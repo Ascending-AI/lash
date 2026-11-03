@@ -505,6 +505,7 @@ fn resident_native_items_agree() {
 /// This is a storage/preparation law, not the core source-acceptance gate.
 #[test]
 fn collection_region_preparations_preserve_source_and_storage() {
+    collection_store_closes_charge_the_rhs_once();
     use crate::machine::islands::witness::Family;
     const BODY: &str = r#"
         let out = [0, 0] let i = 0 let n = resident.len(values) let list = true
@@ -613,76 +614,151 @@ fn collection_region_preparations_preserve_source_and_storage() {
             ..Setup::default()
         },
     );
-    let (program, _) = embedder.program(false);
-    let admitted = program
-        .library
-        .admit(&program.document, Default::default(), &program.selection)
-        .unwrap_or_else(|_| panic!("collection fixture admits"));
-    let exe = admitted
-        .executable(
+    let (mut program, library) = embedder.program(false);
+    for layout in [0, 1, 42] {
+        program.library = crate::PreparedLibrary::with_layout(
+            std::sync::Arc::clone(&library.registry),
+            crate::Layout(layout),
+        );
+        let admitted = program
+            .library
+            .admit(&program.document, Default::default(), &program.selection)
+            .unwrap_or_else(|_| panic!("collection fixture admits"));
+        let exe = admitted
+            .executable(
+                &program.document,
+                &program.library,
+                &program.documents,
+                &program.functions,
+                &program.instances,
+            )
+            .unwrap_or_else(|_| panic!("collection fixture compiles"));
+        let callback = (0..exe.code_count())
+            .map(|code| exe.code(crate::compile::CodeId(code as u32)))
+            .find(|code| code.created.is_some() && code.captures.is_empty())
+            .expect("the actual fixture callback");
+        let site = callback.created.as_ref().unwrap();
+        let origin = lash_kernel_doc::snapshot::closure_at(
             &program.document,
-            &program.library,
-            &program.documents,
-            &program.functions,
-            &program.instances,
+            site,
+            program.link,
+            exe.helpers(),
+            exe.selection(),
         )
-        .unwrap_or_else(|_| panic!("collection fixture compiles"));
-    let callback = (0..exe.code_count())
-        .map(|code| exe.code(crate::compile::CodeId(code as u32)))
-        .find(|code| code.created.is_some() && code.captures.is_empty())
-        .expect("the actual fixture callback");
-    let site = callback.created.as_ref().unwrap();
-    let origin = lash_kernel_doc::snapshot::closure_at(
-        &program.document,
-        site,
-        program.link,
-        exe.helpers(),
-        exe.selection(),
-    )
-    .unwrap();
-    let callback = std::sync::Arc::new(lash_kernel_doc::arena::ClosureIdentity {
-        capture_names: callback.capture_names.clone(),
-        callable: lash_kernel_value::CallableId {
-            link: program.link,
-            function: origin.function,
-        },
-        site: lash_kernel_doc::linked_site::LinkedSite {
-            link: program.link,
-            site: site.clone(),
-        },
-    });
-    let mut prepared = Vec::new();
-    for code in 0..exe.code_count() {
-        let Some(plan) = exe
-            .island_of(crate::compile::CodeId(code as u32))
-            .and_then(|index| exe.island_plan(index))
-        else {
-            continue;
-        };
-        if let Some(compiled) = plan.compiled(&exe) {
-            prepared.extend(compiled.check_collection_preparations(
-                &exe,
-                embedder.machine.source_law_heap(),
-                plan.slots,
-                &callback,
-            ));
+        .unwrap();
+        let callback = std::sync::Arc::new(lash_kernel_doc::arena::ClosureIdentity {
+            capture_names: callback.capture_names.clone(),
+            callable: lash_kernel_value::CallableId {
+                link: program.link,
+                function: origin.function,
+            },
+            site: lash_kernel_doc::linked_site::LinkedSite {
+                link: program.link,
+                site: site.clone(),
+            },
+        });
+        for generic in [false, true] {
+            let mut prepared = Vec::new();
+            for code in 0..exe.code_count() {
+                let Some(plan) = exe
+                    .island_of(crate::compile::CodeId(code as u32))
+                    .and_then(|index| exe.island_plan(index))
+                else {
+                    continue;
+                };
+                let compiled = if generic {
+                    plan.generic(&exe)
+                } else {
+                    plan.compiled(&exe)
+                };
+                if let Some(compiled) = compiled {
+                    prepared.extend(compiled.check_collection_preparations(
+                        &exe,
+                        embedder.machine.source_law_heap(),
+                        plan.slots,
+                        &callback,
+                    ));
+                }
+            }
+            for family in [
+                Family::CollectionAppend,
+                Family::Reduction,
+                Family::Placement,
+                Family::Visit,
+                Family::ReadSlot,
+                Family::Merge,
+            ] {
+                assert!(
+                    prepared.contains(&family),
+                    "a real recognized {family:?} preparation must execute: {prepared:?}"
+                );
+            }
+            println!(
+                "finite collection preparations: {} cases, {prepared:?}",
+                prepared.len()
+            );
         }
     }
-    for family in [
-        Family::CollectionAppend,
-        Family::Reduction,
-        Family::Placement,
-        Family::Visit,
-        Family::ReadSlot,
-        Family::Merge,
-    ] {
-        assert!(
-            prepared.contains(&family),
-            "a real recognized {family:?} preparation must execute: {prepared:?}"
+}
+
+/// K-CHG-002: a value-first indexed write has four fixed forms: its
+/// statement, RHS literal, target read and index literal. Pin costs nothing.
+fn collection_store_closes_charge_the_rhs_once() {
+    use crate::compile::room::charges::ChargeProgram;
+    for layout in [0, 1, 42] {
+        let run = Embedder::with(
+            "main { let values = [1, 2] set values[0] = 3 return values }",
+            Setup::default(),
         );
+        let (mut program, library) = run.program(false);
+        program.library = crate::PreparedLibrary::with_layout(
+            std::sync::Arc::clone(&library.registry),
+            crate::Layout(layout),
+        );
+        let admitted = program
+            .library
+            .admit(&program.document, Default::default(), &program.selection)
+            .unwrap_or_else(|_| panic!("collection close source admits"));
+        let exe = admitted
+            .executable(
+                &program.document,
+                &program.library,
+                &program.documents,
+                &program.functions,
+                &program.instances,
+            )
+            .unwrap_or_else(|_| panic!("collection close source compiles"));
+        let plan = exe
+            .islands
+            .plans
+            .iter()
+            .find(|plan| plan.params.is_empty() && plan.body.statements.len() == 3)
+            .unwrap();
+        let statement = plan.body.statements[1].id;
+        let (stream, stmt, _) = exe.statement(statement);
+        assert!(
+            stream.ops[stmt.ops.start as usize..stmt.ops.end() as usize]
+                .iter()
+                .any(|op| matches!(op, lash_kernel_exec::Op::Pin { .. })),
+            "the real value-first source span contains Pin"
+        );
+        let charges = ChargeProgram::compile(&exe, plan.code, statement, stmt.ops).unwrap();
+        let debt = charges.bind(&[]).unwrap();
+        assert_eq!(
+            debt.units(),
+            4,
+            "statement + RHS literal + target read + index literal; Pin adds no fee"
+        );
+        let tape = crate::ChargeTape::new();
+        debt.record(&tape);
+        assert_eq!(
+            tape.steps()
+                .iter()
+                .map(|weight| weight.units())
+                .sum::<u64>(),
+            4,
+            "the original source closes record the same four forms once"
+        );
+        assert_eq!(charges.verify(&exe, plan.code), Ok(()));
     }
-    println!(
-        "finite collection preparations: {} cases, {prepared:?}",
-        prepared.len()
-    );
 }

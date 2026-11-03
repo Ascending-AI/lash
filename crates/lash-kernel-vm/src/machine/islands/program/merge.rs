@@ -66,7 +66,16 @@ impl Reduction {
             [accumulator, item]
         };
         let function = exe.lib(self.lib);
-        let (entry, _) = function.specialization.prepared.as_ref()?;
+        let native_entry = matches!(function.run, LibRun::Native { .. })
+            .then(|| function.specialization.native.immediate.map(Entry::Native))
+            .flatten();
+        let entry = native_entry.as_ref().or_else(|| {
+            function
+                .specialization
+                .prepared
+                .as_ref()
+                .map(|(entry, _)| entry)
+        })?;
         let signature = self.checked.then_some(&function.header.signature);
         if signature.is_some_and(|signature| {
             !signature
@@ -306,12 +315,7 @@ impl Build<'_> {
         let [write] = body.statements.as_ref() else {
             return None;
         };
-        let StatementKind::Write {
-            close: None,
-            bind: false,
-            ..
-        } = write.kind
-        else {
+        let StatementKind::Write { bind: false, .. } = write.kind else {
             return None;
         };
         let (accumulator, value) = assigned(write, false)?;
@@ -322,6 +326,7 @@ impl Build<'_> {
             Kind::Operator {
                 lib, args, invoke, ..
             } => (*lib, &**args, invoke.is_some_and(|invoke| invoke.checked)),
+            Kind::Native { lib, args, .. } => (*lib, &**args, false),
             Kind::Call { invoke, args, .. } => {
                 let lib = invoke
                     .act
@@ -348,7 +353,16 @@ impl Build<'_> {
         };
         let function = self.exe.lib(lib);
         function.limit.is_none().then_some(())?;
-        let (entry, _) = function.specialization.prepared.as_ref()?;
+        let native_entry = matches!(function.run, LibRun::Native { .. })
+            .then(|| function.specialization.native.immediate.map(Entry::Native))
+            .flatten();
+        let entry = native_entry.as_ref().or_else(|| {
+            function
+                .specialization
+                .prepared
+                .as_ref()
+                .map(|(entry, _)| entry)
+        })?;
         entry.immediate().then_some(())?;
         let depth = match function.run {
             LibRun::Body(_) => Depth::Template(super::super::answer_depth(self.exe, lib)?),
@@ -419,16 +433,17 @@ impl Build<'_> {
         (at == present).then_some(())?;
         let completed = mark.id;
         let mark = self.primitive(test, 1)?;
-        let Kind::Operator { args, .. } = &unpin(test).kind else {
+        let (Kind::Operator { args, .. } | Kind::Native { args, .. }) = &unpin(test).kind else {
             return None;
         };
         let [test] = &**args else {
             return None;
         };
-        let Kind::Operator { lib, args, .. } = &unpin(test).kind else {
+        let (Kind::Operator { lib, args, .. } | Kind::Native { lib, args, .. }) = &unpin(test).kind
+        else {
             return None;
         };
-        crate::compile::islands::unit_test(Some(self.exe.lib(*lib)), args).then_some(())?;
+        collection_unit_test(self.exe.lib(*lib), args).then_some(())?;
         (local(&args[0])? == value).then_some(())?;
         let mut roles = [target, index, list, value, present];
         roles.sort_unstable();
@@ -472,10 +487,12 @@ impl Build<'_> {
         )
         .then_some(())?;
         let (condition, yes, no) = branch(hole)?;
-        let Kind::Operator { lib, args, .. } = &unpin(condition).kind else {
+        let (Kind::Operator { lib, args, .. } | Kind::Native { lib, args, .. }) =
+            &unpin(condition).kind
+        else {
             return None;
         };
-        crate::compile::islands::unit_test(Some(self.exe.lib(*lib)), args).then_some(())?;
+        collection_unit_test(self.exe.lib(*lib), args).then_some(())?;
         (local(&args[0])? == value).then_some(())?;
         let mut roles = [index, length, value];
         roles.sort_unstable();
@@ -562,10 +579,10 @@ impl Build<'_> {
         let one = matches!(increment, Value::Int(1))
             || matches!(increment, Value::Float(value) if value.get() == 1.0);
         (to == index && local(from)? == index && one).then_some(())?;
-        let Kind::Operator { lib, .. } = &unpin(addition).kind else {
+        let (Kind::Operator { lib, .. } | Kind::Native { lib, .. }) = &unpin(addition).kind else {
             return None;
         };
-        self.exe.lib(*lib).specialization.prepared.as_ref()?;
+        self.exe.lib(*lib).specialization.native.immediate?;
         let advance = *lib;
         let mut roles = [target, index, value, list, in_place];
         roles.sort_unstable();
@@ -624,10 +641,8 @@ impl Build<'_> {
             && !function.operation()
             && matches!(function.run, LibRun::Native { .. }))
         .then_some(())?;
-        let advance = &function.specialization.prepared.as_ref()?.0;
-        (advance.depth() == 0
-            && advance.pair()?.ints == Some(lash_kernel_doc::scalar::ScalarOp::Add))
-        .then_some(())?;
+        let advance = function.specialization.native.immediate?;
+        (advance.pair?.ints == Some(lash_kernel_doc::scalar::ScalarOp::Add)).then_some(())?;
         let mut roles = [target, index, value];
         roles.sort_unstable();
         (roles.windows(2).all(|pair| pair[0] != pair[1])
@@ -778,10 +793,12 @@ impl Build<'_> {
 
     fn primitive(&self, value: &Expr, arity: usize) -> Option<LibId> {
         let lib = match &unpin(value).kind {
-            Kind::Operator {
-                lib, invoke: None, ..
+            Kind::Operator { lib, invoke, .. }
+                if invoke.is_none_or(|invoke| invoke.counted().is_none()) =>
+            {
+                *lib
             }
-            | Kind::Native { lib, .. } => *lib,
+            Kind::Native { lib, .. } => *lib,
             _ => return None,
         };
         let function = self.exe.lib(lib);
@@ -789,10 +806,7 @@ impl Build<'_> {
             && !function.operation()
             && function.limit.is_none()
             && matches!(function.run, LibRun::Native { .. })
-            && matches!(
-                function.specialization.prepared.as_ref(),
-                Some((Entry::Native(_), _))
-            ))
+            && function.specialization.native.immediate.is_some())
         .then_some(lib)
     }
 
@@ -902,4 +916,12 @@ fn sets_true(block: &SourceBlock, slot: u32) -> Option<()> {
     let [statement] = plain(block)?;
     let (at, value) = assigned(statement, false)?;
     (at == slot && matches!(value.kind, Kind::Const(Value::Bool(true)))).then_some(())
+}
+
+/// The same native identity predicate as source, independent of whether a
+/// layout elected to publish an Operator entry for this installed native.
+fn collection_unit_test(function: &crate::compile::Lib, args: &[Expr]) -> bool {
+    function.is_same()
+        && function.specialization.native.immediate.is_some()
+        && matches!(args, [_, Expr { kind: Kind::Make { make: Make::Tuple, items, .. }, .. }] if items.is_empty())
 }

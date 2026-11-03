@@ -22,6 +22,22 @@ pub(crate) use merge::{
     Append as CollectionAppend, CollectionStep, Merge, Placement, ReadSlot, Reduction, Visit,
 };
 
+/// One immutable typed packet site, compiled after physical relocation.
+/// Absence of a source proof leaves the original source suffix intact.
+pub(crate) struct CollectionPacket<S> {
+    pub(in crate::machine::islands) shape: S,
+    pub(in crate::machine::islands) proof:
+        std::sync::OnceLock<Option<super::super::execute::CollectionSite<S>>>,
+}
+impl<S> CollectionPacket<S> {
+    pub(in crate::machine::islands) fn new(shape: S) -> Self {
+        Self {
+            shape,
+            proof: std::sync::OnceLock::new(),
+        }
+    }
+}
+
 pub(crate) struct CollectionKernel {
     pub(crate) step: std::sync::Arc<CollectionStep>,
     pub(crate) tail: bool,

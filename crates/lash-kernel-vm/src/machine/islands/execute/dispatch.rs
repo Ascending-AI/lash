@@ -20,9 +20,52 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     return Err(self.at(site.miss));
                 }
             }
-            Opcode::Collection => {
-                let (step, tail) = &code.sites.collection[packet.x as usize];
-                if let Some(answer) = self.collection_step(frame, step, *tail) {
+            Opcode::CollectionAppend => {
+                if let Some(answer) =
+                    self.append_collection(frame, &code.sites.collection_append[packet.x as usize])
+                {
+                    return answer;
+                }
+            }
+            Opcode::CollectionReduce => {
+                if let Some(answer) =
+                    self.reduce_collection(frame, &code.sites.collection_reduce[packet.x as usize])
+                {
+                    return answer;
+                }
+            }
+            Opcode::CollectionPlacement => {
+                if let Some(answer) = self
+                    .place_collection(frame, &code.sites.collection_placement[packet.x as usize])
+                {
+                    return answer;
+                }
+            }
+            Opcode::CollectionVisit => {
+                if let Some(answer) =
+                    self.visit_collection(frame, &code.sites.collection_visit[packet.x as usize])
+                {
+                    return answer;
+                }
+            }
+            Opcode::CollectionReadSlot => {
+                if let Some(answer) =
+                    self.read_collection(frame, &code.sites.collection_read[packet.x as usize])
+                {
+                    return answer;
+                }
+            }
+            Opcode::CollectionMerge => {
+                if let Some(answer) =
+                    self.merge_collection(frame, &code.sites.collection_merge[packet.x as usize])
+                {
+                    return answer;
+                }
+            }
+            Opcode::CollectionMergeTail => {
+                if let Some(answer) = self
+                    .merge_collection_tail(frame, &code.sites.collection_tail[packet.x as usize])
+                {
                     return answer;
                 }
             }

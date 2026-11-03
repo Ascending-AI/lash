@@ -3,6 +3,9 @@
 //! Logical byte bounds remain the source event program: members use their
 //! actual immutable occurrence prices, and callees include frames and cells.
 use super::*;
+#[path = "bulk/path.rs"]
+mod path;
+pub(crate) use path::CollectionProgram;
 
 impl Source {
     /// Resolve a collection kernel's physical bindings through the immutable

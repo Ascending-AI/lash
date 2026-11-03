@@ -19,7 +19,7 @@ pub(super) mod resource;
 pub(crate) use super::code::Op;
 use program::Build;
 pub(super) use program::{
-    CallInputs, CollectionAppend, CollectionStep, Destination, Format, Merge, Operand, Placement,
+    CallInputs, CollectionAppend, CollectionPacket, CollectionStep, Destination, Format, Merge, Operand, Placement,
     ReadSlot, Reduction, Visit, WriteSite,
 };
 pub(crate) use program::{Instruction, Read, StatementEntry, StoreInputs};
@@ -533,7 +533,7 @@ impl Compiled {
             cx.numeric();
             cx.formats();
         }
-        if fused && !plan.charged && stream.layout.0.is_multiple_of(2) {
+        if placement.is_some() {
             cx.merges(&plan.body);
         }
         if cx.registers as u64 * super::SLOT_BYTES > super::ISLAND_HOLD {
@@ -616,7 +616,7 @@ impl Compiled {
             }
         }
         members.sort_unstable_by_key(super::execute::member_region::MemberEntry::packet);
-        Some(Self {
+        let compiled = Self {
             placement,
             members: members.into(),
             literal,
@@ -636,7 +636,9 @@ impl Compiled {
                 .count(),
             room: cx.room,
             observes: cx.observes,
-        })
+        };
+        compiled.compile_collection_sites(exe)?;
+        Some(compiled)
     }
 
     pub(super) fn member(

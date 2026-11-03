@@ -12,6 +12,7 @@ pub(in crate::machine::islands) struct CollectionSite<S> {
     shape: S,
     exits: CollectionExits,
     inputs: Inputs,
+    programs: Box<[Arc<room::CollectionProgram>]>,
 }
 pub(in crate::machine::islands) type AppendSite = CollectionSite<CollectionAppend>;
 pub(in crate::machine::islands) type ReduceSite = CollectionSite<Reduction>;
@@ -22,6 +23,14 @@ pub(in crate::machine::islands) type MergeSite = CollectionSite<Merge>;
 pub(in crate::machine::islands) type MergeTailSite = CollectionSite<MergeTail>;
 
 pub(in crate::machine::islands) struct MergeTail(Merge);
+impl MergeTail {
+    pub(in crate::machine::islands) fn new(shape: Merge) -> Self {
+        Self(shape)
+    }
+    pub(in crate::machine::islands) fn shape(&self) -> &Merge {
+        &self.0
+    }
+}
 
 struct Inputs {
     placement: Arc<BindingPlacement>,
@@ -123,6 +132,47 @@ impl Inputs {
     }
 }
 
+fn source_programs(
+    exe: &Executable,
+    compiled: &Compiled,
+    exits: &CollectionExits,
+    body: usize,
+    statement: Option<usize>,
+) -> Option<Box<[Arc<room::CollectionProgram>]>> {
+    let placement = compiled.placement.as_ref()?;
+    let block = exe.block(compiled.blocks.get(body)?.id);
+    let start = match statement {
+        Some(index) => &exe.stmt(*block.stmts.get(index)?).site,
+        None => &block.site,
+    };
+    let first = compiled.source_room.first_event(start).ok()?;
+    let mut completed = Vec::new();
+    let mut programs = Vec::new();
+    for exit in exits
+        .commit
+        .iter()
+        .chain(exits.callback.iter())
+        .chain(exits.hole.iter().flatten())
+    {
+        if completed.contains(&exit.0) {
+            continue;
+        }
+        completed.push(exit.0.clone());
+        for program in room::CollectionProgram::compile_paths(
+            exe,
+            placement.code(),
+            first.clone(),
+            exit.0.clone(),
+        )
+        .ok()?
+        {
+            program.verify(exe).ok()?;
+            programs.push(Arc::new(program));
+        }
+    }
+    Some(programs.into())
+}
+
 impl<S> CollectionSite<S> {
     fn context<'a>(
         &'a self,
@@ -168,6 +218,11 @@ impl<S> CollectionSite<S> {
         }) {
             return None;
         }
+        let program = self
+            .programs
+            .iter()
+            .find(|program| program.matches(&facts.exit, &facts.branches))?;
+        facts.program = Some(Arc::clone(program));
         facts.entry = Some(entry);
         Some(facts)
     }
@@ -176,25 +231,35 @@ impl<S> CollectionSite<S> {
 // Only immutable descriptors from the actual recognized packet metadata may
 // compile. The old tag is read here once during construction, never at entry.
 macro_rules! site {
-    ($shape:ty, $variant:ident, $reads:expr, $writes:expr, $prepare:ident) => {
+    ($shape:ty, $variant:ident, $table:ident, $reads:expr, $writes:expr, $prepare:ident) => {
         impl CollectionSite<$shape> {
             pub(in crate::machine::islands) fn compile(
                 exe: &Executable,
                 compiled: &Compiled,
                 shape: &$shape,
             ) -> Option<Self> {
-                let (step, _) = compiled.code.sites.collection.iter().find(|(step, tail)| {
-                    !tail && matches!(&**step, CollectionStep::$variant(actual) if std::ptr::eq(actual, shape))
-                })?;
+                compiled
+                    .code
+                    .sites
+                    .$table
+                    .iter()
+                    .find(|site| std::ptr::eq(&site.shape, shape))?;
+                let step = CollectionStep::$variant(shape.clone());
+                let exits = CollectionExits::compile(&step, exe, compiled)?;
+                let programs = source_programs(exe, compiled, &exits, shape.body, None)?;
                 Some(Self {
                     executable: exe.local(),
                     shape: shape.clone(),
-                    exits: CollectionExits::compile(step, exe, compiled)?,
+                    exits,
+                    programs,
                     inputs: Inputs::compile(compiled, &($reads)(shape), &($writes)(shape))?,
                 })
             }
 
-            #[expect(clippy::too_many_arguments, reason = "one authenticated collection entry")]
+            #[expect(
+                clippy::too_many_arguments,
+                reason = "one authenticated collection entry"
+            )]
             pub(in crate::machine::islands) fn prepare(
                 &self,
                 exe: &Executable,
@@ -217,6 +282,7 @@ macro_rules! site {
 site!(
     CollectionAppend,
     Append,
+    collection_append,
     |s: &CollectionAppend| vec![s.target, s.item],
     |_: &CollectionAppend| Vec::<usize>::new(),
     prepare_region
@@ -227,10 +293,13 @@ impl ReduceSite {
         compiled: &Compiled,
         shape: &Reduction,
     ) -> Option<Self> {
-        let (step, _) = compiled.code.sites.collection.iter().find(|(step, tail)| {
-            !tail
-                && matches!(&**step, CollectionStep::Reduce(actual) if std::ptr::eq(actual, shape))
-        })?;
+        compiled
+            .code
+            .sites
+            .collection_reduce
+            .iter()
+            .find(|site| std::ptr::eq(&site.shape, shape))?;
+        let step = CollectionStep::Reduce(shape.clone());
         let function = exe.lib(shape.lib);
         // Body reductions require core's composed source/call acceptance. A
         // prepared scalar entry is not authority to skip their logical frame.
@@ -240,10 +309,13 @@ impl ReduceSite {
         ) {
             return None;
         }
+        let exits = CollectionExits::compile(&step, exe, compiled)?;
+        let programs = source_programs(exe, compiled, &exits, shape.body, None)?;
         Some(Self {
             executable: exe.local(),
             shape: shape.clone(),
-            exits: CollectionExits::compile(step, exe, compiled)?,
+            exits,
+            programs,
             inputs: Inputs::compile(
                 compiled,
                 &[shape.accumulator, shape.item],
@@ -275,6 +347,7 @@ impl ReduceSite {
 site!(
     Placement,
     Place,
+    collection_placement,
     |s: &Placement| [s.target, s.index, s.value]
         .into_iter()
         .chain(s.list)
@@ -285,6 +358,7 @@ site!(
 site!(
     Visit,
     Visit,
+    collection_visit,
     |s: &Visit| vec![s.index, s.length, s.value],
     |_: &Visit| Vec::<usize>::new(),
     prepare_region
@@ -292,6 +366,7 @@ site!(
 site!(
     ReadSlot,
     ReadSlot,
+    collection_read,
     |s: &ReadSlot| vec![s.target, s.index, s.list],
     |s: &ReadSlot| vec![s.value, s.present],
     prepare_region
@@ -299,6 +374,7 @@ site!(
 site!(
     Merge,
     Merge,
+    collection_merge,
     |s: &Merge| s
         .counters
         .into_iter()
@@ -320,9 +396,13 @@ impl MergeTailSite {
         compiled: &Compiled,
         shape: &Merge,
     ) -> Option<Self> {
-        let (step, _) = compiled.code.sites.collection.iter().find(|(step, tail)| {
-            *tail && matches!(&**step, CollectionStep::Merge(actual) if std::ptr::eq(actual, shape))
-        })?;
+        compiled
+            .code
+            .sites
+            .collection_tail
+            .iter()
+            .find(|site| std::ptr::eq(&site.shape.0, shape))?;
+        let step = CollectionStep::Merge(shape.clone());
         let reads: Vec<_> = [
             shape.counters[0],
             shape.counters[3],
@@ -356,11 +436,16 @@ impl MergeTailSite {
             .collection_bindings(&inputs.placement, &clears)
             .ok()?;
         inputs.clear = clears.into_iter().zip(logical).collect();
+        let mut exits = CollectionExits::compile(&step, exe, compiled)?;
+        // Tail cannot re-enter the head's callback preparation.
+        exits.callback = None;
+        let programs = source_programs(exe, compiled, &exits, shape.compared[1], Some(4))?;
         Some(Self {
             executable: exe.local(),
             shape: MergeTail(shape.clone()),
-            exits: CollectionExits::compile(step, exe, compiled)?,
+            exits,
             inputs,
+            programs,
         })
     }
 
@@ -395,6 +480,14 @@ impl CollectionFacts {
         arena: &'a mut Arena,
         heap: &PagedHeap,
     ) -> Result<Option<CollectionBoundary<'a>>, HeapFault> {
+        let Some(program) = self.program.as_ref() else {
+            return Ok(None);
+        };
+        if !Arc::ptr_eq(program.source(), &self.source)
+            || !program.matches(&self.exit, &self.branches)
+        {
+            return Ok(None);
+        }
         let Some(entry) = self.entry.take() else {
             return Ok(None);
         };
@@ -469,6 +562,7 @@ impl CollectionFacts {
         self.transfer.writes = self.writes;
         Ok(Some(CollectionBoundary {
             transaction,
+            program: self.program,
             storage,
             transfer: self.transfer,
             exit: self.exit,
@@ -643,5 +737,33 @@ impl CollectionCallback {
             && invocation == &self.invocation
             && position == &self.position
             && self.dependencies.is_current(ledger, arena)
+    }
+}
+
+impl Compiled {
+    /// Final relocation is complete. Source exits and placements are compiled
+    /// once into each typed site, never rebuilt by packet dispatch.
+    pub(in crate::machine::islands) fn compile_collection_sites(
+        &self,
+        exe: &Executable,
+    ) -> Option<()> {
+        macro_rules! compile {
+            ($table:ident, $site:ty, $shape:expr) => {
+                for packet in &self.code.sites.$table {
+                    packet
+                        .proof
+                        .set(<$site>::compile(exe, self, ($shape)(&packet.shape)))
+                        .ok()?;
+                }
+            };
+        }
+        compile!(collection_append, AppendSite, |shape| shape);
+        compile!(collection_reduce, ReduceSite, |shape| shape);
+        compile!(collection_placement, PlacementSite, |shape| shape);
+        compile!(collection_visit, VisitSite, |shape| shape);
+        compile!(collection_read, ReadSlotSite, |shape| shape);
+        compile!(collection_merge, MergeSite, |shape| shape);
+        compile!(collection_tail, MergeTailSite, MergeTail::shape);
+        Some(())
     }
 }

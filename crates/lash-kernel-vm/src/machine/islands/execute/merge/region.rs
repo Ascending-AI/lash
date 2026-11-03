@@ -10,6 +10,7 @@
 
 use super::*;
 use crate::compile::{Executable, room};
+use crate::machine::islands::compiled::CollectionStep;
 use lash_kernel_doc::{arena::ArenaHandle, heap::HeapFault};
 use lash_kernel_state::{
     arena::{Arena, PreparedListWrite},
@@ -130,6 +131,7 @@ pub(in crate::machine::islands) struct CollectionFacts {
     pub(in crate::machine::islands) transfer: CollectionTransfer,
     pub(in crate::machine::islands) branches: Vec<(lash_kernel_value::sites::Site, bool)>,
     entry: Option<direct::BoundInputs>,
+    program: Option<std::sync::Arc<room::CollectionProgram>>,
 }
 
 /// Recover the source stack after the accepted exit, including the exact
@@ -154,6 +156,7 @@ pub(in crate::machine::islands) struct CollectionStorage(Option<PreparedListWrit
 
 pub(in crate::machine::islands) struct CollectionBoundary<'a> {
     pub(in crate::machine::islands) transaction: BoundaryTransaction<'a>,
+    pub(in crate::machine::islands) program: Option<std::sync::Arc<room::CollectionProgram>>,
     pub(in crate::machine::islands) storage: CollectionStorage,
     pub(in crate::machine::islands) transfer: CollectionTransfer,
     pub(in crate::machine::islands) exit: room::publication::Position,
@@ -223,11 +226,7 @@ impl<'a> CollectionRegion<'a> {
     }
 
     fn primitive(&self, lib: LibId, args: &[Value]) -> Option<Value> {
-        let (crate::compile::Entry::Native(entry), _) =
-            self.exe.lib(lib).specialization.prepared.as_ref()?
-        else {
-            return None;
-        };
+        let entry = self.exe.lib(lib).specialization.native.immediate?;
         (entry.entry)(args)
     }
 
@@ -295,6 +294,7 @@ impl<'a> CollectionRegion<'a> {
             branches: self.branches.borrow().clone(),
             transfer,
             entry: None,
+            program: None,
         })
     }
 
@@ -415,6 +415,7 @@ impl CollectionFacts {
         self.transfer.writes = self.writes;
         Ok(Some(CollectionBoundary {
             transaction: boundary,
+            program: self.program,
             storage,
             transfer: self.transfer,
             exit: self.exit,
@@ -609,8 +610,8 @@ impl Placement {
         }
         let item = cx.value(self.value)?;
         cx.fits(item).then_some(())?;
-        let (advance, _) = cx.exe.lib(self.advance).specialization.prepared.as_ref()?;
-        let next = advance.call(&[index, self.increment])?;
+        let advance = cx.exe.lib(self.advance).specialization.native.immediate?;
+        let next = (advance.entry)(&[index, self.increment])?;
         let mut writes = vec![(self.index, next)];
         if let Some(at) = self.in_place {
             // This source binding survives the advance Commit until the

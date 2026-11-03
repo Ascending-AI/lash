@@ -89,7 +89,13 @@ macro_rules! operations {
         #[repr(u16)]
         pub(super) enum Opcode {
             Begin,
-            Collection,
+            CollectionAppend,
+            CollectionReduce,
+            CollectionPlacement,
+            CollectionVisit,
+            CollectionReadSlot,
+            CollectionMerge,
+            CollectionMergeTail,
             Operator,
             $( $hot, )*
             $( $hot_tuple, )*
@@ -130,7 +136,13 @@ macro_rules! operations {
         pub(super) struct Sites {
             pub(super) begin: Vec<StatementEntry>,
             pub(super) operator: Vec<sites::Operator>,
-            pub(super) collection: Vec<(std::sync::Arc<CollectionStep>, bool)>,
+            pub(super) collection_append: Vec<CollectionPacket<CollectionAppend>>,
+            pub(super) collection_reduce: Vec<CollectionPacket<Reduction>>,
+            pub(super) collection_placement: Vec<CollectionPacket<Placement>>,
+            pub(super) collection_visit: Vec<CollectionPacket<Visit>>,
+            pub(super) collection_read: Vec<CollectionPacket<ReadSlot>>,
+            pub(super) collection_merge: Vec<CollectionPacket<Merge>>,
+            pub(super) collection_tail: Vec<CollectionPacket<super::execute::MergeTail>>,
             $( $( pub(super) $manual_table: Vec<sites::$manual>, )*
                $( pub(super) $table: Vec<sites::$name>, )* )*
             $( pub(super) $tuple_table: Vec<sites::$tuple>, )*
@@ -548,10 +560,47 @@ impl Code {
                 op, live, kernel, ..
             } = instruction;
             if let Some(kernel) = kernel {
-                let x = u32::try_from(code.sites.collection.len()).ok()?;
-                code.sites.collection.push((kernel.step, kernel.tail));
+                fn insert<S>(sites: &mut Vec<CollectionPacket<S>>, shape: S) -> Option<u32> {
+                    let at = u32::try_from(sites.len()).ok()?;
+                    sites.push(CollectionPacket::new(shape));
+                    Some(at)
+                }
+                let (opcode, x) = match (&*kernel.step, kernel.tail) {
+                    (CollectionStep::Append(shape), false) => (
+                        Opcode::CollectionAppend,
+                        insert(&mut code.sites.collection_append, shape.clone())?,
+                    ),
+                    (CollectionStep::Reduce(shape), false) => (
+                        Opcode::CollectionReduce,
+                        insert(&mut code.sites.collection_reduce, shape.clone())?,
+                    ),
+                    (CollectionStep::Place(shape), false) => (
+                        Opcode::CollectionPlacement,
+                        insert(&mut code.sites.collection_placement, shape.clone())?,
+                    ),
+                    (CollectionStep::Visit(shape), false) => (
+                        Opcode::CollectionVisit,
+                        insert(&mut code.sites.collection_visit, shape.clone())?,
+                    ),
+                    (CollectionStep::ReadSlot(shape), false) => (
+                        Opcode::CollectionReadSlot,
+                        insert(&mut code.sites.collection_read, shape.clone())?,
+                    ),
+                    (CollectionStep::Merge(shape), false) => (
+                        Opcode::CollectionMerge,
+                        insert(&mut code.sites.collection_merge, shape.clone())?,
+                    ),
+                    (CollectionStep::Merge(shape), true) => (
+                        Opcode::CollectionMergeTail,
+                        insert(
+                            &mut code.sites.collection_tail,
+                            super::execute::MergeTail::new(shape.clone()),
+                        )?,
+                    ),
+                    _ => return None,
+                };
                 code.packets.push(Packet {
-                    opcode: Opcode::Collection,
+                    opcode,
                     mode: 0,
                     dst: 0,
                     x,

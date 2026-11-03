@@ -2,7 +2,7 @@
 //! common register frame. A cold read, tight boundary or detailed observer
 //! runs the original instructions at the same coordinate.
 use super::super::compiled::{
-    CollectionAppend, CollectionStep, Merge, Placement, ReadSlot, Reduction, Visit,
+    CollectionAppend, CollectionPacket, Merge, Placement, ReadSlot, Reduction, Visit,
 };
 use super::*;
 use crate::compile::LibId;
@@ -14,11 +14,7 @@ pub(super) mod region;
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     fn source_primitive(&self, lib: LibId, args: &[Value]) -> Option<Value> {
-        let (crate::compile::Entry::Native(entry), _) =
-            self.exe.lib(lib).specialization.prepared.as_ref()?
-        else {
-            return None;
-        };
+        let entry = self.exe.lib(lib).specialization.native.immediate?;
         (entry.entry)(args)
     }
 
@@ -34,43 +30,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             Value::Int(value) => Some(value),
             _ => None,
         }
-    }
-
-    pub(super) fn collection_step(
-        &mut self,
-        frame: &mut Values<'_, 'e>,
-        step: &CollectionStep,
-        tail: bool,
-    ) -> Option<Result<Next, Stop>> {
-        #[cfg(any(test, feature = "testing"))]
-        let family = step.family();
-        if !self.collection_ready() {
-            #[cfg(any(test, feature = "testing"))]
-            super::super::witness::record(family, super::super::witness::Exit::Guard);
-            return None;
-        }
-        let answer = match step {
-            CollectionStep::Merge(merge) => self.merge_step(frame, merge, tail),
-            CollectionStep::Place(place) => self.place_step(frame, place),
-            CollectionStep::Visit(visit) => self.visit_step(frame, visit),
-            CollectionStep::ReadSlot(read) => self.read_slot_step(frame, read),
-            CollectionStep::Reduce(reduction) => self.reduce_step(frame, reduction),
-            CollectionStep::Append(append) => self.append_step(frame, append),
-        };
-        #[cfg(any(test, feature = "testing"))]
-        {
-            use super::super::witness::{self, Exit};
-            let exit = match &answer {
-                None => Exit::Guard,
-                Some(Err(_)) => Exit::Boundary,
-                Some(Ok(_)) if matches!(step, CollectionStep::Merge(merge) if !tail && frame.state.pc == merge.callback) => {
-                    Exit::Callback
-                }
-                Some(Ok(_)) => Exit::Commit,
-            };
-            witness::record(family, exit);
-        }
-        answer
     }
 
     fn append_step(
@@ -266,13 +225,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if self.arena.summary_of(&item).depth as usize > self.limits.value_depth() {
             return None;
         }
-        let (advance, _) = self
+        let advance = self
             .exe
             .lib(place.advance)
             .specialization
-            .prepared
-            .as_ref()?;
-        let next = advance.call(&[index, place.increment])?;
+            .native
+            .immediate?;
+        let next = (advance.entry)(&[index, place.increment])?;
         self.arena.list_set(target, at, item).ok()?;
         frame.slots[place.index] = SlotState::Value(next);
         frame
@@ -282,15 +241,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         Some(self.finish_statement(frame, 1, None))
     }
 
-    pub(super) fn merge_step(
+    fn merge_head_step(
         &mut self,
         frame: &mut Values<'_, 'e>,
         merge: &Merge,
-        tail: bool,
     ) -> Option<Result<Next, Stop>> {
-        if tail {
-            return self.merge_tail(frame, merge);
-        }
         let value = |at| match frame.slots[at] {
             SlotState::Value(value) => Some(value),
             _ => None,
@@ -456,5 +411,108 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         // Only tuples and errors carry immutable nesting depth (K-VAL-034).
         !matches!(value, Value::Tuple(_) | Value::Error(_))
             || self.arena.summary_of(value).depth as usize <= self.limits.value_depth()
+    }
+}
+
+// The compiler's CollectionStep tag is erased at lowering. These direct
+// packet entrypoints retain the existing conservative execution guards until
+// the common affine publication seam replaces their source operations.
+macro_rules! collection_entry {
+    ($method:ident, $shape:ty, $family:ident, $run:ident) => {
+        impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
+            pub(super) fn $method(
+                &mut self,
+                frame: &mut Values<'_, 'e>,
+                packet: &CollectionPacket<$shape>,
+            ) -> Option<Result<Next, Stop>> {
+                if packet.proof.get().and_then(Option::as_ref).is_none() || !self.collection_ready()
+                {
+                    #[cfg(any(test, feature = "testing"))]
+                    super::super::witness::record(
+                        super::super::witness::Family::$family,
+                        super::super::witness::Exit::Guard,
+                    );
+                    return None;
+                }
+                let answer = self.$run(frame, &packet.shape);
+                #[cfg(any(test, feature = "testing"))]
+                {
+                    use super::super::witness::{self, Exit, Family};
+                    let exit = match &answer {
+                        None => Exit::Guard,
+                        Some(Err(_)) => Exit::Boundary,
+                        Some(Ok(_)) => Exit::Commit,
+                    };
+                    witness::record(Family::$family, exit);
+                }
+                answer
+            }
+        }
+    };
+}
+collection_entry!(
+    append_collection,
+    CollectionAppend,
+    CollectionAppend,
+    append_step
+);
+collection_entry!(reduce_collection, Reduction, Reduction, reduce_step);
+collection_entry!(place_collection, Placement, Placement, place_step);
+collection_entry!(visit_collection, Visit, Visit, visit_step);
+collection_entry!(read_collection, ReadSlot, ReadSlot, read_slot_step);
+
+impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
+    pub(super) fn merge_collection(
+        &mut self,
+        frame: &mut Values<'_, 'e>,
+        packet: &CollectionPacket<Merge>,
+    ) -> Option<Result<Next, Stop>> {
+        if packet.proof.get().and_then(Option::as_ref).is_none() || !self.collection_ready() {
+            #[cfg(any(test, feature = "testing"))]
+            super::super::witness::record(
+                super::super::witness::Family::Merge,
+                super::super::witness::Exit::Guard,
+            );
+            return None;
+        }
+        let answer = self.merge_head_step(frame, &packet.shape);
+        #[cfg(any(test, feature = "testing"))]
+        {
+            use super::super::witness::{self, Exit, Family};
+            let exit = match &answer {
+                None => Exit::Guard,
+                Some(Err(_)) => Exit::Boundary,
+                Some(Ok(_)) if frame.state.pc == packet.shape.callback => Exit::Callback,
+                Some(Ok(_)) => Exit::Commit,
+            };
+            witness::record(Family::Merge, exit);
+        }
+        answer
+    }
+    pub(super) fn merge_collection_tail(
+        &mut self,
+        frame: &mut Values<'_, 'e>,
+        packet: &CollectionPacket<MergeTail>,
+    ) -> Option<Result<Next, Stop>> {
+        if packet.proof.get().and_then(Option::as_ref).is_none() || !self.collection_ready() {
+            #[cfg(any(test, feature = "testing"))]
+            super::super::witness::record(
+                super::super::witness::Family::Merge,
+                super::super::witness::Exit::Guard,
+            );
+            return None;
+        }
+        let answer = self.merge_tail(frame, packet.shape.shape());
+        #[cfg(any(test, feature = "testing"))]
+        {
+            use super::super::witness::{self, Exit, Family};
+            let exit = match &answer {
+                None => Exit::Guard,
+                Some(Err(_)) => Exit::Boundary,
+                Some(Ok(_)) => Exit::Commit,
+            };
+            witness::record(Family::Merge, exit);
+        }
+        answer
     }
 }

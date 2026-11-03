@@ -14,8 +14,58 @@ impl Compiled {
         callback: &std::sync::Arc<lash_kernel_doc::arena::ClosureIdentity>,
     ) -> Vec<Family> {
         let mut reached = Vec::new();
-        for (step, tail) in &self.code.sites.collection {
-            let exits = CollectionExits::compile(step, exe, self)
+        let mut cases = Vec::new();
+        cases.extend(
+            self.code
+                .sites
+                .collection_append
+                .iter()
+                .map(|site| (CollectionCase::Append(&site.shape), false)),
+        );
+        cases.extend(
+            self.code
+                .sites
+                .collection_reduce
+                .iter()
+                .map(|site| (CollectionCase::Reduce(&site.shape), false)),
+        );
+        cases.extend(
+            self.code
+                .sites
+                .collection_placement
+                .iter()
+                .map(|site| (CollectionCase::Place(&site.shape), false)),
+        );
+        cases.extend(
+            self.code
+                .sites
+                .collection_visit
+                .iter()
+                .map(|site| (CollectionCase::Visit(&site.shape), false)),
+        );
+        cases.extend(
+            self.code
+                .sites
+                .collection_read
+                .iter()
+                .map(|site| (CollectionCase::ReadSlot(&site.shape), false)),
+        );
+        cases.extend(
+            self.code
+                .sites
+                .collection_merge
+                .iter()
+                .map(|site| (CollectionCase::Merge(&site.shape), false)),
+        );
+        cases.extend(
+            self.code
+                .sites
+                .collection_tail
+                .iter()
+                .map(|site| (CollectionCase::Merge(site.shape.shape()), true)),
+        );
+        for (step, tail) in &cases {
+            let exits = CollectionExits::compile(&step.lowering(), exe, self)
                 .expect("source exits compile with the finite site");
             for case in 0..3 {
                 let mut arena = Arena::new();
@@ -26,16 +76,16 @@ impl Compiled {
                     Value::Closure(arena.new_closure(std::sync::Arc::clone(callback), vec![]));
                 let mut slots = vec![SlotState::Value(Value::Int(0)); count];
                 let mut set = |at, value| slots[at] = SlotState::Value(value);
-                match &**step {
-                    CollectionStep::Append(append) => {
+                match step {
+                    CollectionCase::Append(append) => {
                         set(append.target, out);
                         set(append.item, if case == 1 { out } else { sorted });
                     }
-                    CollectionStep::Reduce(reduce) => {
+                    CollectionCase::Reduce(reduce) => {
                         set(reduce.accumulator, Value::Int(11));
                         set(reduce.item, Value::Int(7));
                     }
-                    CollectionStep::Place(place) => {
+                    CollectionCase::Place(place) => {
                         set(place.target, out);
                         set(place.index, Value::Int(0));
                         set(place.value, sorted);
@@ -43,17 +93,17 @@ impl Compiled {
                             set(list, Value::Bool(true));
                         }
                     }
-                    CollectionStep::Visit(visit) => {
+                    CollectionCase::Visit(visit) => {
                         set(visit.index, Value::Int(0));
                         set(visit.length, Value::Int(2));
                         set(visit.value, if case == 0 { hole } else { Value::Absent });
                     }
-                    CollectionStep::ReadSlot(read) => {
+                    CollectionCase::ReadSlot(read) => {
                         set(read.target, sorted);
                         set(read.index, Value::Int(i64::from(case != 0)));
                         set(read.list, Value::Bool(true));
                     }
-                    CollectionStep::Merge(merge) => {
+                    CollectionCase::Merge(merge) => {
                         let counters = if *tail || case == 0 {
                             [0, 0, 0, 0, 0, 1, 2]
                         } else if case == 1 {
@@ -97,9 +147,9 @@ impl Compiled {
                     CollectionRegion::new(exe, self, &exits, &ledger, &arena, &slots, (128, 128))
                 };
                 let cx = context();
-                let completed = match &**step {
-                    CollectionStep::Visit(_) => cx.tested(case == 0),
-                    CollectionStep::Merge(_) if !tail && case == 0 => cx.exits.callback.clone(),
+                let completed = match step {
+                    CollectionCase::Visit(_) => cx.tested(case == 0),
+                    CollectionCase::Merge(_) if !tail && case == 0 => cx.exits.callback.clone(),
                     _ => cx.committed(),
                 }
                 .expect("the recognized exit has a canonical source successor");
@@ -114,14 +164,14 @@ impl Compiled {
                         action: None,
                     },
                 };
-                let prepare = |exit| match &**step {
-                    CollectionStep::Append(append) => append.prepare_region(context(), exit),
-                    CollectionStep::Reduce(reduce) => reduce.prepare_region(context(), exit),
-                    CollectionStep::Place(place) => place.prepare_region(context(), exit),
-                    CollectionStep::Visit(visit) => visit.prepare_region(context(), exit),
-                    CollectionStep::ReadSlot(read) => read.prepare_region(context(), exit),
-                    CollectionStep::Merge(merge) if *tail => merge.prepare_tail(context(), exit),
-                    CollectionStep::Merge(merge) => merge.prepare_head(context(), exit),
+                let prepare = |exit| match step {
+                    CollectionCase::Append(append) => append.prepare_region(context(), exit),
+                    CollectionCase::Reduce(reduce) => reduce.prepare_region(context(), exit),
+                    CollectionCase::Place(place) => place.prepare_region(context(), exit),
+                    CollectionCase::Visit(visit) => visit.prepare_region(context(), exit),
+                    CollectionCase::ReadSlot(read) => read.prepare_region(context(), exit),
+                    CollectionCase::Merge(merge) if *tail => merge.prepare_tail(context(), exit),
+                    CollectionCase::Merge(merge) => merge.prepare_head(context(), exit),
                 };
                 let mut wrong = exit.clone();
                 wrong.at.phase = room::Phase::Enter;
@@ -139,14 +189,14 @@ impl Compiled {
                 );
                 assert_eq!(ledger.balance().unwrap(), before);
                 assert_eq!(facts.kind, room::ExitKind::Normal);
-                match &**step {
-                    CollectionStep::Place(place) => {
+                match step {
+                    CollectionCase::Place(place) => {
                         if let Some(at) = place.in_place {
                             assert!(facts.writes.iter().any(|(physical, value)| *physical == at
                                 && value.same(&Value::Bool(true))));
                         }
                     }
-                    CollectionStep::Reduce(reduce) => {
+                    CollectionCase::Reduce(reduce) => {
                         assert!(
                             facts
                                 .writes
@@ -155,7 +205,7 @@ impl Compiled {
                                     && value.same(&Value::Int(18)))
                         );
                     }
-                    CollectionStep::ReadSlot(read) => {
+                    CollectionCase::ReadSlot(read) => {
                         assert_eq!(facts.transfer.pc, self.blocks[read.arms[1]].end);
                         assert_eq!(
                             facts.transfer.blocks,
@@ -164,11 +214,11 @@ impl Compiled {
                         assert!(facts.writes.iter().any(|(at, value)| *at == read.present
                             && value.same(&Value::Bool(case != 0))));
                     }
-                    CollectionStep::Visit(visit) => {
+                    CollectionCase::Visit(visit) => {
                         assert_eq!(facts.transfer.pc, visit.after[usize::from(case != 0)]);
                         assert_eq!(facts.branches.last().unwrap().1, case == 0);
                     }
-                    CollectionStep::Merge(merge) if *tail => {
+                    CollectionCase::Merge(merge) if *tail => {
                         assert!(!facts.writes.iter().any(|(at, _)| merge.items.contains(at)));
                         assert_eq!(
                             facts.transfer.leave,
@@ -182,7 +232,7 @@ impl Compiled {
                         );
                         assert!(facts.member.as_ref().unwrap().2.same(&hole));
                     }
-                    CollectionStep::Merge(merge) if case == 0 => {
+                    CollectionCase::Merge(merge) if case == 0 => {
                         assert!(facts.member.is_none());
                         assert_eq!(
                             facts.transfer.continuation,
@@ -201,7 +251,7 @@ impl Compiled {
                 }
                 let selected_exit = facts.exit.clone();
                 reached.push(step.family());
-                if let CollectionStep::Append(append) = &**step {
+                if let CollectionCase::Append(append) = step {
                     // K-MACH-008: rejection, abandonment and a stale *input*
                     // must not edit the target, its edges or its source IDs.
                     let out_handle = out.handle().unwrap();
@@ -380,7 +430,7 @@ impl Compiled {
         &self,
         exe: &Executable,
         heap: &PagedHeap,
-        step: &CollectionStep,
+        step: &CollectionCase<'_>,
         tail: bool,
         arena: &mut Arena,
         slots: &[SlotState],
@@ -446,15 +496,15 @@ impl Compiled {
             }};
         }
         let (mut facts, stale) = match step {
-            CollectionStep::Append(shape) => check!(AppendSite, shape, shape.item, Value::Int(97)),
-            CollectionStep::Reduce(shape) => {
+            CollectionCase::Append(shape) => check!(AppendSite, shape, shape.item, Value::Int(97)),
+            CollectionCase::Reduce(shape) => {
                 check!(ReduceSite, shape, shape.accumulator, Value::Int(97))
             }
-            CollectionStep::Place(shape) => {
+            CollectionCase::Place(shape) => {
                 check!(PlacementSite, shape, shape.value, Value::Int(97))
             }
-            CollectionStep::Visit(shape) => check!(VisitSite, shape, shape.index, Value::Int(1)),
-            CollectionStep::ReadSlot(shape) => check!(
+            CollectionCase::Visit(shape) => check!(VisitSite, shape, shape.index, Value::Int(1)),
+            CollectionCase::ReadSlot(shape) => check!(
                 ReadSlotSite,
                 shape,
                 shape.index,
@@ -466,14 +516,14 @@ impl Compiled {
                     }
                 )
             ),
-            CollectionStep::Merge(shape) if tail => {
+            CollectionCase::Merge(shape) if tail => {
                 check!(MergeTailSite, shape, shape.order, Value::Int(97))
             }
-            CollectionStep::Merge(shape) => {
+            CollectionCase::Merge(shape) => {
                 check!(MergeSite, shape, shape.counters[5], Value::Int(2))
             }
         };
-        if let CollectionStep::Merge(shape) = step
+        if let CollectionCase::Merge(shape) = step
             && !tail
             && facts.transfer.continuation == CollectionContinuation::Callback
         {
@@ -517,6 +567,113 @@ impl Compiled {
             );
             facts.writes[second].1 = facts.writes[first].1;
             facts.writes[first].1 = saved;
+        }
+        let program = facts
+            .program
+            .as_ref()
+            .expect("typed facts retain the cached source program");
+        assert_eq!(program.verify(exe), Ok(()));
+        let mut unpaid = facts.exit.clone();
+        unpaid.unpaid = Some(unpaid.at.clone());
+        assert!(
+            !program.matches(&unpaid, &facts.branches),
+            "a completed event cannot become the next unpaid head"
+        );
+        let event_points: Vec<_> = program
+            .events()
+            .iter()
+            .flat_map(|interval| interval.events().map(|event| event.point.clone()))
+            .collect();
+        let close_positions: Vec<_> = program
+            .charges()
+            .map(|charges| {
+                event_points
+                    .iter()
+                    .position(|point| point == charges.first())
+                    .expect("every charged span starts in this actual source prefix")
+            })
+            .collect();
+        assert!(
+            close_positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "canonical statement closes keep the independent source event order"
+        );
+        let source_scopes: Vec<_> = event_points
+            .iter()
+            .filter(|point| matches!(point.phase, room::Phase::Enter | room::Phase::Leave))
+            .cloned()
+            .collect();
+        assert_eq!(
+            program.scopes(),
+            source_scopes,
+            "scope controls agree with the original source events"
+        );
+        let compile = || {
+            room::CollectionProgram::compile_paths(
+                exe,
+                placement.code(),
+                program.first().clone(),
+                program.through().clone(),
+            )
+            .unwrap()
+            .into_iter()
+            .find(|path| path.choices() == program.choices())
+            .unwrap()
+        };
+        let mut wrong = compile();
+        wrong.replace_peak_with_final_for_law();
+        assert_eq!(
+            wrong.verify(exe),
+            Err(room::Refused::Peak),
+            "final holdings cannot replace the source interior peak"
+        );
+        let mut wrong = compile();
+        wrong.omit_scope_for_law();
+        assert_eq!(
+            wrong.verify(exe),
+            Err(room::Refused::Source),
+            "source Enter/Leave controls cannot disappear from a collection prefix"
+        );
+        let mut wrong = compile();
+        wrong.corrupt_charge_for_law();
+        assert_eq!(
+            wrong.verify(exe),
+            Err(room::Refused::Exit),
+            "every original close remains in source order"
+        );
+        if matches!(step, CollectionCase::Visit(_) | CollectionCase::ReadSlot(_)) {
+            assert!(
+                !program.allocations().is_empty(),
+                "hole predicates retain the real source empty-tuple construction obligation"
+            );
+        }
+        if program.through().phase == room::Phase::Test {
+            let branches: Vec<_> = facts
+                .branches
+                .iter()
+                .filter(|(site, _)| *site != program.through().site)
+                .cloned()
+                .collect();
+            assert!(
+                !program.matches(&facts.exit, &branches),
+                "the final test cannot lose its selected successor"
+            );
+        }
+        if !program.allocations().is_empty() {
+            let mut wrong = compile();
+            wrong.omit_allocation_for_law();
+            assert_eq!(
+                wrong.verify(exe),
+                Err(room::Refused::Source),
+                "empty and hole arms retain their source allocation ordinals"
+            );
+        }
+        if !facts.branches.is_empty() {
+            let mut branches = facts.branches.clone();
+            branches[0].1 = !branches[0].1;
+            assert!(
+                !program.matches(&facts.exit, &branches),
+                "same-priced opposite branches cannot select this source exit"
+            );
         }
         let stale_target = facts.member.map(|(handle, _, _)| handle);
         let writes = facts.writes.clone();
@@ -581,5 +738,30 @@ impl Compiled {
                 .is_none(),
             "a detached collection rejects entry dependencies that changed before publication"
         );
+    }
+}
+
+/// Only the fixture uses a family sum to generate its independent cases.
+enum CollectionCase<'a> {
+    Append(&'a CollectionAppend),
+    Reduce(&'a Reduction),
+    Place(&'a Placement),
+    Visit(&'a Visit),
+    ReadSlot(&'a ReadSlot),
+    Merge(&'a Merge),
+}
+impl CollectionCase<'_> {
+    fn lowering(&self) -> CollectionStep {
+        match self {
+            Self::Append(shape) => CollectionStep::Append((*shape).clone()),
+            Self::Reduce(shape) => CollectionStep::Reduce((*shape).clone()),
+            Self::Place(shape) => CollectionStep::Place((*shape).clone()),
+            Self::Visit(shape) => CollectionStep::Visit((*shape).clone()),
+            Self::ReadSlot(shape) => CollectionStep::ReadSlot((*shape).clone()),
+            Self::Merge(shape) => CollectionStep::Merge((*shape).clone()),
+        }
+    }
+    fn family(&self) -> Family {
+        self.lowering().family()
     }
 }
