@@ -1119,66 +1119,6 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         Some(value)
     }
 
-    /// The test `same(value, ())` of `site`: false for any value but a
-    /// tuple, which `same` compares member by member, charged its region
-    /// and its formula with the tuple measured as the empty construction
-    /// it is; or a stop where the tuple's construction resumes, before
-    /// anything is charged, where the value is a tuple, its formula
-    /// measures what the arena holds, or the charge would pass the bound.
-    #[inline(always)]
-    fn unit_test(&mut self, site: &UnitSite, value: Value) -> Answer {
-        let answer = Value::Bool(false);
-        let units = if matches!(value, Value::Tuple(_)) {
-            None
-        } else if self.charging {
-            let function = self.exe.lib(site.lib);
-            function.specialization.prepared.as_ref().and_then(|_| {
-                function
-                    .charge
-                    .immediate(&[value, Value::Absent], Fresh::of(0b10), &answer)
-            })
-        } else {
-            Some(0)
-        };
-        let fixed = site.close.map_or(0, |close| u64::from(close.total));
-        let Some(units) = units.filter(|units| self.fits(fixed.saturating_add(*units))) else {
-            return Err(self.at_held(site.miss, site.reg, value));
-        };
-        let unit = if self.projection().is_some() {
-            Some(
-                self.empty_tuple()
-                    .ok_or_else(|| self.at_held(site.miss, site.reg, value))?,
-            )
-        } else {
-            // The source builds the empty operand, which the arena holds
-            // until its next release; a metered run holds it here too.
-            if self.memory {
-                self.empty_tuple()
-                    .ok_or_else(|| self.at_held(site.miss, site.reg, value))?;
-            }
-            None
-        };
-        if let Some(close) = &site.close {
-            self.close(close);
-        }
-        if let Some(unit) = unit {
-            let native = NativeSite {
-                lib: site.lib,
-                close: None,
-                charges: None,
-                pc: site.miss,
-                reg: site.reg,
-                depth: Depth::None,
-            };
-            let mut args = [Value::Absent; MAX_ARGS];
-            args[0] = value;
-            args[1] = unit;
-            return self.native(&native, &args, 2);
-        }
-        self.formula(units);
-        Ok(answer)
-    }
-
     /// `same(kind(x), literal)` of `x`: by its memo
     /// where it has answered `x`'s kind, as the two calls answer and
     /// charge it otherwise.

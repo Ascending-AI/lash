@@ -526,9 +526,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 frame.regs[site.reg as usize] = if published {
                     Value::Bool(false)
                 } else {
-                    self.retaining(&mut frame.state.transient, |island| {
-                        island.unit_test(site, input)
-                    })?
+                    return Err(self.at_held(site.miss, site.reg, input));
                 };
             }
             Opcode::Kind => {
