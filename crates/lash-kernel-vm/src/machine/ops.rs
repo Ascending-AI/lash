@@ -886,14 +886,7 @@ impl KernelMachine {
                 )
                 .into());
             }
-            LibRun::Body(code) => match self.prepared_heap(task, exe, lib, args)? {
-                Some(value) => {
-                    self.pin_value(&value)?;
-                    self.capacity_check()?;
-                    Ok(value)
-                }
-                None => return Ok(Answer::Body((*code).into())),
-            },
+            LibRun::Body(code) => return Ok(Answer::Body((*code).into())),
             LibRun::Machine(MachineFunction::Deref) => match self.regs.get(args).copied() {
                 Some(Value::TaskRef(task)) => Ok(Value::Task(task)),
                 Some(Value::ObjectRef(object)) => {
@@ -1048,17 +1041,8 @@ impl KernelMachine {
                         let Some(body) = body else {
                             return Err(fault("a native with no kernel body declined").into());
                         };
-                        match self.prepared_heap(task, exe, lib, args)? {
-                            Some(value) => {
-                                self.pin_value(&value)?;
-                                self.capacity_check()?;
-                                Ok(value)
-                            }
-                            None => {
-                                self.observe(Event::NativeExit);
-                                return Ok(Answer::Body((*body).into()));
-                            }
-                        }
+                        self.observe(Event::NativeExit);
+                        return Ok(Answer::Body((*body).into()));
                     }
                 }
             }
