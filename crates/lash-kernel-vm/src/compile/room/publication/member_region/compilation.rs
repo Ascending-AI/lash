@@ -188,8 +188,87 @@ impl Compiler<'_> {
         }
         Ok(())
     }
+    fn compile_statement(
+        &mut self,
+        id: &StmtId,
+        previous: Option<&Statement>,
+    ) -> Result<Statement, Refused> {
+        let exe = self.exe;
+        let placement = self.placement;
+        let source = Arc::clone(self.source());
+        let (_, stmt, _) = exe.statement(*id);
+        if exe.stmt_at(placement.code(), &stmt.site) != Some(*id) {
+            return Err(Refused::Source);
+        }
+        if let Some(previous) = previous {
+            let mut expected = previous.through.site.clone();
+            let last = expected.path.last_mut().ok_or(Refused::Path)?;
+            *last = last.checked_add(1).ok_or(Refused::Path)?;
+            if expected != stmt.site {
+                return Err(Refused::Path);
+            }
+        }
+        let mut node = doc::Node::Block(&source.body);
+        for i in stmt.site.path.iter().skip(source.site.path.len()) {
+            node = *node.children().get(*i as usize).ok_or(Refused::Path)?;
+        }
+        let doc::Node::Stmt(ast) = node else {
+            return Err(Refused::Source);
+        };
+        let start = self.nodes.len();
+        self.statement(ast, &stmt.site)?;
+        let nodes = start..self.nodes.len();
+        let first = self.nodes[start].event.point.clone();
+        let through = Point {
+            site: stmt.site.clone(),
+            phase: Phase::Commit,
+        };
+        let route: Vec<_> = self.nodes[nodes.clone()]
+            .iter()
+            .map(|node| Selection::Event {
+                at: node.event.point.clone(),
+                exit: ExitKind::Normal,
+            })
+            .collect();
+        let interval = source.compile_between(&first, &through, &route, route.len())?;
+        if interval
+            .events()
+            .ne(self.nodes[nodes.clone()].iter().map(|node| &node.event))
+        {
+            return Err(Refused::Source);
+        }
+        let charges = ChargeProgram::compile(exe, placement.code(), *id, stmt.ops)?;
+        if charges.first() != &first {
+            return Err(Refused::Source);
+        }
+        let after = source.next_after_commit(&stmt.site)?;
+        let mut encoding = TokenWriter::new();
+        encoding.seq(3);
+        encoding.text("lash.source.member-region");
+        first.site.encode(&mut encoding);
+        through.site.encode(&mut encoding);
+        let depth = self.nodes[nodes.clone()]
+            .iter()
+            .filter_map(|node| match node.operation {
+                Operation::Native { lib, .. } => Some(u64::from(exe.lib(lib).operation())),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
+        Ok(Statement {
+            id: *id,
+            first,
+            through,
+            after,
+            nodes,
+            charges,
+            recovery: logical_digest(&encoding.into_bytes()),
+            depth,
+        })
+    }
 }
 impl MemberRegion {
+    #[cfg(test)]
     pub(crate) fn compile(
         exe: &Executable,
         placement: Arc<BindingPlacement>,
@@ -198,6 +277,61 @@ impl MemberRegion {
     ) -> Result<Self, Refused> {
         if statements.len() < 2 || exe.code(placement.code()).paced {
             return Err(Refused::Path);
+        }
+        let mut compiler = Compiler {
+            exe,
+            placement: &placement,
+            nodes: Vec::new(),
+            live: BTreeMap::new(),
+            vacant: BTreeSet::new(),
+        };
+        let mut compiled: Vec<Statement> = Vec::new();
+        for id in statements {
+            compiled.push(compiler.compile_statement(id, compiled.last())?);
+        }
+        for pair in compiled.windows(2) {
+            if pair[0].after != pair[1].first {
+                return Err(Refused::Path);
+            }
+        }
+        let Compiler { nodes, vacant, .. } = compiler;
+        let mut region = Self::from_parts(exe, placement, nodes, vacant, compiled, footprint)?;
+        region.peaks = algebra::compile(exe, &region.nodes)?;
+        region.verify(exe)?;
+        Ok(region)
+    }
+    fn from_parts(
+        exe: &Executable,
+        placement: Arc<BindingPlacement>,
+        nodes: Vec<Node>,
+        vacant: BTreeSet<Slot>,
+        statements: Vec<Statement>,
+        footprint: &[u32],
+    ) -> Result<Self, Refused> {
+        let observers = ObserverScope::compile(Arc::clone(&placement), footprint, &[])?;
+        Ok(Self {
+            executable: exe.local(),
+            code: placement.code(),
+            source: Arc::clone(placement.source()),
+            placement,
+            observers,
+            footprint: footprint.into(),
+            nodes: nodes.into(),
+            statements: statements.into(),
+            vacant: vacant.into_iter().collect(),
+            peaks: Box::default(),
+        })
+    }
+    /// Compile the maximal adjacent assignment suffix once at its actual
+    /// block entry. The footprint is lexical source placement, never a list
+    /// inferred from physical extensibility or a benchmark's spelling.
+    pub(crate) fn compile_tail(
+        exe: &Executable,
+        placement: Arc<BindingPlacement>,
+        statements: &[StmtId],
+    ) -> Option<Self> {
+        if statements.len() < 2 || exe.code(placement.code()).paced {
+            return None;
         }
         let source = Arc::clone(placement.source());
         let mut compiler = Compiler {
@@ -209,117 +343,40 @@ impl MemberRegion {
         };
         let mut compiled: Vec<Statement> = Vec::new();
         for id in statements {
-            let (_, stmt, _) = exe.statement(*id);
-            if exe.stmt_at(placement.code(), &stmt.site) != Some(*id) {
-                return Err(Refused::Source);
-            }
-            if let Some(previous) = compiled.last() {
-                let mut expected = previous.through.site.clone();
-                let last = expected.path.last_mut().ok_or(Refused::Path)?;
-                *last = last.checked_add(1).ok_or(Refused::Path)?;
-                if expected != stmt.site {
-                    return Err(Refused::Path);
+            let start = compiler.nodes.len();
+            match compiler.compile_statement(id, compiled.last()) {
+                Ok(stmt)
+                    if compiled
+                        .last()
+                        .is_none_or(|previous| previous.after == stmt.first) =>
+                {
+                    compiled.push(stmt);
+                }
+                _ => {
+                    // A failed next statement may already have staged operands.
+                    // The preceding complete statement leaves no live operand.
+                    compiler.nodes.truncate(start);
+                    compiler.live.clear();
+                    compiler.vacant = compiler
+                        .nodes
+                        .iter()
+                        .filter_map(|node| node.output)
+                        .collect();
+                    break;
                 }
             }
-            let mut node = doc::Node::Block(&source.body);
-            for i in stmt.site.path.iter().skip(source.site.path.len()) {
-                node = *node.children().get(*i as usize).ok_or(Refused::Path)?;
-            }
-            let doc::Node::Stmt(ast) = node else {
-                return Err(Refused::Source);
-            };
-            let start = compiler.nodes.len();
-            compiler.statement(ast, &stmt.site)?;
-            let nodes = start..compiler.nodes.len();
-            let first = compiler.nodes[start].event.point.clone();
-            let through = Point {
-                site: stmt.site.clone(),
-                phase: Phase::Commit,
-            };
-            let route: Vec<_> = compiler.nodes[nodes.clone()]
-                .iter()
-                .map(|node| Selection::Event {
-                    at: node.event.point.clone(),
-                    exit: ExitKind::Normal,
-                })
-                .collect();
-            let interval = source.compile_between(&first, &through, &route, route.len())?;
-            if interval
-                .events()
-                .ne(compiler.nodes[nodes.clone()].iter().map(|node| &node.event))
-            {
-                return Err(Refused::Source);
-            }
-            let charges = ChargeProgram::compile(exe, placement.code(), *id, stmt.ops)?;
-            if charges.first() != &first {
-                return Err(Refused::Source);
-            }
-            let after = source.next_after_commit(&stmt.site)?;
-            let mut encoding = TokenWriter::new();
-            encoding.seq(3);
-            encoding.text("lash.source.member-region");
-            first.site.encode(&mut encoding);
-            through.site.encode(&mut encoding);
-            let depth = compiler.nodes[nodes.clone()]
-                .iter()
-                .filter_map(|node| match node.operation {
-                    Operation::Native { lib, .. } => Some(u64::from(exe.lib(lib).operation())),
-                    _ => None,
-                })
-                .max()
-                .unwrap_or(0);
-            compiled.push(Statement {
-                id: *id,
-                first,
-                through,
-                after,
-                nodes,
-                charges,
-                recovery: logical_digest(&encoding.into_bytes()),
-                depth,
-            });
         }
-        for pair in compiled.windows(2) {
-            if pair[0].after != pair[1].first {
-                return Err(Refused::Path);
-            }
+        if compiled.len() < 2 {
+            return None;
         }
-        let observers = ObserverScope::compile(Arc::clone(&placement), footprint, &[])?;
-        let peaks = algebra::compile(exe, &compiler.nodes)?;
-        let nodes = compiler.nodes.into();
-        let vacant = compiler.vacant.into_iter().collect();
-        let region = Self {
-            executable: exe.local(),
-            code: placement.code(),
-            placement,
-            source,
-            observers,
-            footprint: footprint.into(),
-            nodes,
-            statements: compiled.into(),
-            vacant,
-            peaks,
-        };
-        region.verify(exe)?;
-        Ok(region)
-    }
-    /// Compile the maximal adjacent assignment suffix once at its actual
-    /// block entry. The footprint is lexical source placement, never a list
-    /// inferred from physical extensibility or a benchmark's spelling.
-    pub(crate) fn compile_tail(
-        exe: &Executable,
-        placement: Arc<BindingPlacement>,
-        statements: &[StmtId],
-    ) -> Option<Self> {
-        let first = exe.stmt(*statements.first()?).site.clone();
-        let source = placement.source();
+        let first = &compiled[0].through.site;
         let owners = source.owner_slots().ok()?;
         let footprint: Vec<_> = source
             .bindings
             .iter()
             .filter_map(|binding| {
                 let visible =
-                    super::super::root_owners::visible(&owners.scopes, &first, &binding.name)?;
+                    super::super::root_owners::visible(&owners.scopes, first, &binding.name)?;
                 if *visible
                     != (Owner::Binding {
                         declared: binding.declared.clone(),
@@ -336,17 +393,34 @@ impl MemberRegion {
                 placement.physical(slot)
             })
             .collect();
-        for count in (2..=statements.len()).rev() {
-            if let Ok(region) = Self::compile(
-                exe,
-                Arc::clone(&placement),
-                &statements[..count],
-                &footprint,
-            ) {
-                return Some(region);
+        let Compiler { nodes, vacant, .. } = compiler;
+        let mut region =
+            Self::from_parts(exe, placement, nodes, vacant, compiled, &footprint).ok()?;
+        loop {
+            if let Ok(peaks) = algebra::compile(exe, &region.nodes) {
+                region.peaks = peaks;
+                if region.verify(exe).is_ok() {
+                    return Some(region);
+                }
             }
+            if region.statements.len() <= 2 {
+                return None;
+            }
+            // Reuse the already compiled source events and close programs.
+            // Only the discarded tail and its operand slots leave this candidate.
+            let mut statements = region.statements.into_vec();
+            let discarded = statements.pop()?;
+            let mut nodes = region.nodes.into_vec();
+            nodes.truncate(discarded.nodes.start);
+            region.vacant = nodes
+                .iter()
+                .filter_map(|node| node.output)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            region.nodes = nodes.into();
+            region.statements = statements.into();
         }
-        None
     }
     pub(crate) fn verify(&self, exe: &Executable) -> Result<(), Refused> {
         if exe.local() != self.executable
