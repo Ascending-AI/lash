@@ -3,13 +3,14 @@
 use super::super::*;
 use super::{ScopedCall, scalar};
 use crate::compile::room::charges::{ChargeProgram, FormulaValues, composition::StatementDebt};
+use crate::compile::room::interval::ComposedInterval;
 use crate::compile::room::region::{ScalarInput, ScalarRegionValues};
 use std::collections::BTreeSet;
 
 pub(crate) struct VerifiedIteration {
     executable: u64,
     source: Arc<Source>,
-    interval: Arc<CompiledInterval>,
+    interval: Arc<ComposedInterval>,
     pieces: Box<[Piece]>,
     entries: Box<[Slot]>,
     vacancies: Box<[Slot]>,
@@ -88,87 +89,19 @@ impl VerifiedIteration {
         statement: StmtId,
         calls: &[Arc<VerifiedCall>],
     ) -> Result<Self, Refused> {
-        let stmt = exe.stmt(statement);
-        if exe.stmt_at(code, &stmt.site) != Some(statement)
-            || !matches!(stmt.form, compile::Form::While { .. })
-        {
-            return Err(Refused::Source);
-        }
         let source = &exe.code(code).source_room;
-        let through = Point {
-            site: stmt.site.child(1),
-            phase: Phase::Leave,
-        };
-        struct LoopRoute<'a> {
-            source: &'a Source,
-            branch: &'a Site,
-            through: &'a Point,
-            selected: Vec<Selection>,
-            stop: bool,
-        }
-        impl evaluate::Events for LoopRoute<'_> {
-            fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
-                let at = Point {
-                    site: site.clone(),
-                    phase,
-                };
-                let exit = self
-                    .source
-                    .room
-                    .exits
-                    .iter()
-                    .find(|exit| exit.point == at)
-                    .ok_or(Refused::Exit)?
-                    .kind;
-                self.stop = at == *self.through;
-                self.selected.push(Selection::Event { at, exit });
-                Ok(exit)
-            }
-            fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
-                if site != self.branch {
-                    return Err(Refused::Path);
-                }
-                self.selected.push(Selection::Branch {
-                    at: site.clone(),
-                    taken: true,
-                });
-                Ok(true)
-            }
-            fn selected_end(&self) -> bool {
-                self.stop
-            }
-        }
-        let mut route = LoopRoute {
-            source,
-            branch: &stmt.site,
-            through: &through,
-            selected: vec![],
-            stop: false,
-        };
-        evaluate::walk_to(source, &stmt.site, &mut route, 4096)?;
-        let first = source.first_event(&stmt.site)?;
-        let interval = source.compile_between(&first, &through, &route.selected, 4096)?;
+        let interval = source.compile_composed_loop(exe, code, statement, calls)?;
         Self::compile(exe, code, interval, calls)
     }
     pub(crate) fn compile(
         exe: &Executable,
         code: CodeId,
-        interval: Arc<CompiledInterval>,
+        interval: Arc<ComposedInterval>,
         calls: &[Arc<VerifiedCall>],
     ) -> Result<Self, Refused> {
         let source = Arc::clone(&exe.code(code).source_room);
-        if interval.owner() != source.owner
-            || interval.defining_source() != &source.site
-            || interval.exit() != ExitKind::Normal
-            || calls.is_empty()
-        {
+        if !interval.matches(exe, code, calls) {
             return Err(Refused::Source);
-        }
-        for call in calls {
-            call.verify(exe)?;
-            if call.caller != code || !Arc::ptr_eq(&call.caller_source, &source) {
-                return Err(Refused::Source);
-            }
         }
         let route = interval.selections();
         let mut pieces = Vec::new();
@@ -187,20 +120,30 @@ impl VerifiedIteration {
                 return Err(Refused::Source);
             }
             if start < index {
-                pieces.push(scalar_piece(exe, &source, route, start, index)?);
+                pieces.push(scalar_piece(exe, &source, &interval, start, index)?);
             }
             let atoms = call.root_atoms.clone();
             pieces.push(Piece::Call {
                 call: Arc::clone(call),
                 atoms,
             });
-            start = index + 1;
+            let resume = interval
+                .calls()
+                .iter()
+                .find(|boundary| boundary.entry().0 == at)
+                .ok_or(Refused::Source)?
+                .resume();
+            if !matches!(route.get(index + 1), Some(Selection::Event { at, exit: ExitKind::Normal }) if at == resume)
+            {
+                return Err(Refused::Source);
+            }
+            start = index + 2;
         }
         if used.len() != calls.len() {
             return Err(Refused::Source);
         }
         if start < route.len() {
-            pieces.push(scalar_piece(exe, &source, route, start, route.len())?);
+            pieces.push(scalar_piece(exe, &source, &interval, start, route.len())?);
         }
         let Topology {
             entries,
@@ -231,7 +174,7 @@ impl VerifiedIteration {
     pub(crate) fn source(&self) -> &Arc<Source> {
         &self.source
     }
-    pub(crate) fn interval(&self) -> &Arc<CompiledInterval> {
+    pub(crate) fn interval(&self) -> &Arc<ComposedInterval> {
         &self.interval
     }
     pub(crate) fn scalars(&self) -> impl Iterator<Item = &ScalarRegion> {
@@ -428,54 +371,16 @@ impl VerifiedIteration {
 fn scalar_piece(
     exe: &Executable,
     source: &Arc<Source>,
-    route: &[Selection],
+    interval: &ComposedInterval,
     start: usize,
     end: usize,
 ) -> Result<Piece, Refused> {
-    let region = span(source, route, start, end)?;
+    let region = source.compile_scalar_region(interval.scalar(start, end)?)?;
     let natives = paths::natives(exe, source, &region)?;
     Ok(Piece::Scalar {
         region: Box::new(region),
         natives,
     })
-}
-
-fn span(
-    source: &Arc<Source>,
-    route: &[Selection],
-    start: usize,
-    end: usize,
-) -> Result<ScalarRegion, Refused> {
-    let first = route[start..end]
-        .iter()
-        .find_map(|selection| match selection {
-            Selection::Event { at, .. } => Some(at),
-            _ => None,
-        })
-        .ok_or(Refused::Path)?;
-    let last = route[..end]
-        .iter()
-        .rev()
-        .find_map(|selection| match selection {
-            Selection::Event { at, .. } => Some(at),
-            _ => None,
-        })
-        .ok_or(Refused::Path)?;
-    let mut context = first.site.clone();
-    let common = first
-        .site
-        .path
-        .iter()
-        .zip(&last.site.path)
-        .take_while(|(a, b)| a == b)
-        .count();
-    context.path.truncate(common);
-    let opening = source.first_event(&context)?;
-    let begin = route[..end]
-        .iter()
-        .position(|selection| matches!(selection, Selection::Event { at, .. } if *at == opening))
-        .ok_or(Refused::Path)?;
-    source.compile_scalar_region(source.compile_between(first, last, &route[begin..end], 4096)?)
 }
 
 fn topology(source: &Arc<Source>, pieces: &[Piece]) -> Result<Topology, Refused> {
@@ -627,7 +532,7 @@ fn charge_plans(
     exe: &Executable,
     code: CodeId,
     source: &Arc<Source>,
-    interval: &CompiledInterval,
+    interval: &ComposedInterval,
     pieces: &[Piece],
 ) -> Result<Box<[DebtPlan]>, Refused> {
     let calls: Vec<_> = pieces

@@ -493,6 +493,9 @@ impl VerifiedCall {
         self.caller_source
             .compile_call_continuation(&self.at, through, selected)
     }
+    pub(in crate::compile::room) fn belongs_to(&self, source: &Arc<Source>, code: CodeId) -> bool {
+        self.caller == code && Arc::ptr_eq(source, &self.caller_source)
+    }
     pub(crate) fn callee(&self) -> CodeId {
         self.callee
     }
@@ -753,6 +756,99 @@ fn bind_debt<'a>(
         })
         .collect();
     path.charges.bind(&caller, &body)
+}
+
+/// A verified return edge, distinct from the caller's original action exit.
+/// All admitted callee paths end at this source-local Leave; binding selects
+/// and authenticates the actual guarded path before this edge can publish.
+pub(crate) struct CallCompletion {
+    call: Arc<VerifiedCall>,
+    entry_exit: ExitKind,
+    leave: Point,
+    resume: Point,
+}
+impl CallCompletion {
+    pub(crate) fn entry(&self) -> (&Point, ExitKind) {
+        (&self.call.at, self.entry_exit)
+    }
+    pub(crate) fn callee(&self) -> &Arc<Source> {
+        &self.call.source
+    }
+    pub(crate) fn leave(&self) -> &Point {
+        &self.leave
+    }
+    pub(crate) fn resume(&self) -> &Point {
+        &self.resume
+    }
+    pub(in crate::compile::room) fn call(&self) -> &Arc<VerifiedCall> {
+        &self.call
+    }
+    pub(in crate::compile::room) fn after_return(&self) -> ExitKind {
+        // This is the caller's control result after callee Leave and the
+        // caller's resume event. The stored Enter still exits as Action.
+        ExitKind::Normal
+    }
+}
+impl VerifiedCall {
+    pub(in crate::compile::room) fn completion(
+        self: &Arc<Self>,
+        source: &Source,
+        at: &Point,
+        exit: ExitKind,
+    ) -> Result<CallCompletion, Refused> {
+        if !std::ptr::eq(source, self.caller_source.as_ref())
+            || self.at != *at
+            || !source
+                .room
+                .exits
+                .iter()
+                .any(|candidate| candidate.point == *at && candidate.kind == exit)
+            || exit
+                != if self.at.phase == Phase::Enter {
+                    ExitKind::Action
+                } else {
+                    ExitKind::Normal
+                }
+        {
+            return Err(Refused::Source);
+        }
+        let leave = Point {
+            site: self.source.site.clone(),
+            phase: Phase::Leave,
+        };
+        if self.paths.is_empty()
+            || self.paths.iter().any(|path| {
+                !Arc::ptr_eq(path.region.source(), &self.source)
+                    || !matches!(
+                        path.region.interval.exit(),
+                        ExitKind::Return | ExitKind::Normal
+                    )
+                    || path
+                        .region
+                        .interval
+                        .events()
+                        .last()
+                        .is_none_or(|event| event.point != leave)
+            })
+        {
+            return Err(Refused::Source);
+        }
+        let resume = Point {
+            site: at.site.clone(),
+            phase: if self.rooted {
+                Phase::Commit
+            } else {
+                Phase::Restore
+            },
+        };
+        source.compile_event(&resume, ExitKind::Normal)?;
+        Ok(CallCompletion {
+            call: Arc::clone(self),
+            entry_exit: exit,
+            leave,
+            resume,
+        })
+    }
 }
 
 struct CalleeValues<'a> {

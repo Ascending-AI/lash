@@ -560,7 +560,7 @@ impl Source {
             vacant: Default::default(),
             results: Vec::new(),
             calls: Vec::new(),
-            peaks: Vec::new(),
+            peaks: vec![Polynomial::default()],
             delta: Polynomial::default(),
             facts: 0,
             prices: 0,

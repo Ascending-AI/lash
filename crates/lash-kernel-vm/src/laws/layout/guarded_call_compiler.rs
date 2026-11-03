@@ -7,72 +7,644 @@ pub(super) fn helper_compilation() {
         "return flat.add(a, b)",
         "if flat.lt(a, b) { return flat.add(a, b) } return flat.add(a, b)",
     ] {
-        let helper = super::super::embedder::fragment(&format!(
-            "function helper(a: Any, b: Any) -> Any\nkernel 1\nmetering statements\nbody {{ {helper_body} }}"
-        ));
-        let caller = scalar_document(
-            "let i = 0 while flat.lt(i, 4) { set i = flat.identity(invoke helper(i, 1)) } return i",
-        );
-        let source = format!("definition \"{helper}\"\n{caller}");
-        let embedder = Embedder::with(
-            &source,
-            Setup {
-                probes: Some(scalar_probes),
-                ..Setup::default()
-            },
-        );
-        let (program, _) = embedder.program(true);
-        let admitted = program
-            .library
-            .admit(&program.document, Default::default(), &program.selection)
-            .unwrap_or_else(|_| panic!("helper source admitted"));
-        let exe = admitted
-            .executable(
-                &program.document,
-                &program.library,
-                &program.documents,
-                &program.functions,
-                &program.instances,
-            )
-            .unwrap_or_else(|_| panic!("helper executable"));
-        let caller = exe
-            .islands
-            .plans
-            .iter()
-            .find(|plan| {
-                plan.body.statements.iter().any(|statement| {
+        for call_form in 0..6 {
+            let helper = super::super::embedder::fragment(&format!(
+                "function helper(a: Any, b: Any) -> Any\nkernel 1\nmetering statements\nbody {{ {helper_body} }}"
+            ));
+            let answer = match call_form {
+                3 => 6,
+                5 => 2,
+                _ => 1,
+            };
+            let update = match call_form {
+                0 => "set i = flat.identity(invoke helper(i, 1))",
+                1 => "set i = flat.identity(invoke helper(flat.identity(i), 1))",
+                2 => "set i = invoke helper(i, 1)",
+                3 => "set i = flat.add(5, invoke helper(i, 1))",
+                4 => {
+                    if helper_body.starts_with("if") {
+                        "set i = flat.identity(body.guarded(i, 1))"
+                    } else {
+                        "set i = flat.identity(body.plain(i, 1))"
+                    }
+                }
+                _ => "set i = invoke helper(i, 1) set i = invoke helper(i, 1)",
+            };
+            let caller = scalar_document(&format!(
+                "let i = 0 while flat.lt(i, 4) {{ {update} }} return i"
+            ));
+            let source = format!("definition \"{helper}\"\n{caller}");
+            let embedder = Embedder::with(
+                &source,
+                Setup {
+                    probes: Some(body_helper_probes),
+                    ..Setup::default()
+                },
+            );
+            let (program, _) = embedder.program(true);
+            let admitted = program
+                .library
+                .admit(&program.document, Default::default(), &program.selection)
+                .unwrap_or_else(|_| panic!("helper source admitted"));
+            let exe = admitted
+                .executable(
+                    &program.document,
+                    &program.library,
+                    &program.documents,
+                    &program.functions,
+                    &program.instances,
+                )
+                .unwrap_or_else(|_| panic!("helper executable"));
+            let caller = exe
+                .islands
+                .plans
+                .iter()
+                .find(|plan| {
+                    plan.body.statements.iter().any(|statement| {
+                        matches!(statement.kind, crate::compile::islands::Kind::While { .. })
+                    })
+                })
+                .unwrap();
+            let statement = caller
+                .body
+                .statements
+                .iter()
+                .find(|statement| {
                     matches!(statement.kind, crate::compile::islands::Kind::While { .. })
                 })
-            })
-            .unwrap();
-        let statement = caller
-            .body
-            .statements
-            .iter()
-            .find(|statement| matches!(statement.kind, crate::compile::islands::Kind::While { .. }))
-            .unwrap();
-        let crate::compile::islands::Kind::While { body, .. } = &statement.kind else {
-            unreachable!()
-        };
-        let id = body.statements[0].id;
-        let (stream, stmt, _) = exe.statement(id);
-        let pc = (stmt.ops.start..stmt.ops.end())
-            .find(|pc| {
-                matches!(
-                    stream.ops[*pc as usize],
-                    lash_kernel_exec::Op::Nested { .. }
+                .unwrap();
+            let crate::compile::islands::Kind::While { body, .. } = &statement.kind else {
+                unreachable!()
+            };
+            let id = body.statements[0].id;
+            let (stream, stmt, _) = exe.statement(id);
+            let pc = (stmt.ops.start..stmt.ops.end())
+                .find(|pc| {
+                    matches!(
+                        stream.ops[*pc as usize],
+                        lash_kernel_exec::Op::Nested { .. } | lash_kernel_exec::Op::Act
+                    )
+                })
+                .unwrap();
+            let first_unpaid = (stmt.ops.start..pc)
+                .rev()
+                .find(|at| {
+                    let op = stream.ops[*at as usize];
+                    !op.kind().in_region() && !matches!(op, lash_kernel_exec::Op::Region { .. })
+                })
+                .map_or(stmt.ops.start, |at| at + 1);
+            let call = crate::compile::room::region::calls::VerifiedCall::compile_from(
+                &exe,
+                caller.code,
+                id,
+                pc,
+                first_unpaid,
+            );
+            eprintln!(
+                "loop helper {helper_body:?}: {:?}",
+                call.as_ref().map(|_| "verified")
+            );
+            assert!(
+                call.is_ok(),
+                "a pure guarded helper must have source-call authority"
+            );
+            use crate::compile::room::{
+                self,
+                placement::BindingPlacement,
+                region::{
+                    ScalarRegionValues,
+                    calls::scope::iteration::{IterationValues, VerifiedIteration},
+                },
+            };
+            use lash_kernel_doc::Value;
+            use lash_kernel_state::{
+                arena::Arena,
+                kernel_internals::logical::{Ledger, RootValue},
+            };
+            let call = std::sync::Arc::new(call.unwrap());
+            let mut compiled_calls = vec![std::sync::Arc::clone(&call)];
+            if call_form == 5 {
+                let second = body.statements[1].id;
+                let (_, statement, _) = exe.statement(second);
+                compiled_calls.push(std::sync::Arc::new(
+                    crate::compile::room::region::calls::VerifiedCall::compile(
+                        &exe,
+                        caller.code,
+                        second,
+                        statement.ops.start,
+                    )
+                    .unwrap(),
+                ));
+            }
+            let iteration =
+                VerifiedIteration::compile_loop(&exe, caller.code, statement.id, &compiled_calls)
+                    .unwrap();
+            let composed = iteration.interval();
+            let boundary = &composed.calls()[0];
+            assert_eq!(
+                boundary.entry(),
+                (
+                    call.at(),
+                    if call_form == 4 {
+                        room::ExitKind::Normal
+                    } else {
+                        room::ExitKind::Action
+                    }
                 )
-            })
-            .unwrap();
-        let call =
-            crate::compile::room::region::calls::VerifiedCall::compile(&exe, caller.code, id, pc);
-        eprintln!(
-            "loop helper {helper_body:?}: {:?}",
-            call.as_ref().map(|_| "verified")
-        );
-        assert!(
-            call.is_ok(),
-            "a pure guarded helper must have source-call authority"
-        );
+            );
+            assert!(std::sync::Arc::ptr_eq(boundary.callee(), call.source()));
+            assert_eq!(
+                boundary.leave(),
+                &room::Point {
+                    site: call.source().site.clone(),
+                    phase: room::Phase::Leave
+                }
+            );
+            assert_eq!(
+                boundary.resume(),
+                &room::Point {
+                    site: call.at().site.clone(),
+                    phase: if matches!(call_form, 2 | 5) {
+                        room::Phase::Commit
+                    } else {
+                        room::Phase::Restore
+                    }
+                }
+            );
+            let from = &composed.events().next().unwrap().point;
+            let through = &composed.events().last().unwrap().point;
+            assert!(
+                iteration
+                    .source()
+                    .compile_between(from, through, composed.selections(), 4096)
+                    .is_err(),
+                "ordinary intervals must still stop at the genuine Action exit"
+            );
+            let mut omitted = composed.selections().to_vec();
+            omitted.retain(|selection| !matches!(selection, room::Selection::Event { at, .. } if at == boundary.resume()));
+            assert!(
+                iteration
+                    .source()
+                    .compile_composed_between(
+                        &exe,
+                        caller.code,
+                        from,
+                        through,
+                        &omitted,
+                        &compiled_calls
+                    )
+                    .is_err(),
+                "a caller resume cannot disappear from a composed source path"
+            );
+            let mut ledger = Ledger::fresh();
+            let mut arena = Arena::new();
+            let heap = embedder.machine.source_law_heap();
+            let initial = Value::Int(0);
+            let bindings: Vec<_> = iteration
+                .entries()
+                .iter()
+                .map(|slot| (*slot, RootValue::Value(&initial)))
+                .collect();
+            let (invocation, entered) = ledger
+                .prepare_enter(
+                    lash_kernel_doc::TaskId::MAIN,
+                    &mut arena,
+                    heap.pages(),
+                    &[],
+                    &bindings,
+                )
+                .unwrap();
+            ledger
+                .commit(entered.admit(u64::MAX).ok().unwrap())
+                .unwrap();
+            let placement = BindingPlacement::compile(&exe, caller.code).unwrap();
+            let mut physical: Vec<_> = (0..exe.code(caller.code).slots.len())
+                .map(|_| crate::machine::SlotState::Empty)
+                .collect();
+            for slot in iteration.entries() {
+                physical[placement.physical(*slot).unwrap() as usize] =
+                    crate::machine::SlotState::Value(initial);
+            }
+            let activation = placement
+                .capture(caller.code, &invocation, &ledger, heap, &physical)
+                .unwrap()
+                .unwrap();
+            let reservation = ledger
+                .reserve_invocations(lash_kernel_doc::TaskId::MAIN, 4)
+                .unwrap();
+            let scope = call
+                .bind_scope(
+                    &exe,
+                    call.callee(),
+                    &ledger,
+                    &invocation,
+                    &activation,
+                    reservation,
+                )
+                .unwrap();
+            let roles: Vec<_> = call
+                .scope_roles()
+                .zip([initial, Value::Int(1), Value::Int(5)])
+                .collect();
+            let candidate = call
+                .evaluate_scoped(&exe, call.callee(), &scope, 0, &arena, &roles)
+                .unwrap()
+                .unwrap();
+            let second_candidate = if call_form == 5 {
+                let second = &compiled_calls[1];
+                let roles: Vec<_> = second
+                    .scope_roles()
+                    .zip([Value::Int(1), Value::Int(1)])
+                    .collect();
+                Some(
+                    second
+                        .evaluate_scoped(&exe, second.callee(), &scope, 1, &arena, &roles)
+                        .unwrap()
+                        .unwrap(),
+                )
+            } else {
+                None
+            };
+            let candidates: Vec<_> = std::iter::once(&candidate)
+                .chain(second_candidate.iter())
+                .collect();
+            let mut scalar_values = Vec::new();
+            let mut scalar_rooms = Vec::new();
+            for (region_index, region) in iteration.scalars().enumerate() {
+                let mut values = vec![Value::Null; region.fact_count()];
+                for (slot, fact) in region.entries() {
+                    values[fact.index()] = if iteration.entries().contains(&slot) {
+                        Value::Int(if call_form == 5 && region_index == 2 {
+                            1
+                        } else {
+                            0
+                        })
+                    } else {
+                        let value = compiled_calls
+                            .iter()
+                            .enumerate()
+                            .find_map(|(index, call)| {
+                                let owner = iteration
+                                    .source()
+                                    .owner_slots()
+                                    .unwrap()
+                                    .root(
+                                        &room::Owner::Operand(call.at().site.clone()),
+                                        lash_kernel_doc::TaskId::MAIN,
+                                        0,
+                                    )
+                                    .unwrap();
+                                let lash_kernel_state::kernel_internals::logical::Owner::Value {
+                                    slot: result,
+                                    ..
+                                } = owner
+                                else {
+                                    unreachable!()
+                                };
+                                (slot == result).then_some(index as i64 + 1)
+                            })
+                            .unwrap_or(5);
+                        Value::Int(value)
+                    };
+                }
+                for (at, fact) in region.results() {
+                    let mut node = lash_kernel_doc::Node::Block(&iteration.source().body);
+                    for index in &at.site.path[iteration.source().site.path.len()..] {
+                        node = *node.children().get(*index as usize).unwrap();
+                    }
+                    values[fact.index()] = match node {
+                        lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Literal(
+                            lash_kernel_doc::Literal::Int(value),
+                        )) => Value::Int(value.word().unwrap()),
+                        lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Variable(_)) => initial,
+                        lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Call {
+                            args, ..
+                        }) if args.len() == 2
+                            && !at.site.path.starts_with(&exe.stmt(id).site.path) =>
+                        {
+                            Value::Bool(true)
+                        }
+                        lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Call { .. }) => {
+                            if at.site.path.starts_with(&call.at().site.path) {
+                                initial
+                            } else {
+                                Value::Int(answer)
+                            }
+                        }
+                        _ => panic!("scalar loop source result"),
+                    };
+                }
+                let mut rooms = Vec::new();
+                for event in region.interval().events() {
+                    for measure in event.peak.measures() {
+                        if let room::Measure::CallPeak {
+                            callee: room::CallSource::Native(function),
+                            ..
+                        } = measure
+                        {
+                            let lib = exe.lib(exe.library_lib(function).unwrap());
+                            let crate::compile::LibRun::Native { native, .. } = &lib.run else {
+                                panic!("scalar native");
+                            };
+                            let input = if lib.arity == 2 {
+                                if event.point.site.path.starts_with(&exe.stmt(id).site.path) {
+                                    vec![Value::Int(5), Value::Int(1)]
+                                } else {
+                                    vec![initial, Value::Int(4)]
+                                }
+                            } else {
+                                vec![if event.point.site.path.starts_with(&call.at().site.path) {
+                                    initial
+                                } else {
+                                    Value::Int(1)
+                                }]
+                            };
+                            let contract = native
+                                .resource_contract(lash_kernel_doc::Args::new(
+                                    &input,
+                                    arena.objects(),
+                                    &arena.semantics(),
+                                ))
+                                .unwrap()
+                                .unwrap();
+                            rooms.push(room::CheckedRoom::native(*function, &contract).unwrap());
+                        }
+                    }
+                }
+                scalar_values.push(values);
+                scalar_rooms.push(rooms);
+            }
+            let facts: Vec<_> = scalar_values
+                .iter()
+                .zip(&scalar_rooms)
+                .map(|(values, calls)| ScalarRegionValues { values, calls })
+                .collect();
+            let entry: Vec<_> = iteration
+                .entries()
+                .iter()
+                .map(|slot| (*slot, initial))
+                .collect();
+            let effects = iteration
+                .measure(
+                    &exe,
+                    &arena,
+                    &ledger,
+                    &invocation,
+                    IterationValues {
+                        entry: &entry,
+                        scalars: &facts,
+                        calls: &candidates,
+                    },
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                effects.room().retained_delta,
+                1,
+                "the source assignment replaces zero by one"
+            );
+            assert!(
+                matches!(effects.survivors(), [(slot, value)] if *slot == iteration.entries()[0] && value.same(&Value::Int(answer)))
+            );
+            assert_eq!(
+                effects.invocation_offsets(),
+                Some((0, if call_form == 5 { 2 } else { 1 }))
+            );
+            let expected_fee = if helper_body.starts_with("if") {
+                49
+            } else {
+                38
+            } + if call_form == 1 { 1 + 8 + 1 } else { 0 }
+                - if matches!(call_form, 2 | 5) { 12 } else { 0 }
+                - if call_form == 4 && helper_body.starts_with("if") {
+                    11
+                } else {
+                    0
+                }
+                + if call_form == 5 {
+                    if helper_body.starts_with("if") {
+                        28
+                    } else {
+                        16
+                    }
+                } else {
+                    0
+                };
+            // The source interpreter supplies an independent meter oracle.
+            // The control begins at the post-iteration value, so it has the
+            // identical false test/return suffix and no executed iteration.
+            let source_fee = |initial| {
+                let caller = scalar_document(&format!(
+                    "let i = {initial} while flat.lt(i, 1) {{ {update} }} return i"
+                ));
+                let source = format!("definition \"{helper}\"\n{caller}");
+                let mut run = Embedder::with(
+                    &source,
+                    Setup {
+                        probes: Some(body_helper_probes),
+                        ..Setup::default()
+                    },
+                );
+                let tape = crate::ChargeTape::new();
+                run.machine.record_charges(tape.clone());
+                let end = loop {
+                    run.machine.force_source_execution();
+                    match run.run() {
+                        Step::Ended(end) => break end,
+                        Step::Slice => {}
+                        Step::Parked(_) => panic!("pure source oracle must not park"),
+                    }
+                };
+                (
+                    format!("{:?}", result(end)),
+                    run.machine.meters().charged.unwrap(),
+                )
+            };
+            let executed = source_fee(0);
+            let suffix = source_fee(answer);
+            assert_eq!(executed.0, suffix.0);
+            let reference_fee = executed.1 - suffix.1;
+            assert_eq!(
+                expected_fee, reference_fee,
+                "hand-derived forms and actual source charges agree"
+            );
+            assert_eq!(
+                effects
+                    .debts()
+                    .iter()
+                    .map(|debt| debt.units().unwrap())
+                    .sum::<u64>(),
+                expected_fee
+            );
+            let tape = crate::observe::ChargeTape::new();
+            for debt in effects.debts() {
+                debt.record(&tape);
+            }
+            assert_eq!(
+                tape.steps().iter().map(|step| step.units()).sum::<u64>(),
+                expected_fee
+            );
+            assert_eq!(
+                scope.completed(),
+                0,
+                "a measured iteration cannot consume its prospective invocation"
+            );
+            if let Some(second) = second_candidate.as_ref() {
+                let second_call = &compiled_calls[1];
+                let roles: Vec<_> = second_call
+                    .scope_roles()
+                    .zip([Value::Int(1), Value::Int(1)])
+                    .collect();
+                let duplicate = second_call
+                    .evaluate_scoped(&exe, second_call.callee(), &scope, 0, &arena, &roles)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(second.invocation().id(), candidate.invocation().id() + 1);
+                assert!(
+                    iteration
+                        .measure(
+                            &exe,
+                            &arena,
+                            &ledger,
+                            &invocation,
+                            IterationValues {
+                                entry: &entry,
+                                scalars: &facts,
+                                calls: &[&candidate, &duplicate]
+                            }
+                        )
+                        .unwrap()
+                        .is_none(),
+                    "completed offsets must be exact and ordered before iteration admission"
+                );
+            }
+            if call_form == 3 {
+                let mut wrong_roles = roles.clone();
+                wrong_roles.last_mut().unwrap().1 = Value::Int(6);
+                let wrong_saved = call
+                    .evaluate_scoped(&exe, call.callee(), &scope, 0, &arena, &wrong_roles)
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    iteration
+                        .measure(
+                            &exe,
+                            &arena,
+                            &ledger,
+                            &invocation,
+                            IterationValues {
+                                entry: &entry,
+                                scalars: &facts,
+                                calls: &[&wrong_saved]
+                            }
+                        )
+                        .unwrap()
+                        .is_none(),
+                    "an equal-price saved caller operand cannot be substituted in an iteration"
+                );
+            }
+            let mut wrong = scalar_values.clone();
+            let last = iteration.scalars().last().unwrap();
+            let output = last
+                .results()
+                .next()
+                .map(|(_, fact)| fact)
+                .or_else(|| {
+                    last.entries()
+                        .find(|(slot, _)| !iteration.entries().contains(slot))
+                        .map(|(_, fact)| fact)
+                })
+                .unwrap();
+            wrong.last_mut().unwrap()[output.index()] = Value::Int(if answer == 2 { 3 } else { 2 });
+            let wrong_facts: Vec<_> = wrong
+                .iter()
+                .zip(&scalar_rooms)
+                .map(|(values, calls)| ScalarRegionValues { values, calls })
+                .collect();
+            assert!(
+                iteration
+                    .measure(
+                        &exe,
+                        &arena,
+                        &ledger,
+                        &invocation,
+                        IterationValues {
+                            entry: &entry,
+                            scalars: &wrong_facts,
+                            calls: &candidates
+                        },
+                    )
+                    .unwrap()
+                    .is_none(),
+                "same-price native continuation answers must authenticate"
+            );
+        }
     }
+}
+
+fn body_helper_probes(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
+    use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, PreparedNative, Value};
+    struct Add;
+    impl Add {
+        fn answer(args: &[Value]) -> Option<Value> {
+            use lash_kernel_doc::scalar::{self, ScalarOp};
+            match args {
+                [Value::Int(a), Value::Int(b)] => scalar::ints(ScalarOp::Add, *a, *b),
+                [Value::Float(a), Value::Float(b)] => scalar::floats(ScalarOp::Add, *a, *b),
+                _ => None,
+            }
+        }
+    }
+    impl NativeFunction for Add {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            Self::answer(call.args.values())
+                .ok_or_else(|| NativeError::refused("scalar", "outside scalar domain"))
+        }
+        fn prepare(&self) -> Option<PreparedNative> {
+            Some(PreparedNative {
+                pair: None,
+                charged_entry: None,
+                entry: Self::answer,
+                operation: "law.body_add",
+            })
+        }
+        fn resource_contract(
+            &self,
+            args: lash_kernel_doc::Args<'_>,
+        ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+            Self::answer(args.values())
+                .map(|value| lash_kernel_doc::NativeResourceContract::returned(args, &value))
+                .transpose()
+        }
+    }
+    let mut functions = scalar_probes(registry, ids);
+    let add = functions
+        .iter()
+        .find(|(name, _)| *name == "flat.add")
+        .unwrap()
+        .1;
+    let lt = functions
+        .iter()
+        .find(|(name, _)| *name == "flat.lt")
+        .unwrap()
+        .1;
+    for (name, body) in [
+        ("body.plain", "return flat.add(a,b)"),
+        (
+            "body.guarded",
+            "if flat.lt(a,b) { return flat.add(a,b) } return flat.add(a,b)",
+        ),
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!("function {name}(a: Any, b: Any) -> Any\nkernel 1\ncharge sum(7, size(a), size(b), size(result))\nuse flat.add = @{add}\nuse flat.lt = @{lt}\nnative\nbody {{ {body} }}")).unwrap();
+        functions.push((
+            name,
+            registry
+                .register(definition, Some(std::sync::Arc::new(Add)))
+                .unwrap(),
+        ));
+    }
+    functions
 }

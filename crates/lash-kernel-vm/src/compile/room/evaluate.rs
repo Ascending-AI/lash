@@ -10,6 +10,16 @@ pub(super) trait Events {
     }
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused>;
     fn choose(&mut self, site: &Site) -> Result<bool, Refused>;
+    /// Only a descriptor issued from an actual VerifiedCall may bridge a
+    /// call. Ordinary source evaluation keeps its genuine action departure.
+    fn resume_call(
+        &mut self,
+        _: &Source,
+        _: &Point,
+        _: ExitKind,
+    ) -> Result<Option<region::calls::CallCompletion>, Refused> {
+        Ok(None)
+    }
     fn selected_end(&self) -> bool {
         false
     }
@@ -181,6 +191,21 @@ impl<E: Events> Run<'_, E> {
             return Err(Stop::Selected(departure.unwrap_or(exit)));
         }
         Ok(exit)
+    }
+    fn call(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Stop> {
+        let exit = self.step(site, phase)?;
+        let Some(completion) = self
+            .events
+            .resume_call(self.source, &point(site, phase), exit)?
+        else {
+            return Ok(exit);
+        };
+        let resume = completion.resume();
+        if resume.site != *site {
+            return Err(Refused::Source.into());
+        }
+        self.step(&resume.site, resume.phase)?;
+        Ok(completion.after_return())
     }
     fn choose(&mut self, site: &Site) -> Result<bool, Stop> {
         self.events.choose(site).map_err(Stop::Refused)
@@ -410,8 +435,12 @@ impl<E: Events> Run<'_, E> {
             node,
             doc::Node::Action(_) | doc::Node::Expr(doc::Expr::Act(_))
         ) {
-            return self.step(site, Phase::Enter);
+            return self.call(site, Phase::Enter);
         }
-        self.step(site, Phase::Commit)
+        if matches!(node, doc::Node::Expr(doc::Expr::Call { .. })) {
+            self.call(site, Phase::Commit)
+        } else {
+            self.step(site, Phase::Commit)
+        }
     }
 }
