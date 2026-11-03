@@ -12,7 +12,7 @@ pub(crate) enum CollectionStep {
     Append(Append),
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 impl CollectionStep {
     pub(in crate::machine::islands) fn family(&self) -> crate::machine::islands::witness::Family {
         use crate::machine::islands::witness::Family;
@@ -389,6 +389,48 @@ impl Build<'_> {
         })
     }
 
+    /// Collection compilation reads the original grammar when scalar
+    /// formation could not represent a condition with split charge closes.
+    /// The finite matcher below still authenticates every operation/operand;
+    /// its source program retains the original ordered closes and recovery.
+    fn collection_condition<'s>(
+        &self,
+        statement: &Statement,
+        condition: &'s Expr,
+    ) -> Option<std::borrow::Cow<'s, Expr>> {
+        if !matches!(condition.kind, Kind::Opaque) {
+            return Some(std::borrow::Cow::Borrowed(condition));
+        }
+        let (stream, statement, _) = self.exe.statement(statement.id);
+        let mut tree = crate::compile::expr::statement(stream, statement.ops, false)?;
+        let lash_kernel_exec::Op::Branch { cond, .. } = tree.last else {
+            return None;
+        };
+        let condition = tree.take(cond)?;
+        tree.spent().then_some(())?;
+        Some(std::borrow::Cow::Owned(condition))
+    }
+
+    fn collection_assignment<'s>(
+        &self,
+        statement: &'s Statement,
+    ) -> Option<(u32, std::borrow::Cow<'s, Expr>)> {
+        if let Some((at, value)) = assigned(statement, false) {
+            return Some((at, std::borrow::Cow::Borrowed(value)));
+        }
+        // Split closes can also leave an indexed read or hole-marker write
+        // cold. Read its grammar once; the finite matcher checks it below.
+        matches!(statement.kind, StatementKind::Cold).then_some(())?;
+        let (stream, statement, _) = self.exe.statement(statement.id);
+        let mut tree = crate::compile::expr::statement(stream, statement.ops, false)?;
+        let lash_kernel_exec::Op::WriteLocal { local, src } = tree.last else {
+            return None;
+        };
+        let value = tree.take(src)?;
+        tree.spent().then_some(())?;
+        Some((local.at, std::borrow::Cow::Owned(value)))
+    }
+
     fn read_slot(&self, body: &SourceBlock) -> Option<ReadSlot> {
         let [present, value, read, rest @ ..] = &*body.statements else {
             return None;
@@ -399,15 +441,17 @@ impl Build<'_> {
         let (value, initial) = assigned(value, true)?;
         matches!(initial.kind, Kind::Const(Value::Absent)).then_some(())?;
         let (condition, yes, _) = branch(read)?;
-        let list = local(condition)?;
+        let condition = self.collection_condition(read, condition)?;
+        let list = local(condition.as_ref())?;
         let outer = self.blocks.iter().position(|block| block.id == yes.id)?;
         let [bound] = plain(yes)?;
         let (condition, yes, no) = branch(bound)?;
         let inner = self.blocks.iter().position(|block| block.id == yes.id)?;
         empty(no)?;
         let bound_statement = bound.id;
-        let bound = self.primitive(condition, 2)?;
-        let [index, length] = self.merge_args(condition, "num.lt")?;
+        let condition = self.collection_condition(bound, condition)?;
+        let bound = self.primitive(condition.as_ref(), 2)?;
+        let [index, length] = self.merge_args(condition.as_ref(), "num.lt")?;
         let index = local(index)?;
         let Kind::Native { lib, args, .. } = &unpin(length).kind else {
             return None;
@@ -418,18 +462,19 @@ impl Build<'_> {
         };
         let target = local(target)?;
         let [get, mark] = plain(yes)?;
-        let (at, item) = assigned(get, false)?;
+        let (at, item) = self.collection_assignment(get)?;
         (at == value && get.root.is_none()).then_some(())?;
         let Kind::Index {
             target: source,
             index: position,
             ..
-        } = &unpin(item).kind
+        } = &unpin(item.as_ref()).kind
         else {
             return None;
         };
         (local(source)? == target && local(position)? == index).then_some(())?;
-        let (at, test) = assigned(mark, false)?;
+        let (at, test) = self.collection_assignment(mark)?;
+        let test = test.as_ref();
         (at == present).then_some(())?;
         let completed = mark.id;
         let mark = self.primitive(test, 1)?;
@@ -487,8 +532,9 @@ impl Build<'_> {
         )
         .then_some(())?;
         let (condition, yes, no) = branch(hole)?;
+        let condition = self.collection_condition(hole, condition)?;
         let (Kind::Operator { lib, args, .. } | Kind::Native { lib, args, .. }) =
-            &unpin(condition).kind
+            &unpin(condition.as_ref()).kind
         else {
             return None;
         };

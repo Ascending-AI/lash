@@ -690,7 +690,7 @@ fn collection_region_preparations_preserve_source_and_storage() {
             ] {
                 assert!(
                     prepared.contains(&family),
-                    "a real recognized {family:?} preparation must execute: {prepared:?}"
+                    "layout {layout}, generic {generic}: a real recognized {family:?} preparation must execute: {prepared:?}"
                 );
             }
             println!(
