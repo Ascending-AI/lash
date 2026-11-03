@@ -1,4 +1,4 @@
-//! The source frontier, resource admission and semantic journal share one commit.
+//! The source frontier, resource admission and staged storage share one commit.
 mod binding;
 mod calling;
 mod cell;
@@ -34,10 +34,10 @@ use crate::compile::room::{
 };
 use lash_kernel_doc::{self as doc, arena::ArenaHandle, heap::HeapFault};
 use lash_kernel_state::{
-    arena::{Arena, Registration},
+    arena::Arena,
     kernel_internals::{
         PagedHeap,
-        logical::{Invocation, Lifecycle, MemberEdit, Program},
+        logical::{Invocation, Lifecycle, MemberEdit},
     },
 };
 use std::{cell::Cell, sync::Arc};
@@ -124,47 +124,6 @@ impl room::Execution for LeafExecution {
     }
 }
 
-pub(in crate::machine) struct PreparedStorage<'a, S> {
-    pub(in crate::machine) registration: Registration<'a>,
-    pub(in crate::machine) storage: S,
-    pub(in crate::machine) actual: Program,
-}
-
-pub(in crate::machine) trait StoragePreparation {
-    type Prepared;
-    const MATERIALIZES: bool = false;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault>;
-    fn allowance(_: &Self::Prepared, _: &mut Allowance) {}
-    fn facts(_: &Self::Prepared, _: &mut LeafExecution) -> Result<(), HeapFault> {
-        Ok(())
-    }
-}
-pub(in crate::machine) struct Reserve<F>(pub(in crate::machine) F);
-impl<F, S> StoragePreparation for Reserve<F>
-where
-    F: FnOnce(&mut Arena) -> Result<Option<S>, HeapFault>,
-{
-    type Prepared = S;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, S>>, HeapFault> {
-        let Some(storage) = (self.0)(arena)? else {
-            return Ok(None);
-        };
-        let registration = arena.registration().map_err(native_fault)?;
-        Ok(Some(PreparedStorage {
-            registration,
-            storage,
-            actual,
-        }))
-    }
-}
 pub(in crate::machine) fn native_fault(error: doc::NativeError) -> HeapFault {
     match error {
         doc::NativeError::Host(error) => error,
@@ -246,144 +205,4 @@ pub(in crate::machine) struct Context<'a> {
     pub(in crate::machine) session: &'a mut Session,
     pub(in crate::machine) resources: SourceResources<'a>,
     pub(in crate::machine) logical_memory: &'a Cell<u64>,
-}
-impl Context<'_> {
-    pub(in crate::machine) fn publish<S: StoragePreparation>(
-        self,
-        invocation: &Invocation,
-        frontier: &mut Option<Frontier>,
-        mut prefix: Prefix,
-        make: impl Fn() -> Program,
-        prepare: S,
-        semantic: impl FnOnce(&mut Arena, &mut Session, Vec<MemberEdit>, S::Prepared),
-    ) -> Result<bool, Halt> {
-        // The general protocol starts at a committed ledger: the open
-        // region publishes first.
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
-        if let Some(frontier) = frontier.as_mut()
-            && frontier.departs(&prefix.start)
-        {
-            frontier.handoff(&mut store.borrow_mut(), prefix.start.clone())?;
-        }
-        let ledger = store.borrow();
-        if frontier.is_none() {
-            *frontier = Some(
-                self.source
-                    .frontier(
-                        &ledger,
-                        self.heap,
-                        invocation,
-                        self.link,
-                        self.kernel,
-                        prefix.start,
-                    )
-                    .map_err(|_| malformed("source frontier failed authentication"))?,
-            );
-        }
-        let frontier = frontier
-            .as_mut()
-            .ok_or_else(|| malformed("source frontier disappeared"))?;
-        // Detached bodies and bookkeeping are complete before acceptance.
-        // Their registration returns every reserved slot on any later miss.
-        let Some(PreparedStorage {
-            mut registration,
-            storage,
-            actual,
-        }) = prepare.prepare(self.arena, make())?
-        else {
-            return Ok(false);
-        };
-        S::allowance(&storage, &mut prefix.allowance);
-        S::facts(&storage, &mut prefix.facts)?;
-        let resources = self.resources;
-        let Some(resource_facts) = resources.facts(&prefix.allowance) else {
-            return Ok(false);
-        };
-        let Ok(evaluated) = frontier.evaluate_interval(
-            prefix.interval.clone(),
-            &mut prefix.facts,
-            &ledger,
-            registration.arena(),
-            self.heap,
-            actual.clone(),
-            prefix.next.clone(),
-            prefix.allowance.clone(),
-            resource_facts,
-        ) else {
-            return Ok(false);
-        };
-        let prepared = match self.admission {
-            Admission::Envelope(memory_bound) => {
-                let Some(accepted) = evaluated.admit_interval(
-                    frontier,
-                    &ledger,
-                    registration.arena(),
-                    resources,
-                    &prefix.allowance,
-                    memory_bound,
-                )?
-                else {
-                    return Ok(false);
-                };
-                accepted.prepare_publication(
-                    frontier,
-                    &ledger,
-                    registration,
-                    self.heap,
-                    actual,
-                    prefix.interval.exit(),
-                    &prefix.next,
-                )
-            }
-            Admission::Exact(mut memory) => match evaluated.prepare_exact(
-                frontier,
-                &ledger,
-                registration,
-                self.heap,
-                actual,
-                prefix.interval.exit(),
-                &prefix.next,
-            ) {
-                Ok(mut exact) => {
-                    if memory.exceeded(exact.peak()) {
-                        exact = exact.collect(&ledger, self.heap)?;
-                    }
-                    let limit = memory.admit(exact.peak())?;
-                    exact
-                        .admit_exact(frontier, &ledger, resources, &prefix.allowance, limit)?
-                        .ok_or(PublicationError::Miss("exact source admission declined"))
-                }
-                Err(error) => Err(error),
-            },
-        };
-        let prepared = match prepared {
-            Ok(prepared) => prepared,
-            Err(PublicationError::Miss(_)) => return Ok(false),
-            Err(PublicationError::Heap(error)) => return Err(error.into()),
-        };
-        drop(ledger);
-        let committed = if S::MATERIALIZES {
-            prepared.publish_materialized(
-                frontier,
-                &mut store.borrow_mut(),
-                |arena, edits, _entities| semantic(arena, self.session, edits, storage),
-            )
-        } else {
-            prepared.publish(frontier, &mut store.borrow_mut(), |arena, edits| {
-                semantic(arena, self.session, edits, storage)
-            })
-        }
-        .map_err(|error| match error {
-            PublicationError::Heap(error) => error,
-            PublicationError::Miss(reason) => malformed(reason),
-        })?;
-        debug_assert!(committed.materializations.entities().is_empty());
-        self.logical_memory.set(committed.balance.total()?);
-        #[cfg(any(test, feature = "testing"))]
-        crate::machine::islands::witness::source_loop_published(
-            &frontier.position().occurrence.loops,
-        );
-        Ok(true)
-    }
 }
