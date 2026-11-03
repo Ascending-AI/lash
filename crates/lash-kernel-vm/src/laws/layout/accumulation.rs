@@ -189,6 +189,7 @@ fn run_selected(
 /// charge and held byte when its scalar or text guard answers or fails.
 #[test]
 fn accumulations_agree() {
+    original_format_failure();
     original_text_body_prefixes();
     prepared_text_prefixes();
     prepared_text_bodies();
@@ -525,6 +526,43 @@ fn accumulations_agree() {
                     }
                 }
             }
+        }
+    }
+}
+
+/// K-CHG-002: a declined join keeps the constructor's accepted original
+/// prefix for precise source, including its charge and saved caller operands.
+fn original_format_failure() {
+    let source = scalar_document(
+        r#"let build = fn() { let text = "old" set text = text.concat(text, text.join(["field=", 1, "; suffix"], "")) return text } return apply build()"#,
+    );
+    for record in [false, true] {
+        let expected = run_selected(
+            &source,
+            record,
+            u64::MAX,
+            super::super::embedder::ROOMY,
+            Layout(0),
+            (super::ExecutionMode::Source, false),
+            false,
+        );
+        for mode in [
+            super::ExecutionMode::Generic,
+            super::ExecutionMode::Specialized,
+        ] {
+            assert_eq!(
+                run_selected(
+                    &source,
+                    record,
+                    u64::MAX,
+                    super::super::embedder::ROOMY,
+                    Layout(0),
+                    (mode, false),
+                    false,
+                ),
+                expected,
+                "original format failure, {mode:?}, taped={record}"
+            );
         }
     }
 }
