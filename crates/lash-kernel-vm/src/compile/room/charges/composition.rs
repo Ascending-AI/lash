@@ -144,6 +144,10 @@ impl ComposedCharges {
 }
 
 impl ComposedDebt<'_> {
+    pub(in crate::compile::room) fn belongs_to(&self, program: &ComposedCharges) -> bool {
+        std::ptr::eq(self.program, program)
+    }
+
     pub(crate) fn units(&self) -> u64 {
         self.units
     }

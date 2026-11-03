@@ -6,6 +6,10 @@ use super::*;
 use std::{cell::Cell, rc::Rc};
 #[path = "../region/composition.rs"]
 pub(crate) mod iteration;
+#[path = "scope/settlement.rs"]
+mod settlement;
+pub(in crate::compile::room) use settlement::ScopedPrefixParts;
+pub(crate) use settlement::{ScopedPrefix, SettledCall};
 
 pub(crate) struct CallScope<'ledger> {
     ledger: &'ledger Ledger,
@@ -253,8 +257,12 @@ impl CallScope<'_> {
         {
             return Err(Refused::Source);
         }
-        self.identity
-            .set(self.identity.get().checked_add(1).ok_or(Refused::Facts)?);
+        self.identity.set(
+            self.identity
+                .get()
+                .checked_add(call.completed_invocations())
+                .ok_or(Refused::Facts)?,
+        );
         Ok(())
     }
     /// Feed this pair to BoundaryTransaction::complete_invocations in the
@@ -345,6 +353,9 @@ impl<'call> ScopedCall<'call> {
         arguments
             .chain(self.caller_values.iter().copied())
             .chain(self.callable.iter().map(|(slot, value, _)| (*slot, *value)))
+    }
+    pub(crate) fn completed_invocations(&self) -> u64 {
+        1
     }
     pub(crate) fn result(&self) -> Value {
         self.evaluated.result

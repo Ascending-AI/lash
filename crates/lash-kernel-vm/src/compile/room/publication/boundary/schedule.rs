@@ -4,7 +4,7 @@ use super::*;
 use crate::compile::room::{charges::composition::StatementDebt, region::calls::VerifiedCall};
 use crate::compile::{CodeId, Executable};
 
-mod sealed {
+pub(super) mod sealed {
     pub trait Sealed {}
 }
 
@@ -171,8 +171,9 @@ impl StatementSchedule {
                     }
                     (
                         StatementSite::Call { .. },
-                        StatementDebt::Call { .. } | StatementDebt::PrefixCall { .. },
-                    ) => true,
+                        StatementDebt::Call { call: debt, .. }
+                        | StatementDebt::PrefixCall { call: debt, .. },
+                    ) => site.call().is_some_and(|call| call.owns_debt(debt)),
                     _ => false,
                 };
                 !scalar_identity

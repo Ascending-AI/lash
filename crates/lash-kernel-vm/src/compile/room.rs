@@ -1054,6 +1054,7 @@ impl Source {
         if !matches!(
             node,
             doc::Node::Expr(_)
+                | doc::Node::Action(_)
                 | doc::Node::Stmt(
                     doc::Stmt::Let { .. }
                         | doc::Stmt::Do { .. }

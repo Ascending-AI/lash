@@ -205,15 +205,17 @@ pub(super) fn identities() {
                 );
                 continue;
             }
-            let call = VerifiedCall::compile_callback(
-                &exe,
-                caller.code,
-                statement,
-                pc,
-                stmt.ops.start,
-                callee,
-            )
-            .unwrap();
+            let call = Arc::new(
+                VerifiedCall::compile_callback(
+                    &exe,
+                    caller.code,
+                    statement,
+                    pc,
+                    stmt.ops.start,
+                    callee,
+                )
+                .unwrap(),
+            );
             let alternate = VerifiedCall::compile_callback(
                 &exe,
                 caller.code,
@@ -308,21 +310,51 @@ pub(super) fn identities() {
             };
             let f_slot = root_slot("f");
             let outer_slot = root_slot("outer");
+            let roles: Vec<_> = call
+                .scope_roles()
+                .enumerate()
+                .map(|(index, slot)| {
+                    let value = if index < 2 {
+                        Value::Int(3 + index as i64)
+                    } else if rooted || index == 3 {
+                        actual
+                    } else {
+                        outer
+                    };
+                    (slot, value)
+                })
+                .collect();
+            let entry_roots = [
+                (f_slot, RootValue::Value(&actual)),
+                (outer_slot, RootValue::Value(&outer)),
+            ];
+
             let (invocation, prepared) = ledger
-                .prepare_enter(
-                    TaskId::MAIN,
-                    &mut arena,
-                    heap.pages(),
-                    &[],
-                    &[
-                        (f_slot, RootValue::Value(&actual)),
-                        (outer_slot, RootValue::Value(&outer)),
-                    ],
-                )
+                .prepare_enter(TaskId::MAIN, &mut arena, heap.pages(), &[], &entry_roots)
                 .unwrap();
             ledger
                 .commit(prepared.admit(u64::MAX).ok().unwrap())
                 .unwrap();
+            let registration = arena.registration().unwrap();
+            let operands = roles
+                .iter()
+                .filter(|(slot, _)| {
+                    ledger
+                        .holding(invocation.owner(*slot), heap.pages())
+                        .unwrap()
+                        .is_none()
+                })
+                .map(|(slot, value)| (invocation.owner(*slot), RootValue::Value(value)))
+                .collect::<Vec<_>>();
+            ledger
+                .prepare_source_boundary(registration, heap, &[], &operands)
+                .unwrap()
+                .admit(u64::MAX)
+                .ok()
+                .unwrap()
+                .publish(&mut ledger, |_, edits| assert!(edits.is_empty()))
+                .unwrap();
+
             let placement = BindingPlacement::compile(&exe, caller.code).unwrap();
             let mut physical =
                 vec![crate::machine::SlotState::Empty; exe.code(caller.code).slots.len()];
@@ -420,20 +452,6 @@ pub(super) fn identities() {
                         "callback scope miss layout={layout} rooted={rooted} captured={captured}"
                     )
                 });
-            let roles: Vec<_> = call
-                .scope_roles()
-                .enumerate()
-                .map(|(index, slot)| {
-                    let value = if index < 2 {
-                        Value::Int(3 + index as i64)
-                    } else if rooted || index == 3 {
-                        actual
-                    } else {
-                        outer
-                    };
-                    (slot, value)
-                })
-                .collect();
             assert_eq!(
                 roles.len(),
                 if rooted { 3 } else { 4 },
@@ -577,6 +595,433 @@ pub(super) fn identities() {
                 initial,
                 "abandoned callback candidates spend no invocation"
             );
+            if let Some(cell) = cell {
+                arena.cell_set(cell, Value::Int(9)).unwrap();
+            }
+            if !rooted {
+                arena.list_set(handle, 0, Value::Int(9)).unwrap();
+            }
+            drop(ledger);
+            affine_callback(
+                &exe,
+                &call,
+                &activation,
+                &store,
+                &mut arena,
+                heap,
+                &invocation,
+                &roles,
+                actual,
+                expected,
+                program.link,
+                captured,
+            );
         }
     }
+}
+
+/// Scoped completion must settle once with real roots, original debt and IDs.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the existing callback fixture's admitted entry"
+)]
+fn affine_callback(
+    exe: &crate::compile::Executable,
+    call: &Arc<VerifiedCall>,
+    activation: &room::placement::DenseActivation<'_>,
+    store: &std::cell::RefCell<logical::Ledger>,
+    arena: &mut Arena,
+    heap: &lash_kernel_state::kernel_internals::PagedHeap,
+    caller: &logical::Invocation,
+    roles: &[(logical::Slot, Value)],
+    actual: Value,
+    expected: i64,
+    link: lash_kernel_value::LinkId,
+    captured: bool,
+) {
+    use room::publication::Occurrence;
+    let plan = call.publication_plan_for_law(exe).unwrap();
+    let occurrence = Occurrence {
+        task: TaskId::MAIN,
+        invocation: caller.id(),
+        loops: vec![],
+        action: None,
+    };
+    let mut start = plan.start(occurrence.clone());
+    start.at = call.at().clone();
+    let initial_ledger = store.borrow();
+    let mut frontier = call_caller_frontier(
+        exe,
+        call,
+        &initial_ledger,
+        heap,
+        caller,
+        link,
+        start.clone(),
+    );
+    drop(initial_ledger);
+    let mut locked = store.borrow_mut();
+    let ledger = &mut *locked;
+    let next = plan.exit(occurrence.clone());
+    let first_id = ledger.prospective_invocation(TaskId::MAIN).id();
+    let before = ledger.balance().unwrap();
+    let before_total = before.total().unwrap();
+    let output = call_caller_source(exe, call)
+        .owner_slots()
+        .unwrap()
+        .root(
+            &room::Owner::Operand(call.at().site.clone()),
+            TaskId::MAIN,
+            caller.id(),
+        )
+        .unwrap();
+    let inputs: Vec<_> = call
+        .consumed_roles()
+        .map(|slot| caller.owner(slot))
+        .collect();
+    assert_eq!(
+        inputs.len(),
+        2 + usize::from(
+            roles
+                .last()
+                .is_some_and(|(slot, _)| matches!(slot, logical::Slot::Operand(_)))
+        )
+    );
+    let mut charged = 0;
+    let count = call_scope_occurrences(call, exe);
+    let mut counters = crate::machine::tasks::Occurrences::for_source_law(count);
+    for (memory, budget, wrong_output) in [
+        (0, u64::MAX, false),
+        (u64::MAX, 0, false),
+        (u64::MAX, u64::MAX, true),
+        (u64::MAX, u64::MAX, false),
+    ] {
+        let (scope, candidate) =
+            evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+        let memory = if memory == 0 {
+            before_total + candidate.peak() - 1
+        } else {
+            memory
+        };
+        let prefix = scope
+            .consume_prefix(arena, vec![candidate])
+            .unwrap()
+            .unwrap();
+        assert_eq!(prefix.completed_invocations(), 1);
+        assert!(prefix.calls()[0].result().same(&Value::Int(expected)));
+        let leave = room::Point {
+            site: call.source().site.clone(),
+            phase: room::Phase::Leave,
+        };
+        let cold = prefix.calls()[0]
+            .recovery_after(&leave, occurrence.clone())
+            .unwrap();
+        assert!(Arc::ptr_eq(&cold[1].source, call.source()));
+        assert_eq!(cold[1].position.occurrence.invocation, first_id);
+        if captured {
+            let read = room::Point {
+                site: call.source().site.child(0).child(0).child(1),
+                phase: room::Phase::Commit,
+            };
+            assert!(
+                !prefix.calls()[0]
+                    .recovery_after(&read, occurrence.clone())
+                    .unwrap()[1]
+                    .captures
+                    .is_empty()
+            );
+        }
+        let proof = prefix
+            .bind_call_for_law(&plan, &frontier, ledger, arena, heap, next.clone())
+            .unwrap()
+            .unwrap();
+        let result = Value::Int(if wrong_output { expected + 1 } else { expected });
+        let registration = arena.registration().unwrap();
+        let transaction = ledger
+            .prepare_source_boundary(
+                registration,
+                heap,
+                &inputs,
+                &[(output, RootValue::Value(&result))],
+            )
+            .unwrap();
+        let resources = crate::admission::SourceResources {
+            charged: &mut charged,
+            counters: &mut counters,
+            bound: budget,
+            slice: u64::MAX,
+            depth: 1,
+            limit: u64::MAX,
+            safe_point: 0,
+        };
+        let accepted = proof
+            .prepare_external(&frontier, ledger, heap, transaction, resources, memory)
+            .unwrap();
+        if memory == u64::MAX && budget == u64::MAX && !wrong_output {
+            assert!(
+                accepted.is_some(),
+                "roomy prefix wins provisional admission"
+            );
+            drop(accepted);
+        } else {
+            assert!(accepted.is_none());
+        }
+        assert_eq!(charged, 0);
+        assert_eq!(ledger.balance().unwrap(), before);
+        assert_eq!(ledger.prospective_invocation(TaskId::MAIN).id(), first_id);
+        assert_eq!(frontier.position(), &start);
+    }
+    {
+        let (scope, first) =
+            evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+        let second = call
+            .evaluate_scoped(exe, call.callee(), &scope, 1, arena, roles)
+            .unwrap()
+            .unwrap();
+        let prefix = scope
+            .consume_prefix(arena, vec![first, second])
+            .unwrap()
+            .unwrap();
+        assert_eq!(prefix.completed_invocations(), 2);
+        assert_eq!(prefix.calls()[0].invocation().id(), first_id);
+        assert_eq!(prefix.calls()[1].invocation().id(), first_id + 1);
+        drop(prefix);
+        assert_eq!(ledger.prospective_invocation(TaskId::MAIN).id(), first_id);
+    }
+    let (foreign_scope, foreign_candidate) =
+        evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+    let (scope, candidate) =
+        evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+    drop(candidate);
+    assert!(
+        scope
+            .consume_prefix(arena, vec![foreign_candidate])
+            .unwrap()
+            .is_none(),
+        "foreign scope cannot supply a candidate"
+    );
+    drop(foreign_scope);
+    if captured {
+        let (scope, candidate) =
+            evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+        let prefix = scope
+            .consume_prefix(arena, vec![candidate])
+            .unwrap()
+            .unwrap();
+        let read = room::Point {
+            site: call.source().site.child(0).child(0).child(1),
+            phase: room::Phase::Commit,
+        };
+        let cell = prefix.calls()[0]
+            .recovery_after(&read, occurrence.clone())
+            .unwrap()[1]
+            .captures[0]
+            .1;
+        let old = arena.cell(cell).unwrap();
+        arena.cell_set(cell, Value::Int(10)).unwrap();
+        assert!(
+            prefix
+                .bind_call_for_law(&plan, &frontier, ledger, arena, heap, next.clone())
+                .unwrap()
+                .is_none(),
+            "sealed prefix retains actual captured-cell dependencies"
+        );
+        arena.cell_set(cell, old).unwrap();
+    }
+    if let Some(outer) = roles.iter().find_map(|(_, value)| match value {
+        Value::List(handle) => Some(*handle),
+        _ => None,
+    }) {
+        let (scope, candidate) =
+            evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+        let prefix = scope
+            .consume_prefix(arena, vec![candidate])
+            .unwrap()
+            .unwrap();
+        arena.list_set(outer, 0, Value::Int(10)).unwrap();
+        assert!(
+            prefix
+                .bind_call_for_law(&plan, &frontier, ledger, arena, heap, next.clone())
+                .unwrap()
+                .is_none(),
+            "sealed prefix retains saved graph dependencies"
+        );
+        arena.list_set(outer, 0, Value::Int(9)).unwrap();
+    }
+    let (scope, candidate) =
+        evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+    let debt = candidate.debt().unwrap();
+    let expected_units = debt.units();
+    let expected_tape = crate::ChargeTape::new();
+    debt.record(&expected_tape);
+    let prefix = scope
+        .consume_prefix(arena, vec![candidate])
+        .unwrap()
+        .unwrap();
+    drop(prefix);
+    assert_eq!(ledger.prospective_invocation(TaskId::MAIN).id(), first_id);
+    let (scope, candidate) =
+        evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+    let peak = candidate.peak();
+    let delta = candidate.delta()
+        - if roles
+            .last()
+            .is_some_and(|(slot, _)| matches!(slot, logical::Slot::Operand(_)))
+        {
+            i128::from(arena.logical_local(&actual).unwrap())
+        } else {
+            0
+        };
+    let prefix = scope
+        .consume_prefix(arena, vec![candidate])
+        .unwrap()
+        .unwrap();
+    let proof = prefix
+        .bind_call_for_law(&plan, &frontier, ledger, arena, heap, next.clone())
+        .unwrap()
+        .unwrap();
+    let result = Value::Int(expected);
+    let registration = arena.registration().unwrap();
+    let transaction = ledger
+        .prepare_source_boundary(
+            registration,
+            heap,
+            &inputs,
+            &[(output, RootValue::Value(&result))],
+        )
+        .unwrap();
+    let resources = crate::admission::SourceResources {
+        charged: &mut charged,
+        counters: &mut counters,
+        bound: u64::MAX,
+        slice: u64::MAX,
+        depth: 1,
+        limit: u64::MAX,
+        safe_point: 0,
+    };
+    let accepted = proof
+        .prepare_external(
+            &frontier,
+            ledger,
+            heap,
+            transaction,
+            resources,
+            before_total + peak,
+        )
+        .unwrap()
+        .unwrap();
+    let applied = std::cell::Cell::new(0);
+    let tape = crate::ChargeTape::new();
+    let balance = accepted
+        .publish_boundary(
+            &mut frontier,
+            ledger,
+            |_, edits| {
+                assert!(edits.is_empty());
+                applied.set(applied.get() + 1);
+            },
+            Some(&tape),
+        )
+        .unwrap();
+    assert_eq!(applied.get(), 1);
+    assert_eq!(frontier.position(), &next);
+    assert_eq!(charged, expected_units);
+    assert_eq!(tape.steps(), expected_tape.steps());
+    assert_eq!(
+        ledger.prospective_invocation(TaskId::MAIN).id(),
+        first_id + 1
+    );
+    assert_eq!(
+        i128::from(balance.total().unwrap()) - i128::from(before_total),
+        delta
+    );
+    for (slot, value) in roles
+        .iter()
+        .filter(|(slot, _)| !inputs.contains(&caller.owner(*slot)))
+    {
+        assert!(
+            ledger
+                .holding(caller.owner(*slot), heap.pages())
+                .unwrap()
+                .is_some(),
+            "saved outer role survives"
+        );
+        assert!(value.handle().is_some());
+    }
+}
+
+fn call_caller_source<'a>(
+    exe: &'a crate::compile::Executable,
+    call: &VerifiedCall,
+) -> &'a Arc<room::Source> {
+    (0..exe.code_count())
+        .map(|i| CodeId(i as u32))
+        .find_map(|id| {
+            let source = &exe.code(id).source_room;
+            call.belongs_to_for_law(source, id).then_some(source)
+        })
+        .unwrap()
+}
+fn call_caller_frontier(
+    exe: &crate::compile::Executable,
+    call: &VerifiedCall,
+    ledger: &logical::Ledger,
+    heap: &lash_kernel_state::kernel_internals::PagedHeap,
+    caller: &logical::Invocation,
+    link: lash_kernel_value::LinkId,
+    start: room::publication::Position,
+) -> room::publication::Frontier {
+    call_caller_source(exe, call)
+        .frontier(
+            ledger,
+            heap,
+            caller,
+            link,
+            lash_kernel_doc::KernelVersion::One,
+            start,
+        )
+        .unwrap()
+}
+fn call_scope_occurrences(call: &VerifiedCall, exe: &crate::compile::Executable) -> usize {
+    let _ = exe;
+    call.occurrences_for_law()
+        .iter()
+        .copied()
+        .max()
+        .map_or(0, |n| n + 1)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "existing fixture's authenticated callback entry"
+)]
+fn evaluate_callback<'ledger, 'plan>(
+    exe: &crate::compile::Executable,
+    call: &'plan VerifiedCall,
+    activation: &room::placement::DenseActivation<'_>,
+    caller: &logical::Invocation,
+    roles: &[(logical::Slot, Value)],
+    actual: Value,
+    arena: &Arena,
+    ledger: &'ledger logical::Ledger,
+) -> (
+    room::region::calls::scope::CallScope<'ledger>,
+    room::region::calls::scope::ScopedCall<'plan>,
+) {
+    let scope = call
+        .bind_callback_scope(
+            exe,
+            ledger,
+            arena,
+            caller,
+            activation,
+            ledger.reserve_invocations(TaskId::MAIN, 3).unwrap(),
+            actual,
+        )
+        .unwrap();
+    let candidate = call
+        .evaluate_scoped(exe, call.callee(), &scope, 0, arena, roles)
+        .unwrap()
+        .unwrap();
+    (scope, candidate)
 }

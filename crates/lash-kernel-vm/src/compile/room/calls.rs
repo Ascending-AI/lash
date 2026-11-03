@@ -596,6 +596,9 @@ impl VerifiedCall {
     pub(in crate::compile::room) fn belongs_to(&self, source: &Arc<Source>, code: CodeId) -> bool {
         self.caller == code && Arc::ptr_eq(source, &self.caller_source)
     }
+    pub(in crate::compile::room) fn owns_debt(&self, debt: &ComposedDebt<'_>) -> bool {
+        self.paths.iter().any(|path| debt.belongs_to(&path.charges))
+    }
     pub(crate) fn callee(&self) -> CodeId {
         self.callee
     }

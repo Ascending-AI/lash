@@ -2,6 +2,7 @@
 //! Consumers never supply fee or peak totals to the publication owner.
 use super::super::charges::{ChargeDebt, ChargeProgram, settled::SettledDebt};
 pub(in crate::compile::room) mod schedule;
+pub(in crate::compile::room) mod scoped;
 use super::*;
 use lash_kernel_state::{
     arena::Arena,
@@ -13,7 +14,7 @@ use schedule::StatementSchedule;
 
 /// Source compilers derive these from the selected call/occurrence schedule.
 /// They are not runtime allowances or declarations that a prefix is paid.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(in crate::compile::room) struct BoundaryNeeds {
     pub(in crate::compile::room) depth: u64,
     pub(in crate::compile::room) occurrences: Vec<usize>,
@@ -44,6 +45,7 @@ pub(crate) struct CompiledPublication {
     charges: Box<[Arc<ChargeProgram>]>,
     needs: BoundaryNeeds,
     statements: Option<StatementSchedule>,
+    callbacks: Option<scoped::ScopedSchedule>,
 }
 
 /// The entry revision and proposed source exit cannot be rebound after this
@@ -61,6 +63,7 @@ pub(crate) struct BoundPublication<D = Vec<SettledDebt>> {
     evidence: BoundaryEvidence,
     debts: D,
     completion: Option<(logical::InvocationRange, u64)>,
+    needs: BoundaryNeeds,
 }
 
 pub(crate) struct PreparedPublication<'a, D = Vec<SettledDebt>> {
@@ -115,6 +118,7 @@ impl CompiledPublication {
             charges: charges.into(),
             needs,
             statements: None,
+            callbacks: None,
         }))
     }
 
@@ -166,7 +170,10 @@ impl CompiledPublication {
         debts: Vec<ChargeDebt<'_>>,
         proposed: Position,
     ) -> Result<Option<BoundPublication>, HeapFault> {
-        if self.statements.is_some() || debts.len() != self.charges.len() {
+        if self.statements.is_some()
+            || self.callbacks.is_some()
+            || debts.len() != self.charges.len()
+        {
             return Ok(None);
         }
         let Some(debts) = self
@@ -233,6 +240,7 @@ impl CompiledPublication {
             evidence,
             debts,
             completion: None,
+            needs: self.needs.clone(),
         }))
     }
 }
@@ -248,7 +256,7 @@ impl<D: BoundaryCharges> BoundPublication<D> {
     ) -> Option<Self> {
         if self.completion.is_some()
             || completed == 0
-            || completed != self.plan.needs.invocations
+            || completed != self.needs.invocations
             || completed > range.len()
             || !range.is_current(ledger, &self.evidence.invocation)
         {
@@ -272,7 +280,7 @@ impl<D: BoundaryCharges> BoundPublication<D> {
     ) -> Result<Option<SourceAccepted<'r, PreparedPublication<'a, D>>>, HeapFault> {
         if !self.cursor.current(frontier)
             || !ledger.is_current(self.evidence.dependencies.ledger())
-            || self.completion.as_ref().map_or(0, |(_, n)| *n) != self.plan.needs.invocations
+            || self.completion.as_ref().map_or(0, |(_, n)| *n) != self.needs.invocations
             || !transaction.matches_roots(
                 ledger,
                 &self.evidence.inputs,
@@ -288,11 +296,12 @@ impl<D: BoundaryCharges> BoundPublication<D> {
             return Ok(None);
         }
         let Self {
-            plan,
+            plan: _,
             cursor,
             evidence,
             debts,
             completion,
+            needs,
         } = self;
         transaction = transaction.bind_dependencies(evidence.dependencies)?;
         if !transaction.is_current(ledger) {
@@ -325,12 +334,12 @@ impl<D: BoundaryCharges> BoundPublication<D> {
             return Ok(None);
         };
         let need = Allowance {
-            occurrences: plan.needs.occurrences.clone(),
+            occurrences: needs.occurrences,
             before: 0,
             units,
             close: None,
             strict: true,
-            depth: plan.needs.depth,
+            depth: needs.depth,
             safe_point: resources.safe_point,
         };
         let Some(facts) = resources.facts(&need) else {
