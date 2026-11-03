@@ -275,6 +275,21 @@ impl<'a> BoundaryTransaction<'a> {
         self.is_current(ledger) && self.roots.matches(inputs, outputs)
     }
 
+    /// The source certificate must account for every final staged edit, with
+    /// its exact target, normalized address and replacement value.
+    pub fn matches_members(&self, expected: &[MemberEdit]) -> bool {
+        self.members.len() == expected.len()
+            && self.members.iter().zip(expected).all(|(actual, expected)| {
+                actual.handle == expected.handle
+                    && actual.member.same(&expected.member)
+                    && match (actual.next, expected.next) {
+                        (Some(a), Some(b)) => a.same(&b),
+                        (None, None) => true,
+                        _ => false,
+                    }
+            })
+    }
+
     pub fn holding(&self, owner: Owner, access: &Access<'_>) -> Result<Option<Holding>, HeapFault> {
         self.view().holding(owner, access)
     }

@@ -8,6 +8,7 @@ use lash_kernel_value::{FunctionId, sites::Site};
 use std::sync::Arc;
 pub(crate) mod composition;
 mod event_packet;
+pub(in crate::compile::room) mod settled;
 pub(in crate::compile::room) use event_packet::prefix::OriginalPayment;
 #[cfg(test)]
 pub(crate) use event_packet::prefix::OriginalReplay;

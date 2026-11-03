@@ -3,6 +3,7 @@
 //! physical recovery placement and composed-call authentication must join it
 //! before runtime consumers can elide operations under shared acceptance.
 use super::*;
+mod affine;
 #[path = "calls.rs"]
 pub(crate) mod calls;
 #[path = "region/continuation.rs"]
@@ -380,8 +381,19 @@ impl Compiler<'_> {
                 return Ok(());
             }
         }
+        // A pure discarded expression releases exactly its evaluated operand.
+        let discard = if event.point.phase == Phase::Commit {
+            let mut node = doc::Node::Block(&self.source.body);
+            for index in &event.point.site.path[self.source.site.path.len()..] {
+                node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+            }
+            matches!(node, doc::Node::Stmt(doc::Stmt::Do { .. }))
+        } else {
+            false
+        };
         // A source condition consumes its evaluated test without a new holding.
-        if event.point.phase == Phase::Test
+        if (event.point.phase == Phase::Test || discard)
+            && event.delta.fixed == 0
             && event.output.is_none()
             && event.peak == Amount::default()
             && event.entities.is_empty()

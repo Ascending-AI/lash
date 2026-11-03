@@ -651,7 +651,11 @@ fn current(
 }
 
 impl Source {
-    fn exact_successor(&self, at: &Point, successor: Successor) -> Result<Point, Refused> {
+    pub(in crate::compile::room) fn exact_successor(
+        &self,
+        at: &Point,
+        successor: Successor,
+    ) -> Result<Point, Refused> {
         match at.phase {
             Phase::Commit | Phase::Restore => self.next_after_commit(&at.site),
             Phase::Open => self.compile_leaf(&at.site).map(|(_, next, _)| next),

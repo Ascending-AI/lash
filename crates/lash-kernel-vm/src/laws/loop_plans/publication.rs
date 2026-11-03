@@ -1,5 +1,6 @@
 use super::*;
 mod borrowed;
+mod boundary;
 mod construction;
 mod control;
 mod departure;
@@ -12,6 +13,7 @@ mod unit;
 /// The source publication protocol binds recovery, ownership, charge closes
 /// and an exclusive shared admission; equal byte deltas cannot replace them.
 pub(super) fn checked_source_publication() {
+    self::boundary::exits();
     self::observers::isolation();
     exact::events();
     departure::exits();

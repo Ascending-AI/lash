@@ -14,6 +14,7 @@ use lash_kernel_state::{
     },
 };
 use std::collections::BTreeSet;
+pub(crate) mod boundary;
 mod control;
 pub(crate) use control::{ControlExit, ControlRoots, FrameCaller, FrameEntry};
 mod departure;
