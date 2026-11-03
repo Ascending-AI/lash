@@ -660,6 +660,83 @@ fn member_closes() {
     }
 }
 
+/// K-CHG-002: conditional arms close their own debt before the joined suffix.
+#[test]
+fn conditional_constructor_debt() {
+    use crate::compile::expr::{Expr, Kind};
+
+    fn check(expr: &Expr, stream: &crate::compile::Stream, range: OpRange) -> usize {
+        let mut witnessed = 0;
+        if let Kind::Closure { ahead, miss, .. }
+        | Kind::Make { ahead, miss, .. }
+        | Kind::Record { ahead, miss, .. } = &expr.kind
+        {
+            let prefix =
+                crate::compile::expr::ConstructorPrefix::compile(stream, range, expr.pc).unwrap();
+            assert_eq!(
+                (
+                    prefix.unpaid(),
+                    crate::compile::expr::units(prefix.pending())
+                ),
+                (*miss, *ahead),
+                "a constructor must retain only the selected arm's unpaid closes at pc {}",
+                expr.pc
+            );
+            witnessed += 1;
+        }
+        for operand in expr.operands() {
+            witnessed += check(operand, stream, range);
+        }
+        if let Kind::Cond {
+            then, otherwise, ..
+        } = &expr.kind
+        {
+            for arm in [then, otherwise] {
+                witnessed += check(arm.value.as_ref().unwrap(), stream, range);
+            }
+        }
+        witnessed
+    }
+
+    for layout in [0, 2, 0x5eed] {
+        let (program, _) = Embedder::with(
+            "main { let run = fn(flag) { let made = (if(flag, fn() { return 1 }, fn() { return 2 }), fn() { return 3 }) return made } return apply run(true) }",
+            Setup { layout: crate::Layout(layout), ..Setup::default() },
+        ).program(true);
+        let admitted = program
+            .library
+            .admit(&program.document, Default::default(), &program.selection)
+            .unwrap_or_else(|_| panic!("conditional constructor source admitted"));
+        let exe = admitted
+            .executable(
+                &program.document,
+                &program.library,
+                &program.documents,
+                &program.functions,
+                &program.instances,
+            )
+            .unwrap_or_else(|_| panic!("conditional constructor source compiled"));
+        let body = exe
+            .islands
+            .plans
+            .iter()
+            .find(|plan| plan.params.len() == 1 && plan.body.statements.len() == 2)
+            .unwrap();
+        let statement = &body.body.statements[0];
+        let (stream, stmt, _) = exe.statement(statement.id);
+        let mut source = crate::compile::expr::statement(stream, stmt.ops, false).unwrap();
+        let Op::Bind { src, .. } = source.last else {
+            panic!("the conditional constructor declaration binds its value")
+        };
+        let value = source.take(src).unwrap();
+        assert_eq!(
+            check(&value, stream, stmt.ops),
+            4,
+            "both arms, the following closure and the tuple must be checked"
+        );
+    }
+}
+
 /// K-CHG-002: an interior constructor cannot consume its region's future work.
 /// Its pending identities must survive unchanged until the original close.
 fn constructor_debt() {

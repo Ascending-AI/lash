@@ -247,8 +247,27 @@ impl ConstructorPrefix {
             _ => return None,
         }
         let mut pending = Vec::new();
-        for at in range.start..pc {
+        let mut at = range.start;
+        while at < pc {
             match stream.ops[at as usize] {
+                Op::JumpIfFalse { skip, .. } => {
+                    let (then_end, end) = arm_ends(stream, at, skip)?;
+                    if end > range.end() {
+                        return None;
+                    }
+                    // Each arm starts with fresh debt and closes it at the
+                    // join, just as Reader::arm does. A linear scan would
+                    // retain the final arm's closes in the joined suffix.
+                    pending.clear();
+                    at = if pc < then_end {
+                        at + 1
+                    } else if pc < end {
+                        then_end
+                    } else {
+                        end
+                    };
+                    continue;
+                }
                 Op::Region { region, total } => {
                     let close = Close {
                         region: region.0,
@@ -261,6 +280,7 @@ impl ConstructorPrefix {
                 op if !op.kind().in_region() => pending.clear(),
                 _ => {}
             }
+            at += 1;
         }
         Some(Self {
             pc,
