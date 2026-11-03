@@ -540,7 +540,6 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: None,
-                    item_hook: false,
                     otherwise: 0,
                     after: 0,
                 });
@@ -603,7 +602,6 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: None,
-                    item_hook: false,
                     otherwise: exhausted,
                     after,
                 };
@@ -636,7 +634,6 @@ impl<'e> Build<'e> {
                     crate::compile::Form::For { via, .. } => *via,
                     _ => None,
                 };
-                let item_hook = via.is_some_and(|via| via.item.is_some());
                 self.expr(value)?;
                 self.close(*close, *reg);
                 self.open = None;
@@ -663,7 +660,6 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: Some(*at as usize),
-                    item_hook,
                     otherwise: 0,
                     after: 0,
                 });
@@ -695,7 +691,6 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: Some(*at as usize),
-                    item_hook,
                     otherwise: exhausted,
                     after,
                 };

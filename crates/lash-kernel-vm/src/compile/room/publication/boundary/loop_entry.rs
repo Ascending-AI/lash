@@ -315,7 +315,7 @@ impl LoopEntry {
             Shape::For {
                 input,
                 item,
-                item_at,
+                item_at: _,
                 read,
                 first,
                 next,
@@ -363,12 +363,10 @@ impl LoopEntry {
                         {
                             return Ok(None);
                         }
-                        let Some(crate::machine::SlotState::Value(actual)) =
-                            activation.state(*input).as_ref()
-                        else {
+                        let Some(actual) = activation.value(*input) else {
                             return Ok(None);
                         };
-                        if !walked.same(actual)
+                        if !walked.same(&actual)
                             || !holding_matches(ledger, arena, heap, root(*input), walked)?
                         {
                             return Ok(None);

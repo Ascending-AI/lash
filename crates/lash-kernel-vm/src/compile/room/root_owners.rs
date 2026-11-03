@@ -68,6 +68,20 @@ fn resolve(source: &Description, owners: &BTreeSet<Owner>) -> Result<(Scopes, Al
             }
         }
     }
+    // A resident for retains its iterable as its source cursor across body
+    // statements. It is not an ephemeral expression operand after ForIn.
+    for owner in owners {
+        let Owner::LoopCursor(at) = owner else {
+            continue;
+        };
+        let mut node = doc::Node::Block(&source.body);
+        for index in &at.path[source.site.path.len()..] {
+            node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+        }
+        if matches!(node, doc::Node::Stmt(doc::Stmt::For { via: None, .. })) {
+            aliases.insert(Owner::Operand(child(at, 0)), owner.clone());
+        }
+    }
     Ok((scopes, aliases))
 }
 
@@ -190,7 +204,10 @@ impl OwnerSlots {
             .filter_map(move |owner| self.root(owner, task, invocation))
     }
     pub(crate) fn root(&self, owner: &Owner, task: TaskId, invocation: u64) -> Option<Root> {
-        let owner = self.aliases.get(owner).unwrap_or(owner);
+        let mut owner = owner;
+        while let Some(target) = self.aliases.get(owner) {
+            owner = target;
+        }
         if let Owner::SessionCell { name, .. } = owner {
             return Some(Root::session(name));
         }

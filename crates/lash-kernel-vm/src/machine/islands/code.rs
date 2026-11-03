@@ -328,7 +328,6 @@ operations! {
                 cost: u64,
                 metered: u64,
                 at: Option<usize>,
-                item_hook: bool,
                 otherwise: usize,
                 after: usize,
             }
