@@ -598,7 +598,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             return self.slow_exit(active, &mut callers, slab, recovery, stop);
                         }
                     };
-                    if active.resident && callers.is_empty() {
+                    if active.resident && callers.is_empty() && !active.callee.plan.charged {
                         // Its source frame still owns the bindings through
                         // completion charging. Transfer them before recycling.
                         self.charged += completion.units;
@@ -624,6 +624,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             self.charged += completion.units;
                             completion.record(self.recorder);
                         }
+                    }
+                    if active.resident && callers.is_empty() {
+                        // The physical window belongs to a semantic source
+                        // frame. Project its accepted frontier before recycling
+                        // that window; the ordinary unwind sees the same Leave.
+                        self.depth = 0;
+                        return Ok(value);
                     }
                     if OBSERVING
                         && !active.resident

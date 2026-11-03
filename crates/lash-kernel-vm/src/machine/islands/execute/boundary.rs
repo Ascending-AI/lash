@@ -162,8 +162,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         handoff
     }
 
-    /// A returned resident root keeps its source bindings until its caller
-    /// closes the completion formula, including a refusal at that close.
+    /// A resident return projects the accepted frontier before physical unwind.
+    /// An unpaid completion keeps its bindings through its caller's fee close.
     pub(in crate::machine::islands) fn project_return(
         &mut self,
         active: &mut Frame<'e>,
@@ -173,6 +173,20 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let mut values = slab.view(active);
         if let Some(returned) = values.state.returned {
             self.restore_expression_scopes(values.slots, returned.statement, returned.pc);
+        }
+        if let Some(activation) = values.state.source.take() {
+            debug_assert_eq!(activation.invocation.id(), state.invocation);
+            if activation
+                .frontier
+                .as_ref()
+                .is_some_and(|frontier| frontier.position().unpaid.is_none())
+            {
+                // Source publication has consumed this invocation and moved
+                // the actual return into Incoming. Physical unwind must not
+                // rebuild roots or perform another ledger Leave.
+                state.logical = None;
+            }
+            state.source_frontier = activation.frontier;
         }
         for (at, slot) in values.slots.iter().enumerate() {
             state.set_slot(at as u32, *slot);
