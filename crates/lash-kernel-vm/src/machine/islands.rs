@@ -270,9 +270,6 @@ pub(super) struct Scratch {
     /// Each session binding read, by its name in the stream, at its
     /// resident value: nothing writes a binding while an island runs.
     sessions: Vec<(u32, Value)>,
-    /// The heap operations' operand stack, reused rather than rebuilt by
-    /// each operation; empty between them.
-    arguments: super::registers::Arguments,
     /// The last record key a membership test found absent, with the
     /// record's version then ([`cx::probe`]).
     absent: Option<cx::Absent>,
@@ -321,7 +318,6 @@ struct Island<'a, const OBSERVING: bool> {
     stream: &'a Stream,
     /// The run's arena: a closure whose code a call finds keeps it there.
     arena: &'a mut Arena,
-    pages: lash_kernel_state::kernel_internals::tree::Access<'static>,
     /// The machine's property caches, which a field read reads and keeps
     /// as the reference's does.
     sites: &'a mut SiteCaches,
@@ -775,10 +771,14 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 .item(object, crate::compile::position(&at)?)
                 .ok()?;
         }
-        self.heap(0, false, |cx| {
-            crate::compile::read_index(cx, site, target, at)
-        })
-        .map(|answer| answer.value)
+        if self.tight {
+            return None;
+        }
+        #[cfg(test)]
+        if self.scratch.chilled {
+            return None;
+        }
+        crate::compile::read_index(self.arena, self.sites, site, target, at)
     }
 
     /// The field of `target` that the stream's field read `field` names,

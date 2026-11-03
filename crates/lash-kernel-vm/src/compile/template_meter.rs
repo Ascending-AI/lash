@@ -21,8 +21,6 @@ pub(crate) type MeteredCharges = SpeculativeCharges<ChargeEvent>;
 pub(crate) trait Measurement {
     fn mark(&self) -> ChargeMark;
     fn rewind(&mut self, mark: ChargeMark);
-    fn append(&mut self, other: &mut Self);
-    fn recording(&self) -> bool;
 }
 
 impl Measurement for Measured {
@@ -39,17 +37,6 @@ impl Measurement for Measured {
         self.pace = mark.pace;
         self.valid &= mark.valid;
     }
-    fn append(&mut self, other: &mut Self) {
-        self.units = self.units.saturating_add(other.units);
-        self.pace = self.pace.saturating_add(other.pace);
-        self.valid &= other.valid;
-        other.units = 0;
-        other.pace = 0;
-        other.valid = true;
-    }
-    fn recording(&self) -> bool {
-        self.record
-    }
 }
 
 impl<E, M: Measurement> SpeculativeCharges<E, M> {
@@ -62,12 +49,6 @@ impl<E, M: Measurement> SpeculativeCharges<E, M> {
     pub(crate) fn rewind(&mut self, mark: ChargeMark) {
         self.measurement.rewind(mark);
         self.events.truncate(mark.events);
-    }
-    pub(crate) fn append(&mut self, other: &mut Self) {
-        self.measurement.append(&mut other.measurement);
-        if self.measurement.recording() {
-            self.events.append(&mut other.events);
-        }
     }
 }
 

@@ -61,14 +61,12 @@ pub(crate) mod room;
 mod scopes;
 mod template_meter;
 mod templates;
-pub(crate) use reads::{
-    Field, PropertySlot, ReadSite, find as find_property, write as write_property,
-};
+pub(crate) use reads::{Field, PropertySlot, ReadSite, find as find_property};
 pub(crate) use template_meter::MeteredCharges;
-pub(crate) use templates::{Entry, INNER, inner as inner_entry};
+pub(crate) use templates::Entry;
 
 pub(crate) use crate::machine::islands::cx::{
-    Cx, Fresh, Meter, measured_formula, position, read_index, scalar,
+    Fresh, measured_formula, position, read_index, scalar,
 };
 pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source, TextCharge};
 pub(crate) use loop_plans::LoopPlan;

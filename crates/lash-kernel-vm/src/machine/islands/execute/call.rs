@@ -12,11 +12,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         (read, args, live): (bool, &'e [u32], &'e [u32]),
         slots: usize,
     ) -> Result<Next, Stop> {
-        #[cfg(any(test, feature = "testing"))]
-        assert!(
-            self.scratch.arguments.is_empty(),
-            "a callback must receive no native scratch lease"
-        );
         // Borrow the source-sized window through admission and binding.
         // Only a wide call initializes a maximum-arity window; small calls
         // carry their source-sized operands directly.

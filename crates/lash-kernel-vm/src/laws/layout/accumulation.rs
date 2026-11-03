@@ -666,7 +666,7 @@ fn original_text_body_prefixes() {
 /// rejection. This directly executes the staged consumer even before core
 /// enables authenticated text activation in production.
 fn prepared_text_prefixes() {
-    use crate::machine::islands::cx::Cx;
+    use crate::machine::islands::cx::prepare_text_prefix;
     use lash_kernel_doc::Value;
     use lash_kernel_doc::arena::{Body, Chunk, ShortText};
     use lash_kernel_doc::heap::{HeapFault, TextSummary};
@@ -717,7 +717,7 @@ fn prepared_text_prefixes() {
     // interior predecessor whose storage has moved, even though its fee facts
     // and original summary still exist.
     for surviving in [0, 2, 3] {
-        let result = Cx::prepare_text_prefix(
+        let result = prepare_text_prefix(
             &mut arena,
             &ledger,
             &heap,
@@ -772,7 +772,7 @@ fn prepared_text_prefixes() {
     // short concatenations at their exact memory bound.
     let short = Value::Text(ShortText::new("a").unwrap());
     assert!(
-        Cx::prepare_text_prefix(
+        prepare_text_prefix(
             &mut arena,
             &ledger,
             &heap,
@@ -800,7 +800,7 @@ fn prepared_text_prefixes() {
     let parts = arena.create_list(&[large, right]);
     let empty = Value::Text(ShortText::new("").unwrap());
     let held = arena.held();
-    let result = Cx::prepare_text_prefix(
+    let result = prepare_text_prefix(
         &mut arena,
         &ledger,
         &heap,
@@ -832,7 +832,7 @@ fn prepared_text_prefixes() {
 
     // Errors and stale entry dependencies must both unwind storage. Returning
     // Ok without invoking the accepted publication also consumes no storage.
-    let failed = Cx::prepare_text_prefix(
+    let failed = prepare_text_prefix(
         &mut arena,
         &ledger,
         &heap,
@@ -850,7 +850,7 @@ fn prepared_text_prefixes() {
     });
     assert!(failed.is_err());
     assert_eq!(read(&arena, left), original);
-    let result = Cx::prepare_text_prefix(
+    let result = prepare_text_prefix(
         &mut arena,
         &ledger,
         &heap,
@@ -880,7 +880,7 @@ fn prepared_text_prefixes() {
     assert_eq!(arena.held(), held);
 
     // Shared/self operands copy; moving them would corrupt the old alias.
-    let result = Cx::prepare_text_prefix(
+    let result = prepare_text_prefix(
         &mut arena,
         &ledger,
         &heap,
@@ -910,7 +910,7 @@ fn prepared_text_prefixes() {
     // Donation across multiple appends commits exactly one final root. No
     // per-append journal or reconstructed old buffer participates in success.
     let current = result.1[0];
-    let result = Cx::prepare_text_prefix(
+    let result = prepare_text_prefix(
         &mut arena,
         &ledger,
         &heap,
@@ -953,7 +953,7 @@ fn prepared_text_prefixes() {
     let mut ledger = Ledger::open(root).unwrap();
     let mut cold_arena = Arena::new();
     let reopened = cold_arena.text(&final_text);
-    let cold_result = Cx::prepare_text_prefix(
+    let cold_result = prepare_text_prefix(
         &mut cold_arena,
         &ledger,
         &cold_heap,

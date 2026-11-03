@@ -38,7 +38,7 @@ mod verify;
 mod walk;
 use walk::Walk;
 
-use crate::machine::islands::cx::{Place, Role, scalar};
+use crate::machine::islands::cx::{Role, scalar};
 
 use super::expr::{self, Expr, Kind};
 use super::{
@@ -970,43 +970,38 @@ impl Formation<'_> {
         }
         walk.allocates |= general(stream, self.lowered.lib, tree.last);
         let unshared = |slot: u32| code.slots.get(slot as usize).is_some_and(|s| !s.shared);
-        // The values its last op takes, by role, and where a store writes.
-        let (mut roots, _) = match (tree.last, end) {
+        // The values its last op takes, by role.
+        let mut roots = match (tree.last, end) {
             (Op::Test { cond }, End::Test) | (Op::Branch { cond, .. }, End::Branch) => {
-                (vec![(Role::Value, tree.take(cond)?)], None)
+                vec![(Role::Value, tree.take(cond)?)]
             }
             (Op::WriteLocal { local, src }, End::Write) | (Op::Bind { local, src }, End::Bind)
                 if unshared(local.slot) =>
             {
-                (vec![(Role::Value, tree.take(src)?)], None)
+                vec![(Role::Value, tree.take(src)?)]
             }
             (Op::WriteSession { src, .. }, End::Write) => {
-                (vec![(Role::Value, tree.take(src)?)], None)
+                vec![(Role::Value, tree.take(src)?)]
             }
-            (Op::Continue, End::Continue) => (Vec::new(), None),
+            (Op::Continue, End::Continue) => Vec::new(),
             (Op::SetIndex { target, src }, End::Store) => {
                 let value = tree.take(src)?;
                 let object = tree.take(target)?;
                 let index = tree.take(Reg(target.0 + 1))?;
-                let roots = vec![
+                vec![
                     (Role::Target, object),
                     (Role::Index, index),
                     (Role::Value, value),
-                ];
-                (roots, Some(Place::Index))
+                ]
             }
             (Op::SetField { target, src, field }, End::Store) => {
                 let value = tree.take(src)?;
                 let object = tree.take(target)?;
-                let name = ShortText::new(&stream.fields.get(field.ix())?.name)?;
-                let roots = vec![(Role::Target, object), (Role::Value, value)];
-                (
-                    roots,
-                    Some(Place::Field(lash_kernel_doc::Value::Text(name))),
-                )
+                ShortText::new(&stream.fields.get(field.ix())?.name)?;
+                vec![(Role::Target, object), (Role::Value, value)]
             }
             // A `do` discards what it computed last, in its first register.
-            (Op::End, End::Discard) => (vec![(Role::Value, tree.take(Reg(0))?)], None),
+            (Op::End, End::Discard) => vec![(Role::Value, tree.take(Reg(0))?)],
             _ => return None,
         };
         // Every value the statement computes reaches its end.

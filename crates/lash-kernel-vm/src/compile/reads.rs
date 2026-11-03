@@ -5,7 +5,7 @@
 //! entry's complete key before reusing its position. Caches are
 //! process-local and empty on restore.
 
-use lash_kernel_doc::arena::{ArenaHandle, ShortText};
+use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Value};
 
@@ -69,28 +69,11 @@ pub(crate) fn find(
     arena.table_read(record, slot, key)
 }
 
-/// Writes `value` under the short text `key` of `record` at the position
-/// `slot` proved, where the record is still the version the proof names
-/// and the entry there is keyed `key`: the write `table_write` makes
-/// there, without hashing the key again. `false`, having written nothing,
-/// where the proof is of an absence, of another key, or of an earlier
-/// version.
-#[inline]
-pub(crate) fn write(
-    arena: &mut Arena,
-    record: ArenaHandle,
-    slot: PropertySlot,
-    key: &ShortText,
-    value: Value,
-) -> Result<bool, NativeError> {
-    slot.write(arena, record, key, value)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use lash_kernel_doc::Datum;
-    use lash_kernel_doc::arena::{Body, Table};
+    use lash_kernel_doc::arena::{Body, ShortText, Table};
     use lash_kernel_state::arena::Bench;
 
     /// PLAN-INDEP: a proved position or absence skips normalization only
@@ -190,7 +173,7 @@ mod tests {
             (Value::Int(0), 9),
             (Value::Int(1), 10),
         ] {
-            assert!(write(arena, record, slot, &short, value).unwrap());
+            assert!(slot.write(arena, record, &short, value).unwrap());
             let actual = arena.table_get(record, &a).unwrap().unwrap();
             assert_eq!(
                 lash_kernel_doc::scalar::immediate_equal(&actual, &value),

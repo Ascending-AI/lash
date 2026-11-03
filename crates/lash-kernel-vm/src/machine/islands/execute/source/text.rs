@@ -7,7 +7,7 @@ use crate::compile::room::{
         ExactEvent, ExactRoots, ExternalFacts, Occurrence, Position as SourcePosition, Successor,
     },
 };
-use crate::machine::islands::cx::Cx;
+use crate::machine::islands::cx::prepare_text_prefix;
 use crate::machine::source_publication::native_storage;
 use lash_kernel_state::kernel_internals::logical::PublicationValue;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
@@ -263,7 +263,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let facts = resources
             .facts(&blank)
             .ok_or_else(|| malformed("text resource facts disappeared"))?;
-        let Some(mut storage) = Cx::prepare_text_prefix(
+        let Some(mut storage) = prepare_text_prefix(
             self.arena,
             &ledger,
             self.heap,

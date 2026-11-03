@@ -67,91 +67,89 @@ impl TextPrefix<'_> {
     }
 }
 
-impl Cx<'_> {
-    /// Execute a certified straight-line append kernel, then prepare only its
-    /// actual surviving roots. `steps` index entry values followed by results
-    /// in source order. The compiler supplies observer exclusion for each move.
-    /// The finish callback authenticates the source exit and settles one charge
-    /// debt and BoundaryTransaction. No old source/journal wrapper runs here.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "one source prefix with its storage and exit"
-    )]
-    pub(crate) fn prepare_text_prefix<'a>(
-        arena: &'a mut Arena,
-        ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
-        _heap: &lash_kernel_state::kernel_internals::PagedHeap,
-        entries: &[Value],
-        private: &[ArenaHandle],
-        join: Option<(usize, usize)>,
-        steps: &[(usize, usize, bool)],
-        outputs: &[(lash_kernel_state::kernel_internals::logical::Owner, usize)],
-        inputs: &[lash_kernel_state::kernel_internals::logical::Owner],
-    ) -> Result<Option<TextPrefix<'a>>, HeapFault> {
-        let joined = match join {
-            Some((list, separator)) => {
-                let (Some(&Value::List(list)), Some(&separator)) =
-                    (entries.get(list), entries.get(separator))
-                else {
-                    return Ok(None);
-                };
-                let Ok(pieces) = arena.sequence(list) else {
-                    return Ok(None);
-                };
-                Some((pieces.to_vec(), separator, Value::List(list)))
-            }
-            None => None,
-        };
-        let mut bound_entries = entries.to_vec();
-        if let Some((pieces, _, _)) = &joined {
-            bound_entries.extend_from_slice(pieces);
-        }
-        let Some(mut storage) = arena.prepare_text_region(ledger, &bound_entries, private) else {
-            return Ok(None);
-        };
-        let mut values = entries.to_vec();
-        let mut evaluations = Vec::with_capacity(steps.len());
-        if let Some((pieces, separator, list)) = joined {
-            let Some((result, facts)) = storage.join(&pieces, separator) else {
+/// Execute a certified straight-line append kernel, then prepare only its
+/// actual surviving roots. `steps` index entry values followed by results
+/// in source order. The compiler supplies observer exclusion for each move.
+/// The finish callback authenticates the source exit and settles one charge
+/// debt and BoundaryTransaction. No old source/journal wrapper runs here.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one source prefix with its storage and exit"
+)]
+pub(crate) fn prepare_text_prefix<'a>(
+    arena: &'a mut Arena,
+    ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
+    _heap: &lash_kernel_state::kernel_internals::PagedHeap,
+    entries: &[Value],
+    private: &[ArenaHandle],
+    join: Option<(usize, usize)>,
+    steps: &[(usize, usize, bool)],
+    outputs: &[(lash_kernel_state::kernel_internals::logical::Owner, usize)],
+    inputs: &[lash_kernel_state::kernel_internals::logical::Owner],
+) -> Result<Option<TextPrefix<'a>>, HeapFault> {
+    let joined = match join {
+        Some((list, separator)) => {
+            let (Some(&Value::List(list)), Some(&separator)) =
+                (entries.get(list), entries.get(separator))
+            else {
                 return Ok(None);
             };
-            values.push(result);
-            evaluations.push(TextEvaluation {
-                arguments: [list, separator],
-                result,
-                summaries: [facts.left, facts.right, facts.result],
-                work: facts.work,
-                install: facts.install,
-            });
-        }
-        for &(left, right, moving) in steps {
-            let (Some(&left), Some(&right)) = (values.get(left), values.get(right)) else {
+            let Ok(pieces) = arena.sequence(list) else {
                 return Ok(None);
             };
-            let Some((result, facts)) = storage.concat(left, right, moving) else {
-                return Ok(None);
-            };
-            values.push(result);
-            evaluations.push(TextEvaluation {
-                arguments: [left, right],
-                result,
-                summaries: [facts.left, facts.right, facts.result],
-                work: facts.work,
-                install: facts.install,
-            });
+            Some((pieces.to_vec(), separator, Value::List(list)))
         }
-        let Some(roots): Option<Vec<_>> = outputs
-            .iter()
-            .map(|(owner, index)| Some((*owner, *values.get(*index)?)))
-            .collect()
-        else {
-            return Ok(None);
-        };
-        Ok(Some(TextPrefix {
-            storage,
-            inputs: inputs.to_vec(),
-            outputs: roots,
-            evaluations,
-        }))
+        None => None,
+    };
+    let mut bound_entries = entries.to_vec();
+    if let Some((pieces, _, _)) = &joined {
+        bound_entries.extend_from_slice(pieces);
     }
+    let Some(mut storage) = arena.prepare_text_region(ledger, &bound_entries, private) else {
+        return Ok(None);
+    };
+    let mut values = entries.to_vec();
+    let mut evaluations = Vec::with_capacity(steps.len());
+    if let Some((pieces, separator, list)) = joined {
+        let Some((result, facts)) = storage.join(&pieces, separator) else {
+            return Ok(None);
+        };
+        values.push(result);
+        evaluations.push(TextEvaluation {
+            arguments: [list, separator],
+            result,
+            summaries: [facts.left, facts.right, facts.result],
+            work: facts.work,
+            install: facts.install,
+        });
+    }
+    for &(left, right, moving) in steps {
+        let (Some(&left), Some(&right)) = (values.get(left), values.get(right)) else {
+            return Ok(None);
+        };
+        let Some((result, facts)) = storage.concat(left, right, moving) else {
+            return Ok(None);
+        };
+        values.push(result);
+        evaluations.push(TextEvaluation {
+            arguments: [left, right],
+            result,
+            summaries: [facts.left, facts.right, facts.result],
+            work: facts.work,
+            install: facts.install,
+        });
+    }
+    let Some(roots): Option<Vec<_>> = outputs
+        .iter()
+        .map(|(owner, index)| Some((*owner, *values.get(*index)?)))
+        .collect()
+    else {
+        return Ok(None);
+    };
+    Ok(Some(TextPrefix {
+        storage,
+        inputs: inputs.to_vec(),
+        outputs: roots,
+        evaluations,
+    }))
 }
