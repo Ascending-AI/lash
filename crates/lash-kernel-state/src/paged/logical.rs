@@ -24,7 +24,6 @@ pub use invocations::{Invocation, InvocationRange};
 mod boundaries;
 mod lifecycle;
 pub use lifecycle::Lifecycle;
-use lifecycle::{Publications, Written};
 mod members;
 mod observers;
 pub use observers::ObserverExclusion;
@@ -373,9 +372,6 @@ struct State {
     entities: Tree<EntityHolding>,
     refinements: u64,
     next_invocation: u64,
-    /// The root writes since the ledger last committed a state: they expire
-    /// the publications of exactly those owners, or of all of them.
-    written: Written,
 }
 impl State {
     /// A placeholder held only while the committed state is edited in place.
@@ -387,7 +383,6 @@ impl State {
             entities: Tree::new(false),
             refinements: 0,
             next_invocation: 0,
-            written: Written::None,
         }
     }
     fn balance(&self) -> Result<Balance, HeapFault> {
@@ -460,10 +455,6 @@ pub struct Ledger {
     state: State,
     identity: Rc<()>,
     revision: u64,
-    /// What a runtime event last published to each owner no edit has
-    /// written since. Every commit expires the owners its state wrote;
-    /// rekey and normalization, which replace holdings wholesale, expire all.
-    published: Publications,
 }
 /// A process-local dependency stamp. Every committed owner, member, departure
 /// or normalization change invalidates it. It cannot authenticate another run
@@ -496,7 +487,6 @@ impl Prepared {
             state: self.next,
             identity: Rc::clone(&self.identity),
             revision: self.revision,
-            published: Publications::default(),
         };
         draft.normalize(access, limits)?;
         self.next = draft.state;
@@ -519,7 +509,6 @@ impl Prepared {
             state: before.state.clone(),
             identity: Rc::new(()),
             revision: before.revision,
-            published: Publications::default(),
         };
         swept.normalize(access, limits)?;
         let garbage = before
@@ -571,11 +560,9 @@ impl Ledger {
                 entities: Tree::new(false),
                 refinements: 0,
                 next_invocation: 1,
-                written: Written::default(),
             },
             identity: Rc::new(()),
             revision: 0,
-            published: Publications::default(),
         }
     }
     pub fn open(root: LedgerRoot) -> Result<Self, HeapFault> {
@@ -587,11 +574,9 @@ impl Ledger {
                 entities: Tree::of_keyed(&root.entities),
                 refinements: root.refinements,
                 next_invocation: root.next_invocation,
-                written: Written::default(),
             },
             identity: Rc::new(()),
             revision: 0,
-            published: Publications::default(),
         };
         ledger.balance()?;
         Ok(ledger)
@@ -735,9 +720,6 @@ impl Ledger {
         };
         let edited = edit.roots(changes);
         self.state = edit.state;
-        // The owners written in place no longer hold what they last published.
-        self.published
-            .expire(std::mem::take(&mut self.state.written));
         edited
     }
     pub fn holding(&self, owner: Owner, access: &Access<'_>) -> Result<Option<Holding>, HeapFault> {
@@ -891,8 +873,6 @@ impl Ledger {
         semantic();
         self.state = next;
         self.revision = revision;
-        self.published
-            .expire(std::mem::take(&mut self.state.written));
         Ok(())
     }
     /// Rekeys what the ledger priced under provisional keys to the durable
@@ -909,7 +889,6 @@ impl Ledger {
             return Ok(());
         }
         self.handoff()?;
-        self.published.expire(Written::All);
         let durable: std::collections::HashMap<EntityId, EntityId> =
             rekeyed.iter().copied().collect();
         let state = &mut self.state;
@@ -1145,9 +1124,6 @@ impl Edit<'_, '_> {
         if changes.windows(2).any(|pair| pair[0].0 == pair[1].0) {
             return Err(invalid("owner replaced twice in one transfer"));
         }
-        self.state
-            .written
-            .owners(changes.iter().map(|(owner, _)| *owner));
         let access = self.access;
         let mut edges = BTreeMap::<EntityId, (u64, u64)>::new();
         let mut collect = |value: &Holding, adding: bool| {

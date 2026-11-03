@@ -269,7 +269,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             let Owner::Value { slot, .. } = owner else {
                 return Err(malformed("packet binding has another owner class"));
             };
-            self.logical.rebind(owner, source_value(slot, *state));
+            self.logical.replace(owner, source_value(slot, *state));
         }
         self.source_controls(frame)
     }
@@ -286,7 +286,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .owner_slots()
             .map_err(|_| malformed("packet source controls failed verification"))?;
         for owner in slots.control_roots(self.task, activation.invocation.id()) {
-            self.logical.rebind(owner, None);
+            self.logical.replace(owner, None);
         }
         let publish =
             |selector: room::Owner, value: Option<PublicationValue>| -> Result<(), HeapFault> {
@@ -294,7 +294,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     let owner = slots
                         .root(&selector, self.task, activation.invocation.id())
                         .ok_or_else(|| malformed("packet control has no canonical owner"))?;
-                    self.logical.rebind(owner, Some(value));
+                    self.logical.replace(owner, Some(value));
                 }
                 Ok(())
             };

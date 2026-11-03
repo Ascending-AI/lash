@@ -466,7 +466,6 @@ impl Prepared {
             state: self.next,
             identity: self.identity,
             revision: self.revision,
-            published: super::Publications::default(),
         };
         let mut next = staged.prepare_ownership(arena, access, inputs, outputs)?;
         next.projected.extend(self.projected);

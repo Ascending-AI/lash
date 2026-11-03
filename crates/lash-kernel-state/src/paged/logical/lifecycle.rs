@@ -3,96 +3,7 @@
 use super::*;
 use crate::arena::Arena;
 use crate::paged::heap_impl::PagedHeap;
-use lash_kernel_doc::{Value, arena::ArenaHandle};
 use std::cell::RefCell;
-
-/// Root writes a state has made since its ledger last committed one.
-#[derive(Clone, Default)]
-pub(super) enum Written {
-    #[default]
-    None,
-    Owners(Vec<Owner>),
-    /// Holdings were replaced wholesale, as by normalization.
-    All,
-}
-impl Written {
-    pub(super) fn owners(&mut self, owners: impl Iterator<Item = Owner>) {
-        match self {
-            Self::None => *self = Self::Owners(owners.collect()),
-            Self::Owners(written) => written.extend(owners),
-            Self::All => {}
-        }
-    }
-}
-
-/// The value a runtime event last published to an owner, when republishing
-/// it would project the same holding: a value or a borrowed cell is projected
-/// from its identity and immutable facts alone, under unchanged ledger keys.
-#[derive(Clone, Copy)]
-enum Published {
-    Absent,
-    Value(Value),
-    Capture(ArenaHandle),
-    Departure,
-}
-impl Published {
-    fn of(next: &Option<PublicationValue>) -> Option<Self> {
-        Some(match next {
-            None => Self::Absent,
-            Some(PublicationValue::Native(value)) => Self::Value(*value),
-            Some(PublicationValue::Capture(handle)) => Self::Capture(*handle),
-            Some(PublicationValue::Departure) => Self::Departure,
-            Some(
-                PublicationValue::Page(_)
-                | PublicationValue::Frozen(_)
-                | PublicationValue::Existing(_)
-                | PublicationValue::Frame,
-            ) => return None,
-        })
-    }
-    fn same(&self, next: &Option<PublicationValue>) -> bool {
-        match (self, next) {
-            (Self::Absent, None) | (Self::Departure, Some(PublicationValue::Departure)) => true,
-            (Self::Value(value), Some(PublicationValue::Native(next))) => value.same(next),
-            (Self::Capture(handle), Some(PublicationValue::Capture(next))) => handle == next,
-            _ => false,
-        }
-    }
-}
-
-/// Each owner's last runtime publication, valid until a root write to that
-/// owner or a wholesale replacement expires it. The ledger owns it, so no
-/// edit path can change a holding without expiring the fact.
-#[derive(Default)]
-pub(super) struct Publications(
-    std::collections::HashMap<Owner, Published, foldhash::fast::RandomState>,
-);
-impl Publications {
-    pub(super) fn expire(&mut self, written: Written) {
-        match written {
-            Written::None => {}
-            Written::Owners(owners) => {
-                for owner in owners {
-                    self.0.remove(&owner);
-                }
-            }
-            Written::All => self.0.clear(),
-        }
-    }
-    /// Whether publishing `next` to `owner` would leave its holding as is.
-    fn holds(&self, owner: &Owner, next: &Option<PublicationValue>) -> bool {
-        self.0
-            .get(owner)
-            .is_some_and(|published| published.same(next))
-    }
-    fn record(&mut self, published: &[Replacement]) {
-        for (owner, next) in published {
-            if let Some(next) = Published::of(next) {
-                self.0.insert(*owner, next);
-            }
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct Lifecycle {
@@ -126,24 +37,6 @@ impl Lifecycle {
     }
     pub fn replace(&self, owner: Owner, next: Option<PublicationValue>) {
         self.pending.borrow_mut().record(owner, next);
-    }
-    /// Re-projects a binding or control slot into the open region: `next`
-    /// supersedes the owner's earlier record, and an owner without one that
-    /// still holds what the ledger last published for it records nothing.
-    pub fn rebind(&self, owner: Owner, next: Option<PublicationValue>) {
-        let mut pending = self.pending.borrow_mut();
-        if let Some(recorded) = pending.last.get_mut(&owner) {
-            *recorded = next;
-            return;
-        }
-        if self
-            .ledger
-            .try_borrow()
-            .is_ok_and(|ledger| ledger.published.holds(&owner, &next))
-        {
-            return;
-        }
-        pending.record(owner, next);
     }
     /// Retire only this activation's actual operands, including unpublished
     /// replacements. The caller can reacquire live roles in the same journal.
@@ -183,17 +76,11 @@ impl Lifecycle {
         }
         let result = (|| {
             let mut ledger = self.ledger.borrow_mut();
-            // An owner still holding what it last published needs no event.
             let pending: Vec<Replacement> = journal
                 .last
                 .iter()
-                .filter(|(owner, next)| !ledger.published.holds(owner, next))
                 .map(|(owner, next)| (*owner, next.clone()))
                 .collect();
-            if pending.is_empty() && events.is_empty() {
-                journal.last.clear();
-                return Ok(());
-            }
             let mut registration = arena
                 .registration()
                 .map_err(|error| invalid(&error.to_string()))?;
@@ -203,7 +90,6 @@ impl Lifecycle {
                 .admit(u64::MAX)
                 .map_err(|_| invalid("source holding overflow"))?;
             ledger.publish(accepted, || registration.commit())?;
-            ledger.published.record(&pending);
             journal.last.clear();
             Ok(())
         })();
