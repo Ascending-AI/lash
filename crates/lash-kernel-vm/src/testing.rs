@@ -47,6 +47,12 @@ pub fn take_family_witnesses() -> FamilyCounts {
     crate::machine::islands::witness::take()
 }
 
+/// Takes accepted native text append and join publications, in that order.
+/// Number conversions and other text results do not count as either operation.
+pub fn take_text_operation_publications() -> [u64; 2] {
+    crate::machine::islands::witness::text_operation_publications()
+}
+
 /// Takes the dispatched packet and specialized packet counts for this machine.
 pub fn take_packet_counts(machine: &mut KernelMachine) -> (u64, u64) {
     machine.take_packet_counts()

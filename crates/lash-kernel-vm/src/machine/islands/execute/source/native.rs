@@ -407,6 +407,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         }
         #[cfg(any(test, feature = "testing"))]
         if published {
+            if function.text_join() || function.text_append(self.exe).is_some() {
+                crate::machine::islands::witness::text_operation_published(function.text_join());
+            }
             if collection {
                 crate::machine::islands::witness::native_collection_published(
                     frame.regs[site.reg as usize],

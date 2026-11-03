@@ -88,6 +88,7 @@ thread_local! {
     static PRECISE_SOURCE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static TUPLE_CONSTRUCTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static TABLE_CONSTRUCTIONS: std::cell::Cell<[u64;3]> = const { std::cell::Cell::new([0;3]) };
+    static TEXT_OPERATION_PUBLICATIONS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static NATIVE_TEXT_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_GRAPH_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static IMMUTABLE_NATIVE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -165,6 +166,7 @@ pub(crate) fn begin() {
     IMMUTABLE_NATIVE_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_READ_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_TEXT_PUBLICATIONS.with(|count| count.set(0));
+    TEXT_OPERATION_PUBLICATIONS.with(|count| count.set([0; 2]));
     RETURN_PUBLICATIONS.with(|count| count.set(0));
     CELL_PUBLICATIONS.with(|count| count.set(0));
     CELL_CONSTRUCTIONS.with(|count| count.set(0));
@@ -357,6 +359,17 @@ pub(in crate::machine) fn immutable_native_published() {
 }
 pub(in crate::machine) fn native_read_published() {
     NATIVE_READ_PUBLICATIONS.with(|count| count.set(count.get() + 1));
+}
+
+pub(crate) fn text_operation_publications() -> [u64; 2] {
+    TEXT_OPERATION_PUBLICATIONS.with(|count| count.replace([0; 2]))
+}
+pub(in crate::machine) fn text_operation_published(join: bool) {
+    TEXT_OPERATION_PUBLICATIONS.with(|count| {
+        let mut next = count.get();
+        next[usize::from(join)] += 1;
+        count.set(next);
+    });
 }
 
 #[cfg(test)]

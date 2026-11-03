@@ -2032,24 +2032,27 @@ await build()
 // K-CHG-001 / CONT-EXACT / PLAN-INDEP: the actual dialect's complete
 // read/update and allocating format paths preserve every observed boundary.
 fn whole_path_packets_agree() {
-    use lash_kernel_vm::testing::{self, ExecutionStrategy as Mode, Family, FamilyExit as Exit};
+    use lash_kernel_vm::testing::{self, ExecutionStrategy as Mode};
     let cases = [
         (
+            "member read/update",
             None,
             "def run(obj):\n    total = 1\n    total += obj['a']\n    return total\nprint(await host.echo(run({'a': 255})))\n",
         ),
         (
-            Some(Family::FormatAppend),
+            "formatted append",
+            // Three loop iterations each publish one append and one join.
+            Some([3, 3]),
             "def build(n):\n    text = ''\n    for i in range(n):\n        text += f'Tool {i} value={i * 3}; status=ready\\n'\n    return text\nprint(await host.echo(build(3)))\n",
         ),
     ];
-    let cases = cases.map(|(family, source)| {
+    let cases = cases.map(|(label, texts, source)| {
         let lowered = lower(source).expect("the whole Python path lowers");
         let program = crate::tests::linked::program(
             Arc::clone(lowered.document.shared()),
             installed().prepared.clone(),
         );
-        (family, source, program)
+        (label, texts, source, program)
     });
     let observe = |program: &Program, bounds, rebuild, mode| {
         testing::begin_family_witnesses();
@@ -2084,6 +2087,7 @@ fn whole_path_packets_agree() {
             },
         );
         let exits = testing::take_family_witnesses();
+        let texts = testing::take_text_operation_publications();
         if mode == Mode::Source {
             assert_eq!(packets.0, 0, "the Python source oracle dispatched packets");
         }
@@ -2091,80 +2095,83 @@ fn whole_path_packets_agree() {
             assert_eq!(packets.1, 0, "the generic Python path selected a family");
             assert!(exits.is_empty());
         }
-        ((outcome, stops, cold), exits, packets)
+        ((outcome, stops, cold), exits, packets, texts)
     };
-    for (family, source, program) in &cases {
-        let (reference, _, _) = observe(program, BOUNDS, false, Mode::Source);
+    for (label, required_texts, source, program) in &cases {
+        let (reference, _, _, _) = observe(program, BOUNDS, false, Mode::Source);
         assert!(matches!(reference.0.0.end, End::Finished(_)));
         let charged = reference.0.0.charged;
-        let (fused, exits, packets) = observe(program, BOUNDS, false, Mode::Optimized);
-        assert_eq!(fused, reference, "quiet Python {family:?}: {source}");
-        if let Some(family) = family {
+        let (fused, exits, packets, texts) = observe(program, BOUNDS, false, Mode::Optimized);
+        assert_eq!(fused, reference, "quiet Python {label}: {source}");
+        if let Some(required) = required_texts {
             assert!(
-                exits.get(&(*family, Exit::Commit)).copied().unwrap_or(0) > 0,
-                "the real Python path must commit {family:?}: {exits:?}\n{}",
+                texts
+                    .iter()
+                    .zip(required)
+                    .all(|(actual, expected)| actual >= expected),
+                "the real Python path must publish {required:?} append/join operations: {texts:?}\n{}",
                 kernel_text(source)
             );
         }
         assert!(packets.0 > 0);
         println!(
-            "real Python quiet {family:?}: charged={charged}, packets={packets:?}, exits={exits:?}"
+            "real Python quiet {label}: charged={charged}, packets={packets:?}, exits={exits:?}, texts={texts:?}"
         );
-        let (generic, _, packets) = observe(program, BOUNDS, false, Mode::GenericPackets);
-        assert_eq!(generic, reference, "generic Python {family:?}");
+        let (generic, _, packets, _) = observe(program, BOUNDS, false, Mode::GenericPackets);
+        assert_eq!(generic, reference, "generic Python {label}");
         assert!(packets.0 > 0);
 
         for rebuild in [false, true] {
-            let (reference, _, _) = observe(program, BOUNDS, rebuild, Mode::Source);
+            let (reference, _, _, _) = observe(program, BOUNDS, rebuild, Mode::Source);
             for mode in [Mode::GenericPackets, Mode::Optimized] {
                 let actual = observe(program, BOUNDS, rebuild, mode).0;
                 assert_eq!(actual.2.len(), reference.2.len(), "cold boundary count");
                 for (at, (actual, expected)) in actual.2.iter().zip(&reference.2).enumerate() {
                     assert!(
                         actual == expected,
-                        "Python {family:?}, {mode:?}, cold state at {at}"
+                        "Python {label}, {mode:?}, cold state at {at}"
                     );
                 }
                 assert_eq!(
                     actual.1.iter().map(|stop| stop.2).collect::<Vec<_>>(),
                     reference.1.iter().map(|stop| stop.2).collect::<Vec<_>>(),
-                    "Python {family:?}, {mode:?}, logical owners at every stop"
+                    "Python {label}, {mode:?}, logical owners at every stop"
                 );
                 println!(
-                    "Python {family:?}, {mode:?}, cold={rebuild}: logical owners and normalized cold states agree"
+                    "Python {label}, {mode:?}, cold={rebuild}: logical owners and normalized cold states agree"
                 );
                 assert_eq!(
                     actual.0, reference.0,
-                    "Python {family:?}, {mode:?}, terminal observation"
+                    "Python {label}, {mode:?}, terminal observation"
                 );
                 assert_eq!(
                     actual.1, reference.1,
-                    "Python {family:?}, {mode:?}, stop meters"
+                    "Python {label}, {mode:?}, stop meters"
                 );
                 assert_eq!(
                     actual, reference,
-                    "Python {family:?}, {mode:?}, cold={rebuild}"
+                    "Python {label}, {mode:?}, cold={rebuild}"
                 );
             }
         }
         for charge_limit in 0..charged {
             if charge_limit.is_multiple_of(256) {
-                println!("Python {family:?} charge bound {charge_limit}/{charged}");
+                println!("Python {label} charge bound {charge_limit}/{charged}");
             }
             let bounds = Bounds {
                 charge_limit,
                 ..BOUNDS
             };
-            let (reference, _, _) = observe(program, bounds, false, Mode::Source);
+            let (reference, _, _, _) = observe(program, bounds, false, Mode::Source);
             for mode in [Mode::GenericPackets, Mode::Optimized] {
                 assert_eq!(
                     observe(program, bounds, false, mode).0,
                     reference,
-                    "Python {family:?}, {mode:?}, charge={charge_limit}"
+                    "Python {label}, {mode:?}, charge={charge_limit}"
                 );
             }
         }
-        println!("Python {family:?}: all {charged} finite charge limits agree");
+        println!("Python {label}: all {charged} finite charge limits agree");
     }
 }
 

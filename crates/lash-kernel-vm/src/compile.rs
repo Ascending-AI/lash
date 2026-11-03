@@ -72,7 +72,7 @@ pub(crate) use crate::machine::islands::cx::{
     Accumulator, Cx, Fresh, Made, Meter, Place, Taken, measured_formula, position, read_index,
     scalar, store,
 };
-pub(crate) use formula::{Charge, Fast, LengthCharge, Plan, ScalarTable, Source, TextCharge};
+pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source, TextCharge};
 pub(crate) use loop_plans::LoopPlan;
 #[cfg(test)]
 pub(crate) use loop_plans::{Event, Head, Lowered, Refused, RegionSlot, Step, Summary};

@@ -343,6 +343,10 @@ impl KernelMachine {
                 }
             }
             #[cfg(any(test, feature = "testing"))]
+            if function.text_join() || function.text_append(running.exe).is_some() {
+                crate::machine::islands::witness::text_operation_published(function.text_join());
+            }
+            #[cfg(any(test, feature = "testing"))]
             if collection {
                 crate::machine::islands::witness::native_collection_published(
                     self.regs[args.start.ix()],

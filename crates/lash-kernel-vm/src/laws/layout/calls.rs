@@ -36,7 +36,7 @@ const FORMATTED_MISS: &str = "let build = fn() { let text = \"old\" set text = t
 
 thread_local! {
     static SOURCE_REPLAY_PUBLICATIONS: std::cell::Cell<[u64; 5]> = const { std::cell::Cell::new([0; 5]) };
-    static CHECKPOINT_EXITS: std::cell::RefCell<crate::machine::islands::witness::Counts> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    static FORMAT_SOURCE_PHASES: std::cell::Cell<[bool; 3]> = const { std::cell::Cell::new([false; 3]) };
     // PreparedLibrary is an immutable, shareable fixture. Cold reopen still
     // constructs its own library in Embedder::reopen.
     static CALL_LIBRARIES: std::cell::RefCell<std::collections::BTreeMap<u64, crate::PreparedLibrary>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
@@ -99,6 +99,7 @@ fn observe_source_or_register(
     }
     let _context = Context(source, layout, slice, bounds, taped, mode);
     crate::machine::islands::witness::begin();
+    crate::machine::islands::member_region::begin_statement_publications();
     let prepared = CALL_LIBRARIES.with_borrow_mut(|libraries| {
         libraries
             .entry(layout.0)
@@ -238,6 +239,7 @@ fn observe_source_or_register(
     let sessions = crate::machine::islands::witness::session_publications();
     let scopes = crate::machine::islands::witness::scope_publications();
     let members = crate::machine::islands::witness::member_publications();
+    let private_members = crate::machine::islands::member_region::take_statement_publications();
     let removals = crate::machine::islands::witness::list_removal_publications();
     let table_members = crate::machine::islands::witness::table_member_publications();
     let frame_captures = crate::machine::islands::witness::prepared_frame_captures();
@@ -305,6 +307,7 @@ fn observe_source_or_register(
     let tuple_constructions = crate::machine::islands::witness::tuple_constructions();
     let table_constructions = crate::machine::islands::witness::table_constructions();
     let native_texts = crate::machine::islands::witness::native_text_publications();
+    let text_operations = crate::machine::islands::witness::text_operation_publications();
     let returns = crate::machine::islands::witness::return_publications();
     let cells = crate::machine::islands::witness::cell_publications();
     let cell_constructions = crate::machine::islands::witness::cell_constructions();
@@ -671,9 +674,18 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_MEMBER)
     {
+        // Four assignments write xs and one writes the caller-owned value.
+        // A private prefix covers its accepted source statement width; an
+        // exact member publication covers one write. Packing does not alter
+        // the five source obligations or their independent semantic oracle.
+        let covered = members
+            + private_members
+                .iter()
+                .map(|width| *width as u64)
+                .sum::<u64>();
         assert!(
-            members >= 5,
-            "each aliased append and replacement must publish its source member journal: {members}"
+            covered >= 5,
+            "all five list writes require accepted source publications: exact={members}, private={private_members:?}"
         );
     }
     if mode != Mode::Source
@@ -688,12 +700,17 @@ fn observe_source_or_register(
             "both packet empty tuples must publish separate source occurrences: {empty_tuples:?}"
         );
         assert!(
-            tuple_constructions >= 2,
-            "both nested tuples must publish their canonical immutable occurrence and child graph: {tuple_constructions}"
+            // The inner and outer tuple each own one source occurrence,
+            // whether the packet or precise source path publishes it.
+            tuple_constructions + precise_constructions[1] >= 2,
+            "both nested tuples require accepted occurrences: packet={tuple_constructions}, precise={precise_constructions:?}"
         );
         assert!(
-            table_constructions.iter().all(|count| *count > 0),
-            "map, set and record literals must publish their normalized prepared bodies: {table_constructions:?}"
+            table_constructions
+                .iter()
+                .zip(&precise_constructions[2..])
+                .all(|(packet, precise)| packet + precise > 0),
+            "map, set and record literals each require an accepted body: packet={table_constructions:?}, precise={precise_constructions:?}"
         );
         assert!(
             native_tables.iter().all(|count| *count > 0),
@@ -780,33 +797,21 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(FORMATTED_APPEND)
     {
-        use crate::machine::islands::witness::{Exit, Family};
+        // The three source iterations each contain one join and one append.
         assert!(
-            witnesses
-                .get(&(Family::FormatAppend, Exit::Commit))
-                .copied()
-                .unwrap_or(0)
-                > 0,
-            "the formatting checkpoint must execute its allocating family: {witnesses:?}"
+            text_operations.iter().all(|count| *count >= 3),
+            "three formatted appends require three accepted joins and appends: {text_operations:?}"
         );
-        println!("format/append checkpoint exits: {witnesses:?}");
     }
-    if mode == Mode::Specialized
-        && layout == Layout(0)
-        && [
-            READ_ADD_WRITE,
-            READ_ADD_MISS,
-            READ_ADD_FAIL,
-            FORMATTED_APPEND,
-            FORMATTED_MISS,
-        ]
-        .iter()
-        .any(|body| source.contains(body))
-    {
-        CHECKPOINT_EXITS.with_borrow_mut(|counts| {
-            for (event, count) in witnesses {
-                *counts.entry(event).or_default() += count;
-            }
+    if mode == Mode::Specialized && layout == Layout(0) && source.contains(FORMATTED_APPEND) {
+        FORMAT_SOURCE_PHASES.with(|phases| {
+            let mut seen = phases.get();
+            // The parts list exists before its first unpaid join. A join-only
+            // prefix then precedes the append; all three iterations complete.
+            seen[0] |= constructions + precise_constructions[0] > 0 && text_operations == [0, 0];
+            seen[1] |= text_operations[1] > text_operations[0];
+            seen[2] |= text_operations.iter().all(|count| *count >= 3);
+            phases.set(seen);
         });
     }
     Observed {
@@ -827,8 +832,31 @@ fn observe_source_or_register(
 /// layout, including arity, type, depth, memory and missing-binding exits.
 #[test]
 fn direct_call_entry_agrees() {
+    // K-MACH-008: refusal inside a callee loop retains the same source owners
+    // across physical layouts. Keep the original formatting corpus below.
+    let loop_refusal = r#"main { let f = fn() { let text = "" while true { set text = text.concat(text, text.join([num.to_text(0)], "")) break } return text } return apply f() }"#;
+    let refusal_bounds = Bounds {
+        charge_limit: 21,
+        ..super::super::embedder::ROOMY
+    };
+    let refusal = observe_source_or_register(
+        loop_refusal,
+        Layout(0),
+        u64::MAX,
+        refusal_bounds,
+        true,
+        false,
+        Mode::Source,
+    );
+    for layout in [Layout(0), Layout(1)] {
+        assert_eq!(
+            observe(loop_refusal, layout, u64::MAX, refusal_bounds, true),
+            refusal,
+            "a refused callee-loop expression retains its actual source owners: {layout:?}"
+        );
+    }
     SOURCE_REPLAY_PUBLICATIONS.with(|total| total.set([0; 5]));
-    CHECKPOINT_EXITS.with_borrow_mut(|counts| counts.clear());
+    FORMAT_SOURCE_PHASES.set([false; 3]);
     let definition = |signature: &str, body: &str| {
         let function = format!(
             "function {signature} -> Any\nkernel 1\nmetering statements\nbody {{ {body} }}"
@@ -1311,21 +1339,12 @@ fn direct_call_entry_agrees() {
         }
     }
     println!("direct call entry: {comparisons} paired runs");
-    CHECKPOINT_EXITS.with_borrow(|counts| {
-        use crate::machine::islands::witness::{Exit, Family};
-        for (family, exits) in [(
-            Family::FormatAppend,
-            &[Exit::Commit, Exit::Prefix, Exit::Partial][..],
-        )] {
-            for exit in exits {
-                assert!(
-                    counts.get(&(family, *exit)).copied().unwrap_or(0) > 0,
-                    "the checkpoint must reach {family:?}/{exit:?}: {counts:?}"
-                );
-            }
-        }
-        println!("whole-path checkpoint exits: {counts:?}");
-    });
+    let format_phases = FORMAT_SOURCE_PHASES.get();
+    assert!(
+        format_phases.into_iter().all(|seen| seen),
+        "source formatting must reach parts-only, join-only and completed prefixes: {format_phases:?}"
+    );
+    println!("source formatting prefixes: {format_phases:?}");
     // K-CHG-001 / K-BND-003: a refused statement unit retains updated locals.
     {
         let source = format!("{definitions}main {{ {FORMATTED_APPEND} }}");
@@ -1363,8 +1382,16 @@ fn direct_call_entry_agrees() {
 }
 
 fn placement_witness(source: &str, body: &str) {
+    // A direct return construction can finish entirely in source execution.
+    // Keep the original cases in the semantic corpus; this physical-placement
+    // probe needs a statement boundary after constructing the replacement.
+    let source = if body == SUPERSEDED_RETURN || body == NESTED_RETURN {
+        source.replace("return [9]", "let replacement = [9] return replacement")
+    } else {
+        source.to_owned()
+    };
     let mut embedder = Embedder::with(
-        source,
+        &source,
         Setup {
             probes: Some(helper_probes),
             ..Setup::default()

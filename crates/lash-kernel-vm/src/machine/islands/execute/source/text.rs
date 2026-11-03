@@ -482,7 +482,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             crate::machine::islands::TEXT_APPENDED.with(|n| n.set(n.get() + 1));
         }
         #[cfg(any(test, feature = "testing"))]
-        crate::machine::islands::witness::native_text_published();
+        {
+            crate::machine::islands::witness::native_text_published();
+            crate::machine::islands::witness::text_operation_published(join);
+        }
         #[cfg(test)]
         TEXTS.with(|counts| {
             let mut next = counts.get();

@@ -20,6 +20,17 @@ use lash_kernel_state::{
 #[cfg(test)]
 thread_local! { static COMPOSED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; static PREFIXES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
 #[cfg(test)]
+thread_local! { static STATEMENTS: std::cell::RefCell<Option<Vec<usize>>> = const { std::cell::RefCell::new(None) }; }
+#[cfg(test)]
+pub(crate) fn begin_statement_publications() {
+    STATEMENTS.with(|counts| *counts.borrow_mut() = Some(Vec::new()));
+}
+#[cfg(test)]
+pub(crate) fn take_statement_publications() -> Vec<usize> {
+    STATEMENTS.with(|counts| counts.borrow_mut().take().unwrap_or_default())
+}
+
+#[cfg(test)]
 pub(crate) fn take_publications() -> (u64, u64) {
     (
         COMPOSED.with(|n| n.replace(0)),
@@ -80,6 +91,11 @@ pub(crate) fn execute(
         #[cfg(test)]
         {
             PREFIXES.with(|n| n.set(n.get() + 1));
+            STATEMENTS.with(|counts| {
+                if let Some(counts) = &mut *counts.borrow_mut() {
+                    counts.push(completion.statements);
+                }
+            });
             if completion.statements > 1 {
                 COMPOSED.with(|n| n.set(n.get() + 1));
             }

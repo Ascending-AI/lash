@@ -8,7 +8,6 @@ use std::collections::BTreeMap;
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum CachedSite {
     Read(usize),
-    Guard(usize),
     Write(usize),
 }
 
@@ -54,22 +53,6 @@ impl SiteCaches {
         slot: Option<PropertySlot>,
     ) {
         self.keep_at(CachedSite::Write(statement.0 as usize), slot);
-    }
-
-    #[inline]
-    pub(crate) fn guard(&self, statement: crate::compile::StmtId) -> Option<PropertySlot> {
-        self.slots
-            .get(&CachedSite::Guard(statement.0 as usize))
-            .copied()
-            .flatten()
-    }
-
-    pub(crate) fn keep_guard(
-        &mut self,
-        statement: crate::compile::StmtId,
-        slot: Option<PropertySlot>,
-    ) {
-        self.keep_at(CachedSite::Guard(statement.0 as usize), slot);
     }
 
     fn keep_at(&mut self, at: CachedSite, slot: Option<PropertySlot>) {
