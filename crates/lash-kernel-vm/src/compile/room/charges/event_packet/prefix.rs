@@ -367,7 +367,24 @@ impl OriginalPrefix {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static CONTINUATIONS: std::cell::Cell<[u64; 4]> = const { std::cell::Cell::new([0; 4]) };
+}
+#[cfg(test)]
+fn continued(family: usize) {
+    CONTINUATIONS.with(|counts| {
+        let mut next = counts.get();
+        next[family] += 1;
+        counts.set(next);
+    });
+}
+
 impl AcceptedOriginalPrefix {
+    #[cfg(test)]
+    pub(crate) fn take_continuations() -> [u64; 4] {
+        CONTINUATIONS.with(|counts| counts.replace([0; 4]))
+    }
     pub(crate) fn enter_event(
         &self,
         frontier: &mut Frontier,
@@ -557,6 +574,8 @@ impl AcceptedOriginalPrefix {
         {
             return Err(Refused::Source);
         }
+        #[cfg(test)]
+        continued(0);
         Ok(OriginalReplay {
             next: self.program.next,
             stop: self.program.stop,
@@ -612,6 +631,12 @@ impl OriginalPayment {
             self.validate_prior(prior.as_ref()),
             "original prefix receipt changed"
         );
+        #[cfg(test)]
+        match &self.tape {
+            PaymentTape::Prefix { .. } => {}
+            PaymentTape::Native { formulas } => continued(if formulas.is_empty() { 2 } else { 1 }),
+            PaymentTape::Return { .. } => continued(3),
+        }
         if self.program.recording
             && let Some(tape) = tape
         {

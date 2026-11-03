@@ -76,7 +76,14 @@ pub(super) fn record(
 fn constructors_and_capture_aliases_agree() {
     use crate::laws::embedder::ROOMY;
     const BODY: &str = "let run = fn(value) { let left = [value] let right = [value] let getter = fn() { return (right, left) } let alias = getter let empty_a = () let empty_b = () let values = [left, right] let pair = (left, right) let table = map{1: left, 1.0: right} let members = set{1, 1.0, 2} let record = {rght: right, left: left} do \"a deferred literal larger than the inline text capacity\" do 1000000000000000000000000 do b\"0011ff\" do perform 0(values) as Any set right = left let got = apply alias() return (got, values, pair, table, members, record, empty_a, empty_b) } return apply run(7)";
-    for body in [SOURCE_CELL, BODY] {
+    const NATIVE: &str = "let f = fn(value) { return resident.len([value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value]) } return apply f(7)";
+    const RETURN: &str = "let f = fn(value) { return [value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value] } return apply f(7)";
+    const SESSION: &str = "let saved = [7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7] set saved = [saved, saved] return saved";
+    let mut continuations = [0_u64; 4];
+    let mut cold_payments = 0;
+    let mut charge_refusal_payments = 0;
+    let mut memory_refusal_payments = 0;
+    for body in [SOURCE_CELL, BODY, NATIVE, RETURN, SESSION] {
         let text = format!("main {{ {body} }}");
         for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
             for taped in [false, true] {
@@ -101,6 +108,7 @@ fn constructors_and_capture_aliases_agree() {
                 for mode in [Mode::Generic, Mode::Specialized] {
                     crate::machine::islands::compiled::take_constructor_debt_publications();
                     crate::machine::islands::compiled::take_original_payments();
+                    room::charges::AcceptedOriginalPrefix::take_continuations();
                     assert_eq!(
                         observe_source_or_register(
                             &text,
@@ -113,6 +121,28 @@ fn constructors_and_capture_aliases_agree() {
                         ),
                         reference
                     );
+                    let suffixes = room::charges::AcceptedOriginalPrefix::take_continuations();
+                    for (total, count) in continuations.iter_mut().zip(suffixes) {
+                        *total += count;
+                    }
+                    if layout == Layout(0) && body == NATIVE {
+                        assert!(
+                            suffixes[1] > 0,
+                            "native must consume the real constructor receipt: {suffixes:?}; taped={taped}"
+                        );
+                    }
+                    if layout == Layout(0) && body == RETURN {
+                        assert!(
+                            suffixes[3] > 0,
+                            "return must consume the real constructor receipt: {suffixes:?}; taped={taped}"
+                        );
+                    }
+                    if layout == Layout(0) && body == SESSION {
+                        assert!(
+                            suffixes[2] > 0,
+                            "session binding must consume the real constructor receipt: {suffixes:?}; taped={taped}"
+                        );
+                    }
                     let executed = EXECUTED.get();
                     let debt_publications =
                         crate::machine::islands::compiled::take_constructor_debt_publications();
@@ -146,6 +176,7 @@ fn constructors_and_capture_aliases_agree() {
                         true,
                         Mode::Source,
                     );
+                    crate::machine::islands::compiled::take_original_payments();
                     assert_eq!(
                         observe_source_or_register(
                             &text,
@@ -158,6 +189,7 @@ fn constructors_and_capture_aliases_agree() {
                         ),
                         reference
                     );
+                    cold_payments += crate::machine::islands::compiled::take_original_payments().0;
                 }
             }
         }
@@ -186,6 +218,7 @@ fn constructors_and_capture_aliases_agree() {
                 Mode::Source,
             );
             for mode in [Mode::Generic, Mode::Specialized] {
+                crate::machine::islands::compiled::take_original_payments();
                 assert_eq!(
                     observe_source_or_register(
                         &text,
@@ -199,6 +232,10 @@ fn constructors_and_capture_aliases_agree() {
                     source,
                     "charge {limit}"
                 );
+                let paid = crate::machine::islands::compiled::take_original_payments();
+                if limit < charged {
+                    charge_refusal_payments += paid.0;
+                }
             }
         }
         let mut refused = false;
@@ -215,6 +252,7 @@ fn constructors_and_capture_aliases_agree() {
             );
             refused |= source.end.contains("Memory");
             for mode in [Mode::Generic, Mode::Specialized] {
+                crate::machine::islands::compiled::take_original_payments();
                 assert_eq!(
                     observe_source_or_register(
                         &text,
@@ -228,10 +266,36 @@ fn constructors_and_capture_aliases_agree() {
                     source,
                     "memory {memory}"
                 );
+                let paid = crate::machine::islands::compiled::take_original_payments();
+                if source.end.contains("Memory") {
+                    memory_refusal_payments += paid.0;
+                }
             }
         }
-        assert!(refused, "a constructor must reach a real memory refusal");
+        assert!(
+            refused,
+            "a constructor must reach a real memory refusal: {body}"
+        );
     }
+    assert!(
+        continuations.iter().all(|count| *count > 0),
+        "original source/native/binding/return paths must execute: {continuations:?}"
+    );
+    assert!(
+        cold_payments > 0,
+        "cold slices must execute actual original constructor payments"
+    );
+    assert!(
+        charge_refusal_payments > 0,
+        "charge refusal must retain a genuinely paid constructor prefix"
+    );
+    assert!(
+        memory_refusal_payments > 0,
+        "memory refusal must retain a genuinely paid constructor prefix"
+    );
+    eprintln!(
+        "original continuation witnesses source/native/write/return={continuations:?}; cold={cold_payments}; charge-refusal={charge_refusal_payments}; memory-refusal={memory_refusal_payments}"
+    );
 }
 
 /// K-CLO-001: equal-sized cells and equal capture counts do not authorize aliases.

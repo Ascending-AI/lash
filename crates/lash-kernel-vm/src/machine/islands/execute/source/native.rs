@@ -12,6 +12,20 @@ use room::{
 use crate::machine::islands::compiled;
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
+    fn native_publication_room(&self, frame: &Values<'_, '_>) -> bool {
+        if frame
+            .state
+            .source
+            .as_ref()
+            .is_some_and(|source| source.original.is_some())
+        {
+            // The receipt records the canonical remaining tape at acceptance.
+            !self.tight && self.projection().is_none() && self.storage_room(0)
+        } else {
+            self.resident_room(0)
+        }
+    }
+
     pub(in crate::machine::islands::execute) fn publish_native_value(
         &mut self,
         frame: &mut Values<'_, '_>,
@@ -42,7 +56,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &OperatorSite,
         args: &[Value],
     ) -> Result<ValuePublication, HeapFault> {
-        if !self.resident_room(0)
+        if !self.native_publication_room(frame)
             || self.arena.any_cold()
             || site.root.is_some()
             || site.counted.is_some()
@@ -88,7 +102,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     ) -> Result<ValuePublication, HeapFault> {
         let function = self.exe.lib(site.lib);
         let text = !prepared && function.header.signature.result == lash_kernel_value::Type::Text;
-        if !self.resident_room(0)
+        if !self.native_publication_room(frame)
             || self.arena.any_cold()
             || function.limit.is_some()
             || function.shares_params

@@ -21,7 +21,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             Make::List | Make::Tuple => self.arena.sequence_bound(site.members),
             Make::Map | Make::Set => self.arena.table_bound(site.members),
         };
-        if self.arena.any_cold() || !self.resident_room(bound) {
+        if self.projection().is_some() || self.arena.any_cold() || !self.storage_room(bound) {
             return Ok(ValuePublication::Unavailable);
         }
         self.publish_collection_construction(
@@ -51,7 +51,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         frame: &mut Values<'_, '_>,
         site: &sites::Record,
     ) -> Result<ValuePublication, HeapFault> {
-        if self.arena.any_cold() || !self.resident_room(self.arena.table_bound(site.members)) {
+        if self.projection().is_some()
+            || self.arena.any_cold()
+            || !self.storage_room(self.arena.table_bound(site.members))
+        {
             return Ok(ValuePublication::Unavailable);
         }
         self.publish_collection_construction(

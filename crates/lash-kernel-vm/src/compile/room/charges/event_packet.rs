@@ -1,10 +1,6 @@
 //! A packet event may still owe its original fixed region close.
 use super::*;
 pub(super) mod constructor;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "unpublished H original-prefix integration API")
-)]
 pub(in crate::compile::room) mod prefix;
 
 pub(super) fn derive(
