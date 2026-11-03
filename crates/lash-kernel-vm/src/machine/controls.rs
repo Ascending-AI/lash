@@ -3,7 +3,7 @@
 use super::{Completion, Control, TryPhase};
 use crate::compile::{BlockId, StmtId};
 use lash_kernel_doc::{Value, heap::HeapFault};
-use lash_kernel_state::kernel_internals::logical::SourceValue;
+use lash_kernel_state::kernel_internals::logical::PublicationValue;
 
 /// What an active or pending departure holds. Return and raise carry their
 /// value; break and continue hold a value-less record.
@@ -22,10 +22,10 @@ impl Departed {
             Completion::Normal => None,
         }
     }
-    pub(super) fn source(self) -> SourceValue {
+    pub(super) fn source(self) -> PublicationValue {
         match self {
-            Self::Value(value) => SourceValue::Value(value),
-            Self::Record => SourceValue::Departure,
+            Self::Value(value) => PublicationValue::Native(value),
+            Self::Record => PublicationValue::Departure,
         }
     }
 }

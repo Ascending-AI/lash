@@ -98,7 +98,15 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .map_err(|error| self.halt(error.into()))?
         {
             source::ValuePublication::Published(value) => Ok(value),
-            source::ValuePublication::Declined => {
+            source::ValuePublication::Declined | source::ValuePublication::Unavailable => {
+                if frame
+                    .state
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| source.original.is_some())
+                {
+                    return Err(self.at_operands(site.join.pc, site.join.reg, &args[..2]));
+                }
                 if let Some(close) = &site.join.close
                     && !self.close(close)
                 {
@@ -106,10 +114,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
                 Err(self.at_operands(site.join.pc, site.join.reg, &args[..2]))
             }
-            source::ValuePublication::Unavailable => self
-                .retaining(&mut frame.state.transient, |island| {
-                    island.native(&site.join, &args, 2)
-                }),
         };
         let value = match answer {
             Ok(value) => value,

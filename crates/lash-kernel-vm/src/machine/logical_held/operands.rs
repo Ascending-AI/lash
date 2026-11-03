@@ -1,7 +1,7 @@
 use super::*;
 use crate::compile::room::{Owner as Selector, OwnerSlots};
 use lash_kernel_doc::TaskId;
-use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, SourceValue};
+use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, PublicationValue};
 use lash_kernel_value::sites::Site;
 use std::sync::Arc;
 
@@ -37,7 +37,7 @@ impl BankRoots {
     }
     pub(in crate::machine) fn acquire(&self, owner: Owner, value: Value) {
         self.lifecycle
-            .replace(owner, Some(SourceValue::Value(value)));
+            .replace(owner, Some(PublicationValue::Native(value)));
     }
     pub(in crate::machine) fn release(&self, owner: Owner) {
         self.lifecycle.replace(owner, None);

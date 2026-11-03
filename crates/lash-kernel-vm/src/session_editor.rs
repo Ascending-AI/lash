@@ -17,7 +17,7 @@ use lash_kernel_state::arena::Arena;
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::census_impl::Census;
 use lash_kernel_state::kernel_internals::family_impl::FrozenBase;
-use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, SourceValue};
+use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, PublicationValue};
 use lash_kernel_state::kernel_internals::metadata::metadata_key;
 use lash_kernel_state::kernel_internals::tree::Tree;
 use lash_kernel_state::paged::{
@@ -310,7 +310,7 @@ impl SessionEditor {
         self.bindings
             .write(metadata_key(name), record, self.heap.pages())?;
         self.logical
-            .replace(Owner::session(name), Some(SourceValue::Page(value)));
+            .replace(Owner::session(name), Some(PublicationValue::Page(value)));
         self.changed = true;
         Ok(())
     }

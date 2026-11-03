@@ -76,7 +76,11 @@ pub(crate) fn start(
     let logical =
         lash_kernel_state::kernel_internals::logical::Lifecycle::new(heap.logical_ledger());
     if start.session.is_some() {
-        logical.begin_cell(&mut arena.borrow_mut(), &heap)?;
+        logical.flush(&mut arena.borrow_mut(), &heap)?;
+        logical
+            .ledger()
+            .borrow_mut()
+            .begin_cell(&mut arena.borrow_mut(), &heap)?;
     }
     let mut machine = KernelMachine {
         logical: logical.clone(),
@@ -562,7 +566,7 @@ impl Session {
         if let Some(logical) = &self.logical {
             logical.replace(
                 lash_kernel_state::kernel_internals::logical::Owner::session(&name.name),
-                Some(lash_kernel_state::kernel_internals::logical::SourceValue::Value(value)),
+                Some(lash_kernel_state::kernel_internals::logical::PublicationValue::Native(value)),
             );
         }
         let written = Some(self.writes);
@@ -851,7 +855,11 @@ impl KernelMachine {
                 let value = self.admit_page(&page)?;
                 self.logical.replace(
                     lash_kernel_state::kernel_internals::logical::Owner::session(&name.name),
-                    Some(lash_kernel_state::kernel_internals::logical::SourceValue::Value(value)),
+                    Some(
+                        lash_kernel_state::kernel_internals::logical::PublicationValue::Native(
+                            value,
+                        ),
+                    ),
                 );
                 self.session.bindings.insert(
                     Arc::clone(&name.key),
@@ -871,7 +879,7 @@ impl KernelMachine {
                 self.logical.replace(
                     lash_kernel_state::kernel_internals::logical::Owner::session(&name.name),
                     Some(
-                        lash_kernel_state::kernel_internals::logical::SourceValue::Value(
+                        lash_kernel_state::kernel_internals::logical::PublicationValue::Native(
                             Value::ObjectRef(cell),
                         ),
                     ),
@@ -1027,7 +1035,11 @@ impl KernelMachine {
         let (carried, functions, not_carried) =
             self.save_dropped(classification.carried, &dropped)?;
         self.logical
-            .carry(&mut self.arena.borrow_mut(), &self.heap, carried, functions)?;
+            .flush(&mut self.arena.borrow_mut(), &self.heap)?;
+        self.logical
+            .ledger()
+            .borrow_mut()
+            .carry(&self.heap, carried, functions)?;
         let carry = self.heap.carry(CarryRoots {
             bindings: carried,
             functions,

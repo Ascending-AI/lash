@@ -917,7 +917,8 @@ impl KernelMachine {
     ) -> Eval<()> {
         self.logical_flush_controls(task, exe)?;
         self.logical
-            .handoff(&mut self.arena.borrow_mut(), &self.heap)?;
+            .flush(&mut self.arena.borrow_mut(), &self.heap)?;
+        self.logical.ledger().borrow_mut().handoff()?;
         let Call {
             capture,
             library,
@@ -1395,7 +1396,7 @@ impl KernelMachine {
         let value = self.admit_page(&value)?;
         self.logical.replace(
             lash_kernel_state::kernel_internals::logical::Owner::Incoming(task),
-            Some(lash_kernel_state::kernel_internals::logical::SourceValue::Value(value)),
+            Some(lash_kernel_state::kernel_internals::logical::PublicationValue::Native(value)),
         );
         self.logical_flush()?;
         if failed {

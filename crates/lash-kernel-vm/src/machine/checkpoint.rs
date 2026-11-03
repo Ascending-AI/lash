@@ -91,7 +91,12 @@ impl Machine for KernelMachine {
                 .map_err(MachineError::Heap)?;
         }
         self.logical
-            .handoff(&mut self.arena.borrow_mut(), &self.heap)
+            .flush(&mut self.arena.borrow_mut(), &self.heap)
+            .map_err(MachineError::Heap)?;
+        self.logical
+            .ledger()
+            .borrow_mut()
+            .handoff()
             .map_err(MachineError::Heap)?;
         self.publish_logical_meter().map_err(MachineError::Heap)?;
         if self.ended {

@@ -5,7 +5,7 @@ use crate::compile::{CodeId, Executable, room::Source};
 use crate::machine::{Frame, Halt, SlotState, controls::Departed};
 use lash_kernel_doc::TaskId;
 use lash_kernel_state::kernel_internals::logical::{
-    Invocation, Lifecycle, Owner, Slot, SourceValue,
+    Invocation, Lifecycle, Owner, PublicationValue, Slot,
 };
 use lash_kernel_state::kernel_internals::tree::Access;
 use std::cell::{Cell, RefCell};
@@ -103,7 +103,7 @@ impl FrameRoots {
     fn role(
         &self,
         selector: crate::compile::room::Owner,
-        value: Option<SourceValue>,
+        value: Option<PublicationValue>,
         access: &Access<'_>,
     ) -> Result<(), HeapFault> {
         let bank = &self.bank;
@@ -174,11 +174,11 @@ impl FrameRoots {
                 let site = &exe.stmt(stmt).site;
                 record(
                     Selector::LoopCursor(site.clone()),
-                    cursor.filter(|_| keep).map(SourceValue::Value),
+                    cursor.filter(|_| keep).map(PublicationValue::Native),
                 )?;
                 record(
                     Selector::LoopHeader(site.clone()),
-                    header.filter(|_| keep).map(SourceValue::Value),
+                    header.filter(|_| keep).map(PublicationValue::Native),
                 )
             }
             Roles::Try { stmt, pending } => {
@@ -211,14 +211,14 @@ fn binding_slot(source: &Source, index: u32) -> Slot {
     };
     slot
 }
-fn source_value(slot: Slot, state: SlotState) -> Option<SourceValue> {
+fn source_value(slot: Slot, state: SlotState) -> Option<PublicationValue> {
     match state {
         SlotState::Empty => None,
-        SlotState::Value(value) => Some(SourceValue::Value(value)),
+        SlotState::Value(value) => Some(PublicationValue::Native(value)),
         SlotState::Cell(handle) if matches!(slot, Slot::Capture(_)) => {
-            Some(SourceValue::Capture(handle))
+            Some(PublicationValue::Capture(handle))
         }
-        SlotState::Cell(handle) => Some(SourceValue::Value(Value::ObjectRef(handle))),
+        SlotState::Cell(handle) => Some(PublicationValue::Native(Value::ObjectRef(handle))),
     }
 }
 impl KernelMachine {
@@ -321,7 +321,9 @@ impl KernelMachine {
                 source_value(slot, *state).map(|value| (slot, value))
             })
             .collect::<Vec<_>>();
-        let invocation = self.logical.enter(
+        self.logical
+            .flush(&mut self.arena.borrow_mut(), &self.heap)?;
+        let invocation = self.logical.ledger().borrow_mut().enter_source(
             task,
             &mut self.arena.borrow_mut(),
             &self.heap,
@@ -353,7 +355,9 @@ impl KernelMachine {
         value: Value,
     ) -> Result<(), HeapFault> {
         if let Some(roots) = &frame.logical {
-            self.logical.leave(
+            self.logical
+                .flush(&mut self.arena.borrow_mut(), &self.heap)?;
+            self.logical.ledger().borrow_mut().leave_source(
                 &roots.invocation,
                 &mut self.arena.borrow_mut(),
                 &self.heap,

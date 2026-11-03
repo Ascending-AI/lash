@@ -864,7 +864,8 @@ impl KernelMachine {
     /// needs, from the heap or its pages.
     pub(super) fn warm(&mut self, handle: ArenaHandle, chunk: u32) -> Result<(), Halt> {
         let mut arena = self.arena.borrow_mut();
-        self.logical.handoff(&mut arena, &self.heap)?;
+        self.logical.flush(&mut arena, &self.heap)?;
+        self.logical.ledger().borrow_mut().handoff()?;
         let ledger = self.heap.logical_ledger();
         let fact = if arena
             .facts(handle)

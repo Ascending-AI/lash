@@ -45,7 +45,7 @@ impl KernelMachine {
         task: lash_kernel_doc::TaskId,
         incoming: &super::Incoming,
     ) -> Result<(), HeapFault> {
-        use lash_kernel_state::kernel_internals::logical::{Owner, SourceValue};
+        use lash_kernel_state::kernel_internals::logical::{Owner, PublicationValue};
         let value = match incoming {
             super::Incoming::Value(value) | super::Incoming::Raise(value) => Some(value.clone()),
             super::Incoming::Joined(joined) => self.tasks.ended_result(*joined)?,
@@ -70,14 +70,16 @@ impl KernelMachine {
                 let (CommittedOutcomeRecord::Completed(frozen)
                 | CommittedOutcomeRecord::Failed(frozen)
                 | CommittedOutcomeRecord::Rejected(frozen)) = outcome;
-                self.logical
-                    .replace(Owner::Incoming(task), Some(SourceValue::Frozen(frozen)));
+                self.logical.replace(
+                    Owner::Incoming(task),
+                    Some(PublicationValue::Frozen(frozen)),
+                );
                 return Ok(());
             }
         };
         if let Some(value) = value {
             self.logical
-                .replace(Owner::Incoming(task), Some(SourceValue::Page(value)));
+                .replace(Owner::Incoming(task), Some(PublicationValue::Page(value)));
         }
         Ok(())
     }

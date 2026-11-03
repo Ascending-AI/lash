@@ -582,15 +582,18 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         let (mut live, pages) = fresh();
         let mut arena = crate::arena::Arena::new();
         let lifecycle = Lifecycle::new(live.logical_ledger());
+        lifecycle.flush(&mut arena, &live).unwrap();
         let invocation = lifecycle
-            .enter(
+            .ledger()
+            .borrow_mut()
+            .enter_source(
                 TaskId::MAIN,
                 &mut arena,
                 &live,
                 &[],
                 &[(
                     Slot::Binding(0),
-                    SourceValue::Value(lash_kernel_doc::Value::Int(7)),
+                    PublicationValue::Native(lash_kernel_doc::Value::Int(7)),
                 )],
             )
             .unwrap();
@@ -598,7 +601,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         let original = live.sealed_root().unwrap();
         lifecycle.replace(
             invocation.owner(Slot::Binding(0)),
-            Some(SourceValue::Value(lash_kernel_doc::Value::Int(0))),
+            Some(PublicationValue::Native(lash_kernel_doc::Value::Int(0))),
         );
         lifecycle.flush(&mut arena, &live).unwrap();
         assert!(
@@ -642,14 +645,14 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         let cycle = arena.create_list(&[]);
         lifecycle.replace(
             invocation.owner(Slot::Binding(0)),
-            Some(SourceValue::Value(cycle)),
+            Some(PublicationValue::Native(cycle)),
         );
         lifecycle.flush(&mut arena, &live).unwrap();
         arena.list_set(cycle.handle().unwrap(), 0, cycle).unwrap();
         lifecycle.flush(&mut arena, &live).unwrap();
         lifecycle.replace(
             invocation.owner(Slot::Binding(0)),
-            Some(SourceValue::Value(lash_kernel_doc::Value::Null)),
+            Some(PublicationValue::Native(lash_kernel_doc::Value::Null)),
         );
         lifecycle.flush(&mut arena, &live).unwrap();
         assert_eq!(
@@ -1256,12 +1259,13 @@ fn checked_program_and_warm_balance() {
     arena.watch_logical_members();
     let lifecycle = Lifecycle::new(heap.logical_ledger());
     let root = Owner::Incoming(TaskId::MAIN);
-    lifecycle.replace(root, Some(SourceValue::Page(PageValue::List(entity))));
+    lifecycle.replace(root, Some(PublicationValue::Page(PageValue::List(entity))));
     lifecycle.flush(&mut arena, &heap).unwrap();
     let balance = heap.logical_balance().unwrap();
     assert_eq!(balance.total().unwrap(), 48);
     let handle = arena.proxy(entity, ProxyKind::List);
-    lifecycle.handoff(&mut arena, &heap).unwrap();
+    lifecycle.flush(&mut arena, &heap).unwrap();
+    lifecycle.ledger().borrow_mut().handoff().unwrap();
     let fact = heap
         .logical_ledger()
         .borrow()

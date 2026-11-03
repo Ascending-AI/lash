@@ -684,12 +684,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             Opcode::Done => {
                 let sites::Done { leaves, empty } = &code.sites.done[packet.x as usize];
 
-                // A discard still owes its original source End event. It is
-                // an exact handoff, not permission to clear/rebind the frame.
                 if let Some(id) = frame.state.statement {
                     let (stream, statement, _) = self.exe.statement(id);
                     let pc = statement.ops.end() - 1;
-                    if matches!(stream.ops[pc as usize], lash_kernel_exec::Op::End) {
+                    if matches!(stream.ops[pc as usize], lash_kernel_exec::Op::End)
+                        && !self
+                            .publish_discard(frame, pc)
+                            .map_err(|error| self.halt(error.into()))?
+                    {
                         return Err(self.at_held(pc, 0, frame.regs[0]));
                     }
                 }

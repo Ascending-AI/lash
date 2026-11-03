@@ -437,7 +437,8 @@ fn entered_nested_scope_publication() {
     use lash_kernel_state::kernel_internals::{
         PagedHeap,
         logical::{
-            FrameEvent, JournalEvent, Ledger, Lifecycle, Owner as Root, Program, Slot, SourceValue,
+            FrameEvent, JournalEvent, Ledger, Lifecycle, Owner as Root, Program, PublicationValue,
+            Slot,
         },
     };
     use lash_kernel_value::{Name, sites::Site};
@@ -561,21 +562,27 @@ fn entered_nested_scope_publication() {
     let ledger_store = heap.logical_ledger();
     let lifecycle = Lifecycle::new(ledger_store.clone());
     let mut arena = lash_kernel_state::arena::Arena::new();
+    lifecycle.flush(&mut arena, heap).unwrap();
     let caller = lifecycle
-        .enter(TaskId::MAIN, &mut arena, heap, &[], &[])
+        .ledger()
+        .borrow_mut()
+        .enter_source(TaskId::MAIN, &mut arena, heap, &[], &[])
         .unwrap();
     let argument = caller.owner(Slot::Argument(0));
-    lifecycle.replace(argument, Some(SourceValue::Value(Value::Int(1))));
+    lifecycle.replace(argument, Some(PublicationValue::Native(Value::Int(1))));
     lifecycle.flush(&mut arena, heap).unwrap();
     // The canonical entry owner consumes the evaluated caller argument and
     // initializes the actual admitted formal slot before the body interval.
+    lifecycle.flush(&mut arena, heap).unwrap();
     let invocation = lifecycle
-        .enter(
+        .ledger()
+        .borrow_mut()
+        .enter_source(
             TaskId::MAIN,
             &mut arena,
             heap,
             &[argument],
-            &[(argument_slot, SourceValue::Value(Value::Int(1)))],
+            &[(argument_slot, PublicationValue::Native(Value::Int(1)))],
         )
         .unwrap();
     let parameter = invocation.owner(argument_slot);
@@ -596,7 +603,7 @@ fn entered_nested_scope_publication() {
         17
     );
     let kept = invocation.owner(nested_slot);
-    lifecycle.replace(kept, Some(SourceValue::Value(Value::Int(2))));
+    lifecycle.replace(kept, Some(PublicationValue::Native(Value::Int(2))));
     lifecycle.flush(&mut arena, heap).unwrap();
 
     let mut scope = code

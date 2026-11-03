@@ -3,6 +3,7 @@ mod binding;
 mod calling;
 mod closure;
 mod construction;
+mod end;
 mod frame_entry;
 mod initial_entry;
 mod loop_entry;
@@ -30,7 +31,7 @@ use super::*;
 use crate::compile::room::{self, publication::Frontier};
 use crate::machine::source_publication::{LeafExecution, LeafFacts, ScopeLoop};
 use lash_kernel_doc::{self as doc, heap::HeapFault};
-use lash_kernel_state::kernel_internals::logical::{Invocation, Owner, SourceValue};
+use lash_kernel_state::kernel_internals::logical::{Invocation, Owner, PublicationValue};
 
 pub(in crate::machine::islands) struct Activation {
     pub(in crate::machine::islands) invocation: Invocation,
@@ -140,9 +141,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 source_value(slot, *state).map(|value| (slot, value))
             })
             .collect::<Vec<_>>();
+        self.logical.flush(self.arena, self.heap)?;
         let invocation = self
             .logical
-            .enter(self.task, self.arena, self.heap, inputs, &bindings)?;
+            .ledger()
+            .borrow_mut()
+            .enter_source(self.task, self.arena, self.heap, inputs, &bindings)?;
         self.logical_memory
             .set(self.heap.logical_balance()?.total()?);
         Ok(Activation {
@@ -189,7 +193,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 )
                 .ok_or_else(|| malformed("packet argument has no source owner"))?;
             self.logical
-                .replace(owner, Some(SourceValue::Value(frame.regs[reg.ix()])));
+                .replace(owner, Some(PublicationValue::Native(frame.regs[reg.ix()])));
             if args.contains(&reg.0) {
                 inputs.push(owner);
             }
@@ -232,7 +236,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         self.source_clear_operands(frame)?;
         for (owner, value) in saved {
             self.logical
-                .replace(*owner, Some(SourceValue::Value(*value)));
+                .replace(*owner, Some(PublicationValue::Native(*value)));
         }
         self.logical.flush(self.arena, self.heap)
     }
@@ -285,7 +289,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             self.logical.rebind(owner, None);
         }
         let publish =
-            |selector: room::Owner, value: Option<SourceValue>| -> Result<(), HeapFault> {
+            |selector: room::Owner, value: Option<PublicationValue>| -> Result<(), HeapFault> {
                 if let Some(value) = value {
                     let owner = slots
                         .root(&selector, self.task, activation.invocation.id())
@@ -306,11 +310,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     let site = &self.exe.stmt(stmt).site;
                     publish(
                         room::Owner::LoopCursor(site.clone()),
-                        cursor.map(SourceValue::Value),
+                        cursor.map(PublicationValue::Native),
                     )?;
                     publish(
                         room::Owner::LoopHeader(site.clone()),
-                        header.map(SourceValue::Value),
+                        header.map(PublicationValue::Native),
                     )?;
                 }
                 Some(Roles::Try { stmt, pending }) => publish(
@@ -323,7 +327,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if let Some(cleaning) = activation.cleaning {
             publish(
                 room::Owner::ActiveDeparture(source.site.clone()),
-                Some(SourceValue::Value(cleaning.unwrap_or_else(|value| value))),
+                Some(PublicationValue::Native(
+                    cleaning.unwrap_or_else(|value| value),
+                )),
             )?;
         }
         Ok(())
@@ -375,8 +381,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     )
                     .ok_or_else(|| malformed("packet return role has no source owner"))?;
                 self.logical.replace(continuation, None);
-                self.logical
-                    .replace(operand, Some(SourceValue::Value(frame.regs[role.reg.ix()])));
+                self.logical.replace(
+                    operand,
+                    Some(PublicationValue::Native(frame.regs[role.reg.ix()])),
+                );
             }
         }
         if site.act.is_some()
@@ -389,7 +397,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     activation.invocation.id(),
                 )
                 .ok_or_else(|| malformed("packet call result has no source owner"))?;
-            self.logical.replace(owner, Some(SourceValue::Value(value)));
+            self.logical
+                .replace(owner, Some(PublicationValue::Native(value)));
         }
         self.logical.replace(Owner::Incoming(self.task), None);
         self.logical.flush(self.arena, self.heap)
@@ -400,7 +409,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         activation: &Activation,
         value: Value,
     ) -> Result<(), HeapFault> {
-        self.logical.leave(
+        self.logical.flush(self.arena, self.heap)?;
+        self.logical.ledger().borrow_mut().leave_source(
             &activation.invocation,
             self.arena,
             self.heap,
@@ -411,15 +421,15 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
 fn source_value(
     slot: lash_kernel_state::kernel_internals::logical::Slot,
     state: SlotState,
-) -> Option<SourceValue> {
+) -> Option<PublicationValue> {
     use lash_kernel_state::kernel_internals::logical::Slot;
     match state {
         SlotState::Empty => None,
-        SlotState::Value(value) => Some(SourceValue::Value(value)),
+        SlotState::Value(value) => Some(PublicationValue::Native(value)),
         SlotState::Cell(cell) if matches!(slot, Slot::Capture(_)) => {
-            Some(SourceValue::Capture(cell))
+            Some(PublicationValue::Capture(cell))
         }
-        SlotState::Cell(cell) => Some(SourceValue::Value(Value::ObjectRef(cell))),
+        SlotState::Cell(cell) => Some(PublicationValue::Native(Value::ObjectRef(cell))),
     }
 }
 fn malformed(message: &str) -> HeapFault {

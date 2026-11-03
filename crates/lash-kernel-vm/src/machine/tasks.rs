@@ -929,7 +929,7 @@ impl super::KernelMachine {
         task: TaskId,
         outcome: Result<Value, Value>,
     ) -> Result<(), Halt> {
-        use lash_kernel_state::kernel_internals::logical::{Owner, SourceValue};
+        use lash_kernel_state::kernel_internals::logical::{Owner, PublicationValue};
         let owner = if task == TaskId::MAIN {
             Owner::Incoming(task)
         } else {
@@ -940,7 +940,7 @@ impl super::KernelMachine {
         }
         self.logical.replace(
             owner,
-            Some(SourceValue::Value(
+            Some(PublicationValue::Native(
                 *outcome.as_ref().unwrap_or_else(|value| value),
             )),
         );

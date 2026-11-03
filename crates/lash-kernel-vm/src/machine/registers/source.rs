@@ -5,7 +5,7 @@ use crate::compile::{Stmt, Stream};
 use crate::machine::logical_held::{BankRoots, Held, Projection};
 pub(super) use entry::EntryInputs;
 use lash_kernel_doc::{Value, heap::HeapFault};
-use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, Slot, SourceValue};
+use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, PublicationValue, Slot};
 fn invalid(problem: &str) -> HeapFault {
     HeapFault::Malformed(problem.into())
 }
@@ -385,7 +385,7 @@ impl Operands {
                 invocation: 0,
                 slot: Slot::Argument(index as u32),
             };
-            lifecycle.replace(owner, Some(SourceValue::Value(held.value)));
+            lifecycle.replace(owner, Some(PublicationValue::Native(held.value)));
             held.owner = Some(owner);
         }
         self.entry_roots = Some(lifecycle);
