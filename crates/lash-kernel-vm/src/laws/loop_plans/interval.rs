@@ -165,3 +165,55 @@ pub(super) fn member_read_suffix() {
         Err(Refused::Path | Refused::Exit)
     ));
 }
+
+/// K-BND-002: the native's call envelope and its surviving condition result
+/// are independent symbolic prices, even when this native returns one Bool.
+pub(super) fn scalar_native_condition_peak() {
+    use crate::compile::room::{self, ExitKind, Phase, Point, Selection};
+    use lash_kernel_value::sites::{Site, Unit};
+    let definition = lash_kernel_doc::parse_definition(
+        "function law.condition() -> Bool\nkernel 1\ncharge 1\nnative\n",
+    )
+    .unwrap();
+    let function = definition.identity();
+    let mut document = lash_kernel_doc::parse_document(
+        "numbers by_spelling\nkernel 1\nmain { while false { } return null }",
+    )
+    .unwrap();
+    let lash_kernel_doc::Stmt::While { condition, .. } = &mut document.main.as_mut().unwrap()[0]
+    else {
+        unreachable!()
+    };
+    *condition = lash_kernel_doc::Expr::Call {
+        function,
+        args: vec![],
+    };
+    let source = std::sync::Arc::new(room::Source::compile(
+        lash_kernel_doc::constant_pool::PoolOwner::Document(document.identity()),
+        Site::new(Unit::Main, vec![]),
+        document.main.as_ref().unwrap(),
+        &[],
+        Default::default(),
+        &std::collections::BTreeMap::from([(function, definition)]),
+        &Default::default(),
+    ));
+    let from = Point {
+        site: source.site.child(0).child(0),
+        phase: Phase::Commit,
+    };
+    let through = Point {
+        site: source.site.child(0),
+        phase: Phase::Test,
+    };
+    let route = [from.clone(), through.clone()].map(|at| Selection::Event {
+        at,
+        exit: ExitKind::Normal,
+    });
+    let interval = source.compile_between(&from, &through, &route, 2).unwrap();
+    let region = source.compile_scalar_region(interval).unwrap();
+    assert_eq!(region.verify(), Ok(()));
+    assert!(
+        !region.recovery_after(&from).unwrap().is_empty(),
+        "the condition result stays recoverable before Test consumes it"
+    );
+}

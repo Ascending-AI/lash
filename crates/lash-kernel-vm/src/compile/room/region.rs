@@ -315,6 +315,9 @@ impl Compiler<'_> {
                 self.release(self.slot(input)?)?;
             }
             self.delta.add(&Polynomial::variable(result.price), 1)?;
+            // The callee envelope and the retained result are independent
+            // prices. Its successor can observe the result before releasing it.
+            self.peak(&Polynomial::default())?;
             return Ok(());
         }
         if let [Owner::Operand(rhs)] = &*event.inputs

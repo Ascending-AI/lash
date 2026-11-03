@@ -609,6 +609,7 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
     room_unpooled_immutable_growth();
     placement::binding_values();
     scalar_region_lifetimes();
+    interval::scalar_native_condition_peak();
     charges::compiled_charges();
     interval::member_read_suffix();
     let source = room_numeric_source();
