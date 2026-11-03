@@ -10,9 +10,6 @@ pub(super) fn derive(
     pending: Option<Option<expr::Close>>,
 ) -> Result<(Vec<Close>, Vec<Formula>, Point), Refused> {
     let (stream, stmt, _) = exe.statement(statement);
-    if range.len != 1 || range.start < stmt.ops.start || range.end() > stmt.ops.end() {
-        return Err(Refused::Source);
-    }
     // Verify the original source/physical graph, even though this coverage
     // deliberately contains none of its already-completed fixed closes.
     let canonical = match stmt.form {
@@ -23,6 +20,9 @@ pub(super) fn derive(
         }
         _ => stmt.ops,
     };
+    if range.len != 1 || range.start < canonical.start || range.end() > canonical.end() {
+        return Err(Refused::Source);
+    }
     canonical_span(exe, code, statement, canonical)?;
     let op = *stream
         .ops

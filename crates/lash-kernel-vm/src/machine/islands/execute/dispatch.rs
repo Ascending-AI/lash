@@ -80,12 +80,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             }
             Opcode::Header => {
                 let sites::Header {
+                    entry,
                     repeat,
                     id,
                     cost,
                     metered,
                     at,
-                    item_hook,
                     otherwise,
                     ..
                 } = &code.sites.header[packet.x as usize];
@@ -93,46 +93,21 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 if self.deferred_end.is_some() {
                     self.progressed();
                 }
-                // No header fact is committed until the complete charge
-                // prefix and (for a cursor) the resident next item fit.
-                // A refusal resumes next_iteration in this same step.
-                let next = if let Some(at) = at {
-                    let Some(Position::Loop {
-                        cursor: Some(cursor),
-                        guard,
-                        ..
-                    }) = frame.state.control.last()
-                    else {
-                        return Err(self.halt(fault("a for header has no cursor")));
-                    };
-                    if *item_hook || guard.is_some() {
-                        self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                        return Err(Stop);
-                    }
-                    let Some(next) = cursor.resident_step(self.arena) else {
-                        self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                        return Err(Stop);
-                    };
-                    match next {
-                        Ok((cursor, value)) => Some((*at, cursor, value)),
-                        _ => {
-                            self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                            #[cfg(any(test, feature = "perf-witness"))]
-                            {
-                                self.scratch.exit.reason = Some(Reason::ResidentRead);
-                            }
-                            return Err(Stop);
+                if at.is_some() {
+                    if let Some(entry) = entry {
+                        if self
+                            .publish_loop_entry(frame, entry, None, *otherwise)
+                            .map_err(|e| self.halt(e.into()))?
+                        {
+                            return Ok(Next::Continue);
                         }
                     }
-                } else {
-                    None
-                };
-                if next.as_ref().is_some_and(|(at, _, value)| {
-                    value.is_some() && frame.state.callee.plan.shared[*at] && !self.cell_room(1)
-                }) {
                     self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
                     return Err(Stop);
                 }
+                // No header fact is committed until the complete charge
+                // prefix and (for a cursor) the resident next item fit.
+                // A refusal resumes next_iteration in this same step.
                 if !self.fits((if self.accounting { *cost } else { 0 }).saturating_add(*metered)) {
                     self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
                     #[cfg(any(test, feature = "perf-witness"))]
@@ -170,52 +145,29 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         .ok_or_else(|| self.halt(fault("loop occurrence overflow")))?;
                 }
                 self.covered = false;
-                if let Some((at, next_cursor, value)) = next {
-                    let Some(Position::Loop {
-                        cursor, started, ..
-                    }) = frame.state.control.last_mut()
-                    else {
-                        return Err(self.halt(fault("a for header left its loop")));
-                    };
-                    *cursor = Some(next_cursor);
-                    match value {
-                        Some(value) => {
-                            *started = started
-                                .checked_add(1)
-                                .ok_or_else(|| self.halt(fault("loop occurrence overflow")))?;
-                            frame.slots[at] = if frame.state.callee.plan.shared[at] {
-                                SlotState::Cell(self.arena.new_cell(value))
-                            } else {
-                                SlotState::Value(value)
-                            };
-                        }
-                        None => frame.state.pc = *otherwise,
-                    }
-                } else {
-                    frame.state.statement = Some(*id);
-                }
+                frame.state.statement = Some(*id);
             }
             Opcode::LoopBranch => {
-                let sites::LoopBranch { reg, pc, otherwise } =
-                    &code.sites.loop_branch[packet.x as usize];
+                let sites::LoopBranch {
+                    entry,
+                    reg,
+                    pc,
+                    otherwise,
+                } = &code.sites.loop_branch[packet.x as usize];
 
                 self.transient = self
                     .transient
                     .saturating_sub(std::mem::take(&mut frame.state.transient));
-                match regs[*reg as usize] {
-                    Value::Bool(true) => {
-                        let Some(Position::Loop { started, .. }) = frame.state.control.last_mut()
-                        else {
-                            return Err(self.halt(fault("a while test left its loop")));
-                        };
-                        *started = started
-                            .checked_add(1)
-                            .ok_or_else(|| self.halt(fault("loop occurrence overflow")))?;
+                let value = regs[*reg as usize];
+                if let Some(entry) = entry {
+                    if self
+                        .publish_loop_entry(frame, entry, Some(value), *otherwise)
+                        .map_err(|e| self.halt(e.into()))?
+                    {
+                        return Ok(Next::Continue);
                     }
-                    Value::Bool(false) => frame.state.pc = *otherwise,
-                    _ => return Err(self.at(*pc)),
                 }
-                frame.state.statement = None;
+                return Err(self.at(*pc));
             }
             Opcode::EndLoop => {
                 if !matches!(frame.state.control.pop(), Some(Position::Loop { .. })) {
@@ -611,8 +563,24 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             Opcode::Close => {
                 let sites::Close { close, covered, .. } = &code.sites.close[packet.x as usize];
 
-                if !self.defer_original_close(frame, close)? && !self.close_in(close, *covered) {
-                    return Err(self.at(close.head));
+                let before = self.charged;
+                if !self.defer_original_close(frame, close)? {
+                    if !self.close_in(close, *covered) {
+                        return Err(self.at(close.head));
+                    }
+                    if let Some(id) = frame.state.statement
+                        && let Some(source) = frame.state.source.as_mut()
+                    {
+                        source.loop_input =
+                            crate::compile::room::publication::boundary::PaidLoopInput::record(
+                                self.exe,
+                                frame.state.callee.plan.code,
+                                id,
+                                *close,
+                                before,
+                                self.charged,
+                            );
+                    }
                 }
             }
             Opcode::Write => {

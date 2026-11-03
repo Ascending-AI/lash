@@ -385,7 +385,7 @@ impl<'e> Build<'e> {
             self.placement.as_ref()?.code(),
             self.statement?,
             pc,
-            self.charged.then_some(close).flatten(),
+            close,
         )
         .ok()
         .map(std::sync::Arc::new)
@@ -527,6 +527,14 @@ impl<'e> Build<'e> {
                     texts: Box::default(),
                 });
                 let header = self.emit(Op::Header {
+                    entry: self.placement.as_ref().and_then(|p| {
+                        crate::compile::room::publication::boundary::LoopEntry::compile(
+                            self.exe,
+                            p,
+                            statement.id,
+                        )
+                        .ok()
+                    }),
                     repeat: None,
                     id: statement.id,
                     cost: *cost,
@@ -540,6 +548,14 @@ impl<'e> Build<'e> {
                 self.close(*close, *reg);
                 self.open = None;
                 let branch = self.emit(Op::LoopBranch {
+                    entry: self.placement.as_ref().and_then(|p| {
+                        crate::compile::room::publication::boundary::LoopEntry::compile(
+                            self.exe,
+                            p,
+                            statement.id,
+                        )
+                        .ok()
+                    }),
                     reg: *reg,
                     pc: *pc,
                     otherwise: 0,
@@ -574,6 +590,14 @@ impl<'e> Build<'e> {
                     }))
                 });
                 self.ops[header].op = Op::Header {
+                    entry: self.placement.as_ref().and_then(|p| {
+                        crate::compile::room::publication::boundary::LoopEntry::compile(
+                            self.exe,
+                            p,
+                            statement.id,
+                        )
+                        .ok()
+                    }),
                     repeat,
                     id: statement.id,
                     cost: *cost,
@@ -584,6 +608,14 @@ impl<'e> Build<'e> {
                     after,
                 };
                 self.ops[branch].op = Op::LoopBranch {
+                    entry: self.placement.as_ref().and_then(|p| {
+                        crate::compile::room::publication::boundary::LoopEntry::compile(
+                            self.exe,
+                            p,
+                            statement.id,
+                        )
+                        .ok()
+                    }),
                     reg: *reg,
                     pc: *pc,
                     otherwise: exhausted,
@@ -618,6 +650,14 @@ impl<'e> Build<'e> {
                 });
                 self.live.clear();
                 let header = self.emit(Op::Header {
+                    entry: self.placement.as_ref().and_then(|p| {
+                        crate::compile::room::publication::boundary::LoopEntry::compile(
+                            self.exe,
+                            p,
+                            statement.id,
+                        )
+                        .ok()
+                    }),
                     repeat: None,
                     id: statement.id,
                     cost: *cost,
@@ -642,6 +682,14 @@ impl<'e> Build<'e> {
                     texts,
                 };
                 self.ops[header].op = Op::Header {
+                    entry: self.placement.as_ref().and_then(|p| {
+                        crate::compile::room::publication::boundary::LoopEntry::compile(
+                            self.exe,
+                            p,
+                            statement.id,
+                        )
+                        .ok()
+                    }),
                     repeat: None,
                     id: statement.id,
                     cost: *cost,

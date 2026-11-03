@@ -673,7 +673,17 @@ impl Source {
                     }
                     self.first_event(&at.site.child(1))
                 }
-                Successor::Cursor(_) => Err(Refused::Path),
+                Successor::Cursor(true) => {
+                    let mut node = doc::Node::Block(&self.body);
+                    for index in &at.site.path[self.site.path.len()..] {
+                        node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+                    }
+                    if !matches!(node, doc::Node::Stmt(doc::Stmt::For { via: None, .. })) {
+                        return Err(Refused::Source);
+                    }
+                    self.first_event(&at.site.child(1))
+                }
+                Successor::Cursor(false) => Err(Refused::Path),
             },
             Phase::Leave if at.site != self.site => self.exact_scope_successor(&at.site, successor),
             _ => Err(Refused::Path),

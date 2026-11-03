@@ -128,6 +128,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 .ok()?,
             frontier: state.source_frontier.take(),
             original: None,
+            loop_input: None,
             cleaning: state.cleaning,
         });
         Some(frame)

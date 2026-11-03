@@ -4,11 +4,13 @@ use super::super::charges::{ChargeDebt, ChargeProgram, settled::SettledDebt};
 pub(in crate::compile::room) mod schedule;
 pub(in crate::compile::room) mod scoped;
 use super::*;
+mod loop_entry;
 use lash_kernel_state::{
     arena::Arena,
     kernel_internals::logical::{Dependencies, PublicationValue, RootValue},
 };
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
+pub(crate) use loop_entry::{LoopEntry, PaidLoopInput};
 use schedule::BoundaryCharges;
 use schedule::StatementSchedule;
 
@@ -246,6 +248,9 @@ impl CompiledPublication {
 }
 
 impl<D: BoundaryCharges> BoundPublication<D> {
+    pub(crate) fn roots(&self) -> (&[logical::Owner], &[(logical::Owner, PublicationValue)]) {
+        (&self.evidence.inputs, &self.evidence.outputs)
+    }
     /// The call verifier supplies its one ledger-owned reservation and the
     /// genuinely completed prefix. The source plan requires exactly that many.
     pub(in crate::compile::room) fn with_invocations(

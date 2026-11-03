@@ -13,12 +13,14 @@ pub(in crate::compile::room) use event_packet::prefix::OriginalPayment;
 #[cfg(test)]
 pub(crate) use event_packet::prefix::OriginalReplay;
 pub(crate) use event_packet::prefix::{AcceptedOriginalPrefix, OriginalCompiler, OriginalPrefix};
+mod loop_header;
 mod native_completion;
 mod returning;
 pub(crate) use returning::ReturnDebt;
 #[derive(Clone, Copy)]
 enum Coverage {
     Span,
+    LoopHeader(bool),
     Callback(compile::CodeId),
     NativeCompletion,
     NativePacket(Option<expr::Close>),
@@ -90,7 +92,7 @@ impl ChargeDebt<'_> {
     /// operation/template depth. Consumers cannot supply those independently.
     pub(crate) fn native_allowance(&self, safe_point: u64) -> Option<crate::admission::Allowance> {
         let strict = match self.program.coverage {
-            Coverage::Span | Coverage::Callback(_) => return None,
+            Coverage::Span | Coverage::Callback(_) | Coverage::LoopHeader(_) => return None,
             Coverage::NativeCompletion | Coverage::ConstructorPacket { .. } => false,
             Coverage::NativePacket(_) | Coverage::NativeAfterCloses | Coverage::EventPacket(_) => {
                 true
@@ -199,6 +201,7 @@ impl ChargeProgram {
             return Err(Refused::Source);
         }
         let (closes, formulas, first) = match self.coverage {
+            Coverage::LoopHeader(ending) => loop_header::derive(exe, code, self.statement, ending)?,
             Coverage::Span => {
                 let (closes, formulas) = derive(exe, code, self.statement, self.range)?;
                 (
@@ -242,7 +245,7 @@ impl ChargeProgram {
             )?,
         };
         let native_depth = match self.coverage {
-            Coverage::Span | Coverage::Callback(_) => None,
+            Coverage::Span | Coverage::Callback(_) | Coverage::LoopHeader(_) => None,
             Coverage::EventPacket(_) | Coverage::ConstructorPacket { .. } => Some(0),
             Coverage::NativeCompletion => Some(native_completion::depth(
                 exe,

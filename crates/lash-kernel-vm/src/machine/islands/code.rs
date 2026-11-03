@@ -322,6 +322,7 @@ operations! {
                 texts: Box<[usize]>,
             }
             Header header {
+                entry: Option<std::sync::Arc<crate::compile::room::publication::boundary::LoopEntry>>,
                 repeat: Option<Box<RepeatSite>>,
                 id: StmtId,
                 cost: u64,
@@ -332,6 +333,7 @@ operations! {
                 after: usize,
             }
             LoopBranch loop_branch {
+                entry: Option<std::sync::Arc<crate::compile::room::publication::boundary::LoopEntry>>,
                 reg: u32,
                 pc: u32,
                 otherwise: usize,

@@ -321,6 +321,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     invocation,
                     frontier: Some(frontier),
                     original: None,
+                    loop_input: None,
                     cleaning: None,
                 });
                 inner.boundary = boundary;

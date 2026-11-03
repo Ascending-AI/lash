@@ -5,6 +5,7 @@ mod closure;
 mod construction;
 mod frame_entry;
 mod initial_entry;
+mod loop_entry;
 mod member;
 mod native;
 mod parameters;
@@ -34,6 +35,7 @@ use lash_kernel_state::kernel_internals::logical::{Invocation, Owner, SourceValu
 pub(in crate::machine::islands) struct Activation {
     pub(in crate::machine::islands) invocation: Invocation,
     pub(in crate::machine::islands) frontier: Option<Frontier>,
+    pub(in crate::machine::islands) loop_input: Option<room::publication::boundary::PaidLoopInput>,
     pub(in crate::machine::islands) original: Option<room::charges::AcceptedOriginalPrefix>,
     pub(in crate::machine::islands) cleaning: Option<Result<Value, Value>>,
 }
@@ -147,6 +149,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             invocation,
             frontier: None,
             original: None,
+            loop_input: None,
             cleaning: None,
         })
     }
