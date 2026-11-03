@@ -134,9 +134,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(activation) = frame.state.source.as_mut() else {
             return Ok(ValuePublication::Unavailable);
         };
-        if body.is_some() && activation.original.is_some() {
-            return Ok(ValuePublication::Declined);
-        }
         let slots = source
             .owner_slots()
             .map_err(|_| malformed("text source owners failed verification"))?;

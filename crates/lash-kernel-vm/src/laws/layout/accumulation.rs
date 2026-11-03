@@ -189,6 +189,7 @@ fn run_selected(
 /// charge and held byte when its scalar or text guard answers or fails.
 #[test]
 fn accumulations_agree() {
+    original_text_body_prefixes();
     prepared_text_prefixes();
     prepared_text_bodies();
     use crate::machine::islands::witness::{self, Exit, Family};
@@ -353,6 +354,38 @@ fn accumulations_agree() {
             );
         }
     }
+    // A real kind miss still takes the exact body. Accepted original text
+    // prefixes now succeed, so they no longer supply this guard witness.
+    let guarded = scalar_document(
+        r#"try { do law.append(1, "text") } catch error { print error } return null"#,
+    );
+    let expected = run_selected(
+        &guarded,
+        false,
+        u64::MAX,
+        super::super::embedder::ROOMY,
+        Layout(0),
+        (super::ExecutionMode::Source, false),
+        false,
+    );
+    for mode in [
+        super::ExecutionMode::Generic,
+        super::ExecutionMode::Specialized,
+    ] {
+        assert_eq!(
+            run_selected(
+                &guarded,
+                false,
+                u64::MAX,
+                super::super::embedder::ROOMY,
+                Layout(0),
+                (mode, false),
+                false,
+            ),
+            expected,
+            "text kind guard {mode:?}"
+        );
+    }
     let counts = witness::take();
     for exit in [Exit::Commit, Exit::Guard, Exit::Prefix] {
         assert!(
@@ -489,6 +522,93 @@ fn accumulations_agree() {
                             receipts > 0,
                             "the staged text consumer must settle the actual original receipt: {mode:?}, record={record}"
                         );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// K-CHG-001 / K-MACH-008: a deferred literal's accepted original close
+/// continues into the actual forwarding body, with its frame and native peak.
+fn original_text_body_prefixes() {
+    let source = scalar_document(
+        r#"let text = law.append("abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyzé😀", "é😀") do perform 0(text) as Any return text"#,
+    );
+    for record in [false, true] {
+        let reference = run_selected(
+            &source,
+            record,
+            u64::MAX,
+            super::super::embedder::ROOMY,
+            Layout(0),
+            (super::ExecutionMode::Source, false),
+            false,
+        );
+        let charged = reference.2.last().unwrap().1.charged.unwrap();
+        let bounds = [
+            super::super::embedder::ROOMY,
+            Bounds {
+                charge_limit: charged - 1,
+                ..super::super::embedder::ROOMY
+            },
+            Bounds {
+                charge_limit: charged,
+                ..super::super::embedder::ROOMY
+            },
+            Bounds {
+                memory: 512,
+                ..super::super::embedder::ROOMY
+            },
+            Bounds {
+                memory: 1024,
+                ..super::super::embedder::ROOMY
+            },
+        ];
+        for layout in [Layout(0), Layout(42)] {
+            for (limit, bounds) in bounds.into_iter().enumerate() {
+                for slice in [u64::MAX, 1, 7] {
+                    let cold = slice != u64::MAX;
+                    let expected = run_selected(
+                        &source,
+                        record,
+                        slice,
+                        bounds,
+                        layout,
+                        (super::ExecutionMode::Source, cold),
+                        false,
+                    );
+                    for mode in [
+                        super::ExecutionMode::Generic,
+                        super::ExecutionMode::Specialized,
+                    ] {
+                        crate::machine::islands::take_original_text_publications();
+                        crate::machine::islands::take_body_text_publications();
+                        let actual = run_selected(
+                            &source,
+                            record,
+                            slice,
+                            bounds,
+                            layout,
+                            (mode, cold),
+                            false,
+                        );
+                        let original = crate::machine::islands::take_original_text_publications();
+                        let bodies = crate::machine::islands::take_body_text_publications();
+                        assert_eq!(
+                            actual, expected,
+                            "original body text {mode:?}, record={record}, slice={slice}, limit={limit}, layout={}",
+                            layout.0
+                        );
+                        // Layout 42 deliberately splits original charge regions;
+                        // its deferred literal may end before the call. Default
+                        // placement must execute this compound original prefix.
+                        if slice == u64::MAX && limit == 0 && layout == Layout(0) {
+                            assert!(
+                                original > 0 && bodies > 0,
+                                "the single append must settle its original receipt and real body: {mode:?}, record={record}, original={original}, bodies={bodies}"
+                            );
+                        }
                     }
                 }
             }
