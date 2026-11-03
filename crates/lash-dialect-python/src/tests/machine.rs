@@ -2093,7 +2093,6 @@ fn whole_path_packets_agree() {
         }
         ((outcome, stops, cold), exits, packets)
     };
-    let mut charges = Vec::new();
     for (family, source, program) in &cases {
         let (reference, _, _) = observe(program, BOUNDS, false, Mode::Source);
         assert!(matches!(reference.0.0.end, End::Finished(_)));
@@ -2114,9 +2113,7 @@ fn whole_path_packets_agree() {
         let (generic, _, packets) = observe(program, BOUNDS, false, Mode::GenericPackets);
         assert_eq!(generic, reference, "generic Python {family:?}");
         assert!(packets.0 > 0);
-        charges.push(charged);
-    }
-    for (family, _, program) in &cases {
+
         for rebuild in [false, true] {
             let (reference, _, _) = observe(program, BOUNDS, rebuild, Mode::Source);
             for mode in [Mode::GenericPackets, Mode::Optimized] {
@@ -2150,8 +2147,6 @@ fn whole_path_packets_agree() {
                 );
             }
         }
-    }
-    for ((family, _, program), charged) in cases.iter().zip(charges) {
         for charge_limit in 0..charged {
             if charge_limit.is_multiple_of(256) {
                 println!("Python {family:?} charge bound {charge_limit}/{charged}");
