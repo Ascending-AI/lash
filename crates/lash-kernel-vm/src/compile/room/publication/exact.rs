@@ -78,6 +78,7 @@ pub(crate) struct PreparedEvent<'a> {
     before: Position,
     next: Position,
     transaction: BoundaryTransaction<'a>,
+    release_only: bool,
     allowance: Allowance,
     resources: ResourceFacts,
 }
@@ -552,12 +553,15 @@ impl BoundEvent {
         let transaction = transaction
             .require_source_room(balance.peak_extra)
             .ok_or_else(|| fault("exact source room overflow"))?;
+        let release_only =
+            self.roots.outputs.is_empty() && balance.peak_extra == 0 && balance.retained_delta <= 0;
         Ok(PreparedEvent {
             frontier: self.frontier,
             revision: self.revision,
             before: self.before,
             next: self.next,
             transaction,
+            release_only,
             allowance: self.allowance,
             resources: self.resources,
         })
@@ -565,6 +569,13 @@ impl BoundEvent {
 }
 
 impl<'a> PreparedEvent<'a> {
+    /// The canonical event creates no root or interior acquisition. An
+    /// over-bound incoming value may therefore take its precise retirement
+    /// path before the statement's final capacity verdict.
+    pub(crate) fn releases_only(&self) -> bool {
+        self.release_only
+    }
+
     pub(crate) fn peak(&self) -> u64 {
         self.transaction.peak()
     }

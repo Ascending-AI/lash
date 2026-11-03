@@ -195,10 +195,10 @@ impl Context<'_> {
             Admission::Exact(mut memory) => {
                 if memory.exceeded(prepared.peak()) {
                     prepared = prepared.collect(&ledger, self.heap)?;
-                    // A conservative certificate miss cannot refuse an
-                    // untouched source event. In particular, an inbound value
-                    // may exceed the bound until its do statement releases it.
-                    if memory.exceeded(prepared.peak()) {
+                    // A retirement cannot turn an already-held inbound value
+                    // into an allocation refusal. Its exact handler releases
+                    // that value before the statement's capacity verdict.
+                    if prepared.releases_only() && memory.exceeded(prepared.peak()) {
                         return Ok(false);
                     }
                 }
