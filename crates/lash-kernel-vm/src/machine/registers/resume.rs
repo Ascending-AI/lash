@@ -45,6 +45,18 @@ impl PreparedResume<'_> {
     }
 }
 impl Registers {
+    /// Only the physical mirror moves; live callers remain ledger-owned.
+    pub(in crate::machine) fn discard_replay_source_bank(
+        &mut self,
+        ledger: &Ledger,
+        heap: &lash_kernel_state::kernel_internals::PagedHeap,
+        current: &lash_kernel_state::kernel_internals::logical::Invocation,
+    ) -> Result<(), HeapFault> {
+        if self.source.replay_can_replace(ledger, heap, current)? {
+            self.source = source::Operands::default();
+        }
+        Ok(())
+    }
     pub(in crate::machine) fn prepare_source_resume(
         &mut self,
         at: ResumeAt,

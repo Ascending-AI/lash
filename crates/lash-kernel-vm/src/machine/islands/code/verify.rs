@@ -35,22 +35,9 @@ macro_rules! close_site {
         }
     )* };
 }
-close_site!(
-    OperatorSite,
-    HeapSite,
-    NativeSite,
-    CallSite,
-    WriteSite,
-    UnitSite
-);
+close_site!(OperatorSite, NativeSite, CallSite, WriteSite, UnitSite);
 
 impl Closes for sites::Native {
-    fn verify(&self, stream: &Stream) -> Result<(), Refused> {
-        self.site.verify(stream)
-    }
-}
-
-impl Closes for sites::Heap {
     fn verify(&self, stream: &Stream) -> Result<(), Refused> {
         self.site.verify(stream)
     }

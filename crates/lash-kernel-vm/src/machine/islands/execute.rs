@@ -377,10 +377,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             if OBSERVING
                 && let Some(watching) = &self.projection()
                 && watching.sites()
-                && matches!(
-                    packet.opcode,
-                    Opcode::Call | Opcode::Operator | Opcode::Heap
-                )
+                && matches!(packet.opcode, Opcode::Call | Opcode::Operator)
             {
                 let mut loops = Vec::new();
                 for frame in callers.iter().chain(std::iter::once(&*active)) {

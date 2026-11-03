@@ -1,6 +1,6 @@
 //! Projections of committed register facts. Observation owns no guest state.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 
 use lash_kernel_doc::TaskId;
 use {
@@ -10,8 +10,8 @@ use {
 };
 
 use super::*;
-use crate::compile::{BlockId, LibId};
-use crate::observe::{Event, GuestPhase, Observer};
+use crate::compile::BlockId;
+use crate::observe::{Event, Observer};
 use lash_kernel_doc::heap::HeapFault;
 
 pub(super) type Coordinates = (
@@ -35,14 +35,9 @@ pub(crate) struct Watching<'a> {
     task: TaskId,
     identity: Option<Result<TaskIdentity, HeapFault>>,
     loops: Result<Vec<LoopIteration>, HeapFault>,
-    native: Cell<bool>,
     active_loops: RefCell<Vec<LoopIteration>>,
     host: Option<RefCell<&'a mut dyn crate::Host>>,
     sites: bool,
-    lib: Cell<LibId>,
-    fast: Cell<bool>,
-    formulas: Cell<u64>,
-    guard: Cell<u64>,
 }
 
 impl<'a> Watching<'a> {
@@ -67,12 +62,7 @@ impl<'a> Watching<'a> {
             loops,
             host: host.map(RefCell::new),
             sites,
-            native: Cell::new(false),
             active_loops: RefCell::new(Vec::new()),
-            lib: Cell::new(LibId(0)),
-            fast: Cell::new(false),
-            formulas: Cell::new(0),
-            guard: Cell::new(0),
         }))
     }
 
@@ -190,68 +180,9 @@ impl<'a> Watching<'a> {
                 occurrence,
                 loops,
             });
-            let native = self.native.replace(false);
-            if native {
-                self.phase(None);
-            }
             host.borrow_mut().enter_site(&EffectLocation::authored(at));
-            if native {
-                self.native.set(true);
-                self.phase(Some(GuestPhase::Native(self.lib.get().0)));
-            }
         }
         Ok(())
-    }
-
-    /// Context phases are live during the semantic operation; counters commit
-    /// only with its answer, so a precise slow exit records no speculative call.
-    pub(crate) fn reset_facts(&self) {
-        self.fast.set(false);
-        self.formulas.set(0);
-        self.guard.set(0);
-    }
-
-    pub(crate) fn native_begin(&self, lib: LibId) {
-        self.lib.set(lib);
-        self.native.set(true);
-        self.reset_facts();
-        self.phase(Some(GuestPhase::Native(lib.0)));
-    }
-
-    pub(crate) fn guard_work(&self, units: u64) {
-        self.guard.set(units);
-    }
-
-    fn phase(&self, phase: Option<GuestPhase>) {
-        if let Some(observer) = &self.observer
-            && let Some(context) = &mut observer.borrow_mut().context
-        {
-            match phase {
-                Some(phase) => context.enter(phase),
-                None => context.leave(),
-            }
-        }
-    }
-
-    pub(super) fn native_end(&self, committed: bool, before: (u64, u64), after: (u64, u64)) {
-        self.phase(None);
-        self.native.set(false);
-        if committed
-            && let Some(observer) = &self.observer
-            && let Some(work) = &mut observer.borrow_mut().work
-        {
-            work.flush(before.0, before.1);
-            work.native_enter(self.task.0 as usize, self.lib.get().0);
-            if self.fast.get() {
-                work.native_fast();
-            }
-            work.guard_work(self.guard.get());
-            for _ in 0..self.formulas.get() {
-                work.formula(self.lib.get().0);
-            }
-            work.flush(after.0, after.1);
-            work.native_exit();
-        }
     }
 
     pub(super) fn push(&self, code: CodeId, charged: u64, allocated: u64) {
@@ -307,50 +238,9 @@ impl FramePublication for Sampling<'_> {
     }
 }
 
-impl<const OBSERVING: bool> Island<'_, OBSERVING> {
-    #[inline(always)]
-    pub(super) fn observed_native(
-        &mut self,
-        lib: LibId,
-        operation: impl FnOnce(&mut Self) -> Answer,
-    ) -> Answer {
-        if self.projection().is_none() {
-            return operation(self);
-        }
-        let before = (self.charged, self.arena.allocations());
-        if let Some(watching) = &self.projection() {
-            watching.native_begin(lib);
-        }
-        let answer = operation(self);
-        if let Some(watching) = &self.projection() {
-            watching.native_end(
-                answer.is_ok(),
-                before,
-                (self.charged, self.arena.allocations()),
-            );
-        }
-        answer
-    }
-}
-
-impl crate::observe::NativeObservation for Watching<'_> {
-    fn guard_work(&self, units: u64) {
-        Watching::guard_work(self, units);
-    }
-    fn formula_enter(&self) {
-        self.formulas.set(self.formulas.get() + 1);
-        self.phase(Some(GuestPhase::Formula(self.lib.get().0)));
-    }
-    fn formula_leave(&self) {
-        self.phase(None);
-    }
-}
-
 /// A borrowed projection sink keeps the register program's lifetime independent
 /// of the machine fields lent to observation. It contains no execution policy.
-pub(super) trait Projection: crate::observe::NativeObservation {
-    fn reset_facts(&self);
-    fn general_formula(&self, charging: bool);
+pub(super) trait Projection {
     fn statement(&self, exe: &Executable, fact: StatementFact, meters: (u64, u64));
     fn expressions(&self, stream: &Stream, close: &Close, charging: bool);
     fn empty(&self, exe: &Executable, block: BlockId);
@@ -361,19 +251,10 @@ pub(super) trait Projection: crate::observe::NativeObservation {
     fn sites(&self) -> bool;
     fn loops(&self, loops: Vec<LoopIteration>);
     fn action(&self, exe: &Executable, index: usize, occurrence: u64) -> Result<(), Halt>;
-    fn native_begin(&self, lib: LibId);
-    fn native_end(&self, committed: bool, before: (u64, u64), after: (u64, u64));
     fn push(&self, code: CodeId, charged: u64, allocated: u64);
     fn pop(&self, charged: u64, allocated: u64);
 }
 impl Projection for Watching<'_> {
-    fn reset_facts(&self) {
-        Watching::reset_facts(self);
-    }
-    fn general_formula(&self, charging: bool) {
-        self.fast.set(false);
-        self.formulas.set(u64::from(charging));
-    }
     fn statement(&self, exe: &Executable, fact: StatementFact, meters: (u64, u64)) {
         Watching::statement(self, exe, fact, meters);
     }
@@ -408,26 +289,10 @@ impl Projection for Watching<'_> {
     fn action(&self, exe: &Executable, index: usize, occurrence: u64) -> Result<(), Halt> {
         Watching::action(self, exe, index, occurrence)
     }
-    fn native_begin(&self, lib: LibId) {
-        Watching::native_begin(self, lib);
-    }
-    fn native_end(&self, committed: bool, before: (u64, u64), after: (u64, u64)) {
-        Watching::native_end(self, committed, before, after);
-    }
     fn push(&self, code: CodeId, charged: u64, allocated: u64) {
         Watching::push(self, code, charged, allocated);
     }
     fn pop(&self, charged: u64, allocated: u64) {
         Watching::pop(self, charged, allocated);
-    }
-}
-
-impl Drop for Watching<'_> {
-    fn drop(&mut self) {
-        // The entry owns the published phase before any native or host callback.
-        // Unwinding a callback releases that same obligation.
-        if self.native.get() {
-            self.native_end(false, (0, 0), (0, 0));
-        }
     }
 }

@@ -116,10 +116,6 @@ macro_rules! operations {
                 pub(in crate::machine::islands) site: NativeSite,
                 pub(in crate::machine::islands) args: Box<[u32]>,
             }
-            pub(in crate::machine::islands) struct Heap {
-                pub(in crate::machine::islands) site: HeapSite,
-                pub(in crate::machine::islands) args: Box<[u32]>,
-            }
             $( $( pub(in crate::machine::islands) struct $name {
                 $( pub(in crate::machine::islands) $field: $ty, )*
             } )* )*
@@ -237,10 +233,6 @@ operations! {
             to: Destination,
         }
 
-        Heap {
-            site: HeapSite,
-            args: Box<[u32]>,
-        }
         Native {
             site: NativeSite,
             inputs: NativeInputs,
@@ -343,7 +335,7 @@ operations! {
                 reg: u32,
             }
         }
-        [Native native Heap heap] {
+        [Native native] {
             ScopePrefix scope_prefix {
                 ahead: u64,
                 miss: u32,
@@ -627,11 +619,6 @@ impl Code {
                 });
                 (Opcode::Operator, x, None)
             }
-            Op::Heap { site, args } => {
-                let x = u32::try_from(self.sites.heap.len()).ok()?;
-                self.sites.heap.push(sites::Heap { site, args });
-                (Opcode::Heap, x, None)
-            }
             Op::Native { site, inputs } => {
                 let (args, reads) = match inputs {
                     NativeInputs::Registers(args) => (args, None),
@@ -680,7 +667,7 @@ impl Code {
                         Reason::ResidentRead
                     }
                     Op::Operator { .. } | Op::Unit { .. } => Reason::Operator,
-                    Op::Native { .. } | Op::Heap { .. } => Reason::Native,
+                    Op::Native { .. } => Reason::Native,
                     Op::Call { .. } => Reason::Call,
                     Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => {
                         Reason::Binding
@@ -697,7 +684,6 @@ impl Code {
             library: match op {
                 Op::Native { site, .. } => Some(site.lib),
                 Op::Operator { site, .. } => Some(site.lib),
-                Op::Heap { site, .. } => Some(site.lib),
                 Op::Call { site, .. } => site.library,
                 _ => None,
             },

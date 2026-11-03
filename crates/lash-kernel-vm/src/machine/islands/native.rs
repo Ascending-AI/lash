@@ -37,23 +37,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         Some((value, units))
     }
 
-    /// Resident reads use the native's formula and observation even when
-    /// they need no nursery or argument window. The caller commits those
-    /// facts only after admitting the answer's charge.
+    /// Resident reads supply the native formula to canonical source admission.
     fn read_formula(&self, site: &NativeSite, args: &[Value], value: Value) -> Option<u64> {
-        if let Some(watching) = self.projection() {
-            watching.formula_enter();
-        }
-        let answer = measured_formula(
+        measured_formula(
             self.arena,
             &self.exe.lib(site.lib).charge,
             args,
             Some(&value),
-        );
-        if let Some(watching) = self.projection() {
-            watching.formula_leave();
-        }
-        answer
+        )
     }
 
     /// A membership test's answer ([`crate::compile::Lib::membership`]),

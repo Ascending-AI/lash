@@ -376,26 +376,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                 }
             }
-            Opcode::Heap => {
-                let sites::Heap { site, args } = &code.sites.heap[packet.x as usize];
-                let mut values = [Value::Absent; MAX_ARGS];
-                for (value, reg) in values.iter_mut().zip(args.iter()) {
-                    *value = regs[*reg as usize];
-                }
-                let values = &values[..args.len()];
-                let value = self
-                    .retaining(&mut frame.state.transient, |island| {
-                        island.heap_call(site, values)
-                    })
-                    .inspect_err(|_| {
-                        for (reg, value) in args.iter().zip(values) {
-                            if !self.scratch.exit.regs.iter().any(|(held, _)| held == reg) {
-                                self.scratch.exit.regs.push((*reg, *value));
-                            }
-                        }
-                    })?;
-                frame.regs[site.reg as usize] = value;
-            }
             Opcode::Reserve => {
                 let sites::Reserve {
                     kind,

@@ -77,7 +77,7 @@ use super::sites::SiteCaches;
 use super::tasks::Occurrences;
 use super::{Control, Halt, SlotState, fault};
 pub(crate) use compiled::Compiled;
-use compiled::{Deferred, Depth, Direct, HeapSite, NativeSite, OperatorSite, Read, UnitSite};
+use compiled::{Deferred, Depth, Direct, NativeSite, OperatorSite, Read, UnitSite};
 
 use crate::compile::expr::Close;
 use crate::compile::islands::{HELD_BYTES, IslandPlan, MAX_ARGS};
@@ -736,15 +736,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             Some(units) => units,
             None => match fast.charge(&function.charge, args, &value) {
                 Charge::Units(units) => units,
-                Charge::Plan(plan) => match &self.projection() {
-                    Some(watching) => {
-                        watching.formula_enter();
-                        let answer = measured_formula(self.arena, plan, args, Some(&value));
-                        watching.formula_leave();
-                        answer
-                    }?,
-                    None => measured_formula(self.arena, plan, args, Some(&value))?,
-                },
+                Charge::Plan(plan) => measured_formula(self.arena, plan, args, Some(&value))?,
             },
         };
         Some((value, units))

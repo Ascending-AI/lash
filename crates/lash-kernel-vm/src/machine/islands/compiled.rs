@@ -291,19 +291,6 @@ impl OperatorSite {
     }
 }
 
-/// A prepared heap operation keeps the same semantic call coordinates.
-pub(crate) struct HeapSite {
-    pub(super) lib: LibId,
-    pub(super) close: Option<Close>,
-    pub(super) pc: u32,
-    pub(super) reg: u32,
-    pub(super) depth: Depth,
-    pub(super) checked: bool,
-    pub(super) counted: Option<usize>,
-    pub(super) act: Option<ActIx>,
-    pub(super) root: Option<StmtId>,
-}
-
 /// A compiled general native call.
 pub(crate) struct NativeSite {
     pub(super) lib: LibId,

@@ -162,9 +162,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 }
                 self.answered(function, fast, &arguments, answer)
             })();
-        if prepared && answer.is_none() {
-            return Ok(ValuePublication::Unavailable);
-        }
         let prepared = answer.is_some();
         let LibRun::Native { native, .. } = &function.run else {
             return Ok(ValuePublication::Unavailable);

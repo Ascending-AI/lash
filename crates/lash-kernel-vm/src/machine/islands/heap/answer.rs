@@ -101,11 +101,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 lib,
                 args,
                 Some(extra),
-                if site.checked {
-                    Check::Result
-                } else {
-                    Check::None
-                },
+                site.checked,
                 (before, false),
                 occurrence,
             )

@@ -246,6 +246,31 @@ fn guarded_reads_agree() {
             ])
         )
     );
+    // K-CHG-001: an inline text result uses the installed native contract;
+    // it cannot restore the removed kind/fee memo or qualify by source alone.
+    for generic in [false, true] {
+        let mut run = Embedder::with(
+            "main { let value = 3 return kind(value) }",
+            Setup {
+                probes: Some(guarded_probes),
+                ..Setup::default()
+            },
+        );
+        run.machine.take_native_publications();
+        if generic {
+            run.machine.force_generic_packets();
+        }
+        assert_eq!(
+            result(run.run_to_end(&[])),
+            Datum::Text("integer".into()),
+            "canonical inline native, generic={generic}"
+        );
+        let publications = run.machine.take_native_publications();
+        assert!(
+            publications[1] > 0,
+            "inline native output must publish in its packet: {publications:?}"
+        );
+    }
     let natural = guarded(false, u64::MAX, super::super::embedder::ROOMY);
     // The list path alone retains its length test and item read.
     let items = GUARDED

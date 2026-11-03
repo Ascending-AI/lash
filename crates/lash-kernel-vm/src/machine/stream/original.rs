@@ -92,6 +92,11 @@ impl KernelMachine {
                 },
             });
         }
+        let current = store
+            .borrow()
+            .invocation(running.task, invocation, self.heap.pages())?;
+        self.regs
+            .discard_replay_source_bank(&store.borrow(), &self.heap, &current)?;
         let bank = self
             .regs
             .prepare_source_resume(

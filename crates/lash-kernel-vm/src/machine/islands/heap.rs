@@ -15,19 +15,6 @@ pub(super) struct HeapAnswer {
     admission: crate::admission::Accepted<()>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Check {
-    None,
-    Full,
-    Result,
-}
-
-impl From<bool> for Check {
-    fn from(checked: bool) -> Self {
-        if checked { Self::Full } else { Self::None }
-    }
-}
-
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// Claim another physical window only while its bytes and the nursery
     /// fit the same fixed entry allowance, before counting its call.
@@ -77,9 +64,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         }
         self.scratch.arguments.reset();
         let mut cx = Cx {
-            native_observer: self
-                .projection()
-                .map(|watching| watching as &dyn crate::observe::NativeObservation),
+            native_observer: None,
             meter: Meter::new(self.tape.is_some()),
             charging: self.charging,
             args: &mut self.scratch.arguments,
@@ -154,13 +139,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         lib: crate::compile::LibId,
         args: &[Value],
         deepest: Option<u32>,
-        checked: Check,
+        checked: bool,
         (before, strict): (u64, bool),
         occurrence: Option<usize>,
     ) -> Option<HeapAnswer> {
-        if let Some(watching) = &self.projection() {
-            watching.reset_facts();
-        }
         let function = self.exe.lib(lib);
         let signature = &function.header.signature;
         let operator = deepest.is_some();
@@ -174,36 +156,20 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 return None;
             }
         }
-        if checked == Check::Full
-            && (!signature.params.iter().zip(args).all(|(param, value)| {
-                (param.optional && matches!(value, Value::Absent))
-                    || crate::compile::import_result_fits(&param.ty, *value)
-            }) || self.arena.any_cold())
-        {
-            return None;
-        }
         if let Some(answer) = self.lookup_answer(function, args, before, occurrence)
-            && (checked == Check::None
-                || crate::compile::import_result_fits(&signature.result, answer.value))
+            && (!checked || crate::compile::import_result_fits(&signature.result, answer.value))
         {
             return Some(answer);
         }
-        let answer = self.heap_at(occurrence, before, strict, |cx| {
+        self.heap_at(occurrence, before, strict, |cx| {
             let value = if operator && function.specialization.prepared.is_some() {
                 cx.operate_on(function, args, Fresh::default())
             } else {
                 cx.native_on(function, args, Fresh::default())
             }?;
-            (checked == Check::None || crate::compile::import_result_fits(&signature.result, value))
+            (!checked || crate::compile::import_result_fits(&signature.result, value))
                 .then_some(value)
-        });
-        if answer.is_some()
-            && !matches!(function.run, LibRun::Native { .. })
-            && let Some(watching) = &self.projection()
-        {
-            watching.general_formula(self.charging);
-        }
-        answer
+        })
     }
 
     fn lookup_answer(
@@ -272,63 +238,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         })
     }
 
-    pub(super) fn heap_call(&mut self, site: &HeapSite, args: &[Value]) -> Answer {
-        if let Some(close) = &site.close
-            && !self.close(close)
-        {
-            return Err(self.at_operands(close.head, site.reg, args));
-        }
-        self.observed_native(site.lib, |island| island.heap_call_answer(site, args))
-    }
-
-    fn heap_call_answer(&mut self, site: &HeapSite, args: &[Value]) -> Answer {
-        let (before, root_occurrence) = self.root_prefix(site.root)?;
-        let counted = site.counted.or(root_occurrence);
-        if site.act.is_some()
-            && self
-                .projection()
-                .is_some_and(|watching| !watching.can_call())
-        {
-            return Err(self.at_operands(site.pc, site.reg, args));
-        }
-        let function = self.exe.lib(site.lib);
-        if !self.depth_fits(site.depth)
-            || (self.observed
-                && (site.act.is_some() || site.root.is_some())
-                && matches!(function.run, LibRun::Body(_)))
-        {
-            return Err(self.at(site.pc));
-        }
-        let Some(answer) = self.heap_answer(
-            site.lib,
-            args,
-            // The depth its template checks, its prepared entry's deepest.
-            Some(match site.depth {
-                Depth::Operation(extra) | Depth::Template(extra) => extra,
-                Depth::None => 0,
-            }),
-            site.checked.into(),
-            (before, site.root.is_some() && self.accounting),
-            counted,
-        ) else {
-            return Err(self.at(site.pc));
-        };
-        if let Some(at) = counted {
-            self.count(at)?;
-        } else if let Some(act) = site.act
-            && let Some(watching) = &self.projection()
-        {
-            watching.action_start(self.exe, &self.stream.nested[act.ix()].site);
-        }
-        if let Some(root) = site.root
-            && let Some(watching) = &self.projection()
-        {
-            watching.root_call(self.exe, root, args.len());
-        }
-        self.root_arguments(before);
-        self.commit_heap(answer)
-    }
-
     /// Publish only the facts belonging to this accepted operation, after its
     /// action count and all boundary checks have committed.
     pub(super) fn commit_heap(&mut self, answer: HeapAnswer) -> Answer {
@@ -377,7 +286,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     }
 
     /// Physical storage eligibility for a prepared source operation. Its
-    /// accepted source journal supplies semantic and logical admission.
+    /// accepted source boundary supplies semantic and logical admission.
     pub(super) fn storage_room(&self, bytes: u64) -> bool {
         #[cfg(test)]
         if self.scratch.chilled {

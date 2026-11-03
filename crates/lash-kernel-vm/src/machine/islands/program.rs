@@ -1030,53 +1030,13 @@ impl<'e> Build<'e> {
                 });
                 self.result(reg, &[value.reg]);
             }
-            Kind::Operator {
-                args,
-                lib,
-                invoke,
-                closes,
-            } => {
+            Kind::Operator { args, closes, .. } => {
                 let Some(mut site) = operator_site(expr, self.exe) else {
-                    let function = self.exe.lib(*lib);
-                    let extra =
-                        function
-                            .specialization
-                            .prepared
-                            .as_ref()
-                            .map_or(0, |(entry, _)| {
-                                entry
-                                    .deepest(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id))
-                            });
-                    let depth = if function.operation() {
-                        Depth::Operation(extra)
-                    } else {
-                        Depth::Template(extra)
-                    };
-                    self.site(
-                        depth,
-                        (self.root.is_some() || invoke.is_some_and(|invoke| invoke.call))
-                            && matches!(function.run, LibRun::Body(_)),
-                    );
-                    let mut site = HeapSite {
-                        lib: *lib,
-                        close: closes.first().copied(),
-                        pc,
-                        reg,
-                        depth,
-                        checked: self.root_checked() || invoke.is_some_and(|invoke| invoke.checked),
-                        counted: invoke.and_then(|invoke| invoke.counted()),
-                        act: invoke
-                            .filter(|invoke| invoke.call)
-                            .and_then(|invoke| invoke.act),
-                        root: self.root,
-                    };
                     let args = self.args(args)?;
-                    site.close = self.ordered_closes(closes, reg);
+                    let close = self.ordered_closes(closes, reg);
+                    self.close(close, reg);
                     self.open = None;
-                    self.emit(Op::Heap {
-                        site,
-                        args: args.clone(),
-                    });
+                    self.emit(Op::Cold(Deferred::Source(pc)));
                     self.result(reg, &args);
                     return Some(());
                 };
