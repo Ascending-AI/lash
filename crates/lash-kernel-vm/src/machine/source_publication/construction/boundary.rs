@@ -240,6 +240,8 @@ pub(in crate::machine) use super::super::{
 };
 
 #[cfg(test)]
+mod certificates;
+#[cfg(test)]
 mod laws;
 
 #[cfg(test)]
@@ -253,5 +255,55 @@ impl crate::machine::KernelMachine {
         code: doc::arena::LocalCode,
     ) {
         laws::prepared_literals_and_captures(self, identity, code);
+    }
+}
+
+/// One fresh variable cell takes the actual evaluated RHS, including aliases.
+pub(in crate::machine) fn prepare_cell<'a>(
+    arena: &'a mut Arena,
+    heap: &PagedHeap,
+    value: Value,
+    output: Owner,
+) -> Result<PreparedGraph<'a>, HeapFault> {
+    let entity = arena.next_provisional();
+    let (cell, mut installation) = arena.prepare_cell(value).map_err(native_fault)?;
+    installation
+        .bind_entity(cell, entity)
+        .map_err(native_fault)?;
+    finish(
+        installation,
+        heap,
+        &[(output, Value::ObjectRef(cell))],
+        vec![VirtualEntity {
+            entity,
+            body: VirtualBody::NativeVariable(value),
+        }],
+    )
+}
+
+#[cfg(test)]
+impl crate::machine::KernelMachine {
+    pub(crate) fn check_source_constructor_certificates(
+        &self,
+        source: &std::sync::Arc<crate::compile::room::Source>,
+        link: lash_kernel_value::content_ids::LinkId,
+        expression: &str,
+    ) -> Vec<String> {
+        certificates::source_certificates(self, source, link, expression)
+    }
+}
+
+#[cfg(test)]
+mod captures;
+#[cfg(test)]
+impl crate::machine::KernelMachine {
+    pub(crate) fn check_source_closure_certificates(
+        &self,
+        source: &std::sync::Arc<crate::compile::room::Source>,
+        identity: std::sync::Arc<doc::arena::ClosureIdentity>,
+        names: Vec<lash_kernel_value::Name>,
+        code: doc::arena::LocalCode,
+    ) {
+        captures::source_cells(self, source, identity, names, code);
     }
 }

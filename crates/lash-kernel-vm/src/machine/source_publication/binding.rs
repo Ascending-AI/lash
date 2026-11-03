@@ -3,51 +3,12 @@ use super::*;
 use crate::compile::room::publication::{ExactRoots, Occurrence, Successor};
 use crate::compile::room::{ExitKind, Measure, Owner as Selector, Phase, Point};
 use crate::machine::stream::Running;
-use crate::machine::{
-    Eval, KernelMachine, SlotState, fault, frames::PreparedBinding, registers::PreparedTransfer,
-};
+use crate::machine::{Eval, KernelMachine, SlotState, fault};
 use lash_kernel_exec::Op;
 use lash_kernel_state::kernel_internals::logical::{
-    Holding, JournalEvent, Member, MemberFault, PublicationValue, VirtualBody, VirtualEntity,
+    Holding, Member, MemberFault, PublicationValue,
 };
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
-
-struct BindingPreparation<'bank, 'slot> {
-    bank: PreparedTransfer<'bank>,
-    slot: Option<PreparedBinding<'slot>>,
-    cell: Option<CellConstruction>,
-}
-impl<'bank, 'slot> StoragePreparation for BindingPreparation<'bank, 'slot> {
-    type Prepared = (
-        PreparedTransfer<'bank>,
-        Option<PreparedBinding<'slot>>,
-        Option<PreparedObjectConstruction>,
-    );
-    const MATERIALIZES: bool = true;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        let (registration, storage, actual) = if let Some(cell) = self.cell {
-            let Some(prepared) = cell.prepare(arena, actual)? else {
-                return Ok(None);
-            };
-            (
-                prepared.registration,
-                Some(prepared.storage),
-                prepared.actual,
-            )
-        } else {
-            (arena.registration().map_err(native_fault)?, None, actual)
-        };
-        Ok(Some(PreparedStorage {
-            registration,
-            storage: (self.bank, self.slot, storage),
-            actual,
-        }))
-    }
-}
 
 impl KernelMachine {
     pub(in crate::machine) fn publish_source_binding(
@@ -279,10 +240,6 @@ impl KernelMachine {
             unpaid: Some(unpaid),
             ..start.clone()
         };
-        let entity = shared.then(|| doc::heap::EntityId {
-            family: doc::heap::FamilyId::PROVISIONAL,
-            ordinal: arena.next_provisional().ordinal,
-        });
         let safe_point = self.charged;
         let context = Context {
             admission: Admission::Exact(MemoryLimit::of(
@@ -312,6 +269,12 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         };
+        let release = interval
+            .events()
+            .next()
+            .ok_or_else(|| malformed("binding event disappeared"))?
+            .inputs
+            .clone();
         let prefix = Prefix {
             interval,
             facts: LeafExecution(
@@ -338,51 +301,29 @@ impl KernelMachine {
             },
         };
         let published = if shared {
-            context.publish(
+            context.publish_external(
                 roots.invocation(),
                 &mut frame.source_frontier,
                 prefix,
-                || {
-                    Program::new(vec![JournalEvent {
-                        inputs: inputs.clone(),
-                        outputs: if member.is_some() {
-                            vec![]
-                        } else {
-                            vec![(
-                                output,
-                                entity.map_or(PublicationValue::Existing(input), |entity| {
-                                    PublicationValue::Page(doc::heap::PageValue::Ref(
-                                        doc::heap::Identity::Object(entity),
-                                    ))
-                                }),
-                            )]
-                        },
-                        entities: entity
-                            .into_iter()
-                            .map(|entity| VirtualEntity {
-                                entity,
-                                body: VirtualBody::NativeVariable(value),
-                            })
-                            .collect(),
-                        ..Default::default()
-                    }])
+                CellConstruction {
+                    construction: construction::storage::Construction {
+                        charges: None,
+                        value: construction::storage::ConstructionValue::Cell(value),
+                        output,
+                        at,
+                        release,
+                        inputs,
+                        operands: vec![value],
+                        depth_limit: self.limits.value_depth(),
+                        heap: &self.heap,
+                    },
                 },
-                BindingPreparation {
-                    bank,
-                    slot,
-                    cell: entity.map(|entity| CellConstruction { entity, value }),
-                },
-                |arena, _, edits, (bank, slot, cell)| {
+                |arena, _, edits, storage| {
                     debug_assert!(edits.is_empty());
-                    let state = if let Some(cell) = cell {
-                        cell.batch.publish(arena);
-                        SlotState::Cell(cell.handle)
-                    } else {
-                        SlotState::Value(value)
-                    };
+                    storage.batch.publish(arena);
                     bank.publish();
                     if let Some(slot) = slot {
-                        slot.publish(state);
+                        slot.publish(SlotState::Cell(storage.handle));
                     }
                 },
             )

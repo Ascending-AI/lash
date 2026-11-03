@@ -66,6 +66,7 @@ impl BoundaryPreparation for ReadStorage<'_> {
             Input::Native(value) => value,
             Input::Literal(literal) => {
                 return Ok(Construction {
+                    charges: None,
                     value: ConstructionValue::Literal {
                         literal,
                         link: self.link,

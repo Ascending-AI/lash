@@ -1,5 +1,6 @@
 //! Call-owned frame entry preserves source operands and continuations.
 mod composed;
+mod construction;
 
 const SOURCE_SHARED_ENTRY: &str = "let makers = (call maker(3, 9), call maker(4)) let first = makers[0] let second = makers[1] return (apply first(), apply second())";
 use super::*;
@@ -308,6 +309,14 @@ fn observe_source_or_register(
     let cells = crate::machine::islands::witness::cell_publications();
     let cell_constructions = crate::machine::islands::witness::cell_constructions();
     let closure_constructions = crate::machine::islands::witness::closure_constructions();
+    construction::record(
+        precise_constructions,
+        table_constructions,
+        tuple_constructions,
+        constructions,
+        closure_constructions,
+        cell_constructions,
+    );
     if mode != Mode::Source
         && layout == Layout(0)
         && !taped

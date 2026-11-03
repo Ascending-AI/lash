@@ -15,6 +15,17 @@ pub(crate) struct ExactRoots<'v> {
     pub(crate) outputs: Vec<(RootOwner, ExactValue)>,
 }
 
+type ConstructionInput<'a> = (
+    Option<&'a doc::NewObject>,
+    Option<(&'a doc::Literal, lash_kernel_value::content_ids::LinkId)>,
+    Option<(
+        &'a doc::arena::ClosureIdentity,
+        &'a [doc::arena::ArenaHandle],
+        &'a [Name],
+    )>,
+    Option<doc::Value>,
+);
+
 /// Detached preparations expose actual bodies and their source-ordered phase
 /// schedule while registration still permits the source verifier to read them.
 /// Native arguments must agree with the evaluated source operands, followed
@@ -160,6 +171,7 @@ impl ExactEvent {
         self.check_external_roots(&roots, &external, &next.occurrence)?;
         self.bind_view(
             frontier, ledger, arena, heap, execution, roots, next, allowance, resources, external,
+            None,
         )
     }
 
@@ -203,6 +215,62 @@ impl ExactEvent {
         self.check_external_roots(&roots, &external, &next.occurrence)?;
         self.bind_view(
             frontier, ledger, arena, heap, execution, roots, next, allowance, resources, external,
+            None,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one constructor and its source boundary"
+    )]
+    pub(crate) fn bind_construction(
+        &self,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        arena: &Arena,
+        heap: &PagedHeap,
+        execution: &mut impl Execution,
+        roots: ExactRoots<'_>,
+        next: Position,
+        allowance: Allowance,
+        resources: ResourceFacts,
+        external: ExternalFacts<'_>,
+        construction: ConstructionInput<'_>,
+        debt: Option<&crate::compile::room::charges::ChargeDebt<'_>>,
+    ) -> Result<BoundEvent, Refused> {
+        if let Some(debt) = debt {
+            if !debt.matches(&self.source, &self.at, &self.at)
+                || debt.native_allowance(allowance.safe_point).as_ref() != Some(&allowance)
+            {
+                return Err(Refused::Source);
+            }
+        } else if allowance.before != 0
+            || allowance.units != 0
+            || allowance.close.is_some()
+            || allowance.strict
+            || allowance.depth != 0
+            || !allowance.occurrences.is_empty()
+        {
+            return Err(Refused::Source);
+        }
+        self.check_external_roots(&roots, &external, &next.occurrence)?;
+        self.bind_view(
+            frontier,
+            ledger,
+            arena,
+            heap,
+            execution,
+            roots,
+            next,
+            allowance,
+            resources,
+            external,
+            Some(super::super::interval::construction::ConstructorFacts {
+                construction: construction.0,
+                literal: construction.1,
+                closure: construction.2,
+                cell: construction.3,
+            }),
         )
     }
 
@@ -271,6 +339,7 @@ impl ExactEvent {
         allowance: Allowance,
         resources: ResourceFacts,
         external: ExternalFacts<'_>,
+        construction: Option<super::super::interval::construction::ConstructorFacts<'_>>,
     ) -> Result<BoundEvent, Refused> {
         if frontier.proven
             || !Arc::ptr_eq(&self.source, &frontier.source)
@@ -311,7 +380,7 @@ impl ExactEvent {
                     return Err(Refused::Facts);
                 }
                 handles.extend_from_slice(facts.dependencies().ok_or(Refused::Facts)?);
-                EventContext {
+                let context = EventContext {
                     earlier: &[],
                     source: &self.source,
                     slots: &slots,
@@ -319,11 +388,27 @@ impl ExactEvent {
                     ledger,
                     heap,
                     arena,
+                };
+                context.check(event, site, &view, facts)?;
+                if let Some(descriptor) = &site.construction {
+                    descriptor.check(
+                        (&slots, &frontier.position.occurrence, arena, heap),
+                        event,
+                        &roots,
+                        &external,
+                        construction.as_ref(),
+                        frontier.link,
+                        |owner, cell| context.check_cell(owner, cell),
+                    )?;
+                } else if construction.is_some() {
+                    return Err(Refused::Source);
                 }
-                .check(event, site, &view, facts)?;
                 // A local move preserves its actual provenance, including page and
                 // frozen roots. Equal-sized Native values cannot replace that move.
                 if external.member.is_none()
+                    && construction
+                        .as_ref()
+                        .is_none_or(|facts| facts.cell.is_none())
                     && (site.assignment.is_some()
                         || matches!(
                             event.output,

@@ -2,9 +2,7 @@
 use super::*;
 use crate::admission::Allowance;
 use crate::machine::islands::compiled::WriteSite;
-use lash_kernel_state::kernel_internals::logical::{
-    JournalEvent, Program, PublicationValue as PV, VirtualBody, VirtualEntity,
-};
+use lash_kernel_state::kernel_internals::logical::PublicationValue as PV;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
     ExitKind, Measure, Phase as SourcePhase, Point,
@@ -137,19 +135,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 activation.invocation.id(),
             )
             .ok_or_else(|| malformed("binding has no canonical slot"))?;
-        if site.shared {
-            self.source_bindings(frame)?;
-        }
         let activation = frame
             .state
             .source
             .as_mut()
             .ok_or_else(|| malformed("binding has no source activation"))?;
         self.logical.flush(self.arena, self.heap)?;
-        let entity = site.shared.then(|| doc::heap::EntityId {
-            family: doc::heap::FamilyId::PROVISIONAL,
-            ordinal: self.arena.next_provisional().ordinal,
-        });
         let store = self.logical.ledger();
         let ledger = store.borrow();
         if ledger.holding(input, self.heap.pages())?.is_none() {
@@ -214,7 +205,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             },
         };
         let next = SourcePosition {
-            at,
+            at: at.clone(),
             unpaid: Some(unpaid),
             ..start.clone()
         };
@@ -235,29 +226,33 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             next,
             allowance,
         };
-        let published = if let Some(entity) = entity {
-            let make = || {
-                Program::new(vec![JournalEvent {
-                    inputs: inputs.clone(),
-                    outputs: vec![(
-                        output,
-                        PV::Page(doc::heap::PageValue::Ref(doc::heap::Identity::Object(
-                            entity,
-                        ))),
-                    )],
-                    entities: vec![VirtualEntity {
-                        entity,
-                        body: VirtualBody::NativeVariable(value),
-                    }],
-                    ..Default::default()
-                }])
+        let published = if site.shared {
+            let Ok(charges) = room::charges::ChargeProgram::event_packet(
+                self.exe,
+                frame.state.callee.plan.code,
+                statement_id,
+                site.pc,
+                self.accounting.then_some(site.close).flatten(),
+            ) else {
+                return Ok(None);
             };
-            self.publish_source_prepared(
+            self.publish_source_boundary(
                 frame.state.callee,
                 activation,
                 prefix,
-                make,
-                publication::CellConstruction { entity, value },
+                publication::CellConstruction {
+                    construction: crate::machine::source_publication::construction::storage::Construction {
+                        charges: Some(&charges),
+                        value: crate::machine::source_publication::construction::storage::ConstructionValue::Cell(value),
+                        output,
+                        at: at.clone(),
+                        release: vec![selector].into_boxed_slice(),
+                        inputs,
+                        operands: vec![value],
+                        depth_limit: self.limits.value_depth(),
+                        heap: self.heap,
+                    },
+                },
                 |arena, _, edits, storage| {
                     debug_assert!(edits.is_empty());
                     storage.batch.publish(arena);

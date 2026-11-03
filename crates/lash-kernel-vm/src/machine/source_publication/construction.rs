@@ -148,6 +148,7 @@ impl KernelMachine {
         };
         let safe_point = self.charged;
         let recipe = storage::Construction {
+            charges: None,
             value: storage::ConstructionValue::Collection(object),
             output,
             at: at.clone(),

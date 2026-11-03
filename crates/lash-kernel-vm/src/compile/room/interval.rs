@@ -1,6 +1,8 @@
 //! A selected source path compiled once into indexed logical algebra. Selection
 //! validation walks source control only on a cache miss, never per execution.
 use super::*;
+#[path = "publication/exact/construction.rs"]
+pub(in crate::compile::room) mod construction;
 mod continuation;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -50,6 +52,7 @@ impl Linear {
     }
 }
 pub(super) struct PublicationSite {
+    pub(super) construction: Option<construction::ConstructionEvent>,
     pub(super) borrowed_inputs: bool,
     pub(super) restored_roles: Option<Box<[Site]>>,
     pub(super) uncounted_resumption: bool,
@@ -117,6 +120,7 @@ impl Step {
             None
         };
         let publication = PublicationSite {
+            construction: construction::ConstructionEvent::compile(source, &event.point)?,
             uncounted_resumption: event.point.phase == Phase::Restore
                 && matches!(node, doc::Node::Expr(doc::Expr::Call { .. })),
             restored_roles,

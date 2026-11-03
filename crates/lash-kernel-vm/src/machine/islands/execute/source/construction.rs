@@ -195,6 +195,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 allowance,
             },
             storage::Construction {
+                charges: None,
                 value: storage::ConstructionValue::Collection(object),
                 output,
                 at: publication_at,

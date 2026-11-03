@@ -194,8 +194,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 allowance,
             },
             crate::machine::source_publication::construction::storage::Construction {
+                charges: None,
                 value: crate::machine::source_publication::construction::storage::ConstructionValue::Closure {
                     identity,
+                    capture_names: target.captures.iter().map(|capture| target.slots[capture.inner as usize].name.clone()).collect(),
                     captures,
                     code: doc::arena::LocalCode {
                         executable: self.exe.local(),

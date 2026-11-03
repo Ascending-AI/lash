@@ -12,6 +12,7 @@ use lash_kernel_state::{
 };
 pub(in crate::machine) enum ConstructionValue<'a> {
     Collection(doc::NewObject),
+    Cell(Value),
     Literal {
         literal: &'a doc::Literal,
         link: lash_kernel_value::content_ids::LinkId,
@@ -19,10 +20,12 @@ pub(in crate::machine) enum ConstructionValue<'a> {
     Closure {
         identity: std::sync::Arc<doc::arena::ClosureIdentity>,
         captures: Vec<doc::arena::ArenaHandle>,
+        capture_names: Vec<lash_kernel_value::Name>,
         code: doc::arena::LocalCode,
     },
 }
 pub(in crate::machine) struct Construction<'a> {
+    pub(in crate::machine) charges: Option<&'a room::charges::ChargeProgram>,
     pub(in crate::machine) value: ConstructionValue<'a>,
     pub(in crate::machine) output: Owner,
     pub(in crate::machine) at: Point,
@@ -60,12 +63,12 @@ impl BoundaryPreparation for Construction<'_> {
         let Some(dependencies) = Dependencies::capture(ledger, arena, &handles) else {
             return Ok(None);
         };
-        let mut graph = match self.value {
+        let mut graph = match &self.value {
             ConstructionValue::Collection(object) => {
                 let Some(graph) = super::boundary::prepare_collection(
                     arena,
                     self.heap,
-                    object,
+                    object.clone(),
                     self.output,
                     self.depth_limit,
                 )?
@@ -74,19 +77,23 @@ impl BoundaryPreparation for Construction<'_> {
                 };
                 graph
             }
+            ConstructionValue::Cell(value) => {
+                super::boundary::prepare_cell(arena, self.heap, *value, self.output)?
+            }
             ConstructionValue::Literal { literal, link } => {
-                super::boundary::prepare_literal(arena, self.heap, literal, link, self.output)?
+                super::boundary::prepare_literal(arena, self.heap, literal, *link, self.output)?
             }
             ConstructionValue::Closure {
                 identity,
                 captures,
                 code,
+                ..
             } => super::boundary::prepare_closure(
                 arena,
                 self.heap,
-                identity,
-                captures,
-                code,
+                identity.clone(),
+                captures.clone(),
+                *code,
                 self.output,
             )?,
         };
@@ -133,28 +140,73 @@ impl BoundaryPreparation for Construction<'_> {
         facts
             .values
             .insert(Measure::Release(self.release), i128::from(released));
-        let Ok(bound) = event.bind_paid_external(
+        let roots = ExactRoots {
+            inputs: self.inputs.clone(),
+            outputs: vec![(self.output, ExactValue::Page(output.page.clone()))],
+            ..Default::default()
+        };
+        let external = ExternalFacts {
+            operands: &self.operands,
+            entities: &graph.entities,
+            ..Default::default()
+        };
+        let debt = self.charges.and_then(|charges| charges.bind(&[]));
+        if self.charges.is_some() && debt.is_none() {
+            return Ok(None);
+        }
+        let allowance = if let Some(debt) = &debt {
+            let Some(allowance) = debt.native_allowance(prefix.allowance.safe_point) else {
+                return Ok(None);
+            };
+            allowance
+        } else {
+            prefix.allowance
+        };
+        let construction = (
+            match &self.value {
+                ConstructionValue::Collection(object) => Some(object),
+                _ => None,
+            },
+            match &self.value {
+                ConstructionValue::Literal { literal, link } => Some((*literal, *link)),
+                _ => None,
+            },
+            match &self.value {
+                ConstructionValue::Closure {
+                    identity,
+                    captures,
+                    capture_names,
+                    ..
+                } => Some((
+                    identity.as_ref(),
+                    captures.as_slice(),
+                    capture_names.as_slice(),
+                )),
+                _ => None,
+            },
+            match &self.value {
+                ConstructionValue::Cell(value) => Some(*value),
+                _ => None,
+            },
+        );
+        let bound = event.bind_construction(
             frontier,
             ledger,
             graph.registration.arena(),
             heap,
             &mut prefix.facts,
-            ExactRoots {
-                inputs: self.inputs.clone(),
-                outputs: vec![(self.output, ExactValue::Page(output.page.clone()))],
-                ..Default::default()
-            },
+            roots,
             prefix.next,
-            prefix.allowance,
+            allowance,
             resources,
-            ExternalFacts {
-                operands: &self.operands,
-                entities: &graph.entities,
-                ..Default::default()
-            },
-        ) else {
+            external,
+            construction,
+            debt.as_ref(),
+        );
+        let Ok(bound) = bound else {
             return Ok(None);
         };
+
         let (transaction, mut storage) =
             graph.into_boundary(ledger, heap, &self.inputs, dependencies)?;
         let output = storage

@@ -217,8 +217,14 @@ impl KernelMachine {
                 },
             },
             super::construction::storage::Construction {
+                charges: None,
                 value: super::construction::storage::ConstructionValue::Closure {
                     identity,
+                    capture_names: target
+                        .captures
+                        .iter()
+                        .map(|capture| target.slots[capture.inner as usize].name.clone())
+                        .collect(),
                     captures,
                     code: doc::arena::LocalCode {
                         executable: running.exe.local(),

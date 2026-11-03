@@ -130,6 +130,7 @@ impl KernelMachine {
                 },
             },
             Construction {
+                charges: None,
                 value: ConstructionValue::Literal { literal, link },
                 output,
                 at,
