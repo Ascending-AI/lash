@@ -54,6 +54,17 @@ macro_rules! prepared {
             fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
                 Self::answer(call.args.values())
             }
+            fn resource_contract(
+                &self,
+                args: lash_kernel_doc::Args<'_>,
+            ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+                match Self::answer(args.values()) {
+                    Ok(value) => {
+                        lash_kernel_doc::NativeResourceContract::returned(args, &value).map(Some)
+                    }
+                    Err(_) => Ok(None),
+                }
+            }
             fn prepare(&self) -> Option<PreparedNative> {
                 Some(PreparedNative {
                     pair: None,

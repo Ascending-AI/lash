@@ -921,6 +921,64 @@ impl<'e> Build<'e> {
         Some(args.iter().map(|arg| arg.reg).collect())
     }
 
+    fn native_expression(&mut self, expr: &Expr, can_publish: bool) -> Option<()> {
+        let (Kind::Native { lib, args, closes }
+        | Kind::Operator {
+            lib, args, closes, ..
+        }) = &expr.kind
+        else {
+            return None;
+        };
+        let (pc, reg) = (expr.pc, expr.reg);
+        let extra = self
+            .exe
+            .lib(*lib)
+            .specialization
+            .prepared
+            .as_ref()
+            .map_or(0, |(entry, _)| entry.depth());
+        let mut site = NativeSite {
+            lib: *lib,
+            close: closes.first().copied(),
+            charges: None,
+            pc,
+            reg,
+            depth: if extra > 0 {
+                Depth::Template(extra)
+            } else {
+                Depth::None
+            },
+        };
+        self.site(site.depth, false);
+        if closes.len() <= 1
+            && let Some(reads) = self.reads(args)
+        {
+            site.charges = can_publish
+                .then(|| self.native_charges(pc, site.close, closes))
+                .flatten();
+            let consumed: Vec<_> = reads.iter().map(Read::reg).collect();
+            self.open = None;
+            self.emit(Op::Native {
+                site,
+                inputs: NativeInputs::Source(reads),
+            });
+            self.result(reg, &consumed);
+            return Some(());
+        }
+        let args = self.args(args)?;
+        site.close = self.ordered_closes(closes, reg);
+        site.charges = can_publish
+            .then(|| self.native_charges(pc, site.close, closes))
+            .flatten();
+        self.open = None;
+        self.emit(Op::Native {
+            site,
+            inputs: NativeInputs::Registers(args.clone()),
+        });
+        self.result(reg, &args);
+        Some(())
+    }
+
     fn expr(&mut self, expr: &Expr) -> Option<()> {
         let (pc, reg) = (expr.pc, expr.reg);
         match &expr.kind {
@@ -1025,8 +1083,17 @@ impl<'e> Build<'e> {
                 });
                 self.result(reg, &[value.reg]);
             }
-            Kind::Operator { args, closes, .. } => {
+            Kind::Operator {
+                lib,
+                args,
+                closes,
+                invoke,
+            } => {
                 let Some(mut site) = operator_site(expr, self.exe) else {
+                    if matches!(self.exe.lib(*lib).run, LibRun::Native { .. }) {
+                        return self
+                            .native_expression(expr, self.root.is_none() && invoke.is_none());
+                    }
                     let args = self.args(args)?;
                     let close = self.ordered_closes(closes, reg);
                     self.close(close, reg);
@@ -1089,50 +1156,7 @@ impl<'e> Build<'e> {
                 });
                 self.result(reg, &args);
             }
-            Kind::Native { lib, args, closes } => {
-                let extra = self
-                    .exe
-                    .lib(*lib)
-                    .specialization
-                    .prepared
-                    .as_ref()
-                    .map_or(0, |(entry, _)| entry.depth());
-                let mut site = NativeSite {
-                    lib: *lib,
-                    close: closes.first().copied(),
-                    charges: None,
-                    pc,
-                    reg,
-                    depth: if extra > 0 {
-                        Depth::Template(extra)
-                    } else {
-                        Depth::None
-                    },
-                };
-                self.site(site.depth, false);
-                if closes.len() <= 1
-                    && let Some(reads) = self.reads(args)
-                {
-                    site.charges = self.native_charges(pc, site.close, closes);
-                    let consumed: Vec<_> = reads.iter().map(Read::reg).collect();
-                    self.open = None;
-                    self.emit(Op::Native {
-                        site,
-                        inputs: NativeInputs::Source(reads),
-                    });
-                    self.result(reg, &consumed);
-                    return Some(());
-                }
-                let args = self.args(args)?;
-                site.close = self.ordered_closes(closes, reg);
-                site.charges = self.native_charges(pc, site.close, closes);
-                self.open = None;
-                self.emit(Op::Native {
-                    site,
-                    inputs: NativeInputs::Registers(args.clone()),
-                });
-                self.result(reg, &args);
-            }
+            Kind::Native { .. } => return self.native_expression(expr, true),
             Kind::Field {
                 target,
                 field,
