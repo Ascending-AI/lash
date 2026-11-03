@@ -75,7 +75,7 @@ impl KernelMachine {
                 .ok_or_else(|| fault("original source role lost its accepted owner"))?;
             let value = match value {
                 PublicationValue::Native(value) => value,
-                PublicationValue::Page(value) => super::super::project::admit(
+                PublicationValue::Page(value) => super::super::project::restore_source(
                     &mut self.arena.borrow_mut(),
                     self.heap.pages(),
                     &value,
