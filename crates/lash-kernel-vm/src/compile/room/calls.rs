@@ -2,6 +2,8 @@
 //! not a second frame executor, and every cold role keeps its defining Source.
 #[path = "calls/binding.rs"]
 mod binding;
+#[path = "calls/paths.rs"]
+mod paths;
 #[cfg_attr(
     not(test),
     expect(dead_code, reason = "loop lane wires the scope call API next")
@@ -13,7 +15,7 @@ use super::super::charges::{
     composition::{ComposedCharges, ComposedDebt},
 };
 use super::super::*;
-use super::{BoundScalarRegion, Origin, ScalarRegion};
+use super::{BoundScalarRegion, Origin, ScalarInput, ScalarRegion};
 use crate::compile::{self, CodeId, Executable, LibId, LibRun, NestedCallee, NestedKind, StmtId};
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::Value;
@@ -30,6 +32,7 @@ pub(in crate::compile::room) struct Resolved {
     at: Point,
     arguments: usize,
     occurrence: Option<usize>,
+    rooted: bool,
 }
 
 /// Resolution reads the actual call opcode and its admitted target. An equal
@@ -89,12 +92,41 @@ pub(in crate::compile::room) fn resolved(
                 Phase::Commit,
                 None,
             ),
+            Op::Act => {
+                let compile::Form::Action(action) = &stmt.form else {
+                    return Err(Refused::Source);
+                };
+                if action.site != *site || pc != stmt.ops.start {
+                    return Err(Refused::Source);
+                }
+                let compile::ActionKind::Call { callee, args } = &action.kind else {
+                    return Err(Refused::Source);
+                };
+                let (library, declared) = match callee {
+                    compile::Callee::Declared(code) => (None, Some(*code)),
+                    compile::Callee::Library(lib) | compile::Callee::CheckedHelper(lib) => {
+                        (Some(*lib), None)
+                    }
+                    _ => return Err(Refused::Source),
+                };
+                (
+                    library,
+                    declared,
+                    args.len(),
+                    Phase::Enter,
+                    action.guest.then_some(action.occurrence),
+                )
+            }
             _ => return Err(Refused::Source),
         };
     let code = match (library, declared) {
         (Some(lib), None) => {
             let lib = exe.lib(lib);
-            let LibRun::Body(code) = lib.run else {
+            let (LibRun::Body(code)
+            | LibRun::Native {
+                body: Some(code), ..
+            }) = lib.run
+            else {
                 return Err(Refused::Source);
             };
             if !lib.body_arity(arguments)
@@ -134,12 +166,19 @@ pub(in crate::compile::room) fn resolved(
             };
             (function, act.args.len())
         }
+        doc::Node::Action(doc::Action::Call {
+            callee: doc::Callee::Local(function),
+            args,
+        }) => (*function, args.len()),
         _ => return Err(Refused::Source),
     };
     let expected = exe.declared.get(&function).copied().or_else(|| {
         let lib = exe.library_lib(&function)?;
         match exe.lib(lib).run {
-            LibRun::Body(code) => Some(code),
+            LibRun::Body(code)
+            | LibRun::Native {
+                body: Some(code), ..
+            } => Some(code),
             _ => None,
         }
     });
@@ -158,13 +197,68 @@ pub(in crate::compile::room) fn resolved(
         },
         arguments,
         occurrence,
+        rooted: matches!(stream.ops[pc as usize], Op::Act),
+    })
+}
+
+struct CallerRoles {
+    arguments: Box<[Slot]>,
+    recovery: Box<[Slot]>,
+}
+fn caller_roles(source: &Source, target: &Resolved) -> Result<CallerRoles, Refused> {
+    let event = source.room.events.get(&target.at).ok_or(Refused::Source)?;
+    if target.rooted {
+        // Root actions evaluate ordered atoms at their own Enter. They have
+        // no enclosing expression operands to park across the call.
+        if !event.inputs.is_empty() {
+            return Err(Refused::Source);
+        }
+        let arguments = (0..target.arguments)
+            .map(|index| {
+                slot(
+                    source,
+                    &Owner::Atom {
+                        at: target.at.site.clone(),
+                        index: index as u32,
+                    },
+                )
+            })
+            .collect::<Result<Box<[_]>, _>>()?;
+        return Ok(CallerRoles {
+            arguments,
+            recovery: Box::new([]),
+        });
+    }
+    let arguments = event
+        .inputs
+        .iter()
+        .map(|owner| slot(source, owner))
+        .collect::<Result<Box<[_]>, _>>()?;
+    if arguments.len() != target.arguments {
+        return Err(Refused::Source);
+    }
+    let restore = source.compile_event(
+        &Point {
+            site: target.at.site.clone(),
+            phase: Phase::Restore,
+        },
+        ExitKind::Normal,
+    )?;
+    let recovery = restore
+        .restored_roles()
+        .ok_or(Refused::Source)?
+        .iter()
+        .map(|at| slot(source, &Owner::Operand(at.clone())))
+        .collect::<Result<Box<[_]>, _>>()?;
+    Ok(CallerRoles {
+        arguments,
+        recovery,
     })
 }
 
 struct Native {
     at: Point,
     lib: LibId,
-    pair: doc::scalar::Pair,
     inputs: Box<[super::ScalarFact]>,
     result: super::ScalarFact,
 }
@@ -183,9 +277,10 @@ pub(crate) struct VerifiedCall {
     argument_slots: Box<[Slot]>,
     recovery: Box<[Slot]>,
     parameters: Box<[Slot]>,
-    region: ScalarRegion,
-    natives: Box<[Native]>,
-    charges: ComposedCharges,
+    paths: Box<[paths::BodyPath]>,
+    rooted: bool,
+    root_atoms: Option<Box<[ScalarInput]>>,
+    first_unpaid: u32,
     occurrence: Option<usize>,
     library: Option<LibId>,
 }
@@ -208,6 +303,7 @@ pub(crate) struct BoundCall<'a> {
     delta: i128,
     caller_values: Vec<(Slot, Value)>,
     values: Vec<Value>,
+    path: usize,
     caller_formulas: Vec<(Vec<Value>, Value)>,
     body_formulas: Vec<Vec<(Vec<Value>, Value)>>,
     pub(super) inputs: Vec<Slot>,
@@ -258,64 +354,6 @@ impl VerifiedCall {
         {
             return Err(Refused::Source);
         }
-        // Source syntax is the eligibility rule. Unsupported controls and
-        // calls retain the canonical source handoff, without executing them.
-        let mut pending = vec![doc::Node::Block(&source.body)];
-        while let Some(node) = pending.pop() {
-            match node {
-                doc::Node::Block(_) => {}
-                doc::Node::Stmt(
-                    doc::Stmt::Let {
-                        value: doc::Rhs::Expr(_),
-                        ..
-                    }
-                    | doc::Stmt::Assign {
-                        place: doc::Place::Variable(_),
-                        value: doc::Rhs::Expr(_),
-                        ..
-                    }
-                    | doc::Stmt::Return { .. }
-                    | doc::Stmt::Do { .. },
-                ) => {}
-                doc::Node::Expr(
-                    doc::Expr::Literal(_) | doc::Expr::Variable(_) | doc::Expr::Call { .. },
-                ) => {}
-                _ => return Err(Refused::Source),
-            }
-            pending.extend(node.children());
-        }
-        struct Route<'a> {
-            source: &'a Source,
-            selected: Vec<Selection>,
-        }
-        impl evaluate::Events for Route<'_> {
-            fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
-                let at = Point {
-                    site: site.clone(),
-                    phase,
-                };
-                let exit = self
-                    .source
-                    .room
-                    .exits
-                    .iter()
-                    .find(|exit| exit.point == at)
-                    .ok_or(Refused::Exit)?
-                    .kind;
-                self.selected.push(Selection::Event { at, exit });
-                Ok(exit)
-            }
-            fn choose(&mut self, _: &Site) -> Result<bool, Refused> {
-                Err(Refused::Path)
-            }
-        }
-        let mut route = Route {
-            source: &source,
-            selected: Vec::new(),
-        };
-        evaluate::walk(&source, &source.site, &mut route, 4096)?;
-        let interval = source.compile_interval(&source.site, &route.selected, 4096)?;
-        let region = source.compile_scalar(interval, true)?;
         let mut parameters = Vec::new();
         for (index, name) in source.params.iter().enumerate() {
             let parameter = body.params.get(index).ok_or(Refused::Source)?;
@@ -341,94 +379,21 @@ impl VerifiedCall {
         if parameters.len() != body.params.len() {
             return Err(Refused::Source);
         }
-        let mut natives = Vec::new();
-        for result in &region.results {
-            if !matches!(result.origin, Origin::Computed) {
-                continue;
-            }
-            let mut node = doc::Node::Block(&source.body);
-            for at in &result.at.site.path[source.site.path.len()..] {
-                node = *node.children().get(*at as usize).ok_or(Refused::Path)?;
-            }
-            let doc::Node::Expr(doc::Expr::Call { function, args }) = node else {
-                return Err(Refused::Source);
-            };
-            let lib = exe.library_lib(function).ok_or(Refused::Source)?;
-            let function = exe.lib(lib);
-            if !matches!(function.run, LibRun::Native { body: None, .. })
-                || function.limit.is_some()
-                || function.specialization.resource
-                    != CallSource::Native(function.specialization.function)
-                || args.len() != 2
-                || !function.body_arity(args.len())
-            {
-                return Err(Refused::Source);
-            }
-            let pair = compile::numeric_pair(function, true).ok_or(Refused::Source)?;
-            let prior = region
-                .recovery
-                .iter()
-                .find(|map| map.after == result.at)
-                .and_then(|_| {
-                    region
-                        .interval
-                        .events()
-                        .position(|event| event.point == result.at)
-                })
-                .and_then(|at| at.checked_sub(1))
-                .and_then(|at| region.recovery.get(at))
-                .ok_or(Refused::Exit)?;
-            let inputs = (0..args.len())
-                .map(|at| {
-                    let operand = slot(&source, &Owner::Operand(result.at.site.child(at as u32)))?;
-                    prior
-                        .roles
-                        .iter()
-                        .find(|(candidate, _)| *candidate == operand)
-                        .map(|(_, fact)| *fact)
-                        .ok_or(Refused::Exit)
-                })
-                .collect::<Result<Box<[_]>, _>>()?;
-            natives.push(Native {
-                at: result.at.clone(),
-                lib,
-                pair,
-                inputs,
-                result: result.live.fact,
-            });
-        }
         let caller_source = Arc::clone(&exe.code(caller).source_room);
-        let event = caller_source
-            .room
-            .events
-            .get(&target.at)
-            .ok_or(Refused::Source)?;
-        let argument_slots = event
-            .inputs
-            .iter()
-            .map(|owner| slot(&caller_source, owner))
-            .collect::<Result<Box<[_]>, _>>()?;
-        if argument_slots.len() != target.arguments {
-            return Err(Refused::Source);
-        }
-        let restore = caller_source.compile_event(
-            &Point {
-                site: target.at.site.clone(),
-                phase: Phase::Restore,
-            },
-            ExitKind::Normal,
-        )?;
-        let recovery = restore
-            .restored_roles()
-            .ok_or(Refused::Source)?
-            .iter()
-            .map(|at| slot(&caller_source, &Owner::Operand(at.clone())))
-            .collect::<Result<Box<[_]>, _>>()?;
+        let CallerRoles {
+            arguments: argument_slots,
+            recovery,
+        } = caller_roles(&caller_source, &target)?;
+        let root_atoms = if target.rooted {
+            Some(root_arguments(&caller_source, &target.at)?)
+        } else {
+            None
+        };
         let len = pc
             .checked_add(1)
             .and_then(|end| end.checked_sub(first_unpaid))
             .ok_or(Refused::Path)?;
-        let charges = ComposedCharges::compile(
+        let paths = paths::compile(
             exe,
             caller,
             statement,
@@ -450,9 +415,10 @@ impl VerifiedCall {
             argument_slots,
             recovery,
             parameters: parameters.into(),
-            region,
-            natives: natives.into(),
-            charges,
+            paths,
+            rooted: target.rooted,
+            root_atoms,
+            first_unpaid,
             occurrence: target.occurrence,
             library: target.library,
         };
@@ -467,42 +433,51 @@ impl VerifiedCall {
             || self.at != target.at
             || self.occurrence != target.occurrence
             || self.library != target.library
+            || self.rooted != target.rooted
             || !Arc::ptr_eq(&self.source, &exe.code(self.callee).source_room)
             || !Arc::ptr_eq(&self.caller_source, &exe.code(self.caller).source_room)
         {
             return Err(Refused::Source);
         }
-        let event = self
-            .caller_source
-            .room
-            .events
-            .get(&self.at)
-            .ok_or(Refused::Source)?;
-        let expected = event
-            .inputs
-            .iter()
-            .map(|owner| slot(&self.caller_source, owner))
-            .collect::<Result<Vec<_>, _>>()?;
-        let restore = self.caller_source.compile_event(
-            &Point {
-                site: self.at.site.clone(),
-                phase: Phase::Restore,
-            },
-            ExitKind::Normal,
-        )?;
-        let recovery = restore
-            .restored_roles()
-            .ok_or(Refused::Source)?
-            .iter()
-            .map(|at| slot(&self.caller_source, &Owner::Operand(at.clone())))
-            .collect::<Result<Vec<_>, _>>()?;
-        if expected.as_slice() != self.argument_slots.as_ref()
-            || recovery.as_slice() != self.recovery.as_ref()
+        let CallerRoles {
+            arguments: expected,
+            recovery,
+        } = caller_roles(&self.caller_source, &target)?;
+        if target.rooted {
+            let expected = root_arguments(&self.caller_source, &target.at)?;
+            if self.root_atoms.as_ref().is_none_or(|actual| {
+                actual.len() != expected.len()
+                    || actual
+                        .iter()
+                        .zip(expected.iter())
+                        .any(|(a, b)| match (a, b) {
+                            (ScalarInput::Literal(a), ScalarInput::Literal(b)) => !a.same(b),
+                            (ScalarInput::Binding(a), ScalarInput::Binding(b)) => a != b,
+                            _ => true,
+                        })
+            }) {
+                return Err(Refused::Source);
+            }
+        } else if self.root_atoms.is_some() {
+            return Err(Refused::Source);
+        }
+        if expected.as_ref() != self.argument_slots.as_ref()
+            || recovery.as_ref() != self.recovery.as_ref()
         {
             return Err(Refused::Exit);
         }
-        self.region.verify()?;
-        self.charges.verify(exe)
+        for path in &self.paths {
+            if !path
+                .charges
+                .covers(self.caller, self.statement, self.first_unpaid, self.pc)
+            {
+                return Err(Refused::Exit);
+            }
+            path.region.verify()?;
+            path.charges.verify(exe)?;
+        }
+        paths::verify_coverage(self)?;
+        Ok(())
     }
 
     pub(crate) fn compile_continuation(
@@ -524,8 +499,8 @@ impl VerifiedCall {
     pub(crate) fn at(&self) -> &Point {
         &self.at
     }
-    pub(crate) fn body(&self) -> &ScalarRegion {
-        &self.region
+    pub(crate) fn source(&self) -> &Arc<Source> {
+        &self.source
     }
 
     pub(crate) fn bind<'a>(
@@ -554,7 +529,7 @@ impl VerifiedCall {
             .events()
             .next()
             .map(|event| &event.point)
-            != Some(self.charges.caller().first())
+            != Some(self.paths[0].charges.caller().first())
         {
             return Ok(None);
         }
@@ -664,7 +639,7 @@ impl VerifiedCall {
             || !activation.current(&self.caller_source, ledger, invocation)
             || position.occurrence.invocation != invocation.id()
             || position.unpaid.as_ref() != Some(&self.at)
-            || self.charges.caller().first() != &self.at
+            || self.paths[0].charges.caller().first() != &self.at
         {
             return Ok(None);
         }
@@ -673,7 +648,7 @@ impl VerifiedCall {
 
     #[cfg(test)]
     pub(crate) fn understate_frame_for_law(&mut self) {
-        self.region.peaks = Box::new([]);
+        self.paths[0].region.peaks = Box::new([]);
     }
     #[cfg(test)]
     pub(crate) fn omit_caller_role_for_law(&mut self) {
@@ -681,7 +656,7 @@ impl VerifiedCall {
     }
     #[cfg(test)]
     pub(crate) fn reorder_closes_for_law(&mut self) {
-        self.charges.reorder_for_law();
+        self.paths[0].charges.reorder_for_law();
     }
 }
 
@@ -718,7 +693,11 @@ impl<'a> BoundCall<'a> {
         ledger.is_current(&self.stamp) && caller == &self.caller_invocation
     }
     pub(crate) fn debt(&self) -> Option<ComposedDebt<'a>> {
-        bind_debt(self.call, &self.caller_formulas, &self.body_formulas)
+        bind_debt(
+            &self.call.paths[self.path],
+            &self.caller_formulas,
+            &self.body_formulas,
+        )
     }
     pub(crate) fn recovery_after(
         &self,
@@ -730,7 +709,10 @@ impl<'a> BoundCall<'a> {
             &self.caller_invocation,
             &self.reservation.invocation(0)?,
             &self.caller_values,
-            &self.values,
+            CalleeValues {
+                values: &self.values,
+                path: self.path,
+            },
             at,
             caller_occurrence,
         )
@@ -747,7 +729,7 @@ impl<'a> BoundCall<'a> {
 }
 
 fn bind_debt<'a>(
-    call: &'a VerifiedCall,
+    path: &'a paths::BodyPath,
     caller_formulas: &[(Vec<Value>, Value)],
     body_formulas: &[Vec<(Vec<Value>, Value)>],
 ) -> Option<ComposedDebt<'a>> {
@@ -770,15 +752,19 @@ fn bind_debt<'a>(
                 .collect()
         })
         .collect();
-    call.charges.bind(&caller, &body)
+    path.charges.bind(&caller, &body)
 }
 
+struct CalleeValues<'a> {
+    values: &'a [Value],
+    path: usize,
+}
 fn call_recovery(
     call: &VerifiedCall,
     caller_invocation: &logical::Invocation,
     invocation: &logical::Invocation,
     caller_values: &[(Slot, Value)],
-    values: &[Value],
+    body: CalleeValues<'_>,
     at: &Point,
     caller_occurrence: super::super::publication::Occurrence,
 ) -> Option<[CallRecovery; 2]> {
@@ -788,12 +774,9 @@ fn call_recovery(
     {
         return None;
     }
-    let index = call
-        .region
-        .recovery
-        .iter()
-        .position(|map| &map.after == at)?;
-    let map = &call.region.recovery[index];
+    let region = &call.paths.get(body.path)?.region;
+    let index = region.recovery.iter().position(|map| &map.after == at)?;
+    let map = &region.recovery[index];
     let digest = |at: &Point, roles: &[(Slot, Value)]| {
         let mut encoding = TokenWriter::new();
         encoding.seq(3);
@@ -811,7 +794,11 @@ fn call_recovery(
             at: call.at.clone(),
             unpaid: Some(Point {
                 site: call.at.site.clone(),
-                phase: Phase::Restore,
+                phase: if call.rooted {
+                    Phase::Commit
+                } else {
+                    Phase::Restore
+                },
             }),
             recovery: digest(&call.at, caller_values),
             occurrence: caller_occurrence.clone(),
@@ -821,17 +808,13 @@ fn call_recovery(
     let roles: Vec<_> = map
         .roles
         .iter()
-        .map(|(slot, fact)| (*slot, values[fact.index()]))
+        .map(|(slot, fact)| (*slot, body.values[fact.index()]))
         .collect();
     let callee = CallRecovery {
         source: Arc::clone(&call.source),
         position: super::super::publication::Position {
             at: map.after.clone(),
-            unpaid: call
-                .region
-                .recovery
-                .get(index + 1)
-                .map(|map| map.after.clone()),
+            unpaid: region.recovery.get(index + 1).map(|map| map.after.clone()),
             recovery: digest(&map.after, &roles),
             occurrence: super::super::publication::Occurrence {
                 task: caller_occurrence.task,
@@ -843,4 +826,40 @@ fn call_recovery(
         roles,
     };
     Some([caller, callee])
+}
+
+fn root_arguments(source: &Source, at: &Point) -> Result<Box<[ScalarInput]>, Refused> {
+    let mut node = doc::Node::Block(&source.body);
+    for index in &at.site.path[source.site.path.len()..] {
+        node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+    }
+    let doc::Node::Action(doc::Action::Call { args, .. }) = node else {
+        return Err(Refused::Source);
+    };
+    let slots = source.owner_slots()?;
+    args.iter()
+        .map(|atom| match atom {
+            doc::Atom::Variable(name) => {
+                let owner =
+                    root_owners::visible(&slots.scopes, &at.site, name).ok_or(Refused::Source)?;
+                if let Owner::Binding { declared, name } = owner
+                    && source.shared.get(&(declared.clone(), name.clone())) == Some(&true)
+                {
+                    return Err(Refused::Source);
+                }
+                Ok(ScalarInput::Binding(slot(source, owner)?))
+            }
+            doc::Atom::Literal(value) => Ok(ScalarInput::Literal(match value {
+                doc::Literal::Null => Value::Null,
+                doc::Literal::Absent => Value::Absent,
+                doc::Literal::Bool(value) => Value::Bool(*value),
+                doc::Literal::Int(value) => Value::Int(value.word().ok_or(Refused::Facts)?),
+                doc::Literal::Float(value) => Value::Float(*value),
+                doc::Literal::Text(value) => {
+                    Value::Text(doc::arena::ShortText::new(value).ok_or(Refused::Facts)?)
+                }
+                _ => return Err(Refused::Source),
+            })),
+        })
+        .collect()
 }

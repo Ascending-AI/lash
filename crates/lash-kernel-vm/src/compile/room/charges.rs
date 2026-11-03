@@ -340,6 +340,12 @@ fn point(site: &Site, op: Op) -> Point {
 }
 
 fn source_point(stream: &compile::Stream, site: &Site, op: Op) -> Point {
+    if matches!(op, Op::Act) {
+        return Point {
+            site: site.clone(),
+            phase: super::Phase::Enter,
+        };
+    }
     if let Op::Nested { act, .. } = op
         && stream
             .nested
@@ -385,7 +391,29 @@ fn canonical_span(
         || range.end() > canonical.end()
         || (range.start != canonical.start && !closes(range.start - 1))
         || !closes(range.end() - 1)
-        || !stream.verify_holding_sites(&body.source_room, canonical, stmt.regs)
+        || !(if matches!(stmt.form, compile::Form::Action(_)) {
+            // The action writes register zero through the semantic ABI, not
+            // Op::writes. Verify its actual source call and finite rooted
+            // continuation, instead of inventing a nested-op location.
+            super::region::calls::resolved(exe, code, statement, stmt.ops.start).is_ok()
+                && matches!(
+                    stream
+                        .ops
+                        .get(stmt.ops.start as usize..stmt.ops.end() as usize),
+                    Some([
+                        Op::Act,
+                        Op::Bind { .. } | Op::WriteLocal { .. } | Op::End | Op::Return { .. }
+                    ])
+                )
+                && compile::expr::statement(stream, stmt.ops, true).is_some()
+                && stream
+                    .source_sites
+                    .get((stmt.ops.end() - 1) as usize)
+                    .and_then(Option::as_deref)
+                    == Some(&stmt.site)
+        } else {
+            stream.verify_holding_sites(&body.source_room, canonical, stmt.regs)
+        })
     {
         return Err(Refused::Source);
     }
@@ -513,6 +541,39 @@ fn derive(
                         code.charging,
                     )?;
                 }
+                Op::Act => {
+                    let compile::Form::Action(action) = &stmt.form else {
+                        return Err(Refused::Source);
+                    };
+                    let compile::ActionKind::Call { callee, args } = &action.kind else {
+                        return Err(Refused::Source);
+                    };
+                    if pc != stmt.ops.start || action.site != *site {
+                        return Err(Refused::Source);
+                    }
+                    if code.charged {
+                        tape.extend(args.iter().map(|_| {
+                            TapeEvent::Fixed(Weight::Atomic(
+                                doc::plan::FormCharge::Argument.measurement().0,
+                            ))
+                        }));
+                    }
+                    match callee {
+                        compile::Callee::Library(lib) | compile::Callee::CheckedHelper(lib) => {
+                            completion(
+                                exe,
+                                *lib,
+                                args.len(),
+                                source_point(stream, site, op),
+                                &mut formulas,
+                                &mut tape,
+                                code.charging,
+                            )?
+                        }
+                        compile::Callee::Declared(_) => {}
+                        _ => return Err(Refused::Source),
+                    }
+                }
                 Op::Nested { act, args } => {
                     let nested = stream.nested.get(act.ix()).ok_or(Refused::Source)?;
                     if let Some(lib) = nested.kind.operator_lib() {
@@ -536,6 +597,7 @@ fn derive(
                 | Op::WriteLocal { .. }
                 | Op::End
                 | Op::Test { .. }
+                | Op::Branch { .. }
                 | Op::Return { .. } => {}
                 // A source error/effect, guest call, dynamic branch, copy-out
                 // or body formula needs its own authenticated composition.

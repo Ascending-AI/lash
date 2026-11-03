@@ -422,6 +422,35 @@ pub(crate) struct CheckedRoom {
     balance: Balance,
     exit: ExitKind,
 }
+/// A body envelope remains tied to the actual evaluated call and both
+/// logical invocations. It cannot be rebound by supplying byte totals.
+pub(crate) struct SourceCallRoom<'call> {
+    call: &'call region::calls::scope::ScopedCall<'call>,
+    checked: CheckedRoom,
+}
+impl<'call> SourceCallRoom<'call> {
+    fn new(call: &'call region::calls::scope::ScopedCall<'call>) -> Self {
+        Self {
+            call,
+            checked: call.checked_room(),
+        }
+    }
+    pub(crate) fn checked(
+        &self,
+        ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
+        caller_source: &Arc<Source>,
+        at: &Point,
+        caller: &lash_kernel_state::kernel_internals::logical::Invocation,
+        invocation: &lash_kernel_state::kernel_internals::logical::Invocation,
+    ) -> Option<&CheckedRoom> {
+        (self.call.current(ledger)
+            && self
+                .call
+                .authenticates_source(caller_source, at, caller, invocation))
+        .then_some(&self.checked)
+    }
+}
+
 impl CheckedRoom {
     fn for_call(&self, callee: CallSource, resolved: Option<FunctionId>) -> Option<&Balance> {
         let function = match callee {

@@ -9,6 +9,7 @@ pub(crate) struct ComposedCharges {
     caller_code: CodeId,
     callee_code: CodeId,
     callee: Arc<Source>,
+    selected: Box<[super::super::Selection]>,
 }
 
 /// This borrows the verified source schedule. No consumer supplies a price or
@@ -27,6 +28,7 @@ impl ComposedCharges {
         statement: StmtId,
         range: OpRange,
         callee: CodeId,
+        selected: &[super::super::Selection],
     ) -> Result<Self, Refused> {
         let pc = range.end().checked_sub(1).ok_or(Refused::Path)?;
         if super::super::region::calls::resolved(exe, caller, statement, pc)?.code != callee {
@@ -35,19 +37,14 @@ impl ComposedCharges {
         let caller_program = ChargeProgram::compile(exe, caller, statement, range)?;
         let body = exe.code(callee);
         let mut programs = Vec::new();
-        for &statement in &exe.block(body.body).stmts {
-            let (stream, stmt, _) = exe.statement(statement);
-            programs.push(ChargeProgram::compile(exe, callee, statement, stmt.ops)?);
-            if matches!(stream.ops[stmt.ops.end() as usize - 1], Op::Return { .. }) {
-                break;
-            }
-        }
+        body_programs(exe, callee, body.body, selected, &mut programs)?;
         Ok(Self {
             caller: caller_program,
             body: programs.into(),
             caller_code: caller,
             callee_code: callee,
             callee: Arc::clone(&body.source_room),
+            selected: selected.into(),
         })
     }
 
@@ -59,6 +56,7 @@ impl ComposedCharges {
             self.caller.statement,
             self.caller.range,
             self.callee_code,
+            &self.selected,
         )?;
         if !Arc::ptr_eq(&self.callee, &exe.code(self.callee_code).source_room)
             || expected.body.len() != self.body.len()
@@ -74,6 +72,18 @@ impl ComposedCharges {
         Ok(())
     }
 
+    pub(in crate::compile::room) fn covers(
+        &self,
+        code: CodeId,
+        statement: StmtId,
+        first: u32,
+        pc: u32,
+    ) -> bool {
+        self.caller_code == code
+            && self.caller.statement == statement
+            && self.caller.range.start == first
+            && self.caller.range.end().checked_sub(1) == Some(pc)
+    }
     pub(crate) fn caller(&self) -> &ChargeProgram {
         &self.caller
     }
@@ -189,6 +199,11 @@ impl<'a> crate::admission::SourceResources<'a> {
 /// continuation. Both source schedules retain their canonical close identities.
 pub(crate) enum StatementDebt<'a> {
     Scalar(ChargeDebt<'a>),
+    PrefixCall {
+        prefix: ChargeDebt<'a>,
+        call: ComposedDebt<'a>,
+        suffix: ChargeDebt<'a>,
+    },
     Call {
         call: ComposedDebt<'a>,
         suffix: ChargeDebt<'a>,
@@ -198,6 +213,14 @@ impl StatementDebt<'_> {
     pub(crate) fn units(&self) -> Option<u64> {
         match self {
             Self::Scalar(debt) => Some(debt.units()),
+            Self::PrefixCall {
+                prefix,
+                call,
+                suffix,
+            } => prefix
+                .units()
+                .checked_add(call.units())?
+                .checked_add(suffix.units()),
             Self::Call { call, suffix } => call.units().checked_add(suffix.units()),
         }
     }
@@ -213,6 +236,21 @@ impl StatementDebt<'_> {
             Self::Scalar(debt) => {
                 call_point.is_none() && callee.is_none() && debt.matches(source, first, through)
             }
+            Self::PrefixCall {
+                prefix,
+                call,
+                suffix,
+            } => {
+                prefix.matches(source, first, &prefix.program.through)
+                    && Arc::ptr_eq(source, &call.program.caller.source)
+                    && prefix.program.statement == call.program.caller.statement
+                    && prefix.program.range.end() == call.program.caller.range.start
+                    && call_point.is_some_and(|at| &call.program.caller.through == at)
+                    && callee.is_some_and(|source| Arc::ptr_eq(source, &call.program.callee))
+                    && suffix.matches(source, &suffix.program.first, through)
+                    && suffix.program.statement == call.program.caller.statement
+                    && call.program.caller.range.end() == suffix.program.range.start
+            }
             Self::Call { call, suffix } => {
                 call_point.is_some_and(|at| {
                     call.caller.matches(source, first, at)
@@ -227,6 +265,15 @@ impl StatementDebt<'_> {
     pub(crate) fn record(&self, tape: &crate::observe::ChargeTape) {
         match self {
             Self::Scalar(debt) => debt.record(tape),
+            Self::PrefixCall {
+                prefix,
+                call,
+                suffix,
+            } => {
+                prefix.record(tape);
+                call.record(tape);
+                suffix.record(tape);
+            }
             Self::Call { call, suffix } => {
                 call.record(tape);
                 suffix.record(tape);
@@ -259,4 +306,50 @@ impl<'a> crate::admission::SourceResources<'a> {
         };
         self.admit_interval(&facts, &need, request)
     }
+}
+
+/// Statement and branch order comes from the defining body's compiled blocks.
+/// Every selected test and returned statement keeps its original charge span.
+fn body_programs(
+    exe: &Executable,
+    code: CodeId,
+    block: crate::compile::BlockId,
+    selected: &[super::super::Selection],
+    programs: &mut Vec<ChargeProgram>,
+) -> Result<bool, Refused> {
+    for &statement in &exe.block(block).stmts {
+        let (stream, stmt, _) = exe.statement(statement);
+        programs.push(ChargeProgram::compile(exe, code, statement, stmt.ops)?);
+        match stmt.form {
+            crate::compile::Form::If {
+                then_block,
+                else_block,
+            } => {
+                let taken = selected
+                    .iter()
+                    .find_map(|selection| match selection {
+                        super::super::Selection::Branch { at, taken } if *at == stmt.site => {
+                            Some(*taken)
+                        }
+                        _ => None,
+                    })
+                    .ok_or(Refused::Path)?;
+                if body_programs(
+                    exe,
+                    code,
+                    if taken { then_block } else { else_block },
+                    selected,
+                    programs,
+                )? {
+                    return Ok(true);
+                }
+            }
+            crate::compile::Form::Plain => {}
+            _ => return Err(Refused::Source),
+        }
+        if matches!(stream.ops[stmt.ops.end() as usize - 1], Op::Return { .. }) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }

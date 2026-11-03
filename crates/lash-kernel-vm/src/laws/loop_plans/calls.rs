@@ -14,6 +14,7 @@ use lash_kernel_state::{arena::Arena, kernel_internals::logical::Ledger};
 
 pub(super) fn pure_calls() {
     entry_calls();
+    guarded_calls();
     for layout in [0, 1, 42, u64::MAX] {
         let definition = |signature: &str, body: &str| {
             super::super::super::embedder::fragment(&format!(
@@ -386,7 +387,7 @@ pub(super) fn pure_calls() {
             action: None,
         };
         let after = Point {
-            site: call.body().source().site.clone(),
+            site: call.source().site.clone(),
             phase: Phase::Leave,
         };
         let recovery = bound.recovery_after(&after, occurrence).unwrap();
@@ -406,10 +407,7 @@ pub(super) fn pure_calls() {
                 .any(|(_, value)| value.same(&Value::Int(5)))
         );
         assert!(std::sync::Arc::ptr_eq(&recovery[0].source, source));
-        assert!(std::sync::Arc::ptr_eq(
-            &recovery[1].source,
-            call.body().source()
-        ));
+        assert!(std::sync::Arc::ptr_eq(&recovery[1].source, call.source()));
         drop(debt);
         drop(bound);
         assert_eq!(
@@ -564,6 +562,19 @@ pub(super) fn pure_calls() {
                 .unwrap()
                 .unwrap();
             scope.complete(candidate).unwrap();
+            let room = duplicate.room();
+            assert!(
+                room.checked(
+                    &ledger,
+                    source,
+                    call.at(),
+                    &invocation,
+                    duplicate.invocation()
+                )
+                .is_none(),
+                "a completed invocation cannot authorize its duplicate room"
+            );
+
             assert_eq!(
                 scope.complete(duplicate),
                 Err(Refused::Source),
@@ -747,4 +758,319 @@ fn entry_calls() {
             "one caller statement and one invoke node, followed by the declaration's completion formula"
         );
     }
+}
+
+/// Guarded helper paths must select the real answer and retain the original
+/// root action, native/body identity and every source-local charge close.
+fn guarded_calls() {
+    for layout in [0, 1, 42, u64::MAX] {
+        for rooted in [false, true] {
+            for (a, b, expected) in [(1, 4, 5), (4, 1, 4)] {
+                for (target, native) in [
+                    ("helper", false),
+                    ("law.guarded", true),
+                    ("law.kind_guarded", true),
+                    ("law.wrong", true),
+                ] {
+                    let definition = super::super::super::embedder::fragment(
+                        "function helper(a: Any, b: Any) -> Any\nkernel 1\nmetering statements\nbody { if flat.lt(a, b) { return flat.add(a, b) } return flat.mul(a, b) }",
+                    );
+                    let rhs = if rooted {
+                        format!("invoke {target}({a}, {b})")
+                    } else {
+                        format!("flat.identity(invoke {target}({a}, {b}))")
+                    };
+                    let caller = super::super::super::embedder::fragment(&format!(
+                        "function caller() -> Any\nkernel 1\nmetering statements\nbody {{ let answer = {rhs} return answer }}"
+                    ));
+                    let text = format!(
+                        "definition \"{definition}\"\ndefinition \"{caller}\"\nmain {{ return invoke caller() }}"
+                    );
+                    let run = Embedder::with(
+                        &text,
+                        Setup {
+                            layout: crate::Layout(layout),
+                            probes: Some(guarded_probes),
+                            ..Setup::default()
+                        },
+                    );
+                    let (program, _) = run.program(true);
+                    let admitted = program
+                        .library
+                        .admit(&program.document, Default::default(), &program.selection)
+                        .unwrap_or_else(|_| panic!("guarded source admitted"));
+                    let exe = admitted
+                        .executable(
+                            &program.document,
+                            &program.library,
+                            &program.documents,
+                            &program.functions,
+                            &program.instances,
+                        )
+                        .unwrap_or_else(|_| panic!("guarded executable"));
+                    let caller = exe
+                        .islands
+                        .plans
+                        .iter()
+                        .find(|plan| {
+                            exe.code(plan.code).source_room.params.is_empty()
+                                && plan.body.statements.len() == 2
+                        })
+                        .unwrap();
+                    let statement = caller.body.statements[0].id;
+                    let (stream, stmt, _) = exe.statement(statement);
+                    let pc = (stmt.ops.start..stmt.ops.end())
+                        .find(|pc| matches!(stream.ops[*pc as usize], Op::Nested { .. } | Op::Act))
+                        .unwrap();
+                    let call = VerifiedCall::compile(&exe, caller.code, statement, pc)
+                        .unwrap_or_else(|error| {
+                            panic!("guarded {target} root={rooted}: {error:?}")
+                        });
+                    assert_eq!(call.verify(&exe), Ok(()));
+                    let mut ledger = Ledger::fresh();
+                    let mut arena = Arena::new();
+                    let heap = run.machine.source_law_heap();
+                    let (invocation, entered) = ledger
+                        .prepare_enter(TaskId::MAIN, &mut arena, heap.pages(), &[], &[])
+                        .unwrap();
+                    ledger
+                        .commit(entered.admit(u64::MAX).ok().unwrap())
+                        .unwrap();
+                    let placement = BindingPlacement::compile(&exe, caller.code).unwrap();
+                    let physical: Vec<_> = (0..exe.code(caller.code).slots.len())
+                        .map(|_| SlotState::Empty)
+                        .collect();
+                    let activation = placement
+                        .capture(caller.code, &invocation, &ledger, heap, &physical)
+                        .unwrap()
+                        .unwrap();
+                    let reservation = ledger.reserve_invocations(TaskId::MAIN, 2).unwrap();
+                    let scope = call
+                        .bind_scope(
+                            &exe,
+                            call.callee(),
+                            &ledger,
+                            &invocation,
+                            &activation,
+                            reservation,
+                        )
+                        .unwrap();
+                    let roles: Vec<_> = call
+                        .scope_roles()
+                        .zip([Value::Int(a), Value::Int(b)])
+                        .collect();
+                    let candidate = call
+                        .evaluate_scoped(&exe, call.callee(), &scope, 0, &arena, &roles)
+                        .unwrap();
+                    if target == "law.wrong" {
+                        assert!(
+                            candidate.is_none(),
+                            "an installed native answer cannot be replaced by an equal-price source answer"
+                        );
+                        continue;
+                    }
+                    let candidate = candidate.unwrap_or_else(|| {
+                        panic!("guarded evaluation {target} root={rooted}, {a},{b}")
+                    });
+                    assert!(
+                        candidate.result().same(&Value::Int(expected)),
+                        "actual branch result {target}, {a},{b}"
+                    );
+                    if rooted {
+                        let swapped: Vec<_> = call
+                            .scope_roles()
+                            .zip([Value::Int(b), Value::Int(a)])
+                            .collect();
+                        assert!(
+                            call.evaluate_scoped(&exe, call.callee(), &scope, 0, &arena, &swapped)
+                                .unwrap()
+                                .is_none(),
+                            "statement-root literals must keep their source order and values"
+                        );
+                    }
+                    let room = candidate.room();
+                    assert!(
+                        room.checked(
+                            &ledger,
+                            &exe.code(caller.code).source_room,
+                            call.at(),
+                            &invocation,
+                            candidate.invocation()
+                        )
+                        .is_some()
+                    );
+                    let wrong_invocation = ledger
+                        .reserve_invocations(TaskId::MAIN, 2)
+                        .unwrap()
+                        .invocation(1)
+                        .unwrap();
+                    assert!(
+                        room.checked(
+                            &ledger,
+                            &exe.code(caller.code).source_room,
+                            call.at(),
+                            &invocation,
+                            &wrong_invocation
+                        )
+                        .is_none(),
+                        "same function at another invocation has no room authority"
+                    );
+                    assert!(
+                        room.checked(
+                            &ledger,
+                            call.source(),
+                            call.at(),
+                            &invocation,
+                            candidate.invocation()
+                        )
+                        .is_none(),
+                        "caller and callee Sources cannot be interchanged"
+                    );
+                    let debt = candidate.debt().unwrap();
+                    // Two native scalar formulas cost 8 for comparison and 9
+                    // for arithmetic. Source statements/forms cost 8. A root
+                    // caller pays its statement plus its two atom reads.
+                    let expected_fee =
+                        if native { 7 + 2 + 2 + 2 } else { 8 + 8 + 9 } + if rooted { 3 } else { 5 };
+                    assert_eq!(
+                        debt.units(),
+                        expected_fee,
+                        "canonical {target} action={rooted} charges"
+                    );
+                    let tape = crate::observe::ChargeTape::new();
+                    debt.record(&tape);
+                    assert_eq!(
+                        tape.steps().iter().map(|step| step.units()).sum::<u64>(),
+                        expected_fee
+                    );
+                    let after = Point {
+                        site: call.source().site.clone(),
+                        phase: Phase::Leave,
+                    };
+                    let recovery = candidate
+                        .recovery_after(
+                            &after,
+                            Occurrence {
+                                task: TaskId::MAIN,
+                                invocation: invocation.id(),
+                                loops: vec![],
+                                action: None,
+                            },
+                        )
+                        .unwrap();
+                    assert!(recovery[1].position.unpaid.is_none());
+                    assert_eq!(
+                        scope.completed(),
+                        0,
+                        "evaluating room and debt must consume no invocation"
+                    );
+                    drop(scope);
+                    ledger.handoff().unwrap();
+                    assert!(
+                        room.checked(
+                            &ledger,
+                            &exe.code(caller.code).source_room,
+                            call.at(),
+                            &invocation,
+                            candidate.invocation()
+                        )
+                        .is_none(),
+                        "a source call envelope cannot survive a ledger handoff"
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn guarded_probes(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
+    use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, PreparedNative};
+    struct Guarded(bool);
+    impl Guarded {
+        fn answer(args: &[Value]) -> Option<Value> {
+            match args {
+                [Value::Int(a), Value::Int(b)] => if a < b {
+                    a.checked_add(*b)
+                } else {
+                    a.checked_mul(*b)
+                }
+                .map(Value::Int),
+                _ => None,
+            }
+        }
+    }
+    impl NativeFunction for Guarded {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            if self.0 {
+                Ok(Value::Int(99))
+            } else {
+                Self::answer(call.args.values())
+                    .ok_or_else(|| NativeError::refused("scalar", "outside guarded domain"))
+            }
+        }
+        fn prepare(&self) -> Option<PreparedNative> {
+            Some(PreparedNative {
+                pair: None,
+                charged_entry: None,
+                operation: "law.guarded",
+                entry: if self.0 {
+                    |_| Some(Value::Int(99))
+                } else {
+                    Self::answer
+                },
+            })
+        }
+        fn resource_contract(
+            &self,
+            args: lash_kernel_doc::Args<'_>,
+        ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+            let value = if self.0 {
+                Some(Value::Int(99))
+            } else {
+                Self::answer(args.values())
+            };
+            value
+                .map(|value| lash_kernel_doc::NativeResourceContract::returned(args, &value))
+                .transpose()
+        }
+    }
+    let mut functions = super::super::super::layout::scalar_probes(registry, ids);
+    for (definition, native) in lash_kernel_lib::numbers() {
+        let name = match definition.name.as_str() {
+            "kind" => "kind",
+            "same" => "same",
+            _ => continue,
+        };
+        functions.push((name, registry.register(definition, Some(native)).unwrap()));
+    }
+    let get = |name| functions.iter().find(|(key, _)| *key == name).unwrap().1;
+    let lt = get("flat.lt");
+    let add = get("flat.add");
+    let mul = get("flat.mul");
+    let kind = get("kind");
+    let same = get("same");
+    for (name, wrong) in [
+        ("law.guarded", false),
+        ("law.kind_guarded", false),
+        ("law.wrong", true),
+    ] {
+        let body = if name == "law.kind_guarded" {
+            "if same(kind(a), \"integer\") { if same(kind(b), \"integer\") { if flat.lt(a,b) { return flat.add(a,b) } return flat.mul(a,b) } } return absent"
+        } else {
+            "if flat.lt(a,b) { return flat.add(a,b) } return flat.mul(a,b)"
+        };
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {name}(a: Any, b: Any) -> Any\nkernel 1\ncharge sum(7, size(a), size(b), size(result))\nuse kind = @{kind}\nuse same = @{same}\nuse flat.lt = @{lt}\nuse flat.add = @{add}\nuse flat.mul = @{mul}\nnative\nbody {{ {body} }}"
+        )).unwrap();
+        functions.push((
+            name,
+            registry
+                .register(definition, Some(std::sync::Arc::new(Guarded(wrong))))
+                .unwrap(),
+        ));
+    }
+    functions
 }

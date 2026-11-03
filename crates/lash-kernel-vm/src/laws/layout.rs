@@ -1385,10 +1385,14 @@ pub(super) fn packet_modes(
     counts
 }
 
+#[path = "layout/guarded_call_compiler.rs"]
+mod guarded_call_compiler;
+
 /// K-CHG-001/007: real typed iterations retain the header's unpaid tail.
 /// Body-local values leave no roots in the parked continuation.
 #[test]
 fn typed_repeat_agrees() {
+    guarded_call_compiler::helper_compilation();
     use crate::machine::islands::witness::{Counts, Exit, Family};
     let seen = std::cell::RefCell::new(Counts::new());
     let collect = |counts: Counts| {

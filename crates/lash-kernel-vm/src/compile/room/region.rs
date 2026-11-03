@@ -439,6 +439,23 @@ impl Compiler<'_> {
             }
             return Ok(());
         }
+        // A statement If rejoins after its selected scope has released. It
+        // creates no value; the interval already authenticates its test/arm.
+        if event.point.phase == Phase::Commit
+            && event.inputs.is_empty()
+            && event.output.is_none()
+            && event.entities.is_empty()
+            && event.peak == Amount::default()
+            && event.delta == Amount::default()
+        {
+            let mut node = doc::Node::Block(&self.source.body);
+            for index in &event.point.site.path[self.source.site.path.len()..] {
+                node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+            }
+            if matches!(node, doc::Node::Stmt(doc::Stmt::If { .. })) {
+                return Ok(());
+            }
+        }
         // Nested block entry has no owner or charge effect. Its scope lifetime
         // is authenticated by the interval's already checked control route.
         if event.point.phase == Phase::Enter
@@ -455,6 +472,7 @@ impl Compiler<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(super) enum ScalarInput {
     Literal(Value),
     Binding(Slot),
@@ -487,6 +505,9 @@ impl Source {
                     doc::Literal::Bool(value) => Value::Bool(*value),
                     doc::Literal::Int(value) => Value::Int(value.word().ok_or(Refused::Facts)?),
                     doc::Literal::Float(value) => Value::Float(*value),
+                    doc::Literal::Text(value) => {
+                        Value::Text(doc::arena::ShortText::new(value).ok_or(Refused::Facts)?)
+                    }
                     _ => return Err(Refused::Source),
                 };
                 Ok(ScalarInput::Literal(value))
@@ -974,7 +995,12 @@ impl ScalarRegion {
             || values.values.iter().any(|value| {
                 !matches!(
                     value,
-                    Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Null | Value::Absent
+                    Value::Int(_)
+                        | Value::Float(_)
+                        | Value::Bool(_)
+                        | Value::Null
+                        | Value::Absent
+                        | Value::Text(_)
                 )
             })
         {

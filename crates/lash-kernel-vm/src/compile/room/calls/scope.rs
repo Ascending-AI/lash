@@ -3,7 +3,9 @@
 use super::super::super::placement::DenseActivation;
 use super::binding::EvaluatedArguments;
 use super::*;
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
+#[path = "../region/composition.rs"]
+pub(crate) mod iteration;
 
 pub(crate) struct CallScope<'ledger> {
     ledger: &'ledger Ledger,
@@ -11,18 +13,18 @@ pub(crate) struct CallScope<'ledger> {
     source: Arc<Source>,
     caller: logical::Invocation,
     range: logical::InvocationRange,
-    completed: u64,
-    identity: Rc<()>,
+    identity: Rc<Cell<u64>>,
 }
 
 /// The actual evaluated source call, including its saved caller operands.
 /// It is an affine candidate until its containing prefix is admitted.
 pub(crate) struct ScopedCall<'call> {
     call: &'call VerifiedCall,
-    identity: Rc<()>,
+    identity: Rc<Cell<u64>>,
     offset: u64,
     caller: logical::Invocation,
     invocation: logical::Invocation,
+    stamp: logical::Stamp,
     caller_values: Vec<(Slot, Value)>,
     evaluated: EvaluatedArguments,
 }
@@ -53,8 +55,7 @@ impl VerifiedCall {
             source: Arc::clone(&self.caller_source),
             caller: caller.clone(),
             range,
-            completed: 0,
-            identity: Rc::new(()),
+            identity: Rc::new(Cell::new(0)),
         })
     }
 
@@ -82,7 +83,7 @@ impl VerifiedCall {
             || scope.executable != exe.local()
             || self.callee != resolved_code
             || !Arc::ptr_eq(&self.caller_source, &scope.source)
-            || offset < scope.completed
+            || offset < scope.identity.get()
             || roles.iter().enumerate().any(|(index, (slot, value))| {
                 !scalar(*value)
                     || roles[..index].iter().any(|(prior, _)| prior == slot)
@@ -110,6 +111,7 @@ impl VerifiedCall {
         else {
             return Ok(None);
         };
+        if self.root_atoms.as_ref().is_some_and(|atoms| atoms.iter().zip(&arguments).any(|(atom, actual)| matches!(atom, ScalarInput::Literal(expected) if !expected.same(actual)))) { return Ok(None); }
         let Some(evaluated) = self.evaluate_arguments(exe, arena, arguments)? else {
             return Ok(None);
         };
@@ -127,6 +129,7 @@ impl VerifiedCall {
             offset,
             caller: scope.caller.clone(),
             invocation,
+            stamp: scope.ledger.stamp(),
             caller_values,
             evaluated,
         }))
@@ -135,19 +138,20 @@ impl VerifiedCall {
 
 impl CallScope<'_> {
     pub(crate) fn completed(&self) -> u64 {
-        self.completed
+        self.identity.get()
     }
     /// Call only after the containing iteration/prefix wins admission. A
     /// declined candidate is dropped and leaves this offset available.
     pub(crate) fn complete(&mut self, call: ScopedCall<'_>) -> Result<(), Refused> {
         if !Rc::ptr_eq(&self.identity, &call.identity)
-            || call.offset != self.completed
+            || call.offset != self.identity.get()
             || call.caller != self.caller
-            || self.range.invocation(self.completed).as_ref() != Some(&call.invocation)
+            || self.range.invocation(self.identity.get()).as_ref() != Some(&call.invocation)
         {
             return Err(Refused::Source);
         }
-        self.completed = self.completed.checked_add(1).ok_or(Refused::Facts)?;
+        self.identity
+            .set(self.identity.get().checked_add(1).ok_or(Refused::Facts)?);
         Ok(())
     }
     /// Feed this pair to BoundaryTransaction::complete_invocations in the
@@ -155,11 +159,77 @@ impl CallScope<'_> {
     pub(crate) fn finish(self) -> Option<(logical::InvocationRange, u64)> {
         self.range
             .is_current(self.ledger, &self.caller)
-            .then_some((self.range, self.completed))
+            .then_some((self.range, self.identity.get()))
     }
 }
 
 impl<'call> ScopedCall<'call> {
+    /// Only this evaluated source call can mint its body envelope. Borrowing
+    /// the candidate retains its exact source/function and reserved invocation.
+    pub(crate) fn room(&self) -> SourceCallRoom<'_> {
+        SourceCallRoom::new(self)
+    }
+    pub(in crate::compile::room) fn checked_room(&self) -> CheckedRoom {
+        CheckedRoom {
+            owner: self.call.source.owner,
+            native: false,
+            whole: true,
+            native_contract: None,
+            balance: Balance {
+                peak_extra: self.evaluated.peak,
+                retained_delta: self.evaluated.delta,
+            },
+            exit: self.call.paths[self.evaluated.path].region.interval.exit(),
+        }
+    }
+
+    pub(in crate::compile::room) fn authenticates_source(
+        &self,
+        source: &Arc<Source>,
+        at: &Point,
+        caller: &logical::Invocation,
+        invocation: &logical::Invocation,
+    ) -> bool {
+        Arc::ptr_eq(&self.call.caller_source, source)
+            && self.call.at == *at
+            && self.caller == *caller
+            && self.invocation == *invocation
+    }
+
+    pub(in crate::compile::room) fn current(&self, ledger: &Ledger) -> bool {
+        ledger.is_current(&self.stamp) && self.offset >= self.identity.get()
+    }
+    pub(super) fn is_next(&self) -> bool {
+        self.offset == self.identity.get()
+    }
+    pub(super) fn matches_call(&self, call: &VerifiedCall, caller: &logical::Invocation) -> bool {
+        std::ptr::eq(self.call, call) && self.caller == *caller
+    }
+    pub(super) fn same_scope(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.identity, &other.identity)
+    }
+    pub(super) fn offset(&self) -> u64 {
+        self.offset
+    }
+    pub(super) fn roles(&self) -> impl Iterator<Item = (Slot, Value)> + '_ {
+        let region = &self.call.paths[self.evaluated.path].region;
+        let arguments = self
+            .call
+            .argument_slots
+            .iter()
+            .zip(self.call.parameters.iter())
+            .map(move |(slot, parameter)| {
+                let fact = region
+                    .entries
+                    .iter()
+                    .find(|entry| entry.slot == *parameter)
+                    .unwrap_or_else(|| unreachable!("compiled formal"))
+                    .live
+                    .fact;
+                (*slot, self.evaluated.values[fact.index()])
+            });
+        arguments.chain(self.caller_values.iter().copied())
+    }
     pub(crate) fn result(&self) -> Value {
         self.evaluated.result
     }
@@ -182,7 +252,7 @@ impl<'call> ScopedCall<'call> {
     }
     pub(crate) fn debt(&self) -> Option<ComposedDebt<'call>> {
         bind_debt(
-            self.call,
+            &self.call.paths[self.evaluated.path],
             &self.evaluated.caller_formulas,
             &self.evaluated.body_formulas,
         )
@@ -197,16 +267,24 @@ impl<'call> ScopedCall<'call> {
             &self.caller,
             &self.invocation,
             &self.caller_values,
-            &self.evaluated.values,
+            CalleeValues {
+                values: &self.evaluated.values,
+                path: self.evaluated.path,
+            },
             at,
             occurrence,
         )
     }
 }
 
-fn scalar(value: Value) -> bool {
+pub(super) fn scalar(value: Value) -> bool {
     matches!(
         value,
-        Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)
+        Value::Null
+            | Value::Absent
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::Text(_)
     )
 }
