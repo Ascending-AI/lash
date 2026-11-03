@@ -23,6 +23,8 @@ use lash_kernel_state::{
 };
 use std::cell::RefCell;
 
+#[path = "region/direct.rs"]
+pub(in crate::machine::islands) mod direct;
 #[cfg(test)]
 #[path = "region/law.rs"]
 mod law;
@@ -127,6 +129,7 @@ pub(in crate::machine::islands) struct CollectionFacts {
     pub(in crate::machine::islands) kind: room::ExitKind,
     pub(in crate::machine::islands) transfer: CollectionTransfer,
     pub(in crate::machine::islands) branches: Vec<(lash_kernel_value::sites::Site, bool)>,
+    entry: Option<direct::BoundInputs>,
 }
 
 /// Recover the source stack after the accepted exit, including the exact
@@ -291,6 +294,7 @@ impl<'a> CollectionRegion<'a> {
             kind: room::ExitKind::Normal,
             branches: self.branches.borrow().clone(),
             transfer,
+            entry: None,
         })
     }
 

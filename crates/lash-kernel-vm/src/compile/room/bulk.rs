@@ -4,6 +4,40 @@
 //! actual immutable occurrence prices, and callees include frames and cells.
 use super::*;
 
+impl Source {
+    /// Resolve a collection kernel's physical bindings through the immutable
+    /// source placement. A physical index never becomes a logical owner ID.
+    pub(crate) fn collection_bindings(
+        &self,
+        placement: &placement::BindingPlacement,
+        physical: &[usize],
+    ) -> Result<Box<[lash_kernel_state::kernel_internals::logical::Slot]>, Refused> {
+        if !std::ptr::eq(self, placement.source().as_ref()) {
+            return Err(Refused::Source);
+        }
+        self.verify()?;
+        physical
+            .iter()
+            .map(|&physical| {
+                let physical = u32::try_from(physical).map_err(|_| Refused::Source)?;
+                let mut selected = self.bindings.iter().filter_map(|binding| {
+                    let lash_kernel_state::kernel_internals::logical::Owner::Value { slot, .. } =
+                        self.binding_root(binding.index, doc::TaskId::MAIN, 0)?
+                    else {
+                        return None;
+                    };
+                    (placement.physical(slot) == Some(physical)).then_some((binding, slot))
+                });
+                let (binding, slot) = selected.next().ok_or(Refused::Source)?;
+                if binding.shared || selected.next().is_some() || !placement.unshared(physical) {
+                    return Err(Refused::Source);
+                }
+                Ok(slot)
+            })
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Bulk {
     pub(crate) function: FunctionId,

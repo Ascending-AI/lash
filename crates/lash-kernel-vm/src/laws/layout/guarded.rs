@@ -627,6 +627,30 @@ fn collection_region_preparations_preserve_source_and_storage() {
             &program.instances,
         )
         .unwrap_or_else(|_| panic!("collection fixture compiles"));
+    let callback = (0..exe.code_count())
+        .map(|code| exe.code(crate::compile::CodeId(code as u32)))
+        .find(|code| code.created.is_some() && code.captures.is_empty())
+        .expect("the actual fixture callback");
+    let site = callback.created.as_ref().unwrap();
+    let origin = lash_kernel_doc::snapshot::closure_at(
+        &program.document,
+        site,
+        program.link,
+        exe.helpers(),
+        exe.selection(),
+    )
+    .unwrap();
+    let callback = std::sync::Arc::new(lash_kernel_doc::arena::ClosureIdentity {
+        capture_names: callback.capture_names.clone(),
+        callable: lash_kernel_value::CallableId {
+            link: program.link,
+            function: origin.function,
+        },
+        site: lash_kernel_doc::linked_site::LinkedSite {
+            link: program.link,
+            site: site.clone(),
+        },
+    });
     let mut prepared = Vec::new();
     for code in 0..exe.code_count() {
         let Some(plan) = exe
@@ -640,6 +664,7 @@ fn collection_region_preparations_preserve_source_and_storage() {
                 &exe,
                 embedder.machine.source_law_heap(),
                 plan.slots,
+                &callback,
             ));
         }
     }

@@ -11,6 +11,7 @@ impl Compiled {
         exe: &Executable,
         heap: &PagedHeap,
         count: usize,
+        callback: &std::sync::Arc<lash_kernel_doc::arena::ClosureIdentity>,
     ) -> Vec<Family> {
         let mut reached = Vec::new();
         for (step, tail) in &self.code.sites.collection {
@@ -21,6 +22,8 @@ impl Compiled {
                 let hole = arena.tuple(vec![], 128).unwrap();
                 let sorted = arena.create_list(&[hole, Value::Absent]);
                 let out = arena.create_list(&[Value::Int(3), Value::Int(7)]);
+                let callable =
+                    Value::Closure(arena.new_closure(std::sync::Arc::clone(callback), vec![]));
                 let mut slots = vec![SlotState::Value(Value::Int(0)); count];
                 let mut set = |at, value| slots[at] = SlotState::Value(value);
                 match &**step {
@@ -64,6 +67,9 @@ impl Compiled {
                         set(merge.lists[0], sorted);
                         set(merge.lists[1], out);
                         set(merge.order, Value::Int(if case == 0 { 1 } else { 0 }));
+                        if let Some(at) = merge.callback_binding {
+                            set(at, callable);
+                        }
                         // These are the saved pre-callback operands. Tail must
                         // read the current list, without overwriting either.
                         set(merge.items[0], Value::Int(41));
@@ -193,6 +199,7 @@ impl Compiled {
                     }
                     _ => {}
                 }
+                let selected_exit = facts.exit.clone();
                 reached.push(step.family());
                 if let CollectionStep::Append(append) = &**step {
                     // K-MACH-008: rejection, abandonment and a stale *input*
@@ -349,8 +356,230 @@ impl Compiled {
                             .is_none()
                     );
                 }
+                self.check_direct_collection_entry(
+                    exe,
+                    heap,
+                    step,
+                    *tail,
+                    &mut arena,
+                    &slots,
+                    selected_exit,
+                );
             }
         }
         reached
+    }
+}
+
+impl Compiled {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the existing collection preparation fixture"
+    )]
+    fn check_direct_collection_entry(
+        &self,
+        exe: &Executable,
+        heap: &PagedHeap,
+        step: &CollectionStep,
+        tail: bool,
+        arena: &mut Arena,
+        slots: &[SlotState],
+        mut exit: room::publication::Position,
+    ) {
+        use direct::*;
+        let placement = self.placement.as_ref().expect("source binding placement");
+        let physical: Vec<_> = (0..slots.len()).collect();
+        let logical = self
+            .source_room
+            .collection_bindings(placement, &physical)
+            .expect("the fixture has unshared source bindings");
+        let bindings: Vec<_> = logical
+            .iter()
+            .zip(slots)
+            .filter_map(|(slot, state)| match state {
+                SlotState::Value(value) => Some((*slot, RootValue::Value(value))),
+                SlotState::Empty => None,
+                SlotState::Cell(_) => panic!("no shared fixture binding"),
+            })
+            .collect();
+        let mut ledger = Ledger::fresh();
+        let (invocation, boundary) = ledger
+            .prepare_enter_publication(
+                TaskId::MAIN,
+                arena.registration().unwrap(),
+                heap.pages(),
+                &[],
+                &bindings,
+            )
+            .unwrap();
+        boundary
+            .admit(u64::MAX)
+            .unwrap_or_else(|_| panic!("fixture entry fits"))
+            .publish(&mut ledger, |_, edits| assert!(edits.is_empty()))
+            .unwrap();
+        exit.occurrence.invocation = invocation.id();
+        let activation = placement
+            .capture(placement.code(), &invocation, &ledger, heap, slots)
+            .unwrap()
+            .expect("actual source activation");
+        let entry = |exit| CollectionEntry {
+            activation: &activation,
+            invocation: &invocation,
+            exit,
+        };
+        macro_rules! check {
+            ($site:ty, $shape:expr, $physical:expr, $replacement:expr) => {{
+                let site = <$site>::compile(exe, self, $shape).expect("typed recognized collection site");
+                let run = |slots, exit| site.prepare(
+                    exe, self, &ledger, arena, slots, (128, 128), entry(exit),
+                );
+                let facts = run(slots, exit.clone()).expect("source-bound direct preparation");
+                let mut wrong = slots.to_vec();
+                wrong[$physical] = SlotState::Value($replacement);
+                assert!(run(&wrong, exit.clone()).is_none(),
+                    "a direct collection cannot replace an actual source input with a same-price value");
+                let mut wrong_exit = exit.clone();
+                wrong_exit.unpaid = Some(wrong_exit.at.clone());
+                assert!(run(slots, wrong_exit).is_none(), "completed work is not an unpaid exit");
+                let stale = run(slots, exit.clone()).expect("independent candidate before abandonment");
+                (facts, stale)
+            }};
+        }
+        let (mut facts, stale) = match step {
+            CollectionStep::Append(shape) => check!(AppendSite, shape, shape.item, Value::Int(97)),
+            CollectionStep::Reduce(shape) => {
+                check!(ReduceSite, shape, shape.accumulator, Value::Int(97))
+            }
+            CollectionStep::Place(shape) => {
+                check!(PlacementSite, shape, shape.value, Value::Int(97))
+            }
+            CollectionStep::Visit(shape) => check!(VisitSite, shape, shape.index, Value::Int(1)),
+            CollectionStep::ReadSlot(shape) => check!(
+                ReadSlotSite,
+                shape,
+                shape.index,
+                Value::Int(
+                    if matches!(slots[shape.index], SlotState::Value(Value::Int(0))) {
+                        1
+                    } else {
+                        0
+                    }
+                )
+            ),
+            CollectionStep::Merge(shape) if tail => {
+                check!(MergeTailSite, shape, shape.order, Value::Int(97))
+            }
+            CollectionStep::Merge(shape) => {
+                check!(MergeSite, shape, shape.counters[5], Value::Int(2))
+            }
+        };
+        if let CollectionStep::Merge(shape) = step
+            && !tail
+            && facts.transfer.continuation == CollectionContinuation::Callback
+        {
+            let site = MergeSite::compile(exe, self, shape).unwrap();
+            let shell = site
+                .callback(&facts, &ledger, arena)
+                .expect("actual callback shell");
+            assert!(shell.current(&self.source_room, &invocation, &facts.exit, &ledger, arena));
+            assert!(
+                shell.arguments[0].same(
+                    &arena
+                        .item(shell.buffers[0], shell.pending.left)
+                        .unwrap()
+                        .unwrap()
+                )
+            );
+            assert!(
+                shell.arguments[1].same(
+                    &arena
+                        .item(shell.buffers[0], shell.pending.right)
+                        .unwrap()
+                        .unwrap()
+                )
+            );
+            let first = facts
+                .writes
+                .iter()
+                .position(|(at, _)| *at == shape.items[0])
+                .unwrap();
+            let second = facts
+                .writes
+                .iter()
+                .position(|(at, _)| *at == shape.items[1])
+                .unwrap();
+            let saved = facts.writes[first].1;
+            facts.writes[first].1 = facts.writes[second].1;
+            facts.writes[second].1 = saved;
+            assert!(
+                site.callback(&facts, &ledger, arena).is_none(),
+                "callback operands retain their original source order"
+            );
+            facts.writes[second].1 = facts.writes[first].1;
+            facts.writes[first].1 = saved;
+        }
+        let stale_target = facts.member.map(|(handle, _, _)| handle);
+        let writes = facts.writes.clone();
+        let clears = facts.transfer.clears.clone();
+        let allocations = arena.allocations();
+        let balance = ledger.balance().unwrap();
+        let CollectionBoundary {
+            mut transaction,
+            storage,
+            ..
+        } = facts
+            .prepare_direct_boundary(&ledger, arena, heap)
+            .unwrap()
+            .expect("source-bound detached boundary");
+        let outputs: Vec<_> = writes
+            .iter()
+            .map(|(physical, value)| {
+                (
+                    invocation.owner(logical[*physical]),
+                    RootValue::Value(value),
+                )
+            })
+            .collect();
+        let inputs: Vec<_> = clears
+            .iter()
+            .copied()
+            .chain(writes.iter().map(|(physical, _)| *physical))
+            .map(|physical| invocation.owner(logical[physical]))
+            .collect();
+        assert!(transaction.matches_roots(&ledger, &inputs, &outputs));
+        if let Some((owner, _)) = outputs.first() {
+            assert!(
+                !transaction.matches_roots(
+                    &ledger,
+                    &inputs,
+                    &[(*owner, RootValue::Value(&Value::Int(999)))]
+                ),
+                "a same-priced wrong result cannot replace the bound direct transfer"
+            );
+        }
+        drop(transaction);
+        drop(storage);
+        assert_eq!(
+            arena.allocations(),
+            allocations,
+            "abandonment claims no ordinal"
+        );
+        assert_eq!(
+            ledger.balance().unwrap(),
+            balance,
+            "abandonment publishes no source owner"
+        );
+        if let Some(handle) = stale_target {
+            arena.list_set(handle, 0, Value::Int(203)).unwrap();
+        } else {
+            ledger.handoff().unwrap();
+        }
+        assert!(
+            stale
+                .prepare_direct_boundary(&ledger, arena, heap)
+                .unwrap()
+                .is_none(),
+            "a detached collection rejects entry dependencies that changed before publication"
+        );
     }
 }
