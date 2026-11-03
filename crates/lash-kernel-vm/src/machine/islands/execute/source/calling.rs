@@ -1,10 +1,11 @@
 //! A packet call borrows its actual operands and admits its occurrence together.
 use super::*;
-use crate::admission::Allowance;
+use crate::admission::{Allowance, SourceResources};
 use crate::compile::NestedKind;
 use crate::machine::source_publication::Prefix;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, Program};
+use crate::machine::source_publication::{Admission, Context};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
+use room::publication::ControlRoots;
 use room::{
     ExitKind, Phase, Point,
     publication::{Occurrence, Position as SourcePosition},
@@ -141,12 +142,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             ..start.clone()
         };
         let safe_point = self.charged;
-        let program = Program::new(vec![JournalEvent {
-            borrowed,
-            ..Default::default()
-        }]);
         let published = self
-            .publish_source(
+            .publish_source_control(
                 frame.state.callee,
                 activation,
                 Prefix {
@@ -173,8 +170,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         safe_point,
                     },
                 },
-                || program.clone(),
-                |_, edits| debug_assert!(edits.is_empty()),
+                ControlRoots {
+                    borrowed,
+                    ..Default::default()
+                },
+                (),
+                |_, _, ()| {},
             )
             .map_err(|error| self.halt(error.into()))?;
         if !published {
@@ -183,5 +184,59 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         #[cfg(any(test, feature = "testing"))]
         super::super::super::witness::packet_call_entered();
         Ok(Some(ordinal))
+    }
+}
+
+impl<const OBSERVING: bool> Island<'_, OBSERVING> {
+    pub(super) fn publish_source_control<S>(
+        &mut self,
+        callee: Callee<'_>,
+        activation: &mut Activation,
+        prefix: Prefix,
+        roots: room::publication::ControlRoots,
+        storage: S,
+        semantic: impl FnOnce(&mut Arena, &mut Session, S),
+    ) -> Result<bool, HeapFault> {
+        let source = &self.exe.code(callee.plan.code).source_room;
+        let document = self
+            .exe
+            .instances
+            .get(&callee.link)
+            .ok_or_else(|| malformed("source link has no admitted document"))?;
+        let kernel = doc::KernelVersion::of(document.kernel())
+            .ok_or_else(|| malformed("source kernel is unsupported"))?;
+        let safe_point = self.charged;
+        Context {
+            admission: Admission::Envelope(self.memory_bound),
+            source,
+            link: callee.link,
+            kernel,
+            logical: &self.logical,
+            heap: self.heap,
+            arena: self.arena,
+            session: self.session,
+            resources: SourceResources {
+                charged: &mut self.charged,
+                counters: self.counters,
+                bound: self.bound,
+                slice: self.slice_end,
+                depth: (self.base + u64::from(self.depth)).saturating_sub(1),
+                limit: self.call_depth,
+                safe_point,
+            },
+            logical_memory: self.logical_memory,
+        }
+        .publish_control(
+            &activation.invocation,
+            &mut activation.frontier,
+            prefix,
+            roots,
+            storage,
+            semantic,
+        )
+        .map_err(|halt| match halt {
+            crate::machine::Halt::Heap(error) => *error,
+            _ => malformed("an envelope control publication ended the run"),
+        })
     }
 }

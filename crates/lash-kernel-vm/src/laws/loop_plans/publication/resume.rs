@@ -11,7 +11,7 @@ fn calls_kind(body: bool) {
     use crate::compile::room::{self, ExitKind, Phase, Point, publication::*};
     use lash_kernel_doc::{self as doc, TaskId, Value};
     use lash_kernel_state::kernel_internals::logical::{
-        JournalEvent, Owner as Root, Program, PublicationValue as PV, RootValue, Slot,
+        Owner as Root, PublicationValue as PV, RootValue, Slot,
     };
     use lash_kernel_value::sites::{Site, Unit};
     use std::sync::Arc;
@@ -77,6 +77,8 @@ fn calls_kind(body: bool) {
     let interval = source
         .compile_event(&at, ExitKind::Normal)
         .expect("an entered call has a canonical source resumption");
+    let descriptor =
+        ExactEvent::compile(&source, Arc::clone(&interval), Successor::Normal).unwrap();
     let heap = run.machine.source_law_heap();
     let store = heap.logical_ledger();
     let mut ledger = store.borrow_mut();
@@ -164,22 +166,20 @@ fn calls_kind(body: bool) {
         depth: 0,
         safe_point: 0,
     };
-    let make = |saved_input, result_input, recreate| {
-        Program::new(vec![JournalEvent {
-            inputs: vec![incoming, saved_input],
-            outputs: vec![
-                (
-                    result,
-                    if recreate {
-                        PV::Native(value)
-                    } else {
-                        PV::Existing(result_input)
-                    },
-                ),
-                (operand, PV::Existing(saved_input)),
-            ],
-            ..Default::default()
-        }])
+    let make = |saved_input, result_input, recreate| ExactRoots {
+        inputs: vec![incoming, saved_input],
+        outputs: vec![
+            (
+                result,
+                if recreate {
+                    PV::Native(value)
+                } else {
+                    PV::Existing(result_input)
+                },
+            ),
+            (operand, PV::Existing(saved_input)),
+        ],
+        ..Default::default()
     };
     let mut charged = 0;
     let mut counters = crate::machine::tasks::Occurrences::for_source_law(0);
@@ -199,13 +199,13 @@ fn calls_kind(body: bool) {
             safe_point: 0,
         };
         assert_eq!(
-            frontier
-                .evaluate_interval(
-                    Arc::clone(&interval),
-                    &mut Execution,
+            descriptor
+                .bind(
+                    &frontier,
                     &ledger,
                     &arena,
                     heap,
+                    &mut Execution,
                     make(saved_input, result_input, recreate),
                     next.clone(),
                     allowance.clone(),
@@ -249,13 +249,13 @@ fn calls_kind(body: bool) {
             safe_point: 0,
         };
         assert!(
-            forged
-                .evaluate_interval(
-                    Arc::clone(&interval),
-                    &mut Execution,
+            descriptor
+                .bind(
+                    &forged,
                     &ledger,
                     &arena,
                     heap,
+                    &mut Execution,
                     make(saved, incoming, false),
                     forged_next,
                     allowance.clone(),
@@ -274,13 +274,13 @@ fn calls_kind(body: bool) {
         limit: 10,
         safe_point: 0,
     };
-    let evaluated = frontier
-        .evaluate_interval(
-            Arc::clone(&interval),
-            &mut Execution,
+    let bound = descriptor
+        .bind(
+            &frontier,
             &ledger,
             &arena,
             heap,
+            &mut Execution,
             make(saved, incoming, false),
             next.clone(),
             allowance.clone(),
@@ -288,32 +288,18 @@ fn calls_kind(body: bool) {
         )
         .ok()
         .unwrap();
-    let prepared = evaluated
-        .prepare_exact(
-            &frontier,
-            &ledger,
-            arena.registration().unwrap(),
-            heap,
-            make(saved, incoming, false),
-            ExitKind::Normal,
-            &next,
-        )
+    let prepared = bound
+        .prepare(&frontier, &ledger, arena.registration().unwrap(), heap)
         .ok()
         .unwrap();
     let accepted = prepared
-        .admit_exact(
-            &frontier,
-            &ledger,
-            resources,
-            &allowance,
-            before.total().unwrap(),
-        )
+        .admit(&frontier, &ledger, resources, before.total().unwrap())
         .unwrap()
         .unwrap();
     drop(ledger);
     let mut ledger = store.borrow_mut();
     accepted
-        .publish(&mut frontier, &mut ledger, |_, edits| {
+        .publish_event(&mut frontier, &mut ledger, |_, edits| {
             assert!(edits.is_empty())
         })
         .ok()

@@ -1,6 +1,7 @@
 use super::*;
 mod borrowed;
 mod construction;
+mod control;
 mod departure;
 mod exact;
 mod fields;
@@ -13,6 +14,7 @@ pub(super) fn checked_source_publication() {
     departure::exits();
     resume::calls();
     borrowed::entry();
+    control::joins();
     fields::names();
     construction::successors();
     use crate::compile::room::{self, Phase, Point, Selection, publication::*};

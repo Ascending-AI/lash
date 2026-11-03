@@ -1,11 +1,11 @@
 //! A guest action observes its pinned arguments before the callee transfers them.
 use super::*;
+use crate::compile::room::publication::{ControlExit, ControlRoots};
 use crate::compile::{
     Nested,
     room::{ExitKind, Phase, Point, publication::Occurrence},
 };
 use crate::machine::{Halt, KernelMachine, fault, stream::Running};
-use lash_kernel_state::kernel_internals::logical::JournalEvent;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
 impl KernelMachine {
@@ -90,10 +90,6 @@ impl KernelMachine {
             }),
             ..start.clone()
         };
-        let program = Program::new(vec![JournalEvent {
-            borrowed,
-            ..Default::default()
-        }]);
         let safe_point = self.charged;
         let source_action = &mut frame.source_action;
         let published = Context {
@@ -124,7 +120,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_control(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -151,10 +147,12 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || program.clone(),
-            Reserve(move |_: &mut Arena| Ok(Some(bank))),
-            |_, _, edits, _bank| {
-                debug_assert!(edits.is_empty());
+            ControlRoots {
+                borrowed,
+                ..Default::default()
+            },
+            bank,
+            |_, _, _bank| {
                 *source_action = Some((entry.occurrence, occurrence));
             },
         )?;
@@ -163,5 +161,92 @@ impl KernelMachine {
             crate::machine::islands::witness::call_enter_published();
         }
         Ok(published.then_some(occurrence))
+    }
+}
+
+impl Context<'_> {
+    pub(in crate::machine) fn publish_control<S>(
+        self,
+        invocation: &Invocation,
+        frontier: &mut Option<Frontier>,
+        mut prefix: Prefix,
+        roots: ControlRoots,
+        storage: S,
+        semantic: impl FnOnce(&mut Arena, &mut Session, S),
+    ) -> Result<bool, Halt> {
+        self.logical.flush(self.arena, self.heap)?;
+        let store = self.logical.ledger();
+        if let Some(frontier) = frontier.as_mut()
+            && frontier.departs(&prefix.start)
+        {
+            frontier.handoff(&mut store.borrow_mut(), prefix.start.clone())?;
+        }
+        let ledger = store.borrow();
+        if frontier.is_none() {
+            *frontier = Some(
+                self.source
+                    .frontier(
+                        &ledger,
+                        self.heap,
+                        invocation,
+                        self.link,
+                        self.kernel,
+                        prefix.start.clone(),
+                    )
+                    .map_err(|_| malformed("exact source frontier failed authentication"))?,
+            );
+        }
+        let frontier = frontier
+            .as_mut()
+            .ok_or_else(|| malformed("exact frontier disappeared"))?;
+        let Ok(event) = ControlExit::compile(self.source, prefix.interval) else {
+            return Ok(false);
+        };
+        if prefix.allowance.safe_point != *self.resources.charged {
+            return Ok(false);
+        }
+        let Some(facts) = self.resources.facts(&prefix.allowance) else {
+            return Ok(false);
+        };
+        let registration = self.arena.registration().map_err(native_fault)?;
+        let Some(mut prepared) = event.prepare(
+            self.source,
+            frontier,
+            invocation,
+            &ledger,
+            registration,
+            self.heap,
+            &mut prefix.facts,
+            roots,
+            prefix.next,
+            prefix.allowance,
+            facts,
+        )?
+        else {
+            return Ok(false);
+        };
+        let memory_bound = match self.admission {
+            Admission::Envelope(bound) => bound,
+            Admission::Exact(mut memory) => {
+                if memory.exceeded(prepared.peak()) {
+                    prepared = prepared.collect(&ledger, self.heap)?;
+                }
+                memory.admit(prepared.peak())?
+            }
+        };
+        let Some(accepted) = prepared.admit(frontier, &ledger, self.resources, memory_bound)?
+        else {
+            return Ok(false);
+        };
+        drop(ledger);
+        let balance = accepted.publish_control(frontier, &mut store.borrow_mut(), |arena| {
+            semantic(arena, self.session, storage)
+        })?;
+        self.logical_memory.set(balance.total()?);
+        #[cfg(any(test, feature = "testing"))]
+        crate::machine::islands::witness::source_loop_published(
+            &frontier.position().occurrence.loops,
+        );
+        Ok(true)
     }
 }

@@ -5,9 +5,7 @@ pub(super) fn entry() {
     use crate::admission::{Allowance, SourceResources};
     use crate::compile::room::{self, ExitKind, Phase, Point, publication::*};
     use lash_kernel_doc::{self as doc, TaskId, Value};
-    use lash_kernel_state::kernel_internals::logical::{
-        JournalEvent, Owner, Program, PublicationValue, RootValue, Slot,
-    };
+    use lash_kernel_state::kernel_internals::logical::{Owner, PublicationValue, RootValue, Slot};
     use lash_kernel_value::sites::{Site, Unit};
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -55,6 +53,7 @@ pub(super) fn entry() {
         phase: Phase::Enter,
     };
     let interval = source.compile_event(&at, ExitKind::Action).unwrap();
+    let descriptor = ControlExit::compile(&source, Arc::clone(&interval)).unwrap();
     let event = interval.events().next().unwrap();
     let heap = run.machine.source_law_heap();
     let store = heap.logical_ledger();
@@ -126,7 +125,7 @@ pub(super) fn entry() {
     let mut charged = 0;
     let mut counters = crate::machine::tasks::Occurrences::for_source_law(1);
     let mut variants = vec![(
-        JournalEvent {
+        ControlRoots {
             borrowed: owners.clone(),
             ..Default::default()
         },
@@ -135,31 +134,41 @@ pub(super) fn entry() {
     let mut wrong = owners.clone();
     wrong[0] = foreign;
     variants.push((
-        JournalEvent {
+        ControlRoots {
             borrowed: wrong,
             ..Default::default()
         },
         false,
     ));
+    let mut reordered = owners.clone();
+    reordered.reverse();
+    assert_ne!(reordered, owners);
     variants.push((
-        JournalEvent {
+        ControlRoots {
+            borrowed: reordered,
+            ..Default::default()
+        },
+        false,
+    ));
+    variants.push((
+        ControlRoots {
             inputs: owners.clone(),
             ..Default::default()
         },
         false,
     ));
-    variants.push((JournalEvent::default(), false));
+    variants.push((ControlRoots::default(), false));
     let mut duplicate = owners.clone();
     duplicate.push(owners[0]);
     variants.push((
-        JournalEvent {
+        ControlRoots {
             borrowed: duplicate,
             ..Default::default()
         },
         false,
     ));
     variants.push((
-        JournalEvent {
+        ControlRoots {
             borrowed: owners.clone(),
             outputs: vec![(foreign, PublicationValue::Native(value))],
             ..Default::default()
@@ -176,28 +185,30 @@ pub(super) fn entry() {
             limit: 10,
             safe_point: 0,
         };
-        let evaluated = frontier.evaluate_interval(
-            Arc::clone(&interval),
-            &mut Execution,
-            &ledger,
-            &arena,
-            heap,
-            Program::new(vec![event]),
-            next.clone(),
-            allowance.clone(),
-            resources.facts(&allowance).unwrap(),
-        );
+        let prepared = descriptor
+            .prepare(
+                &source,
+                &frontier,
+                &invocation,
+                &ledger,
+                arena.registration().unwrap(),
+                heap,
+                &mut Execution,
+                event,
+                next.clone(),
+                allowance.clone(),
+                resources.facts(&allowance).unwrap(),
+            )
+            .unwrap();
         assert_eq!(
-            evaluated.is_ok(),
+            prepared.is_some(),
             valid,
             "only the exact read-only entry arguments are accepted"
         );
     }
-    let make = || {
-        Program::new(vec![JournalEvent {
-            borrowed: owners.clone(),
-            ..Default::default()
-        }])
+    let make = || ControlRoots {
+        borrowed: owners.clone(),
+        ..Default::default()
     };
     let resources = SourceResources {
         charged: &mut charged,
@@ -208,42 +219,68 @@ pub(super) fn entry() {
         limit: 10,
         safe_point: 0,
     };
-    let evaluated = frontier
-        .evaluate_interval(
-            Arc::clone(&interval),
-            &mut Execution,
+    let prepared = descriptor
+        .prepare(
+            &source,
+            &frontier,
+            &invocation,
             &ledger,
-            &arena,
+            arena.registration().unwrap(),
             heap,
+            &mut Execution,
             make(),
             next.clone(),
             allowance.clone(),
             resources.facts(&allowance).unwrap(),
         )
-        .ok()
+        .unwrap()
         .unwrap();
-    let prepared = evaluated
-        .prepare_exact(
+    let accepted = prepared
+        .admit(&frontier, &ledger, resources, 4096)
+        .unwrap()
+        .unwrap();
+    drop(accepted);
+    assert_eq!(charged, 0);
+    assert_eq!(
+        counters.current(0),
+        Some(0),
+        "an abandoned Enter consumes no occurrence"
+    );
+    assert_eq!(ledger.balance().unwrap(), before);
+    assert_eq!(frontier.position().unpaid.as_ref(), Some(&at));
+    let resources = SourceResources {
+        charged: &mut charged,
+        counters: &mut counters,
+        bound: 10,
+        slice: 10,
+        depth: 0,
+        limit: 10,
+        safe_point: 0,
+    };
+    let prepared = descriptor
+        .prepare(
+            &source,
             &frontier,
+            &invocation,
             &ledger,
             arena.registration().unwrap(),
             heap,
+            &mut Execution,
             make(),
-            ExitKind::Action,
-            &next,
+            next.clone(),
+            allowance.clone(),
+            resources.facts(&allowance).unwrap(),
         )
-        .ok()
+        .unwrap()
         .unwrap();
     let accepted = prepared
-        .admit_exact(&frontier, &ledger, resources, &allowance, 4096)
+        .admit(&frontier, &ledger, resources, 4096)
         .unwrap()
         .unwrap();
     drop(ledger);
     let mut ledger = store.borrow_mut();
     accepted
-        .publish(&mut frontier, &mut ledger, |_, edits| {
-            assert!(edits.is_empty())
-        })
+        .publish_control(&mut frontier, &mut ledger, |_| {})
         .ok()
         .unwrap();
     assert_eq!(ledger.balance().unwrap(), before);
@@ -252,29 +289,117 @@ pub(super) fn entry() {
     }
     assert_eq!(charged, 0);
     assert_eq!(counters.current(0), Some(1));
+    drop(ledger);
+    let ledger = store.borrow();
     // The same borrowed owner list cannot outlive the ledger revision at which
     // its exact contents were observed.
-    let evaluated = make().evaluate(&ledger, &arena).unwrap();
-    ledger.handoff().unwrap();
-    assert!(!evaluated.is_current(&ledger, &arena));
+    let resources = SourceResources {
+        charged: &mut charged,
+        counters: &mut counters,
+        bound: 10,
+        slice: 10,
+        depth: 0,
+        limit: 10,
+        safe_point: 0,
+    };
+    let prepared = descriptor
+        .prepare(
+            &source,
+            &frontier,
+            &invocation,
+            &ledger,
+            arena.registration().unwrap(),
+            heap,
+            &mut Execution,
+            make(),
+            next.clone(),
+            allowance.clone(),
+            resources.facts(&allowance).unwrap(),
+        )
+        .unwrap();
     assert!(
-        evaluated
-            .prepare(&ledger, arena.registration().unwrap(), heap, make())
-            .is_err()
+        prepared.is_none(),
+        "the old Enter cannot run past its published unpaid head"
+    );
+    drop(prepared);
+    let mut stale_position = frontier.position().clone();
+    stale_position.unpaid = Some(at.clone());
+    stale_position.occurrence.action = Some((at.clone(), 1));
+    let stale = source
+        .frontier(
+            &ledger,
+            heap,
+            &invocation,
+            program.link,
+            doc::KernelVersion::One,
+            stale_position,
+        )
+        .unwrap();
+    let next = Position {
+        occurrence: stale.position().occurrence.clone(),
+        ..next
+    };
+    let prepared = descriptor
+        .prepare(
+            &source,
+            &stale,
+            &invocation,
+            &ledger,
+            arena.registration().unwrap(),
+            heap,
+            &mut Execution,
+            make(),
+            next,
+            allowance.clone(),
+            resources.facts(&allowance).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+    drop(ledger);
+    let mut ledger = store.borrow_mut();
+    ledger.handoff().unwrap();
+    assert!(
+        prepared
+            .admit(&stale, &ledger, resources, 4096)
+            .unwrap()
+            .is_none()
     );
     let absent = Owner::Incoming(TaskId::MAIN);
     assert!(ledger.holding(absent, heap.pages()).unwrap().is_none());
-    let missing = || {
-        Program::new(vec![JournalEvent {
-            borrowed: vec![absent],
-            ..Default::default()
-        }])
+    let resources = SourceResources {
+        charged: &mut charged,
+        counters: &mut counters,
+        bound: 10,
+        slice: 10,
+        depth: 0,
+        limit: 10,
+        safe_point: 0,
     };
     assert!(
-        missing()
-            .evaluate(&ledger, &arena)
+        descriptor
+            .prepare(
+                &source,
+                &stale,
+                &invocation,
+                &ledger,
+                arena.registration().unwrap(),
+                heap,
+                &mut Execution,
+                ControlRoots {
+                    borrowed: vec![absent],
+                    ..Default::default()
+                },
+                Position {
+                    unpaid: Some(Point {
+                        phase: Phase::Commit,
+                        ..at
+                    }),
+                    ..stale.position().clone()
+                },
+                allowance.clone(),
+                resources.facts(&allowance).unwrap(),
+            )
             .unwrap()
-            .prepare(&ledger, arena.registration().unwrap(), heap, missing())
-            .is_err()
+            .is_none()
     );
 }

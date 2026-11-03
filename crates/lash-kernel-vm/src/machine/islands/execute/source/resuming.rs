@@ -1,9 +1,10 @@
 //! Packet restoration adopts Incoming and actual saved owners in one event.
 use super::*;
-use crate::admission::Allowance;
+use crate::admission::{Allowance, SourceResources};
 use crate::compile::NestedKind;
 use crate::machine::source_publication::Prefix;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, Program, PublicationValue as PV};
+use crate::machine::source_publication::{Admission, Context};
+use lash_kernel_state::kernel_internals::logical::PublicationValue as PV;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
     ExitKind, Phase, Point,
@@ -205,13 +206,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             ..start.clone()
         };
         let safe_point = self.charged;
-        let program = Program::new(vec![JournalEvent {
-            inputs,
-            outputs,
-            ..Default::default()
-        }]);
         let output = &mut frame.regs[site.reg as usize];
-        let published = self.publish_source(
+        let published = self.publish_source_event(
             frame.state.callee,
             activation,
             Prefix {
@@ -238,8 +234,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     safe_point,
                 },
             },
-            || program.clone(),
-            |_, edits| {
+            room::publication::ExactRoots {
+                inputs,
+                outputs,
+                ..Default::default()
+            },
+            room::publication::Successor::Normal,
+            (),
+            |_, _, edits, ()| {
                 debug_assert!(edits.is_empty());
                 *output = value;
             },
@@ -249,5 +251,67 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             crate::machine::islands::witness::packet_call_resumed(entry.roles.len());
         }
         Ok(published)
+    }
+}
+
+impl<const OBSERVING: bool> Island<'_, OBSERVING> {
+    #[expect(clippy::too_many_arguments, reason = "one exact source event envelope")]
+    pub(super) fn publish_source_event<S>(
+        &mut self,
+        callee: Callee<'_>,
+        activation: &mut Activation,
+        prefix: Prefix,
+        roots: room::publication::ExactRoots,
+        successor: room::publication::Successor,
+        storage: S,
+        semantic: impl FnOnce(
+            &mut Arena,
+            &mut Session,
+            Vec<lash_kernel_state::kernel_internals::logical::MemberEdit>,
+            S,
+        ),
+    ) -> Result<bool, HeapFault> {
+        let source = &self.exe.code(callee.plan.code).source_room;
+        let document = self
+            .exe
+            .instances
+            .get(&callee.link)
+            .ok_or_else(|| malformed("source link has no admitted document"))?;
+        let kernel = doc::KernelVersion::of(document.kernel())
+            .ok_or_else(|| malformed("source kernel is unsupported"))?;
+        let safe_point = self.charged;
+        Context {
+            admission: Admission::Envelope(self.memory_bound),
+            source,
+            link: callee.link,
+            kernel,
+            logical: &self.logical,
+            heap: self.heap,
+            arena: self.arena,
+            session: self.session,
+            resources: SourceResources {
+                charged: &mut self.charged,
+                counters: self.counters,
+                bound: self.bound,
+                slice: self.slice_end,
+                depth: (self.base + u64::from(self.depth)).saturating_sub(1),
+                limit: self.call_depth,
+                safe_point,
+            },
+            logical_memory: self.logical_memory,
+        }
+        .publish_event(
+            &activation.invocation,
+            &mut activation.frontier,
+            prefix,
+            roots,
+            successor,
+            storage,
+            semantic,
+        )
+        .map_err(|halt| match halt {
+            crate::machine::Halt::Heap(error) => *error,
+            _ => malformed("an envelope event publication ended the run"),
+        })
     }
 }

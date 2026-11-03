@@ -1,6 +1,12 @@
 //! A nested Leave releases only that scope's genuine source owners.
 use super::*;
-use room::{ExitKind, Phase as SourcePhase, Point};
+use crate::admission::Allowance;
+use crate::machine::source_publication::Prefix;
+use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
+use room::{
+    ExitKind, Measure, Phase as SourcePhase, Point,
+    publication::{ExactRoots, Occurrence, Position as SourcePosition, Successor},
+};
 use std::collections::BTreeSet;
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
@@ -19,17 +25,27 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         }
         // A parent position with no next source event refuses, as the checked
         // path does.
-        let (loop_body, dependency) = match frame.state.control.iter().rev().nth(1) {
+        let (loop_body, dependency, unpaid) = match frame.state.control.iter().rev().nth(1) {
             Some(Position::Block(parent, next)) => {
                 let parent = self
                     .exe
                     .block(frame.state.callee.compiled.blocks[*parent].id);
-                if let Some(stmt) = parent.stmts.get(*next)
-                    && source.first_event(&self.exe.stmt(*stmt).site).is_err()
-                {
-                    return Ok(false);
-                }
-                (None, None)
+                let unpaid = if let Some(stmt) = parent.stmts.get(*next) {
+                    let Ok(point) = source.first_event(&self.exe.stmt(*stmt).site) else {
+                        return Ok(false);
+                    };
+                    point
+                } else {
+                    Point {
+                        site: parent.site.clone(),
+                        phase: if parent.site == source.site {
+                            SourcePhase::Fallthrough
+                        } else {
+                            SourcePhase::Leave
+                        },
+                    }
+                };
+                (None, None, unpaid)
             }
             Some(Position::Loop {
                 id,
@@ -44,10 +60,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 if *body != frame.state.callee.compiled.blocks[block].id || *started == 0 {
                     return Err(malformed("scope is not an entered while body"));
                 }
-                if source.first_event(&site.child(0)).is_err() {
+                let Ok(unpaid) = source.first_event(&site.child(0)) else {
                     return Ok(false);
-                }
-                (Some(ScopeLoop::While), None)
+                };
+                (Some(ScopeLoop::While), None, unpaid)
             }
             Some(Position::Loop {
                 id,
@@ -72,36 +88,51 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     return Ok(false);
                 };
                 let continued = next.is_some();
-                if source.next_after_for_cursor(site, continued).is_err() {
+                let Ok(unpaid) = source.next_after_for_cursor(site, continued) else {
                     return Ok(false);
-                }
+                };
                 (
                     Some(ScopeLoop::For { continued }),
                     cursor.walked().and_then(|value| value.handle()),
+                    unpaid,
                 )
             }
             _ => return Ok(false),
         };
         debug_assert!(loop_body.is_none() || frame.state.control.len() >= 2);
         debug_assert!(!matches!(loop_body, Some(ScopeLoop::For { .. })) || dependency.is_some());
+        let at = Point {
+            site: closing.clone(),
+            phase: SourcePhase::Leave,
+        };
+        let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
+            return Ok(false);
+        };
+        if !interval.scope_release(source, closing) {
+            return Ok(false);
+        }
+        self.logical.flush(self.arena, self.heap)?;
+        let activation = frame
+            .state
+            .source
+            .as_mut()
+            .ok_or_else(|| malformed("nested scope has no source activation"))?;
+        let slots = source
+            .owner_slots()
+            .map_err(|_| malformed("scope owners failed verification"))?;
+        let groups = vec![
+            room::Owner::Scope(closing.clone()),
+            room::Owner::Operands(closing.clone()),
+        ];
+        let store = self.logical.ledger();
+        let ledger = store.borrow();
+        let live = ledger.invocation_owners(&activation.invocation, self.heap.pages())?;
         let members = frame.state.callee.compiled.blocks[block]
             .leave
             .get_or_init(|| {
-                let leave = Point {
-                    site: closing.clone(),
-                    phase: SourcePhase::Leave,
-                };
-                let interval = source.compile_event(&leave, ExitKind::Normal).ok()?;
-                if !interval.scope_release(source, closing) {
-                    return None;
-                }
-                let slots = source.owner_slots().ok()?;
                 let mut members = BTreeSet::new();
-                for selector in [
-                    room::Owner::Scope(closing.clone()),
-                    room::Owner::Operands(closing.clone()),
-                ] {
-                    for owner in slots.group(&selector, self.task, 0)? {
+                for group in &groups {
+                    for owner in slots.group(group, self.task, 0)? {
                         let Owner::Value { slot, .. } = owner else {
                             return None;
                         };
@@ -113,38 +144,102 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(members) = members else {
             return Ok(false);
         };
-        if dependency.is_some_and(|handle| self.arena.content_version(handle).is_none()) {
-            return Ok(false);
-        }
-        let activation = frame
-            .state
-            .source
-            .as_mut()
-            .ok_or_else(|| malformed("nested scope has no source activation"))?;
-        let Some(frontier) = activation.frontier.as_mut() else {
-            return Ok(false);
+        let inputs: Vec<_> = live
+            .into_iter()
+            .filter(|owner| {
+                matches!(owner,
+            Owner::Value { slot, .. } if members.binary_search(slot).is_ok())
+            })
+            .collect();
+        let released = ledger.release_cost(&inputs, self.heap.pages())?;
+        drop(ledger);
+        let mut encoding = TokenWriter::new();
+        encoding.seq(3);
+        encoding.text("lash.source.packet-scope-leave");
+        at.site.encode(&mut encoding);
+        inputs.encode(&mut encoding);
+        let start = SourcePosition {
+            at: at.clone(),
+            unpaid: Some(at.clone()),
+            recovery: logical_digest(&encoding.into_bytes()),
+            occurrence: Occurrence {
+                task: self.task,
+                invocation: activation.invocation.id(),
+                loops: frame
+                    .state
+                    .control
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, control)| match control {
+                        Position::Loop {
+                            id,
+                            started,
+                            cursor,
+                            ..
+                        } => Some((
+                            self.exe.stmt(*id).site.clone(),
+                            started.saturating_sub(u64::from(
+                                cursor.is_some() || index + 1 < frame.state.control.len(),
+                            )),
+                        )),
+                        _ => None,
+                    })
+                    .collect(),
+                action: None,
+            },
         };
-        // The proven prefix's shared admission: a release adds no peak and no
-        // charge, so only the current envelope and window. Its journal is
-        // the groups' held owners, released inside the open region.
-        let depth = (self.base + u64::from(self.depth)).saturating_sub(1);
-        if self.charged > self.bound
-            || depth > self.call_depth
-            || !self
-                .logical
-                .admit(self.arena, self.heap, 0, self.memory_bound)?
-        {
+        let next = SourcePosition {
+            unpaid: Some(unpaid),
+            ..start.clone()
+        };
+        let declared = &frame.state.callee.compiled.blocks[block].declares;
+        let published = self.publish_source_event(
+            frame.state.callee,
+            activation,
+            Prefix {
+                interval,
+                start,
+                next,
+                facts: LeafExecution(
+                    [(
+                        at,
+                        LeafFacts {
+                            dependencies: dependency.into_iter().collect(),
+                            values: [(Measure::Release(groups.into()), i128::from(released))]
+                                .into(),
+                            ..Default::default()
+                        },
+                    )]
+                    .into(),
+                ),
+                allowance: Allowance {
+                    occurrences: vec![],
+                    before: 0,
+                    units: 0,
+                    close: None,
+                    strict: false,
+                    depth: 0,
+                    safe_point: self.charged,
+                },
+            },
+            ExactRoots {
+                inputs,
+                ..Default::default()
+            },
+            match loop_body {
+                Some(ScopeLoop::For { continued }) => Successor::Cursor(continued),
+                _ => Successor::Normal,
+            },
+            &mut frame.slots,
+            |_, _, edits, slots| {
+                assert!(edits.is_empty());
+                for at in declared {
+                    slots[*at as usize] = SlotState::Empty;
+                }
+            },
+        )?;
+        if !published {
             return Ok(false);
-        }
-        for slot in members {
-            let owner = activation.invocation.owner(*slot);
-            if self.logical.holds(owner, self.heap.pages())? {
-                self.logical.replace(owner, None);
-            }
-        }
-        frontier.proven()?;
-        for at in &frame.state.callee.compiled.blocks[block].declares {
-            frame.slots[*at as usize] = SlotState::Empty;
         }
         #[cfg(any(test, feature = "testing"))]
         {

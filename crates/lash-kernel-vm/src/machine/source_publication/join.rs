@@ -1,12 +1,13 @@
 //! Compiler joins publish their authenticated child receipt at the source Commit.
 use super::*;
+use crate::compile::room::publication::ControlRoots;
 use crate::compile::{
     SourceJoin,
     room::{Measure, Phase, Point, publication::Occurrence},
 };
 use crate::machine::{Halt, KernelMachine, SlotState, fault, stream::Running};
 use lash_kernel_exec::{LocalRef, Op};
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, PublicationValue};
+use lash_kernel_state::kernel_internals::logical::PublicationValue;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
 impl KernelMachine {
@@ -186,7 +187,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_control(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -214,16 +215,13 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || {
-                Program::new(vec![JournalEvent {
-                    inputs: inputs.clone(),
-                    outputs: vec![(output, PublicationValue::Existing(input))],
-                    ..Default::default()
-                }])
+            ControlRoots {
+                inputs,
+                outputs: vec![(output, PublicationValue::Existing(input))],
+                ..Default::default()
             },
-            Reserve(|_: &mut Arena| Ok(Some((bank, slot)))),
-            |_, _, edits, (bank, slot)| {
-                debug_assert!(edits.is_empty());
+            (bank, slot),
+            |_, _, (bank, slot)| {
                 bank.publish();
                 if let Some(slot) = slot {
                     slot.publish(SlotState::Empty);
