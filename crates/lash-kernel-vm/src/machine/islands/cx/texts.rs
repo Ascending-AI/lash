@@ -81,16 +81,62 @@ fn append(
 /// Actual operands, result and native scratch phase, retained independently of
 /// a source journal. The common charge compiler binds its canonical formula to
 /// these facts; this consumer never supplies a second charge price.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "staged text kernel awaits core source activation")
-)]
 pub(crate) struct TextEvaluation {
     pub(crate) arguments: [Value; 2],
     pub(crate) result: Value,
     pub(crate) summaries: [lash_kernel_doc::heap::TextSummary; 3],
     pub(crate) work: u64,
     pub(crate) install: u64,
+}
+
+/// Detached text storage and actual source-ordered evaluations. No registration,
+/// charge acceptance or source frontier escapes the eventual boundary callback.
+pub(crate) struct TextPrefix<'a> {
+    storage: lash_kernel_state::arena::PreparedTexts<'a>,
+    inputs: Vec<lash_kernel_state::kernel_internals::logical::Owner>,
+    outputs: Vec<(lash_kernel_state::kernel_internals::logical::Owner, Value)>,
+    evaluations: Vec<TextEvaluation>,
+}
+impl TextPrefix<'_> {
+    pub(crate) fn release_cost(
+        &mut self,
+        ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
+        heap: &lash_kernel_state::kernel_internals::PagedHeap,
+    ) -> Result<u64, HeapFault> {
+        self.storage
+            .release_cost(ledger, heap, &self.inputs, &self.outputs)
+    }
+    pub(crate) fn arena(&self) -> &Arena {
+        self.storage.arena()
+    }
+    pub(crate) fn evaluations(&self) -> &[TextEvaluation] {
+        &self.evaluations
+    }
+    pub(crate) fn boundary<R>(
+        self,
+        ledger: &mut lash_kernel_state::kernel_internals::logical::Ledger,
+        heap: &lash_kernel_state::kernel_internals::PagedHeap,
+        finish: impl FnOnce(
+            lash_kernel_state::kernel_internals::logical::BoundaryTransaction<'_>,
+            &mut lash_kernel_state::kernel_internals::logical::Ledger,
+            &mut dyn FnMut(
+                &mut Arena,
+                Vec<lash_kernel_state::kernel_internals::logical::MemberEdit>,
+            ),
+            &[TextEvaluation],
+        ) -> Result<R, HeapFault>,
+    ) -> Result<Option<(R, Vec<Value>)>, HeapFault> {
+        let live = self.outputs.iter().map(|(_, value)| *value).collect();
+        self.storage
+            .boundary(
+                ledger,
+                heap,
+                &self.inputs,
+                &self.outputs,
+                |transaction, ledger, apply| finish(transaction, ledger, apply, &self.evaluations),
+            )
+            .map(|result| result.map(|result| (result, live)))
+    }
 }
 
 impl Cx<'_> {
@@ -103,30 +149,17 @@ impl Cx<'_> {
         clippy::too_many_arguments,
         reason = "one source prefix with its storage and exit"
     )]
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "staged text kernel awaits core source activation")
-    )]
-    pub(crate) fn prepare_text_prefix<R>(
-        arena: &mut Arena,
-        ledger: &mut lash_kernel_state::kernel_internals::logical::Ledger,
-        heap: &lash_kernel_state::kernel_internals::PagedHeap,
+    pub(crate) fn prepare_text_prefix<'a>(
+        arena: &'a mut Arena,
+        ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
+        _heap: &lash_kernel_state::kernel_internals::PagedHeap,
         entries: &[Value],
         private: &[ArenaHandle],
         join: Option<(usize, usize)>,
         steps: &[(usize, usize, bool)],
         outputs: &[(lash_kernel_state::kernel_internals::logical::Owner, usize)],
         inputs: &[lash_kernel_state::kernel_internals::logical::Owner],
-        finish: impl FnOnce(
-            lash_kernel_state::kernel_internals::logical::BoundaryTransaction<'_>,
-            &mut lash_kernel_state::kernel_internals::logical::Ledger,
-            &mut dyn FnMut(
-                &mut Arena,
-                Vec<lash_kernel_state::kernel_internals::logical::MemberEdit>,
-            ),
-            &[TextEvaluation],
-        ) -> Result<R, HeapFault>,
-    ) -> Result<Option<(R, Vec<Value>)>, HeapFault> {
+    ) -> Result<Option<TextPrefix<'a>>, HeapFault> {
         let joined = match join {
             Some((list, separator)) => {
                 let (Some(&Value::List(list)), Some(&separator)) =
@@ -186,16 +219,12 @@ impl Cx<'_> {
         else {
             return Ok(None);
         };
-        let live = roots.iter().map(|(_, value)| *value).collect();
-        storage
-            .boundary(
-                ledger,
-                heap,
-                inputs,
-                &roots,
-                |transaction, ledger, apply| finish(transaction, ledger, apply, &evaluations),
-            )
-            .map(|result| result.map(|result| (result, live)))
+        Ok(Some(TextPrefix {
+            storage,
+            inputs: inputs.to_vec(),
+            outputs: roots,
+            evaluations,
+        }))
     }
 }
 
@@ -213,26 +242,17 @@ impl crate::machine::islands::compiled::Format {
         dead_code,
         reason = "staged format kernel awaits core source activation"
     )]
-    pub(crate) fn prepare_text_storage<R>(
+    pub(crate) fn prepare_text_storage<'a>(
         &self,
-        arena: &mut Arena,
-        ledger: &mut lash_kernel_state::kernel_internals::logical::Ledger,
+        arena: &'a mut Arena,
+        ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
         heap: &lash_kernel_state::kernel_internals::PagedHeap,
         registers: &[Value],
         private: &[ArenaHandle],
         inputs: &[lash_kernel_state::kernel_internals::logical::Owner],
         output: lash_kernel_state::kernel_internals::logical::Owner,
         move_left: bool,
-        finish: impl FnOnce(
-            lash_kernel_state::kernel_internals::logical::BoundaryTransaction<'_>,
-            &mut lash_kernel_state::kernel_internals::logical::Ledger,
-            &mut dyn FnMut(
-                &mut Arena,
-                Vec<lash_kernel_state::kernel_internals::logical::MemberEdit>,
-            ),
-            &[TextEvaluation],
-        ) -> Result<R, HeapFault>,
-    ) -> Result<Option<(R, Vec<Value>)>, HeapFault> {
+    ) -> Result<Option<TextPrefix<'a>>, HeapFault> {
         let (Some(&parts), Some(&left)) = (
             registers.get(self.parts.reg as usize),
             registers.get(self.append_args[0] as usize),
@@ -249,7 +269,6 @@ impl crate::machine::islands::compiled::Format {
             &[(2, 3, move_left)],
             &[(output, 4)],
             inputs,
-            finish,
         )
     }
 }

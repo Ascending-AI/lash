@@ -18,6 +18,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &NativeSite,
         args: &[Value],
     ) -> Result<ValuePublication, HeapFault> {
+        if matches!(site.direct(self.exe), Some(Direct::TextJoin)) {
+            match self.publish_text_value(frame, site, args, true)? {
+                ValuePublication::Unavailable => {}
+                published => return Ok(published),
+            }
+        }
         self.publish_native_answer(frame, site, args, false, None)
     }
 
@@ -104,9 +110,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         ) else {
             return Ok(ValuePublication::Unavailable);
         };
-        if !self.source_operand_transfer(frame, stream, site.pc, at) {
-            return Ok(ValuePublication::Unavailable);
-        }
         let Ok(unpaid) = source.next_after_commit(at) else {
             return Ok(ValuePublication::Unavailable);
         };

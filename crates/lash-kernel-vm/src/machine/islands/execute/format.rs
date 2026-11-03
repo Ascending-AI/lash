@@ -93,14 +93,31 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         self.construct(frame, &site.parts).inspect_err(|_| {
             witnessed!(FormatAppend, Prefix);
         })?;
-        frame.regs[site.separator.0 as usize] = site.separator.1;
+        if !self.source_read(frame, site.separator.2, site.separator.0, site.separator.1)? {
+            return Err(self.at(site.separator.2.unpaid()));
+        }
         let mut args = [Value::Absent; MAX_ARGS];
         for (value, reg) in args.iter_mut().zip(site.join_args) {
             *value = frame.regs[reg as usize];
         }
-        let answer = self.retaining(&mut frame.state.transient, |island| {
-            island.native(&site.join, &args, 2)
-        });
+        let answer = match self
+            .publish_native_value(frame, &site.join, &args[..2])
+            .map_err(|error| self.halt(error.into()))?
+        {
+            source::ValuePublication::Published(value) => Ok(value),
+            source::ValuePublication::Declined => {
+                if let Some(close) = &site.join.close
+                    && !self.close(close)
+                {
+                    return Err(self.at_operands(close.head, site.join.reg, &args[..2]));
+                }
+                Err(self.at_operands(site.join.pc, site.join.reg, &args[..2]))
+            }
+            source::ValuePublication::Unavailable => self
+                .retaining(&mut frame.state.transient, |island| {
+                    island.native(&site.join, &args, 2)
+                }),
+        };
         let value = match answer {
             Ok(value) => value,
             Err(stop) => {
@@ -112,9 +129,31 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         };
         frame.regs[site.join.reg as usize] = value;
         let args = site.append_args.map(|reg| frame.regs[reg as usize]);
-        let answer = self.retaining(&mut frame.state.transient, |island| {
-            island.operator_value(&site.append, &args, site.covered)
-        });
+        let native = NativeSite {
+            lib: site.append.lib,
+            close: site.append.close,
+            pc: site.append.pc,
+            reg: site.append.reg,
+            depth: site.append.depth,
+        };
+        let answer = match self
+            .publish_text_value(frame, &native, &args, false)
+            .map_err(|error| self.halt(error.into()))?
+        {
+            source::ValuePublication::Published(value) => Ok(value),
+            source::ValuePublication::Declined => {
+                if let Some(close) = &site.append.close
+                    && !self.close(close)
+                {
+                    return Err(self.at_operands(close.head, site.append.reg, &args));
+                }
+                Err(self.at_operands(site.append.pc, site.append.reg, &args))
+            }
+            source::ValuePublication::Unavailable => self
+                .retaining(&mut frame.state.transient, |island| {
+                    island.operator_value(&site.append, &args, site.covered)
+                }),
+        };
         let value = match answer {
             Ok(value) => value,
             Err(stop) => {

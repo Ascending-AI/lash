@@ -85,6 +85,7 @@ mod reach;
 mod sizes;
 mod tables;
 mod texts;
+pub use texts::PreparedTexts;
 mod versions;
 pub use versions::{ContentVersion, Registration};
 mod member_events;

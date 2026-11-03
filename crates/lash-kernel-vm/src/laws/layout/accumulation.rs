@@ -66,6 +66,22 @@ fn probes(
     probes
 }
 
+fn native_probes(
+    registry: &mut FunctionRegistry,
+    ids: &BTreeMap<&'static str, FunctionId>,
+) -> Vec<(&'static str, FunctionId)> {
+    let mut functions = probes(registry, ids);
+    for (definition, native) in lash_kernel_lib::text_json() {
+        let name = match definition.name.as_str() {
+            "text.concat" => "text.concat",
+            "text.join" => "text.join",
+            _ => continue,
+        };
+        functions.push((name, registry.register(definition, Some(native)).unwrap()));
+    }
+    functions
+}
+
 type Observation = (
     String,
     Vec<Datum>,
@@ -83,6 +99,7 @@ fn run(source: &str, record: bool, slice: u64, bounds: Bounds, layout: Layout) -
         layout,
         super::ExecutionMode::Specialized,
         false,
+        false,
     )
 }
 
@@ -94,11 +111,12 @@ fn run_selected(
     layout: Layout,
     mode: super::ExecutionMode,
     cold: bool,
+    native: bool,
 ) -> Observation {
     let mut embedder = Embedder::with(
         source,
         Setup {
-            probes: Some(probes),
+            probes: Some(if native { native_probes } else { probes }),
             bounds,
             slice,
             layout,
@@ -237,6 +255,7 @@ fn accumulations_agree() {
             Layout(0),
             super::ExecutionMode::Source,
             cold,
+            false,
         );
         for mode in [
             super::ExecutionMode::Generic,
@@ -250,6 +269,7 @@ fn accumulations_agree() {
                 Layout(0),
                 mode,
                 cold,
+                false,
             );
             assert_eq!(
                 actual.0, expected.0,
@@ -290,6 +310,7 @@ fn accumulations_agree() {
     let formatted = scalar_document(
         r#"let s = "abcdefghijklmnopé😀" let old = s let i = 0 while flat.lt(i, 3) { set s = text.concat(s, text.join(["é😀", num.to_text(-0.0), format.fixed(1.25, 2), format.radix(255, 16)], "|")) set i = flat.add(i, 1) } do perform 0(s) as Any return (s, old)"#,
     );
+    crate::machine::islands::take_text_publications();
     for slice in [u64::MAX, 1, 7] {
         let cold = slice != u64::MAX;
         let expected = run_selected(
@@ -300,6 +321,7 @@ fn accumulations_agree() {
             Layout(0),
             super::ExecutionMode::Source,
             cold,
+            false,
         );
         for mode in [
             super::ExecutionMode::Generic,
@@ -313,7 +335,8 @@ fn accumulations_agree() {
                     super::super::embedder::ROOMY,
                     Layout(0),
                     mode,
-                    cold
+                    cold,
+                    false,
                 ),
                 expected,
                 "canonical formatted pieces {mode:?}, cold={cold}, slice={slice}"
@@ -332,6 +355,44 @@ fn accumulations_agree() {
         );
     }
     println!("owned append exits: {counts:?}");
+    crate::machine::islands::take_text_publications();
+    for slice in [u64::MAX, 1, 7] {
+        let cold = slice != u64::MAX;
+        let expected = run_selected(
+            &formatted,
+            false,
+            slice,
+            super::super::embedder::ROOMY,
+            Layout(0),
+            super::ExecutionMode::Source,
+            cold,
+            true,
+        );
+        for mode in [
+            super::ExecutionMode::Generic,
+            super::ExecutionMode::Specialized,
+        ] {
+            let actual = run_selected(
+                &formatted,
+                false,
+                slice,
+                super::super::embedder::ROOMY,
+                Layout(0),
+                mode,
+                cold,
+                true,
+            );
+            assert_eq!(
+                actual, expected,
+                "native text source/packet/cold agreement {mode:?}, slice={slice}"
+            );
+        }
+    }
+    let text_certificates = crate::machine::islands::take_text_publications();
+    assert!(
+        text_certificates.iter().all(|count| *count > 0),
+        "native concat and join must publish through staged text storage: {text_certificates:?}"
+    );
 }
 
 /// K-MACH-008 / LogicalHeldV1: a text prefix publishes its actual live-outs
@@ -400,36 +461,38 @@ fn prepared_text_prefixes() {
             &[(0, 1, true), (2, 1, true)],
             &[(owner, surviving)],
             &[owner],
-            |transaction, _, _, facts| {
-                assert_eq!(facts.len(), 2);
-                assert_eq!(
-                    facts[0].summaries[0],
-                    TextSummary {
-                        utf8_bytes: 22,
-                        chars: 18,
-                        utf16_units: 19
-                    }
-                );
-                assert_eq!(
-                    facts[0].summaries[1],
-                    TextSummary {
-                        utf8_bytes: 6,
-                        chars: 2,
-                        utf16_units: 3
-                    }
-                );
-                assert_eq!(
-                    facts[1].summaries[2],
-                    TextSummary {
-                        utf8_bytes: 34,
-                        chars: 22,
-                        utf16_units: 25
-                    }
-                );
-                assert!(transaction.admit(0).is_err());
-                Ok(())
-            },
         )
+        .unwrap()
+        .unwrap()
+        .boundary(&mut ledger, &heap, |transaction, _, _, facts| {
+            assert_eq!(facts.len(), 2);
+            assert_eq!(
+                facts[0].summaries[0],
+                TextSummary {
+                    utf8_bytes: 22,
+                    chars: 18,
+                    utf16_units: 19
+                }
+            );
+            assert_eq!(
+                facts[0].summaries[1],
+                TextSummary {
+                    utf8_bytes: 6,
+                    chars: 2,
+                    utf16_units: 3
+                }
+            );
+            assert_eq!(
+                facts[1].summaries[2],
+                TextSummary {
+                    utf8_bytes: 34,
+                    chars: 22,
+                    utf16_units: 25
+                }
+            );
+            assert!(transaction.admit(0).is_err());
+            Ok(())
+        })
         .unwrap();
         assert!(result.is_none());
         assert_eq!(read(&arena, left), original);
@@ -453,12 +516,14 @@ fn prepared_text_prefixes() {
             &[(0, 1, false)],
             &[(owner, 2)],
             &[owner],
-            |_, _, _, facts| {
-                assert_eq!(facts[0].work, 0);
-                assert_eq!(facts[0].install, 0);
-                Ok(())
-            },
         )
+        .unwrap()
+        .unwrap()
+        .boundary(&mut ledger, &heap, |_, _, _, facts| {
+            assert_eq!(facts[0].work, 0);
+            assert_eq!(facts[0].install, 0);
+            Ok(())
+        },)
         .unwrap()
         .is_none()
     );
@@ -479,18 +544,20 @@ fn prepared_text_prefixes() {
         &[(0, 3, true)],
         &[(owner, 5)],
         &[owner],
-        |transaction, _, _, facts| {
-            assert!(facts[0].arguments[0].same(&parts));
-            assert!(facts[0].arguments[1].same(&empty));
-            assert_eq!(facts[0].summaries[2].utf8_bytes, 198);
-            assert_eq!(facts[0].work, 198);
-            assert!(facts[0].install > 0);
-            assert_eq!(facts[1].summaries[2].utf8_bytes, 28);
-            let required = transaction.require_source_room(facts[0].work).unwrap();
-            assert!(required.admit(before.total().unwrap() + 197).is_err());
-            Ok(())
-        },
     )
+    .unwrap()
+    .unwrap()
+    .boundary(&mut ledger, &heap, |transaction, _, _, facts| {
+        assert!(facts[0].arguments[0].same(&parts));
+        assert!(facts[0].arguments[1].same(&empty));
+        assert_eq!(facts[0].summaries[2].utf8_bytes, 198);
+        assert_eq!(facts[0].work, 198);
+        assert!(facts[0].install > 0);
+        assert_eq!(facts[1].summaries[2].utf8_bytes, 28);
+        let required = transaction.require_source_room(facts[0].work).unwrap();
+        assert!(required.admit(before.total().unwrap() + 197).is_err());
+        Ok(())
+    })
     .unwrap();
     assert!(result.is_none());
     assert_eq!(read(&arena, left), original);
@@ -509,8 +576,12 @@ fn prepared_text_prefixes() {
         &[(0, 1, true)],
         &[(owner, 2)],
         &[owner],
-        |_, _, _, _| Err::<(), _>(HeapFault::Malformed("declined source exit".into())),
-    );
+    )
+    .unwrap()
+    .unwrap()
+    .boundary(&mut ledger, &heap, |_, _, _, _| {
+        Err::<(), _>(HeapFault::Malformed("declined source exit".into()))
+    });
     assert!(failed.is_err());
     assert_eq!(read(&arena, left), original);
     let result = Cx::prepare_text_prefix(
@@ -523,18 +594,20 @@ fn prepared_text_prefixes() {
         &[(0, 1, true)],
         &[(owner, 2)],
         &[owner],
-        |transaction, ledger, apply, _| {
-            ledger.handoff()?;
-            assert!(
-                transaction
-                    .admit(u64::MAX)
-                    .unwrap_or_else(|_| panic!("roomy"))
-                    .publish(ledger, apply)
-                    .is_err()
-            );
-            Ok(())
-        },
     )
+    .unwrap()
+    .unwrap()
+    .boundary(&mut ledger, &heap, |transaction, ledger, apply, _| {
+        ledger.handoff()?;
+        assert!(
+            transaction
+                .admit(u64::MAX)
+                .unwrap_or_else(|_| panic!("roomy"))
+                .publish(ledger, apply)
+                .is_err()
+        );
+        Ok(())
+    })
     .unwrap();
     assert!(result.is_none());
     assert_eq!(read(&arena, left), original);
@@ -551,15 +624,17 @@ fn prepared_text_prefixes() {
         &[(0, 0, true)],
         &[(owner, 1)],
         &[owner],
-        |transaction, ledger, apply, facts| {
-            assert!(facts[0].arguments.iter().all(|value| value.same(&left)));
-            assert_eq!(facts[0].work, 44);
-            transaction
-                .admit(u64::MAX)
-                .unwrap_or_else(|_| panic!("roomy"))
-                .publish(ledger, apply)
-        },
     )
+    .unwrap()
+    .unwrap()
+    .boundary(&mut ledger, &heap, |transaction, ledger, apply, facts| {
+        assert!(facts[0].arguments.iter().all(|value| value.same(&left)));
+        assert_eq!(facts[0].work, 44);
+        transaction
+            .admit(u64::MAX)
+            .unwrap_or_else(|_| panic!("roomy"))
+            .publish(ledger, apply)
+    })
     .unwrap()
     .expect("prepared consumer published");
     assert_eq!(read(&arena, left), original);
@@ -579,15 +654,17 @@ fn prepared_text_prefixes() {
         &[(0, 1, true), (2, 1, true)],
         &[(owner, 3)],
         &[owner],
-        |transaction, ledger, apply, facts| {
-            assert_eq!(facts[1].summaries[0].utf8_bytes, 50);
-            assert!(facts[1].result.handle().is_some());
-            transaction
-                .admit(u64::MAX)
-                .unwrap_or_else(|_| panic!("roomy"))
-                .publish(ledger, apply)
-        },
     )
+    .unwrap()
+    .unwrap()
+    .boundary(&mut ledger, &heap, |transaction, ledger, apply, facts| {
+        assert_eq!(facts[1].summaries[0].utf8_bytes, 50);
+        assert!(facts[1].result.handle().is_some());
+        transaction
+            .admit(u64::MAX)
+            .unwrap_or_else(|_| panic!("roomy"))
+            .publish(ledger, apply)
+    })
     .unwrap()
     .expect("staged append path executed");
     assert_eq!(
@@ -620,13 +697,15 @@ fn prepared_text_prefixes() {
         &[(0, 1, true)],
         &[(owner, 2)],
         &[owner],
-        |transaction, ledger, apply, _| {
-            transaction
-                .admit(u64::MAX)
-                .unwrap_or_else(|_| panic!("roomy cold append"))
-                .publish(ledger, apply)
-        },
     )
+    .unwrap()
+    .unwrap()
+    .boundary(&mut ledger, &cold_heap, |transaction, ledger, apply, _| {
+        transaction
+            .admit(u64::MAX)
+            .unwrap_or_else(|_| panic!("roomy cold append"))
+            .publish(ledger, apply)
+    })
     .unwrap()
     .expect("cold owner is independent of the old physical handle");
     assert_eq!(

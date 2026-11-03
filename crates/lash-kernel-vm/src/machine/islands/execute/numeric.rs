@@ -176,6 +176,32 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         args: &[Value],
         to: &Destination,
     ) -> Result<Option<Next>, Stop> {
+        if site.concat(self.exe).is_some() {
+            let native = NativeSite {
+                lib: site.lib,
+                close: site.close,
+                pc: site.pc,
+                reg: site.reg,
+                depth: site.depth,
+            };
+            match self
+                .publish_text_value(frame, &native, args, false)
+                .map_err(|error| self.halt(error.into()))?
+            {
+                source::ValuePublication::Published(value) => {
+                    return self.destination(frame, site.reg, value, to).map(Some);
+                }
+                source::ValuePublication::Declined => {
+                    if let Some(close) = &site.close
+                        && !self.close(close)
+                    {
+                        return Err(self.at_operands(close.head, site.reg, args));
+                    }
+                    return Err(self.at_operands(site.pc, site.reg, args));
+                }
+                source::ValuePublication::Unavailable => {}
+            }
+        }
         if matches!(to, Destination::Write(write) if write.accumulates) {
             return Ok(None);
         }

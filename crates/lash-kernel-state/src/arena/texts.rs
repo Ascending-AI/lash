@@ -315,6 +315,27 @@ impl Arena {
 }
 
 impl PreparedTexts<'_> {
+    /// Read actual staged bodies while this guard still excludes arena writers.
+    /// Source authentication must finish before the exit takes registration.
+    pub fn arena(&self) -> &Arena {
+        self.arena
+    }
+
+    /// Canonical release pricing preserves the actual surviving text roots.
+    pub fn release_cost(
+        &mut self,
+        ledger: &crate::paged::logical::Ledger,
+        heap: &crate::paged::heap_impl::PagedHeap,
+        inputs: &[crate::paged::logical::Owner],
+        outputs: &[(crate::paged::logical::Owner, Value)],
+    ) -> Result<u64, lash_kernel_doc::heap::HeapFault> {
+        let roots: Vec<_> = outputs
+            .iter()
+            .map(|(owner, value)| (*owner, crate::paged::logical::RootValue::Value(value)))
+            .collect();
+        ledger.release_cost_preserving(self.arena, heap, inputs, &roots)
+    }
+
     /// Only entry values and this prefix's own outputs may be read. A moved
     /// predecessor has a summary but no readable contents, so it cannot become
     /// a live-out or be read as another operand after its storage was donated.

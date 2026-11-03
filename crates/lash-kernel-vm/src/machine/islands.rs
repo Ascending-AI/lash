@@ -51,6 +51,8 @@ mod heap;
 mod native;
 use execute::source;
 #[cfg(test)]
+pub(crate) use execute::source::take_text_publications;
+#[cfg(test)]
 pub(crate) use execute::{take_certified_statements, take_composed_statements};
 mod observing;
 mod scheduling;
