@@ -434,6 +434,11 @@ fn continued(family: usize) {
 }
 
 impl AcceptedOriginalPrefix {
+    /// The source cursor at which this accepted prefix resumes execution.
+    pub(crate) fn replay_pc(&self) -> u32 {
+        self.program.next
+    }
+
     #[cfg(test)]
     pub(crate) fn take_continuations() -> [u64; 4] {
         CONTINUATIONS.with(|counts| counts.replace([0; 4]))

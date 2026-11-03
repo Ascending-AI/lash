@@ -513,12 +513,20 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         self.link = frame.state.callee.link;
         self.stream = frame.state.callee.stream;
         let source = frame.state.statement.and_then(|stmt| {
-            frame
+            let pc = match frame
                 .state
-                .continuation
-                .map(|continuation| continuation.site.pc)
-                .or(self.scratch.exit.at)
-                .map(|pc| (stmt, pc))
+                .source
+                .as_ref()
+                .and_then(|source| source.original.as_ref())
+            {
+                Some(prefix) => Some(prefix.replay_pc()),
+                None => frame
+                    .state
+                    .continuation
+                    .map(|continuation| continuation.site.pc)
+                    .or(self.scratch.exit.at),
+            };
+            pc.map(|pc| (stmt, pc))
         });
         if let Some(stmt) = frame.state.statement {
             self.stand(stmt, stop);
