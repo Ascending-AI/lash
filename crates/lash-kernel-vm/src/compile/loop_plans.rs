@@ -207,30 +207,11 @@ pub(crate) struct Summary {
     calls: Box<[usize]>,
     /// A statement-root invoke keeps its original action and resume form.
     action: Option<StmtId>,
-    /// The values its last op takes, read from its ops' tree, each with
-    /// its role, in the order the statement completes them: none for a
-    /// `continue` or a statement-root invoke's write.
-    roots: Box<[(Role, Expr)]>,
     /// Its guest call, if it makes one.
     pub(crate) guest: Option<GuestCall>,
 }
 
 impl Summary {
-    pub(crate) fn scalar_root(&self) -> Option<&Expr> {
-        if self.action.is_some()
-            || self.guest.is_some()
-            || !self.calls.is_empty()
-            || !self.arms.is_empty()
-            || self.general
-        {
-            return None;
-        }
-        match &*self.roots {
-            [(Role::Value, root)] => Some(root),
-            _ => None,
-        }
-    }
-
     /// The most the statement charges.
     fn max(&self) -> Option<u64> {
         self.fixed.checked_add(self.formula_max?)
@@ -579,7 +560,6 @@ impl Formation<'_> {
             general,
             calls: Box::default(),
             action: None,
-            roots: Box::default(),
             guest: None,
         })
     }
@@ -742,7 +722,6 @@ impl Formation<'_> {
             general: allocates,
             calls: shared.calls.into(),
             action: Some(id),
-            roots: Box::default(),
             guest,
         }))
     }
@@ -1073,7 +1052,6 @@ impl Formation<'_> {
             general: allocates,
             calls: calls.into(),
             action: None,
-            roots: roots.into(),
             guest,
         })
     }
