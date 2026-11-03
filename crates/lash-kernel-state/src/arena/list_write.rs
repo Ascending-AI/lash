@@ -2,6 +2,9 @@
 use super::*;
 use lash_kernel_doc::heap::{HeapFault, HostResource};
 
+mod body;
+pub use body::PreparedMemberBody;
+
 /// An affine storage reservation. It changes no guest member until the
 /// matching ledger publication invokes `publish` under its registration.
 pub struct PreparedListWrite {

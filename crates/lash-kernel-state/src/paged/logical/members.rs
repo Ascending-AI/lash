@@ -63,6 +63,7 @@ impl Ledger {
             inputs,
             outputs,
             None,
+            false,
         )
     }
 
@@ -90,6 +91,7 @@ impl Ledger {
             inputs,
             outputs,
             Some(heap),
+            false,
         )?;
         Ok(BoundaryTransaction::from_program(
             registration,
@@ -100,6 +102,71 @@ impl Ledger {
         ))
     }
 
+    /// Project final edits grouped by their single detached storage body.
+    /// The storage owner checks its sealed snapshot; this method validates
+    /// distinct entity/member identities and canonical original provenance.
+    /// Source, observers, dependencies and interior peaks grant no authority
+    /// from this grouping alone.
+    pub fn prepare_source_member_bodies_boundary<'a>(
+        &self,
+        mut registration: Registration<'a>,
+        heap: &super::super::heap_impl::PagedHeap,
+        bodies: &[&[MemberEdit]],
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+    ) -> Result<BoundaryTransaction<'a>, MemberFault> {
+        let mut targets = std::collections::BTreeSet::new();
+        let mut edits = Vec::new();
+        for body in bodies {
+            let Some(first) = body.first() else {
+                return Err(invalid("private boundary has an empty body").into());
+            };
+            if !targets.insert(registration.arena().ledger_key(first.handle)?)
+                || body.iter().any(|edit| edit.handle != first.handle)
+            {
+                return Err(invalid("private boundary needs one final body per entity").into());
+            }
+            let mut addresses = Vec::new();
+            for edit in *body {
+                let address = member_address(registration.arena(), &edit.member)?;
+                if addresses.contains(&address) {
+                    return Err(invalid("private boundary repeats a final member").into());
+                }
+                addresses.push(address);
+            }
+            edits.extend_from_slice(body);
+        }
+        if edits.is_empty() {
+            return Err(invalid("private member boundary has no mutation").into());
+        }
+        registration
+            .arena()
+            .reserve_member_body_publication(bodies.iter().map(|body| body[0].handle))?;
+        let PreparedMember {
+            prepared,
+            dependencies,
+        } = self.prepare_members_ownership(
+            &mut registration,
+            heap.pages(),
+            &edits,
+            inputs,
+            outputs,
+            Some(heap),
+            true,
+        )?;
+        Ok(BoundaryTransaction::from_program(
+            registration,
+            dependencies,
+            prepared,
+            edits,
+            publication::RootProof::new(inputs, outputs),
+        ))
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one canonical member boundary and its storage grouping"
+    )]
     fn prepare_members_ownership(
         &self,
         registration: &mut Registration<'_>,
@@ -108,6 +175,7 @@ impl Ledger {
         inputs: &[Owner],
         outputs: &[(Owner, RootValue<'_>)],
         heap: Option<&super::super::heap_impl::PagedHeap>,
+        grouped: bool,
     ) -> Result<PreparedMember, MemberFault> {
         let arena = registration.arena();
         let mut targets = std::collections::BTreeSet::new();
@@ -118,7 +186,7 @@ impl Ledger {
             // Independent storage reservations may be installed together.
             // Two snapshots of one body would overwrite each other. A private
             // body kernel must submit its single final storage reservation.
-            if !targets.insert(arena.ledger_key(edit.handle)?) {
+            if !targets.insert(arena.ledger_key(edit.handle)?) && !grouped {
                 return Err(invalid("member boundary needs one final edit per body").into());
             }
             let (change, edges, versions) =
@@ -268,6 +336,21 @@ impl Ledger {
         ))
     }
 }
+#[derive(PartialEq, Eq)]
+enum MemberAddress {
+    List(u64),
+    Table(crate::arena::Key),
+    Variable,
+}
+fn member_address(arena: &Arena, member: &Member) -> Result<MemberAddress, MemberFault> {
+    Ok(match member {
+        Member::List(index) => MemberAddress::List(*index),
+        Member::Table(value) => MemberAddress::Table(arena.key(value)?),
+        Member::Field(name) => MemberAddress::Table(crate::arena::Key::of_text(name)),
+        Member::Variable => MemberAddress::Variable,
+    })
+}
+
 fn entry(
     arena: &mut Arena,
     access: &Access<'_>,
