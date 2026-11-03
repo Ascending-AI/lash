@@ -75,8 +75,7 @@ pub(crate) use crate::machine::islands::cx::{
 pub(crate) use formula::{Charge, Fast, LengthCharge, Plan, ScalarTable, Source, TextCharge};
 pub(crate) use loop_plans::LoopPlan;
 #[cfg(test)]
-pub(crate) use loop_plans::{Event, Lowered, Refused};
-pub(crate) use loop_plans::{Head, RegionSlot, Step, Summary};
+pub(crate) use loop_plans::{Event, Head, Lowered, Refused, RegionSlot, Step, Summary};
 
 /// How the executable is laid out. Layout `0` is the natural order; any
 /// other value permutes the code, block, statement and library tables and
