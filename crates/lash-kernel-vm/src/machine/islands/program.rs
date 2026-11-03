@@ -348,11 +348,7 @@ impl<'e> Build<'e> {
     ) -> Option<std::sync::Arc<crate::compile::room::charges::ChargeProgram>> {
         let code = self.placement.as_ref()?.code();
         crate::compile::room::charges::ChargeProgram::event_packet(
-            self.exe,
-            code,
-            statement,
-            pc,
-            self.charged.then_some(close).flatten(),
+            self.exe, code, statement, pc, close,
         )
         .ok()
         .map(std::sync::Arc::new)

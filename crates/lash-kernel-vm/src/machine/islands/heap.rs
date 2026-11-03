@@ -482,20 +482,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         true
     }
 
-    /// The empty tuple without an operation's context. It charges nothing
-    /// and only needs its room.
-    pub(super) fn empty_tuple(&mut self) -> Option<Value> {
-        let free = self
-            .ceiling
-            .saturating_sub(self.register_bytes)
-            .saturating_sub(self.arena.held())
-            .saturating_sub(self.transient);
-        if self.memory && self.arena.sequence_bound(0) > free {
-            return None;
-        }
-        self.arena.tuple(Vec::new(), self.limits.value_depth()).ok()
-    }
-
     pub(super) fn remove(&mut self, target: Value, index: Value) -> Option<()> {
         let Value::List(list) = target else {
             return None;

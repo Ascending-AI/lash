@@ -765,6 +765,12 @@ fn collection_region_preparations_preserve_source_and_storage() {
             actual_runs.push((mode, layout, counts));
         }
     }
+    for (mode, layout, counts) in &actual_runs {
+        assert!(
+            counts[6] > 0,
+            "the preceding assignment closes before the merge tail: {mode:?}, layout {layout}: {counts:?}"
+        );
+    }
     for (mode, layout, counts) in actual_runs {
         assert!(
             counts.iter().all(|count| *count > 0),
