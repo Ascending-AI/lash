@@ -550,7 +550,11 @@ impl PreparedNative {
 /// A kind check suffices only for unconstrained containers. A resident list
 /// with a supported scalar item contract checks every actual member; nested
 /// or cold shapes retain the ordinary signature handler.
-fn resident_argument_fits(arena: &Arena, ty: &lash_kernel_value::Type, value: Value) -> bool {
+pub(in crate::machine) fn resident_argument_fits(
+    arena: &Arena,
+    ty: &lash_kernel_value::Type,
+    value: Value,
+) -> bool {
     if let Some(check) = crate::compile::import_result_check(ty) {
         return check(value);
     }

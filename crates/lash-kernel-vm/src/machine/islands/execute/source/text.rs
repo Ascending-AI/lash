@@ -46,7 +46,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 .params
                 .iter()
                 .zip(arguments)
-                .all(|(param, value)| crate::compile::import_result_fits(&param.ty, *value))
+                .all(|(param, value)| {
+                    native_storage::resident_argument_fits(self.arena, &param.ty, *value)
+                })
         {
             return Ok(ValuePublication::Unavailable);
         }

@@ -71,13 +71,15 @@ fn native_probes(
     ids: &BTreeMap<&'static str, FunctionId>,
 ) -> Vec<(&'static str, FunctionId)> {
     let mut functions = probes(registry, ids);
-    for (definition, native) in lash_kernel_lib::text_json() {
-        let name = match definition.name.as_str() {
-            "text.concat" => "text.concat",
-            "text.join" => "text.join",
-            _ => continue,
-        };
-        functions.push((name, registry.register(definition, Some(native)).unwrap()));
+    for (mut definition, native) in lash_kernel_lib::text_json() {
+        if definition.name.as_str() != "text.concat" {
+            continue;
+        }
+        definition.name = lash_kernel_value::FunctionName::new("law.native_concat").unwrap();
+        functions.push((
+            "law.native_concat",
+            registry.register(definition, Some(native)).unwrap(),
+        ));
     }
     functions
 }
@@ -355,11 +357,14 @@ fn accumulations_agree() {
         );
     }
     println!("owned append exits: {counts:?}");
+    let native_formatted = scalar_document(
+        r#"let s = "abcdefghijklmnopé😀" let old = s let parts = ["é😀", "tag"] let separator = "|" let i = 0 while flat.lt(i, 3) { let joined = text.join(parts, separator) set s = law.native_concat(s, joined) set i = flat.add(i, 1) } do perform 0(s) as Any return (s, old)"#,
+    );
     crate::machine::islands::take_text_publications();
     for slice in [u64::MAX, 1, 7] {
         let cold = slice != u64::MAX;
         let expected = run_selected(
-            &formatted,
+            &native_formatted,
             false,
             slice,
             super::super::embedder::ROOMY,
@@ -373,7 +378,7 @@ fn accumulations_agree() {
             super::ExecutionMode::Specialized,
         ] {
             let actual = run_selected(
-                &formatted,
+                &native_formatted,
                 false,
                 slice,
                 super::super::embedder::ROOMY,

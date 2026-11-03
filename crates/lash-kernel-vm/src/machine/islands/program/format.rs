@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 
 pub(crate) struct Format {
     pub(in crate::machine::islands) parts: crate::machine::islands::code::sites::Make,
-    pub(in crate::machine::islands) separator: (u32, Value, crate::compile::expr::SourceRead),
+    pub(in crate::machine::islands) separator:
+        (u32, Value, Option<crate::compile::expr::SourceRead>),
     pub(in crate::machine::islands) join: NativeSite,
     pub(in crate::machine::islands) join_args: [u32; 2],
     pub(in crate::machine::islands) joined: Box<[u32]>,
@@ -51,11 +52,7 @@ impl Build<'_> {
                             reg,
                             ..
                         },
-                        Op::Constant {
-                            dst,
-                            source: Some(_),
-                            ..
-                        },
+                        Op::Constant { dst, .. },
                         Op::Native {
                             site: join,
                             inputs: NativeInputs::Registers(joined),
@@ -119,12 +116,7 @@ impl Build<'_> {
                 else {
                     unreachable!();
                 };
-                let Op::Constant {
-                    dst,
-                    value,
-                    source: Some(source),
-                } = separator.op
-                else {
+                let Op::Constant { dst, value, source } = separator.op else {
                     unreachable!();
                 };
                 let Op::Native {

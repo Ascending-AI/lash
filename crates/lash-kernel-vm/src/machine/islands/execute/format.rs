@@ -93,8 +93,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         self.construct(frame, &site.parts).inspect_err(|_| {
             witnessed!(FormatAppend, Prefix);
         })?;
-        if !self.source_read(frame, site.separator.2, site.separator.0, site.separator.1)? {
-            return Err(self.at(site.separator.2.unpaid()));
+        if let Some(source) = site.separator.2 {
+            if !self.source_read(frame, source, site.separator.0, site.separator.1)? {
+                return Err(self.at(source.unpaid()));
+            }
+        } else {
+            frame.regs[site.separator.0 as usize] = site.separator.1;
         }
         let mut args = [Value::Absent; MAX_ARGS];
         for (value, reg) in args.iter_mut().zip(site.join_args) {
