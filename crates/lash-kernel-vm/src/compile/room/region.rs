@@ -6,6 +6,7 @@ use super::*;
 mod affine;
 #[path = "calls.rs"]
 pub(crate) mod calls;
+mod captures;
 #[path = "region/continuation.rs"]
 mod continuation;
 pub(crate) mod text;
@@ -120,6 +121,7 @@ pub(crate) struct ScalarRegion {
     source: Arc<Source>,
     interval: Arc<CompiledInterval>,
     entries: Box<[Entry]>,
+    captures: Box<[Entry]>,
     vacant: Box<[Slot]>,
     results: Box<[ResultFact]>,
     calls: Box<[CallFact]>,
@@ -137,6 +139,8 @@ struct Compiler<'a> {
     slots: Arc<OwnerSlots>,
     live: BTreeMap<Slot, Live>,
     entries: Vec<Entry>,
+    captures: Vec<Entry>,
+    allow_captures: bool,
     vacant: std::collections::BTreeSet<Slot>,
     results: Vec<ResultFact>,
     calls: Vec<CallFact>,
@@ -274,9 +278,17 @@ impl Compiler<'_> {
         }
         let interval = self.source.compile_event(&event.point, ExitKind::Normal)?;
         if interval.acquisition(self.source).is_some() {
-            let origin = match self.source.scalar_input(&self.slots, &event.point)? {
-                ScalarInput::Literal(value) => Origin::Literal(value),
-                ScalarInput::Binding(slot) => Origin::Read(self.entry(slot)?),
+            let origin = match self.source.scalar_input(&self.slots, &event.point) {
+                Ok(ScalarInput::Literal(value)) => Origin::Literal(value),
+                Ok(ScalarInput::Binding(slot)) => Origin::Read(self.entry(slot)?),
+                Err(_) if self.allow_captures => {
+                    let slot = self
+                        .source
+                        .captured_input(&self.slots, &event.point)
+                        .ok_or(Refused::Source)?;
+                    Origin::Read(self.capture(slot))
+                }
+                Err(error) => return Err(error),
             };
             let result = self.result(
                 &event.point,
@@ -442,7 +454,9 @@ impl Compiler<'_> {
                     };
                     if self.live.contains_key(slot) {
                         self.release(*slot)?;
-                    } else if !self.entries.iter().any(|entry| entry.slot == *slot) {
+                    } else if !self.entries.iter().any(|entry| entry.slot == *slot)
+                        && !matches!(slot, Slot::Capture(_))
+                    {
                         self.vacant.insert(*slot);
                     }
                 }
@@ -577,6 +591,23 @@ impl Source {
         body: bool,
         live: &[Slot],
     ) -> Result<ScalarRegion, Refused> {
+        self.compile_scalar_mode(interval, body, live, false)
+    }
+
+    pub(super) fn compile_callback_body(
+        self: &Arc<Self>,
+        interval: Arc<CompiledInterval>,
+    ) -> Result<ScalarRegion, Refused> {
+        self.compile_scalar_mode(interval, true, &[], true)
+    }
+
+    fn compile_scalar_mode(
+        self: &Arc<Self>,
+        interval: Arc<CompiledInterval>,
+        body: bool,
+        live: &[Slot],
+        allow_captures: bool,
+    ) -> Result<ScalarRegion, Refused> {
         self.verify()?;
         if interval.owner() != self.owner
             || interval.defining_source() != &self.site
@@ -589,6 +620,8 @@ impl Source {
             slots: self.owner_slots()?,
             live: BTreeMap::new(),
             entries: Vec::new(),
+            captures: Vec::new(),
+            allow_captures,
             vacant: Default::default(),
             results: Vec::new(),
             calls: Vec::new(),
@@ -625,6 +658,7 @@ impl Source {
             source: Arc::clone(self),
             interval,
             entries: compiler.entries.into(),
+            captures: compiler.captures.into(),
             vacant: compiler.vacant.into_iter().collect(),
             results: compiler.results.into(),
             calls: compiler.calls.into(),
@@ -733,6 +767,7 @@ impl ScalarRegion {
             .collect();
         let mut delta = Polynomial::default();
         let mut result_index = 0;
+        let mut used_captures = std::collections::BTreeSet::new();
         let mut recovery = Vec::new();
         for event in self.interval.events() {
             let result = self
@@ -755,12 +790,22 @@ impl ScalarRegion {
                         }
                     }
                     Origin::Read(input) => {
-                        let ScalarInput::Binding(slot) =
-                            self.source.scalar_input(&slots, &event.point)?
-                        else {
-                            return Err(Refused::Facts);
+                        let expected = match self.source.scalar_input(&slots, &event.point) {
+                            Ok(ScalarInput::Binding(slot)) => live.get(&slot),
+                            Err(_) => {
+                                let slot = self
+                                    .source
+                                    .captured_input(&slots, &event.point)
+                                    .ok_or(Refused::Facts)?;
+                                used_captures.insert(slot);
+                                self.captures
+                                    .iter()
+                                    .find(|capture| capture.slot == slot)
+                                    .map(|capture| &capture.live)
+                            }
+                            _ => return Err(Refused::Facts),
                         };
-                        if live.get(&slot) != Some(&input)
+                        if expected != Some(&input)
                             || result.live.price != input.price
                             || result.live.entry != input.entry
                         {
@@ -904,6 +949,11 @@ impl ScalarRegion {
             });
         }
         if result_index != self.results.len()
+            || used_captures.len() != self.captures.len()
+            || self
+                .captures
+                .iter()
+                .any(|capture| capture.live.entry.is_some())
             || delta != self.delta
             || live.into_iter().ne(self.survivors.iter().copied())
         {
@@ -981,6 +1031,9 @@ impl ScalarRegion {
         invocation: &logical::Invocation,
         values: ScalarRegionValues<'_>,
     ) -> Result<Option<BoundScalarRegion<'a>>, doc::heap::HeapFault> {
+        if !self.captures.is_empty() {
+            return Ok(None);
+        }
         let logical::Owner::Frame { task, .. } = invocation.frame() else {
             return Ok(None);
         };

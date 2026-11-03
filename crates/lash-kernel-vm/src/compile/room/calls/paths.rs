@@ -89,7 +89,11 @@ pub(super) fn compile(
         }
         let path = (|| {
             let interval = source.compile_interval(&source.site, &route.selected, 4096)?;
-            let region = source.compile_scalar(interval, true)?;
+            let region = if exe.code(callee).captures.is_empty() {
+                source.compile_scalar(interval, true)?
+            } else {
+                source.compile_callback_body(interval)?
+            };
             let natives = natives(exe, source, &region)?;
             let charges =
                 ComposedCharges::compile(exe, caller, statement, range, callee, &route.selected)?;

@@ -330,6 +330,7 @@ pub(crate) struct CallRecovery {
     pub(crate) source: Arc<Source>,
     pub(crate) position: super::super::publication::Position,
     pub(crate) roles: Vec<(Slot, Value)>,
+    pub(crate) captures: Vec<(Slot, doc::arena::ArenaHandle)>,
 }
 
 pub(crate) struct BoundCall<'a> {
@@ -405,15 +406,35 @@ impl VerifiedCall {
         let source = Arc::clone(&exe.code(target.code).source_room);
         source.verify()?;
         let body = exe.code(target.code);
+        let captures = target.dynamic && !body.captures.is_empty();
+        let slots = source.owner_slots()?;
         if target.code == caller
             || !body.free.is_empty()
-            || !body.captures.is_empty()
-            || !body.capture_names.is_empty()
-            || body.slots.iter().any(|slot| slot.shared)
-            || source
-                .bindings
-                .iter()
-                .any(|binding| binding.shared || binding.borrowed)
+            || (!captures && (!body.captures.is_empty() || !body.capture_names.is_empty()))
+            || body.slots.iter().any(|entry| {
+                entry.shared
+                    && !matches!(
+                        slots.root(
+                            &Owner::Binding {
+                                declared: entry.declared.clone(),
+                                name: entry.name.clone()
+                            },
+                            TaskId::MAIN,
+                            0
+                        ),
+                        Some(logical::Owner::Value {
+                            slot: Slot::Capture(_),
+                            ..
+                        })
+                    )
+            })
+            || source.bindings.iter().any(|binding| {
+                (binding.shared || binding.borrowed)
+                    && !(captures
+                        && binding.borrowed
+                        && binding.declared == source.site
+                        && body.capture_names.contains(&binding.name))
+            })
         {
             return Err(Refused::Source);
         }
@@ -796,6 +817,7 @@ impl<'a> BoundCall<'a> {
             CalleeValues {
                 values: &self.values,
                 path: self.path,
+                captures: &[],
             },
             at,
             caller_occurrence,
@@ -935,6 +957,7 @@ impl VerifiedCall {
 struct CalleeValues<'a> {
     values: &'a [Value],
     path: usize,
+    captures: &'a [(Slot, doc::arena::ArenaHandle)],
 }
 fn call_recovery(
     call: &VerifiedCall,
@@ -954,17 +977,22 @@ fn call_recovery(
     let region = &call.paths.get(body.path)?.region;
     let index = region.recovery.iter().position(|map| &map.after == at)?;
     let map = &region.recovery[index];
-    let digest = |at: &Point, roles: &[(Slot, Value)]| {
-        let mut encoding = TokenWriter::new();
-        encoding.seq(3);
-        encoding.text("lash.source.composed-call");
-        at.site.encode(&mut encoding);
-        encoding.seq(roles.len() as u64);
-        for (slot, _) in roles {
-            slot.encode(&mut encoding);
-        }
-        logical_digest(&encoding.into_bytes())
-    };
+    let digest =
+        |at: &Point, roles: &[(Slot, Value)], captures: &[(Slot, doc::arena::ArenaHandle)]| {
+            let mut encoding = TokenWriter::new();
+            encoding.seq(4);
+            encoding.text("lash.source.composed-call");
+            at.site.encode(&mut encoding);
+            encoding.seq(roles.len() as u64);
+            for (slot, _) in roles {
+                slot.encode(&mut encoding);
+            }
+            encoding.seq(captures.len() as u64);
+            for (slot, _) in captures {
+                slot.encode(&mut encoding);
+            }
+            logical_digest(&encoding.into_bytes())
+        };
     let caller = CallRecovery {
         source: Arc::clone(&call.caller_source),
         position: super::super::publication::Position {
@@ -977,22 +1005,28 @@ fn call_recovery(
                     Phase::Restore
                 },
             }),
-            recovery: digest(&call.at, caller_values),
+            recovery: digest(&call.at, caller_values, &[]),
             occurrence: caller_occurrence.clone(),
         },
         roles: caller_values.to_vec(),
+        captures: Vec::new(),
     };
     let roles: Vec<_> = map
         .roles
         .iter()
         .map(|(slot, fact)| (*slot, body.values[fact.index()]))
         .collect();
+    let captures = if map.after.site == call.source.site && map.after.phase == Phase::Leave {
+        &[][..]
+    } else {
+        body.captures
+    };
     let callee = CallRecovery {
         source: Arc::clone(&call.source),
         position: super::super::publication::Position {
             at: map.after.clone(),
             unpaid: region.recovery.get(index + 1).map(|map| map.after.clone()),
-            recovery: digest(&map.after, &roles),
+            recovery: digest(&map.after, &roles, captures),
             occurrence: super::super::publication::Occurrence {
                 task: caller_occurrence.task,
                 invocation: invocation.id(),
@@ -1001,6 +1035,7 @@ fn call_recovery(
             },
         },
         roles,
+        captures: captures.to_vec(),
     };
     Some([caller, callee])
 }

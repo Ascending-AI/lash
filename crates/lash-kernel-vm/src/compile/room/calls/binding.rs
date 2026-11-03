@@ -24,7 +24,7 @@ impl VerifiedCall {
             body_formulas,
             depth,
             path,
-        }) = self.evaluate_arguments(exe, arena, arguments)?
+        }) = self.evaluate_arguments(exe, arena, arguments, &[])?
         else {
             return Ok(None);
         };
@@ -63,12 +63,15 @@ impl VerifiedCall {
         exe: &Executable,
         arena: &Arena,
         arguments: Vec<Value>,
+        captures: &[(Slot, doc::arena::ArenaHandle, Value)],
     ) -> Result<Option<EvaluatedArguments>, doc::heap::HeapFault> {
         if arguments.len() != self.argument_slots.len() {
             return Ok(None);
         }
         for (index, path) in self.paths.iter().enumerate() {
-            if let Some(evaluated) = self.evaluate_path(exe, arena, &arguments, path, index)? {
+            if let Some(evaluated) =
+                self.evaluate_path(exe, arena, &arguments, captures, path, index)?
+            {
                 return Ok(Some(evaluated));
             }
         }
@@ -80,6 +83,7 @@ impl VerifiedCall {
         exe: &Executable,
         arena: &Arena,
         arguments: &[Value],
+        captures: &[(Slot, doc::arena::ArenaHandle, Value)],
         path: &super::paths::BodyPath,
         index: usize,
     ) -> Result<Option<EvaluatedArguments>, doc::heap::HeapFault> {
@@ -89,6 +93,14 @@ impl VerifiedCall {
         let price = |value: &Value, arena: &Arena| -> Result<i128, doc::heap::HeapFault> {
             Ok(i128::from(arena.logical_local(value)?))
         };
+        for capture in &region.captures {
+            let Some((_, _, value)) = captures.iter().find(|(slot, _, _)| *slot == capture.slot)
+            else {
+                return Ok(None);
+            };
+            values[capture.live.fact.index()] = *value;
+            prices[capture.live.price] = price(value, arena)?;
+        }
         let mut given = 0_i128;
         let mut padded = 0_i128;
         for (index, parameter) in self.parameters.iter().enumerate() {

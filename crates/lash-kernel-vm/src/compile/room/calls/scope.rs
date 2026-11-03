@@ -21,6 +21,7 @@ struct BoundCallable {
     value: Value,
     code: CodeId,
     identity: lash_kernel_value::CallableId,
+    captures: Vec<(Slot, doc::arena::ArenaHandle, Value)>,
     dependencies: logical::Dependencies,
 }
 
@@ -87,13 +88,15 @@ impl VerifiedCall {
         if !actual.same(&callable) {
             return None;
         }
-        let identity = self.authenticate_callable(exe, arena, callable)?;
+        let snapshot = self.authenticate_callable(exe, arena, callable)?;
+        handles.extend(snapshot.captures.iter().map(|(_, cell, _)| *cell));
         let dependencies = logical::Dependencies::capture(ledger, arena, &handles)?;
         let mut scope = self.scope_entry(exe, self.callee, ledger, caller, activation, range)?;
         scope.target = Some(Rc::new(BoundCallable {
             value: callable,
             code: self.callee,
-            identity,
+            identity: snapshot.identity,
+            captures: snapshot.captures,
             dependencies,
         }));
         Some(scope)
@@ -204,7 +207,12 @@ impl VerifiedCall {
             return Ok(None);
         };
         if self.root_atoms.as_ref().is_some_and(|atoms| atoms.iter().zip(&arguments).any(|(atom, actual)| matches!(atom, ScalarInput::Literal(expected) if !expected.same(actual)))) { return Ok(None); }
-        let Some(evaluated) = self.evaluate_arguments(exe, arena, arguments)? else {
+        let captures = scope
+            .target
+            .as_ref()
+            .filter(|_| self.callable.is_some())
+            .map_or(&[][..], |target| target.captures.as_slice());
+        let Some(evaluated) = self.evaluate_arguments(exe, arena, arguments, captures)? else {
             return Ok(None);
         };
         let caller_values = self
@@ -370,6 +378,13 @@ impl<'call> ScopedCall<'call> {
         at: &Point,
         occurrence: super::super::super::publication::Occurrence,
     ) -> Option<[CallRecovery; 2]> {
+        let captures: Vec<_> = self
+            .target
+            .as_ref()
+            .map_or(&[][..], |target| target.captures.as_slice())
+            .iter()
+            .map(|(slot, cell, _)| (*slot, *cell))
+            .collect();
         call_recovery(
             self.call,
             &self.caller,
@@ -378,6 +393,7 @@ impl<'call> ScopedCall<'call> {
             CalleeValues {
                 values: &self.evaluated.values,
                 path: self.evaluated.path,
+                captures: &captures,
             },
             at,
             occurrence,

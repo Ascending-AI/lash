@@ -178,18 +178,25 @@ pub(super) fn root_slot(source: &Source, at: &Point) -> Result<Slot, Refused> {
     slot(source, owner)
 }
 
+pub(super) struct CallableSnapshot {
+    pub(super) identity: lash_kernel_value::CallableId,
+    pub(super) captures: Vec<(Slot, doc::arena::ArenaHandle, Value)>,
+}
+
 impl VerifiedCall {
     pub(super) fn authenticate_callable(
         &self,
         exe: &Executable,
         arena: &Arena,
         value: Value,
-    ) -> Option<lash_kernel_value::CallableId> {
+    ) -> Option<CallableSnapshot> {
         match value {
             Value::Closure(handle) => {
                 let (identity, cells, _) = arena.closure(handle).ok()?;
-                if !cells.is_empty()
-                    || identity.capture_names != exe.code(self.callee).capture_names
+                let body = exe.code(self.callee);
+                if cells.len() != body.captures.len()
+                    || cells.len() != body.capture_names.len()
+                    || identity.capture_names != body.capture_names
                 {
                     return None;
                 }
@@ -200,7 +207,32 @@ impl VerifiedCall {
                     &identity.capture_names,
                 )
                 .ok()?;
-                (code == self.callee).then_some(identity.callable)
+                if code != self.callee {
+                    return None;
+                }
+                let mut captures = Vec::with_capacity(cells.len());
+                for (name, cell) in body.capture_names.iter().zip(cells) {
+                    let slot = slot(
+                        &self.source,
+                        &Owner::Binding {
+                            declared: self.source.site.clone(),
+                            name: name.clone(),
+                        },
+                    )
+                    .ok()?;
+                    if !matches!(slot, Slot::Capture(_)) {
+                        return None;
+                    }
+                    let value = arena.cell(*cell).ok()?;
+                    if !super::scope::scalar(value) {
+                        return None;
+                    }
+                    captures.push((slot, *cell, value));
+                }
+                Some(CallableSnapshot {
+                    identity: identity.callable,
+                    captures,
+                })
             }
             Value::Function(handle) => {
                 let callable = arena.callable(handle).ok()?;
@@ -217,7 +249,10 @@ impl VerifiedCall {
                         _ => None,
                     }
                 })?;
-                (code == self.callee).then_some(callable)
+                (code == self.callee).then_some(CallableSnapshot {
+                    identity: callable,
+                    captures: Vec::new(),
+                })
             }
             _ => None,
         }
