@@ -29,10 +29,11 @@ mod observers;
 pub use observers::ObserverExclusion;
 mod ownership;
 mod program;
+#[cfg(any(test, feature = "perf-witness"))]
 pub use program::{
-    AcceptedProgram, EvaluatedProgram, FrameEvent, JournalEvent, Materializations, PreparedProgram,
-    Program, ScratchEvent, VirtualBody, VirtualEntity,
+    AcceptedProgram, EvaluatedProgram, JournalEvent, Materializations, PreparedProgram, Program,
 };
+pub use program::{FrameEvent, ScratchEvent, VirtualBody, VirtualEntity};
 mod publication;
 use members::PreparedMember;
 pub use members::{Member, MemberFault};
