@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) fn helper_compilation() {
+    while_test_compilation();
     native_iteration_compilation();
     // The supplied call compiler must retain a guarded scalar helper's
     // source path before its body can be composed into a repeated region.
@@ -706,6 +707,130 @@ pub(super) fn helper_compilation() {
     }
 }
 
+fn while_test_compilation() {
+    use crate::compile::room::{
+        ExitKind, Phase,
+        region::calls::{VerifiedCall, scope::iteration::VerifiedIteration},
+    };
+    let text = scalar_document("let i = 0 while body.lt(i, 4) { set i = flat.add(i, 1) } return i");
+    let (program, _) = Embedder::with(
+        &text,
+        Setup {
+            probes: Some(body_helper_probes),
+            ..Setup::default()
+        },
+    )
+    .program(true);
+    let admitted = program
+        .library
+        .admit(&program.document, Default::default(), &program.selection)
+        .unwrap_or_else(|_| panic!("while-test source admitted"));
+    let exe = admitted
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.functions,
+            &program.instances,
+        )
+        .unwrap_or_else(|_| panic!("while-test executable"));
+    let caller = exe
+        .islands
+        .plans
+        .iter()
+        .find(|plan| {
+            plan.body.statements.iter().any(|statement| {
+                matches!(statement.kind, crate::compile::islands::Kind::While { .. })
+            })
+        })
+        .unwrap();
+    let id = caller
+        .body
+        .statements
+        .iter()
+        .find(|statement| matches!(statement.kind, crate::compile::islands::Kind::While { .. }))
+        .unwrap()
+        .id;
+    let (stream, statement, _) = exe.statement(id);
+    let crate::compile::Form::While { test, body, .. } = statement.form else {
+        unreachable!()
+    };
+    let pc = (test.start..test.end())
+        .find(|pc| {
+            matches!(
+                stream.ops[*pc as usize],
+                lash_kernel_exec::Op::Nested { .. }
+            )
+        })
+        .unwrap();
+    assert!(
+        pc >= statement.ops.end(),
+        "the canonical test is separate from the while header"
+    );
+    let first_unpaid = (test.start..pc)
+        .rev()
+        .find(|at| {
+            let op = stream.ops[*at as usize];
+            !op.kind().in_region() && !matches!(op, lash_kernel_exec::Op::Region { .. })
+        })
+        .map_or(test.start, |at| at + 1);
+    let call = std::sync::Arc::new(
+        VerifiedCall::compile_from(&exe, caller.code, id, pc, first_unpaid)
+            .expect("a call in the canonical while test must have source authority"),
+    );
+    call.verify(&exe).unwrap();
+    let complete = VerifiedCall::compile(&exe, caller.code, id, pc)
+        .expect("a complete while-test call starts at the canonical test fence");
+    assert_eq!(complete.at(), call.at());
+    assert!(std::sync::Arc::ptr_eq(complete.source(), call.source()));
+    assert!(
+        VerifiedCall::compile_from(&exe, caller.code, id, pc, statement.ops.start).is_err(),
+        "the header cannot replace the test's unpaid fence"
+    );
+    assert!(
+        VerifiedCall::compile(&exe, caller.code, id, statement.ops.start).is_err(),
+        "a while header is not a call"
+    );
+    assert!(
+        VerifiedCall::compile_from(
+            &exe,
+            caller.code,
+            exe.block(body).stmts[0],
+            pc,
+            first_unpaid
+        )
+        .is_err(),
+        "a condition call cannot belong to a body statement"
+    );
+    let iteration =
+        VerifiedIteration::compile_loop(&exe, caller.code, id, &[std::sync::Arc::clone(&call)])
+            .unwrap();
+    assert_eq!(iteration.calls().count(), 1);
+    let boundary = &iteration.interval().calls()[0];
+    assert_eq!(boundary.entry(), (call.at(), ExitKind::Normal));
+    assert_eq!(boundary.resume().phase, Phase::Restore);
+    assert!(std::sync::Arc::ptr_eq(boundary.callee(), call.source()));
+    assert!(!std::sync::Arc::ptr_eq(
+        boundary.callee(),
+        iteration.source()
+    ));
+    assert_eq!(boundary.leave().phase, Phase::Leave);
+    assert_eq!(boundary.leave().site, call.source().site);
+    let interval = iteration.interval();
+    assert!(
+        iteration
+            .source()
+            .compile_between(
+                &interval.events().next().unwrap().point,
+                &interval.events().last().unwrap().point,
+                interval.selections(),
+                4096
+            )
+            .is_err(),
+        "ordinary intervals must retain the body-call handoff"
+    );
+}
+
 fn native_iteration_compilation() {
     use crate::compile::room::{
         Measure,
@@ -944,5 +1069,11 @@ fn body_helper_probes(
                 .unwrap(),
         ));
     }
+    let implementation = std::sync::Arc::clone(registry.get(&lt).unwrap().native().unwrap());
+    let definition = lash_kernel_doc::parse_definition(&format!("function body.lt(a: Any, b: Any) -> Bool\nkernel 1\ncharge sum(7, size(a), size(b), size(result))\nuse flat.lt = @{lt}\nnative\nbody {{ return flat.lt(a,b) }}")).unwrap();
+    functions.push((
+        "body.lt",
+        registry.register(definition, Some(implementation)).unwrap(),
+    ));
     functions
 }

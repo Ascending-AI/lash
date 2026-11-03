@@ -38,6 +38,18 @@ pub(in crate::compile::room) struct Resolved {
     pub(in crate::compile::room) dynamic: bool,
 }
 
+fn caller_span(stmt: &compile::Stmt, pc: u32) -> Result<OpRange, Refused> {
+    let range = match stmt.form {
+        compile::Form::While { test, .. } if pc >= test.start && pc < test.end() => test,
+        _ => stmt.ops,
+    };
+    if pc >= range.start && pc < range.end() {
+        Ok(range)
+    } else {
+        Err(Refused::Source)
+    }
+}
+
 /// Resolution reads the actual call opcode and its admitted target. An equal
 /// formula, signature or function name cannot stand in for this identity.
 pub(in crate::compile::room) fn resolved(
@@ -56,10 +68,7 @@ fn resolved_static(
     pc: u32,
 ) -> Result<Resolved, Refused> {
     let (stream, stmt, _) = exe.statement(statement);
-    if exe.stmt_at(caller, &stmt.site) != Some(statement)
-        || pc < stmt.ops.start
-        || pc >= stmt.ops.end()
-    {
+    if exe.stmt_at(caller, &stmt.site) != Some(statement) || caller_span(stmt, pc).is_err() {
         return Err(Refused::Source);
     }
     let site = stream
@@ -356,7 +365,7 @@ impl VerifiedCall {
         pc: u32,
     ) -> Result<Self, Refused> {
         let (_, stmt, _) = exe.statement(statement);
-        Self::compile_from(exe, caller, statement, pc, stmt.ops.start)
+        Self::compile_from(exe, caller, statement, pc, caller_span(stmt, pc)?.start)
     }
 
     /// The first unpaid fence belongs to the caller's original stream. The
