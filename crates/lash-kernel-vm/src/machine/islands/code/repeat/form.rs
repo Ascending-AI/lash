@@ -49,7 +49,7 @@ impl Match<'_> {
         })
     }
 
-    fn copy(&self, statement: &Statement, source: &Summary, from: u32) -> Option<Copy> {
+    fn copy(&self, statement: &Statement, from: u32) -> Option<Copy> {
         let (at, bind, value) = write(statement)?;
         let unary = if local(value) == Some(from) {
             None
@@ -65,7 +65,6 @@ impl Match<'_> {
         Some(Copy {
             at,
             keep: !bind,
-            charge: Charge::of(source, usize::from(unary.is_some()))?,
             unary,
         })
     }
@@ -77,13 +76,12 @@ impl Repeat {
         plan: &LoopPlan,
         shared: &[bool],
         exe: &Executable,
-        charged: bool,
         placement: std::sync::Arc<crate::compile::room::placement::BindingPlacement>,
     ) -> Option<Self> {
         let StatementKind::While { cond, body, .. } = &statement.kind else {
             return None;
         };
-        let Head::While(test_source) = &plan.head else {
+        let Head::While(_) = &plan.head else {
             return None;
         };
         if body.statements.len() != plan.body.steps.len() || body.statements.len() > 4 {
@@ -146,13 +144,13 @@ impl Repeat {
         // reduction or immediately before its write. Match the dependency
         // graph while retaining that source order in the charge schedule.
         let mut before = if update_at > 0 {
-            cx.copy(&body.statements[0], sources[0].0, counter)
+            cx.copy(&body.statements[0], counter)
         } else {
             None
         };
         let copy_after_reduction = before.is_none() && update_at == 2;
         if copy_after_reduction {
-            before = Some(cx.copy(&body.statements[1], sources[1].0, counter)?);
+            before = Some(cx.copy(&body.statements[1], counter)?);
         }
         if !copy_after_reduction && let Some(copy) = &before {
             cx.previous = Some(copy.at);
@@ -198,7 +196,6 @@ impl Repeat {
                 fold: Scalar::of(expr, exe, false)?,
                 term,
                 reverse,
-                charge: Charge::of(sources[reduction_at].0, 1 + usize::from(scale.is_some()))?,
                 scale,
             })
         } else {
@@ -221,14 +218,13 @@ impl Repeat {
         let update = Update {
             at: counter,
             operation,
-            charge: Charge::of(sources[update_at].0, 1)?,
         };
         let after = match body.statements.get(update_at + 1) {
             Some(statement) => {
                 if update_at + 2 != body.statements.len() {
                     return None;
                 }
-                Some(cx.copy(statement, sources[update_at + 1].0, counter)?)
+                Some(cx.copy(statement, counter)?)
             }
             None => None,
         };
@@ -246,16 +242,14 @@ impl Repeat {
         let run = Self {
             source_room: std::sync::Arc::clone(&plan.source_room),
             source_site: plan.source_site.clone(),
-            charged,
             proof,
             test,
-            test_charge: Charge::of(test_source, 1)?,
             before,
             copy_after_reduction,
             reduction,
             update,
             after,
         };
-        (run.verify(plan, exe, shared) && run.proof.verify(exe).is_ok()).then_some(run)
+        (run.verify(statement, plan, exe, shared) && run.proof.verify(exe).is_ok()).then_some(run)
     }
 }

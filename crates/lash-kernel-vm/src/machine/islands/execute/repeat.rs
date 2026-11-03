@@ -22,7 +22,6 @@ macro_rules! stop {
 
 pub(super) struct Window {
     pub(super) iteration_max: u64,
-    pub(super) loop_test: u64,
 }
 
 /// The induction and accumulator stay in their native Rust domain. Value
@@ -35,7 +34,6 @@ trait Number: std::marker::Copy {
     -> Option<lash_kernel_doc::scalar::ScalarOp>;
     fn number(op: lash_kernel_doc::scalar::ScalarOp, a: Self, b: Self) -> Option<Self>;
     fn truth(op: lash_kernel_doc::scalar::ScalarOp, a: Self, b: Self) -> Option<bool>;
-    fn fee(table: &crate::compile::ScalarTable, a: Self, b: Self, result: Value) -> Option<u64>;
 }
 
 impl Number for i64 {
@@ -64,10 +62,6 @@ impl Number for i64 {
     fn truth(op: lash_kernel_doc::scalar::ScalarOp, a: Self, b: Self) -> Option<bool> {
         lash_kernel_doc::scalar::int_truth(op, a, b)
     }
-    #[inline(always)]
-    fn fee(table: &crate::compile::ScalarTable, a: Self, b: Self, result: Value) -> Option<u64> {
-        table.units(super::super::sizes(&[a.value(), b.value()], &result))
-    }
 }
 
 impl Number for f64 {
@@ -95,10 +89,6 @@ impl Number for f64 {
     #[inline(always)]
     fn truth(op: lash_kernel_doc::scalar::ScalarOp, a: Self, b: Self) -> Option<bool> {
         lash_kernel_doc::scalar::float_truth(op, a, b)
-    }
-    #[inline(always)]
-    fn fee(table: &crate::compile::ScalarTable, _: Self, _: Self, _: Value) -> Option<u64> {
-        table.units(0)
     }
 }
 
@@ -139,78 +129,63 @@ impl<N: Number> BoundInput<N> {
     }
 }
 
-struct ScalarRun<'e, N> {
+struct ScalarRun<N> {
     operation: lash_kernel_doc::scalar::ScalarOp,
-    table: Option<&'e crate::compile::ScalarTable>,
     domain: std::marker::PhantomData<N>,
 }
 
-impl<'e, N: Number> ScalarRun<'e, N> {
-    fn of(scalar: &Scalar, exe: &'e Executable, charged: bool) -> Option<Self> {
+impl<N: Number> ScalarRun<N> {
+    fn of(scalar: &Scalar, exe: &Executable) -> Option<Self> {
         Some(Self {
             operation: N::operation(&scalar.site.pair(exe)?)?,
-            table: charged.then(|| scalar.site.table(exe)),
             domain: std::marker::PhantomData,
         })
     }
 
     #[inline(always)]
-    fn number(&self, args: [N; 2]) -> Option<(N, u64)> {
-        let value = N::number(self.operation, args[0], args[1])?;
-        let units = self.table.map_or(Some(0), |table| {
-            N::fee(table, args[0], args[1], value.value())
-        })?;
-        Some((value, units))
+    fn number(&self, args: [N; 2]) -> Option<N> {
+        N::number(self.operation, args[0], args[1])
     }
 
     #[inline(always)]
-    fn truth(&self, args: [N; 2]) -> Option<(bool, u64)> {
-        let value = N::truth(self.operation, args[0], args[1])?;
-        let units = self.table.map_or(Some(0), |table| {
-            N::fee(table, args[0], args[1], Value::Bool(value))
-        })?;
-        Some((value, units))
+    fn truth(&self, args: [N; 2]) -> Option<bool> {
+        N::truth(self.operation, args[0], args[1])
     }
 }
 
 impl Scalar {
     #[inline(always)]
-    fn unary(&self, exe: &Executable, value: Value, charged: bool) -> Option<(Value, u64)> {
-        let (answer, units) = super::super::compiled::unary(&self.site, value, exe)?;
+    fn unary(&self, exe: &Executable, value: Value) -> Option<Value> {
+        let (answer, _) = super::super::compiled::unary(&self.site, value, exe)?;
         matches!(
             (value, answer),
             (Value::Int(_), Value::Int(_)) | (Value::Float(_), Value::Float(_))
         )
-        .then_some((answer, if charged { units? } else { 0 }))
+        .then_some(answer)
     }
 }
 
-struct BinaryRun<'e, N> {
-    scalar: ScalarRun<'e, N>,
+struct BinaryRun<N> {
+    scalar: ScalarRun<N>,
     inputs: [BoundInput<N>; 2],
 }
 
-impl<'e, N: Number> BinaryRun<'e, N> {
-    fn of(
-        binary: &Binary,
-        exe: &'e Executable,
-        frame: &Values<'_, '_>,
-        charged: bool,
-    ) -> Option<Self> {
+impl<N: Number> BinaryRun<N> {
+    fn of(binary: &Binary, exe: &Executable, frame: &Values<'_, '_>) -> Option<Self> {
         Some(Self {
-            scalar: ScalarRun::of(&binary.scalar, exe, charged)?,
+            scalar: ScalarRun::of(&binary.scalar, exe)?,
             inputs: [binary.inputs[0].bind(frame)?, binary.inputs[1].bind(frame)?],
         })
     }
 
     #[inline(always)]
-    fn number(&self, inputs: &Inputs<N>) -> Option<(N, u64)> {
+    fn number(&self, inputs: &Inputs<N>) -> Option<N> {
         self.scalar
             .number([self.inputs[0].read(inputs)?, self.inputs[1].read(inputs)?])
     }
 
     #[inline(always)]
-    fn truth(&self, inputs: &Inputs<N>) -> Option<(bool, u64)> {
+    fn truth(&self, inputs: &Inputs<N>) -> Option<bool> {
         self.scalar
             .truth([self.inputs[0].read(inputs)?, self.inputs[1].read(inputs)?])
     }
@@ -218,19 +193,10 @@ impl<'e, N: Number> BinaryRun<'e, N> {
 
 impl Copy {
     #[inline(always)]
-    fn value<N: Number>(&self, exe: &Executable, value: N, charged: bool) -> Option<(N, u64)> {
-        self.unary.as_ref().map_or(Some((value, 0)), |unary| {
-            let (value, fee) = unary.unary(exe, value.value(), charged)?;
-            Some((N::read(value)?, fee))
+    fn value<N: Number>(&self, exe: &Executable, value: N) -> Option<N> {
+        self.unary.as_ref().map_or(Some(value), |unary| {
+            N::read(unary.unary(exe, value.value())?)
         })
-    }
-}
-
-impl super::super::code::repeat::Charge {
-    fn units(&self, formulas: &[u64]) -> Option<u64> {
-        formulas
-            .iter()
-            .try_fold(self.fixed, |sum, units| sum.checked_add(*units))
     }
 }
 
@@ -323,17 +289,17 @@ impl Repeat {
                 return Ok(None);
             }
         }
-        let test = BinaryRun::<N>::of(&self.test, exe, frame, self.charged);
-        let update = BinaryRun::<N>::of(&self.update.operation, exe, frame, self.charged);
+        let test = BinaryRun::<N>::of(&self.test, exe, frame);
+        let update = BinaryRun::<N>::of(&self.update.operation, exe, frame);
         let fold = self
             .reduction
             .as_ref()
-            .and_then(|reduce| ScalarRun::<N>::of(&reduce.fold, exe, self.charged));
+            .and_then(|reduce| ScalarRun::<N>::of(&reduce.fold, exe));
         let scale = self
             .reduction
             .as_ref()
             .and_then(|reduce| reduce.scale.as_ref())
-            .and_then(|scale| BinaryRun::<N>::of(scale, exe, frame, self.charged));
+            .and_then(|scale| BinaryRun::<N>::of(scale, exe, frame));
         let term = self
             .reduction
             .as_ref()
@@ -344,37 +310,26 @@ impl Repeat {
             .and_then(|reduce| frame.value(reduce.at))
             .and_then(N::read);
         let (mut saved_before, mut saved_after) = (None, None);
-        let (mut iterations, mut units) = (0u64, 0u64);
+        let mut iterations = 0u64;
         loop {
             let mut inputs = Inputs {
                 counter,
                 previous: counter,
                 accumulator: None,
             };
-            let Some((test, test_fee)) = test.as_ref().and_then(|test| test.truth(&inputs)) else {
+            let Some(test) = test.as_ref().and_then(|test| test.truth(&inputs)) else {
                 stop!(Guard);
             };
             if !test {
                 stop!(End);
             }
-            let Some(mut iteration) = self.test_charge.units(&[test_fee]) else {
-                stop!(Guard);
-            };
             let before = match &self.before {
                 Some(copy) => {
-                    let Some((value, fee)) = copy.value(exe, counter, self.charged) else {
+                    let Some(value) = copy.value(exe, counter) else {
                         stop!(Guard);
                     };
-                    let Some(sum) = copy
-                        .charge
-                        .units(&[fee])
-                        .and_then(|n| iteration.checked_add(n))
-                    else {
-                        stop!(Guard);
-                    };
-                    iteration = sum;
                     inputs.previous = value;
-                    Some((value, fee))
+                    Some(value)
                 }
                 None => None,
             };
@@ -384,21 +339,21 @@ impl Repeat {
                         stop!(Guard);
                     };
                     inputs.accumulator = Some(accumulator);
-                    let (term, scale_fee) = match &reduce.scale {
+                    let term = match &reduce.scale {
                         Some(_) => {
-                            let Some((value, fee)) =
+                            let Some(value) =
                                 scale.as_ref().and_then(|scale| scale.number(&inputs))
                             else {
                                 stop!(Guard);
                             };
-                            (value, fee)
+                            value
                         }
                         None => {
                             let Some(term) = term.as_ref().and_then(|term| term.read(&inputs))
                             else {
                                 stop!(Guard);
                             };
-                            (term, 0)
+                            term
                         }
                     };
                     let args = if reduce.reverse {
@@ -406,76 +361,32 @@ impl Repeat {
                     } else {
                         [accumulator, term]
                     };
-                    let Some((value, fold_fee)) = fold.as_ref().and_then(|fold| fold.number(args))
-                    else {
+                    let Some(value) = fold.as_ref().and_then(|fold| fold.number(args)) else {
                         stop!(Guard);
                     };
-                    let fees = if reduce.scale.is_some() {
-                        &[scale_fee, fold_fee][..]
-                    } else {
-                        &[fold_fee][..]
-                    };
-                    let Some(sum) = reduce
-                        .charge
-                        .units(fees)
-                        .and_then(|n| iteration.checked_add(n))
-                    else {
-                        stop!(Guard);
-                    };
-                    iteration = sum;
-                    Some((value, scale_fee, fold_fee, term))
+                    Some((value, term))
                 }
                 None => None,
             };
-            let Some((next, update_fee)) =
-                update.as_ref().and_then(|update| update.number(&inputs))
-            else {
+            let Some(next) = update.as_ref().and_then(|update| update.number(&inputs)) else {
                 stop!(Guard);
             };
-            let Some(sum) = self
-                .update
-                .charge
-                .units(&[update_fee])
-                .and_then(|n| iteration.checked_add(n))
-            else {
-                stop!(Guard);
-            };
-            iteration = sum;
             let after = match &self.after {
                 Some(copy) => {
-                    let Some((value, fee)) = copy.value(exe, next, self.charged) else {
+                    let Some(value) = copy.value(exe, next) else {
                         stop!(Guard);
                     };
-                    let Some(sum) = copy
-                        .charge
-                        .units(&[fee])
-                        .and_then(|n| iteration.checked_add(n))
-                    else {
-                        stop!(Guard);
-                    };
-                    iteration = sum;
-                    Some((value, fee))
+                    Some(value)
                 }
                 None => None,
-            };
-            let Some(iteration) = iteration.checked_add(window.loop_test) else {
-                stop!(Guard);
-            };
-            // The independently verified source maximum is the admission
-            // authority. A changed projection cannot spend beyond that proof.
-            if iteration > window.iteration_max {
-                stop!(Guard);
-            }
-            let Some(total) = units.checked_add(iteration) else {
-                stop!(Guard);
             };
             let actual = IterationValues {
                 test,
-                before: before.map(|(value, _)| value.value()),
-                scale: reduction.map(|(_, _, _, term)| term.value()),
-                reduced: reduction.map(|(value, _, _, _)| value.value()),
+                before: before.map(Number::value),
+                scale: reduction.map(|(_, term)| term.value()),
+                reduced: reduction.map(|(value, _)| value.value()),
                 next: Some(next.value()),
-                after: after.map(|(value, _)| value.value()),
+                after: after.map(Number::value),
             };
             #[cfg(test)]
             let actual =
@@ -496,6 +407,16 @@ impl Repeat {
             let Some(evaluated) = self.proof.evaluate(exe, arena, &actual, &mut values)? else {
                 stop!(Guard);
             };
+            // Keep the original scalar-plan ceiling while canonical source
+            // debts alone determine the amount admitted and recorded.
+            if evaluated
+                .debts
+                .iter()
+                .try_fold(0u64, |sum, debt| sum.checked_add(debt.units()))
+                .is_none_or(|units| units > window.iteration_max)
+            {
+                stop!(Guard);
+            }
             if bound.is_none() {
                 bound = self.proof.recurrence.bind(
                     ledger,
@@ -517,18 +438,17 @@ impl Repeat {
                 stop!(Prefix);
             }
             scope.advance(room)?;
-            saved_before = before.map(|(value, _)| value);
-            if let Some((value, _, _, _)) = reduction {
+            saved_before = before;
+            if let Some((value, _)) = reduction {
                 accumulator_value = Some(value);
             }
             counter = next;
-            saved_after = after.map(|(value, _)| value);
+            saved_after = after;
             if let Some(tape) = tape {
                 for debt in &evaluated.debts {
                     debt.record(tape);
                 }
             }
-            units = total;
             iterations += 1;
         }
         let mut writes = Vec::new();
@@ -616,7 +536,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             frame,
             Window {
                 iteration_max: site.iteration_max,
-                loop_test: cost,
             },
             &ledger,
             self.arena,

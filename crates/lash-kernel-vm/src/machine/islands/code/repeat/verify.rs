@@ -82,31 +82,28 @@ impl Scalar {
 }
 
 fn next<'a>(
-    statements: &mut impl Iterator<Item = &'a Step>,
+    statements: &mut impl Iterator<Item = &'a Statement>,
     at: u32,
     bind: bool,
-    charge: &Charge,
 ) -> Option<&'a Expr> {
-    let (source, binding) = summary(statements.next()?)?;
-    if source.write != Some(RegionSlot::Frame(at)) || bind != binding || !charge.verifies(source) {
-        return None;
-    }
-    source.scalar_root()
+    let (actual, binding, value) = write(statements.next()?)?;
+    (actual == at && binding == bind).then_some(value)
 }
 
 impl Repeat {
     pub(in crate::machine::islands) fn verify(
         &self,
+        statement: &Statement,
         plan: &LoopPlan,
         exe: &Executable,
         shared: &[bool],
     ) -> bool {
-        let Head::While(test) = &plan.head else {
+        let StatementKind::While { cond, body, .. } = &statement.kind else {
             return false;
         };
         if !std::sync::Arc::ptr_eq(&self.source_room, &plan.source_room)
             || self.source_site != plan.source_site
-            || !self.test_charge.verifies(test)
+            || plan.stmt != statement.id
         {
             return false;
         }
@@ -133,17 +130,14 @@ impl Repeat {
             written: &written,
             shared,
         };
-        let Some(source) = test.scalar_root() else {
-            return false;
-        };
-        if !roles.binary(&self.test, source, exe, true) {
+        if !roles.binary(&self.test, cond, exe, true) {
             return false;
         }
-        let mut statements = plan.body.steps.iter();
+        let mut statements = body.statements.iter();
         if !self.copy_after_reduction
             && let Some(copy) = &self.before
         {
-            let Some(source) = next(&mut statements, copy.at, !copy.keep, &copy.charge) else {
+            let Some(source) = next(&mut statements, copy.at, !copy.keep) else {
                 return false;
             };
             if !roles.copy(copy, source, exe) {
@@ -152,7 +146,7 @@ impl Repeat {
             roles.previous = Some(copy.at);
         }
         if let Some(reduce) = &self.reduction {
-            let Some(source) = next(&mut statements, reduce.at, false, &reduce.charge) else {
+            let Some(source) = next(&mut statements, reduce.at, false) else {
                 return false;
             };
             let Expression::Operator { args, .. } = &unpin(source).kind else {
@@ -182,7 +176,7 @@ impl Repeat {
             let Some(copy) = &self.before else {
                 return false;
             };
-            let Some(source) = next(&mut statements, copy.at, !copy.keep, &copy.charge) else {
+            let Some(source) = next(&mut statements, copy.at, !copy.keep) else {
                 return false;
             };
             if self.reduction.is_none() || !roles.copy(copy, source, exe) {
@@ -190,14 +184,14 @@ impl Repeat {
             }
             roles.previous = Some(copy.at);
         }
-        let Some(source) = next(&mut statements, self.update.at, false, &self.update.charge) else {
+        let Some(source) = next(&mut statements, self.update.at, false) else {
             return false;
         };
         if !roles.binary(&self.update.operation, source, exe, false) {
             return false;
         }
         if let Some(copy) = &self.after {
-            let Some(source) = next(&mut statements, copy.at, !copy.keep, &copy.charge) else {
+            let Some(source) = next(&mut statements, copy.at, !copy.keep) else {
                 return false;
             };
             if !roles.copy(copy, source, exe) {

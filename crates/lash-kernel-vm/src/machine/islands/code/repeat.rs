@@ -5,7 +5,7 @@ use super::super::compiled::{OperatorSite, operator_site};
 use super::*;
 use crate::compile::expr::{Expr, Kind as Expression};
 use crate::compile::islands::{Kind as StatementKind, Statement};
-use crate::compile::{Event, Head, LoopPlan, RegionSlot, Step, Summary};
+use crate::compile::{Head, LoopPlan, RegionSlot, Step, Summary};
 
 mod form;
 pub(in crate::machine::islands) mod proof;
@@ -26,48 +26,6 @@ pub(in crate::machine::islands) struct Scalar {
     pub(in crate::machine::islands) site: OperatorSite,
 }
 
-pub(in crate::machine::islands) struct Charge {
-    pub(in crate::machine::islands) fixed: u64,
-    pub(in crate::machine::islands) events: Box<[Event]>,
-    formulas: usize,
-}
-
-impl Charge {
-    fn of(source: &Summary, formulas: usize) -> Option<Self> {
-        if source.scalar_root().is_none()
-            || source
-                .program
-                .iter()
-                .any(|event| !matches!(event, Event::Fixed(_) | Event::Formula))
-            || source
-                .program
-                .iter()
-                .filter(|event| **event == Event::Formula)
-                .count()
-                != formulas
-        {
-            return None;
-        }
-        Some(Self {
-            fixed: source.fixed,
-            events: source.program.clone(),
-            formulas,
-        })
-    }
-
-    fn verifies(&self, source: &Summary) -> bool {
-        source.scalar_root().is_some()
-            && self.fixed == source.fixed
-            && self.events == source.program
-            && self.formulas
-                == source
-                    .program
-                    .iter()
-                    .filter(|event| **event == Event::Formula)
-                    .count()
-    }
-}
-
 pub(in crate::machine::islands) struct Binary {
     pub(in crate::machine::islands) scalar: Scalar,
     pub(in crate::machine::islands) inputs: [Input; 2],
@@ -77,13 +35,11 @@ pub(in crate::machine::islands) struct Copy {
     pub(in crate::machine::islands) at: u32,
     pub(in crate::machine::islands) keep: bool,
     pub(in crate::machine::islands) unary: Option<Scalar>,
-    pub(in crate::machine::islands) charge: Charge,
 }
 
 pub(in crate::machine::islands) struct Update {
     pub(in crate::machine::islands) at: u32,
     pub(in crate::machine::islands) operation: Binary,
-    pub(in crate::machine::islands) charge: Charge,
 }
 
 pub(in crate::machine::islands) struct Reduction {
@@ -92,16 +48,13 @@ pub(in crate::machine::islands) struct Reduction {
     pub(in crate::machine::islands) fold: Scalar,
     pub(in crate::machine::islands) term: Input,
     pub(in crate::machine::islands) reverse: bool,
-    pub(in crate::machine::islands) charge: Charge,
 }
 
 pub(in crate::machine::islands) struct Repeat {
     pub(in crate::machine::islands) source_room: std::sync::Arc<crate::compile::room::Source>,
     pub(in crate::machine::islands) source_site: lash_kernel_value::sites::Site,
-    pub(in crate::machine::islands) charged: bool,
     pub(in crate::machine::islands) proof: proof::Proof,
     pub(in crate::machine::islands) test: Binary,
-    pub(in crate::machine::islands) test_charge: Charge,
     pub(in crate::machine::islands) before: Option<Copy>,
     pub(in crate::machine::islands) copy_after_reduction: bool,
     pub(in crate::machine::islands) reduction: Option<Reduction>,

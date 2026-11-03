@@ -468,6 +468,41 @@ impl Compiled {
         exe: &Executable,
         owner: &IslandPlan,
     ) -> Result<usize, crate::compile::room::Refused> {
+        fn statement(
+            block: &crate::compile::islands::Block,
+            id: StmtId,
+        ) -> Option<&crate::compile::islands::Statement> {
+            use crate::compile::islands::Kind;
+            for candidate in &block.statements {
+                if candidate.id == id {
+                    return Some(candidate);
+                }
+                let nested = match &candidate.kind {
+                    Kind::While {
+                        body, otherwise, ..
+                    }
+                    | Kind::For {
+                        body, otherwise, ..
+                    } => statement(body, id)
+                        .or_else(|| otherwise.as_ref().and_then(|block| statement(block, id))),
+                    Kind::If { then_, else_, .. } => {
+                        statement(then_, id).or_else(|| statement(else_, id))
+                    }
+                    Kind::Try {
+                        body,
+                        catch,
+                        finally,
+                    } => statement(body, id)
+                        .or_else(|| catch.as_ref().and_then(|block| statement(block, id)))
+                        .or_else(|| finally.as_ref().and_then(|block| statement(block, id))),
+                    _ => None,
+                };
+                if nested.is_some() {
+                    return nested;
+                }
+            }
+            None
+        }
         let mut checked = 0;
         for header in &self.code.sites.header {
             if let Some(repeat) = &header.repeat {
@@ -477,7 +512,9 @@ impl Compiled {
                     .iter()
                     .find(|p| p.stmt == header.id)
                     .ok_or(crate::compile::room::Refused::Source)?;
-                if !repeat.run.verify(plan, exe, &owner.shared) {
+                let statement = statement(&owner.body, header.id)
+                    .ok_or(crate::compile::room::Refused::Source)?;
+                if !repeat.run.verify(statement, plan, exe, &owner.shared) {
                     return Err(crate::compile::room::Refused::Source);
                 }
                 repeat.run.source_room.verify()?;
