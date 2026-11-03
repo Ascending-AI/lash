@@ -24,6 +24,31 @@ pub(super) use program::{
 };
 pub(crate) use program::{Instruction, Read, StatementEntry, StoreInputs};
 
+#[path = "../../compile/room/region/recurrence.rs"]
+pub(crate) mod recurrence;
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static LOOP_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    pub(crate) static SUBSTITUTE_LOOP_RESULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+#[cfg(test)]
+pub(crate) fn take_loop_publications() -> u64 {
+    LOOP_PUBLICATIONS.with(|count| count.replace(0))
+}
+
+#[cfg(test)]
+pub(crate) fn with_substituted_loop_result<R>(run: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SUBSTITUTE_LOOP_RESULT.with(|enabled| enabled.set(self.0));
+        }
+    }
+    let _restore = Restore(SUBSTITUTE_LOOP_RESULT.with(|enabled| enabled.replace(true)));
+    run()
+}
+
 /// Heap text construction and operations the source handler must answer.
 #[derive(Clone, Copy)]
 pub(crate) enum Deferred {
@@ -456,6 +481,7 @@ impl Compiled {
                     return Err(crate::compile::room::Refused::Source);
                 }
                 repeat.run.source_room.verify()?;
+                repeat.run.proof.verify(exe)?;
                 checked += 1;
             }
         }

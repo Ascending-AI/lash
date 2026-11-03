@@ -1407,10 +1407,15 @@ fn typed_repeat_agrees() {
     ] {
         let source = scalar_document(body);
         crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.set(0));
+        crate::machine::islands::compiled::take_loop_publications();
         let roomy = observe_scalar(&source, Layout(0), false, false, false);
         assert!(
             crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.get()) > 0,
             "real typed iterations execute"
+        );
+        assert!(
+            crate::machine::islands::compiled::take_loop_publications() > 0,
+            "actual loop-scoped source publications execute"
         );
         let compare = |bounds, slice, cold, record| {
             collect(packet_modes(&source, bounds, slice, cold, record))
@@ -1494,6 +1499,25 @@ fn typed_repeat_agrees() {
             ));
         }
     }
+    // A same-domain substituted kernel answer cannot authorize any boundary,
+    // even when its charge and holding width are unchanged.
+    crate::machine::islands::compiled::take_loop_publications();
+    let refused = crate::machine::islands::compiled::with_substituted_loop_result(|| {
+        packet_modes(&reordered, super::embedder::ROOMY, u64::MAX, false, true)
+    });
+    assert_eq!(
+        crate::machine::islands::compiled::take_loop_publications(),
+        0,
+        "wrong native answer published a loop"
+    );
+    assert!(
+        refused
+            .get(&(Family::Repeated, Exit::Guard))
+            .copied()
+            .unwrap_or(0)
+            > 0
+    );
+    collect(refused);
     // K-CHG-001 / K-VAL-020: a mixed-domain test misses before work;
     // overflowing multiplication misses after a completed iteration.
     for (body, prefix) in [

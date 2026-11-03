@@ -533,6 +533,7 @@ impl<'e> Build<'e> {
                                     self.shared,
                                     self.exe,
                                     self.charged,
+                                    std::sync::Arc::clone(self.placement.as_ref()?),
                                 )?,
                                 iteration_max: plan.iteration_max,
                             }))

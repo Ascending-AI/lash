@@ -147,54 +147,18 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 {
                     watching.condition(self.exe, *id);
                 }
-                // The typed kernel executes every iteration and charges
-                // the next test last. Reserve the metered tail so a paid
-                // test never has to materialize without a source PC.
-                let mut repeated = 0;
-                if self.admitted
-                    && !OBSERVING
+                // Canonical iteration debts include their entered header.
+                // The admitted prefix leaves room for the next unpaid header
+                // so an interior stop always retains an exact source point.
+                let repeated = if !OBSERVING
                     && self.exe.charging()
                     && let Some(site) = repeat
                 {
-                    let window = repeat::Window {
-                        charged: self.charged + cost,
-                        bound: self.bound.saturating_sub(*metered),
-                        slice_end: self.slice_end.saturating_sub(*metered),
-                        iteration_max: site.iteration_max,
-                        loop_test: *cost,
-                    };
-                    // The first header unit precedes the repeated source
-                    // schedule on a tape. If no iteration can run, its normal
-                    // header path below records the unit once instead.
-                    let pending = self.tape.map(|_| crate::observe::ChargeTape::new());
-                    let (iterations, units) = site.run.run(
-                        self.exe,
-                        frame,
-                        window,
-                        pending.as_ref(),
-                        #[cfg(any(test, feature = "perf-witness"))]
-                        &self.scratch.census,
-                        self.scratch.counting,
-                    );
-                    if iterations != 0 {
-                        self.formula(*cost);
-                        self.charged += units;
-                        if let (Some(tape), Some(pending)) = (self.tape, &pending) {
-                            for weight in pending.steps() {
-                                tape.push(weight);
-                            }
-                        }
-                        if let Some(recorder) = self.recorder {
-                            recorder.typed(iterations);
-                        }
-                        repeated = iterations;
-                        #[cfg(test)]
-                        super::REPEATED_TEMPLATE.with(|n| n.set(n.get() + iterations));
-                    }
-                }
-                if repeated == 0 {
-                    self.formula(*cost);
-                }
+                    self.repeat_scope(frame, site, *cost, *metered)?
+                } else {
+                    0
+                };
+                self.formula(*cost);
                 if *metered != 0 {
                     self.scheduled(*metered);
                 }

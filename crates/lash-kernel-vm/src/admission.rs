@@ -1,6 +1,8 @@
 //! Shared source resource admission. All consumers use this owner for charge
 //! additions and slice inequalities; selected ledger programs travel in C.
 use crate::compile::expr::Close;
+#[path = "compile/room/publication/repeat.rs"]
+pub(crate) mod repeat;
 
 /// The source charge window, read before publishing speculative work.
 /// All charge additions and both slice inequalities have one owner.
@@ -16,26 +18,6 @@ pub(crate) struct Window {
 pub(crate) struct Accepted<C = ()> {
     pub(super) request: C,
     pub(super) end: u64,
-}
-
-/// A fixed iteration suffix is admitted once; later prefixes spend its room.
-pub(crate) struct RepeatBudget {
-    end: u64,
-    remaining: u64,
-}
-
-impl RepeatBudget {
-    #[inline(always)]
-    pub(crate) fn admit(&self, before: u64) -> Option<Accepted> {
-        if before > self.remaining {
-            return None;
-        }
-        Some(Accepted {
-            request: (),
-            // The accepted suffix and remaining allowance prove this fits.
-            end: self.end + before,
-        })
-    }
 }
 
 impl Window {
@@ -63,15 +45,6 @@ impl Window {
             .checked_add(units)?
             .checked_add(close.map_or(0, |close| u64::from(close.total)))?;
         (end <= self.bound && (!strict || end < self.slice)).then_some(Accepted { request, end })
-    }
-
-    #[inline(always)]
-    pub(crate) fn repeating(self, units: u64) -> Option<RepeatBudget> {
-        let accepted = self.admit((), 0, units, None, true)?;
-        Some(RepeatBudget {
-            end: accepted.end,
-            remaining: self.bound.min(self.slice.checked_sub(1)?) - accepted.end,
-        })
     }
 }
 
@@ -131,10 +104,14 @@ pub(crate) struct SourceResources<'a> {
     pub(crate) limit: u64,
     pub(crate) safe_point: u64,
 }
+enum OccurrenceDebt {
+    Steps(Vec<usize>),
+    Repeated(Vec<(usize, u64)>),
+}
 pub(crate) struct SourceAccepted<'a, C> {
     resources: SourceResources<'a>,
     accepted: Accepted<C>,
-    occurrences: Vec<usize>,
+    occurrences: OccurrenceDebt,
 }
 impl SourceResources<'_> {
     pub(crate) fn facts(&self, need: &Allowance) -> Option<ResourceFacts> {
@@ -186,7 +163,7 @@ impl<'a> SourceResources<'a> {
         Ok(Some(SourceAccepted {
             resources: self,
             accepted,
-            occurrences: need.occurrences.clone(),
+            occurrences: OccurrenceDebt::Steps(need.occurrences.clone()),
         }))
     }
 }
@@ -208,7 +185,16 @@ impl<'a, C> SourceAccepted<'a, C> {
     pub(crate) fn commit<R, E>(self, commit: impl FnOnce(C) -> Result<R, E>) -> Result<R, E> {
         let result = commit(self.accepted.request)?;
         *self.resources.charged = self.accepted.end;
-        self.resources.counters.publish_admitted(&self.occurrences);
+        match self.occurrences {
+            OccurrenceDebt::Steps(sites) => self.resources.counters.publish_admitted(&sites),
+            OccurrenceDebt::Repeated(counts) => {
+                for (site, count) in counts {
+                    for _ in 0..count {
+                        self.resources.counters.publish_admitted(&[site]);
+                    }
+                }
+            }
+        }
         Ok(result)
     }
 }

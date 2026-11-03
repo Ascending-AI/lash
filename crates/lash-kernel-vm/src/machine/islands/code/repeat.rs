@@ -8,6 +8,7 @@ use crate::compile::islands::{Kind as StatementKind, Statement};
 use crate::compile::{Event, Head, LoopPlan, RegionSlot, Step, Summary};
 
 mod form;
+pub(in crate::machine::islands) mod proof;
 mod verify;
 
 /// Values read by the fixed graph. Invariants cannot be written by its body.
@@ -98,6 +99,7 @@ pub(in crate::machine::islands) struct Repeat {
     pub(in crate::machine::islands) source_room: std::sync::Arc<crate::compile::room::Source>,
     pub(in crate::machine::islands) source_site: lash_kernel_value::sites::Site,
     pub(in crate::machine::islands) charged: bool,
+    pub(in crate::machine::islands) proof: proof::Proof,
     pub(in crate::machine::islands) test: Binary,
     pub(in crate::machine::islands) test_charge: Charge,
     pub(in crate::machine::islands) before: Option<Copy>,

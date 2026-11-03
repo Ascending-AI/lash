@@ -78,6 +78,7 @@ impl Repeat {
         shared: &[bool],
         exe: &Executable,
         charged: bool,
+        placement: std::sync::Arc<crate::compile::room::placement::BindingPlacement>,
     ) -> Option<Self> {
         let StatementKind::While { cond, body, .. } = &statement.kind else {
             return None;
@@ -231,10 +232,22 @@ impl Repeat {
             }
             None => None,
         };
+        let proof = proof::Proof::compile(
+            exe,
+            placement,
+            statement,
+            proof::Targets {
+                counter,
+                before: before.as_ref().map(|copy| copy.at),
+                reduced: reduction.as_ref().map(|reduce| reduce.at),
+                after: after.as_ref().map(|copy| copy.at),
+            },
+        )?;
         let run = Self {
             source_room: std::sync::Arc::clone(&plan.source_room),
             source_site: plan.source_site.clone(),
             charged,
+            proof,
             test,
             test_charge: Charge::of(test_source, 1)?,
             before,
@@ -243,6 +256,6 @@ impl Repeat {
             update,
             after,
         };
-        run.verify(plan, exe, shared).then_some(run)
+        (run.verify(plan, exe, shared) && run.proof.verify(exe).is_ok()).then_some(run)
     }
 }
