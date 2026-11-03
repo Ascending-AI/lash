@@ -66,8 +66,8 @@ mod prepared_tests;
 
 mod collections;
 pub use collections::{
-    CollectionError, MergePosition, SortComparison, SortContinuation, implement_collections,
-    register_collections,
+    CollectionError, ComparisonPhase, MergePosition, SortComparison, SortContinuation,
+    implement_collections, register_collections,
 };
 
 /// A pure native constructor selected by a build's identity table. The

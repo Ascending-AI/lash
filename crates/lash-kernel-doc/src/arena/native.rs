@@ -22,6 +22,9 @@
 //! so a call run again does what it did, and the nursery of the abandoned
 //! attempt is discarded.
 
+/// Semantic merge positions and callback phases shared by natives and the VM.
+pub mod sort;
+
 use std::sync::Arc;
 
 use std::borrow::Cow;

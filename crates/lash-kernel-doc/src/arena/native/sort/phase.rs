@@ -1,6 +1,6 @@
 //! Borrow the semantic continuation across a callback, never an arena view.
 use super::{Comparison, Merge, MergePosition};
-use lash_kernel_doc::{Args, NativeError, Value};
+use crate::{Args, NativeError, Value};
 
 /// A pending comparison with its actual guest buffers and ordered operands.
 /// Dropping it leaves the merge untouched. This is native phase evidence;
