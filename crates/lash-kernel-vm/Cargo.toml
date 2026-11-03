@@ -38,13 +38,13 @@ lash-kernel-doc = { workspace = true }
 lash-kernel-package = { workspace = true }
 lash-kernel-exec = { workspace = true }
 lash-kernel-state = { workspace = true }
-lash-kernel-lib = { workspace = true }
 num-bigint = { workspace = true }
 num-traits = { workspace = true }
 thiserror = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+lash-kernel-lib = { workspace = true }
 lash-kernel-doc = { workspace = true, features = ["perf-witness"] }
 lash-kernel-check = { workspace = true }
 lash-kernel-package = { workspace = true, features = ["testing"] }
