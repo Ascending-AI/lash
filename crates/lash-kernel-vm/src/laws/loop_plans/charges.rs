@@ -699,6 +699,7 @@ fn constructor_debt() {
         complete.bind(&[]).unwrap().record(&expected);
         let actual = crate::observe::ChargeTape::new();
         let mut constructors = 0;
+        let mut inline_constants = 0;
         for pc in stmt.ops.start..stmt.ops.end() {
             let Some(prefix) = ConstructorPrefix::compile(stream, stmt.ops, pc) else {
                 continue;
@@ -776,11 +777,24 @@ fn constructor_debt() {
                     "a constructor cannot omit or duplicate an original pending close"
                 );
             }
-            constructors += 1;
+            if matches!(stream.ops[pc as usize], Op::Const { c, .. }
+                if matches!(stream.consts[c.ix()], crate::compile::Constant::Resident(_)))
+            {
+                inline_constants += 1;
+            } else {
+                constructors += 1;
+            }
         }
+        // The RHS has a list, map, set, record, closure, deferred text and
+        // outer tuple. Their inline integer operands are 2 + 2 + 2 + 1;
+        // the closure body's return literal belongs to another statement.
         assert_eq!(
             constructors, 7,
             "all constructor/deferred-literal debt cases execute"
+        );
+        assert_eq!(
+            inline_constants, 7,
+            "all inline integer operand prefixes execute"
         );
         complete.bind(&[]).unwrap().record(&actual);
         assert_eq!(
