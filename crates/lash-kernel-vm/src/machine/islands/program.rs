@@ -118,10 +118,6 @@ pub(crate) struct WriteSite {
     pub(crate) bind: bool,
     pub(in crate::machine::islands) close: Option<Close>,
     /// Canonical unpaid event close, compiled with this exact code layout.
-    #[expect(
-        dead_code,
-        reason = "constructor integration consumes cached write debt"
-    )]
     pub(crate) charges: Option<std::sync::Arc<crate::compile::room::charges::ChargeProgram>>,
     pub(in crate::machine::islands) covered: bool,
     pub(in crate::machine::islands) leaves: u32,

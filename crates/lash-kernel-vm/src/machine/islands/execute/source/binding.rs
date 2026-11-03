@@ -86,7 +86,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(statement) = frame.state.statement else {
             return Ok(None);
         };
-        let statement_id = statement;
         let (stream, statement, _) = self.exe.statement(statement);
         let Some(at) = stream
             .source_sites
@@ -226,23 +225,17 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             next,
             allowance,
         };
+        let Some(charges) = site.charges.as_deref() else {
+            return Ok(None);
+        };
         let published = if site.shared {
-            let Ok(charges) = room::charges::ChargeProgram::event_packet(
-                self.exe,
-                frame.state.callee.plan.code,
-                statement_id,
-                site.pc,
-                self.accounting.then_some(site.close).flatten(),
-            ) else {
-                return Ok(None);
-            };
             self.publish_source_boundary(
                 frame.state.callee,
                 activation,
                 prefix,
                 publication::CellConstruction {
                     construction: crate::machine::source_publication::construction::storage::Construction {
-                        charges: Some(&charges),
+                        charges: Some(charges),
                         value: crate::machine::source_publication::construction::storage::ConstructionValue::Cell(value),
                         output,
                         at: at.clone(),
@@ -260,21 +253,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 },
             )?
         } else {
-            let Ok(charges) = room::charges::ChargeProgram::event_packet(
-                self.exe,
-                frame.state.callee.plan.code,
-                statement_id,
-                site.pc,
-                self.accounting.then_some(site.close).flatten(),
-            ) else {
-                return Ok(None);
-            };
             self.publish_source_boundary(
                 frame.state.callee,
                 activation,
                 prefix,
                 SourceTransfer {
-                    charges: &charges,
+                    charges,
                     inputs,
                     input,
                     output,
