@@ -5,7 +5,7 @@ pub(crate) fn seed_actions(machine: &mut KernelMachine, count: u64) -> usize {
     let exe = &machine.exe;
     let mut counts = vec![0; exe.occurrence_count()];
     let mut seeded = 0;
-    for index in 0..exe.occurrence_count() {
+    for (index, current) in counts.iter_mut().enumerate() {
         // Only caller actions lexically within a loop, not the entry call
         // or a helper body's independent invocation-local coordinates.
         let Some(site) = exe.occurrence_site(index) else {
@@ -22,7 +22,7 @@ pub(crate) fn seed_actions(machine: &mut KernelMachine, count: u64) -> usize {
                 && site.path.starts_with(&stmt.site.path)
         });
         if in_loop {
-            counts[index] = count;
+            *current = count;
             seeded += 1;
         }
     }
