@@ -1271,7 +1271,7 @@ impl<'e> Build<'e> {
                 let outer = self.live.clone();
                 self.arm(then, reg)?;
                 let jump = self.emit(Op::Jump(0));
-                self.live = outer;
+                self.live = outer.clone();
                 self.open = None;
                 let target = self.ops.len();
                 self.ops[branch].op = Op::Cond {
@@ -1283,6 +1283,8 @@ impl<'e> Build<'e> {
                 self.arm(otherwise, reg)?;
                 self.ops[jump].op = Op::Jump(self.ops.len());
                 self.open = None;
+                self.live = outer;
+                self.result(reg, &[]);
             }
             Kind::Let {
                 local,
