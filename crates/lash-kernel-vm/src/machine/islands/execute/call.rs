@@ -88,6 +88,17 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         };
         let answer =
             (|| {
+                // A partly paid expression must settle its remaining source
+                // events before entering a callee. Its affine receipt belongs
+                // to this running statement, not to a suspended caller.
+                if frame
+                    .state
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| source.original.is_some())
+                {
+                    return Err(self.at(site.pc));
+                }
                 let callee = inputs.as_ref().map_or_else(
                     || read.then(|| frame.regs[site.reg as usize]),
                     |values| values.0,
