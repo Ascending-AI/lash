@@ -422,16 +422,15 @@ impl FrameCaller<'_> {
             return Ok(false);
         }
         expected_inputs.extend(arguments.iter().filter_map(|(owner, _)| *owner));
-        let restore = self
-            .source
-            .compile_event(
-                &Point {
-                    site: self.entry.site.clone(),
-                    phase: Phase::Restore,
-                },
-                ExitKind::Normal,
-            )
-            .map_err(|_| fault("caller has no source Restore"))?;
+        let Ok(restore) = self.source.compile_event(
+            &Point {
+                site: self.entry.site.clone(),
+                phase: Phase::Restore,
+            },
+            ExitKind::Normal,
+        ) else {
+            return Ok(false);
+        };
         let Some(roles) = restore.restored_roles() else {
             return Ok(false);
         };
