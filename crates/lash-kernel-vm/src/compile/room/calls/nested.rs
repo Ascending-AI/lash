@@ -28,7 +28,7 @@ impl CompileContext {
 }
 
 pub(super) enum BodyRegion {
-    Scalar(ScalarRegion),
+    Scalar(Box<ScalarRegion>),
     Composed(Box<Body>),
 }
 impl BodyRegion {
