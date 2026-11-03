@@ -16,6 +16,7 @@ use std::sync::Arc;
 #[cfg(test)]
 thread_local! {
     static TEXTS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
+    static BODY_TEXTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static ORIGINAL_TEXTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 #[cfg(test)]
@@ -26,6 +27,11 @@ pub(crate) fn take_text_publications() -> [u64; 2] {
 #[cfg(test)]
 pub(crate) fn take_original_text_publications() -> u64 {
     ORIGINAL_TEXTS.with(|counts| counts.replace(0))
+}
+
+#[cfg(test)]
+pub(crate) fn take_body_text_publications() -> u64 {
+    BODY_TEXTS.with(|counts| counts.replace(0))
 }
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
@@ -59,10 +65,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         {
             return Ok(ValuePublication::Unavailable);
         }
-        let LibRun::Native { native, .. } = &function.run else {
+        let body = function.kernels(self.exe).text_body.as_ref();
+        let primitive = self.exe.lib(body.map_or(site.lib, |body| body.primitive()));
+        let LibRun::Native { native, .. } = &primitive.run else {
             return Ok(ValuePublication::Unavailable);
         };
-        let room::CallSource::Native(function_id) = function.specialization.resource else {
+        let room::CallSource::Native(function_id) = primitive.specialization.resource else {
             return Ok(ValuePublication::Unavailable);
         };
         let contract = match native.resource_contract(doc::Args::new(
@@ -126,6 +134,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(activation) = frame.state.source.as_mut() else {
             return Ok(ValuePublication::Unavailable);
         };
+        if body.is_some() && activation.original.is_some() {
+            return Ok(ValuePublication::Declined);
+        }
         let slots = source
             .owner_slots()
             .map_err(|_| malformed("text source owners failed verification"))?;
@@ -310,9 +321,33 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             Depth::Operation(extra) | Depth::Template(extra) => u64::from(extra) + 1,
         });
         let released = storage.release_cost(&ledger, self.heap)?;
-        let called = room::CheckedRoom::native(function_id, &contract)
-            .ok_or_else(|| malformed("text contract failed verification"))?;
-        let scratch = native_storage::scratch_events(output, &contract)?;
+        let (called, completion) = if let Some(body) = body {
+            let Some(call) = body.bind(
+                self.exe,
+                &ledger,
+                storage.arena(),
+                &activation.invocation,
+                arguments,
+                value,
+            )?
+            else {
+                return Ok(ValuePublication::Declined);
+            };
+            let (room, completion) = call.room();
+            allowance.depth = allowance.depth.max(completion.depth());
+            (room, Some(completion))
+        } else {
+            (
+                room::CheckedRoom::native(function_id, &contract)
+                    .ok_or_else(|| malformed("text contract failed verification"))?,
+                None,
+            )
+        };
+        let scratch = if body.is_none() {
+            native_storage::scratch_events(output, &contract)?
+        } else {
+            vec![]
+        };
         let mut execution = LeafExecution(
             [(
                 at.clone(),
@@ -370,7 +405,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             ExternalFacts {
                 operands: arguments,
                 arguments,
-                native: Some(&contract),
+                native: body.is_none().then_some(&contract),
                 scratch: &scratch,
                 ..Default::default()
             },
@@ -383,6 +418,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let published = storage
             .boundary(&mut ledger, self.heap, |transaction, ledger, apply, _| {
                 use room::publication::PublicationError;
+                let transaction = match completion {
+                    Some(completion) => completion.finish(ledger, self.heap, transaction)?,
+                    None => transaction,
+                };
                 let balance = if let Some(receipt) = activation.original.as_ref() {
                     let bound = match bound.with_original_native(frontier, ledger, receipt, &debt) {
                         Ok(bound) => bound,
@@ -437,6 +476,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         #[cfg(test)]
         if original {
             ORIGINAL_TEXTS.with(|counts| counts.set(counts.get() + 1));
+        }
+        if body.is_some() {
+            witnessed!(TextAppend, Commit);
+            #[cfg(test)]
+            BODY_TEXTS.with(|counts| counts.set(counts.get() + 1));
+            #[cfg(test)]
+            crate::machine::islands::TEXT_APPENDED.with(|n| n.set(n.get() + 1));
         }
         #[cfg(any(test, feature = "testing"))]
         crate::machine::islands::witness::native_text_published();

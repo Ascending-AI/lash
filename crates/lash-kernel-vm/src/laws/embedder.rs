@@ -83,6 +83,37 @@ prepared!(Less, |args| match args {
 
 struct Concat;
 impl NativeFunction for Concat {
+    fn resource_contract(
+        &self,
+        args: lash_kernel_doc::Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        let (Some(left), Some(right)) = (args.get(0), args.get(1)) else {
+            return Ok(None);
+        };
+        let (Some(left), Some(right)) = (args.text(left)?, args.text(right)?) else {
+            return Ok(None);
+        };
+        let bytes = left
+            .len()
+            .checked_add(right.len())
+            .ok_or(NativeError::Malformed("concat logical size overflow"))?;
+        let mut contract = lash_kernel_doc::NativeResourceContract::value(
+            lash_kernel_doc::NativeResourceExit::Returned,
+            lash_kernel_doc::LogicalHeldV1::REFERENCE
+                .checked_add(bytes)
+                .ok_or(NativeError::Malformed("concat logical size overflow"))?,
+            lash_kernel_doc::NativeResourceOrigin::Immutable,
+        );
+        contract
+            .events
+            .push(lash_kernel_doc::NativeResourceEvent::Scratch {
+                owner: lash_kernel_doc::NativeResourceOwner(0),
+                bytes,
+                release: lash_kernel_doc::NativeResourceRelease::Exit,
+            });
+        Ok(Some(contract))
+    }
+
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
         lash_kernel_doc::NativeSpecialization {
             immediate: self.prepare(),

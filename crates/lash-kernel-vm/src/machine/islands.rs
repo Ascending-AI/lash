@@ -51,7 +51,9 @@ mod heap;
 mod native;
 use execute::source;
 #[cfg(test)]
-pub(crate) use execute::source::{take_original_text_publications, take_text_publications};
+pub(crate) use execute::source::{
+    take_body_text_publications, take_original_text_publications, take_text_publications,
+};
 #[cfg(test)]
 pub(crate) use execute::{take_certified_statements, take_composed_statements};
 mod observing;
@@ -755,9 +757,6 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     /// a stop at its op.
     #[inline(always)]
     pub(super) fn operate(&mut self, site: &OperatorSite, args: &[Value]) -> Answer {
-        if let Some(answer) = self.text_concatenation(site, args) {
-            return answer;
-        }
         if let Some(close) = &site.close
             && !self.close(close)
         {

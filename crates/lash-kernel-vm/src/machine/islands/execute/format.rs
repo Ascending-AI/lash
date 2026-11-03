@@ -129,7 +129,15 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .map_err(|error| self.halt(error.into()))?
         {
             source::ValuePublication::Published(value) => Ok(value),
-            source::ValuePublication::Declined => {
+            source::ValuePublication::Declined | source::ValuePublication::Unavailable => {
+                if frame
+                    .state
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| source.original.is_some())
+                {
+                    return Err(self.at_operands(site.append.pc, site.append.reg, &args));
+                }
                 if let Some(close) = &site.append.close
                     && !self.close(close)
                 {
@@ -137,10 +145,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
                 Err(self.at_operands(site.append.pc, site.append.reg, &args))
             }
-            source::ValuePublication::Unavailable => self
-                .retaining(&mut frame.state.transient, |island| {
-                    island.operator_value(&site.append, &args, site.covered)
-                }),
         };
         let value = match answer {
             Ok(value) => value,

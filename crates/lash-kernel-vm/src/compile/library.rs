@@ -40,6 +40,7 @@ pub(crate) struct Kernels {
     pub(crate) resident: Option<Resident>,
     pub(crate) append: bool,
     pub(crate) concat: Option<TextCharge>,
+    pub(crate) text_body: Option<std::sync::Arc<super::room::region::text::TextBody>>,
 }
 
 /// The installed native's certified resident answer and canonical formula.
@@ -69,6 +70,9 @@ impl Lib {
                 .or_else(|| self.membership().map(Resident::Member))
                 .or_else(|| self.text_join().then_some(Resident::TextJoin)),
             append: self.text_append(exe).is_some(),
+            text_body: super::room::region::text::TextBody::compile(exe, self.index)
+                .ok()
+                .map(std::sync::Arc::new),
             concat: self
                 .text_append(exe)
                 .and_then(|_| self.charge.text_charge()),

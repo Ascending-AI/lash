@@ -101,7 +101,9 @@ impl Expression {
                     Operation::Binding(local.at)
                 }
                 expr::Kind::Operator { lib, args, .. }
-                    if allow_call && matches!(exe.lib(*lib).run, LibRun::Body(_)) =>
+                    if allow_call
+                        && matches!(exe.lib(*lib).run, LibRun::Body(_))
+                        && exe.lib(*lib).text_append(exe).is_none() =>
                 {
                     for arg in args.iter() {
                         add(results, exe, stream, placement, arg, allow_call)?;

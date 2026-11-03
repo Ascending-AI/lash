@@ -190,6 +190,7 @@ fn run_selected(
 #[test]
 fn accumulations_agree() {
     prepared_text_prefixes();
+    prepared_text_bodies();
     use crate::machine::islands::witness::{self, Exit, Family};
     witness::begin();
     let source = scalar_document(
@@ -208,7 +209,12 @@ fn accumulations_agree() {
     taken();
     let reference = run(true, u64::MAX, super::super::embedder::ROOMY);
     crate::machine::islands::TEXT_APPENDED.with(|n| n.set(0));
+    crate::machine::islands::take_body_text_publications();
     let natural = run(false, u64::MAX, super::super::embedder::ROOMY);
+    assert!(
+        crate::machine::islands::take_body_text_publications() > 0,
+        "the forwarding helper must publish its real compiled body under text acceptance"
+    );
     assert_eq!(
         without_tape(natural.clone()),
         without_tape(reference.clone())
@@ -810,5 +816,111 @@ fn prepared_text_prefixes() {
     assert_eq!(ledger.balance().unwrap().total().unwrap(), 16 + 62);
     println!(
         "prepared text consumer: 3 committed prefixes; rollback, scratch peak, stale exit and cold owner checked"
+    );
+}
+
+/// A body result is authenticated by content and the real callee. Equal text
+/// prices cannot substitute a result, and abandoned calls consume no IDs.
+fn prepared_text_bodies() {
+    use crate::compile::room::region::text::TextBody;
+    use lash_kernel_doc::Value;
+    use lash_kernel_state::{
+        arena::Arena,
+        kernel_internals::logical::{Ledger, RootValue, Slot},
+    };
+    let source = scalar_document(r#"return law.append("left", "right")"#);
+    let run = Embedder::with(
+        &source,
+        Setup {
+            probes: Some(probes),
+            ..Setup::default()
+        },
+    );
+    let (program, library) = run.program(false);
+    let admitted = program
+        .library
+        .admit(&program.document, Default::default(), &program.selection)
+        .unwrap_or_else(|_| panic!("text body admitted"));
+    let exe = admitted
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.functions,
+            &program.instances,
+        )
+        .unwrap_or_else(|_| panic!("text body compiled"));
+    let lib = exe.library_lib(&library.ids["law.append"]).unwrap();
+    let body = TextBody::compile(&exe, lib).unwrap();
+    let mut arena = Arena::new();
+    let mut ledger = Ledger::fresh();
+    let heap = run.machine.source_law_heap();
+    let values = [
+        arena.text("abcdefghijklmnopqrstuvwxyz0123456789"),
+        arena.text("é😀"),
+    ];
+    let roots = [
+        (Slot::Binding(0), RootValue::Value(&values[0])),
+        (Slot::Binding(1), RootValue::Value(&values[1])),
+    ];
+    let (invocation, entered) = ledger
+        .prepare_enter(
+            lash_kernel_doc::TaskId::MAIN,
+            &mut arena,
+            heap.pages(),
+            &[],
+            &roots,
+        )
+        .unwrap();
+    ledger
+        .commit(entered.admit(u64::MAX).ok().unwrap())
+        .unwrap();
+    let result = arena.concat_text(values[0], values[1]).unwrap();
+    let wrong = arena.text("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzé😀");
+    assert_eq!(
+        arena.logical_local(&result).unwrap(),
+        arena.logical_local(&wrong).unwrap()
+    );
+    assert!(
+        body.bind(&exe, &ledger, &arena, &invocation, &values, wrong)
+            .unwrap()
+            .is_none(),
+        "a same-price result cannot stand in for the actual concatenation"
+    );
+    let first = ledger
+        .reserve_invocations(lash_kernel_doc::TaskId::MAIN, 1)
+        .unwrap()
+        .invocation(0)
+        .unwrap()
+        .id();
+    let call = body
+        .bind(&exe, &ledger, &arena, &invocation, &values, result)
+        .unwrap()
+        .unwrap();
+    let (room, completion) = call.room();
+    assert!(
+        room.balance().peak_extra >= lash_kernel_doc::LogicalHeldV1::FRAME,
+        "a body call retains its source frame at the interior peak"
+    );
+    let argument_reads = values
+        .iter()
+        .map(|value| arena.logical_local(value).unwrap())
+        .sum::<u64>();
+    let result_bytes = arena.logical_local(&result).unwrap();
+    let native_scratch = result_bytes - lash_kernel_doc::LogicalHeldV1::REFERENCE;
+    assert_eq!(
+        room.balance().peak_extra,
+        lash_kernel_doc::LogicalHeldV1::FRAME + argument_reads + result_bytes + native_scratch,
+        "the native scratch coexists with the body frame and both parameter reads"
+    );
+    drop(completion);
+    assert_eq!(
+        ledger
+            .reserve_invocations(lash_kernel_doc::TaskId::MAIN, 1)
+            .unwrap()
+            .invocation(0)
+            .unwrap()
+            .id(),
+        first
     );
 }

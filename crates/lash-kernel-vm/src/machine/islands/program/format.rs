@@ -14,7 +14,6 @@ pub(crate) struct Format {
     pub(in crate::machine::islands) append: Box<OperatorSite>,
     pub(in crate::machine::islands) append_args: [u32; 2],
     pub(in crate::machine::islands) appending: Box<[u32]>,
-    pub(in crate::machine::islands) covered: bool,
     pub(in crate::machine::islands) write: Box<WriteSite>,
     pub(in crate::machine::islands) writing: Box<[u32]>,
 }
@@ -129,7 +128,7 @@ impl Build<'_> {
                 let Op::Operator {
                     site: append,
                     inputs: OperatorInputs::Registers(append_args),
-                    covered,
+                    covered: _,
                     to: Destination::Register,
                 } = appending.op
                 else {
@@ -156,7 +155,6 @@ impl Build<'_> {
                     append,
                     append_args: [append_args[0], append_args[1]],
                     appending: appending.live,
-                    covered,
                     write,
                     writing: writing.live,
                 }));

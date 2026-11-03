@@ -196,11 +196,18 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 .map_err(|error| self.halt(error.into()))?
             {
                 source::ValuePublication::Published(value) => {
+                    #[cfg(test)]
+                    if matches!(to, Destination::Write(_)) {
+                        super::super::ACCUMULATED.with(|n| n.set(n.get() + 1));
+                    }
                     return self.destination(frame, site.reg, value, to).map(Some);
                 }
-                source::ValuePublication::Unavailable
-                    if !matches!(function.run, LibRun::Native { .. }) => {}
-                source::ValuePublication::Declined | source::ValuePublication::Unavailable => {
+                miss @ (source::ValuePublication::Declined
+                | source::ValuePublication::Unavailable) => {
+                    match miss {
+                        source::ValuePublication::Unavailable => witnessed!(TextAppend, Guard),
+                        _ => witnessed!(TextAppend, Prefix),
+                    }
                     if original {
                         return Err(self.at_operands(site.pc, site.reg, args));
                     }

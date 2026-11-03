@@ -7,6 +7,7 @@ use super::*;
 pub(crate) mod calls;
 #[path = "region/continuation.rs"]
 mod continuation;
+pub(crate) mod text;
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_state::{
     arena::{Arena, Registration},

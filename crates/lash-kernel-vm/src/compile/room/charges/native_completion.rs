@@ -30,13 +30,23 @@ pub(super) fn derive(
         .ok_or(Refused::Source)?;
     let (lib, args) = match op {
         Op::Call { lib, args } | Op::Operator { lib, args } => (LibId(lib.0), args),
+        Op::Nested { act, args } => match stream.nested.get(act.ix()).map(|nested| &nested.kind) {
+            Some(compile::NestedKind::Body(lib)) => (*lib, args),
+            _ => return Err(Refused::Source),
+        },
         _ => return Err(Refused::Source),
     };
     let function = exe.lib(lib);
-    if !matches!(function.run, compile::LibRun::Native { .. })
-        || function.specialization.resource
-            != super::super::CallSource::Native(function.specialization.function)
-    {
+    let identity = match function.run {
+        compile::LibRun::Native { .. } => {
+            super::super::CallSource::Native(function.specialization.function)
+        }
+        compile::LibRun::Body(_) => {
+            super::super::CallSource::Body(function.specialization.function)
+        }
+        _ => return Err(Refused::Source),
+    };
+    if function.specialization.resource != identity {
         return Err(Refused::Source);
     }
     let site = stream
@@ -123,6 +133,12 @@ pub(super) fn depth(
     let (stream, _, _) = exe.statement(statement);
     let lib = match stream.ops.get(pc as usize) {
         Some(Op::Call { lib, .. } | Op::Operator { lib, .. }) => LibId(lib.0),
+        Some(Op::Nested { act, .. }) => {
+            match stream.nested.get(act.ix()).map(|nested| &nested.kind) {
+                Some(compile::NestedKind::Body(lib)) => *lib,
+                _ => return Err(Refused::Source),
+            }
+        }
         _ => return Err(Refused::Source),
     };
     let function = exe.lib(lib);
