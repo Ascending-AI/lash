@@ -32,13 +32,6 @@ impl<'a> PreparedGraph<'a> {
     /// Entry dependencies include discarded operands and capture cells. The
     /// source owner must authenticate the selected exit and interior peak with
     /// this transaction before it can publish either storage or resources.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "core wires authenticated source acceptance after consumer merge"
-        )
-    )]
     pub(in crate::machine) fn into_boundary(
         self,
         ledger: &Ledger,
@@ -68,13 +61,6 @@ impl<'a> PreparedGraph<'a> {
         ))
     }
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "core wires authenticated source acceptance after consumer merge"
-    )
-)]
 pub(in crate::machine) struct PreparedGraphStorage {
     pub(in crate::machine) batch: PreparedBatch,
     pub(in crate::machine) outputs: Vec<Output>,
@@ -249,13 +235,6 @@ fn project_body(
     })
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        unused_imports,
-        reason = "core consumes the family preparation entrypoints after merge"
-    )
-)]
 pub(in crate::machine) use super::super::{
     closure::prepare_closure, literal_storage::prepare_literal,
 };

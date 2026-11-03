@@ -72,25 +72,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             == self.exe.code(frame.state.callee.plan.code).source_room.site
     }
 
-    /// Where the operand at `pc` (source `at`) transfers, resolved once
-    /// per pc.
+    /// Source transfer classification for an exact dynamic boundary.
     fn source_operand_transfer(
         &self,
         frame: &storage::Values<'_, '_>,
-        stream: &crate::compile::Stream,
-        pc: u32,
+        _stream: &crate::compile::Stream,
+        _pc: u32,
         at: &lash_kernel_value::sites::Site,
     ) -> bool {
-        let code = frame.state.callee.plan.code;
-        let source = &self.exe.code(code).source_room;
-        let target = match stream
-            .source_transfers
-            .get(stream.ops.len(), pc as usize, || {
-                Some((code, source.transfer_target(at)))
-            }) {
-            Some((resolved, target)) if *resolved == code => *target,
-            _ => source.transfer_target(at),
-        };
+        let source = &self.exe.code(frame.state.callee.plan.code).source_room;
+        let target = source.transfer_target(at);
         match target {
             Some(room::TransferTarget::Binding | room::TransferTarget::NativeInput) => true,
             Some(room::TransferTarget::RootReturn) => self.source_return_frame(frame),

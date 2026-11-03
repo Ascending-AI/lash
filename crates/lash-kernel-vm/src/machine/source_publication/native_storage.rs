@@ -245,7 +245,7 @@ impl NativeStorage<'_> {
                 .zip(&self.args)
                 .all(|(param, value)| {
                     (param.optional && matches!(value, Value::Absent))
-                        || crate::compile::import_result_fits(&param.ty, *value)
+                        || resident_argument_fits(arena, &param.ty, *value)
                 })
             || self.function.limit.is_some()
             || self.function.shares_params
@@ -322,9 +322,12 @@ impl NativeStorage<'_> {
             // Heap reads can have a checked direct answer without an immediate
             // prepared entry. Authenticate it with the installed native before
             // retaining any nursery output or accepting the source boundary.
-            if self
-                .known
-                .is_some_and(|(expected, _)| !value.same(&expected))
+            // Keep the nursery's slot owner until every result guard passes.
+            // A speculative type miss must leave the precise retry no gaps.
+            if !crate::compile::import_result_fits(&self.function.header.signature.result, value)
+                || self
+                    .known
+                    .is_some_and(|(expected, _)| !value.same(&expected))
             {
                 nursery.discard();
                 return Ok(None);
@@ -340,9 +343,6 @@ impl NativeStorage<'_> {
             }
             (value, counter.spent(), 0, nursery.into_new())
         };
-        if !crate::compile::import_result_fits(&self.function.header.signature.result, value) {
-            return Ok(None);
-        }
         let allocated = !new.is_empty();
         let first = arena.next_provisional().ordinal;
         let handles: Vec<_> = new
@@ -544,6 +544,26 @@ impl PreparedNative {
             crate::machine::islands::witness::native_graph_published();
         }
         self.batch.publish(arena);
+    }
+}
+
+/// A kind check suffices only for unconstrained containers. A resident list
+/// with a supported scalar item contract checks every actual member; nested
+/// or cold shapes retain the ordinary signature handler.
+fn resident_argument_fits(arena: &Arena, ty: &lash_kernel_value::Type, value: Value) -> bool {
+    if let Some(check) = crate::compile::import_result_check(ty) {
+        return check(value);
+    }
+    match (ty, value) {
+        (lash_kernel_value::Type::List(item), Value::List(handle)) => {
+            let Some(check) = crate::compile::import_result_check(item) else {
+                return false;
+            };
+            arena
+                .sequence(handle)
+                .is_ok_and(|values| values.iter().copied().all(check))
+        }
+        _ => false,
     }
 }
 

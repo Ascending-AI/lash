@@ -3,64 +3,9 @@ pub(in crate::machine) mod boundary;
 pub(in crate::machine) mod storage;
 use super::*;
 use crate::compile::room::{ExitKind, Phase, Point, publication::Occurrence};
-use crate::machine::{Halt, KernelMachine, fault, registers::PreparedOutput, stream::Running};
+use crate::machine::{Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::{Holding, JournalEvent, PublicationValue as PV};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
-
-struct SourceConstruction<'heap, 'bank> {
-    recipe: storage::Construction<'heap>,
-    bank: PreparedOutput<'bank>,
-    physical_room: u64,
-}
-struct PreparedSourceConstruction<'bank> {
-    data: storage::Prepared,
-    bank: PreparedOutput<'bank>,
-    holding: Holding,
-}
-impl<'bank> StoragePreparation for SourceConstruction<'_, 'bank> {
-    type Prepared = PreparedSourceConstruction<'bank>;
-    const MATERIALIZES: bool = true;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        // Compatibility eligibility only, until all paths use logical admission.
-        // Physical storage estimates never supply a logical price or refusal.
-        if arena.object_bound(&self.recipe.object) > self.physical_room {
-            return Ok(None);
-        }
-        let heap = self.recipe.heap;
-        let Some(PreparedStorage {
-            registration,
-            storage,
-            actual,
-        }) = self.recipe.prepare(arena, actual)?
-        else {
-            return Ok(None);
-        };
-        let [event] = actual.events() else {
-            return Err(malformed("source construction lost its prepared event"));
-        };
-        let [(_, PV::Page(page))] = event.outputs.as_slice() else {
-            return Err(malformed("source construction lost its canonical output"));
-        };
-        let holding = Holding::from_page(heap.pages(), page)?;
-        Ok(Some(PreparedStorage {
-            registration,
-            storage: PreparedSourceConstruction {
-                data: storage,
-                bank: self.bank,
-                holding,
-            },
-            actual,
-        }))
-    }
-    fn facts(prepared: &Self::Prepared, facts: &mut LeafExecution) -> Result<(), HeapFault> {
-        <storage::Construction<'_> as StoragePreparation>::facts(&prepared.data, facts)
-    }
-}
 
 impl KernelMachine {
     pub(in crate::machine) fn publish_source_construction(
@@ -129,6 +74,7 @@ impl KernelMachine {
         let inputs = bank.owners();
         let values = bank.values();
         let dependencies = values.iter().filter_map(doc::Value::handle).collect();
+        let operands = values.clone();
         let object = match op {
             Op::MakeList { .. } => doc::NewObject::List(values),
             Op::MakeTuple { .. } => doc::NewObject::Tuple(values),
@@ -150,6 +96,9 @@ impl KernelMachine {
             ),
             _ => unreachable!(),
         };
+        if self.arena.borrow().object_bound(&object) > physical_room {
+            return Ok(false);
+        }
         let document = running
             .exe
             .instances
@@ -199,11 +148,12 @@ impl KernelMachine {
         };
         let safe_point = self.charged;
         let recipe = storage::Construction {
-            object,
+            value: storage::ConstructionValue::Collection(object),
             output,
             at: at.clone(),
             release,
-            ledger: self.logical.ledger(),
+            inputs,
+            operands,
             heap: &self.heap,
             depth_limit: self.limits.value_depth(),
         };
@@ -235,7 +185,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_external(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -262,21 +212,11 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || {
-                Program::new(vec![JournalEvent {
-                    inputs: inputs.clone(),
-                    ..Default::default()
-                }])
-            },
-            SourceConstruction {
-                recipe,
-                bank,
-                physical_room,
-            },
+            recipe,
             |arena, _, edits, prepared| {
                 debug_assert!(edits.is_empty());
-                prepared.data.batch.publish(arena);
-                prepared.bank.publish(prepared.data.value, prepared.holding);
+                prepared.batch.publish(arena);
+                bank.publish(prepared.value, prepared.holding);
             },
         )?;
         drop(arena);

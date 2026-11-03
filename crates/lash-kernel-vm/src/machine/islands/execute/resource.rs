@@ -71,6 +71,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             bound,
             debt,
             composed,
+            #[cfg(any(test, feature = "testing"))]
+            prepared_natives,
         } = evaluated;
         let callee = frame.state.callee;
         let source = &self.exe.code(callee.plan.code).source_room;
@@ -167,6 +169,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             debt.record(tape);
         }
         witnessed!(Scalar, Commit);
+        // Whole-statement certificates discharge these native events together.
+        // Count only after their shared acceptance and publication succeeds.
+        #[cfg(any(test, feature = "testing"))]
+        for _ in 0..prepared_natives {
+            crate::machine::islands::witness::prepared_native_published();
+        }
         #[cfg(test)]
         if composed {
             COMPOSED.with(|count| count.set(count.get().saturating_add(1)));

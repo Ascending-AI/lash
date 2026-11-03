@@ -213,6 +213,13 @@ pub(in crate::laws) fn helper_probes(
             "a: Number, b: Number) -> Number",
         ),
         ("resident.negate", "num.neg", "value: Number) -> Number"),
+        // A native whose declared result rejects its allocated BigInt pins
+        // abandonment before the nursery loses ownership of reserved slots.
+        (
+            "resident.wrong_result",
+            "num.add",
+            "a: Number, b: Number) -> Float",
+        ),
     ] {
         let charge = if name == "resident.large_add" {
             "sum(1, size(a), size(b), size(result))"
@@ -794,6 +801,19 @@ const LOOKALIKE_COUNTERS: &str = r#"main {
 /// charge event and source continuation while entering the common loop.
 #[test]
 fn helper_frames_agree() {
+    let overflow = Embedder::with(
+        "main { return resident.large_add(9223372036854775807, 7) }",
+        Setup {
+            probes: Some(helper_probes),
+            ..Setup::default()
+        },
+    );
+    overflow
+        .machine
+        .assert_abandoned_native_slots(overflow.library.ids["resident.large_add"]);
+    overflow
+        .machine
+        .assert_abandoned_native_slots(overflow.library.ids["resident.wrong_result"]);
     // FIG-7614: exercise detached storage and authenticated external source
     // acceptance directly. A fallback-only green cannot pass.
     let boundary = Embedder::with(

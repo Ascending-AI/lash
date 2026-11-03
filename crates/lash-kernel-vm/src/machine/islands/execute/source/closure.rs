@@ -1,9 +1,6 @@
 //! A closure owns its actual captured cells before its prepared body is installed.
 use super::*;
 use crate::admission::Allowance;
-use lash_kernel_state::kernel_internals::logical::{
-    JournalEvent, Program, PublicationValue as PV, VirtualBody, VirtualEntity,
-};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
     ExitKind, Measure, Phase as SourcePhase, Point,
@@ -84,7 +81,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(ValuePublication::Unavailable);
         };
-        self.source_bindings(frame)?;
         self.logical.flush(self.arena, self.heap)?;
         let mut entities = capture_buffer(captures.len())?;
         for handle in &captures {
@@ -113,18 +109,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 activation.invocation.id(),
             )
             .ok_or_else(|| malformed("closure result has no canonical source owner"))?;
-        let entity = doc::heap::EntityId {
-            family: doc::heap::FamilyId::PROVISIONAL,
-            ordinal: self.arena.next_provisional().ordinal,
-        };
-        let event = JournalEvent {
-            outputs: vec![(output, PV::Page(doc::heap::PageValue::Closure(entity)))],
-            entities: vec![VirtualEntity {
-                entity,
-                body: VirtualBody::Closure(entities.clone()),
-            }],
-            ..Default::default()
-        };
         let store = self.logical.ledger();
         if store.borrow().holding(output, self.heap.pages())?.is_some() {
             return Ok(ValuePublication::Declined);
@@ -197,8 +181,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     .ok_or_else(|| malformed("verified closure site disappeared"))?,
             },
         });
+        let publication_at = next.at.clone();
         let result = &mut frame.regs[site.reg as usize];
-        let published = self.publish_source_prepared(
+        let published = self.publish_source_boundary(
             frame.state.callee,
             activation,
             publication::Prefix {
@@ -208,21 +193,27 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 next,
                 allowance,
             },
-            || Program::new(vec![event.clone()]),
-            publication::ClosureConstruction {
-                entity,
-                identity,
-                captures,
-                entities,
-                code: doc::arena::LocalCode {
-                    executable: self.exe.local(),
-                    code: site.code.0,
+            crate::machine::source_publication::construction::storage::Construction {
+                value: crate::machine::source_publication::construction::storage::ConstructionValue::Closure {
+                    identity,
+                    captures,
+                    code: doc::arena::LocalCode {
+                        executable: self.exe.local(),
+                        code: site.code.0,
+                    },
                 },
+                output,
+                at: publication_at,
+                release: vec![].into_boxed_slice(),
+                inputs: vec![],
+                operands: vec![],
+                depth_limit: self.limits.value_depth(),
+                heap: self.heap,
             },
             |arena, _, edits, storage| {
                 debug_assert!(edits.is_empty());
                 storage.batch.publish(arena);
-                *result = Value::Closure(storage.handle);
+                *result = storage.value;
             },
         )?;
         #[cfg(any(test, feature = "testing"))]

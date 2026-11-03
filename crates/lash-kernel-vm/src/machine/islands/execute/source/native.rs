@@ -128,48 +128,41 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         arguments.resize(function.arity, Value::Absent);
         // Check the complete source consumer before evaluating a prepared
         // answer. Unsupported expressions retain their original handler.
-        let answer = if prepared {
-            let Some((entry, fast)) = &function.specialization.prepared else {
-                return Ok(ValuePublication::Unavailable);
-            };
-            if !function
-                .header
-                .signature
-                .params
-                .iter()
-                .zip(&arguments)
-                .all(|(param, value)| {
-                    (param.optional && matches!(value, Value::Absent))
-                        || crate::compile::import_result_fits(&param.ty, *value)
-                })
-            {
-                return Ok(ValuePublication::Unavailable);
-            }
-            if let Some((value, units)) = kernel {
-                if !crate::compile::import_result_fits(&function.header.signature.result, value) {
-                    return Ok(ValuePublication::Unavailable);
+        let answer =
+            (|| {
+                let (entry, fast) = function.specialization.prepared.as_ref()?;
+                if !self.depth_fits(site.depth)
+                    || !function.header.signature.params.iter().zip(&arguments).all(
+                        |(param, value)| {
+                            (param.optional && matches!(value, Value::Absent))
+                                || crate::compile::import_result_fits(&param.ty, *value)
+                        },
+                    )
+                {
+                    return None;
                 }
-                Some((value, units))
-            } else {
-                let Some(answer) = entry.answer(&arguments, self.charging) else {
-                    return Ok(ValuePublication::Unavailable);
-                };
+                if let Some((value, units)) = kernel {
+                    return crate::compile::import_result_fits(
+                        &function.header.signature.result,
+                        value,
+                    )
+                    .then_some((value, units));
+                }
+                let answer = entry.answer(&arguments, self.charging)?;
                 if !scalar(&answer.value)
                     || !crate::compile::import_result_fits(
                         &function.header.signature.result,
                         answer.value,
                     )
                 {
-                    return Ok(ValuePublication::Unavailable);
+                    return None;
                 }
-                let Some(answer) = self.answered(function, fast, &arguments, answer) else {
-                    return Ok(ValuePublication::Unavailable);
-                };
-                Some(answer)
-            }
-        } else {
-            None
-        };
+                self.answered(function, fast, &arguments, answer)
+            })();
+        if prepared && answer.is_none() {
+            return Ok(ValuePublication::Unavailable);
+        }
+        let prepared = answer.is_some();
         let LibRun::Native { native, .. } = &function.run else {
             return Ok(ValuePublication::Unavailable);
         };
@@ -226,7 +219,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Ok(ValuePublication::Unavailable);
         };
-        self.source_bindings(frame)?;
         let activation = frame
             .state
             .source
@@ -402,14 +394,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         }
         #[cfg(any(test, feature = "testing"))]
         if published {
-            if prepared {
-                crate::machine::islands::witness::prepared_native_published();
-            } else if collection {
+            if collection {
                 crate::machine::islands::witness::native_collection_published(
                     frame.regs[site.reg as usize],
                 );
             } else if text {
                 crate::machine::islands::witness::native_text_published();
+            } else if prepared {
+                crate::machine::islands::witness::prepared_native_published();
             } else {
                 crate::machine::islands::witness::native_read_published();
             }

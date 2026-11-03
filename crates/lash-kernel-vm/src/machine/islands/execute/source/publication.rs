@@ -8,7 +8,7 @@ pub(super) use crate::machine::source_publication::{
     Prefix, Reserve, StoragePreparation, native_fault,
 };
 
-pub(super) use crate::machine::source_publication::{CellConstruction, ClosureConstruction};
+pub(super) use crate::machine::source_publication::CellConstruction;
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(super) fn publish_source(
         &mut self,

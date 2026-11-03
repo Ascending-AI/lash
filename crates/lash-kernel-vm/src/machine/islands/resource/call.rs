@@ -232,6 +232,8 @@ impl CallPlan {
             bound,
             debt: StatementDebt::Call { call: debt, suffix },
             composed: true,
+            #[cfg(any(test, feature = "testing"))]
+            prepared_natives: after.formulas.len(),
         }))
     }
 }

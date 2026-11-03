@@ -1,48 +1,10 @@
 //! Deferred constants stage their complete backing before source acceptance.
-use super::literal_storage::{Literal, PreparedLiteral};
+use super::construction::storage::{Construction, ConstructionValue};
 use super::*;
 use crate::compile::room::publication::Occurrence;
-use crate::machine::{Halt, KernelMachine, fault, registers::PreparedOutput, stream::Running};
+use crate::machine::{Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::JournalEvent;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
-
-struct LiteralResult<'bank, 'literal, 'heap> {
-    bank: PreparedOutput<'bank>,
-    recipe: Literal<'literal, 'heap>,
-}
-struct PreparedBankLiteral<'bank> {
-    bank: PreparedOutput<'bank>,
-    data: PreparedLiteral,
-}
-impl<'bank> StoragePreparation for LiteralResult<'bank, '_, '_> {
-    type Prepared = PreparedBankLiteral<'bank>;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        let Some(PreparedStorage {
-            registration,
-            storage,
-            actual,
-        }) = self.recipe.prepare(arena, actual)?
-        else {
-            return Ok(None);
-        };
-        Ok(Some(PreparedStorage {
-            registration,
-            storage: PreparedBankLiteral {
-                bank: self.bank,
-                data: storage,
-            },
-            actual,
-        }))
-    }
-    fn facts(prepared: &Self::Prepared, facts: &mut LeafExecution) -> Result<(), HeapFault> {
-        <Literal<'_, '_> as StoragePreparation>::facts(&prepared.data, facts)
-    }
-}
 
 impl KernelMachine {
     pub(in crate::machine) fn publish_source_literal(
@@ -57,7 +19,6 @@ impl KernelMachine {
         let crate::compile::Constant::Deferred(literal) = &running.stream.consts[c.ix()] else {
             return Ok(false);
         };
-        let physical_room = self.capacity_headroom();
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
             return Ok(false);
         };
@@ -150,7 +111,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_external(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -168,24 +129,20 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || Program::new(vec![JournalEvent::default()]),
-            LiteralResult {
-                bank,
-                recipe: Literal {
-                    literal,
-                    link,
-                    output,
-                    at,
-                    physical_room,
-                    heap: &self.heap,
-                },
+            Construction {
+                value: ConstructionValue::Literal { literal, link },
+                output,
+                at,
+                release: vec![].into_boxed_slice(),
+                inputs: vec![],
+                operands: vec![],
+                depth_limit: self.limits.value_depth(),
+                heap: &self.heap,
             },
             |arena, _, edits, prepared| {
                 debug_assert!(edits.is_empty());
-                prepared.data.batch.publish(arena);
-                prepared
-                    .bank
-                    .publish(prepared.data.value, prepared.data.holding);
+                prepared.batch.publish(arena);
+                bank.publish(prepared.value, prepared.holding);
             },
         )?;
         #[cfg(any(test, feature = "testing"))]

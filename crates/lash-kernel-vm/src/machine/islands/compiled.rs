@@ -55,6 +55,7 @@ pub(super) struct Cleanup {
 }
 
 pub(crate) struct Compiled {
+    pub(super) placement: Option<std::sync::Arc<crate::compile::room::placement::BindingPlacement>>,
     pub(super) literal: Option<LiteralReturn>,
     pub(super) layout: Layout,
     pub(super) blocks: Vec<Block>,
@@ -488,7 +489,7 @@ impl Compiled {
             measure.registers as u32,
         );
         cx.fused = fused;
-        cx.placement = placement;
+        cx.placement = placement.clone();
         cx.charged = plan.charged;
         cx.block(&plan.body)?;
         if fused {
@@ -561,6 +562,7 @@ impl Compiled {
         actions.sort_unstable_by_key(|(pc, _)| *pc);
         cleanup.sort_unstable_by_key(|entry| entry.id.0);
         Some(Self {
+            placement,
             literal,
             source_room: std::sync::Arc::clone(&plan.source_room),
             layout: Layout::of(plan)?,

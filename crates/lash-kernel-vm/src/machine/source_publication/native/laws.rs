@@ -7,6 +7,84 @@ use lash_kernel_value::sites::{Site, Unit};
 use std::{cell::RefCell, rc::Rc};
 
 impl KernelMachine {
+    /// A speculative miss must return every slot before precise execution
+    /// retries the same canonical native, including an allocated BigInt.
+    pub(crate) fn assert_abandoned_native_slots(&self, id: lash_kernel_value::FunctionId) {
+        let function = self.exe.lib(self.exe.library_lib(&id).unwrap());
+        let LibRun::Native { native, .. } = &function.run else {
+            panic!("installed native");
+        };
+        let ledger = Rc::new(RefCell::new(Ledger::fresh()));
+        let mut arena = Arena::new();
+        let arguments = [doc::Value::Int(i64::MAX), doc::Value::Int(7)];
+        let expected = {
+            let mut nursery = doc::Nursery::unaccounted(arena.objects());
+            let value = nursery.allocate(doc::NewObject::List(vec![]));
+            nursery.discard();
+            value.handle().unwrap()
+        };
+        let before = ledger.borrow().balance().unwrap();
+        for _ in 0..2 {
+            let contract = native
+                .resource_contract(doc::Args::new(
+                    &arguments,
+                    arena.objects(),
+                    &arena.semantics(),
+                ))
+                .unwrap()
+                .unwrap();
+            let abandoned = NativeStorage {
+                contract,
+                function,
+                args: arguments.to_vec(),
+                output: Owner::Value {
+                    task: doc::TaskId::MAIN,
+                    invocation: 1,
+                    slot: Slot::Operand(0),
+                },
+                at: Point {
+                    site: Site::new(Unit::Main, vec![0]),
+                    phase: Phase::Commit,
+                },
+                release: vec![].into_boxed_slice(),
+                ledger: Rc::clone(&ledger),
+                heap: &self.heap,
+                charging: true,
+                limits: self.limits,
+                room: None,
+                known: None,
+            }
+            .prepare_boundary(&mut arena, &[], |_, _, _, _| Ok(None::<()>))
+            .unwrap();
+            assert!(abandoned.is_none());
+            drop(abandoned);
+            let mut nursery = doc::Nursery::unaccounted(arena.objects());
+            let next = nursery.allocate(doc::NewObject::List(vec![]));
+            assert_eq!(
+                next.handle(),
+                Some(expected),
+                "a declined native must return its nursery slots before handoff"
+            );
+            nursery.discard();
+            assert_eq!(ledger.borrow().balance().unwrap(), before);
+        }
+        let (result, built) = {
+            let semantics = arena.semantics();
+            let mut nursery = doc::Nursery::unaccounted(arena.objects());
+            let mut counter = doc::WorkCounter::new(None);
+            let result = native
+                .call(doc::NativeCall {
+                    args: doc::Args::new(&arguments, arena.objects(), &semantics),
+                    new: &mut nursery,
+                    counter: &mut counter,
+                })
+                .unwrap();
+            (result, nursery.into_new())
+        };
+        assert!(matches!(result, doc::Value::BigInt(_)));
+        assert_eq!(result.handle(), Some(expected));
+        arena.install(built).unwrap();
+    }
     pub(crate) fn assert_native_boundary_law(&self, id: lash_kernel_value::FunctionId) {
         let function = self.exe.lib(self.exe.library_lib(&id).unwrap());
         let LibRun::Native { native, .. } = &function.run else {

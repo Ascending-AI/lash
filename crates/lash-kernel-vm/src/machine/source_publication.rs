@@ -7,7 +7,6 @@ mod end;
 mod exact;
 pub(in crate::machine) mod frame_entry;
 pub(in crate::machine) use cell::{CellConstruction, PreparedObjectConstruction};
-pub(in crate::machine) use closure::ClosureConstruction;
 pub(in crate::machine) mod construction;
 mod join;
 mod leaf;

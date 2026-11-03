@@ -2,7 +2,6 @@
 use super::*;
 use crate::admission::Allowance;
 use crate::machine::source_publication::construction::storage;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, Program};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
     ExitKind, Phase as SourcePhase, Point,
@@ -89,7 +88,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(ValuePublication::Unavailable);
         };
-        self.source_bindings(frame)?;
         let activation = frame
             .state
             .source
@@ -114,13 +112,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         }
         let output = root(&room::Owner::Operand(at.site.clone()))?;
         self.logical.flush(self.arena, self.heap)?;
-        let event = JournalEvent {
-            inputs,
-            ..Default::default()
-        };
         let store = self.logical.ledger();
         let ledger = store.borrow();
-        for input in &event.inputs {
+        for input in &inputs {
             if ledger.holding(*input, self.heap.pages())?.is_none() {
                 return Ok(ValuePublication::Unavailable);
             }
@@ -144,7 +138,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             )]
             .into(),
         );
-        let object = make(values);
+        let object = make(values.clone());
         #[cfg(any(test, feature = "testing"))]
         let empty_tuple = matches!(&object, doc::NewObject::Tuple(values) if values.is_empty());
         let mut encoding = TokenWriter::new();
@@ -190,7 +184,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         drop(ledger);
         let publication_at = start.at.clone();
         let result = &mut frame.regs[reg as usize];
-        let published = self.publish_source_prepared(
+        let published = self.publish_source_boundary(
             frame.state.callee,
             activation,
             publication::Prefix {
@@ -200,13 +194,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 next,
                 allowance,
             },
-            || Program::new(vec![event.clone()]),
             storage::Construction {
-                object,
+                value: storage::ConstructionValue::Collection(object),
                 output,
                 at: publication_at,
                 release,
-                ledger: store.clone(),
+                inputs,
+                operands: values,
                 heap: self.heap,
                 depth_limit: self.limits.value_depth(),
             },

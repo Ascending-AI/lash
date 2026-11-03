@@ -4,93 +4,11 @@ use crate::compile::{
     CodeId,
     room::{ExitKind, Measure, Phase, Point, publication::Occurrence},
 };
-use crate::machine::{
-    Halt, KernelMachine, SlotState, fault, registers::PreparedOutput, stream::Running,
-};
-use doc::heap::EntityId;
+use crate::machine::{Halt, KernelMachine, SlotState, fault, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::{
-    Holding, JournalEvent, PublicationValue as PV, VirtualBody, VirtualEntity,
-};
+use lash_kernel_state::kernel_internals::logical::{VirtualBody, VirtualEntity};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
-pub(in crate::machine) struct ClosureConstruction {
-    pub(in crate::machine) entity: EntityId,
-    pub(in crate::machine) identity: Arc<doc::arena::ClosureIdentity>,
-    pub(in crate::machine) captures: Vec<ArenaHandle>,
-    pub(in crate::machine) entities: Vec<EntityId>,
-    pub(in crate::machine) code: doc::arena::LocalCode,
-}
-impl StoragePreparation for ClosureConstruction {
-    type Prepared = PreparedObjectConstruction;
-    const MATERIALIZES: bool = true;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        use lash_kernel_state::kernel_internals::logical::PublicationValue as PV;
-        let [event] = actual.events() else {
-            return Ok(None);
-        };
-        let [entity] = event.entities.as_slice() else {
-            return Ok(None);
-        };
-        if !matches!(&entity.body, VirtualBody::Closure(captures) if captures == &self.entities)
-            || entity.entity != self.entity
-            || self.entity != arena.next_provisional()
-            || !matches!(event.outputs.as_slice(), [(_, PV::Page(doc::heap::PageValue::Closure(id)))] if *id == self.entity)
-            || !event.inputs.is_empty()
-            || event.member.is_some()
-            || event.frame.is_some()
-            || !event.scratch.is_empty()
-            || self.captures.len() != self.entities.len()
-            || !self
-                .captures
-                .iter()
-                .zip(&self.entities)
-                .all(|(handle, entity)| {
-                    arena
-                        .facts(*handle)
-                        .is_ok_and(|facts| facts.ledger_entity() == Some(*entity))
-                })
-        {
-            return Ok(None);
-        }
-        let (handle, installation, _) =
-            prepare_closure_body(arena, self.identity, self.captures, self.code)?;
-        let (registration, batch) = installation.into_parts();
-        Ok(Some(PreparedStorage {
-            registration,
-            storage: PreparedObjectConstruction { batch, handle },
-            actual,
-        }))
-    }
-}
-
-struct SourceClosure<'bank> {
-    recipe: ClosureConstruction,
-    bank: PreparedOutput<'bank>,
-    holding: Holding,
-}
-impl<'bank> StoragePreparation for SourceClosure<'bank> {
-    type Prepared = (PreparedObjectConstruction, PreparedOutput<'bank>, Holding);
-    const MATERIALIZES: bool = true;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        let Some(prepared) = self.recipe.prepare(arena, actual)? else {
-            return Ok(None);
-        };
-        Ok(Some(PreparedStorage {
-            registration: prepared.registration,
-            storage: (prepared.storage, self.bank, self.holding),
-            actual: prepared.actual,
-        }))
-    }
-}
 impl KernelMachine {
     pub(in crate::machine) fn publish_source_closure(
         &mut self,
@@ -193,12 +111,6 @@ impl KernelMachine {
             .ok_or_else(|| malformed("source link has no admitted document"))?;
         let kernel = doc::KernelVersion::of(document.kernel())
             .ok_or_else(|| malformed("source kernel is unsupported"))?;
-        let entity = EntityId {
-            family: doc::heap::FamilyId::PROVISIONAL,
-            ordinal: self.arena.borrow().next_provisional().ordinal,
-        };
-        let holding =
-            Holding::from_page(self.heap.pages(), &doc::heap::PageValue::Closure(entity))?;
         let mut encoding = TokenWriter::new();
         encoding.seq(4);
         encoding.text("lash.source.precise-closure");
@@ -248,20 +160,16 @@ impl KernelMachine {
                 at.clone(),
                 LeafFacts {
                     dependencies: captures.clone(),
-                    values: [(Measure::CaptureEdges(at.site), captures.len() as i128)].into(),
+                    values: [(
+                        Measure::CaptureEdges(at.site.clone()),
+                        captures.len() as i128,
+                    )]
+                    .into(),
                     ..Default::default()
                 },
             )]
             .into(),
         );
-        let event = JournalEvent {
-            outputs: vec![(output, PV::Page(doc::heap::PageValue::Closure(entity)))],
-            entities: vec![VirtualEntity {
-                entity,
-                body: VirtualBody::Closure(entities.clone()),
-            }],
-            ..Default::default()
-        };
         let published = Context {
             admission: Admission::Exact(MemoryLimit::of(
                 self.bounds.memory_meter,
@@ -290,7 +198,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_external(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -308,25 +216,27 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || Program::new(vec![event.clone()]),
-            SourceClosure {
-                recipe: ClosureConstruction {
-                    entity,
+            super::construction::storage::Construction {
+                value: super::construction::storage::ConstructionValue::Closure {
                     identity,
                     captures,
-                    entities,
                     code: doc::arena::LocalCode {
                         executable: running.exe.local(),
                         code: code.0,
                     },
                 },
-                bank,
-                holding,
+                output,
+                at,
+                release: vec![].into_boxed_slice(),
+                inputs: vec![],
+                operands: vec![],
+                depth_limit: self.limits.value_depth(),
+                heap: &self.heap,
             },
-            |arena, _, edits, (storage, bank, holding)| {
+            |arena, _, edits, storage| {
                 debug_assert!(edits.is_empty());
                 storage.batch.publish(arena);
-                bank.publish(doc::Value::Closure(storage.handle), holding);
+                bank.publish(storage.value, storage.holding);
             },
         )?;
         drop(arena);
@@ -386,13 +296,6 @@ fn prepare_closure_body(
     ))
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "core wires authenticated source acceptance after consumer merge"
-    )
-)]
 pub(in crate::machine) fn prepare_closure<'a>(
     arena: &'a mut Arena,
     heap: &PagedHeap,

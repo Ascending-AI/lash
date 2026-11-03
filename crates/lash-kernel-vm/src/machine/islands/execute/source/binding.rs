@@ -11,6 +11,63 @@ use room::{
     publication::{Occurrence, Position as SourcePosition},
 };
 
+/// An exact local move retains the evaluated RHS provenance. Its source
+/// charge close and owner transfer share the same affine acceptance.
+struct SourceTransfer<'a> {
+    charges: &'a room::charges::ChargeProgram,
+    inputs: Vec<Owner>,
+    input: Owner,
+    output: Owner,
+}
+impl crate::machine::source_publication::BoundaryPreparation for SourceTransfer<'_> {
+    type Prepared = ();
+    fn prepare<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: crate::machine::source_publication::ExternalEntry<'_>,
+    ) -> Result<Option<(room::publication::PreparedEvent<'a>, ())>, HeapFault> {
+        let crate::machine::source_publication::ExternalEntry {
+            event,
+            frontier,
+            ledger,
+            heap,
+            mut prefix,
+            resources,
+        } = entry;
+        let Some(debt) = self.charges.bind(&[]) else {
+            return Ok(None);
+        };
+        let Some(allowance) = debt.native_allowance(prefix.allowance.safe_point) else {
+            return Ok(None);
+        };
+        let Ok(bound) = event.bind_external(
+            frontier,
+            ledger,
+            arena,
+            heap,
+            &mut prefix.facts,
+            room::publication::ExactRoots {
+                inputs: self.inputs,
+                outputs: vec![(self.output, PV::Existing(self.input))],
+                ..Default::default()
+            },
+            prefix.next,
+            allowance,
+            resources,
+            room::publication::ExternalFacts::default(),
+            &debt,
+        ) else {
+            return Ok(None);
+        };
+        let registration = arena.registration().map_err(publication::native_fault)?;
+        match bound.prepare(frontier, ledger, registration, heap) {
+            Ok(prepared) => Ok(Some((prepared, ()))),
+            Err(room::publication::PublicationError::Miss(_)) => Ok(None),
+            Err(room::publication::PublicationError::Heap(error)) => Err(error),
+        }
+    }
+}
+
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(in crate::machine::islands::execute) fn publish_binding(
         &mut self,
@@ -31,6 +88,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(statement) = frame.state.statement else {
             return Ok(None);
         };
+        let statement_id = statement;
         let (stream, statement, _) = self.exe.statement(statement);
         let Some(at) = stream
             .source_sites
@@ -79,62 +137,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 activation.invocation.id(),
             )
             .ok_or_else(|| malformed("binding has no canonical slot"))?;
-        let invocation = activation.invocation.id();
-        if !site.shared
-            && value.handle().is_none()
-            && match frame.slots[site.at] {
-                SlotState::Empty => true,
-                SlotState::Value(old) => old.handle().is_none(),
-                SlotState::Cell(_) => false,
-            }
-            && self
-                .logical
-                .recorded(input)
-                .is_some_and(|held| held.same(&value))
-            && interval
-                .binding_move(source, rhs)
-                .is_some_and(|owner| slots.root(owner, self.task, invocation) == Some(output))
-        {
-            // The RHS operand is still in the open region, so its move joins
-            // the region too: it adds no peak above the region's admitted
-            // envelope, and only the close charge and the window stand.
-            if site.bind && self.logical.holds(output, self.heap.pages())? {
-                return Ok(Some(false));
-            }
-            let close = self
-                .accounting
-                .then_some(site.close)
-                .flatten()
-                .map_or(0, |close| u64::from(close.total));
-            let depth = (self.base + u64::from(self.depth)).saturating_sub(1);
-            let Some(end) = self.charged.checked_add(close) else {
-                return Ok(Some(false));
-            };
-            let Some(frontier) = frame
-                .state
-                .source
-                .as_mut()
-                .and_then(|activation| activation.frontier.as_mut())
-            else {
-                return Ok(None);
-            };
-            if end > self.bound || depth > self.call_depth {
-                return Ok(Some(false));
-            }
-            frontier.proven()?;
-            self.logical.replace(input, None);
-            self.logical
-                .replace(output, Some(SourceValue::Value(value)));
-            self.charged = end;
-            frame.slots[site.at] = SlotState::Value(value);
-            return Ok(Some(true));
+        if site.shared {
+            self.source_bindings(frame)?;
         }
-        // An RHS that holds nothing once the region publishes has no source
-        // move; deciding that needs no publication, so the region stays open.
-        if !self.logical.holds(input, self.heap.pages())? {
-            return Ok(None);
-        }
-        self.source_bindings(frame)?;
         let activation = frame
             .state
             .source
@@ -152,45 +157,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         }
         if site.bind && ledger.holding(output, self.heap.pages())?.is_some() {
             return Ok(Some(false));
-        }
-        if entity.is_none()
-            && value
-                .handle()
-                .is_none_or(|handle| self.arena.content_version(handle).is_some())
-            && interval.binding_move(source, rhs).is_some_and(|owner| {
-                slots.root(owner, self.task, activation.invocation.id()) == Some(output)
-            })
-            && let Some(frontier) = activation.frontier.as_mut()
-        {
-            // The proven prefix's shared admission: a move adds no peak, so
-            // only the current envelope, the close charge and the window.
-            // Its journal moves the RHS holding into the binding in place,
-            // releasing the binding's previous value.
-            drop(ledger);
-            let mut ledger = store.borrow_mut();
-            let close = self
-                .accounting
-                .then_some(site.close)
-                .flatten()
-                .map_or(0, |close| u64::from(close.total));
-            let depth = (self.base + u64::from(self.depth)).saturating_sub(1);
-            let Some(end) = self.charged.checked_add(close) else {
-                return Ok(Some(false));
-            };
-            if ledger.balance()?.total()? > self.memory_bound
-                || end > self.bound
-                || depth > self.call_depth
-                || !ledger.transfer(input, output, self.heap.pages())?
-            {
-                return Ok(Some(false));
-            }
-            frontier.proven()?;
-            let total = ledger.balance()?.total()?;
-            drop(ledger);
-            self.logical_memory.set(total);
-            self.charged = end;
-            frame.slots[site.at] = SlotState::Value(value);
-            return Ok(Some(true));
         }
         let mut inputs = vec![input];
         let mut measures = std::collections::BTreeMap::new();
@@ -261,27 +227,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             depth: 0,
             safe_point: self.charged,
         };
-        let make = || {
-            Program::new(vec![JournalEvent {
-                inputs: inputs.clone(),
-                outputs: vec![(
-                    output,
-                    entity.map_or(PV::Existing(input), |entity| {
-                        PV::Page(doc::heap::PageValue::Ref(doc::heap::Identity::Object(
-                            entity,
-                        )))
-                    }),
-                )],
-                entities: entity
-                    .into_iter()
-                    .map(|entity| VirtualEntity {
-                        entity,
-                        body: VirtualBody::NativeVariable(value),
-                    })
-                    .collect(),
-                ..Default::default()
-            }])
-        };
         drop(ledger);
         let prefix = publication::Prefix {
             interval,
@@ -291,6 +236,22 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             allowance,
         };
         let published = if let Some(entity) = entity {
+            let make = || {
+                Program::new(vec![JournalEvent {
+                    inputs: inputs.clone(),
+                    outputs: vec![(
+                        output,
+                        PV::Page(doc::heap::PageValue::Ref(doc::heap::Identity::Object(
+                            entity,
+                        ))),
+                    )],
+                    entities: vec![VirtualEntity {
+                        entity,
+                        body: VirtualBody::NativeVariable(value),
+                    }],
+                    ..Default::default()
+                }])
+            };
             self.publish_source_prepared(
                 frame.state.callee,
                 activation,
@@ -304,10 +265,30 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 },
             )?
         } else {
-            self.publish_source(frame.state.callee, activation, prefix, make, |_, edits| {
-                debug_assert!(edits.is_empty());
-                frame.slots[site.at] = SlotState::Value(value);
-            })?
+            let Ok(charges) = room::charges::ChargeProgram::event_packet(
+                self.exe,
+                frame.state.callee.plan.code,
+                statement_id,
+                site.pc,
+                self.accounting.then_some(site.close).flatten(),
+            ) else {
+                return Ok(None);
+            };
+            self.publish_source_boundary(
+                frame.state.callee,
+                activation,
+                prefix,
+                SourceTransfer {
+                    charges: &charges,
+                    inputs,
+                    input,
+                    output,
+                },
+                |_, _, edits, ()| {
+                    debug_assert!(edits.is_empty());
+                    frame.slots[site.at] = SlotState::Value(value);
+                },
+            )?
         };
         #[cfg(any(test, feature = "testing"))]
         if published && site.shared {
