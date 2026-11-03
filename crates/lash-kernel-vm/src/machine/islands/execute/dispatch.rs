@@ -519,32 +519,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     && !matches!(input, Value::Tuple(_))
                     && self.projection().is_none()
                 {
-                    let answer = Value::Bool(false);
-                    if let Some(tuple) = self.empty_tuple() {
-                        let units = if self.charging {
-                            measured_formula(
-                                self.arena,
-                                &self.exe.lib(site.lib).charge,
-                                &[input, tuple],
-                                Some(&answer),
-                            )
-                        } else {
-                            Some(0)
-                        };
-                        if let Some(units) = units {
-                            published = self
-                                .publish_unit_comparison(frame, site, input, tuple, units)
-                                .map_err(|error| self.halt(error.into()))?;
-                            if published && let Some(tape) = self.tape {
-                                if let Some(close) = &site.close {
-                                    super::super::record(tape, self.stream, close.region);
-                                }
-                                if units != 0 {
-                                    tape.push(Weight::Atomic(units));
-                                }
-                            }
-                        }
-                    }
+                    published = self
+                        .publish_unit_comparison(frame, site, input)
+                        .map_err(|error| self.halt(error.into()))?;
                 }
                 frame.regs[site.reg as usize] = if published {
                     Value::Bool(false)

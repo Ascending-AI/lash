@@ -333,7 +333,17 @@ fn verified_unit(site: &sites::Unit, plan: &IslandPlan, exe: &Executable) -> Opt
         Expression::Local { local, .. } => Some(local.at),
         _ => None,
     };
-    (crate::compile::islands::unit_test(Some(exe.lib(*lib)), args)
+    (selected.compiled.matches_site(
+        plan.code,
+        selected.statement,
+        site.site.lib,
+        [
+            &selected.value,
+            &selected.tuple,
+            &selected.comparison,
+            &selected.test,
+        ],
+    ) && crate::compile::islands::unit_test(Some(exe.lib(*lib)), args)
         && *lib == site.site.lib
         && test.reg == site.site.reg
         && value.reg == site.src

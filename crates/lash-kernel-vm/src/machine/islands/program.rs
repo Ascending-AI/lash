@@ -999,6 +999,15 @@ impl<'e> Build<'e> {
                                 return None;
                             }
                             Some(Box::new(super::UnitSource {
+                                compiled:
+                                    crate::compile::room::publication::UnitComparison::compile(
+                                        self.exe,
+                                        std::sync::Arc::clone(self.placement.as_ref()?),
+                                        id,
+                                        pc,
+                                        closes.first().copied(),
+                                    )
+                                    .ok()?,
                                 statement: id,
                                 binding: match &value.kind {
                                     Kind::Local { local, .. } => Some(local.at),

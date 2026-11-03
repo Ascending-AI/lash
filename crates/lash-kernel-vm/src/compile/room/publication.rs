@@ -20,11 +20,13 @@ mod departure;
 pub(crate) use departure::DepartureExit;
 mod exact;
 mod region;
+mod unit;
 pub(crate) use exact::{
     BoundEvent, ExactEvent, ExactRoots, ExternalFacts, OriginalBound, OriginalPrepared,
     PreparedEvent, Successor,
 };
 pub(crate) use region::CompiledExit;
+pub(crate) use unit::UnitComparison;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Occurrence {

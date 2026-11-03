@@ -321,6 +321,7 @@ impl NativeSite {
 /// answered without building the tuple.
 #[derive(Clone)]
 pub(crate) struct UnitSource {
+    pub(super) compiled: std::sync::Arc<crate::compile::room::publication::UnitComparison>,
     pub(super) statement: StmtId,
     pub(super) binding: Option<u32>,
     pub(super) value: lash_kernel_value::sites::Site,
