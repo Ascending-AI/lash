@@ -321,6 +321,15 @@ impl PreparedTexts<'_> {
         self.arena
     }
 
+    /// Buffer transfers staged by this guard. They count as execution only if
+    /// the eventual boundary publishes; abandonment restores every transfer.
+    pub fn moved(&self) -> u64 {
+        self.edits
+            .iter()
+            .filter(|edit| edit.moved.is_some())
+            .count() as u64
+    }
+
     /// Canonical release pricing preserves the actual surviving text roots.
     pub fn release_cost(
         &mut self,

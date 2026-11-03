@@ -112,7 +112,7 @@ enum Fact {
     RegisterEntry,
     SlowExit(Owner, Reason),
     OperationExit(Reason, String),
-    Accumulated,
+    Accumulated(u64),
 }
 
 fn produce(counts: &Arc<Mutex<Collector>>, fact: Fact) {
@@ -138,7 +138,7 @@ fn produce(counts: &Arc<Mutex<Collector>>, fact: Fact) {
             *counts.census.statements.entry(owner).or_default() += n;
         }
         Fact::RegisterEntry => counts.census.register_entries += 1,
-        Fact::Accumulated => counts.census.accumulated += 1,
+        Fact::Accumulated(n) => counts.census.accumulated += n,
         Fact::SlowExit(owner, reason) => {
             *counts
                 .census
@@ -237,9 +237,12 @@ pub(crate) fn register_entry<const LITERAL: bool>(recorder: &Recorder, counting:
 }
 
 #[inline(always)]
-pub(crate) fn accumulated(recorder: &Recorder, counting: bool) {
-    if counting && let Some(counts) = &recorder.inner {
-        produce(counts, Fact::Accumulated);
+pub(crate) fn accumulated(recorder: &Recorder, counting: bool, n: u64) {
+    if counting
+        && n != 0
+        && let Some(counts) = &recorder.inner
+    {
+        produce(counts, Fact::Accumulated(n));
     }
 }
 

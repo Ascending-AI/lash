@@ -96,6 +96,11 @@ pub(crate) struct TextPrefix<'a> {
     evaluations: Vec<TextEvaluation>,
 }
 impl TextPrefix<'_> {
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub(crate) fn moved(&self) -> u64 {
+        self.storage.moved()
+    }
+
     pub(crate) fn release_cost(
         &mut self,
         ledger: &lash_kernel_state::kernel_internals::logical::Ledger,

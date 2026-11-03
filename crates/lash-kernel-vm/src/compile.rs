@@ -69,8 +69,7 @@ pub(crate) use template_meter::MeteredCharges;
 pub(crate) use templates::{Entry, INNER, inner as inner_entry};
 
 pub(crate) use crate::machine::islands::cx::{
-    Accumulator, Cx, Fresh, Made, Meter, Place, Taken, measured_formula, position, read_index,
-    scalar, store,
+    Accumulator, Cx, Fresh, Meter, Taken, measured_formula, position, read_index, scalar,
 };
 pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source, TextCharge};
 pub(crate) use loop_plans::LoopPlan;

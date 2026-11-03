@@ -171,59 +171,6 @@ pub(crate) enum Prepared {
     Unset { set: ArenaHandle, key: Value },
 }
 
-/// Writes `value` at `place` of `target`, with `index` for an index, as
-/// the reference's member write does, marking what it changes dirty, its
-/// growth (a new member's value slots) admitted by the room first; `None`,
-/// having written nothing, where the reference raises or must decode
-/// first.
-pub(crate) fn store(
-    cx: &mut Cx<'_>,
-    place: &Place,
-    target: Value,
-    index: Value,
-    value: Value,
-) -> Option<()> {
-    if let Value::Record(record) = target
-        && cx.keyed.is_some_and(|(read, _)| read == record)
-        && keyed_store(cx, place, record, index, value)
-    {
-        return Some(());
-    }
-    let (write, _) = prepare(cx, place, target, index, value)?;
-    apply(cx, write)
-}
-
-/// Writes `value` under a record's short key where the record's last
-/// read through a caching site found that key, and the record is still
-/// the version that read proved it in: the write [`prepare`] checks and
-/// [`apply`] makes, its growth admitted as theirs, without finding the
-/// key again. `false`, having written nothing, otherwise. Out of line,
-/// so that the other targets' stores stay [`prepare`]'s and [`apply`]'s.
-#[inline(never)]
-fn keyed_store(
-    cx: &mut Cx<'_>,
-    place: &Place,
-    record: ArenaHandle,
-    index: Value,
-    value: Value,
-) -> bool {
-    let Some((read, site)) = cx.keyed else {
-        return false;
-    };
-    let key = match (place, index) {
-        (Place::Field(Value::Text(name)), _) => *name,
-        (Place::Index, Value::Text(key)) => key,
-        _ => return false,
-    };
-    // With no cold chunk anywhere, no key is unresolved.
-    record == read
-        && !cx.arena.any_cold()
-        && cx.fits(2 * VALUE_BYTES)
-        && cx.sites.slot(site).is_some_and(|slot| {
-            write_property(cx.arena, record, slot, &key, value).is_ok_and(|written| written)
-        })
-}
-
 /// The write of `value` at `place` of `target`, with `index` for an
 /// index, checked as the reference's member write checks it, and the most
 /// capacity its growth holds, which the room admits; `None` where the

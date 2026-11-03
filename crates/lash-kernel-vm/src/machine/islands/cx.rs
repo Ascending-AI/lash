@@ -36,7 +36,7 @@ use crate::data::immediate_measure;
 use crate::machine::registers::Arguments;
 use crate::machine::sites::SiteCaches;
 pub(crate) use meter::{Meter, Taken};
-pub(crate) use operands::{Fresh, Place, Role, position, read_index, scalar, store};
+pub(crate) use operands::{Fresh, Place, Role, position, read_index, scalar};
 use operands::{Held, Prepared, apply, error_field, prepare};
 
 /// What a region's statements read and build with: the meter of the

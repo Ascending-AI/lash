@@ -411,6 +411,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             Ok(bound) => bound,
             Err(_) => return Ok(ValuePublication::Declined),
         };
+        #[cfg(any(test, feature = "perf-witness"))]
+        let moved = storage.moved();
         let memory_bound = self.memory_bound;
         let published = storage
             .boundary(&mut ledger, self.heap, |transaction, ledger, apply, _| {
@@ -466,6 +468,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if !published {
             return Ok(ValuePublication::Declined);
         }
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::execution::accumulated(
+            &self.scratch.census,
+            self.scratch.counting,
+            moved,
+        );
         frame.regs[site.reg as usize] = value;
         if !original && let Some(tape) = self.recorder {
             debt.record(tape);
