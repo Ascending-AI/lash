@@ -502,7 +502,7 @@ fn resident_native_items_agree() {
 /// K-COL / K-MACH-008: finite collection preparations preserve real lists,
 /// holes, saved callback values and exact source exits. Rejected, abandoned
 /// and stale append transactions publish no list edit or allocation ordinal.
-/// This is a storage/preparation law, not the core source-acceptance gate.
+/// Accepted packets agree with Source at warm, cold and refused boundaries.
 #[test]
 fn collection_region_preparations_preserve_source_and_storage() {
     collection_store_closes_charge_the_rhs_once();
@@ -623,35 +623,85 @@ fn collection_region_preparations_preserve_source_and_storage() {
         probes
     }
     let source = "main { return invoke helper.direct([3, 7], fn(a, b) { return 0 }) }";
-    let run = |mode: super::ExecutionMode, layout: u64| {
-        let mut runtime = Embedder::with(
-            source,
-            Setup {
-                probes: Some(probes),
-                layout: Layout(layout),
-                ..Setup::default()
-            },
-        );
-        runtime.machine.take_collection_acceptances();
-        let tape = crate::ChargeTape::new();
-        runtime.machine.record_charges(tape.clone());
-        let end = loop {
-            match mode {
-                super::ExecutionMode::Source => runtime.machine.force_source_execution(),
-                super::ExecutionMode::Generic => runtime.machine.force_generic_packets(),
-                super::ExecutionMode::Specialized => {}
-            }
-            match runtime.run() {
-                Step::Ended(end) => break end,
-                Step::Slice => {}
-                Step::Parked(_) => runtime.deliver_next(),
-            }
+    let observe =
+        |mode: super::ExecutionMode, layout: u64, bounds: Bounds, slice: u64, cold: bool| {
+            let mut runtime = Embedder::with(
+                source,
+                Setup {
+                    probes: Some(probes),
+                    layout: Layout(layout),
+                    bounds,
+                    slice,
+                    ..Setup::default()
+                },
+            );
+            runtime.machine.take_collection_acceptances();
+            let tape = crate::ChargeTape::new();
+            runtime.machine.record_charges(tape.clone());
+            let mut stops = Vec::new();
+            let mut reopened = 0;
+            let end = loop {
+                match mode {
+                    super::ExecutionMode::Source => runtime.machine.force_source_execution(),
+                    super::ExecutionMode::Generic => runtime.machine.force_generic_packets(),
+                    super::ExecutionMode::Specialized => {}
+                }
+                let step = runtime.run();
+                assert!(runtime.machine.execution_storage_released());
+                let balance = runtime.machine.logical_balance().unwrap();
+                stops.push((
+                    match &step {
+                        Step::Ended(_) => "ended",
+                        Step::Slice => "slice",
+                        Step::Parked(_) => "parked",
+                    },
+                    runtime.machine.meters(),
+                    [
+                        balance.entity_local_bytes,
+                        balance.root_and_control_bytes,
+                        balance.entities,
+                    ],
+                    (!matches!(&step, Step::Ended(_)))
+                        .then(|| runtime.machine.semantic_checkpoint()),
+                ));
+                match step {
+                    Step::Ended(end) => break end,
+                    Step::Slice | Step::Parked(_) => {
+                        if cold {
+                            // Only publications after the first cold reopen count
+                            // toward the cold witness, never its initial warm prefix.
+                            if reopened == 0 {
+                                runtime.machine.take_collection_acceptances();
+                            }
+                            runtime.reopen(Layout(layout), true);
+                            runtime.machine.record_charges(tape.clone());
+                            reopened += 1;
+                        }
+                        if matches!(step, Step::Parked(_)) {
+                            runtime.deliver_next();
+                        }
+                    }
+                }
+            };
+            let counts = runtime.machine.take_collection_acceptances();
+            let finished = matches!(&end, End::Finished(_));
+            (
+                (
+                    format!("{end:?}"),
+                    runtime.machine.meters(),
+                    tape.steps(),
+                    stops,
+                    finished,
+                ),
+                counts,
+                reopened,
+            )
         };
-        let counts = runtime.machine.take_collection_acceptances();
-        (
-            (format!("{end:?}"), runtime.machine.meters(), tape.steps()),
-            counts,
-        )
+    let run = |mode, layout| {
+        let (observed, counts, reopened) =
+            observe(mode, layout, super::super::embedder::ROOMY, u64::MAX, false);
+        assert_eq!(reopened, 0);
+        (observed, counts)
     };
     let embedder = Embedder::with(
         source,
@@ -746,6 +796,10 @@ fn collection_region_preparations_preserve_source_and_storage() {
         }
     }
     let (reference, source_counts) = run(super::ExecutionMode::Source, 0);
+    assert!(
+        reference.4,
+        "the collection corpus finishes under roomy bounds"
+    );
     assert_eq!(source_counts, [0; 7]);
     let mut actual_runs = Vec::new();
     for layout in [0, 1, 42] {
@@ -777,6 +831,117 @@ fn collection_region_preparations_preserve_source_and_storage() {
             "all six affine families and the separate tail execute: {mode:?}, layout {layout}: {counts:?}"
         );
     }
+
+    for layout in [0, 1, 42] {
+        let mut accepted_after_reopen = [[0_u64; 7]; 2];
+        for slice in [1, 3] {
+            let expected = observe(
+                super::ExecutionMode::Source,
+                layout,
+                super::super::embedder::ROOMY,
+                slice,
+                true,
+            );
+            assert!(expected.0.4, "cold Source collection run finishes");
+            assert!(expected.2 > 0, "the cold fixture must reopen");
+            assert_eq!(expected.1, [0; 7]);
+            for (index, mode) in [
+                super::ExecutionMode::Specialized,
+                super::ExecutionMode::Generic,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let actual = observe(mode, layout, super::super::embedder::ROOMY, slice, true);
+                assert_eq!(
+                    actual.0, expected.0,
+                    "cold collection source/tape/checkpoint/holding agreement {mode:?}, layout {layout}, slice {slice}"
+                );
+                assert_eq!(actual.2, expected.2);
+                for (count, additional) in accepted_after_reopen[index].iter_mut().zip(actual.1) {
+                    *count += additional;
+                }
+            }
+        }
+        for (index, counts) in accepted_after_reopen.into_iter().enumerate() {
+            println!(
+                "cold affine collection publications mode {index}, layout {layout}: {counts:?}"
+            );
+            assert!(
+                counts.iter().all(|count| *count > 0),
+                "all six families and the separate tail publish after reopening: mode {index}, layout {layout}: {counts:?}"
+            );
+        }
+    }
+    let charged = reference.1.charged.unwrap();
+    let mut refusals = 0;
+    for layout in [0, 42] {
+        for limit in [0, charged / 2, charged - 1] {
+            let bounds = Bounds {
+                charge_limit: limit,
+                ..super::super::embedder::ROOMY
+            };
+            let expected = observe(
+                super::ExecutionMode::Source,
+                layout,
+                bounds,
+                u64::MAX,
+                false,
+            );
+            assert!(
+                !expected.0.4,
+                "the tight charge case must refuse, limit {limit}"
+            );
+            for mode in [
+                super::ExecutionMode::Specialized,
+                super::ExecutionMode::Generic,
+            ] {
+                let actual = observe(mode, layout, bounds, u64::MAX, false);
+                assert_eq!(
+                    actual.0, expected.0,
+                    "tight collection charge prefix {mode:?}, layout {layout}, limit {limit}"
+                );
+                refusals += 1;
+            }
+        }
+        for memory in [0, 4096, 24 << 10, 64 << 10] {
+            let bounds = Bounds {
+                memory,
+                ..super::super::embedder::ROOMY
+            };
+            let expected = observe(
+                super::ExecutionMode::Source,
+                layout,
+                bounds,
+                u64::MAX,
+                false,
+            );
+            if memory == 0 {
+                assert!(
+                    !expected.0.4,
+                    "zero memory must refuse the collection corpus"
+                );
+            }
+            for mode in [
+                super::ExecutionMode::Specialized,
+                super::ExecutionMode::Generic,
+            ] {
+                let actual = observe(mode, layout, bounds, u64::MAX, false);
+                assert_eq!(
+                    actual.0, expected.0,
+                    "tight collection memory prefix {mode:?}, layout {layout}, memory {memory}"
+                );
+                refusals += usize::from(!expected.0.4);
+            }
+        }
+    }
+    assert!(
+        refusals >= 12,
+        "the matrix exercises actual resource refusals"
+    );
+    println!(
+        "collection cold/tight matrix: 12 cold comparisons, 28 tight comparisons, {refusals} actual refusals"
+    );
 }
 
 /// K-CHG-002: a value-first indexed write has four fixed forms: its
