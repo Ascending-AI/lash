@@ -7,6 +7,15 @@ pub(crate) struct SettledDebt {
     units: u64,
 }
 impl ChargeProgram {
+    #[cfg(test)]
+    pub(in crate::compile::room) fn recompile_for_boundary_law(
+        &self,
+        exe: &Executable,
+        code: compile::CodeId,
+    ) -> Result<Self, Refused> {
+        Self::compile(exe, code, self.statement, self.range)
+    }
+
     pub(in crate::compile::room) fn through(&self) -> &Point {
         &self.through
     }
@@ -20,11 +29,14 @@ impl ChargeProgram {
             && self.range.start < other.range.end()
             && other.range.start < self.range.end()
     }
+    pub(in crate::compile::room) fn owns_debt(&self, debt: &ChargeDebt<'_>) -> bool {
+        std::ptr::eq(self, debt.program)
+    }
     pub(in crate::compile::room) fn settle(
         self: &Arc<Self>,
         debt: ChargeDebt<'_>,
     ) -> Option<SettledDebt> {
-        if !std::ptr::eq(&**self, debt.program) {
+        if !self.owns_debt(&debt) {
             return None;
         }
         Some(SettledDebt {

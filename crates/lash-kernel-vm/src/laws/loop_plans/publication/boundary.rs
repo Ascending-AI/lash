@@ -210,7 +210,7 @@ pub(super) fn exits() {
     let retained = arena.logical_local(&Value::Int(2)).unwrap();
     let bind = |arena: &mut Arena, next: Position| {
         let ledger = store.borrow();
-        region
+        let proof = region
             .bind(
                 &ledger,
                 arena,
@@ -232,7 +232,12 @@ pub(super) fn exits() {
                 &[vec![], vec![]],
                 next,
             )
-            .unwrap()
+            .unwrap();
+        proof.and_then(|proof| {
+            proof
+                .statements_for_law(&exe, body.code, &frontier, &ledger, arena, heap, &charges)
+                .unwrap()
+        })
     };
     let next = plan.exit(occurrence);
     let mut wrong = next.clone();

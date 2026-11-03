@@ -1,12 +1,15 @@
 //! A compiler-owned source proof and detached storage have one affine exit.
 //! Consumers never supply fee or peak totals to the publication owner.
 use super::super::charges::{ChargeDebt, ChargeProgram, settled::SettledDebt};
+pub(in crate::compile::room) mod schedule;
 use super::*;
 use lash_kernel_state::{
     arena::Arena,
     kernel_internals::logical::{Dependencies, PublicationValue, RootValue},
 };
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
+use schedule::BoundaryCharges;
+use schedule::StatementSchedule;
 
 /// Source compilers derive these from the selected call/occurrence schedule.
 /// They are not runtime allowances or declarations that a prefix is paid.
@@ -40,6 +43,7 @@ pub(crate) struct CompiledPublication {
     recovery: [u8; 32],
     charges: Box<[Arc<ChargeProgram>]>,
     needs: BoundaryNeeds,
+    statements: Option<StatementSchedule>,
 }
 
 /// The entry revision and proposed source exit cannot be rebound after this
@@ -51,17 +55,17 @@ struct Cursor {
     before: Position,
     next: Position,
 }
-pub(crate) struct BoundPublication {
+pub(crate) struct BoundPublication<D = Vec<SettledDebt>> {
     plan: Arc<CompiledPublication>,
     cursor: Cursor,
     evidence: BoundaryEvidence,
-    debts: Vec<SettledDebt>,
+    debts: D,
     completion: Option<(logical::InvocationRange, u64)>,
 }
 
-pub(crate) struct PreparedPublication<'a> {
+pub(crate) struct PreparedPublication<'a, D = Vec<SettledDebt>> {
     cursor: Cursor,
-    debts: Vec<SettledDebt>,
+    debts: D,
     transaction: logical::BoundaryTransaction<'a>,
     memory_bound: u64,
 }
@@ -110,6 +114,7 @@ impl CompiledPublication {
             recovery: logical_digest(&encoding.into_bytes()),
             charges: charges.into(),
             needs,
+            statements: None,
         }))
     }
 
@@ -161,6 +166,35 @@ impl CompiledPublication {
         debts: Vec<ChargeDebt<'_>>,
         proposed: Position,
     ) -> Result<Option<BoundPublication>, HeapFault> {
+        if self.statements.is_some() || debts.len() != self.charges.len() {
+            return Ok(None);
+        }
+        let Some(debts) = self
+            .charges
+            .iter()
+            .zip(debts)
+            .map(|(program, debt)| program.settle(debt))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Ok(None);
+        };
+        self.bind_checked(frontier, ledger, arena, heap, evidence, debts, proposed)
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one source proof and canonical debts"
+    )]
+    fn bind_checked<D: BoundaryCharges>(
+        self: &Arc<Self>,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        arena: &Arena,
+        heap: &PagedHeap,
+        evidence: BoundaryEvidence,
+        debts: D,
+        proposed: Position,
+    ) -> Result<Option<BoundPublication<D>>, HeapFault> {
         if frontier.proven
             || !Arc::ptr_eq(&self.source, &frontier.source)
             || frontier.position.unpaid.as_ref() != Some(&self.first)
@@ -184,19 +218,9 @@ impl CompiledPublication {
             || evidence.room.exit != ExitKind::Normal
             || !evidence.dependencies.is_current(ledger, arena)
             || proposed != self.exit(frontier.position.occurrence.clone())
-            || debts.len() != self.charges.len()
         {
             return Ok(None);
         }
-        let Some(debts) = self
-            .charges
-            .iter()
-            .zip(debts)
-            .map(|(program, debt)| program.settle(debt))
-            .collect::<Option<Vec<_>>>()
-        else {
-            return Ok(None);
-        };
         Ok(Some(BoundPublication {
             plan: Arc::clone(self),
             cursor: Cursor {
@@ -213,7 +237,7 @@ impl CompiledPublication {
     }
 }
 
-impl BoundPublication {
+impl<D: BoundaryCharges> BoundPublication<D> {
     /// The call verifier supplies its one ledger-owned reservation and the
     /// genuinely completed prefix. The source plan requires exactly that many.
     pub(in crate::compile::room) fn with_invocations(
@@ -245,7 +269,7 @@ impl BoundPublication {
         mut transaction: logical::BoundaryTransaction<'a>,
         resources: SourceResources<'r>,
         memory_bound: u64,
-    ) -> Result<Option<SourceAccepted<'r, PreparedPublication<'a>>>, HeapFault> {
+    ) -> Result<Option<SourceAccepted<'r, PreparedPublication<'a, D>>>, HeapFault> {
         if !self.cursor.current(frontier)
             || !ledger.is_current(self.evidence.dependencies.ledger())
             || self.completion.as_ref().map_or(0, |(_, n)| *n) != self.plan.needs.invocations
@@ -297,10 +321,7 @@ impl BoundPublication {
         if transaction.peak() > memory_bound {
             return Ok(None);
         }
-        let Some(units) = debts
-            .iter()
-            .try_fold(0_u64, |sum, debt| sum.checked_add(debt.units()))
-        else {
+        let Some(units) = debts.units() else {
             return Ok(None);
         };
         let need = Allowance {
@@ -327,7 +348,7 @@ impl BoundPublication {
         )
     }
 }
-impl SourceAccepted<'_, PreparedPublication<'_>> {
+impl<D: BoundaryCharges> SourceAccepted<'_, PreparedPublication<'_, D>> {
     pub(crate) fn publish_boundary(
         self,
         frontier: &mut Frontier,
@@ -352,9 +373,7 @@ impl SourceAccepted<'_, PreparedPublication<'_>> {
             frontier.position = prepared.cursor.next;
             frontier.revision = revision;
             if let Some(tape) = tape {
-                for debt in &prepared.debts {
-                    debt.record(tape);
-                }
+                prepared.debts.record(tape);
             }
             Ok(balance)
         })
