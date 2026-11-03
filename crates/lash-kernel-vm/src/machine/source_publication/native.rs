@@ -64,27 +64,48 @@ impl KernelMachine {
         self.logical_flush()?;
         let physical_room =
             (self.bounds.memory_meter != crate::MemoryMeter::Off).then(|| self.capacity_headroom());
-        let Some(bank) = self.regs.prepare_source_output(running.stream, pc)? else {
-            return Ok(false);
+        // A preparation borrows the register bank. Retain only its immutable
+        // values while warming, then reacquire the same unconsumed source roots.
+        let operands = {
+            let Some(bank) = self.regs.prepare_source_output(running.stream, pc)? else {
+                return Ok(false);
+            };
+            bank.values()
         };
-        let output = bank.owner();
-        let inputs = bank.owners();
-        let operands = bank.values();
         let mut values = operands.clone();
         values.resize(function.arity, doc::Value::Absent);
-        let contract = {
-            let arena = self.arena.borrow();
-            match native.resource_contract(doc::Args::new(
-                &values,
-                arena.objects(),
-                &arena.semantics(),
-            )) {
-                Ok(Some(contract)) if native_storage::supports(&contract) => contract,
+        let contract = loop {
+            let query = {
+                let arena = self.arena.borrow();
+                native.resource_contract(doc::Args::new(
+                    &values,
+                    arena.objects(),
+                    &arena.semantics(),
+                ))
+            };
+            match query {
+                Ok(Some(contract)) if native_storage::supports(&contract) => break contract,
+                Err(doc::NativeError::Retry(doc::Retry::Cold { object, chunk })) => {
+                    self.warm(object, chunk)?
+                }
                 Err(doc::NativeError::Host(error)) => return Err(error.into()),
                 Err(doc::NativeError::Malformed(reason)) => return Err(malformed(reason).into()),
                 _ => return Ok(false),
             }
         };
+        let Some(bank) = self.regs.prepare_source_output(running.stream, pc)? else {
+            return Ok(false);
+        };
+        if bank
+            .values()
+            .iter()
+            .zip(&operands)
+            .any(|(actual, expected)| !actual.same(expected))
+        {
+            return Err(malformed("native input changed while warming").into());
+        }
+        let output = bank.owner();
+        let inputs = bank.owners();
         let collection = contract
             .events
             .iter()
