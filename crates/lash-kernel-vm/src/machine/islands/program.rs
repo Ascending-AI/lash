@@ -117,6 +117,12 @@ pub(crate) struct WriteSite {
     pub(in crate::machine::islands) pc: u32,
     pub(crate) bind: bool,
     pub(in crate::machine::islands) close: Option<Close>,
+    /// Canonical unpaid event close, compiled with this exact code layout.
+    #[expect(
+        dead_code,
+        reason = "constructor integration consumes cached write debt"
+    )]
+    pub(crate) charges: Option<std::sync::Arc<crate::compile::room::charges::ChargeProgram>>,
     pub(in crate::machine::islands) covered: bool,
     pub(in crate::machine::islands) leaves: u32,
     /// A linear text accumulator's write (FIG-6795).
@@ -333,6 +339,24 @@ impl<'e> Build<'e> {
         Some(())
     }
 
+    fn write_charges(
+        &self,
+        statement: StmtId,
+        pc: u32,
+        close: Option<Close>,
+    ) -> Option<std::sync::Arc<crate::compile::room::charges::ChargeProgram>> {
+        let code = self.placement.as_ref()?.code();
+        crate::compile::room::charges::ChargeProgram::event_packet(
+            self.exe,
+            code,
+            statement,
+            pc,
+            self.charged.then_some(close).flatten(),
+        )
+        .ok()
+        .map(std::sync::Arc::new)
+    }
+
     fn statement(&mut self, statement: &Statement, index: usize) -> Option<()> {
         self.statement = Some(statement.id);
         self.captures.clear();
@@ -407,6 +431,7 @@ impl<'e> Build<'e> {
                     pc: *pc,
                     bind: *bind,
                     close: *close,
+                    charges: self.write_charges(statement.id, *pc, *close),
                     covered,
                     leaves: statement.leaves,
                     accumulates: false,
@@ -642,6 +667,7 @@ impl<'e> Build<'e> {
                         pc: *pc,
                         bind: *bind,
                         close: *close,
+                        charges: self.write_charges(statement.id, *pc, *close),
                         covered,
                         leaves: statement.leaves,
                         accumulates,
