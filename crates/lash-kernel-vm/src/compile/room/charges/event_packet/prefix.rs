@@ -103,7 +103,7 @@ impl OriginalPrefix {
         statement: compile::StmtId,
         prefix: &expr::ConstructorPrefix,
     ) -> Result<Arc<Self>, Refused> {
-        ChargeProgram::constructor_packet(exe, code, statement, prefix)?.verify(exe, code)?;
+        ChargeProgram::constructor_packet(exe, code, statement, prefix)?;
         let (stream, stmt, _) = exe.statement(statement);
         let pc = prefix.pc();
         let at = source_point(

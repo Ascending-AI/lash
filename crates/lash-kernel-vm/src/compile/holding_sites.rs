@@ -5,11 +5,36 @@ use super::{Form, OpRange, Stmt as CompiledStmt, Stream, room};
 use lash_kernel_doc::{Expr, Node, Stmt};
 use lash_kernel_exec::Op;
 use lash_kernel_value::sites::Site;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 pub(crate) type SourceRoleList = Arc<[(lash_kernel_exec::Reg, Arc<Site>)]>;
 pub(crate) type SourceRoles = BTreeMap<u32, SourceRoleList>;
+
+/// Child lists belong to this verification only, so altered streams still
+/// resolve every site against the independent source tree.
+struct SourceNodes<'a> {
+    source: &'a room::Source,
+    children: BTreeMap<Vec<u32>, Vec<Node<'a>>>,
+}
+
+impl<'a> SourceNodes<'a> {
+    fn at(&mut self, site: &Site) -> Option<Node<'a>> {
+        if site.unit != self.source.site.unit || !site.path.starts_with(&self.source.site.path) {
+            return None;
+        }
+        let path = &site.path[self.source.site.path.len()..];
+        let mut node = Node::Block(&self.source.body);
+        for (depth, index) in path.iter().enumerate() {
+            let children = self
+                .children
+                .entry(path[..depth].to_vec())
+                .or_insert_with(|| node.children());
+            node = *children.get(*index as usize)?;
+        }
+        Some(node)
+    }
+}
 
 impl CompiledStmt {
     /// Cache only requested resume points. A representative forward path
@@ -91,6 +116,10 @@ impl Stream {
         if self.source_sites.len() != self.ops.len() {
             return false;
         }
+        let mut nodes = SourceNodes {
+            source,
+            children: BTreeMap::new(),
+        };
         for pc in range.start..range.end() {
             let op = self.ops[pc as usize];
             let site = &self.source_sites[pc as usize];
@@ -103,24 +132,33 @@ impl Stream {
             let Some(site) = site else {
                 return false;
             };
-            if site.unit != source.site.unit || !site.path.starts_with(&source.site.path) {
+            let Some(node) = nodes.at(site) else {
                 return false;
-            }
-            let mut node = Node::Block(&source.body);
-            for index in &site.path[source.site.path.len()..] {
-                let Some(child) = node.children().get(*index as usize).copied() else {
-                    return false;
-                };
-                node = child;
-            }
+            };
             if !implements(op, node) {
                 return false;
             }
         }
-        self.verify_source_flow(source, range, regs)
+        self.verify_source_flow(source, range, regs, &mut nodes)
     }
 
-    fn verify_source_flow(&self, source: &room::Source, range: OpRange, regs: u32) -> bool {
+    fn verify_source_flow(
+        &self,
+        source: &room::Source,
+        range: OpRange,
+        regs: u32,
+        nodes: &mut SourceNodes<'_>,
+    ) -> bool {
+        // Only jump targets can have multiple incoming paths. Linear steps
+        // transfer their owners without copying the entire register file.
+        let targets: BTreeSet<_> = (range.start..range.end())
+            .filter_map(|pc| match self.ops[pc as usize] {
+                Op::Jump { skip } | Op::JumpIfFalse { skip, .. } => {
+                    pc.checked_add(1)?.checked_add(skip)
+                }
+                _ => None,
+            })
+            .collect();
         let mut pending = vec![(range.start, vec![None::<Arc<Site>>; regs as usize])];
         let mut seen = BTreeMap::new();
         while let Some((pc, mut owners)) = pending.pop() {
@@ -130,20 +168,18 @@ impl Stream {
             if pc > range.end() {
                 return false;
             }
-            if let Some(previous) = seen.insert(pc, owners.clone()) {
+            if targets.contains(&pc)
+                && let Some(previous) = seen.insert(pc, owners.clone())
+            {
                 if previous != owners {
                     return false;
                 }
                 continue;
             }
             let op = self.ops[pc as usize];
-            let expected = self.source_sites[pc as usize].as_ref().and_then(|site| {
-                let mut node = Node::Block(&source.body);
-                for index in &site.path[source.site.path.len()..] {
-                    node = *node.children().get(*index as usize)?;
-                }
-                inputs(op, site, node)
-            });
+            let expected = self.source_sites[pc as usize]
+                .as_ref()
+                .and_then(|site| inputs(op, site, nodes.at(site)?));
             for (index, reg) in op.reads().into_iter().enumerate() {
                 let Some(owner) = owners.get_mut(reg.ix()) else {
                     return false;
@@ -179,13 +215,9 @@ impl Stream {
                     {
                         return false;
                     }
-                    let mut node = Node::Block(&source.body);
-                    for index in &join.to.path[source.site.path.len()..] {
-                        let Some(child) = node.children().get(*index as usize).copied() else {
-                            return false;
-                        };
-                        node = child;
-                    }
+                    let Some(node) = nodes.at(&join.to) else {
+                        return false;
+                    };
                     if !matches!(
                         (node, join.from.path.last()),
                         (Node::Expr(Expr::If { .. }), Some(1 | 2))
@@ -198,9 +230,17 @@ impl Stream {
             }
             let next = pc + 1;
             match op {
-                Op::Jump { skip } => pending.push((next + skip, owners)),
+                Op::Jump { skip } => {
+                    let Some(target) = next.checked_add(skip) else {
+                        return false;
+                    };
+                    pending.push((target, owners));
+                }
                 Op::JumpIfFalse { skip, .. } => {
-                    pending.push((next + skip, owners.clone()));
+                    let Some(target) = next.checked_add(skip) else {
+                        return false;
+                    };
+                    pending.push((target, owners.clone()));
                     pending.push((next, owners));
                 }
                 _ => pending.push((next, owners)),
