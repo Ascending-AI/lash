@@ -21,7 +21,7 @@ macro_rules! stop {
 }
 
 pub(super) struct Window {
-    pub(super) iteration_max: u64,
+    pub(super) iteration_max: Option<u64>,
 }
 
 /// The induction and accumulator stay in their native Rust domain. Value
@@ -135,9 +135,9 @@ struct ScalarRun<N> {
 }
 
 impl<N: Number> ScalarRun<N> {
-    fn of(scalar: &Scalar, exe: &Executable) -> Option<Self> {
+    fn of(scalar: &Scalar, _exe: &Executable) -> Option<Self> {
         Some(Self {
-            operation: N::operation(&scalar.site.pair(exe)?)?,
+            operation: N::operation(&scalar.pair?)?,
             domain: std::marker::PhantomData,
         })
     }
@@ -156,7 +156,10 @@ impl<N: Number> ScalarRun<N> {
 impl Scalar {
     #[inline(always)]
     fn unary(&self, exe: &Executable, value: Value) -> Option<Value> {
-        let (answer, _) = super::super::compiled::unary(&self.site, value, exe)?;
+        let answer = match &self.site {
+            Some(site) => super::super::compiled::unary(site, value, exe)?.0,
+            None => value,
+        };
         matches!(
             (value, answer),
             (Value::Int(_), Value::Int(_)) | (Value::Float(_), Value::Float(_))
@@ -279,10 +282,19 @@ impl Repeat {
         memory_bound: u64,
         tape: Option<&crate::observe::ChargeTape>,
     ) -> Result<Option<Run<'plan, 'ledger>>, HeapFault> {
-        let Some(mut values) = self.proof.entry_values(activation) else {
+        let Some(calls) =
+            self.proof
+                .scope(exe, ledger, invocation, activation, resources.capacity())
+        else {
             return Ok(None);
         };
-        let mut bound: Option<BoundRecurrence<'plan, 'ledger>> = None;
+        let Some(mut bound) = self
+            .proof
+            .recurrence
+            .bind(ledger, arena, heap, invocation, activation, calls)?
+        else {
+            return Ok(None);
+        };
         for copy in [&self.before, &self.after].into_iter().flatten() {
             if copy.keep && frame.value(copy.at).is_none() {
                 witnessed!(Repeated, Guard);
@@ -401,54 +413,50 @@ impl Repeat {
                 } else {
                     actual
                 };
-            if let Some(bound) = &bound {
-                bound.entries(&mut values);
-            }
-            let Some(evaluated) = self.proof.evaluate(exe, arena, &actual, &mut values)? else {
+            let Some(evaluated) = self.proof.evaluate(
+                exe,
+                arena,
+                ledger,
+                invocation,
+                bound.calls.as_ref(),
+                bound.entries(),
+                &actual,
+            )?
+            else {
                 stop!(Guard);
             };
-            // Keep the original scalar-plan ceiling while canonical source
-            // debts alone determine the amount admitted and recorded.
-            if evaluated
-                .debts
-                .iter()
-                .try_fold(0u64, |sum, debt| sum.checked_add(debt.units()?))
-                .is_none_or(|units| units > window.iteration_max)
+            if let Some(ceiling) = window.iteration_max
+                && evaluated
+                    .effects
+                    .debts()
+                    .iter()
+                    .try_fold(0u64, |sum, debt| sum.checked_add(debt.units()?))
+                    .is_none_or(|units| units > ceiling)
             {
                 stop!(Guard);
             }
-            if bound.is_none() {
-                bound = self.proof.recurrence.bind(
-                    ledger,
-                    arena,
-                    heap,
-                    invocation,
-                    activation,
-                    &values,
-                    &evaluated.calls,
-                )?;
-            }
-            let Some(scope) = &mut bound else {
-                stop!(Guard);
-            };
-            let Some(room) = scope.evaluate(arena, &values, &evaluated.calls, memory_bound)? else {
+            let Some(room) = bound.evaluate(&evaluated.effects, memory_bound) else {
                 stop!(Prefix);
             };
-            if !resources.admit(&evaluated.debts, self.proof.depth, &[]) {
+            if !resources.admit(
+                evaluated.effects.debts(),
+                evaluated.effects.depth(),
+                evaluated.effects.occurrences(),
+            ) {
                 stop!(Prefix);
             }
-            scope.advance(room)?;
+            if let Some(tape) = tape {
+                for debt in evaluated.effects.debts() {
+                    debt.record(tape);
+                }
+            }
+            bound.advance(room, evaluated.candidates)?;
             saved_before = before;
             if let Some((value, _)) = reduction {
                 accumulator_value = Some(value);
             }
             counter = next;
             saved_after = after;
-            if let Some(tape) = tape {
-                for debt in &evaluated.debts {
-                    debt.record(tape);
-                }
-            }
             iterations += 1;
         }
         let mut writes = Vec::new();
@@ -468,9 +476,7 @@ impl Repeat {
                 writes.push((copy.at, value.value()));
             }
         }
-        Ok(bound
-            .filter(|bound| bound.iterations() != 0)
-            .map(|bound| Run { bound, writes }))
+        Ok((bound.iterations() != 0).then_some(Run { bound, writes }))
     }
 }
 

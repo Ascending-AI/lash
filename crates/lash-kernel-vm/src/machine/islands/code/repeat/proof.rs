@@ -1,24 +1,33 @@
-//! Source fact placement for the finite recurrence. This is a projection of
-//! the checked graph, not an evaluator: arithmetic stays in the typed kernel.
+//! Project the finite kernel's answers into the compiled source iteration.
 use super::*;
 use crate::compile::{
-    CodeId, LibId, LibRun,
+    CodeId, LibId, StmtId,
     room::{
-        self, ExitKind, Phase, Point, Selection,
-        charges::{ChargeProgram, FormulaValues, composition::StatementDebt},
+        self, Phase, Point,
         placement::{BindingPlacement, DenseActivation},
+        region::{
+            ScalarRegionValues,
+            calls::{
+                VerifiedCall,
+                scope::{
+                    CallScope, ScopedCall,
+                    iteration::{IterationEffects, IterationValues, VerifiedIteration},
+                },
+            },
+        },
     },
 };
 use crate::machine::islands::compiled::recurrence::Recurrence;
-use lash_kernel_doc::heap::HeapFault;
+use lash_kernel_doc::{TaskId, Value, heap::HeapFault};
 use lash_kernel_state::{
     arena::Arena,
     kernel_internals::{
         PagedHeap,
-        logical::{Invocation, Ledger},
+        logical::{self, Invocation, Ledger, Slot},
     },
 };
 use std::{collections::BTreeMap, sync::Arc};
+mod facts;
 
 #[derive(Clone, Copy)]
 enum ValueAt {
@@ -31,16 +40,28 @@ enum ValueAt {
     Next,
     After,
 }
-struct ResultFact {
-    at: Point,
-    value: ValueAt,
-    fact: usize,
-}
 struct Native {
     at: Point,
     lib: LibId,
     arguments: Box<[ValueAt]>,
     result: ValueAt,
+}
+struct Call {
+    call: Arc<VerifiedCall>,
+    arguments: Box<[ValueAt]>,
+    root: bool,
+    result: ValueAt,
+    library: Option<LibId>,
+}
+type CallRoles = Box<[(Slot, ValueAt)]>;
+
+struct ScalarFacts {
+    values: Box<[ValueAt]>,
+    natives: Box<[usize]>,
+}
+enum Step {
+    Scalar(usize),
+    Call(usize),
 }
 pub(super) struct Targets {
     pub(super) counter: u32,
@@ -48,20 +69,18 @@ pub(super) struct Targets {
     pub(super) reduced: Option<u32>,
     pub(super) after: Option<u32>,
 }
-
 pub(in crate::machine::islands) struct Proof {
     placement: Arc<BindingPlacement>,
     pub(in crate::machine::islands) recurrence: Recurrence,
-    results: Box<[ResultFact]>,
+    scalars: Box<[ScalarFacts]>,
+    calls: Box<[Call]>,
+    roles: Box<[CallRoles]>,
+    steps: Box<[Step]>,
     natives: Box<[Native]>,
-    charges: Box<[ChargeProgram]>,
     pub(in crate::machine::islands) first: Point,
     pub(in crate::machine::islands) through: Point,
-    pub(in crate::machine::islands) depth: u64,
     pub(in crate::machine::islands) recovery: [u8; 32],
-    entries: Box<[(u32, usize)]>,
 }
-
 #[derive(Default)]
 pub(in crate::machine::islands) struct Values {
     pub(in crate::machine::islands) test: bool,
@@ -72,44 +91,44 @@ pub(in crate::machine::islands) struct Values {
     pub(in crate::machine::islands) after: Option<Value>,
 }
 pub(in crate::machine::islands) struct Evaluated<'a> {
-    pub(in crate::machine::islands) calls: Vec<room::CheckedRoom>,
-    pub(in crate::machine::islands) debts: Vec<StatementDebt<'a>>,
+    pub(in crate::machine::islands) effects: IterationEffects<'a>,
+    pub(in crate::machine::islands) candidates: Vec<ScopedCall<'a>>,
 }
-
 struct Projection<'a> {
     exe: &'a Executable,
     placement: &'a BindingPlacement,
     environment: BTreeMap<u32, ValueAt>,
-    results: Vec<ResultFact>,
+    results: BTreeMap<Point, ValueAt>,
     natives: Vec<Native>,
-    selected: Vec<Selection>,
-    depth: u64,
+    calls: Vec<Call>,
 }
 impl Projection<'_> {
-    fn event(&mut self, at: Point) {
-        self.selected.push(Selection::Event {
-            at,
-            exit: ExitKind::Normal,
-        });
-    }
     fn expression(
         &mut self,
-        stream: &crate::compile::Stream,
+        id: StmtId,
         expr: &Expr,
         output: ValueAt,
+        root: bool,
     ) -> Option<ValueAt> {
         let expr = unpin(expr);
+        let (stream, stmt, _) = self.exe.statement(id);
         let at = Point {
-            site: stream
-                .source_sites
-                .get(expr.pc as usize)?
-                .as_deref()?
-                .clone(),
+            site: if root {
+                stmt.site.clone()
+            } else {
+                stream
+                    .source_sites
+                    .get(expr.pc as usize)?
+                    .as_deref()?
+                    .clone()
+            },
             phase: Phase::Commit,
         };
         let value = match &expr.kind {
             Expression::Const(value @ (Value::Int(_) | Value::Float(_))) => {
-                self.placement.verify_literal(&at, *value).ok()?;
+                if !root {
+                    self.placement.verify_literal(&at, *value).ok()?;
+                }
                 ValueAt::Literal(*value)
             }
             Expression::Local {
@@ -117,34 +136,24 @@ impl Projection<'_> {
                 scoped: false,
                 ..
             } if self.placement.unshared(local.at) => {
-                self.placement.verify_read(&at, local.at).ok()?;
+                if !root {
+                    self.placement.verify_read(&at, local.at).ok()?;
+                }
                 self.environment
                     .get(&local.at)
                     .copied()
                     .unwrap_or(ValueAt::Entry(local.at))
             }
-            Expression::Operator {
-                lib,
-                invoke: None,
-                args,
-                ..
-            } => {
-                let function = self.exe.lib(*lib);
-                if !matches!(function.run, LibRun::Native { body: None, .. })
-                    || function.limit.is_some()
-                    || function.shares_params
-                    || function.arity != args.len()
-                    || function.specialization.prepared.as_ref()?.0.depth() != 0
-                    || function.specialization.resource
-                        != room::CallSource::Native(function.specialization.function)
-                {
+            Expression::Operator { lib, args, .. }
+                if matches!(self.exe.lib(*lib).run, LibRun::Native { body: None, .. }) =>
+            {
+                if root {
                     return None;
                 }
                 let arguments = args
                     .iter()
-                    .map(|arg| self.expression(stream, arg, ValueAt::Scale))
+                    .map(|arg| self.expression(id, arg, ValueAt::Scale, false))
                     .collect::<Option<Box<[_]>>>()?;
-                self.depth = self.depth.max(u64::from(function.operation()));
                 self.natives.push(Native {
                     at: at.clone(),
                     lib: *lib,
@@ -153,15 +162,68 @@ impl Projection<'_> {
                 });
                 output
             }
+            Expression::Operator { args, .. } | Expression::Call { args, .. } => {
+                let arguments = if root {
+                    args.iter()
+                        .map(|arg| match &unpin(arg).kind {
+                            Expression::Const(value @ (Value::Int(_) | Value::Float(_))) => {
+                                Some(ValueAt::Literal(*value))
+                            }
+                            Expression::Local {
+                                local,
+                                scoped: false,
+                                ..
+                            } if self.placement.unshared(local.at) => Some(
+                                self.environment
+                                    .get(&local.at)
+                                    .copied()
+                                    .unwrap_or(ValueAt::Entry(local.at)),
+                            ),
+                            _ => None,
+                        })
+                        .collect::<Option<Box<[_]>>>()?
+                } else {
+                    args.iter()
+                        .map(|arg| self.expression(id, arg, ValueAt::Scale, false))
+                        .collect::<Option<Box<[_]>>>()?
+                };
+                let pc = if root { stmt.ops.start } else { expr.pc };
+                let first = (stmt.ops.start..pc)
+                    .rev()
+                    .find(|pc| {
+                        let op = stream.ops[*pc as usize];
+                        !op.kind().in_region() && !matches!(op, lash_kernel_exec::Op::Region { .. })
+                    })
+                    .map_or(stmt.ops.start, |pc| pc + 1);
+                let call = Arc::new(
+                    VerifiedCall::compile_from(self.exe, self.placement.code(), id, pc, first)
+                        .ok()?,
+                );
+                let library = match call.source().owner {
+                    lash_kernel_doc::constant_pool::PoolOwner::Function(function) => {
+                        self.exe.library_lib(&function)
+                    }
+                    _ => None,
+                };
+                self.calls.push(Call {
+                    call,
+                    arguments,
+                    root,
+                    result: output,
+                    library,
+                });
+                output
+            }
             _ => return None,
         };
-        self.event(at.clone());
-        self.results.push(ResultFact {
-            at,
-            value,
-            fact: usize::MAX,
-        });
+        self.results.insert(at, value);
         Some(value)
+    }
+}
+fn owner_slot(source: &room::Source, owner: &room::Owner) -> Option<Slot> {
+    match source.owner_slots().ok()?.root(owner, TaskId::MAIN, 0)? {
+        logical::Owner::Value { slot, .. } => Some(slot),
+        _ => None,
     }
 }
 impl Proof {
@@ -174,38 +236,18 @@ impl Proof {
         let StatementKind::While { cond, body, .. } = &statement.kind else {
             return None;
         };
-        let (stream, stmt, _) = exe.statement(statement.id);
-        let source = placement.source();
         let mut projection = Projection {
             exe,
             placement: &placement,
             environment: BTreeMap::new(),
-            results: Vec::new(),
+            results: BTreeMap::new(),
             natives: Vec::new(),
-            selected: Vec::new(),
-            depth: 0,
+            calls: Vec::new(),
         };
-        projection.expression(stream, cond, ValueAt::Test)?;
-        projection.event(Point {
-            site: stmt.site.clone(),
-            phase: Phase::Test,
-        });
-        projection.selected.push(Selection::Branch {
-            at: stmt.site.clone(),
-            taken: true,
-        });
-        let body_site = stmt.site.child(1);
-        projection.event(Point {
-            site: body_site.clone(),
-            phase: Phase::Enter,
-        });
-        let crate::compile::Form::While { test, .. } = stmt.form else {
-            return None;
-        };
-        let mut charges =
-            vec![ChargeProgram::compile(exe, placement.code(), statement.id, test).ok()?];
+        projection.expression(statement.id, cond, ValueAt::Test, false)?;
         for statement in &body.statements {
             let (at, _, expr) = write(statement)?;
+            facts::target(&placement, exe, statement.id, at)?;
             let output = if at == targets.counter {
                 ValueAt::Next
             } else if Some(at) == targets.before {
@@ -217,87 +259,107 @@ impl Proof {
             } else {
                 return None;
             };
-            let (stream, stmt, _) = exe.statement(statement.id);
-            let commit = Point {
-                site: stmt.site.clone(),
-                phase: Phase::Commit,
-            };
-            let event = source.compile_event(&commit, ExitKind::Normal).ok()?;
-            let mut owner = event.events().next()?.output.clone();
-            if owner.is_none() {
-                let mut node = lash_kernel_doc::Node::Block(&source.body);
-                for index in &stmt.site.path[source.site.path.len()..] {
-                    node = *node.children().get(*index as usize)?;
-                }
-                let lash_kernel_doc::Node::Stmt(lash_kernel_doc::Stmt::Assign {
-                    place: lash_kernel_doc::Place::Variable(name),
-                    ..
-                }) = node
-                else {
-                    return None;
-                };
-                owner = Some(room::Owner::Visible {
-                    at: stmt.site.clone(),
-                    name: name.clone(),
-                });
-            }
-            let lash_kernel_state::kernel_internals::logical::Owner::Value { slot, .. } = source
-                .owner_slots()
-                .ok()?
-                .root(&owner?, lash_kernel_doc::TaskId::MAIN, 0)?
-            else {
-                return None;
-            };
-            if placement.physical(slot) != Some(at) || !placement.unshared(at) {
-                return None;
-            }
-            let value = projection.expression(stream, expr, output)?;
+            let value =
+                projection.expression(statement.id, expr, output, statement.root.is_some())?;
             projection.environment.insert(at, value);
-            projection.event(Point {
-                site: stmt.site.clone(),
-                phase: Phase::Commit,
-            });
-            charges
-                .push(ChargeProgram::compile(exe, placement.code(), statement.id, stmt.ops).ok()?);
         }
-        let first = projection.results.first()?.at.clone();
-        let through = Point {
-            site: body_site,
-            phase: Phase::Leave,
-        };
-        projection.event(through.clone());
-        let interval = source
-            .compile_between(
-                &first,
-                &through,
-                &projection.selected,
-                projection.selected.len(),
-            )
-            .ok()?;
-        let recurrence = Recurrence::compile(source, interval, stmt.site.clone()).ok()?;
-        let mut canonical = recurrence.region().results();
-        for result in &mut projection.results {
-            let (point, fact) = canonical.next()?;
-            if *point != result.at {
-                return None;
+        let descriptors: Vec<_> = projection
+            .calls
+            .iter()
+            .map(|call| Arc::clone(&call.call))
+            .collect();
+        let attempt =
+            VerifiedIteration::compile_loop(exe, placement.code(), statement.id, &descriptors);
+        let iteration = attempt.ok()?;
+        let source = iteration.source();
+        let first = iteration.interval().events().next()?.point.clone();
+        let through = iteration.interval().events().last()?.point.clone();
+        let mut scalars = Vec::new();
+        let mut roles = Vec::new();
+        let mut steps = Vec::new();
+        let mut live: BTreeMap<_, _> = iteration
+            .entries()
+            .iter()
+            .map(|slot| Some((*slot, ValueAt::Entry(placement.physical(*slot)?))))
+            .collect::<Option<_>>()?;
+        let mut regions = iteration.scalars().enumerate().peekable();
+        let mut calls = projection.calls.iter().enumerate().peekable();
+        for event in iteration.interval().events() {
+            if let Some((index, call)) = calls.peek()
+                && call.call.at() == &event.point
+            {
+                let mut required = BTreeMap::new();
+                for (arg, slot) in call.arguments.iter().zip(call.call.scope_roles()) {
+                    if call.root {
+                        required.insert(slot, *arg);
+                    }
+                }
+                for slot in call.call.scope_roles() {
+                    if let std::collections::btree_map::Entry::Vacant(entry) = required.entry(slot)
+                    {
+                        entry.insert(*live.get(&slot)?);
+                    }
+                }
+                // Root atom values are authenticated by the call descriptor;
+                // nested argument roles already belong to the scalar prefix.
+                let argument_slots: Vec<_> =
+                    call.call.scope_roles().take(call.arguments.len()).collect();
+                for slot in argument_slots {
+                    live.remove(&slot);
+                }
+                live.insert(
+                    owner_slot(source, &room::Owner::Operand(call.call.at().site.clone()))?,
+                    call.result,
+                );
+                roles.push(required.into_iter().collect::<Vec<_>>().into_boxed_slice());
+                steps.push(Step::Call(*index));
+                calls.next();
+            } else if let Some((index, region)) = regions.peek()
+                && region.interval().events().next()?.point == event.point
+            {
+                let mut values = vec![ValueAt::Literal(Value::Null); region.fact_count()];
+                for (slot, fact) in region.entries() {
+                    values[fact.index()] = *live.get(&slot)?;
+                }
+                for (at, fact) in region.results() {
+                    values[fact.index()] = *projection.results.get(at)?;
+                }
+                let natives = region
+                    .interval()
+                    .events()
+                    .flat_map(|event| {
+                        event.peak.measures().filter_map(|measure| match measure {
+                            room::Measure::CallPeak {
+                                callee: room::CallSource::Native(_),
+                                ..
+                            } => projection
+                                .natives
+                                .iter()
+                                .position(|native| native.at == event.point),
+                            _ => None,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                for (slot, _) in region.entries() {
+                    live.remove(&slot);
+                }
+                let last = region.interval().events().last()?;
+                for (slot, fact) in region.recovery_after(&last.point)? {
+                    live.insert(*slot, values[fact.index()]);
+                }
+                scalars.push(ScalarFacts {
+                    values: values.into(),
+                    natives: natives.into(),
+                });
+                steps.push(Step::Scalar(*index));
+                regions.next();
             }
-            result.fact = fact.index();
         }
-        if canonical.next().is_some() {
+        if regions.next().is_some() || calls.next().is_some() {
             return None;
         }
-        drop(canonical);
-        let entries = recurrence
-            .region()
-            .entries()
-            .map(|(slot, fact)| Some((placement.physical(slot)?, fact.index())))
-            .collect::<Option<Box<[_]>>>()?;
-        let Projection {
-            results,
-            natives,
-            depth,
-            ..
-        } = projection;
+        drop(regions);
+        drop(calls);
         use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
         let mut encoding = TokenWriter::new();
         encoding.seq(3);
@@ -305,26 +367,29 @@ impl Proof {
         first.site.encode(&mut encoding);
         through.site.encode(&mut encoding);
         let recovery = logical_digest(&encoding.into_bytes());
+        let Projection { calls, natives, .. } = projection;
         Some(Self {
-            recovery,
             placement,
-            recurrence,
-            results: results.into(),
+            recurrence: Recurrence { iteration },
+            scalars: scalars.into(),
+            calls: calls.into(),
             natives: natives.into(),
-            charges: charges.into(),
+            roles: roles.into(),
+            steps: steps.into(),
             first,
             through,
-            depth,
-            entries,
+            recovery,
         })
     }
     pub(in crate::machine::islands) fn verify(
         &self,
         exe: &Executable,
     ) -> Result<(), room::Refused> {
-        self.recurrence.region().verify()?;
-        for charge in &self.charges {
-            charge.verify(exe, self.placement.code())?;
+        for region in self.recurrence.iteration.scalars() {
+            region.verify()?;
+        }
+        for call in &self.calls {
+            call.call.verify(exe)?;
         }
         Ok(())
     }
@@ -339,21 +404,39 @@ impl Proof {
         self.placement
             .capture(code, invocation, ledger, heap, slots)
     }
-    pub(in crate::machine::islands) fn entry_values(
+    pub(in crate::machine::islands) fn scope<'ledger>(
         &self,
+        exe: &Executable,
+        ledger: &'ledger Ledger,
+        invocation: &Invocation,
         activation: &DenseActivation<'_>,
-    ) -> Option<Vec<Value>> {
-        self.recurrence.entry_values(activation)
+        capacity: u64,
+    ) -> Option<Option<CallScope<'ledger>>> {
+        let Some(call) = self.calls.first() else {
+            return Some(None);
+        };
+        let logical::Owner::Frame { task, .. } = invocation.frame() else {
+            return None;
+        };
+        let capacity = capacity
+            .saturating_mul(self.calls.len() as u64)
+            .min(u64::MAX - ledger.prospective_invocation(task).id());
+        let range = ledger.reserve_invocations(task, capacity)?;
+        Some(Some(call.call.bind_scope(
+            exe,
+            call.call.callee(),
+            ledger,
+            invocation,
+            activation,
+            range,
+        )?))
     }
-    fn value(&self, at: ValueAt, values: &[Value], actual: &Values) -> Option<Value> {
+    fn value(&self, at: ValueAt, entry: &[(Slot, Value)], actual: &Values) -> Option<Value> {
         match at {
-            ValueAt::Entry(at) => self
-                .entries
-                .iter()
-                .find(|(physical, _)| *physical == at)
-                .and_then(|(_, fact)| values.get(*fact))
-                .copied(),
-            ValueAt::Literal(value) => Some(value),
+            ValueAt::Entry(at) => entry.iter().find_map(|(slot, value)| {
+                (self.placement.physical(*slot) == Some(at)).then_some(*value)
+            }),
+            ValueAt::Literal(v) => Some(v),
             ValueAt::Test => Some(Value::Bool(actual.test)),
             ValueAt::Before => actual.before,
             ValueAt::Scale => actual.scale,
@@ -361,123 +444,5 @@ impl Proof {
             ValueAt::Next => actual.next,
             ValueAt::After => actual.after,
         }
-    }
-    pub(in crate::machine::islands) fn evaluate<'a>(
-        &'a self,
-        exe: &Executable,
-        arena: &Arena,
-        actual: &Values,
-        values: &mut [Value],
-    ) -> Result<Option<Evaluated<'a>>, HeapFault> {
-        for result in &self.results {
-            let Some(value) = self.value(result.value, values, actual) else {
-                return Ok(None);
-            };
-            values[result.fact] = value;
-        }
-        let mut facts = Vec::with_capacity(self.natives.len());
-        for native in &self.natives {
-            let Some(arguments) = native
-                .arguments
-                .iter()
-                .map(|input| self.value(*input, values, actual))
-                .collect::<Option<Vec<_>>>()
-            else {
-                return Ok(None);
-            };
-            let Some(result) = self.value(native.result, values, actual) else {
-                return Ok(None);
-            };
-            let function = exe.lib(native.lib);
-            if !function
-                .header
-                .signature
-                .params
-                .iter()
-                .zip(&arguments)
-                .all(|(param, value)| {
-                    (param.optional && matches!(value, Value::Absent))
-                        || crate::compile::import_result_fits(&param.ty, *value)
-                })
-                || !crate::compile::import_result_fits(&function.header.signature.result, result)
-                || function
-                    .specialization
-                    .prepared
-                    .as_ref()
-                    .and_then(|(entry, _)| entry.call(&arguments))
-                    .is_none_or(|answer| !answer.same(&result))
-            {
-                return Ok(None);
-            }
-            let LibRun::Native {
-                native: implementation,
-                ..
-            } = &function.run
-            else {
-                return Ok(None);
-            };
-            let contract = match implementation.resource_contract(lash_kernel_doc::Args::new(
-                &arguments,
-                arena.objects(),
-                &arena.semantics(),
-            )) {
-                Ok(Some(contract)) => contract,
-                // Preparation is speculative. The source path owns any error
-                // and its paid prefix, after admitted iterations publish at
-                // their exact backedge.
-                _ => return Ok(None),
-            };
-            if contract
-                != lash_kernel_doc::NativeResourceContract::value(
-                    lash_kernel_doc::NativeResourceExit::Returned,
-                    arena.logical_local(&result)?,
-                    lash_kernel_doc::NativeResourceOrigin::Immutable,
-                )
-            {
-                return Ok(None);
-            }
-            let Some(room) = room::CheckedRoom::native(function.specialization.function, &contract)
-            else {
-                return Ok(None);
-            };
-            facts.push((native, arguments, result, Some(room)));
-        }
-        let mut calls = Vec::new();
-        for (point, callee) in self.recurrence.calls() {
-            let Some((_, _, _, room)) = facts.iter_mut().find(|(native, ..)| {
-                native.at == *point
-                    && callee
-                        == room::CallSource::Native(exe.lib(native.lib).specialization.function)
-            }) else {
-                return Ok(None);
-            };
-            let Some(room) = room.take() else {
-                return Ok(None);
-            };
-            calls.push(room);
-        }
-        let mut debts = Vec::with_capacity(self.charges.len());
-        for program in &self.charges {
-            let formulas = program
-                .formulas()
-                .map(|(point, function, count)| {
-                    let (_, arguments, result, _) =
-                        facts.iter().find(|(native, arguments, ..)| {
-                            native.at == *point
-                                && exe.lib(native.lib).specialization.function == function
-                                && arguments.len() == count
-                        })?;
-                    Some(FormulaValues {
-                        arguments,
-                        result: *result,
-                    })
-                })
-                .collect::<Option<Vec<_>>>();
-            let Some(debt) = formulas.and_then(|values| program.bind(&values)) else {
-                return Ok(None);
-            };
-            debts.push(StatementDebt::Scalar(debt));
-        }
-        Ok(Some(Evaluated { calls, debts }))
     }
 }

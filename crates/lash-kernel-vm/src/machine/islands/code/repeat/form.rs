@@ -37,10 +37,8 @@ impl Match<'_> {
     }
 
     fn binary(&self, expr: &Expr, comparison: bool) -> Option<Binary> {
-        let Expression::Operator { args, .. } = &unpin(expr).kind else {
-            return None;
-        };
-        let [a, b] = &**args else {
+        let args = arguments(expr)?;
+        let [a, b] = args else {
             return None;
         };
         Some(Binary {
@@ -54,9 +52,7 @@ impl Match<'_> {
         let unary = if local(value) == Some(from) {
             None
         } else {
-            let Expression::Operator { args, .. } = &value.kind else {
-                return None;
-            };
+            let args = arguments(value)?;
             if args.len() != 1 || local(&args[0]) != Some(from) {
                 return None;
             }
@@ -73,7 +69,6 @@ impl Match<'_> {
 impl Repeat {
     pub(in crate::machine::islands) fn of(
         statement: &Statement,
-        plan: &LoopPlan,
         shared: &[bool],
         exe: &Executable,
         placement: std::sync::Arc<crate::compile::room::placement::BindingPlacement>,
@@ -81,10 +76,7 @@ impl Repeat {
         let StatementKind::While { cond, body, .. } = &statement.kind else {
             return None;
         };
-        let Head::While(_) = &plan.head else {
-            return None;
-        };
-        if body.statements.len() != plan.body.steps.len() || body.statements.len() > 4 {
+        if body.statements.len() > 4 {
             return None;
         }
         let writes = body
@@ -100,9 +92,7 @@ impl Repeat {
         {
             return None;
         }
-        let Expression::Operator { args, .. } = &unpin(cond).kind else {
-            return None;
-        };
+        let args = arguments(cond)?;
         let candidates: Vec<_> = args
             .iter()
             .filter_map(local)
@@ -113,22 +103,7 @@ impl Repeat {
         };
         let counter = *counter;
         let update_at = writes.iter().position(|(at, _, _)| *at == counter)?;
-        if writes[update_at].1 || plan.body.declares.contains(&counter) {
-            return None;
-        }
-        let sources = plan
-            .body
-            .steps
-            .iter()
-            .map(summary)
-            .collect::<Option<Vec<_>>>()?;
-        if sources
-            .iter()
-            .zip(&writes)
-            .any(|((source, bind), (at, binding, _))| {
-                bind != binding || source.write != Some(RegionSlot::Frame(*at))
-            })
-        {
+        if writes[update_at].1 || body.declares.contains(&counter) {
             return None;
         }
         let mut cx = Match {
@@ -163,10 +138,8 @@ impl Repeat {
             }
             let (at, _, expr) = writes[reduction_at];
             cx.accumulator = Some(at);
-            let Expression::Operator { args, .. } = &expr.kind else {
-                return None;
-            };
-            let [a, b] = &**args else {
+            let args = arguments(expr)?;
+            let [a, b] = args else {
                 return None;
             };
             let reverse = local(b) == Some(at);
@@ -230,7 +203,7 @@ impl Repeat {
         };
         let proof = proof::Proof::compile(
             exe,
-            placement,
+            std::sync::Arc::clone(&placement),
             statement,
             proof::Targets {
                 counter,
@@ -240,8 +213,8 @@ impl Repeat {
             },
         )?;
         let run = Self {
-            source_room: std::sync::Arc::clone(&plan.source_room),
-            source_site: plan.source_site.clone(),
+            source_room: std::sync::Arc::clone(placement.source()),
+            source_site: exe.stmt(statement.id).site.clone(),
             proof,
             test,
             before,
@@ -250,6 +223,6 @@ impl Repeat {
             update,
             after,
         };
-        (run.verify(statement, plan, exe, shared) && run.proof.verify(exe).is_ok()).then_some(run)
+        (run.verify(statement, exe, shared) && run.proof.verify(exe).is_ok()).then_some(run)
     }
 }

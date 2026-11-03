@@ -410,7 +410,7 @@ pub(crate) fn answer_depth(exe: &Executable, lib: LibId) -> Option<u32> {
 /// A whole typed scalar loop, compiled from its verified ordered facts.
 pub(crate) struct RepeatSite {
     pub(super) run: super::code::repeat::Repeat,
-    pub(super) iteration_max: u64,
+    pub(super) iteration_max: Option<u64>,
 }
 
 impl Compiled {
@@ -538,15 +538,9 @@ impl Compiled {
         let mut checked = 0;
         for header in &self.code.sites.header {
             if let Some(repeat) = &header.repeat {
-                let plan = exe
-                    .islands
-                    .scalar
-                    .iter()
-                    .find(|p| p.stmt == header.id)
-                    .ok_or(crate::compile::room::Refused::Source)?;
                 let statement = statement(&owner.body, header.id)
                     .ok_or(crate::compile::room::Refused::Source)?;
-                if !repeat.run.verify(statement, plan, exe, &owner.shared) {
+                if !repeat.run.verify(statement, exe, &owner.shared) {
                     return Err(crate::compile::room::Refused::Source);
                 }
                 repeat.run.source_room.verify()?;

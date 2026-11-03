@@ -1388,6 +1388,8 @@ pub(super) fn packet_modes(
 
 #[path = "layout/guarded_call_compiler.rs"]
 mod guarded_call_compiler;
+#[path = "layout/repeated_calls.rs"]
+mod repeated_calls;
 
 /// K-CHG-001/007: real typed iterations retain the header's unpaid tail.
 /// Body-local values leave no roots in the parked continuation.
@@ -1401,6 +1403,7 @@ fn typed_repeat_agrees() {
             *seen.borrow_mut().entry(event).or_default() += count;
         }
     };
+    repeated_calls::runtime(&collect);
     for body in [
         "let i = -2 let before = 99 let after = 99 while flat.lt(i, 3) { set before = i set i = flat.add(i, 1) set after = i } do perform 0((i, before, after)) as Any return (i, before, after)",
         "let i = 1 let before = 0 while flat.lt(i, 20) { set before = i set i = flat.mul(i, 2) } return (i, before)",

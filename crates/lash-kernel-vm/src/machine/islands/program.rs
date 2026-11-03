@@ -557,23 +557,21 @@ impl<'e> Build<'e> {
                     texts,
                 };
                 let repeat = self.fused.then_some(()).and_then(|_| {
-                    self.exe
-                        .islands
-                        .scalar
-                        .iter()
-                        .find(|plan| plan.stmt == statement.id)
-                        .and_then(|plan| {
-                            Some(Box::new(RepeatSite {
-                                run: super::super::code::repeat::Repeat::of(
-                                    statement,
-                                    plan,
-                                    self.shared,
-                                    self.exe,
-                                    std::sync::Arc::clone(self.placement.as_ref()?),
-                                )?,
-                                iteration_max: plan.iteration_max,
-                            }))
-                        })
+                    Some(Box::new(RepeatSite {
+                        run: super::super::code::repeat::Repeat::of(
+                            statement,
+                            self.shared,
+                            self.exe,
+                            std::sync::Arc::clone(self.placement.as_ref()?),
+                        )?,
+                        iteration_max: self
+                            .exe
+                            .islands
+                            .scalar
+                            .iter()
+                            .find(|plan| plan.stmt == statement.id && !plan.allocates)
+                            .map(|plan| plan.iteration_max),
+                    }))
                 });
                 self.ops[header].op = Op::Header {
                     repeat,

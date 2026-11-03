@@ -37,10 +37,10 @@ impl Roles<'_> {
     }
 
     fn binary(&self, binary: &Binary, source: &Expr, exe: &Executable, comparison: bool) -> bool {
-        let Expression::Operator { args, .. } = &unpin(source).kind else {
+        let Some(args) = arguments(source) else {
             return false;
         };
-        let [left, right] = &**args else {
+        let [left, right] = args else {
             return false;
         };
         binary.scalar.verifies(source, exe, comparison)
@@ -52,7 +52,7 @@ impl Roles<'_> {
         match &copy.unary {
             None => self.input(Input::Counter, source),
             Some(unary) => {
-                let Expression::Operator { args, .. } = &unpin(source).kind else {
+                let Some(args) = arguments(source) else {
                     return false;
                 };
                 args.len() == 1
@@ -68,16 +68,12 @@ impl Scalar {
         let Some(canonical) = Self::of(unpin(source), exe, comparison) else {
             return false;
         };
-        let (a, b) = (&self.site, &canonical.site);
-        a.lib == b.lib
-            && a.checked == b.checked
-            && a.pc == b.pc
-            && a.reg == b.reg
-            && a.close == b.close
-            && a.fixed == b.fixed
-            && a.counted.is_none()
-            && a.act.is_none()
-            && a.root.is_none()
+        self.pair.map(|p| (p.ints, p.floats)) == canonical.pair.map(|p| (p.ints, p.floats))
+            && self.site.as_ref().map(|s| (s.lib, s.pc, s.reg, s.checked))
+                == canonical
+                    .site
+                    .as_ref()
+                    .map(|s| (s.lib, s.pc, s.reg, s.checked))
     }
 }
 
@@ -94,30 +90,23 @@ impl Repeat {
     pub(in crate::machine::islands) fn verify(
         &self,
         statement: &Statement,
-        plan: &LoopPlan,
         exe: &Executable,
         shared: &[bool],
     ) -> bool {
         let StatementKind::While { cond, body, .. } = &statement.kind else {
             return false;
         };
-        if !std::sync::Arc::ptr_eq(&self.source_room, &plan.source_room)
-            || self.source_site != plan.source_site
-            || plan.stmt != statement.id
-            || !matches!(plan.head, Head::While(_))
+        if !std::sync::Arc::ptr_eq(&self.source_room, self.proof.recurrence.iteration.source())
+            || self.source_site != exe.stmt(statement.id).site
         {
             return false;
         }
-        let written: Vec<_> = plan
-            .body
-            .steps
+        let written: Vec<_> = body
+            .statements
             .iter()
-            .filter_map(|step| match summary(step)?.0.write? {
-                RegionSlot::Frame(at) => Some(at),
-                _ => None,
-            })
+            .filter_map(|s| write(s).map(|(at, _, _)| at))
             .collect();
-        if written.len() != plan.body.steps.len()
+        if written.len() != body.statements.len()
             || written.iter().enumerate().any(|(i, at)| {
                 written[..i].contains(at) || shared.get(*at as usize) != Some(&false)
             })
@@ -150,10 +139,10 @@ impl Repeat {
             let Some(source) = next(&mut statements, reduce.at, false) else {
                 return false;
             };
-            let Expression::Operator { args, .. } = &unpin(source).kind else {
+            let Some(args) = arguments(source) else {
                 return false;
             };
-            let [left, right] = &**args else {
+            let [left, right] = args else {
                 return false;
             };
             roles.accumulator = Some(reduce.at);

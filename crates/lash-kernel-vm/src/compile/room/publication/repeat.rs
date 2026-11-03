@@ -26,6 +26,12 @@ impl<'a> SourceResources<'a> {
     }
 }
 impl RepeatResources<'_> {
+    pub(crate) fn capacity(&self) -> u64 {
+        self.resources
+            .bound
+            .min(self.resources.slice.saturating_sub(1))
+            .saturating_sub(*self.resources.charged)
+    }
     pub(crate) fn admit(
         &mut self,
         debts: &[StatementDebt<'_>],
