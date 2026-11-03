@@ -275,7 +275,7 @@ impl VerifiedIteration {
                 }
                 Piece::Call { call, atoms } => {
                     let candidate = calls[call_index];
-                    if !candidate.current(ledger)
+                    if !candidate.current(ledger, arena)
                         || !candidate.matches_call(call, caller)
                         || calls.first().is_some_and(|first| {
                             !candidate.same_scope(first)
@@ -310,6 +310,7 @@ impl VerifiedIteration {
                     let envelope = candidate.room();
                     let Some(checked) = envelope.checked(
                         ledger,
+                        arena,
                         &self.source,
                         &call.at,
                         caller,

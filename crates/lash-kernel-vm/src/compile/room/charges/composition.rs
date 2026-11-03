@@ -31,10 +31,30 @@ impl ComposedCharges {
         selected: &[super::super::Selection],
     ) -> Result<Self, Refused> {
         let pc = range.end().checked_sub(1).ok_or(Refused::Path)?;
-        if super::super::region::calls::resolved(exe, caller, statement, pc)?.code != callee {
-            return Err(Refused::Source);
+        let (stream, _, _) = exe.statement(statement);
+        // One composed debt owns one entered body. Earlier guest calls need
+        // their own source-local composition, never only their fixed closes.
+        for prior in range.start..pc {
+            let op = *stream.ops.get(prior as usize).ok_or(Refused::Path)?;
+            if matches!(op, Op::Region { .. }) {
+                continue;
+            }
+            let site = stream
+                .source_sites
+                .get(prior as usize)
+                .and_then(Option::as_deref)
+                .ok_or(Refused::Source)?;
+            if source_point(stream, site, op).phase == super::super::Phase::Enter {
+                return Err(Refused::Source);
+            }
         }
-        let caller_program = ChargeProgram::compile(exe, caller, statement, range)?;
+        let resolved =
+            super::super::region::calls::target::resolve(exe, caller, statement, pc, Some(callee))?;
+        let caller_program = if resolved.dynamic {
+            ChargeProgram::compile_callback(exe, caller, statement, range, callee)?
+        } else {
+            ChargeProgram::compile(exe, caller, statement, range)?
+        };
         let body = exe.code(callee);
         let mut programs = Vec::new();
         body_programs(exe, callee, body.body, selected, &mut programs)?;

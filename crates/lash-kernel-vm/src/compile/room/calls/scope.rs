@@ -14,6 +14,14 @@ pub(crate) struct CallScope<'ledger> {
     caller: logical::Invocation,
     range: logical::InvocationRange,
     identity: Rc<Cell<u64>>,
+    target: Option<Rc<BoundCallable>>,
+}
+
+struct BoundCallable {
+    value: Value,
+    code: CodeId,
+    identity: lash_kernel_value::CallableId,
+    dependencies: logical::Dependencies,
 }
 
 /// The actual evaluated source call, including its saved caller operands.
@@ -25,6 +33,9 @@ pub(crate) struct ScopedCall<'call> {
     caller: logical::Invocation,
     invocation: logical::Invocation,
     stamp: logical::Stamp,
+    dependencies: logical::Dependencies,
+    callable: Option<(Slot, Value, lash_kernel_value::CallableId)>,
+    target: Option<Rc<BoundCallable>>,
     caller_values: Vec<(Slot, Value)>,
     evaluated: EvaluatedArguments,
 }
@@ -33,6 +44,62 @@ impl VerifiedCall {
     /// The activation and range authenticate once while the scope's immutable
     /// ledger borrow excludes publications, handoffs and normalization.
     pub(crate) fn bind_scope<'ledger>(
+        &self,
+        exe: &Executable,
+        resolved_code: CodeId,
+        ledger: &'ledger Ledger,
+        caller: &logical::Invocation,
+        activation: &DenseActivation<'_>,
+        range: logical::InvocationRange,
+    ) -> Option<CallScope<'ledger>> {
+        if self.callable.is_some() {
+            return None;
+        }
+        self.scope_entry(exe, resolved_code, ledger, caller, activation, range)
+    }
+
+    /// The actual callable and defining origin authenticate once for this
+    /// scope. Iterations only match that identity and changing scalar facts.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one source activation, actual callable and affine reservation"
+    )]
+    pub(crate) fn bind_callback_scope<'ledger>(
+        &self,
+        exe: &Executable,
+        ledger: &'ledger Ledger,
+        arena: &Arena,
+        caller: &logical::Invocation,
+        activation: &DenseActivation<'_>,
+        range: logical::InvocationRange,
+        callable: Value,
+    ) -> Option<CallScope<'ledger>> {
+        self.callable?;
+        let mut handles = vec![callable.handle()?];
+        let actual = match activation.state(self.callable_origin?)? {
+            crate::machine::SlotState::Value(value) => value,
+            crate::machine::SlotState::Cell(cell) => {
+                handles.push(cell);
+                arena.cell(cell).ok()?
+            }
+            crate::machine::SlotState::Empty => return None,
+        };
+        if !actual.same(&callable) {
+            return None;
+        }
+        let identity = self.authenticate_callable(exe, arena, callable)?;
+        let dependencies = logical::Dependencies::capture(ledger, arena, &handles)?;
+        let mut scope = self.scope_entry(exe, self.callee, ledger, caller, activation, range)?;
+        scope.target = Some(Rc::new(BoundCallable {
+            value: callable,
+            code: self.callee,
+            identity,
+            dependencies,
+        }));
+        Some(scope)
+    }
+
+    fn scope_entry<'ledger>(
         &self,
         exe: &Executable,
         resolved_code: CodeId,
@@ -56,6 +123,7 @@ impl VerifiedCall {
             caller: caller.clone(),
             range,
             identity: Rc::new(Cell::new(0)),
+            target: None,
         })
     }
 
@@ -66,6 +134,7 @@ impl VerifiedCall {
             .iter()
             .chain(self.recovery.iter())
             .copied()
+            .chain(self.callable)
     }
 
     /// Bind only changing scalar facts. All source topology was verified at
@@ -85,7 +154,7 @@ impl VerifiedCall {
             || !Arc::ptr_eq(&self.caller_source, &scope.source)
             || offset < scope.identity.get()
             || roles.iter().enumerate().any(|(index, (slot, value))| {
-                !scalar(*value)
+                (self.argument_slots.contains(slot) && !scalar(*value))
                     || roles[..index].iter().any(|(prior, _)| prior == slot)
                     || !self.scope_roles().any(|required| required == *slot)
             })
@@ -102,6 +171,29 @@ impl VerifiedCall {
             roles
                 .iter()
                 .find_map(|(slot, value)| (*slot == required).then_some(*value))
+        };
+        let callable = if let Some(slot) = self.callable {
+            let Some(value) = lookup(slot) else {
+                return Ok(None);
+            };
+            let Some(target) = scope.target.as_ref().filter(|target| {
+                target.code == self.callee
+                    && target.value.same(&value)
+                    && target.dependencies.is_current(scope.ledger, arena)
+            }) else {
+                return Ok(None);
+            };
+            Some((slot, value, target.identity))
+        } else {
+            None
+        };
+        let handles: Vec<_> = roles
+            .iter()
+            .filter_map(|(_, value)| value.handle())
+            .collect();
+        let Some(dependencies) = logical::Dependencies::capture(scope.ledger, arena, &handles)
+        else {
+            return Ok(None);
         };
         let Some(arguments) = self
             .argument_slots
@@ -130,6 +222,9 @@ impl VerifiedCall {
             caller: scope.caller.clone(),
             invocation,
             stamp: scope.ledger.stamp(),
+            dependencies,
+            callable,
+            target: self.callable.and(scope.target.as_ref().map(Rc::clone)),
             caller_values,
             evaluated,
         }))
@@ -171,7 +266,12 @@ impl<'call> ScopedCall<'call> {
     }
     pub(in crate::compile::room) fn checked_room(&self) -> CheckedRoom {
         CheckedRoom {
-            owner: self.call.source.owner,
+            owner: self
+                .callable
+                .as_ref()
+                .map_or(self.call.source.owner, |(_, _, identity)| {
+                    doc::constant_pool::PoolOwner::Function(identity.function)
+                }),
             native: false,
             whole: true,
             native_contract: None,
@@ -196,8 +296,14 @@ impl<'call> ScopedCall<'call> {
             && self.invocation == *invocation
     }
 
-    pub(in crate::compile::room) fn current(&self, ledger: &Ledger) -> bool {
-        ledger.is_current(&self.stamp) && self.offset >= self.identity.get()
+    pub(in crate::compile::room) fn current(&self, ledger: &Ledger, arena: &Arena) -> bool {
+        ledger.is_current(&self.stamp)
+            && self.dependencies.is_current(ledger, arena)
+            && self
+                .target
+                .as_ref()
+                .is_none_or(|target| target.dependencies.is_current(ledger, arena))
+            && self.offset >= self.identity.get()
     }
     pub(super) fn is_next(&self) -> bool {
         self.offset == self.identity.get()
@@ -228,7 +334,9 @@ impl<'call> ScopedCall<'call> {
                     .fact;
                 (*slot, self.evaluated.values[fact.index()])
             });
-        arguments.chain(self.caller_values.iter().copied())
+        arguments
+            .chain(self.caller_values.iter().copied())
+            .chain(self.callable.iter().map(|(slot, value, _)| (*slot, *value)))
     }
     pub(crate) fn result(&self) -> Value {
         self.evaluated.result

@@ -566,6 +566,7 @@ pub(super) fn pure_calls() {
             assert!(
                 room.checked(
                     &ledger,
+                    &arena,
                     source,
                     call.at(),
                     &invocation,
@@ -892,6 +893,7 @@ fn guarded_calls() {
                     assert!(
                         room.checked(
                             &ledger,
+                            &arena,
                             &exe.code(caller.code).source_room,
                             call.at(),
                             &invocation,
@@ -907,6 +909,7 @@ fn guarded_calls() {
                     assert!(
                         room.checked(
                             &ledger,
+                            &arena,
                             &exe.code(caller.code).source_room,
                             call.at(),
                             &invocation,
@@ -918,6 +921,7 @@ fn guarded_calls() {
                     assert!(
                         room.checked(
                             &ledger,
+                            &arena,
                             call.source(),
                             call.at(),
                             &invocation,
@@ -969,6 +973,7 @@ fn guarded_calls() {
                     assert!(
                         room.checked(
                             &ledger,
+                            &arena,
                             &exe.code(caller.code).source_room,
                             call.at(),
                             &invocation,

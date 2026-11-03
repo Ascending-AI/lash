@@ -19,6 +19,7 @@ pub(crate) use returning::ReturnDebt;
 #[derive(Clone, Copy)]
 enum Coverage {
     Span,
+    Callback(compile::CodeId),
     NativeCompletion,
     NativePacket(Option<expr::Close>),
     NativeAfterCloses,
@@ -89,7 +90,7 @@ impl ChargeDebt<'_> {
     /// operation/template depth. Consumers cannot supply those independently.
     pub(crate) fn native_allowance(&self, safe_point: u64) -> Option<crate::admission::Allowance> {
         let strict = match self.program.coverage {
-            Coverage::Span => return None,
+            Coverage::Span | Coverage::Callback(_) => return None,
             Coverage::NativeCompletion | Coverage::ConstructorPacket { .. } => false,
             Coverage::NativePacket(_) | Coverage::NativeAfterCloses | Coverage::EventPacket(_) => {
                 true
@@ -139,10 +140,30 @@ impl ChargeProgram {
         statement: compile::StmtId,
         range: OpRange,
     ) -> Result<Self, Refused> {
+        Self::compile_selected(exe, code, statement, range, None)
+    }
+
+    pub(in crate::compile::room) fn compile_callback(
+        exe: &Executable,
+        code: compile::CodeId,
+        statement: compile::StmtId,
+        range: OpRange,
+        target: compile::CodeId,
+    ) -> Result<Self, Refused> {
+        Self::compile_selected(exe, code, statement, range, Some(target))
+    }
+
+    fn compile_selected(
+        exe: &Executable,
+        code: compile::CodeId,
+        statement: compile::StmtId,
+        range: OpRange,
+        target: Option<compile::CodeId>,
+    ) -> Result<Self, Refused> {
         let source = Arc::clone(&exe.code(code).source_room);
         source.verify()?;
-        let (closes, formulas) = derive(exe, code, statement, range)?;
-        let first = first(exe, code, statement, range)?;
+        let (closes, formulas) = derive_target(exe, code, statement, range, target)?;
+        let first = first_target(exe, code, statement, range, target)?;
         let through = closes.last().ok_or(Refused::Exit)?.at.clone();
         let fixed = closes
             .iter()
@@ -154,7 +175,7 @@ impl ChargeProgram {
             .ok_or(Refused::Facts)?;
         let program = Self {
             source,
-            coverage: Coverage::Span,
+            coverage: target.map_or(Coverage::Span, Coverage::Callback),
             native_depth: None,
             statement,
             range,
@@ -186,6 +207,15 @@ impl ChargeProgram {
                     first(exe, code, self.statement, self.range)?,
                 )
             }
+            Coverage::Callback(target) => {
+                let (closes, formulas) =
+                    derive_target(exe, code, self.statement, self.range, Some(target))?;
+                (
+                    closes,
+                    formulas,
+                    first_target(exe, code, self.statement, self.range, Some(target))?,
+                )
+            }
             Coverage::NativeCompletion => {
                 native_completion::derive(exe, code, self.statement, self.range, None)?
             }
@@ -212,7 +242,7 @@ impl ChargeProgram {
             )?,
         };
         let native_depth = match self.coverage {
-            Coverage::Span => None,
+            Coverage::Span | Coverage::Callback(_) => None,
             Coverage::EventPacket(_) | Coverage::ConstructorPacket { .. } => Some(0),
             Coverage::NativeCompletion => Some(native_completion::depth(
                 exe,
@@ -376,6 +406,16 @@ fn canonical_span(
     statement: compile::StmtId,
     range: OpRange,
 ) -> Result<OpRange, Refused> {
+    canonical_span_target(exe, code, statement, range, None)
+}
+
+fn canonical_span_target(
+    exe: &Executable,
+    code: compile::CodeId,
+    statement: compile::StmtId,
+    range: OpRange,
+    target: Option<compile::CodeId>,
+) -> Result<OpRange, Refused> {
     let (stream, stmt, _) = exe.statement(statement);
     let body = exe.code(code);
     let canonical = match stmt.form {
@@ -403,7 +443,8 @@ fn canonical_span(
             // The action writes register zero through the semantic ABI, not
             // Op::writes. Verify its actual source call and finite rooted
             // continuation, instead of inventing a nested-op location.
-            super::region::calls::resolved(exe, code, statement, stmt.ops.start).is_ok()
+            super::region::calls::target::resolve(exe, code, statement, stmt.ops.start, target)
+                .is_ok()
                 && matches!(
                     stream
                         .ops
@@ -434,7 +475,17 @@ fn first(
     statement: compile::StmtId,
     range: OpRange,
 ) -> Result<Point, Refused> {
-    let canonical = canonical_span(exe, code, statement, range)?;
+    first_target(exe, code, statement, range, None)
+}
+
+fn first_target(
+    exe: &Executable,
+    code: compile::CodeId,
+    statement: compile::StmtId,
+    range: OpRange,
+    target: Option<compile::CodeId>,
+) -> Result<Point, Refused> {
+    let canonical = canonical_span_target(exe, code, statement, range, target)?;
     let (stream, stmt, _) = exe.statement(statement);
     let source = &exe.code(code).source_room;
     if range.start == canonical.start {
@@ -467,8 +518,19 @@ fn derive(
     statement: compile::StmtId,
     range: OpRange,
 ) -> Result<(Vec<Close>, Vec<Formula>), Refused> {
+    derive_target(exe, code, statement, range, None)
+}
+
+fn derive_target(
+    exe: &Executable,
+    code: compile::CodeId,
+    statement: compile::StmtId,
+    range: OpRange,
+    target: Option<compile::CodeId>,
+) -> Result<(Vec<Close>, Vec<Formula>), Refused> {
     let (stream, stmt, _) = exe.statement(statement);
-    let canonical = canonical_span(exe, code, statement, range)?;
+    let canonical = canonical_span_target(exe, code, statement, range, target)?;
+    let caller_code = code;
     let code = exe.code(code);
     let mut closes = Vec::new();
     let mut formulas = Vec::new();
@@ -579,6 +641,26 @@ fn derive(
                             )?
                         }
                         compile::Callee::Declared(_) => {}
+                        compile::Callee::Value(_) => {
+                            let resolved = super::region::calls::target::resolve(
+                                exe,
+                                caller_code,
+                                statement,
+                                pc,
+                                target,
+                            )?;
+                            if let Some(lib) = resolved.library {
+                                completion(
+                                    exe,
+                                    lib,
+                                    args.len(),
+                                    source_point(stream, site, op),
+                                    &mut formulas,
+                                    &mut tape,
+                                    code.charging,
+                                )?;
+                            }
+                        }
                         _ => return Err(Refused::Source),
                     }
                 }
@@ -594,6 +676,28 @@ fn derive(
                             &mut tape,
                             code.charging,
                         )?;
+                    } else if matches!(
+                        nested.kind,
+                        compile::NestedKind::Call(compile::NestedCallee::Read)
+                    ) {
+                        let resolved = super::region::calls::target::resolve(
+                            exe,
+                            caller_code,
+                            statement,
+                            pc,
+                            target,
+                        )?;
+                        if let Some(lib) = resolved.library {
+                            completion(
+                                exe,
+                                lib,
+                                args.len.checked_sub(1).ok_or(Refused::Source)? as usize,
+                                source_point(stream, site, op),
+                                &mut formulas,
+                                &mut tape,
+                                code.charging,
+                            )?;
+                        }
                     } else if !matches!(
                         nested.kind,
                         compile::NestedKind::Call(compile::NestedCallee::Declared(_))

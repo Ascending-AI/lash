@@ -438,12 +438,13 @@ impl<'call> SourceCallRoom<'call> {
     pub(crate) fn checked(
         &self,
         ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
+        arena: &lash_kernel_state::arena::Arena,
         caller_source: &Arc<Source>,
         at: &Point,
         caller: &lash_kernel_state::kernel_internals::logical::Invocation,
         invocation: &lash_kernel_state::kernel_internals::logical::Invocation,
     ) -> Option<&CheckedRoom> {
-        (self.call.current(ledger)
+        (self.call.current(ledger, arena)
             && self
                 .call
                 .authenticates_source(caller_source, at, caller, invocation))

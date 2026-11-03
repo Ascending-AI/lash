@@ -10,6 +10,8 @@ mod paths;
 )]
 #[path = "calls/scope.rs"]
 pub(crate) mod scope;
+#[path = "calls/target.rs"]
+pub(in crate::compile::room) mod target;
 use super::super::charges::{
     FormulaValues,
     composition::{ComposedCharges, ComposedDebt},
@@ -28,16 +30,26 @@ use lash_kernel_state::kernel_internals::{
 
 pub(in crate::compile::room) struct Resolved {
     pub(in crate::compile::room) code: CodeId,
-    library: Option<LibId>,
+    pub(in crate::compile::room) library: Option<LibId>,
     at: Point,
     arguments: usize,
     occurrence: Option<usize>,
     rooted: bool,
+    pub(in crate::compile::room) dynamic: bool,
 }
 
 /// Resolution reads the actual call opcode and its admitted target. An equal
 /// formula, signature or function name cannot stand in for this identity.
 pub(in crate::compile::room) fn resolved(
+    exe: &Executable,
+    caller: CodeId,
+    statement: StmtId,
+    pc: u32,
+) -> Result<Resolved, Refused> {
+    target::resolve(exe, caller, statement, pc, None)
+}
+
+fn resolved_static(
     exe: &Executable,
     caller: CodeId,
     statement: StmtId,
@@ -198,12 +210,14 @@ pub(in crate::compile::room) fn resolved(
         arguments,
         occurrence,
         rooted: matches!(stream.ops[pc as usize], Op::Act),
+        dynamic: false,
     })
 }
 
 struct CallerRoles {
     arguments: Box<[Slot]>,
     recovery: Box<[Slot]>,
+    callable: Option<Slot>,
 }
 fn caller_roles(source: &Source, target: &Resolved) -> Result<CallerRoles, Refused> {
     let event = source.room.events.get(&target.at).ok_or(Refused::Source)?;
@@ -227,13 +241,26 @@ fn caller_roles(source: &Source, target: &Resolved) -> Result<CallerRoles, Refus
         return Ok(CallerRoles {
             arguments,
             recovery: Box::new([]),
+            callable: if target.dynamic {
+                Some(target::root_slot(source, &target.at)?)
+            } else {
+                None
+            },
         });
     }
-    let arguments = event
+    let mut arguments = event
         .inputs
         .iter()
         .map(|owner| slot(source, owner))
-        .collect::<Result<Box<[_]>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
+    let callable = if target.dynamic {
+        if arguments.is_empty() {
+            return Err(Refused::Source);
+        }
+        Some(arguments.remove(0))
+    } else {
+        None
+    };
     if arguments.len() != target.arguments {
         return Err(Refused::Source);
     }
@@ -251,8 +278,9 @@ fn caller_roles(source: &Source, target: &Resolved) -> Result<CallerRoles, Refus
         .map(|at| slot(source, &Owner::Operand(at.clone())))
         .collect::<Result<Box<[_]>, _>>()?;
     Ok(CallerRoles {
-        arguments,
+        arguments: arguments.into(),
         recovery,
+        callable,
     })
 }
 
@@ -275,6 +303,8 @@ pub(crate) struct VerifiedCall {
     source: Arc<Source>,
     at: Point,
     argument_slots: Box<[Slot]>,
+    callable: Option<Slot>,
+    callable_origin: Option<Slot>,
     recovery: Box<[Slot]>,
     parameters: Box<[Slot]>,
     paths: Box<[paths::BodyPath]>,
@@ -338,7 +368,31 @@ impl VerifiedCall {
         pc: u32,
         first_unpaid: u32,
     ) -> Result<Self, Refused> {
-        let target = resolved(exe, caller, statement, pc)?;
+        Self::compile_selected(exe, caller, statement, pc, first_unpaid, None)
+    }
+
+    /// A dynamic site's alternatives are compiled once. Binding still needs
+    /// the actual admitted callable, its defining Link and environment.
+    pub(crate) fn compile_callback(
+        exe: &Executable,
+        caller: CodeId,
+        statement: StmtId,
+        pc: u32,
+        first_unpaid: u32,
+        callee: CodeId,
+    ) -> Result<Self, Refused> {
+        Self::compile_selected(exe, caller, statement, pc, first_unpaid, Some(callee))
+    }
+
+    fn compile_selected(
+        exe: &Executable,
+        caller: CodeId,
+        statement: StmtId,
+        pc: u32,
+        first_unpaid: u32,
+        selected: Option<CodeId>,
+    ) -> Result<Self, Refused> {
+        let target = target::resolve(exe, caller, statement, pc, selected)?;
         let source = Arc::clone(&exe.code(target.code).source_room);
         source.verify()?;
         let body = exe.code(target.code);
@@ -383,6 +437,7 @@ impl VerifiedCall {
         let CallerRoles {
             arguments: argument_slots,
             recovery,
+            callable,
         } = caller_roles(&caller_source, &target)?;
         let root_atoms = if target.rooted {
             Some(root_arguments(&caller_source, &target.at)?)
@@ -403,6 +458,11 @@ impl VerifiedCall {
             },
             target.code,
         )?;
+        let callable_origin = if target.dynamic {
+            Some(target::root_slot(&caller_source, &target.at)?)
+        } else {
+            None
+        };
         let call = Self {
             executable: exe.local(),
             caller,
@@ -413,6 +473,8 @@ impl VerifiedCall {
             source,
             at: target.at,
             argument_slots,
+            callable,
+            callable_origin,
             recovery,
             parameters: parameters.into(),
             paths,
@@ -427,7 +489,7 @@ impl VerifiedCall {
     }
 
     pub(crate) fn verify(&self, exe: &Executable) -> Result<(), Refused> {
-        let target = resolved(exe, self.caller, self.statement, self.pc)?;
+        let target = target::resolve(exe, self.caller, self.statement, self.pc, Some(self.callee))?;
         if self.executable != exe.local()
             || self.callee != target.code
             || self.at != target.at
@@ -442,6 +504,7 @@ impl VerifiedCall {
         let CallerRoles {
             arguments: expected,
             recovery,
+            callable,
         } = caller_roles(&self.caller_source, &target)?;
         if target.rooted {
             let expected = root_arguments(&self.caller_source, &target.at)?;
@@ -461,7 +524,14 @@ impl VerifiedCall {
         } else if self.root_atoms.is_some() {
             return Err(Refused::Source);
         }
-        if expected.as_ref() != self.argument_slots.as_ref()
+        let origin = if target.dynamic {
+            Some(target::root_slot(&self.caller_source, &target.at)?)
+        } else {
+            None
+        };
+        if origin != self.callable_origin
+            || callable != self.callable
+            || expected.as_ref() != self.argument_slots.as_ref()
             || recovery.as_ref() != self.recovery.as_ref()
         {
             return Err(Refused::Exit);
@@ -515,7 +585,8 @@ impl VerifiedCall {
         heap: &PagedHeap,
         caller: &BoundScalarRegion<'_>,
     ) -> Result<Option<BoundCall<'a>>, doc::heap::HeapFault> {
-        if self.executable != exe.local()
+        if self.callable.is_some()
+            || self.executable != exe.local()
             || resolved_code != self.callee
             || !caller.region.calls.is_empty()
             || !Arc::ptr_eq(&self.caller_source, caller.region.source())
@@ -635,7 +706,8 @@ impl VerifiedCall {
         activation: &super::super::placement::DenseActivation,
         position: &super::super::publication::Position,
     ) -> Result<Option<BoundCall<'a>>, doc::heap::HeapFault> {
-        if self.executable != exe.local()
+        if self.callable.is_some()
+            || self.executable != exe.local()
             || resolved_code != self.callee
             || !self.argument_slots.is_empty()
             || !self.recovery.is_empty()
