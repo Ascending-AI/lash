@@ -5,7 +5,7 @@ use crate::compile::{
     CodeId, LibId, LibRun,
     room::{
         self, ExitKind, Phase, Point, Selection,
-        charges::{ChargeDebt, ChargeProgram, FormulaValues},
+        charges::{ChargeProgram, FormulaValues, composition::StatementDebt},
         placement::{BindingPlacement, DenseActivation},
     },
 };
@@ -73,7 +73,7 @@ pub(in crate::machine::islands) struct Values {
 }
 pub(in crate::machine::islands) struct Evaluated<'a> {
     pub(in crate::machine::islands) calls: Vec<room::CheckedRoom>,
-    pub(in crate::machine::islands) debts: Vec<ChargeDebt<'a>>,
+    pub(in crate::machine::islands) debts: Vec<StatementDebt<'a>>,
 }
 
 struct Projection<'a> {
@@ -476,7 +476,7 @@ impl Proof {
             let Some(debt) = formulas.and_then(|values| program.bind(&values)) else {
                 return Ok(None);
             };
-            debts.push(debt);
+            debts.push(StatementDebt::Scalar(debt));
         }
         Ok(Some(Evaluated { calls, debts }))
     }

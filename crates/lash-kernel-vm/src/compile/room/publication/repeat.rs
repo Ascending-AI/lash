@@ -1,7 +1,7 @@
 //! One source resource owner stages an admitted loop prefix. No iteration
 //! changes the shared meter or counters; its final boundary settles them once.
 use super::{Accepted, OccurrenceDebt, SourceAccepted, SourceResources, Window};
-use crate::compile::room::charges::ChargeDebt;
+use crate::compile::room::charges::composition::StatementDebt;
 use lash_kernel_doc::heap::HeapFault;
 use std::collections::BTreeMap;
 
@@ -28,13 +28,13 @@ impl<'a> SourceResources<'a> {
 impl RepeatResources<'_> {
     pub(crate) fn admit(
         &mut self,
-        debts: &[ChargeDebt<'_>],
+        debts: &[StatementDebt<'_>],
         depth: u64,
         occurrences: &[usize],
     ) -> bool {
         let Some(units) = debts
             .iter()
-            .try_fold(0u64, |sum, debt| sum.checked_add(debt.units()))
+            .try_fold(0u64, |sum, debt| sum.checked_add(debt.units()?))
         else {
             return false;
         };

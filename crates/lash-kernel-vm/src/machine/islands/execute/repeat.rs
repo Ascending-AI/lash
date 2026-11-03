@@ -412,7 +412,7 @@ impl Repeat {
             if evaluated
                 .debts
                 .iter()
-                .try_fold(0u64, |sum, debt| sum.checked_add(debt.units()))
+                .try_fold(0u64, |sum, debt| sum.checked_add(debt.units()?))
                 .is_none_or(|units| units > window.iteration_max)
             {
                 stop!(Guard);

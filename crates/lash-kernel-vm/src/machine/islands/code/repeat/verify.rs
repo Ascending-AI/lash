@@ -1,4 +1,4 @@
-//! Check graph roles against the separately verified source summaries.
+//! Check graph roles against the resolved source statements and loop plan.
 
 use super::*;
 
@@ -104,6 +104,7 @@ impl Repeat {
         if !std::sync::Arc::ptr_eq(&self.source_room, &plan.source_room)
             || self.source_site != plan.source_site
             || plan.stmt != statement.id
+            || !matches!(plan.head, Head::While(_))
         {
             return false;
         }
