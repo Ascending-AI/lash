@@ -5,10 +5,11 @@ use super::super::compiled::{OperatorSite, operator_site};
 use super::*;
 use crate::compile::LibRun;
 use crate::compile::expr::{Expr, Kind as Expression};
-use crate::compile::islands::{Kind as StatementKind, Statement};
+use crate::compile::islands::Statement;
 
 mod form;
 pub(in crate::machine::islands) mod proof;
+mod syntax;
 mod verify;
 
 /// Values read by the fixed graph. Invariants cannot be written by its body.
@@ -129,18 +130,6 @@ fn local(expr: &Expr) -> Option<u32> {
     }
 }
 
-fn write(statement: &Statement) -> Option<(u32, bool, &Expr)> {
-    match &statement.kind {
-        StatementKind::Write {
-            at, bind, value, ..
-        } => {
-            let value = if matches!(unpin(value).kind, Expression::Act) {
-                statement.root.as_ref()?
-            } else {
-                value
-            };
-            Some((*at, *bind, unpin(value)))
-        }
-        _ => None,
-    }
+fn write(statement: &syntax::Write) -> (u32, bool, &Expr) {
+    (statement.at, statement.bind, unpin(&statement.value))
 }

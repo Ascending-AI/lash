@@ -47,8 +47,8 @@ impl Match<'_> {
         })
     }
 
-    fn copy(&self, statement: &Statement, from: u32) -> Option<Copy> {
-        let (at, bind, value) = write(statement)?;
+    fn copy(&self, statement: &syntax::Write, from: u32) -> Option<Copy> {
+        let (at, bind, value) = write(statement);
         let unary = if local(value) == Some(from) {
             None
         } else {
@@ -73,17 +73,13 @@ impl Repeat {
         exe: &Executable,
         placement: std::sync::Arc<crate::compile::room::placement::BindingPlacement>,
     ) -> Option<Self> {
-        let StatementKind::While { cond, body, .. } = &statement.kind else {
-            return None;
-        };
-        if body.statements.len() > 4 {
+        let original = syntax::LoopSyntax::read(exe, statement.id)?;
+        let cond = &original.cond;
+        let body = &original.body;
+        if body.len() > 4 {
             return None;
         }
-        let writes = body
-            .statements
-            .iter()
-            .map(write)
-            .collect::<Option<Vec<_>>>()?;
+        let writes = body.iter().map(write).collect::<Vec<_>>();
         let written: Vec<_> = writes.iter().map(|(at, _, _)| *at).collect();
         if written
             .iter()
@@ -103,7 +99,7 @@ impl Repeat {
         };
         let counter = *counter;
         let update_at = writes.iter().position(|(at, _, _)| *at == counter)?;
-        if writes[update_at].1 || body.declares.contains(&counter) {
+        if writes[update_at].1 || original.declares.contains(&counter) {
             return None;
         }
         let mut cx = Match {
@@ -119,13 +115,13 @@ impl Repeat {
         // reduction or immediately before its write. Match the dependency
         // graph while retaining that source order in the charge schedule.
         let mut before = if update_at > 0 {
-            cx.copy(&body.statements[0], counter)
+            cx.copy(&body[0], counter)
         } else {
             None
         };
         let copy_after_reduction = before.is_none() && update_at == 2;
         if copy_after_reduction {
-            before = Some(cx.copy(&body.statements[1], counter)?);
+            before = Some(cx.copy(&body[1], counter)?);
         }
         if !copy_after_reduction && let Some(copy) = &before {
             cx.previous = Some(copy.at);
@@ -192,9 +188,9 @@ impl Repeat {
             at: counter,
             operation,
         };
-        let after = match body.statements.get(update_at + 1) {
+        let after = match body.get(update_at + 1) {
             Some(statement) => {
-                if update_at + 2 != body.statements.len() {
+                if update_at + 2 != body.len() {
                     return None;
                 }
                 Some(cx.copy(statement, counter)?)
@@ -204,7 +200,7 @@ impl Repeat {
         let proof = proof::Proof::compile(
             exe,
             std::sync::Arc::clone(&placement),
-            statement,
+            &original,
             proof::Targets {
                 counter,
                 before: before.as_ref().map(|copy| copy.at),

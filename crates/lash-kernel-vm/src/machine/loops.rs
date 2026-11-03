@@ -682,7 +682,9 @@ impl KernelMachine {
             return Err(fault("a `for` loop is not at a `for`").into());
         };
         *header = Header::Body;
-        *started += 1;
+        *started = started
+            .checked_add(1)
+            .ok_or_else(|| fault("loop occurrence overflow"))?;
         self.push_block(task, *body)?;
         self.bind(task, binding.at, binding.shared, element)?;
         Ok(Flow::Step)
@@ -719,7 +721,9 @@ impl KernelMachine {
         };
         match value {
             true => {
-                *started += 1;
+                *started = started
+                    .checked_add(1)
+                    .ok_or_else(|| fault("loop occurrence overflow"))?;
                 self.push_block(task, *body)?;
                 Ok(Flow::Step)
             }

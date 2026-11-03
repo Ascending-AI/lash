@@ -139,6 +139,15 @@ impl Occurrences {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn for_source_law_counts(counts: &[u64]) -> Self {
+        Self {
+            counts: counts.to_vec().into_boxed_slice(),
+            marked: vec![false; counts.len()].into_boxed_slice(),
+            dirty: Vec::new(),
+        }
+    }
+
     pub(crate) fn current(&self, index: usize) -> Option<u64> {
         self.counts.get(index).copied()
     }

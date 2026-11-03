@@ -230,12 +230,11 @@ impl Proof {
     pub(super) fn compile(
         exe: &Executable,
         placement: Arc<BindingPlacement>,
-        statement: &Statement,
+        statement: &syntax::LoopSyntax,
         targets: Targets,
     ) -> Option<Self> {
-        let StatementKind::While { cond, body, .. } = &statement.kind else {
-            return None;
-        };
+        let cond = &statement.cond;
+        let body = &statement.body;
         let mut projection = Projection {
             exe,
             placement: &placement,
@@ -245,8 +244,8 @@ impl Proof {
             calls: Vec::new(),
         };
         projection.expression(statement.id, cond, ValueAt::Test, false)?;
-        for statement in &body.statements {
-            let (at, _, expr) = write(statement)?;
+        for statement in body {
+            let (at, _, expr) = write(statement);
             facts::target(&placement, exe, statement.id, at)?;
             let output = if at == targets.counter {
                 ValueAt::Next
@@ -259,8 +258,7 @@ impl Proof {
             } else {
                 return None;
             };
-            let value =
-                projection.expression(statement.id, expr, output, statement.root.is_some())?;
+            let value = projection.expression(statement.id, expr, output, statement.root)?;
             projection.environment.insert(at, value);
         }
         let descriptors: Vec<_> = projection

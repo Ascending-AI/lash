@@ -39,7 +39,6 @@ pub(super) fn runtime() {
                         },
                     );
                     assert!(repeat_laws::seed_actions(&mut run.machine, initial) > 0);
-                    // seed_actions reloads the actual persisted task rows.
                     let before = repeat_laws::action_counts(&mut run.machine);
                     let first_invocation = repeat_laws::invocation_cursor(&run.machine);
                     let tape = crate::ChargeTape::new();
@@ -61,7 +60,8 @@ pub(super) fn runtime() {
                         before
                             .iter()
                             .zip(&after)
-                            .all(|(before, after)| *before != initial || *after == u64::MAX)
+                            .all(|(before, after)| *before != initial || *after == u64::MAX),
+                        "{body} {mode:?} {layout:?} initial={initial} before={before:?} after={after:?}"
                     );
                     let published = take_loop_publications();
                     let invocations = take_loop_invocations();
@@ -107,7 +107,11 @@ pub(super) fn runtime() {
 fn started() {
     // The real saved Loop.started counter also bounds a batch before staging.
     let source = scalar_document("let i = 0 while flat.lt(i,4) { set i = flat.add(i,1) } return i");
-    for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
+    for mode in [
+        ExecutionMode::Source,
+        ExecutionMode::Generic,
+        ExecutionMode::Specialized,
+    ] {
         let mut run = Embedder::with(
             &source,
             Setup {

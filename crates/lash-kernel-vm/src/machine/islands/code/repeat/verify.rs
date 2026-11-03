@@ -78,11 +78,11 @@ impl Scalar {
 }
 
 fn next<'a>(
-    statements: &mut impl Iterator<Item = &'a Statement>,
+    statements: &mut impl Iterator<Item = &'a syntax::Write>,
     at: u32,
     bind: bool,
 ) -> Option<&'a Expr> {
-    let (actual, binding, value) = write(statements.next()?)?;
+    let (actual, binding, value) = write(statements.next()?);
     (actual == at && binding == bind).then_some(value)
 }
 
@@ -93,23 +93,21 @@ impl Repeat {
         exe: &Executable,
         shared: &[bool],
     ) -> bool {
-        let StatementKind::While { cond, body, .. } = &statement.kind else {
+        let Some(original) = syntax::LoopSyntax::read(exe, statement.id) else {
             return false;
         };
+        let cond = &original.cond;
+        let body = &original.body;
         if !std::sync::Arc::ptr_eq(&self.source_room, self.proof.recurrence.iteration.source())
             || self.source_site != exe.stmt(statement.id).site
         {
             return false;
         }
-        let written: Vec<_> = body
-            .statements
+        let written: Vec<_> = body.iter().map(|s| write(s).0).collect();
+        if written
             .iter()
-            .filter_map(|s| write(s).map(|(at, _, _)| at))
-            .collect();
-        if written.len() != body.statements.len()
-            || written.iter().enumerate().any(|(i, at)| {
-                written[..i].contains(at) || shared.get(*at as usize) != Some(&false)
-            })
+            .enumerate()
+            .any(|(i, at)| written[..i].contains(at) || shared.get(*at as usize) != Some(&false))
         {
             return false;
         }
@@ -123,7 +121,7 @@ impl Repeat {
         if !roles.binary(&self.test, cond, exe, true) {
             return false;
         }
-        let mut statements = body.statements.iter();
+        let mut statements = body.iter();
         if !self.copy_after_reduction
             && let Some(copy) = &self.before
         {
