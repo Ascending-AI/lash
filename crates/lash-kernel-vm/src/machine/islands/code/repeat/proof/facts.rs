@@ -87,7 +87,7 @@ impl Proof {
     ) -> Result<Option<Evaluated<'a>>, HeapFault> {
         let mut values = Vec::new();
         let mut rooms = Vec::new();
-        let mut candidates = Vec::new();
+        let mut candidates: Vec<ScopedCall<'a>> = Vec::new();
         for step in &self.steps {
             match *step {
                 Step::Scalar(index) => {
@@ -123,8 +123,12 @@ impl Proof {
                     else {
                         return Ok(None);
                     };
-                    let Some(offset) = scope.completed().checked_add(index as u64) else {
-                        return Ok(None);
+                    let offset = match candidates.last() {
+                        Some(previous) => match previous.next_offset() {
+                            Some(offset) => offset,
+                            None => return Ok(None),
+                        },
+                        None => scope.completed(),
                     };
                     let candidate = match call.call.evaluate_scoped(
                         exe,

@@ -416,8 +416,11 @@ impl Proof {
         let logical::Owner::Frame { task, .. } = invocation.frame() else {
             return None;
         };
+        let width = self.calls.iter().try_fold(0u64, |width, call| {
+            width.checked_add(call.call.reservation_width()?)
+        })?;
         let capacity = capacity
-            .saturating_mul(self.calls.len() as u64)
+            .saturating_mul(width)
             .min(u64::MAX - ledger.prospective_invocation(task).id());
         let range = ledger.reserve_invocations(task, capacity)?;
         Some(Some(call.call.bind_scope(

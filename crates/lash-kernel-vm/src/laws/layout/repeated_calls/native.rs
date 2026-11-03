@@ -72,6 +72,38 @@ fn probes(
                 .unwrap(),
         ));
     }
+    let identity = functions
+        .iter()
+        .find(|(name, _)| *name == "flat.identity")
+        .unwrap()
+        .1;
+    let implementation = Arc::clone(registry.get(&identity).unwrap().native().unwrap());
+    let inner = lash_kernel_doc::parse_definition(&format!(
+        "function wrapped.identity(value: Any) -> Any\nkernel 1\ncharge sum(7, size(value), size(result))\nuse flat.identity = @{identity}\nnative\nbody {{ return flat.identity(value) }}"
+    )).unwrap();
+    let inner = registry
+        .register(
+            inner,
+            Some(Arc::new(Wrapped {
+                native: Arc::clone(&implementation),
+                known: true,
+            })),
+        )
+        .unwrap();
+    functions.push(("wrapped.identity", inner));
+    let chain = lash_kernel_doc::parse_definition(&format!(
+        "function wrapped.chain(value: Any) -> Any\nkernel 1\ncharge sum(7, size(value), size(result))\nuse wrapped.identity = @{inner}\nnative\nbody {{ let output = invoke wrapped.identity(value) return output }}"
+    )).unwrap();
+    let chain = registry
+        .register(
+            chain,
+            Some(Arc::new(Wrapped {
+                native: implementation,
+                known: true,
+            })),
+        )
+        .unwrap();
+    functions.push(("wrapped.chain", chain));
     functions
 }
 fn observe(
@@ -163,13 +195,26 @@ fn observe(
 }
 pub(super) fn runtime() {
     use crate::machine::islands::compiled::{take_loop_invocations, take_loop_publications};
-    for (name, eligible, test, invocations) in [
-        ("wrapped.known", true, "wrapped.lt", 8),
-        ("wrapped.known", true, "flat.lt", 4),
-        ("wrapped.unknown", false, "flat.lt", 0),
+    for (name, eligible, test, invocations, copy) in [
+        ("wrapped.known", true, "flat.lt", None, "wrapped.chain"),
+        (
+            "wrapped.known",
+            true,
+            "wrapped.lt",
+            Some(8),
+            "flat.identity",
+        ),
+        ("wrapped.known", true, "flat.lt", Some(4), "flat.identity"),
+        (
+            "wrapped.unknown",
+            false,
+            "flat.lt",
+            Some(0),
+            "flat.identity",
+        ),
     ] {
         let source = scalar_document(&format!(
-            "let i = 0 let s = 0 while {test}(i,4) {{ set s = flat.add(s,flat.mul(i,i)) let previous = flat.identity(i) set i = invoke {name}(previous,1) }} return (s,i)"
+            "let i = 0 let s = 0 while {test}(i,4) {{ set s = flat.add(s,flat.mul(i,i)) let previous = {copy}(i) set i = invoke {name}(previous,1) }} return (s,i)"
         ));
         take_loop_publications();
         take_loop_invocations();
@@ -191,11 +236,13 @@ pub(super) fn runtime() {
             u64::from(eligible),
             "installed native contract: {name}"
         );
-        assert_eq!(
-            take_loop_invocations(),
-            invocations,
-            "completed source invocations: {name}"
-        );
+        let completed = take_loop_invocations();
+        if let Some(invocations) = invocations {
+            assert_eq!(
+                completed, invocations,
+                "completed source invocations: {name}"
+            );
+        }
         for layout in [Layout(0), Layout(1), Layout(2), Layout(u64::MAX)] {
             for record in [false, true] {
                 for (slice, cold) in [(u64::MAX, false), (roomy.0.4 / 2, true), (3, true)] {

@@ -118,7 +118,7 @@ pub(super) fn compile(
                     source.compile_callback_body(interval)?
                 };
                 let natives = natives(exe, source, &scalar)?;
-                (super::nested::BodyRegion::Scalar(Box::new(scalar)), natives)
+                (super::nested::BodyRegion::Scalar(scalar), natives)
             } else {
                 (
                     super::nested::BodyRegion::Composed(Box::new(super::nested::Body::compile(

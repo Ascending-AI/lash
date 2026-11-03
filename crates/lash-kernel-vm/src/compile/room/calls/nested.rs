@@ -444,7 +444,8 @@ impl VerifiedCall {
                         call.at.clone(),
                         live.iter().map(|(slot, value)| (*slot, *value)).collect(),
                     ));
-                    let Some(evaluated) = call.evaluate_arguments(exe, arena, input.clone())?
+                    let Some(evaluated) =
+                        call.evaluate_arguments(exe, arena, input.clone(), &[])?
                     else {
                         return Ok(None);
                     };
