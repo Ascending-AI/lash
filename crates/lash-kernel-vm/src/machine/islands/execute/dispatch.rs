@@ -358,7 +358,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         frame.regs[site.reg as usize] = value;
                         return Ok(Next::Continue);
                     }
-                    source::ValuePublication::Declined => {
+                    source::ValuePublication::Declined | source::ValuePublication::Unavailable => {
                         if frame
                             .state
                             .source
@@ -374,20 +374,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         }
                         return Err(self.at_operands(site.pc, site.reg, &values[..given]));
                     }
-                    source::ValuePublication::Unavailable => {}
                 }
-                if frame
-                    .state
-                    .source
-                    .as_ref()
-                    .is_some_and(|source| source.original.is_some())
-                {
-                    return Err(self.at_operands(site.pc, site.reg, &values[..given]));
-                }
-                let answer = self.retaining(&mut frame.state.transient, |island| {
-                    island.native(site, &values, given)
-                });
-                frame.regs[site.reg as usize] = answer?;
             }
             Opcode::Heap => {
                 let sites::Heap { site, args } = &code.sites.heap[packet.x as usize];

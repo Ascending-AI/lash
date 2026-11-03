@@ -904,16 +904,6 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         Some((value, units))
     }
 
-    #[inline(always)]
-    fn admit_native(&mut self, units: u64) -> bool {
-        let fits = self.fits(units);
-        #[cfg(any(test, feature = "perf-witness"))]
-        if !fits {
-            self.scratch.exit.reason = Some(Reason::Charge);
-        }
-        fits
-    }
-
     /// The session binding named `name` in the stream, at its resident
     /// value when the frame may hold it; `None` where the reference reads
     /// it: no value is resident for it (`docs/design/kernel-regions.md`

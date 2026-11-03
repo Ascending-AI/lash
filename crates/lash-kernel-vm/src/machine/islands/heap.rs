@@ -64,30 +64,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         self.commit_heap(answer)
     }
 
-    #[inline(never)]
-    pub(super) fn native_heap(
-        &mut self,
-        site: &NativeSite,
-        padded: &[Value; MAX_ARGS],
-        given: usize,
-    ) -> Answer {
-        let args = &padded[..given];
-        let Some(answer) = self.heap_answer(
-            site.lib,
-            &padded[..self.exe.lib(site.lib).arity],
-            None,
-            Check::None,
-            (0, false),
-            None,
-        ) else {
-            return Err(self.at_operands(site.pc, site.reg, args));
-        };
-        if !self.admit_native(answer.admission.end - self.charged) {
-            return Err(self.at_operands(site.pc, site.reg, args));
-        }
-        self.commit_heap(answer)
-    }
-
     /// Claim another physical window only while its bytes and the nursery
     /// fit the same fixed entry allowance, before counting its call.
     #[inline(always)]
