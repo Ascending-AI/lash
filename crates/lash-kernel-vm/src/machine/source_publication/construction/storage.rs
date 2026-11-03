@@ -73,10 +73,6 @@ impl BoundaryPreparation for Construction<'_> {
 impl Construction<'_> {
     /// The same detached graph and source checks, with compiler-owned original
     /// debt and recovery roles attached before the one external transaction.
-    #[expect(
-        dead_code,
-        reason = "H packet lowering adopts this unpublished entrypoint"
-    )]
     pub(in crate::machine) fn prepare_original<'a>(
         self,
         arena: &'a mut Arena,

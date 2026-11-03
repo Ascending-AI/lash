@@ -1,8 +1,10 @@
 //! Source collections own their normalized graph before storage is installed.
 use super::*;
+mod original;
 use crate::admission::Allowance;
 use crate::machine::source_publication::construction::storage;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
+pub(in crate::machine::islands::execute) use original::OriginalConstruction;
 use room::{
     ExitKind, Phase as SourcePhase, Point,
     publication::{Occurrence, Position as SourcePosition},
@@ -27,7 +29,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             site.pc,
             &site.items,
             site.reg,
-            &site.charges,
+            &site.original,
             |values| match site.make {
                 Make::List => doc::NewObject::List(values),
                 Make::Set => doc::NewObject::Set(values),
@@ -57,7 +59,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             site.pc,
             &site.values,
             site.reg,
-            &site.charges,
+            &site.original,
             |values| doc::NewObject::Record(site.names.iter().copied().zip(values).collect()),
         )
     }
@@ -68,7 +70,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         pc: u32,
         items: &[u32],
         reg: u32,
-        charges: &room::charges::ChargeProgram,
+        original: &std::sync::Arc<room::charges::OriginalPrefix>,
         make: impl FnOnce(Vec<Value>) -> doc::NewObject,
     ) -> Result<ValuePublication, HeapFault> {
         let Some(statement) = frame.state.statement else {
@@ -194,8 +196,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         };
         drop(ledger);
         let publication_at = start.at.clone();
-        let result = &mut frame.regs[reg as usize];
-        let published = self.publish_source_boundary(
+        let published = self.publish_original_construction(
             frame.state.callee,
             activation,
             publication::Prefix {
@@ -205,23 +206,26 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 next,
                 allowance,
             },
-            storage::Construction {
-                charges: Some(charges),
-                value: storage::ConstructionValue::Collection(object),
-                output,
-                at: publication_at,
-                release,
-                inputs,
-                operands: values,
-                heap: self.heap,
-                depth_limit: self.limits.value_depth(),
-            },
-            |arena, _, edits, storage| {
-                debug_assert!(edits.is_empty());
-                storage.batch.publish(arena);
-                *result = storage.value;
+            OriginalConstruction {
+                original,
+                registers: original.values(|reg| frame.regs[reg as usize]),
+                construction: storage::Construction {
+                    charges: None,
+                    value: storage::ConstructionValue::Collection(object),
+                    output,
+                    at: publication_at,
+                    release,
+                    inputs,
+                    operands: values,
+                    heap: self.heap,
+                    depth_limit: self.limits.value_depth(),
+                },
             },
         )?;
+        if let Some(value) = published {
+            frame.regs[reg as usize] = value;
+        }
+        let published = published.is_some();
         #[cfg(test)]
         if published {
             super::super::super::compiled::constructor_debt_published(0);

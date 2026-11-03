@@ -21,7 +21,7 @@ pub(crate) struct OriginalPrefix {
     at: Point,
     next: u32,
     stop: u32,
-    end: Point,
+    end: Option<Point>,
     regions: Box<[Region]>,
     roles: Box<[(u32, crate::compile::room::Owner)]>,
     registers: usize,
@@ -89,10 +89,14 @@ impl OriginalPrefix {
                 matches!(op, Op::Region { .. }) || !op.kind().in_region()
             })
             .ok_or(Refused::Path)?;
-        let end_site = stream.source_sites[stop as usize]
+        // A layout region head is a legal source handoff, but is not a
+        // native/write/return completion whose debt can consume this receipt.
+        let end = stream.source_sites[stop as usize]
             .as_deref()
-            .ok_or(Refused::Source)?;
-        let end = source_point(stream, end_site, stream.ops[stop as usize]);
+            .map(|site| source_point(stream, site, stream.ops[stop as usize]));
+        if end.is_none() && !matches!(stream.ops[stop as usize], Op::Region { .. }) {
+            return Err(Refused::Source);
+        }
         let mut regions = Vec::new();
         for close in prefix.pending() {
             let events = stream.regions.events(close.region);
@@ -169,6 +173,50 @@ impl OriginalPrefix {
             paid_tape: paid_tape.into(),
             remaining_tape: remaining_tape.into(),
         }))
+    }
+
+    pub(crate) fn values(&self, mut read: impl FnMut(u32) -> Value) -> Vec<Value> {
+        let mut values = vec![Value::Absent; self.registers];
+        for (reg, role) in &self.roles {
+            if !matches!(role, crate::compile::room::Owner::Operand(site) if site == &self.at.site)
+            {
+                values[*reg as usize] = read(*reg);
+            }
+        }
+        values
+    }
+    pub(crate) fn pc(&self) -> u32 {
+        self.next - 1
+    }
+    pub(crate) fn unpaid(&self) -> u32 {
+        self.regions
+            .first()
+            .map_or(self.pc(), |region| region.close.head)
+    }
+    pub(crate) fn matches_constructor(
+        &self,
+        stream: &compile::Stream,
+        pc: u32,
+        unpaid: u32,
+        quote: u64,
+    ) -> bool {
+        self.pc() == pc
+            && self.unpaid() == unpaid
+            && self
+                .regions
+                .iter()
+                .map(|region| u64::from(region.close.total))
+                .sum::<u64>()
+                == quote
+            && stream
+                .source_sites
+                .get(pc as usize)
+                .and_then(Option::as_deref)
+                .is_some_and(|site| self.at == source_point(stream, site, stream.ops[pc as usize]))
+            && self
+                .regions
+                .iter()
+                .all(|region| compile::islands::verify_close(Some(&region.close), stream).is_ok())
     }
 
     fn compatible(&self, previous: &Self) -> bool {
@@ -310,7 +358,7 @@ impl AcceptedOriginalPrefix {
             || safe_point != self.paid_at
             || !Arc::ptr_eq(&self.program.source, &debt.program.source)
             || self.program.statement != debt.program.statement
-            || self.program.end != debt.program.first
+            || self.program.end.as_ref() != Some(&debt.program.first)
             || debt.program.closes.len() != 1
             || debt.program.closes[0].regions.as_ref()
                 != self
@@ -352,7 +400,7 @@ impl AcceptedOriginalPrefix {
     ) -> Result<OriginalPayment, Refused> {
         if !self.belongs(frontier, ledger)
             || original.safe_point != self.paid_at
-            || self.program.end != frontier.position.at
+            || self.program.end.as_ref() != Some(&frontier.position.at)
             || original.before != 0
             || original.close.is_some()
             || original.depth != 0

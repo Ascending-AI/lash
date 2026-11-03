@@ -66,6 +66,25 @@ pub(in crate::machine::islands) fn constructor_debt_published(family: usize) {
     });
 }
 
+#[cfg(test)]
+thread_local! { static ORIGINAL_PAYMENTS: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) }; }
+#[cfg(test)]
+pub(crate) fn take_original_payments() -> (u64, u64) {
+    ORIGINAL_PAYMENTS.with(|payments| payments.replace((0, 0)))
+}
+#[cfg(test)]
+pub(in crate::machine::islands) fn original_paid(units: u64) {
+    ORIGINAL_PAYMENTS.with(|payments| {
+        let (count, paid) = payments.get();
+        if count == 0 {
+            eprintln!(
+                "actual constructor original publication: paid {units} units; affine receipt issued"
+            );
+        }
+        payments.set((count + 1, paid + units));
+    });
+}
+
 /// Heap text construction and operations the source handler must answer.
 #[derive(Clone)]
 pub(crate) enum Deferred {
@@ -74,7 +93,7 @@ pub(crate) enum Deferred {
         dst: u32,
         constant: lash_kernel_exec::ConstIx,
         source: crate::compile::expr::SourceRead,
-        charges: std::sync::Arc<crate::compile::room::charges::ChargeProgram>,
+        original: std::sync::Arc<crate::compile::room::charges::OriginalPrefix>,
     },
 }
 
@@ -561,18 +580,12 @@ impl Compiled {
         let placement = crate::compile::room::placement::BindingPlacement::compile(exe, plan.code)
             .ok()
             .map(std::sync::Arc::new);
-        let mut measure = Build::new(exe, &plan.shared, stream, None, 0);
+        let mut measure = Build::new(exe, &plan.shared, stream, None);
         measure.placement = placement.clone();
         measure.fused = fused;
         measure.charged = plan.charged;
         measure.block(&plan.body)?;
-        let mut cx = Build::new(
-            exe,
-            &plan.shared,
-            stream,
-            Some(measure.segments),
-            measure.registers as u32,
-        );
+        let mut cx = Build::new(exe, &plan.shared, stream, Some(measure.segments));
         cx.fused = fused;
         cx.placement = placement.clone();
         cx.charged = plan.charged;
@@ -622,7 +635,6 @@ impl Compiled {
         let mut headers = Vec::new();
         let mut actions = Vec::new();
         let mut cleanup = Vec::new();
-        let mut restarts = Vec::new();
         for (at, packet) in code.packets.iter().enumerate() {
             use super::code::Opcode;
             match packet.opcode {
@@ -636,7 +648,6 @@ impl Compiled {
                         pending: packet.x as usize,
                     });
                 }
-                Opcode::Keep => restarts.push(code.sites.keep[packet.x as usize].value),
                 Opcode::Spawn | Opcode::Yield | Opcode::Join | Opcode::Wait | Opcode::Cancel => {
                     actions.push((packet.y, at + 1));
                 }
@@ -654,7 +665,7 @@ impl Compiled {
             blocks: cx.blocks,
             cleanups: cleanup.iter().any(|entry| entry.finally.is_some()),
             cleanup: cleanup.into(),
-            restarts: restarts.into(),
+            restarts: Box::default(),
             code,
             registers: cx.registers,
             headers: headers.into(),

@@ -150,9 +150,6 @@ pub(super) struct Build<'e> {
     pub(super) fused: bool,
     pub(super) charged: bool,
     pub(super) registers: usize,
-    restarts: usize,
-    captures: Vec<(u32, super::Restart, bool)>,
-    source_registers: u32,
     live: Vec<u32>,
     statement: Option<StmtId>,
     /// The accumulator slots of each loop being built, innermost last.
@@ -165,7 +162,6 @@ impl<'e> Build<'e> {
         shared: &'e [bool],
         stream: &'e Stream,
         measured: Option<Vec<u64>>,
-        source_registers: u32,
     ) -> Self {
         Self {
             placement: None,
@@ -184,9 +180,6 @@ impl<'e> Build<'e> {
             fused: true,
             charged: true,
             registers: 0,
-            restarts: 0,
-            captures: Vec::new(),
-            source_registers,
             live: Vec::new(),
             statement: None,
             texts: Vec::new(),
@@ -293,7 +286,6 @@ impl<'e> Build<'e> {
                 self.segments.len(),
                 self.blocks.len(),
                 self.texts.len(),
-                self.restarts,
             );
             if self.statement(statement, index).is_none() {
                 // A straight-line statement the register cannot build runs
@@ -308,7 +300,6 @@ impl<'e> Build<'e> {
                 self.segments.truncate(mark.1);
                 self.blocks.truncate(mark.2);
                 self.texts.truncate(mark.3);
-                self.restarts = mark.4;
                 (self.root, self.begin, self.open) = (None, None, None);
                 let cold = Statement {
                     id: statement.id,
@@ -335,10 +326,10 @@ impl<'e> Build<'e> {
         Some(())
     }
 
-    fn constructor_charges(
+    fn constructor_original(
         &self,
         pc: u32,
-    ) -> Option<std::sync::Arc<crate::compile::room::charges::ChargeProgram>> {
+    ) -> Option<std::sync::Arc<crate::compile::room::charges::OriginalPrefix>> {
         let statement = self.statement?;
         let stmt = self.exe.stmt(statement);
         let range = match stmt.form {
@@ -346,14 +337,13 @@ impl<'e> Build<'e> {
             _ => stmt.ops,
         };
         let prefix = crate::compile::expr::ConstructorPrefix::compile(self.stream, range, pc)?;
-        crate::compile::room::charges::ChargeProgram::constructor_packet(
+        crate::compile::room::charges::OriginalPrefix::compile(
             self.exe,
             self.placement.as_ref()?.code(),
             statement,
             &prefix,
         )
         .ok()
-        .map(std::sync::Arc::new)
     }
 
     fn write_charges(
@@ -392,7 +382,6 @@ impl<'e> Build<'e> {
 
     fn statement(&mut self, statement: &Statement, index: usize) -> Option<()> {
         self.statement = Some(statement.id);
-        self.captures.clear();
         self.live.clear();
         if self.fused
             && statement.leaves == 0
@@ -851,7 +840,7 @@ impl<'e> Build<'e> {
         }
         self.open = None;
         self.live.clear();
-        self.captures.iter().all(|capture| capture.2).then_some(())
+        Some(())
     }
 
     /// The branch instruction enters a nonempty arm's source block itself.
@@ -906,37 +895,6 @@ impl<'e> Build<'e> {
 
     fn expr(&mut self, expr: &Expr) -> Option<()> {
         let (pc, reg) = (expr.pc, expr.reg);
-        let collection = match &expr.kind {
-            Kind::Operator { lib, .. } => self.exe.lib(*lib).collection_method(),
-            Kind::Call { invoke, .. } => invoke
-                .act
-                .and_then(|act| self.stream.nested[act.ix()].kind.operator_lib())
-                .is_some_and(|lib| self.exe.lib(lib).collection_method()),
-            _ => false,
-        };
-        if collection {
-            for close in expr.closes() {
-                if let Some((made, input)) =
-                    crate::compile::islands::collection_restart(self.stream, close.head, pc)
-                {
-                    let saved = self.source_registers + 2 * self.restarts as u32;
-                    self.registers = self.registers.max(saved as usize + 2);
-                    let restart = super::Restart {
-                        statement: self.statement?,
-                        head: close.head,
-                        reg: input,
-                        saved,
-                    };
-                    self.restarts += 1;
-                    self.captures.push((made, restart, false));
-                    self.emit(Op::Constant {
-                        dst: saved + 1,
-                        value: Value::Bool(false),
-                        source: None,
-                    });
-                }
-            }
-        }
         match &expr.kind {
             Kind::Local { local, miss, .. } => {
                 self.emit(Op::Local {
@@ -970,7 +928,7 @@ impl<'e> Build<'e> {
                     dst: reg,
                     constant: *constant,
                     source: expr.read?,
-                    charges: self.constructor_charges(pc)?,
+                    original: self.constructor_original(pc)?,
                 }));
                 self.result(reg, &[]);
             }
@@ -1400,21 +1358,9 @@ impl<'e> Build<'e> {
                     && *miss < pc
                     && items.first().is_some_and(|item| item.pc < *miss);
                 let items: Box<[_]> = items.iter().map(|item| item.reg).collect();
-                let keeps: Vec<_> = self
-                    .captures
-                    .iter_mut()
-                    .filter(|capture| capture.0 == pc)
-                    .map(|capture| {
-                        capture.2 = true;
-                        capture.1
-                    })
-                    .collect();
-                for restart in keeps {
-                    self.emit(Op::Keep(restart));
-                }
                 self.emit(Op::Make {
                     pc,
-                    charges: self.constructor_charges(pc)?,
+                    original: self.constructor_original(pc)?,
                     ahead: *ahead,
                     replay_guard,
                     make: *make,
@@ -1449,7 +1395,7 @@ impl<'e> Build<'e> {
                 let values: Box<[_]> = values.iter().map(|value| value.reg).collect();
                 self.emit(Op::Record {
                     pc,
-                    charges: self.constructor_charges(pc)?,
+                    original: self.constructor_original(pc)?,
                     ahead: *ahead,
                     members: names.len(),
                     names,
@@ -1462,7 +1408,7 @@ impl<'e> Build<'e> {
             Kind::Closure { code, ahead, miss } => {
                 self.emit(Op::Closure {
                     pc,
-                    charges: self.constructor_charges(pc)?,
+                    original: self.constructor_original(pc)?,
                     ahead: *ahead,
                     code: *code,
                     reg,

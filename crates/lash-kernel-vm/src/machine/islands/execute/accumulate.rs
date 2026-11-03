@@ -9,24 +9,24 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Values<'_, 'e>,
         operation: &Deferred,
     ) -> Result<Next, Stop> {
-        let (dst, constant, source, charges) = match operation {
+        let (dst, constant, source, original) = match operation {
             Deferred::Source(pc) => return Err(self.at(*pc)),
             Deferred::Text {
                 dst,
                 constant,
                 source,
-                charges,
-            } => (*dst, *constant, *source, charges),
+                original,
+            } => (*dst, *constant, *source, original),
         };
         let crate::compile::Constant::Deferred(literal @ lash_kernel_doc::Literal::Text(_)) =
             &frame.state.callee.stream.consts[constant.ix()]
         else {
             unreachable!("a text instruction names a text literal");
         };
-        if !self.source_literal(frame, source, dst, literal, charges)? {
+        if !self.source_literal(frame, source, dst, literal, original)? {
             return Err(self.at(source.unpaid()));
         }
-        Ok(Next::Continue)
+        Err(self.at(source.pc() + 1))
     }
 
     /// A certified concatenation of resident texts retains the native's

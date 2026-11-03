@@ -299,13 +299,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 });
                 return self.returning(frame, *value);
             }
-            Opcode::Keep => {
-                let restart = &code.sites.keep[packet.x as usize].value;
-
-                regs[restart.saved as usize] = regs[restart.reg as usize];
-                regs[restart.saved as usize + 1] = Value::Bool(true);
-            }
-
             Opcode::Operator => {
                 use super::super::code::{OperatorInputs, ScalarInputs};
                 let sites::Operator {

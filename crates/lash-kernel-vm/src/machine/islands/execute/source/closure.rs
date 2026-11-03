@@ -21,7 +21,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         frame: &mut Values<'_, '_>,
         site: &sites::Closure,
     ) -> Result<ValuePublication, HeapFault> {
-        if self.tape.is_some() || self.projection().is_some() || self.arena.any_cold() {
+        if self.projection().is_some() || self.arena.any_cold() {
             return Ok(ValuePublication::Unavailable);
         }
         let Some(statement) = frame.state.statement else {
@@ -182,8 +182,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             },
         });
         let publication_at = next.at.clone();
-        let result = &mut frame.regs[site.reg as usize];
-        let published = self.publish_source_boundary(
+        let published = self.publish_original_construction(
             frame.state.callee,
             activation,
             publication::Prefix {
@@ -193,8 +192,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 next,
                 allowance,
             },
-            crate::machine::source_publication::construction::storage::Construction {
-                charges: Some(&site.charges),
+            super::construction::OriginalConstruction {
+                original: &site.original,
+                registers: site.original.values(|reg| frame.regs[reg as usize]),
+                construction: crate::machine::source_publication::construction::storage::Construction {
+                charges: None,
                 value: crate::machine::source_publication::construction::storage::ConstructionValue::Closure {
                     identity,
                     capture_names: target.captures.iter().map(|capture| target.slots[capture.inner as usize].name.clone()).collect(),
@@ -212,12 +214,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 depth_limit: self.limits.value_depth(),
                 heap: self.heap,
             },
-            |arena, _, edits, storage| {
-                debug_assert!(edits.is_empty());
-                storage.batch.publish(arena);
-                *result = storage.value;
             },
         )?;
+        if let Some(value) = published {
+            frame.regs[site.reg as usize] = value;
+        }
+        let published = published.is_some();
         #[cfg(test)]
         if published {
             super::super::super::compiled::constructor_debt_published(1);
@@ -227,7 +229,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             crate::machine::islands::witness::closure_constructed();
         }
         Ok(if published {
-            ValuePublication::Published(*result)
+            ValuePublication::Published(frame.regs[site.reg as usize])
         } else {
             ValuePublication::Declined
         })

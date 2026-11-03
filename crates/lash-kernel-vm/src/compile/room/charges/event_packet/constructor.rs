@@ -93,17 +93,12 @@ impl ChargeProgram {
 
     /// Pending fixed work is an admission guard. Its ordered events remain
     /// unpaid until the original close, including when this operation publishes.
+    #[cfg(test)]
     pub(crate) fn constructor_quote(&self) -> Option<u64> {
         match self.coverage {
             Coverage::ConstructorPacket { quote, .. } => Some(quote),
             _ => None,
         }
-    }
-
-    pub(crate) fn constructor_matches(&self, pc: u32, unpaid: u32, quote: u64) -> bool {
-        self.range == OpRange { start: pc, len: 1 }
-            && matches!(self.coverage, Coverage::ConstructorPacket { unpaid: head, quote: amount }
-                if head == unpaid && amount == quote)
     }
 
     #[cfg(test)]

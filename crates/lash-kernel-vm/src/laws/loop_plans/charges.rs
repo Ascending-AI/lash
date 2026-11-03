@@ -702,6 +702,42 @@ fn constructor_debt() {
             let Some(prefix) = ConstructorPrefix::compile(stream, stmt.ops, pc) else {
                 continue;
             };
+            let original = crate::compile::room::charges::OriginalPrefix::compile(
+                &exe, body.code, statement, &prefix,
+            )
+            .unwrap();
+            assert!(original.matches_constructor(
+                stream,
+                pc,
+                prefix.unpaid(),
+                crate::compile::expr::units(prefix.pending())
+            ));
+            assert!(!original.matches_constructor(
+                stream,
+                pc,
+                pc + 1,
+                crate::compile::expr::units(prefix.pending())
+            ));
+            // K-EVAL-004: recovery reads only previously evaluated roles. The
+            // constructor's output comes from its accepted graph transaction.
+            let at = stream.source_sites[pc as usize].as_ref().unwrap();
+            let roles = stmt.source_roles_at(stream, pc + 1).unwrap();
+            let needed: Vec<_> = roles
+                .iter()
+                .filter(|(_, site)| site.as_ref() != at.as_ref())
+                .map(|(reg, _)| reg.0)
+                .collect();
+            let values = original.values(|reg| {
+                assert!(
+                    needed.contains(&reg),
+                    "original recovery read an output or an unevaluated physical register"
+                );
+                Value::Int(7)
+            });
+            assert_eq!(values.len(), stmt.regs as usize);
+            for reg in needed {
+                assert!(values[reg as usize].same(&Value::Int(7)));
+            }
             let charges =
                 ChargeProgram::constructor_packet(&exe, body.code, statement, &prefix).unwrap();
             assert_eq!(charges.verify(&exe, body.code), Ok(()));

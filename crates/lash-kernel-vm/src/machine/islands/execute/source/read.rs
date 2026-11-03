@@ -11,9 +11,7 @@ use room::{
     publication::{Occurrence, Position as SourcePosition},
 };
 
-use crate::machine::source_publication::construction::storage::{
-    Construction, ConstructionValue, Prepared,
-};
+use crate::machine::source_publication::construction::storage::{Construction, ConstructionValue};
 
 #[derive(Clone, Copy)]
 enum Input<'a> {
@@ -29,61 +27,22 @@ impl Input<'_> {
     }
 }
 struct ReadStorage<'a> {
-    charges: Option<&'a room::charges::ChargeProgram>,
-    value: Input<'a>,
-    link: lash_kernel_value::content_ids::LinkId,
+    value: Value,
     owner: Owner,
     at: Point,
-    heap: &'a lash_kernel_state::kernel_internals::PagedHeap,
     placement: &'a room::placement::BindingPlacement,
     invocation: &'a Invocation,
     slots: &'a [SlotState],
     code: crate::compile::CodeId,
-    depth_limit: usize,
-}
-enum PreparedRead {
-    Native(Value),
-    Constructed(Prepared),
-}
-impl PreparedRead {
-    fn publish(self, arena: &mut Arena) -> Value {
-        match self {
-            Self::Native(value) => value,
-            Self::Constructed(prepared) => {
-                prepared.batch.publish(arena);
-                prepared.value
-            }
-        }
-    }
 }
 impl BoundaryPreparation for ReadStorage<'_> {
-    type Prepared = PreparedRead;
+    type Prepared = Value;
     fn prepare<'a>(
         self,
         arena: &'a mut Arena,
         entry: ExternalEntry<'_>,
-    ) -> Result<Option<(room::publication::PreparedEvent<'a>, PreparedRead)>, HeapFault> {
-        let value = match self.value {
-            Input::Native(value) => value,
-            Input::Literal(literal) => {
-                return Ok(Construction {
-                    charges: self.charges,
-                    value: ConstructionValue::Literal {
-                        literal,
-                        link: self.link,
-                    },
-                    output: self.owner,
-                    at: self.at,
-                    release: vec![].into_boxed_slice(),
-                    inputs: vec![],
-                    operands: vec![],
-                    depth_limit: self.depth_limit,
-                    heap: self.heap,
-                }
-                .prepare(arena, entry)?
-                .map(|(prepared, storage)| (prepared, PreparedRead::Constructed(storage))));
-            }
-        };
+    ) -> Result<Option<(room::publication::PreparedEvent<'a>, Value)>, HeapFault> {
+        let value = self.value;
         let ExternalEntry {
             event,
             frontier,
@@ -129,7 +88,7 @@ impl BoundaryPreparation for ReadStorage<'_> {
         };
         let registration = arena.registration().map_err(native_fault)?;
         match bound.prepare(frontier, ledger, registration, heap) {
-            Ok(prepared) => Ok(Some((prepared, PreparedRead::Native(value)))),
+            Ok(prepared) => Ok(Some((prepared, value))),
             Err(room::publication::PublicationError::Miss(_)) => Ok(None),
             Err(room::publication::PublicationError::Heap(error)) => Err(error),
         }
@@ -153,9 +112,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         read: SourceRead,
         reg: u32,
         literal: &doc::Literal,
-        charges: &room::charges::ChargeProgram,
+        original: &std::sync::Arc<room::charges::OriginalPrefix>,
     ) -> Result<bool, Stop> {
-        self.source_input(frame, read, reg, Input::Literal(literal), Some(charges))
+        self.source_input(frame, read, reg, Input::Literal(literal), Some(original))
     }
 
     fn source_input(
@@ -164,7 +123,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         read: SourceRead,
         reg: u32,
         value: Input<'_>,
-        charges: Option<&room::charges::ChargeProgram>,
+        original: Option<&std::sync::Arc<room::charges::OriginalPrefix>>,
     ) -> Result<bool, Stop> {
         let Some(statement_id) = frame.state.statement else {
             return Ok(false);
@@ -198,12 +157,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         }
         // The original unpaid quote is a charge guard, never a memory price.
         // On a miss source replays that exact prefix before acquiring this root.
-        let quote = match charges {
-            Some(charges) => charges.constructor_quote().ok_or_else(|| {
-                self.halt(malformed("literal has no canonical pending charge coverage").into())
-            })?,
-            None => read.quote(),
-        };
+        let quote = if original.is_some() { 0 } else { read.quote() };
         if !self.fits(quote) {
             return Err(self.at(read.unpaid()));
         }
@@ -276,56 +230,90 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         #[cfg(any(test, feature = "testing"))]
         let callee_read = at.phase == room::Phase::Open;
         let invocation = activation.invocation.clone();
-        let result = &mut frame.regs[reg as usize];
-        let published = self
-            .publish_source_boundary(
-                frame.state.callee,
-                activation,
-                publication::Prefix {
-                    interval: std::sync::Arc::clone(&interval),
-                    facts: LeafExecution(
-                        [(
-                            at.clone(),
-                            LeafFacts {
-                                dependencies: value
-                                    .native()
-                                    .and_then(|value| value.handle())
-                                    .into_iter()
-                                    .chain(cell)
-                                    .collect(),
-                                ..Default::default()
+        let prefix = publication::Prefix {
+            interval: std::sync::Arc::clone(&interval),
+            facts: LeafExecution(
+                [(
+                    at.clone(),
+                    LeafFacts {
+                        dependencies: value
+                            .native()
+                            .and_then(|value| value.handle())
+                            .into_iter()
+                            .chain(cell)
+                            .collect(),
+                        ..Default::default()
+                    },
+                )]
+                .into(),
+            ),
+            start,
+            next,
+            allowance,
+        };
+        let published = match value {
+            Input::Literal(literal) => {
+                let original = original.ok_or_else(|| {
+                    self.halt(malformed("literal lost its original source prefix").into())
+                })?;
+                let value = self
+                    .publish_original_construction(
+                        frame.state.callee,
+                        activation,
+                        prefix,
+                        super::construction::OriginalConstruction {
+                            original,
+                            registers: original.values(|reg| frame.regs[reg as usize]),
+                            construction: Construction {
+                                charges: None,
+                                value: ConstructionValue::Literal {
+                                    literal,
+                                    link: frame.state.callee.link,
+                                },
+                                output,
+                                at: at.clone(),
+                                release: Box::default(),
+                                inputs: vec![],
+                                operands: vec![],
+                                depth_limit: self.limits.value_depth(),
+                                heap: self.heap,
                             },
-                        )]
-                        .into(),
-                    ),
-                    start,
-                    next,
-                    allowance,
-                },
-                ReadStorage {
-                    charges,
-                    value,
-                    link: frame.state.callee.link,
-                    owner: output,
-                    at: at.clone(),
-                    heap: self.heap,
-                    placement,
-                    invocation: &invocation,
-                    slots: frame.slots,
-                    code,
-                    depth_limit: self.limits.value_depth(),
-                },
-                |arena, _, edits, storage| {
-                    debug_assert!(edits.is_empty());
-                    *result = storage.publish(arena);
-                },
-            )
-            .map_err(|error| self.halt(error.into()))?;
+                        },
+                    )
+                    .map_err(|error| self.halt(error.into()))?;
+                if let Some(value) = value {
+                    frame.regs[reg as usize] = value;
+                }
+                value.is_some()
+            }
+            Input::Native(value) => {
+                let result = &mut frame.regs[reg as usize];
+                self.publish_source_boundary(
+                    frame.state.callee,
+                    activation,
+                    prefix,
+                    ReadStorage {
+                        value,
+                        owner: output,
+                        at: at.clone(),
+                        placement,
+                        invocation: &invocation,
+                        slots: frame.slots,
+                        code,
+                    },
+                    |_, _, edits, storage| {
+                        debug_assert!(edits.is_empty());
+                        *result = storage;
+                    },
+                )
+                .map_err(|error| self.halt(error.into()))?
+            }
+        };
         if !published {
             return Err(self.at(read.unpaid()));
         }
         #[cfg(test)]
-        if charges.is_some() {
+        if original.is_some() {
             super::super::super::compiled::constructor_debt_published(2);
         }
         #[cfg(any(test, feature = "testing"))]

@@ -100,6 +100,7 @@ fn constructors_and_capture_aliases_agree() {
                 }
                 for mode in [Mode::Generic, Mode::Specialized] {
                     crate::machine::islands::compiled::take_constructor_debt_publications();
+                    crate::machine::islands::compiled::take_original_payments();
                     assert_eq!(
                         observe_source_or_register(
                             &text,
@@ -116,6 +117,11 @@ fn constructors_and_capture_aliases_agree() {
                     let debt_publications =
                         crate::machine::islands::compiled::take_constructor_debt_publications();
                     if body == BODY && !taped && layout == Layout(0) {
+                        let original = crate::machine::islands::compiled::take_original_payments();
+                        assert!(
+                            original.0 > 0 && original.1 > 0,
+                            "packet constructors must settle real original events before source handoff: {original:?}"
+                        );
                         assert!(
                             debt_publications.iter().all(|count| *count > 0),
                             "canonical constructor debt must bind on actual collection/closure/literal publications: {debt_publications:?}"
