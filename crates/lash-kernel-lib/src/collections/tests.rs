@@ -989,6 +989,28 @@ fn sort_callback_wait_resumes_the_snapshot_and_comparator_operands() {
 }
 
 #[test]
+fn sort_callback_preserves_saved_outer_operands_and_aliases() {
+    // The waiting sort and comparator retain an outer expression operand,
+    // stable ties and the actual aliased records through an empty-cache reopen.
+    let marked = |id| {
+        Datum::Record(vec![
+            ("id".into(), int(id)),
+            ("seen".into(), Datum::Bool(true)),
+        ])
+    };
+    let sorted = Datum::List(vec![
+        tuple(vec![int(1), marked(1)]),
+        tuple(vec![int(2), marked(0)]),
+        tuple(vec![int(2), Datum::Record(vec![("id".into(), int(2))])]),
+    ]);
+    callback_law(
+        "definition \"function f(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let x = num.sub(a[0], b[0]) let y = perform 0(x) as Any set a[1].seen = true return y }\"\n definition \"function sorted(xs: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { do invoke list.sort(xs, &f) return xs }\"\n main { let xs = [(2, {id: 0}), (1, {id: 1}), (2, {id: 2})] let alias = xs return (\"saved outer operand\", call sorted(xs), alias) }",
+        tuple(vec![text("saved outer operand"), sorted.clone(), sorted]),
+        3,
+    );
+}
+
+#[test]
 fn k_bool_001_not_is_strict_without_truthiness() {
     assert_eq!(
         body("return (bool.not(true), bool.not(false))"),
