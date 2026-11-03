@@ -9,35 +9,105 @@ use room::{
 };
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
-    pub(in crate::machine::islands::execute) fn publish_list_store(
+    pub(in crate::machine::islands::execute) fn publish_store(
         &mut self,
         frame: &mut Values<'_, '_>,
         pc: u32,
-        operands: [(u32, Value); 3],
+        field: Option<usize>,
+        operands: &[(u32, Value)],
     ) -> Result<bool, HeapFault> {
-        let [(_, target), (_, index), (_, value)] = operands;
-        let Value::List(handle) = target else {
-            return Ok(false);
+        let (handle, member, value) = match (field, operands) {
+            (Some(field), [(_, Value::Record(handle)), (_, value)]) => {
+                let Some(field) = self.stream.fields.get(field) else {
+                    return Ok(false);
+                };
+                (
+                    *handle,
+                    Member::Field(std::sync::Arc::from(field.name.as_str())),
+                    *value,
+                )
+            }
+            (None, [(_, Value::List(handle)), (_, index), (_, value)]) => {
+                let Some(index) = crate::compile::position(index) else {
+                    return Ok(false);
+                };
+                let Ok(len) = self.arena.len(*handle) else {
+                    return Ok(false);
+                };
+                if index > len {
+                    return Ok(false);
+                }
+                (*handle, Member::List(index), *value)
+            }
+            (None, [(_, target), (_, key), (_, value)]) => {
+                let handle = match target {
+                    Value::Map(handle) | Value::Set(handle) => *handle,
+                    Value::Record(handle) if matches!(key, Value::Text(_) | Value::LongText(_)) => {
+                        *handle
+                    }
+                    _ => return Ok(false),
+                };
+                if self.arena.key(key).is_err() || self.arena.entries(handle).is_err() {
+                    return Ok(false);
+                }
+                (handle, Member::Table(*key), *value)
+            }
+            _ => return Ok(false),
         };
-        let Some(index) = crate::compile::position(&index) else {
-            return Ok(false);
+        self.publish_member_store(
+            frame,
+            pc,
+            operands,
+            MemberEdit {
+                handle,
+                member,
+                next: Some(value),
+            },
+            None,
+        )
+    }
+
+    pub(in crate::machine::islands::execute) fn publish_remove(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        pc: u32,
+        operands: [(u32, Value); 2],
+    ) -> Result<bool, HeapFault> {
+        let [(_, target), (_, key)] = operands;
+        let (handle, member) = match target {
+            Value::List(handle) => {
+                let Some(index) = crate::compile::position(&key) else {
+                    return Ok(false);
+                };
+                let Ok(len) = self.arena.len(handle) else {
+                    return Ok(false);
+                };
+                if index >= len {
+                    return Ok(false);
+                }
+                (handle, Member::List(index))
+            }
+            Value::Map(handle) | Value::Set(handle) | Value::Record(handle) => {
+                if matches!(target, Value::Record(_))
+                    && !matches!(key, Value::Text(_) | Value::LongText(_))
+                {
+                    return Ok(false);
+                }
+                if self.arena.key(&key).is_err() || self.arena.entries(handle).is_err() {
+                    return Ok(false);
+                }
+                (handle, Member::Table(key))
+            }
+            _ => return Ok(false),
         };
-        // An out-of-range source write raises its guest error on the precise
-        // path. It cannot be submitted as a malformed ownership transition.
-        let Ok(len) = self.arena.len(handle) else {
-            return Ok(false);
-        };
-        if index > len {
-            return Ok(false);
-        }
         self.publish_member_store(
             frame,
             pc,
             &operands,
             MemberEdit {
                 handle,
-                member: Member::List(index),
-                next: Some(value),
+                member,
+                next: None,
             },
             None,
         )
@@ -276,11 +346,15 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             },
             |arena, _, edits, write| {
                 let [edit] = edits.as_slice() else {
-                    unreachable!("a checked list publication changed member arity");
+                    unreachable!("a checked member publication changed member arity");
                 };
                 write.publish(arena, edit.clone());
             },
         )?;
+        #[cfg(test)]
+        if published && !matches!(edit.member, Member::Variable) {
+            super::super::super::DIRECT_COLLECTIONS.with(|count| count.set(count.get() + 1));
+        }
         #[cfg(any(test, feature = "testing"))]
         if published {
             match edit.member {

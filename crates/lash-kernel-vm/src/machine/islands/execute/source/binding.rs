@@ -109,13 +109,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &WriteSite,
         value: Value,
     ) -> Result<Option<bool>, HeapFault> {
-        if site.accumulates
-            || (self.tape.is_some()
-                && frame
-                    .state
-                    .source
-                    .as_ref()
-                    .is_none_or(|source| source.original.is_none()))
+        if (self.tape.is_some()
+            && frame
+                .state
+                .source
+                .as_ref()
+                .is_none_or(|source| source.original.is_none()))
             || self.projection().is_some()
             || (!site.bind && matches!(frame.slots[site.at], SlotState::Empty))
         {

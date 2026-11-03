@@ -440,7 +440,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     field,
                     pc,
                     inputs,
-                    cache,
                     finish,
                 } = &code.sites.store[packet.x as usize];
 
@@ -459,31 +458,29 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 let ordered = inputs
                     .as_ref()
                     .map_or(values, |inputs| inputs.roles.map(|at| values[at]));
-                let statement = cache.then_some(frame.state.statement).flatten();
-                let published = if field.is_none()
-                    && let Some(index) = index
-                {
-                    self.publish_list_store(
+                let published = if let Some(field) = field {
+                    self.publish_store(
                         frame,
                         *pc,
-                        [
+                        Some(*field),
+                        &[(*target, ordered[0]), (*value, ordered[2])],
+                    )
+                } else if let Some(index) = index {
+                    self.publish_store(
+                        frame,
+                        *pc,
+                        None,
+                        &[
                             (*target, ordered[0]),
                             (*index, ordered[1]),
                             (*value, ordered[2]),
                         ],
                     )
-                    .map_err(|error| self.halt(error.into()))?
                 } else {
-                    false
-                };
-                let stored = if published {
-                    Some(())
-                } else {
-                    self.retaining(&mut frame.state.transient, |island| {
-                        island.store(statement, *field, ordered[0], ordered[1], ordered[2])
-                    })
-                };
-                if stored.is_none() {
+                    Ok(false)
+                }
+                .map_err(|error| self.halt(error.into()))?;
+                if !published {
                     let stop = self.at(*pc);
                     if let Some(inputs) = inputs {
                         for (read, value) in inputs.reads.iter().zip(values) {
@@ -507,8 +504,22 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             Opcode::Remove => {
                 let sites::Remove { target, index, pc } = &code.sites.remove[packet.x as usize];
 
-                self.remove(regs[*target as usize], regs[*index as usize])
-                    .ok_or_else(|| self.at(*pc))?;
+                let operands = [
+                    (*target, regs[*target as usize]),
+                    (*index, regs[*index as usize]),
+                ];
+                if !self
+                    .publish_remove(frame, *pc, operands)
+                    .map_err(|error| self.halt(error.into()))?
+                {
+                    let stop = self.at(*pc);
+                    for (reg, value) in operands {
+                        if !self.scratch.exit.regs.iter().any(|(held, _)| *held == reg) {
+                            self.scratch.exit.regs.push((reg, value));
+                        }
+                    }
+                    return Err(stop);
+                }
             }
             Opcode::Unit => {
                 let sites::Unit { site, src } = &code.sites.unit[packet.x as usize];
@@ -642,19 +653,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 {
                     Some(true) => {}
                     Some(false) => return Err(self.at(site.pc)),
-                    None => {
-                        if frame
-                            .state
-                            .source
-                            .as_ref()
-                            .is_some_and(|source| source.original.is_some())
-                        {
-                            return Err(self.at_held(site.pc, site.reg, value));
-                        }
-                        if !self.write_session(site.name, value, site.bind) {
-                            return Err(self.at(site.pc));
-                        }
-                    }
+                    None => return Err(self.at_held(site.pc, site.reg, value)),
                 }
             }
             Opcode::Effect => {
@@ -685,6 +684,15 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             Opcode::Done => {
                 let sites::Done { leaves, empty } = &code.sites.done[packet.x as usize];
 
+                // A discard still owes its original source End event. It is
+                // an exact handoff, not permission to clear/rebind the frame.
+                if let Some(id) = frame.state.statement {
+                    let (stream, statement, _) = self.exe.statement(id);
+                    let pc = statement.ops.end() - 1;
+                    if matches!(stream.ops[pc as usize], lash_kernel_exec::Op::End) {
+                        return Err(self.at_held(pc, 0, frame.regs[0]));
+                    }
+                }
                 return self.finish_statement(frame, *leaves, *empty);
             }
             Opcode::Branch => {
@@ -704,7 +712,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     _ => return Err(self.at(*pc)),
                 };
                 self.source_clear_operands(frame)
-                    .and_then(|()| self.logical.bounded(self.arena, self.heap))
                     .map_err(|error| self.halt(error.into()))?;
                 self.transient = self
                     .transient

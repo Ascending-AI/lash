@@ -167,6 +167,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .set(balance.total().map_err(|error| self.halt(error.into()))?);
         if let Some(tape) = self.recorder {
             debt.record(tape);
+            if prepared_natives != 0 {
+                tape.typed_packet();
+            }
         }
         witnessed!(Scalar, Commit);
         // Whole-statement certificates discharge these native events together.

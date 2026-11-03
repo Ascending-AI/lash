@@ -779,35 +779,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .saturating_sub(std::mem::take(&mut frame.state.transient));
     }
 
-    /// An accumulator statement, which cannot stop once its concatenation
-    /// answered, wrote `value` to the slot at `at`: the text that
-    /// concatenation made is the slot's to extend again. Storage it took
-    /// belongs to that value; any other value would leave it with a text
-    /// no longer whole.
-    #[inline(always)]
-    fn accumulated(
-        &mut self,
-        frame: &mut Values<'_, 'e>,
-        at: usize,
-        value: Value,
-        made: crate::compile::Made,
-    ) -> Result<(), Stop> {
-        match value {
-            Value::LongText(text) if text == made.text => {
-                #[cfg(any(test, feature = "perf-witness"))]
-                if made.moved.is_some() {
-                    execution::accumulated(&self.scratch.census, self.scratch.counting);
-                }
-                frame.state.texts.push((at, text));
-                Ok(())
-            }
-            _ if made.moved.is_none() => Ok(()),
-            _ => Err(self.halt(fault(
-                "an accumulator's concatenation is not its statement's value",
-            ))),
-        }
-    }
-
     /// A statement that stops after its accumulator's concatenation took
     /// its operand's storage gives the storage back, so its source owner
     /// runs it over the text it read.
@@ -947,10 +918,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         leaves: u32,
         empty: Option<crate::compile::BlockId>,
     ) -> Result<Next, Stop> {
-        self.source_clear_operands(frame)
-            .and_then(|()| self.source_bindings(frame))
-            .and_then(|()| self.logical.bounded(self.arena, self.heap))
-            .map_err(|error| self.halt(error.into()))?;
         if let Some(block) = empty
             && OBSERVING
             && let Some(watching) = &self.projection()

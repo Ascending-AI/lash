@@ -396,7 +396,6 @@ operations! {
                 field: Option<usize>,
                 pc: u32,
                 inputs: Option<Box<StoreInputs>>,
-                cache: bool,
                 finish: Option<u32>,
             }
             Remove remove {

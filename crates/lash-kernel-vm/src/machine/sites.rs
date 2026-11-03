@@ -5,16 +5,10 @@
 use crate::compile::{PropertySlot, ReadSite};
 use std::collections::BTreeMap;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-enum CachedSite {
-    Read(usize),
-    Write(usize),
-}
-
 /// Each site's guarded short key and position.
 #[derive(Default)]
 pub(crate) struct SiteCaches {
-    slots: BTreeMap<CachedSite, Option<PropertySlot>>,
+    slots: BTreeMap<usize, Option<PropertySlot>>,
 }
 
 impl SiteCaches {
@@ -24,10 +18,7 @@ impl SiteCaches {
         if site.missing {
             return None;
         }
-        self.slots
-            .get(&CachedSite::Read(site.at.ix()))
-            .copied()
-            .flatten()
+        self.slots.get(&site.at.ix()).copied().flatten()
     }
 
     /// Keeps the slot `site` found its property at, or none.
@@ -36,26 +27,10 @@ impl SiteCaches {
         if site.missing {
             return;
         }
-        self.keep_at(CachedSite::Read(site.at.ix()), slot);
+        self.keep_at(site.at.ix(), slot);
     }
 
-    #[inline]
-    pub(crate) fn write(&self, statement: crate::compile::StmtId) -> Option<PropertySlot> {
-        self.slots
-            .get(&CachedSite::Write(statement.0 as usize))
-            .copied()
-            .flatten()
-    }
-
-    pub(crate) fn keep_write(
-        &mut self,
-        statement: crate::compile::StmtId,
-        slot: Option<PropertySlot>,
-    ) {
-        self.keep_at(CachedSite::Write(statement.0 as usize), slot);
-    }
-
-    fn keep_at(&mut self, at: CachedSite, slot: Option<PropertySlot>) {
+    fn keep_at(&mut self, at: usize, slot: Option<PropertySlot>) {
         if slot.is_some() {
             self.slots.insert(at, slot);
         } else if let Some(stored) = self.slots.get_mut(&at) {

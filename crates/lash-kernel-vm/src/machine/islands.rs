@@ -699,61 +699,6 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         }
     }
 
-    #[inline(always)]
-    fn operator_value(&mut self, site: &OperatorSite, values: &[Value], covered: bool) -> Answer {
-        let typed = if OBSERVING || (site.root.is_some() && self.accounting) {
-            None
-        } else {
-            match values {
-                [x] if self.accounting => compiled::unary(site, *x, self.exe),
-                [x, y] => site
-                    .pair(self.exe)
-                    .and_then(|pair| compiled::typed(site, &pair, *x, *y, self.charging, self.exe))
-                    .or_else(|| {
-                        compiled::text_relation(site, *x, *y, self.exe, self.arena, self.charging)
-                    }),
-                _ => None,
-            }
-        };
-        if !OBSERVING
-            && !self.accounting
-            && self.admitted
-            && !site.checked
-            && site.counted.is_none()
-        {
-            typed
-                .map(|(value, _)| value)
-                .or_else(|| site.entry(self.exe).call(values))
-                .map(Ok)
-                .unwrap_or_else(|| self.operate(site, values))
-        } else if OBSERVING || (site.root.is_some() && self.accounting) {
-            self.covered = false;
-            self.operate(site, values)
-        } else {
-            match typed {
-                Some((value, Some(units))) if covered && self.covered => {
-                    self.charged += site.fixed;
-                    if let Some(occurrence) = site.counted {
-                        self.count(occurrence)?;
-                    }
-                    self.charged += units;
-                    Ok(value)
-                }
-                Some((value, units)) => match self.typed(site, value, units) {
-                    Some(answer) => answer,
-                    None => {
-                        self.covered = false;
-                        self.operate(site, values)
-                    }
-                },
-                None => {
-                    self.covered = false;
-                    self.operate(site, values)
-                }
-            }
-        }
-    }
-
     /// The operator `site` on `args`: its prepared entry's value, charged
     /// its formula from its scalar table on scalars, measured otherwise, or
     /// a stop at its op.
@@ -893,57 +838,6 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         Ok(())
     }
 
-    /// The scalar answer `value` of the typed path of operator `site` on
-    /// two floats or two word integers, committed as [`Self::operate`]
-    /// commits the same answer: its region closed, its occurrence counted
-    /// and its formula charged the `units` its scalar table gives for the
-    /// call's sizes, in that order. `None`, with nothing committed, where
-    /// [`Self::operate`] decides otherwise: an observed helper's body, a
-    /// depth that does not fit, sizes its table does not certify or a charge
-    /// past the bound. The checked occurrence advance remains after the
-    /// argument region closes, as in the source handler.
-    #[inline(always)]
-    pub(super) fn typed(
-        &mut self,
-        site: &OperatorSite,
-        value: Value,
-        units: Option<u64>,
-    ) -> Option<Answer> {
-        if !self.accounting && self.admitted && !site.checked && site.counted.is_none() {
-            return Some(Ok(value));
-        }
-        // The kernel producer already validated checked arguments/result.
-        if !self.admits(site) {
-            return None;
-        }
-        let units = if self.charging { units? } else { 0 };
-        let fixed = if self.accounting { site.fixed } else { 0 };
-        if !self.fits(fixed.checked_add(units)?) {
-            return None;
-        }
-        // Both fit together, so each is charged without a second check.
-        if self.accounting
-            && let Some(close) = &site.close
-        {
-            self.charged += u64::from(close.total);
-            if let Some(tape) = self.tape {
-                record(tape, self.stream, close.region);
-            }
-        }
-        if let Some(occurrence) = site.counted
-            && let Err(stop) = self.count(occurrence)
-        {
-            return Some(Err(stop));
-        }
-        self.charged += units;
-        if units != 0
-            && let Some(tape) = self.tape
-        {
-            tape.push(Weight::Atomic(units));
-        }
-        Some(Ok(value))
-    }
-
     /// The operator `site` on `args`, not all scalars, or answering no
     /// scalar: its prepared entry's answer, when the frame may hold it,
     /// charged as the reference charges a prepared answer, by its scalar
@@ -1030,30 +924,6 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             Some((_, value)) => Some(*value),
             None => self.session_cold(name),
         }
-    }
-
-    /// Writes session binding `name`, a declaration when `bind`, as its
-    /// source handler writes it. An assignment of a binding the cell does
-    /// not hold resident leaves to that handler: `false`, nothing written.
-    #[inline(never)]
-    fn write_session(&mut self, name: u32, value: Value, bind: bool) -> bool {
-        let Some(binding) = self.stream.names.get(name as usize) else {
-            return false;
-        };
-        if !bind && self.session.resident(&binding.key).is_none() {
-            return false;
-        }
-        self.session.write(binding, value);
-        match self
-            .scratch
-            .sessions
-            .iter_mut()
-            .find(|(read, _)| *read == name)
-        {
-            Some((_, cached)) => *cached = value,
-            None => self.scratch.sessions.push((name, value)),
-        }
-        true
     }
 
     #[inline(never)]

@@ -61,19 +61,23 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Values<'_, 'e>,
         site: &OperatorSite,
         values: &[Value],
-        covered: bool,
+        _covered: bool,
         to: &Destination,
     ) -> Result<Next, Stop> {
         if let Some(next) = self.prepared_destination(frame, site, values, to)? {
             return Ok(next);
         }
-        let value = self.retaining(&mut frame.state.transient, |island| {
-            island.operator_value(site, values, covered)
-        })?;
-        #[cfg(test)]
-        if matches!(to, Destination::Write(_)) {
-            super::super::ACCUMULATED.with(|n| n.set(n.get() + 1));
+        let original = frame
+            .state
+            .source
+            .as_ref()
+            .is_some_and(|source| source.original.is_some());
+        if !original
+            && let Some(close) = &site.close
+            && !self.close(close)
+        {
+            return Err(self.at_operands(close.head, site.reg, values));
         }
-        self.destination(frame, site.reg, value, to)
+        Err(self.at_operands(site.pc, site.reg, values))
     }
 }
