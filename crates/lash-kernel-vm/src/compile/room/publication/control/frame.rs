@@ -57,6 +57,7 @@ impl FrameEntry<'_> {
         mut installation: PreparedInstallation<'a>,
         heap: &PagedHeap,
         arguments: &[(Option<Root>, Value)],
+        public_arguments: Option<&[(Option<Root>, Value)]>,
         states: &[SlotState],
         caller: Option<&FrameCaller<'_>>,
         inputs: &[Root],
@@ -245,7 +246,7 @@ impl FrameEntry<'_> {
                 ledger,
                 registration.arena(),
                 heap,
-                arguments,
+                public_arguments.unwrap_or(arguments),
                 &captures,
                 inputs,
                 &mut expected,
@@ -253,7 +254,8 @@ impl FrameEntry<'_> {
                 return Ok(None);
             }
         } else if inputs.iter().any(|owner| {
-            !arguments
+            !public_arguments
+                .unwrap_or(arguments)
                 .iter()
                 .any(|(input, _)| input.as_ref() == Some(owner))
         }) {

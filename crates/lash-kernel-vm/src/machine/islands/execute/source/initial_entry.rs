@@ -110,6 +110,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             installation,
             self.heap,
             &arguments,
+            None,
             &bindings,
             None,
             inputs,

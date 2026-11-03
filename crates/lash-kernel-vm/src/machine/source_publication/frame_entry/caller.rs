@@ -5,6 +5,25 @@ use crate::machine::frames::{Pending, Role};
 use lash_kernel_exec::{ActIx, Reg};
 use lash_kernel_state::paged::PhaseRecord;
 
+pub(in crate::machine) struct CallerArguments {
+    pub(in crate::machine) args: usize,
+    pub(in crate::machine) owners: ArgumentOwners,
+    pub(in crate::machine) given: usize,
+    pub(in crate::machine) awaited_by: Option<crate::compile::StmtId>,
+    pub(in crate::machine) capture: Option<ActIx>,
+}
+impl From<&EntryCall> for CallerArguments {
+    fn from(call: &EntryCall) -> Self {
+        Self {
+            args: call.args,
+            owners: call.owners,
+            given: call.given,
+            awaited_by: call.awaited_by,
+            capture: call.capture,
+        }
+    }
+}
+
 pub(super) struct Caller<'a> {
     pub(super) callee: Option<Reg>,
     pub(super) capture: Option<(ActIx, &'a Nested)>,
@@ -58,13 +77,40 @@ impl Caller<'_> {
     }
 }
 impl KernelMachine {
+    pub(in crate::machine) fn prepare_export_arguments(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        call: CallerArguments,
+    ) -> Eval<()> {
+        let mut encoding = TokenWriter::new();
+        let Some((caller, _)) = self.prepare_frame_caller(task, exe, &call, &mut encoding)? else {
+            return Err(malformed("export has no authenticated public source call").into());
+        };
+        let control = matches!(call.owners, ArgumentOwners::Control);
+        let Some(bank) = self.regs.prepare_frame_entry(
+            call.args,
+            call.given,
+            caller.callee,
+            control,
+            caller.roles(),
+        )?
+        else {
+            return Err(malformed("export has no evaluated public argument bank").into());
+        };
+        caller.authenticate(&bank)?;
+        bank.stage_export(call.args, caller.callee, control)?;
+        Ok(())
+    }
+
     pub(super) fn prepare_frame_caller<'a>(
         &mut self,
         task_id: TaskId,
         exe: &'a Executable,
-        call: &EntryCall,
+        call: &CallerArguments,
         encoding: &mut TokenWriter,
     ) -> Eval<Option<(Caller<'a>, Option<u64>)>> {
+        let given = self.regs.public_entry_count(call.args, call.given)?;
         let mut result = Caller {
             callee: None,
             capture: None,
@@ -75,6 +121,10 @@ impl KernelMachine {
         if let Some(statement) = call.awaited_by {
             let caller = self.frame(task_id)?;
             encoding.unsigned(caller.invocation);
+            if matches!(call.owners, ArgumentOwners::Control) {
+                encoding.seq(0);
+                return Ok(Some((result, None)));
+            }
             if let Some(act) = call.capture.or(caller.nested) {
                 let (stream, stmt, _) = exe.statement(statement);
                 let entry = stream
@@ -150,7 +200,7 @@ impl KernelMachine {
                     let slots = source
                         .owner_slots()
                         .map_err(|_| malformed("entry caller owners failed verification"))?;
-                    let mut expected = buffer(call.given + usize::from(result.callee.is_some()))?;
+                    let mut expected = buffer(given + usize::from(result.callee.is_some()))?;
                     for selector in &event
                         .events()
                         .next()
@@ -165,7 +215,7 @@ impl KernelMachine {
                                 })?,
                         );
                     }
-                    if expected.len() != call.given + usize::from(result.callee.is_some())
+                    if expected.len() != given + usize::from(result.callee.is_some())
                         || call.args != entry.dst.ix() + usize::from(result.callee.is_some())
                     {
                         return Err(malformed(

@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 #[derive(Default)]
 pub(super) struct Operands {
+    export: Option<entry::ExportEntry>,
     roots: Option<BankRoots>,
     entry_roots: Option<Lifecycle>,
     values: Vec<Operand>,
@@ -391,6 +392,9 @@ impl Operands {
         self.entry_roots = Some(lifecycle);
     }
     pub(super) fn take_arguments(&mut self, start: usize, count: usize) -> Vec<Owner> {
+        if let Some(owners) = self.take_export_arguments(start, count) {
+            return owners;
+        }
         if self.entry_active {
             return self
                 .entry
@@ -410,6 +414,7 @@ impl Operands {
             .collect()
     }
     pub(super) fn clear(&mut self) {
+        self.export = None;
         for operand in &self.values {
             if let (Some(roots), Some(owner)) = (&self.roots, operand.held.owner) {
                 roots.release(owner);

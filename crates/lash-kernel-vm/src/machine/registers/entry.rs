@@ -7,6 +7,20 @@ pub(in crate::machine) struct PreparedEntryBank<'a> {
     inputs: source::EntryInputs,
 }
 impl PreparedEntryBank<'_> {
+    pub(in crate::machine) fn stage_export(
+        self,
+        start: usize,
+        callee: Option<lash_kernel_exec::Reg>,
+        control: bool,
+    ) -> Result<(), HeapFault> {
+        self.registers
+            .source
+            .stage_export(start, callee, control, self.inputs)
+    }
+    pub(in crate::machine) fn public_arguments(&self) -> Option<&[(Option<Owner>, Value)]> {
+        self.inputs.public_arguments()
+    }
+
     pub(in crate::machine) fn arguments(
         &self,
     ) -> impl Iterator<Item = (Option<Owner>, Value)> + '_ {
@@ -46,6 +60,22 @@ impl PreparedEntryBank<'_> {
     }
 }
 impl Registers {
+    pub(in crate::machine) fn finish_export_arguments(
+        &mut self,
+        start: usize,
+        count: usize,
+    ) -> Result<(), HeapFault> {
+        self.source
+            .finish_export(start, self.values[start..start + count].to_vec())
+    }
+    pub(in crate::machine) fn public_entry_count(
+        &self,
+        start: usize,
+        count: usize,
+    ) -> Result<usize, HeapFault> {
+        self.source.public_entry_count(start, count)
+    }
+
     pub(in crate::machine) fn prepare_frame_entry(
         &mut self,
         start: usize,

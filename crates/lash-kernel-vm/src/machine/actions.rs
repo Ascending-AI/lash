@@ -852,7 +852,29 @@ impl KernelMachine {
     ) -> Status {
         let (target, count, export) = match target {
             Target::Export(callable, descriptor) => {
+                let adapted = matches!(
+                    descriptor.convention,
+                    lash_kernel_doc::StartConvention::PyArgsList { .. }
+                        | lash_kernel_doc::StartConvention::TsArgsList { .. }
+                        | lash_kernel_doc::StartConvention::TsDirect { .. }
+                );
+                if adapted {
+                    self.prepare_export_arguments(
+                        task,
+                        exe,
+                        super::source_publication::frame_entry::CallerArguments {
+                            args,
+                            owners: super::exec::ArgumentOwners::Operands,
+                            given: count,
+                            awaited_by: Some(stmt),
+                            capture: None,
+                        },
+                    )?;
+                }
                 let count = self.export_arguments(exe, callable, &descriptor, args, count)?;
+                if adapted {
+                    self.regs.finish_export_arguments(args, count)?;
+                }
                 (
                     self.callable_target(exe, callable)?,
                     count,

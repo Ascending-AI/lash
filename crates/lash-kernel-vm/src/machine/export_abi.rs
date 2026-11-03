@@ -78,7 +78,29 @@ impl KernelMachine {
             awaiting,
             ..
         } = invocation;
+        let adapted = matches!(
+            descriptor.convention,
+            lash_kernel_doc::StartConvention::PyArgsList { .. }
+                | lash_kernel_doc::StartConvention::TsArgsList { .. }
+                | lash_kernel_doc::StartConvention::TsDirect { .. }
+        );
+        if adapted {
+            self.prepare_export_arguments(
+                task,
+                exe,
+                super::source_publication::frame_entry::CallerArguments {
+                    args,
+                    owners,
+                    given: count,
+                    awaited_by: awaiting,
+                    capture: None,
+                },
+            )?;
+        }
         let count = self.export_arguments(exe, callable, descriptor, args, count)?;
+        if adapted {
+            self.regs.finish_export_arguments(args, count)?;
+        }
         let flow = match self.callable_target(exe, callable)? {
             Target::Library(lib, link) => self.call_lib_linked(
                 task,

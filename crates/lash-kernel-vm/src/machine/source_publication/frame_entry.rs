@@ -7,6 +7,7 @@ use crate::compile::room::{
 };
 use crate::compile::{CodeId, Executable, NestedCallee, NestedKind, StmtId};
 use crate::machine::{Eval, Frame, KernelMachine, SlotState, exec::ArgumentOwners, fault};
+pub(in crate::machine) use caller::CallerArguments;
 use lash_kernel_doc::{
     TaskId, Value,
     heap::{EntityId, FamilyId, Identity, PageValue},
@@ -86,7 +87,7 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         let has_caller = !rooted;
         let Some((caller, ordinal)) =
-            self.prepare_frame_caller(task_id, exe, &call, &mut encoding)?
+            self.prepare_frame_caller(task_id, exe, &CallerArguments::from(&call), &mut encoding)?
         else {
             return Ok(Some(frame));
         };
@@ -113,7 +114,9 @@ impl KernelMachine {
         };
         let frame_entry = FrameEntry::compile(exe, call.code)
             .map_err(|_| malformed("frame entry descriptor failed verification"))?;
-        let frame_caller = if let Some(statement) = call.awaited_by {
+        let frame_caller = if !matches!(call.owners, ArgumentOwners::Control)
+            && let Some(statement) = call.awaited_by
+        {
             let outer = self.frame(task_id)?;
             if let Some(act) = call.capture.or(outer.nested) {
                 let entry = &exe.statement(statement).0.nested[act.ix()];
@@ -276,6 +279,7 @@ impl KernelMachine {
             installation,
             &self.heap,
             &arguments,
+            bank.public_arguments(),
             frame.slot_states(),
             frame_caller.as_ref(),
             &inputs,
