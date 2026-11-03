@@ -274,10 +274,14 @@ impl<'a> crate::admission::SourceResources<'a> {
     }
 }
 
-/// A complete statement may contain one verified call and its original caller
-/// continuation. Both source schedules retain their canonical close identities.
+/// An ordered statement fragment retains its original caller closes and any
+/// entered callee. The next fragment may own its unpaid caller continuation.
 pub(crate) enum StatementDebt<'a> {
     Scalar(ChargeDebt<'a>),
+    ThroughCall {
+        prefix: Option<ChargeDebt<'a>>,
+        call: ComposedDebt<'a>,
+    },
     PrefixCall {
         prefix: ChargeDebt<'a>,
         call: ComposedDebt<'a>,
@@ -292,6 +296,10 @@ impl StatementDebt<'_> {
     pub(crate) fn units(&self) -> Option<u64> {
         match self {
             Self::Scalar(debt) => Some(debt.units()),
+            Self::ThroughCall { prefix, call } => prefix
+                .as_ref()
+                .map_or(0, ChargeDebt::units)
+                .checked_add(call.units()),
             Self::PrefixCall {
                 prefix,
                 call,
@@ -314,6 +322,20 @@ impl StatementDebt<'_> {
         match self {
             Self::Scalar(debt) => {
                 call_point.is_none() && callee.is_none() && debt.matches(source, first, through)
+            }
+            Self::ThroughCall { prefix, call } => {
+                through == &call.program.caller.through
+                    && call_point == Some(through)
+                    && callee.is_some_and(|source| Arc::ptr_eq(source, &call.program.callee))
+                    && match prefix {
+                        Some(prefix) => {
+                            prefix.matches(source, first, &prefix.program.through)
+                                && Arc::ptr_eq(source, &call.program.caller.source)
+                                && prefix.program.statement == call.program.caller.statement
+                                && prefix.program.range.end() == call.program.caller.range.start
+                        }
+                        None => call.caller.matches(source, first, through),
+                    }
             }
             Self::PrefixCall {
                 prefix,
@@ -344,6 +366,12 @@ impl StatementDebt<'_> {
     pub(crate) fn record(&self, tape: &crate::observe::ChargeTape) {
         match self {
             Self::Scalar(debt) => debt.record(tape),
+            Self::ThroughCall { prefix, call } => {
+                if let Some(prefix) = prefix {
+                    prefix.record(tape);
+                }
+                call.record(tape);
+            }
             Self::PrefixCall {
                 prefix,
                 call,

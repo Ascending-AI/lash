@@ -33,7 +33,7 @@ enum DebtPlan {
     Call {
         index: usize,
         prefix: Option<Box<ChargeProgram>>,
-        suffix: Box<ChargeProgram>,
+        suffix: Option<Box<ChargeProgram>>,
     },
 }
 
@@ -368,15 +368,25 @@ impl VerifiedIteration {
                     suffix,
                 } => {
                     let call = calls[*index].debt().ok_or_else(invalid)?;
-                    let suffix = bind_formulas(suffix, &formulas).ok_or_else(invalid)?;
-                    if let Some(prefix) = prefix {
-                        StatementDebt::PrefixCall {
-                            prefix: bind_formulas(prefix, &formulas).ok_or_else(invalid)?,
-                            call,
-                            suffix,
+                    let prefix = match prefix {
+                        Some(program) => {
+                            Some(bind_formulas(program, &formulas).ok_or_else(invalid)?)
+                        }
+                        None => None,
+                    };
+                    if let Some(suffix) = suffix {
+                        let suffix = bind_formulas(suffix, &formulas).ok_or_else(invalid)?;
+                        if let Some(prefix) = prefix {
+                            StatementDebt::PrefixCall {
+                                prefix,
+                                call,
+                                suffix,
+                            }
+                        } else {
+                            StatementDebt::Call { call, suffix }
                         }
                     } else {
-                        StatementDebt::Call { call, suffix }
+                        StatementDebt::ThroughCall { prefix, call }
                     }
                 }
             };
@@ -592,43 +602,55 @@ fn charge_plans(
             }
             _ => return Err(Refused::Source),
         };
-        if let Some(index) = calls.iter().position(|call| call.statement == id) {
-            let call = calls[index];
-            let first = OpRange {
-                start: call.first_unpaid,
-                len: call
-                    .pc
-                    .checked_add(1)
-                    .and_then(|end| end.checked_sub(call.first_unpaid))
-                    .ok_or(Refused::Path)?,
-            };
-            let prefix = if first.start == range.start {
+        let mut cursor = range.start;
+        let mut found = false;
+        for (index, call) in calls
+            .iter()
+            .enumerate()
+            .filter(|(_, call)| call.statement == id)
+        {
+            // Pieces already follow source evaluation order. Charge ownership
+            // partitions that same statement at each genuine call boundary.
+            if call.first_unpaid < cursor || call.pc < call.first_unpaid || call.pc >= range.end() {
+                return Err(Refused::Source);
+            }
+            let prefix = if cursor == call.first_unpaid {
                 None
             } else {
-                Some(ChargeProgram::compile(
+                Some(Box::new(ChargeProgram::compile(
                     exe,
                     code,
                     id,
                     OpRange {
-                        start: range.start,
-                        len: first.start.checked_sub(range.start).ok_or(Refused::Path)?,
+                        start: cursor,
+                        len: call.first_unpaid.checked_sub(cursor).ok_or(Refused::Path)?,
                     },
-                )?)
+                )?))
             };
-            let suffix = ChargeProgram::compile(
-                exe,
-                code,
-                id,
-                OpRange {
-                    start: call.pc + 1,
-                    len: range.end().checked_sub(call.pc + 1).ok_or(Refused::Path)?,
-                },
-            )?;
             plans.push(DebtPlan::Call {
                 index,
-                prefix: prefix.map(Box::new),
-                suffix: Box::new(suffix),
+                prefix,
+                suffix: None,
             });
+            cursor = call.pc.checked_add(1).ok_or(Refused::Path)?;
+            found = true;
+        }
+        if found {
+            if cursor < range.end() {
+                let suffix = ChargeProgram::compile(
+                    exe,
+                    code,
+                    id,
+                    OpRange {
+                        start: cursor,
+                        len: range.end().checked_sub(cursor).ok_or(Refused::Path)?,
+                    },
+                )?;
+                let Some(DebtPlan::Call { suffix: last, .. }) = plans.last_mut() else {
+                    return Err(Refused::Source);
+                };
+                *last = Some(Box::new(suffix));
+            }
         } else {
             plans.push(DebtPlan::Scalar(Box::new(ChargeProgram::compile(
                 exe, code, id, range,
