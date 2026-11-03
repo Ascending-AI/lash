@@ -137,6 +137,7 @@ natives!(name, kernel;
             preserve: name.ends_with("URI"),
         }),
         "ts.string.toUpperCase" => Arc::new(strings::Uppercase),
+
         "ts.spread" => Arc::new(arrays::Spread),
         "ts.builtin_name" => Arc::new(BuiltinName),
         "ts.sub" => Arc::new(Subtract {
