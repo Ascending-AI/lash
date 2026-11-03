@@ -420,199 +420,99 @@ fn malformed(message: &str) -> HeapFault {
 }
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
-    /// Entry has already committed its real parameter and capture owners.
-    /// This suffix may decline without discarding or repeating that entry.
+    /// The compiler owns the literal, its full canonical debt and its only
+    /// interior acquisition. Entry is already a committed source prefix.
     pub(super) fn publish_literal_body(
         &mut self,
         callee: Callee<'_>,
         activation: &mut Activation,
     ) -> Result<bool, HeapFault> {
-        use crate::admission::Allowance;
-        use lash_kernel_state::kernel_internals::logical::{
-            FrameEvent, Holding, JournalEvent, Program, PublicationValue as PV,
-        };
-        use room::{
-            ExitKind, Measure, Phase, Point, Selection,
-            publication::{Occurrence, Position},
-        };
+        use crate::admission::SourceResources;
+        use room::publication::Occurrence;
         let Some(literal) = &callee.compiled.literal else {
             return Ok(false);
         };
-        // This rule needs no native/body contract or result dependency. A
-        // non-inline value takes its ordinary source path.
-        if literal.value.handle().is_some() {
+        let source = &self.exe.code(callee.plan.code).source_room;
+        let Ok(exit) = source.literal_return_exit(self.exe, callee.plan.code) else {
+            return Ok(false);
+        };
+        if !exit.literal_matches(literal.statement, literal.reg, literal.close, literal.value) {
             return Ok(false);
         }
-        let source = &self.exe.code(callee.plan.code).source_room;
-        let statement = self.exe.stmt(literal.statement);
-        let return_site = statement.site.clone();
-        let literal_site = return_site.child(0);
-        let point = |site, phase| Point { site, phase };
-        let enter = point(source.site.clone(), Phase::Enter);
-        let operand_at = point(literal_site.clone(), Phase::Commit);
-        let return_at = point(return_site.clone(), Phase::Commit);
-        let leave = point(source.site.clone(), Phase::Leave);
-        let selections = [
-            Selection::Event {
-                at: enter,
-                exit: ExitKind::Normal,
-            },
-            Selection::Event {
-                at: operand_at.clone(),
-                exit: ExitKind::Normal,
-            },
-            Selection::Event {
-                at: return_at.clone(),
-                exit: ExitKind::Return,
-            },
-            Selection::Event {
-                at: leave.clone(),
-                exit: ExitKind::Normal,
-            },
-        ];
-        let Ok(interval) =
-            source.compile_between(&operand_at, &leave, &selections, selections.len())
+        let start = exit.literal_start(Occurrence {
+            task: self.task,
+            invocation: activation.invocation.id(),
+            loops: vec![],
+            action: None,
+        });
+        self.logical.flush(self.arena, self.heap)?;
+        let store = self.logical.ledger();
+        if let Some(frontier) = activation.frontier.as_mut()
+            && frontier.departs(&start)
+        {
+            frontier.handoff(&mut store.borrow_mut(), start.clone())?;
+        }
+        let ledger = store.borrow();
+        if activation.frontier.is_none() {
+            let document = self
+                .exe
+                .instances
+                .get(&callee.link)
+                .ok_or_else(|| malformed("literal return has no defining document"))?;
+            let kernel = doc::KernelVersion::of(document.kernel())
+                .ok_or_else(|| malformed("literal return has an unsupported kernel"))?;
+            activation.frontier = Some(
+                source
+                    .frontier(
+                        &ledger,
+                        self.heap,
+                        &activation.invocation,
+                        callee.link,
+                        kernel,
+                        start,
+                    )
+                    .map_err(|_| malformed("literal frontier failed authentication"))?,
+            );
+        }
+        let frontier = activation
+            .frontier
+            .as_mut()
+            .ok_or_else(|| malformed("literal frontier disappeared"))?;
+        let safe_point = self.charged;
+        let resources = SourceResources {
+            charged: &mut self.charged,
+            counters: self.counters,
+            bound: self.bound,
+            slice: self.slice_end,
+            depth: (self.base + u64::from(self.depth)).saturating_sub(1),
+            limit: self.call_depth,
+            safe_point,
+        };
+        let registration = self
+            .arena
+            .registration()
+            .map_err(publication::native_fault)?;
+        let Some(accepted) = exit.prepare_literal(
+            source,
+            frontier,
+            &activation.invocation,
+            &ledger,
+            registration,
+            self.heap,
+            literal.value,
+            resources,
+            self.memory_bound,
+        )?
         else {
             return Ok(false);
         };
-        let slots = source
-            .owner_slots()
-            .map_err(|_| malformed("literal source owners failed verification"))?;
-        let owner = |selector| {
-            slots
-                .root(&selector, self.task, activation.invocation.id())
-                .ok_or_else(|| malformed("literal source owner is absent"))
-        };
-        let operand_selector = room::Owner::Operand(literal_site);
-        let departure_selector = room::Owner::ActiveDeparture(source.site.clone());
-        let operand = owner(operand_selector.clone())?;
-        let departure = owner(departure_selector.clone())?;
-        let invocation = activation.invocation.id();
-        let task = self.task;
-        let make = || {
-            Program::new(vec![
-                JournalEvent {
-                    outputs: vec![(operand, PV::Native(literal.value))],
-                    ..Default::default()
-                },
-                JournalEvent {
-                    inputs: vec![operand],
-                    outputs: vec![(departure, PV::Existing(operand))],
-                    ..Default::default()
-                },
-                JournalEvent {
-                    frame: Some(FrameEvent::Leave { task, invocation }),
-                    outputs: vec![(Owner::Incoming(task), PV::Existing(departure))],
-                    ..Default::default()
-                },
-            ])
-        };
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
-        let ledger = store.borrow();
-        let bytes = i128::from(
-            Holding::from_native(self.arena, self.heap.pages(), &literal.value)?.bytes(),
-        );
-        let groups = vec![
-            room::Owner::Scope(source.site.clone()),
-            room::Owner::Operands(source.site.clone()),
-        ];
-        let live = ledger.frame_owners(self.task, activation.invocation.id(), self.heap.pages())?;
-        let released = groups
-            .iter()
-            .flat_map(|selector| {
-                slots
-                    .select_group(selector, self.task, activation.invocation.id(), &live)
-                    .into_iter()
-                    .flatten()
-            })
-            .filter_map(|root| match ledger.holding(root, self.heap.pages()) {
-                Ok(Some(_)) => Some(Ok(root)),
-                Ok(None) => None,
-                Err(error) => Some(Err(error)),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let release = i128::from(ledger.release_cost(&released, self.heap.pages())?);
-        let facts = LeafExecution(
-            [
-                (
-                    operand_at.clone(),
-                    LeafFacts {
-                        values: [(Measure::Local(operand_selector.clone()), bytes)].into(),
-                        ..Default::default()
-                    },
-                ),
-                (
-                    return_at,
-                    LeafFacts {
-                        values: [
-                            (Measure::Local(departure_selector), bytes),
-                            (Measure::Release(vec![operand_selector].into()), bytes),
-                        ]
-                        .into(),
-                        ..Default::default()
-                    },
-                ),
-                (
-                    leave.clone(),
-                    LeafFacts {
-                        values: [(Measure::Release(groups.into()), release)].into(),
-                        ..Default::default()
-                    },
-                ),
-            ]
-            .into(),
-        );
-        use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
-        let mut encoding = TokenWriter::new();
-        encoding.seq(4);
-        encoding.text("lash.source.literal-return");
-        operand_at.site.encode(&mut encoding);
-        operand.encode(&mut encoding);
-        departure.encode(&mut encoding);
-        let recovery = logical_digest(&encoding.into_bytes());
-        let start = Position {
-            at: operand_at.clone(),
-            unpaid: Some(operand_at),
-            recovery,
-            occurrence: Occurrence {
-                task: self.task,
-                invocation: activation.invocation.id(),
-                loops: vec![],
-                action: None,
-            },
-        };
-        let next = Position {
-            at: leave,
-            unpaid: None,
-            ..start.clone()
-        };
-        let allowance = Allowance {
-            occurrences: vec![],
-            before: 0,
-            units: 1,
-            close: literal.close,
-            strict: false,
-            depth: 0,
-            safe_point: self.charged,
-        };
         drop(ledger);
-        let published = self.publish_source(
-            callee,
-            activation,
-            publication::Prefix {
-                interval,
-                facts,
-                start,
-                next,
-                allowance,
-            },
-            make,
-            |_, edits| debug_assert!(edits.is_empty()),
-        )?;
-        if published {
-            witnessed!(SourcePublication, Commit);
+        let balance = accepted.publish_literal(frontier, &mut store.borrow_mut())?;
+        self.logical_memory.set(balance.total()?);
+        if let Some(tape) = self.recorder {
+            exit.record_literal(tape);
         }
-        Ok(published)
+        witnessed!(SourcePublication, Commit);
+        Ok(true)
     }
 }

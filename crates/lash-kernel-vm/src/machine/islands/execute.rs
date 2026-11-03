@@ -286,12 +286,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 watching.expressions(callee.stream, close, self.exe.charging());
             }
         }
-        if let Some(tape) = self.recorder.filter(|_| self.exe.charging()) {
-            tape.push(Weight::Atomic(1));
-            if let Some(close) = &literal.close {
-                super::record(tape, callee.stream, close.region);
-            }
-        }
         // The literal return is a statement the register program executed.
         #[cfg(any(test, feature = "perf-witness"))]
         execution::statements(

@@ -5,8 +5,10 @@ use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_state::kernel_internals::logical::{Owner, RootValue};
 use lash_kernel_value::sites::{Site, Unit};
 use std::sync::Arc;
+mod literal;
 
 pub(super) fn exits() {
+    literal::returns();
     let run = Embedder::new("main { let n = 1 return n }");
     let (program, _) = run.program(false);
     let source = Arc::new(room::Source::compile(

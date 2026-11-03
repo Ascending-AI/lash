@@ -2,8 +2,10 @@
 //! Its transient record aliases the carried root, so it adds no logical peak.
 use super::*;
 use logical::{BoundaryTransaction, Dependencies, Owner as Root, RootValue, Slot};
+mod literal;
 
 pub(crate) struct DepartureExit {
+    literal: Option<literal::LiteralReturn>,
     interval: Arc<CompiledInterval>,
     first: Point,
     last: Point,
@@ -92,6 +94,7 @@ impl Source {
         }
         let last = last.ok_or(Refused::Exit)?;
         let exit = Arc::new(DepartureExit {
+            literal: None,
             interval,
             first: at.clone(),
             last,
@@ -167,6 +170,9 @@ impl DepartureExit {
         resources: ResourceFacts,
     ) -> Result<Option<PreparedDeparture<'a>>, HeapFault> {
         let before = &frontier.position;
+        if self.literal.is_some() {
+            return Ok(None);
+        }
         if !debt.map_or(allowance.units == 0, |debt| {
             debt.matches(source, &self.first, allowance.units)
         }) {
