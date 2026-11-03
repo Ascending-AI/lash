@@ -5,6 +5,10 @@ use crate::compile::{CodeId, Executable, StmtId};
 use charges::ChargeProgram;
 use lash_kernel_exec::OpRange;
 
+#[path = "proof.rs"]
+mod proof;
+pub(crate) use proof::PreparedStorage as CollectionPublicationStorage;
+
 type Fact = (Point, Measure);
 #[derive(Clone, Default, PartialEq, Eq)]
 struct Polynomial {
@@ -63,7 +67,7 @@ impl Polynomial {
 struct ChargeSpan {
     statement: StmtId,
     range: OpRange,
-    program: ChargeProgram,
+    program: Arc<ChargeProgram>,
 }
 
 /// Immutable source authority for one selected finite exit. This authenticates
@@ -82,6 +86,13 @@ pub(crate) struct CollectionProgram {
     retained: Polynomial,
     scopes: Box<[Point]>,
     allocations: Box<[(Point, Owner)]>,
+    proof: Option<proof::Compiled>,
+    publications: Box<
+        [(
+            Option<bool>,
+            Arc<publication::boundary::CompiledPublication>,
+        )],
+    >,
 }
 
 struct Route<'a> {
@@ -279,7 +290,7 @@ impl CollectionProgram {
                 charges.push(ChargeSpan {
                     statement,
                     range: stmt.ops,
-                    program: ChargeProgram::compile(exe, code, statement, stmt.ops)?,
+                    program: Arc::new(ChargeProgram::compile(exe, code, statement, stmt.ops)?),
                 });
             }
         }
@@ -294,7 +305,38 @@ impl CollectionProgram {
             ],
             _ => return Err(Refused::Exit),
         };
+        let proof = proof::Compiled::compile(exe, &source, &route.events).ok();
+        let publications = if let Some(proof) = &proof {
+            successors
+                .iter()
+                .map(|(choice, _)| {
+                    publication::boundary::CompiledPublication::compile(
+                        exe,
+                        code,
+                        first.clone(),
+                        through.clone(),
+                        choice.map_or(
+                            publication::Successor::Normal,
+                            publication::Successor::Condition,
+                        ),
+                        charges
+                            .iter()
+                            .map(|span| Arc::clone(&span.program))
+                            .collect(),
+                        publication::boundary::BoundaryNeeds {
+                            depth: proof.depth,
+                            ..Default::default()
+                        },
+                    )
+                    .map(|plan| (*choice, plan))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            Vec::new()
+        };
         Ok(Self {
+            proof,
+            publications: publications.into(),
             source,
             code,
             first,
@@ -451,7 +493,7 @@ impl CollectionProgram {
         &self.events
     }
     pub(crate) fn charges(&self) -> impl Iterator<Item = &ChargeProgram> {
-        self.charges.iter().map(|span| &span.program)
+        self.charges.iter().map(|span| span.program.as_ref())
     }
     pub(crate) fn scopes(&self) -> &[Point] {
         &self.scopes

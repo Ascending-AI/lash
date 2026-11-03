@@ -566,7 +566,23 @@ fn collection_region_preparations_preserve_source_and_storage() {
         ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
     ) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
         let mut probes = guarded_probes(registry, ids);
+        // This accepted-runtime fixture uses the installed production contract.
+        // The general guarded-read fixture intentionally retains its unknown one.
+        let definition = lash_kernel_doc::parse_definition(
+            "function bool.not(value: Bool) -> Bool\nkernel 1\ncharge 1\nnative\n",
+        )
+        .unwrap();
+        let boolean_not = registry
+            .register(definition, lash_kernel_lib::native("bool.not"))
+            .unwrap();
+        probes
+            .iter_mut()
+            .find(|(name, _)| *name == "bool.not")
+            .unwrap()
+            .1 = boolean_not;
         for (name, native, signature) in [
+            ("num.add", "num.add", "(a: Number, b: Number) -> Number"),
+            ("num.lt", "num.lt", "(a: Number, b: Number) -> Bool"),
             ("resident.len", "list.len", "(values: List(Any)) -> Int"),
             ("num.min", "num.min", "(a: Number, b: Number) -> Number"),
         ] {
@@ -582,7 +598,7 @@ fn collection_region_preparations_preserve_source_and_storage() {
             ));
         }
         let references = ["num.add", "num.lt"]
-            .map(|name| (name, ids[name]))
+            .map(|name| (name, probes.iter().find(|(key, _)| *key == name).unwrap().1))
             .into_iter()
             .chain(
                 [
@@ -607,6 +623,36 @@ fn collection_region_preparations_preserve_source_and_storage() {
         probes
     }
     let source = "main { return invoke helper.direct([3, 7], fn(a, b) { return 0 }) }";
+    let run = |mode: super::ExecutionMode, layout: u64| {
+        let mut runtime = Embedder::with(
+            source,
+            Setup {
+                probes: Some(probes),
+                layout: Layout(layout),
+                ..Setup::default()
+            },
+        );
+        runtime.machine.take_collection_acceptances();
+        let tape = crate::ChargeTape::new();
+        runtime.machine.record_charges(tape.clone());
+        let end = loop {
+            match mode {
+                super::ExecutionMode::Source => runtime.machine.force_source_execution(),
+                super::ExecutionMode::Generic => runtime.machine.force_generic_packets(),
+                super::ExecutionMode::Specialized => {}
+            }
+            match runtime.run() {
+                Step::Ended(end) => break end,
+                Step::Slice => {}
+                Step::Parked(_) => runtime.deliver_next(),
+            }
+        };
+        let counts = runtime.machine.take_collection_acceptances();
+        (
+            (format!("{end:?}"), runtime.machine.meters(), tape.steps()),
+            counts,
+        )
+    };
     let embedder = Embedder::with(
         source,
         Setup {
@@ -698,6 +744,32 @@ fn collection_region_preparations_preserve_source_and_storage() {
                 prepared.len()
             );
         }
+    }
+    let (reference, source_counts) = run(super::ExecutionMode::Source, 0);
+    assert_eq!(source_counts, [0; 7]);
+    let mut actual_runs = Vec::new();
+    for layout in [0, 1, 42] {
+        let (source_run, counts) = run(super::ExecutionMode::Source, layout);
+        assert_eq!(counts, [0; 7]);
+        assert_eq!(source_run, reference, "source collection layout {layout}");
+        for mode in [
+            super::ExecutionMode::Specialized,
+            super::ExecutionMode::Generic,
+        ] {
+            let (actual, counts) = run(mode, layout);
+            assert_eq!(
+                actual, reference,
+                "accepted collection source/tape/holding agreement {mode:?}, layout {layout}"
+            );
+            println!("actual affine collection publications {mode:?}, layout {layout}: {counts:?}");
+            actual_runs.push((mode, layout, counts));
+        }
+    }
+    for (mode, layout, counts) in actual_runs {
+        assert!(
+            counts.iter().all(|count| *count > 0),
+            "all six affine families and the separate tail execute: {mode:?}, layout {layout}: {counts:?}"
+        );
     }
 }
 

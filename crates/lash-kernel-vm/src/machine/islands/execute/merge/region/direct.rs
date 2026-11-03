@@ -32,6 +32,22 @@ impl MergeTail {
     }
 }
 
+pub(in crate::machine::islands) struct CandidateContext<'a> {
+    pub(in crate::machine::islands) exe: &'a Executable,
+    pub(in crate::machine::islands) compiled: &'a Compiled,
+    pub(in crate::machine::islands) ledger: &'a Ledger,
+    pub(in crate::machine::islands) arena: &'a Arena,
+    pub(in crate::machine::islands) slots: &'a [SlotState],
+    pub(in crate::machine::islands) limits: (usize, u32),
+}
+pub(in crate::machine::islands) trait CollectionCandidate {
+    fn candidate(
+        &self,
+        context: CandidateContext<'_>,
+        entry: CollectionEntry<'_>,
+    ) -> Option<CollectionFacts>;
+}
+
 struct Inputs {
     placement: Arc<BindingPlacement>,
     read: Box<[(usize, Slot)]>,
@@ -276,6 +292,23 @@ macro_rules! site {
                 self.finish(facts, bound)
             }
         }
+        impl CollectionCandidate for CollectionSite<$shape> {
+            fn candidate(
+                &self,
+                context: CandidateContext<'_>,
+                entry: CollectionEntry<'_>,
+            ) -> Option<CollectionFacts> {
+                self.prepare(
+                    context.exe,
+                    context.compiled,
+                    context.ledger,
+                    context.arena,
+                    context.slots,
+                    context.limits,
+                    entry,
+                )
+            }
+        }
     };
 }
 
@@ -408,6 +441,7 @@ impl MergeTailSite {
             shape.counters[3],
             shape.counters[4],
             shape.order,
+            shape.from_right,
         ]
         .into_iter()
         .chain(shape.lists)
@@ -467,6 +501,51 @@ impl MergeTailSite {
         let bound = self.inputs.bind(&cx, &entry)?;
         let facts = self.shape.0.prepare_tail(cx, entry.exit)?;
         self.finish(facts, bound)
+    }
+}
+
+impl CollectionCandidate for ReduceSite {
+    fn candidate(
+        &self,
+        context: CandidateContext<'_>,
+        entry: CollectionEntry<'_>,
+    ) -> Option<CollectionFacts> {
+        self.prepare(
+            context.exe,
+            context.compiled,
+            context.ledger,
+            context.arena,
+            context.slots,
+            context.limits,
+            entry,
+        )
+    }
+}
+impl CollectionCandidate for MergeTailSite {
+    fn candidate(
+        &self,
+        context: CandidateContext<'_>,
+        entry: CollectionEntry<'_>,
+    ) -> Option<CollectionFacts> {
+        self.prepare(
+            context.exe,
+            context.compiled,
+            context.ledger,
+            context.arena,
+            context.slots,
+            context.limits,
+            entry,
+        )
+    }
+}
+impl<S> CollectionSite<S> {
+    pub(in crate::machine::islands) fn positions(
+        &self,
+        occurrence: room::publication::Occurrence,
+    ) -> impl Iterator<Item = room::publication::Position> + '_ {
+        self.programs
+            .iter()
+            .flat_map(move |program| program.publication_positions(occurrence.clone()))
     }
 }
 
@@ -765,5 +844,115 @@ impl Compiled {
         compile!(collection_merge, MergeSite, |shape| shape);
         compile!(collection_tail, MergeTailSite, MergeTail::shape);
         Some(())
+    }
+}
+
+impl CollectionFacts {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one source candidate and affine resource window"
+    )]
+    pub(in crate::machine::islands) fn accept<'a, 'r>(
+        mut self,
+        exe: &Executable,
+        frontier: &room::publication::Frontier,
+        activation: &DenseActivation<'_>,
+        ledger: &Ledger,
+        heap: &PagedHeap,
+        arena: &'a mut Arena,
+        resources: crate::admission::SourceResources<'r>,
+        memory_bound: u64,
+    ) -> Result<
+        Option<(
+            crate::admission::SourceAccepted<
+                'r,
+                room::publication::boundary::PreparedPublication<'a>,
+            >,
+            room::CollectionPublicationStorage,
+            CollectionTransfer,
+        )>,
+        HeapFault,
+    > {
+        let Some(entry) = self.entry.as_ref() else {
+            return Ok(None);
+        };
+        let Some(program) = &self.program else {
+            return Ok(None);
+        };
+        if !entry.dependencies.is_current(ledger, arena)
+            || !self.dependencies.is_current(ledger, arena)
+        {
+            return Ok(None);
+        }
+        let Some(writes) = self
+            .writes
+            .iter()
+            .map(|(physical, value)| {
+                entry
+                    .writes
+                    .iter()
+                    .find(|(at, _)| at == physical)
+                    .map(|(_, slot)| (*slot, *value))
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Ok(None);
+        };
+        let Some(clears) = self
+            .transfer
+            .clears
+            .iter()
+            .map(|physical| {
+                entry
+                    .clears
+                    .iter()
+                    .find(|(at, _)| at == physical)
+                    .map(|(_, slot)| *slot)
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Ok(None);
+        };
+        let member = self.member.map(|(handle, index, value)| MemberEdit {
+            handle,
+            member: Member::List(index),
+            next: Some(value),
+        });
+        let Some((accepted, storage)) = program.prepare_publication(
+            exe,
+            frontier,
+            activation,
+            &entry.invocation,
+            ledger,
+            heap,
+            arena,
+            room::CollectionResult {
+                writes: &writes,
+                clears: &clears,
+                member: member.as_ref(),
+                branches: &self.branches,
+                exit: &self.exit,
+            },
+            resources,
+            memory_bound,
+        )?
+        else {
+            return Ok(None);
+        };
+        self.transfer.writes = self.writes;
+        Ok(Some((accepted, storage, self.transfer)))
+    }
+    pub(in crate::machine::islands::execute) fn reserve(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+    ) -> Result<bool, HeapFault> {
+        self.transfer.writes = self.writes.clone();
+        self.transfer.reserve_frame(frame)
+    }
+    #[cfg(test)]
+    pub(in crate::machine::islands::execute) fn publication_start(
+        &self,
+    ) -> Option<room::publication::Position> {
+        self.program.as_ref()?.publication_start(&self.exit)
     }
 }

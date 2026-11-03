@@ -5,7 +5,18 @@
 use super::*;
 #[path = "bulk/path.rs"]
 mod path;
-pub(crate) use path::CollectionProgram;
+pub(crate) use path::{CollectionProgram, CollectionPublicationStorage};
+
+pub(crate) struct CollectionResult<'a> {
+    pub(crate) writes: &'a [(
+        lash_kernel_state::kernel_internals::logical::Slot,
+        doc::Value,
+    )],
+    pub(crate) clears: &'a [lash_kernel_state::kernel_internals::logical::Slot],
+    pub(crate) member: Option<&'a lash_kernel_state::kernel_internals::logical::MemberEdit>,
+    pub(crate) branches: &'a [(Site, bool)],
+    pub(crate) exit: &'a publication::Position,
+}
 
 impl Source {
     /// Resolve a collection kernel's physical bindings through the immutable

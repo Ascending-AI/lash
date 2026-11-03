@@ -1,5 +1,7 @@
 //! Local preparation proof. Full source/charge acceptance is core's gate.
 use super::*;
+#[path = "law/affine.rs"]
+mod affine;
 use crate::machine::islands::witness::Family;
 use lash_kernel_doc::TaskId;
 
@@ -117,6 +119,9 @@ impl Compiled {
                         set(merge.lists[0], sorted);
                         set(merge.lists[1], out);
                         set(merge.order, Value::Int(if case == 0 { 1 } else { 0 }));
+                        if *tail {
+                            set(merge.from_right, Value::Bool(false));
+                        }
                         if let Some(at) = merge.callback_binding {
                             set(at, callable);
                         }
@@ -738,6 +743,50 @@ impl Compiled {
                 .is_none(),
             "a detached collection rejects entry dependencies that changed before publication"
         );
+        // Establish this law's explicit source entry separately from the live
+        // packet header. No synthetic receipt substitutes for the runtime gate.
+        let mut initial = slots.to_vec();
+        match step {
+            CollectionCase::ReadSlot(shape) => {
+                initial[shape.value] = SlotState::Empty;
+                initial[shape.present] = SlotState::Empty;
+            }
+            CollectionCase::Place(shape) => {
+                if let Some(at) = shape.in_place {
+                    initial[at] = SlotState::Empty;
+                }
+            }
+            CollectionCase::Merge(shape) if !tail => {
+                initial[shape.from_right] = SlotState::Empty;
+                for block in shape.compared {
+                    for at in &self.blocks[block].declares {
+                        initial[*at as usize] = SlotState::Empty;
+                    }
+                }
+            }
+            _ => {}
+        }
+        macro_rules! accepted {
+            ($site:ty, $shape:expr) => {
+                self.check_affine_collection(
+                    exe,
+                    heap,
+                    arena,
+                    &initial,
+                    &<$site>::compile(exe, self, $shape).unwrap(),
+                    exit,
+                )
+            };
+        }
+        match step {
+            CollectionCase::Append(shape) => accepted!(AppendSite, shape),
+            CollectionCase::Reduce(shape) => accepted!(ReduceSite, shape),
+            CollectionCase::Place(shape) => accepted!(PlacementSite, shape),
+            CollectionCase::Visit(shape) => accepted!(VisitSite, shape),
+            CollectionCase::ReadSlot(shape) => accepted!(ReadSlotSite, shape),
+            CollectionCase::Merge(shape) if tail => accepted!(MergeTailSite, shape),
+            CollectionCase::Merge(shape) => accepted!(MergeSite, shape),
+        }
     }
 }
 

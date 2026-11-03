@@ -9,7 +9,7 @@
 )]
 
 use super::*;
-use crate::compile::{Executable, room};
+use crate::compile::{Executable, LibId, room};
 use crate::machine::islands::compiled::CollectionStep;
 use lash_kernel_doc::{arena::ArenaHandle, heap::HeapFault};
 use lash_kernel_state::{
@@ -29,6 +29,8 @@ pub(in crate::machine::islands) mod direct;
 #[cfg(test)]
 #[path = "region/law.rs"]
 mod law;
+#[path = "region/runtime.rs"]
+mod runtime;
 
 // Unpublished consumers cannot be enabled before core's authenticated exits.
 pub(in crate::machine::islands) struct CollectionRegion<'a> {
@@ -803,6 +805,9 @@ impl Merge {
         cx: CollectionRegion<'_>,
         exit: room::publication::Position,
     ) -> Option<CollectionFacts> {
+        // The callback cannot write this private local. A false order guard
+        // retains the source's initialized false value rather than resetting it.
+        matches!(cx.value(self.from_right)?, Value::Bool(false)).then_some(())?;
         let from_right = cx.boolean(self.tests[2], &[Value::Int(0), cx.value(self.order)?])?;
         cx.choose(self.compared[1], 4, from_right)?;
         cx.choose(self.body, 3, from_right)?;
