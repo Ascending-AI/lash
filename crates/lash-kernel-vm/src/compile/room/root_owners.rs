@@ -181,15 +181,7 @@ pub(super) fn cell_assignments(source: &Description) -> Result<BTreeMap<Site, Na
 }
 impl OwnerSlots {
     pub(crate) fn continuation(&self, site: &Site, task: TaskId, invocation: u64) -> Option<Root> {
-        let Root::Value {
-            // A for's iterable aliases its cursor control root. A failing
-            // protocol open still saves that same source value as a role.
-            slot: Slot::Operand(index) | Slot::Control(index),
-            ..
-        } = self.root(&Owner::Operand(site.clone()), task, invocation)?
-        else {
-            return None;
-        };
+        let index = self.get(&Owner::Operand(site.clone()))?;
         Some(Root::Value {
             task,
             invocation,

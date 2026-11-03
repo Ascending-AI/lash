@@ -13,6 +13,10 @@ impl KernelMachine {
         running: &Running<'_>,
         pc: u32,
     ) -> Result<bool, Halt> {
+        #[cfg(test)]
+        if self.pins.force_cold {
+            return Ok(false);
+        }
         let (Op::Call { lib, args } | Op::Operator { lib, args }) = running.stream.ops[pc as usize]
         else {
             return Ok(false);
