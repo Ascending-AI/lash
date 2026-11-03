@@ -101,7 +101,7 @@ impl Compiler<'_> {
                 if !matches!(entry.run, LibRun::Native { body: None, .. })
                     || entry.limit.is_some()
                     || entry.shares_params
-                    || args.len() > entry.arity
+                    || !entry.body_arity(args.len())
                     || entry.specialization.resource != CallSource::Native(*function)
                     || entry
                         .specialization

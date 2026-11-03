@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 pub(super) fn captures() {
     let mut published = (0, 0);
-    for layout in [0, 1, 42] {
+    for layout in [0, 1, 2, 42] {
         for tape in [false, true] {
             let source = crate::laws::layout::scalar_document(
                 "let n = 1 let m = 1 let view = fn() { set n = flat.add(n, 1) set m = flat.add(m, 256) set n = flat.add(m, 1) return (n,m) } return view",
@@ -80,8 +80,18 @@ pub(super) fn captures() {
             let (m, b) = slot("m");
             assert!(matches!(n, Slot::Capture(_)) && matches!(m, Slot::Capture(_)));
             let statements = &exe.block(body.body).stmts[..3];
-            let plan = MemberRegion::compile(&exe, Arc::clone(&placement), statements, &[a, b])
-                .expect("private capture region");
+            let compiled = MemberRegion::compile(&exe, Arc::clone(&placement), statements, &[a, b]);
+            if layout == 1 {
+                // Odd layouts deliberately omit prepared native entries. This
+                // remains a genuine source handoff; even layouts supply the
+                // unchanged mandatory private-publication count below.
+                assert!(
+                    compiled.is_err(),
+                    "a general native cannot be relabeled as a private immediate kernel"
+                );
+                continue;
+            }
+            let plan = compiled.expect("private capture region");
             assert!(
                 MemberRegion::compile_tail(
                     &exe,
@@ -363,6 +373,33 @@ pub(super) fn captures() {
                     tape.then_some(&recorder),
                 )
                 .unwrap();
+                let selected = completion.as_ref().map_or(0, |done| done.statements);
+                let expected_tape = crate::observe::ChargeTape::new();
+                if tape {
+                    let calls = [(1, 1, 2), (2, 256, 258), (258, 1, 259)];
+                    for (statement, (left, right, answer)) in
+                        statements.iter().zip(calls).take(selected)
+                    {
+                        let (_, stmt, _) = exe.statement(*statement);
+                        let canonical = crate::compile::room::charges::ChargeProgram::compile(
+                            &exe, code, *statement, stmt.ops,
+                        )
+                        .unwrap();
+                        let arguments = [Value::Int(left), Value::Int(right)];
+                        canonical
+                            .bind(&[crate::compile::room::charges::FormulaValues {
+                                arguments: &arguments,
+                                result: Value::Int(answer),
+                            }])
+                            .unwrap()
+                            .record(&expected_tape);
+                    }
+                }
+                assert_eq!(
+                    recorder.steps(),
+                    expected_tape.steps(),
+                    "the accepted source closes retain their canonical order and exact formula operands"
+                );
                 let publications = runtime::take_publications();
                 published.0 += publications.0;
                 published.1 += publications.1;

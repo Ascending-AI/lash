@@ -65,7 +65,7 @@ pub(crate) fn execute(
         };
         let registration = arena
             .registration()
-            .map_err(|error| HeapFault::Malformed(error.to_string().into()))?;
+            .map_err(|error| HeapFault::Malformed(error.to_string()))?;
         let Some(prepared) = bound.prepare(
             frontier,
             ledger,
@@ -96,10 +96,7 @@ pub(crate) fn execute(
 use super::*;
 use std::sync::Arc;
 /// Physical entry/jump placement is separate from the source certificate.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "core installs immutable member entries")
-)]
+#[expect(dead_code, reason = "core installs immutable member entries")]
 pub(crate) struct MemberEntry {
     region: Arc<MemberRegion>,
     block: usize,
@@ -107,10 +104,7 @@ pub(crate) struct MemberEntry {
     first_packet: usize,
     after: Box<[usize]>,
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "core compiles member statement entries")
-)]
+#[expect(dead_code, reason = "core compiles member statement entries")]
 impl MemberEntry {
     pub(in crate::machine::islands) fn compile(
         exe: &Executable,
@@ -145,10 +139,7 @@ impl MemberEntry {
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// Call before packet fetch/Begin. A decline keeps that same source entry;
     /// a publication returns the physical jump for its authenticated exit.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "core registers the member entry call")
-    )]
+    #[expect(dead_code, reason = "core registers the member entry call")]
     pub(super) fn private_members(
         &mut self,
         frame: &mut Values<'_, '_>,

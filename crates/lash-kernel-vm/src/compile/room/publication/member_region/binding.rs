@@ -188,10 +188,7 @@ impl MemberRegion {
                     let Some((entry, _)) = function.specialization.prepared.as_ref() else {
                         return Ok(None);
                     };
-                    let Some(value) = entry
-                        .call(&padded)
-                        .filter(|value| crate::compile::scalar(value))
-                    else {
+                    let Some(value) = entry.call(&padded).filter(crate::compile::scalar) else {
                         return Ok(None);
                     };
                     if !crate::compile::import_result_fits(&function.header.signature.result, value)
