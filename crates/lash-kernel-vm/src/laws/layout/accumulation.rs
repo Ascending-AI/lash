@@ -823,7 +823,6 @@ fn prepared_text_prefixes() {
 /// prices cannot substitute a result, and abandoned calls consume no IDs.
 fn prepared_text_bodies() {
     use crate::compile::room::region::text::TextBody;
-    use lash_kernel_doc::Value;
     use lash_kernel_state::{
         arena::Arena,
         kernel_internals::logical::{Ledger, RootValue, Slot},

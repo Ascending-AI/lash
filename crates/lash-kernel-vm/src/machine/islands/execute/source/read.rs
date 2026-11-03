@@ -34,14 +34,17 @@ struct ReadStorage<'a> {
     invocation: &'a Invocation,
     slots: &'a [SlotState],
     code: crate::compile::CodeId,
+    original: Option<(
+        &'a std::sync::Arc<room::charges::OriginalPrefix>,
+        Vec<Value>,
+    )>,
 }
-impl BoundaryPreparation for ReadStorage<'_> {
-    type Prepared = Value;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
+impl ReadStorage<'_> {
+    fn bind(
+        &self,
+        arena: &mut Arena,
         entry: ExternalEntry<'_>,
-    ) -> Result<Option<(room::publication::PreparedEvent<'a>, Value)>, HeapFault> {
+    ) -> Result<Option<room::publication::BoundEvent>, HeapFault> {
         let value = self.value;
         let ExternalEntry {
             event,
@@ -86,9 +89,56 @@ impl BoundaryPreparation for ReadStorage<'_> {
         ) else {
             return Ok(None);
         };
+        Ok(Some(bound))
+    }
+}
+impl BoundaryPreparation for ReadStorage<'_> {
+    type Prepared = Value;
+    fn prepare<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: ExternalEntry<'_>,
+    ) -> Result<Option<(room::publication::PreparedEvent<'a>, Value)>, HeapFault> {
+        let (frontier, ledger, heap) = (entry.frontier, entry.ledger, entry.heap);
+        let Some(bound) = self.bind(arena, entry)? else {
+            return Ok(None);
+        };
         let registration = arena.registration().map_err(native_fault)?;
         match bound.prepare(frontier, ledger, registration, heap) {
-            Ok(prepared) => Ok(Some((prepared, value))),
+            Ok(prepared) => Ok(Some((prepared, self.value))),
+            Err(room::publication::PublicationError::Miss(_)) => Ok(None),
+            Err(room::publication::PublicationError::Heap(error)) => Err(error),
+        }
+    }
+    fn prepare_remaining<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: ExternalEntry<'_>,
+        prior: &room::charges::AcceptedOriginalPrefix,
+    ) -> Result<Option<(room::publication::OriginalPrepared<'a>, Value)>, HeapFault> {
+        let Some((program, registers)) = self.original.as_ref() else {
+            return Ok(None);
+        };
+        let (frontier, ledger, heap) = (entry.frontier, entry.ledger, entry.heap);
+        let Some(bound) = self.bind(arena, entry)? else {
+            return Ok(None);
+        };
+        let bound = match bound.with_original_prefix(
+            frontier,
+            ledger,
+            arena,
+            heap,
+            program,
+            registers,
+            Some(prior),
+        ) {
+            Ok(bound) => bound,
+            Err(room::publication::PublicationError::Miss(_)) => return Ok(None),
+            Err(room::publication::PublicationError::Heap(error)) => return Err(error),
+        };
+        let registration = arena.registration().map_err(native_fault)?;
+        match bound.prepare(frontier, ledger, registration, heap) {
+            Ok(prepared) => Ok(Some((prepared, self.value))),
             Err(room::publication::PublicationError::Miss(_)) => Ok(None),
             Err(room::publication::PublicationError::Heap(error)) => Err(error),
         }
@@ -104,6 +154,24 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         value: Value,
     ) -> Result<bool, Stop> {
         self.source_input(frame, read, reg, Input::Native(value), None)
+    }
+
+    pub(in crate::machine::islands::execute) fn source_constant(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        read: SourceRead,
+        reg: u32,
+        value: Value,
+        original: Option<&std::sync::Arc<room::charges::OriginalPrefix>>,
+    ) -> Result<bool, Stop> {
+        let original = frame
+            .state
+            .source
+            .as_ref()
+            .is_some_and(|source| source.original.is_some())
+            .then_some(original)
+            .flatten();
+        self.source_input(frame, read, reg, Input::Native(value), original)
     }
 
     pub(in crate::machine::islands::execute) fn source_literal(
@@ -287,6 +355,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 value.is_some()
             }
             Input::Native(value) => {
+                let original = original
+                    .map(|program| (program, program.values(|reg| frame.regs[reg as usize])));
                 let result = &mut frame.regs[reg as usize];
                 self.publish_source_boundary(
                     frame.state.callee,
@@ -300,6 +370,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         invocation: &invocation,
                         slots: frame.slots,
                         code,
+                        original,
                     },
                     |_, _, edits, storage| {
                         debug_assert!(edits.is_empty());

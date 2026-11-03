@@ -934,6 +934,7 @@ impl<'e> Build<'e> {
                     dst: reg,
                     value: *value,
                     source: expr.read,
+                    original: self.constructor_original(pc),
                 });
                 self.result(reg, &[]);
             }

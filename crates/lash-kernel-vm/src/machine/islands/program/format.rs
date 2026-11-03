@@ -8,6 +8,8 @@ pub(crate) struct Format {
     pub(in crate::machine::islands) parts: crate::machine::islands::code::sites::Make,
     pub(in crate::machine::islands) separator:
         (u32, Value, Option<crate::compile::expr::SourceRead>),
+    pub(in crate::machine::islands) separator_original:
+        Option<std::sync::Arc<crate::compile::room::charges::OriginalPrefix>>,
     pub(in crate::machine::islands) join: NativeSite,
     pub(in crate::machine::islands) join_args: [u32; 2],
     pub(in crate::machine::islands) joined: Box<[u32]>,
@@ -115,7 +117,13 @@ impl Build<'_> {
                 else {
                     unreachable!();
                 };
-                let Op::Constant { dst, value, source } = separator.op else {
+                let Op::Constant {
+                    dst,
+                    value,
+                    source,
+                    original: separator_original,
+                } = separator.op
+                else {
                     unreachable!();
                 };
                 let Op::Native {
@@ -149,6 +157,7 @@ impl Build<'_> {
                         miss,
                     },
                     separator: (dst, value, source),
+                    separator_original,
                     join,
                     join_args: [joined_args[0], joined_args[1]],
                     joined: joined.live,

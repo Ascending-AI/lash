@@ -29,11 +29,7 @@ impl Continuation {
             | Op::MakeSet { .. }
             | Op::MakeRecord { .. }
             | Op::Closure { .. } => Self::Constructor,
-            Op::Const { c, .. }
-                if matches!(stream.consts[c.ix()], compile::Constant::Deferred(_)) =>
-            {
-                Self::Constructor
-            }
+            Op::Const { .. } => Self::Constructor,
             Op::Call { .. } | Op::Operator { .. } => Self::Native,
             Op::Bind { .. }
             | Op::BindShared { .. }

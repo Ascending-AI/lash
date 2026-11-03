@@ -243,8 +243,7 @@ impl ConstructorPrefix {
             | Op::MakeSet { .. }
             | Op::MakeRecord { .. }
             | Op::Closure { .. } => {}
-            Op::Const { c, .. }
-                if matches!(stream.consts.get(c.ix()), Some(Constant::Deferred(_))) => {}
+            Op::Const { .. } => {}
             _ => return None,
         }
         let mut pending = Vec::new();

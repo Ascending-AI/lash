@@ -330,7 +330,9 @@ impl Build<'_> {
             return None;
         }
         let leaf = |p: usize| match self.ops[p].op {
-            Op::Constant { dst, value, source } => Some(Read::Literal {
+            Op::Constant {
+                dst, value, source, ..
+            } => Some(Read::Literal {
                 reg: dst,
                 value,
                 source: source?,

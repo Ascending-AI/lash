@@ -77,7 +77,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             witnessed!(FormatAppend, Prefix);
         })?;
         if let Some(source) = site.separator.2 {
-            if !self.source_read(frame, source, site.separator.0, site.separator.1)? {
+            if !self.source_constant(
+                frame,
+                source,
+                site.separator.0,
+                site.separator.1,
+                site.separator_original.as_ref(),
+            )? {
                 return Err(self.at(source.unpaid()));
             }
         } else {

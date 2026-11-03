@@ -436,8 +436,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     Opcode::Constant => {
                         let value = code.constant(packet);
                         if let Some(read) = recovery.source {
-                            match self.source_read(&mut slab.view(active), read, packet.dst, value)
-                            {
+                            match self.source_constant(
+                                &mut slab.view(active),
+                                read,
+                                packet.dst,
+                                value,
+                                code.constant_original(packet),
+                            ) {
                                 Ok(true) => continue,
                                 Ok(false) => {}
                                 Err(stop) => {

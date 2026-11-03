@@ -141,10 +141,6 @@ impl TextBody {
         self.primitive
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "one actual forwarding call and its prepared result"
-    )]
     pub(crate) fn bind(
         &self,
         exe: &Executable,

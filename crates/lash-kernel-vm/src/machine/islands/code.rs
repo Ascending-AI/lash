@@ -259,6 +259,7 @@ operations! {
             dst: u32,
             value: Value,
             source: Option<crate::compile::expr::SourceRead>,
+            original: Option<std::sync::Arc<crate::compile::room::charges::OriginalPrefix>>,
         }
         Local {
             dst: u32,
@@ -512,12 +513,16 @@ pub(super) struct Recovery {
     pub(super) library: Option<crate::compile::LibId>,
 }
 
+struct ConstantValue {
+    value: Value,
+    original: Option<std::sync::Arc<crate::compile::room::charges::OriginalPrefix>>,
+}
 #[derive(Default)]
 pub(super) struct Code {
     pub(super) packets: Vec<Packet>,
     pub(super) recovery: Vec<Recovery>,
     pub(super) sites: Sites,
-    constants: Vec<Value>,
+    constants: Vec<ConstantValue>,
     /// Pure input placements select a mode of the canonical operation.
     pub(super) inputs: Vec<Box<[Read]>>,
 }
@@ -742,9 +747,17 @@ impl Code {
         };
         let at = |n: usize| u32::try_from(n).ok();
         match *op {
-            Op::Constant { dst, value, .. } => {
+            Op::Constant {
+                dst,
+                value,
+                ref original,
+                ..
+            } => {
                 let x = at(self.constants.len())?;
-                self.constants.push(value);
+                self.constants.push(ConstantValue {
+                    value,
+                    original: original.clone(),
+                });
                 packet(Opcode::Constant, 0, dst, x, 0)
             }
             Op::Local {
@@ -780,7 +793,13 @@ impl Code {
     }
 
     pub(super) fn constant(&self, packet: Packet) -> Value {
-        self.constants[packet.x as usize]
+        self.constants[packet.x as usize].value
+    }
+    pub(super) fn constant_original(
+        &self,
+        packet: Packet,
+    ) -> Option<&std::sync::Arc<crate::compile::room::charges::OriginalPrefix>> {
+        self.constants[packet.x as usize].original.as_ref()
     }
 
     /// Metadata readers name the body packet even when the source entry

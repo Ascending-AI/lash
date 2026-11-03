@@ -61,15 +61,6 @@ impl LengthCharge {
     }
 }
 
-impl TextCharge {
-    #[inline(always)]
-    pub(crate) fn units(self, left: u64, right: u64) -> u64 {
-        self.fixed
-            .saturating_add(self.left.saturating_mul(left))
-            .saturating_add(self.right.saturating_mul(right))
-    }
-}
-
 /// An instruction of a plan's program. Each combining one takes the two
 /// amounts on the top of the stack: a sum of more terms is its terms
 /// combined pairwise from the left, as the saturating fold computes it.

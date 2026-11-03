@@ -5,7 +5,6 @@ use super::*;
 pub(in crate::machine::islands) struct Appended {
     pub(in crate::machine::islands) made: Made,
     pub(in crate::machine::islands) held: u64,
-    pub(in crate::machine::islands) bytes: u64,
 }
 
 /// The same immutable result and native work reservation as text.concat.
@@ -74,7 +73,6 @@ fn append(
             moved: Some(moved),
         },
         held,
-        bytes,
     }))
 }
 
