@@ -120,7 +120,6 @@ pub(crate) struct PreparedMembers<'p, 'a> {
 }
 pub(crate) struct MemberCompletion {
     pub(crate) statements: usize,
-    pub(crate) position: Position,
     pub(crate) balance: logical::Balance,
 }
 impl<'p> BoundMembers<'p> {
@@ -229,6 +228,7 @@ impl<'p> BoundMembers<'p> {
             memory_bound,
         }))
     }
+    #[cfg(test)]
     pub(crate) fn peak(&self) -> u64 {
         self.peak
     }
@@ -286,7 +286,7 @@ impl SourceAccepted<'_, PreparedMembers<'_, '_>> {
                 }
             })?;
             frontier.revision = revision;
-            frontier.position = prepared.next.clone();
+            frontier.position = prepared.next;
             if let Some(tape) = tape {
                 for debt in &prepared.debts {
                     debt.record(tape);
@@ -294,7 +294,6 @@ impl SourceAccepted<'_, PreparedMembers<'_, '_>> {
             }
             Ok(MemberCompletion {
                 statements: prepared.count,
-                position: prepared.next,
                 balance,
             })
         })

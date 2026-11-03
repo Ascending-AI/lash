@@ -121,6 +121,7 @@ pub(crate) struct Compiled {
     pub(super) literal: Option<LiteralReturn>,
     pub(super) layout: Layout,
     pub(super) blocks: Vec<Block>,
+    members: Box<[super::execute::member_region::MemberEntry]>,
     pub(super) code: super::code::Code,
     pub(super) registers: usize,
     headers: Box<[(u32, usize)]>,
@@ -647,8 +648,31 @@ impl Compiled {
         headers.sort_unstable_by_key(|(id, _)| *id);
         actions.sort_unstable_by_key(|(pc, _)| *pc);
         cleanup.sort_unstable_by_key(|entry| entry.id.0);
+        let mut members = Vec::new();
+        if fused && let Some(placement) = &placement {
+            for (block, physical) in cx.blocks.iter().enumerate() {
+                for (index, packet) in physical.starts.iter().copied().enumerate() {
+                    if !code.entry(packet).is_some_and(|entry| {
+                        entry.index == index && entry.id == exe.block(physical.id).stmts[index]
+                    }) {
+                        continue;
+                    }
+                    if let Some(entry) = super::execute::member_region::MemberEntry::compile(
+                        exe,
+                        std::sync::Arc::clone(placement),
+                        block,
+                        physical,
+                        index,
+                    ) {
+                        members.push(entry);
+                    }
+                }
+            }
+        }
+        members.sort_unstable_by_key(super::execute::member_region::MemberEntry::packet);
         Some(Self {
             placement,
+            members: members.into(),
             literal,
             source_room: std::sync::Arc::clone(&plan.source_room),
             layout: Layout::of(plan)?,
@@ -667,6 +691,16 @@ impl Compiled {
             room: cx.room,
             observes: cx.observes,
         })
+    }
+
+    pub(super) fn member(
+        &self,
+        packet: usize,
+    ) -> Option<&super::execute::member_region::MemberEntry> {
+        self.members
+            .binary_search_by_key(&packet, super::execute::member_region::MemberEntry::packet)
+            .ok()
+            .map(|at| &self.members[at])
     }
 
     pub(super) fn cleanup(&self, id: StmtId) -> Option<Cleanup> {

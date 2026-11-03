@@ -563,6 +563,25 @@ fn graphs() {
             panic!("source body binding");
         };
         let at = placement.physical(slot).unwrap();
+        // K-CHG-001: count the authored forms, independently of original
+        // stream regions. Indexed assignments have 5, 5, 3 expressions;
+        // field assignments have 3, 3, 2. Each also owes one statement.
+        let fixed = exe.block(body.body).stmts[1..4]
+            .iter()
+            .map(|id| {
+                let (_, stmt, _) = exe.statement(*id);
+                crate::compile::room::charges::ChargeProgram::compile(&exe, code, *id, stmt.ops)
+                    .unwrap()
+                    .bind(&[])
+                    .unwrap()
+                    .units()
+            })
+            .sum::<u64>();
+        assert_eq!(
+            fixed,
+            if kind == 2 { 11 } else { 16 },
+            "every authored member close contributes its original fixed fee"
+        );
         let plan = MemberRegion::compile(
             &exe,
             Arc::clone(&placement),
@@ -666,6 +685,7 @@ fn graphs() {
         .expect("source-certified final body");
         assert_eq!(completed.statements, 3);
         assert_eq!(runtime::take_publications(), (1, 1));
+        assert_eq!(charged, fixed);
         assert_eq!(
             completed.balance, before,
             "one extra integer payload byte replaces one reference's payload byte"

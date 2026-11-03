@@ -13,10 +13,6 @@ struct BindingObserver {
 /// The finite source roots through which a private kernel may observe its
 /// members. This proves exclusion only; the kernel still proves source order,
 /// all legal exits, charges, logical peaks and synchronous call composition.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "I adopts the observer scope API")
-)]
 pub(crate) struct ObserverScope {
     placement: Arc<BindingPlacement>,
     bindings: Box<[BindingObserver]>,
@@ -25,10 +21,6 @@ pub(crate) struct ObserverScope {
 
 /// Opaque current observer evidence. It cannot outlive a new alias, ledger
 /// revision, cold reopen or actual input content change, nor be serialized.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "I adopts the private member finish API")
-)]
 pub(crate) struct PrivateObservers {
     source: Arc<Source>,
     invocation: Invocation,
@@ -36,10 +28,6 @@ pub(crate) struct PrivateObservers {
     dependencies: Dependencies,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "I adopts the observer scope API")
-)]
 impl ObserverScope {
     /// Physical binding indices are validated once against immutable source
     /// placement. Evaluated operands name genuine source owner selectors.
@@ -173,10 +161,6 @@ impl ObserverScope {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "I adopts the private member finish API")
-)]
 impl PrivateObservers {
     pub(crate) fn permits(
         &self,

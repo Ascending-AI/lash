@@ -593,6 +593,11 @@ fn derive_target(
             }
             continue;
         }
+        // Pin preserves the evaluated RHS while source target/index reads
+        // run. canonical_span verified its role; it has no charge close.
+        if matches!(op, Op::Pin { .. }) {
+            continue;
+        }
         let site = stream
             .source_sites
             .get(pc as usize)
@@ -707,6 +712,10 @@ fn derive_target(
                 }
                 Op::Bind { .. }
                 | Op::WriteLocal { .. }
+                | Op::SetIndex { .. }
+                | Op::SetField { .. }
+                | Op::Field { .. }
+                | Op::Index { .. }
                 | Op::End
                 | Op::Test { .. }
                 | Op::Branch { .. }

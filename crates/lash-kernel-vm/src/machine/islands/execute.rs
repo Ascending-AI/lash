@@ -350,7 +350,26 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         loop {
             #[cfg(test)]
             slab.record_placement(&callers, active, self.arena);
-            let code = &active.callee.compiled.code;
+            let compiled = active.callee.compiled;
+            let code = &compiled.code;
+            if let Some(entry) = compiled.member(active.pc) {
+                match self.private_members(&mut slab.view(active), entry) {
+                    Ok(Some(next)) => {
+                        active.pc = next;
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(stop) => {
+                        return self.slow_exit(
+                            active,
+                            &mut callers,
+                            slab,
+                            &code.recovery[active.pc],
+                            stop,
+                        );
+                    }
+                }
+            }
             let packet = code.packets[active.pc];
             let recovery = &code.recovery[active.pc];
             active.pc += 1;

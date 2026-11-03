@@ -440,9 +440,6 @@ impl MemberRegion {
     pub(crate) fn placement(&self) -> &Arc<BindingPlacement> {
         &self.placement
     }
-    pub(crate) fn statement(&self, index: usize) -> Option<StmtId> {
-        self.statements.get(index).map(|stmt| stmt.id)
-    }
     pub(crate) fn start(&self, occurrence: Occurrence) -> Position {
         Position {
             at: self.statements[0].first.clone(),
