@@ -9,10 +9,8 @@ pub(in crate::compile::room) fn resolve(
     selected: Option<CodeId>,
 ) -> Result<Resolved, Refused> {
     let (stream, stmt, _) = exe.statement(statement);
-    if exe.stmt_at(caller, &stmt.site) != Some(statement)
-        || pc < stmt.ops.start
-        || pc >= stmt.ops.end()
-    {
+    let span = caller_span(stmt, pc)?;
+    if exe.stmt_at(caller, &stmt.site) != Some(statement) {
         return Err(Refused::Source);
     }
     let op = stream.ops.get(pc as usize).ok_or(Refused::Source)?;
@@ -97,7 +95,7 @@ pub(in crate::compile::room) fn resolve(
     let placement = super::super::super::placement::BindingPlacement::compile(exe, caller)?;
     let physical = placement.physical(origin).ok_or(Refused::Source)?;
     let valid_read = match op {
-        Op::Nested { args, .. } => (stmt.ops.start..pc)
+        Op::Nested { args, .. } => (span.start..pc)
             .rev()
             .find_map(|read| {
                 let op = &stream.ops[read as usize];
