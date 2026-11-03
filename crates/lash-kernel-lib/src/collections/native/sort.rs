@@ -2,6 +2,9 @@
 //! original positions until the caller supplies its answer. Guest callback
 //! composition must retain the corresponding values, end arena-view leases,
 //! and reacquire views after returning from the callback.
+mod phase;
+pub use phase::ComparisonPhase;
+
 use std::cmp::Ordering;
 
 use lash_kernel_doc::{NativeError, Value};

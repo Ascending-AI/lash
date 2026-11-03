@@ -962,6 +962,7 @@ fn reduce_callback_wait_resumes_the_accumulator() {
 }
 #[test]
 fn sort_callback_wait_resumes_the_snapshot_and_comparator_operands() {
+    sort_phases_authenticate_pending_values();
     // K-COL-011: suspending a comparison may not advance it or reread
     // changed operands. [3,1,2] merges (3,1), then (1,2), then (3,2).
     use super::native::sort::{Comparison, Merge};
@@ -985,6 +986,206 @@ fn sort_callback_wait_resumes_the_snapshot_and_comparator_operands() {
         "definition \"function f(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let x = num.sub(a, b) let y = perform 0(x) as Any return y }\"\n main { let xs = [3, 1, 2] do invoke list.sort(xs, &f) return xs }",
         list(&[1, 2, 3]),
         3,
+    );
+}
+
+// K-COL-011 / K-EVAL-008: callback aliases retain saved outer source roles.
+#[test]
+fn sort_callback_preserves_saved_outer_operands_and_aliases() {
+    // The waiting sort and comparator retain an outer expression operand,
+    // stable ties and the actual aliased records through an empty-cache reopen.
+    let marked = |id| {
+        Datum::Record(vec![
+            ("id".into(), int(id)),
+            ("seen".into(), Datum::Bool(true)),
+        ])
+    };
+    let sorted = Datum::List(vec![
+        tuple(vec![int(1), marked(1)]),
+        tuple(vec![int(2), marked(0)]),
+        tuple(vec![int(2), Datum::Record(vec![("id".into(), int(2))])]),
+    ]);
+    callback_law(
+        "definition \"function f(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let x = num.sub(a[0], b[0]) let y = perform 0(x) as Any set a[1].seen = true return y }\"\n definition \"function sorted(xs: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { do invoke list.sort(xs, &f) return xs }\"\n main { let xs = [(2, {id: 0}), (1, {id: 1}), (2, {id: 2})] let alias = xs return (\"saved outer operand\", call sorted(xs), alias) }",
+        tuple(vec![text("saved outer operand"), sorted.clone(), sorted]),
+        3,
+    );
+}
+
+// K-COL-011: a native callback phase authenticates source-sized buffers,
+// comparator order and identity before advancing the canonical schedule.
+fn sort_phases_authenticate_pending_values() {
+    use super::native::sort::{Comparison, Merge};
+    use lash_kernel_doc::{Args, Value};
+    use lash_kernel_value::{CallableId, FunctionId, content_ids::LinkId};
+    let mut bench = crate::testsupport::heap();
+    let snapshot = [Value::Int(3), Value::Int(1), Value::Int(2)];
+    let sorted = crate::testsupport::decode(&mut bench, list(&[3, 1, 2]));
+    let duplicate = crate::testsupport::decode(&mut bench, list(&[3, 1, 2]));
+    let output = crate::testsupport::decode(&mut bench, list(&[]));
+    let scratch = crate::testsupport::decode(&mut bench, list(&[0, 0, 0]));
+    let callback = bench.arena_mut().function(CallableId {
+        link: LinkId::from_bytes([1; 32]),
+        function: FunctionId::from_bytes([2; 32]),
+    });
+    let other_callback = bench.arena_mut().function(CallableId {
+        link: LinkId::from_bytes([3; 32]),
+        function: FunctionId::from_bytes([2; 32]),
+    });
+    let mut merge = Merge::new(3);
+    let pending = Comparison {
+        before: 0,
+        after: 1,
+    };
+    assert_eq!(merge.comparison(), Some(pending));
+    let position = merge.position();
+    let operands = [snapshot[0], snapshot[1]];
+    let buffers = [sorted, output];
+    let mut missing = Vec::new();
+    {
+        let semantics = bench.arena().semantics();
+        let args = Args::new(&[], bench.arena().objects(), &semantics);
+        let mut wrong = position;
+        wrong.width = 2;
+        if merge
+            .bind_comparison(args, &snapshot, buffers, callback, wrong, operands)
+            .unwrap()
+            .is_some()
+        {
+            missing.push("wrong phase");
+        }
+        if merge
+            .bind_comparison(
+                args,
+                &snapshot,
+                buffers,
+                callback,
+                position,
+                [operands[1], operands[0]],
+            )
+            .unwrap()
+            .is_some()
+        {
+            missing.push("reversed comparator operands");
+        }
+        if merge
+            .bind_comparison(
+                args,
+                &snapshot,
+                [sorted, scratch],
+                callback,
+                position,
+                operands,
+            )
+            .unwrap()
+            .is_some()
+        {
+            missing.push("unwritten native tail became guest members");
+        }
+    }
+    // Bind drops all arena leases, so a callback can read, mutate or park.
+    // The VM hands effects off before composition; revalidation remains real.
+    for (changed_buffers, changed_callback, label) in [
+        (
+            [duplicate, output],
+            callback,
+            "same-price wrong buffer identity",
+        ),
+        (
+            buffers,
+            other_callback,
+            "same function with another defining Link",
+        ),
+    ] {
+        let phase = {
+            let semantics = bench.arena().semantics();
+            let args = Args::new(&[], bench.arena().objects(), &semantics);
+            merge
+                .bind_comparison(args, &snapshot, buffers, callback, position, operands)
+                .unwrap()
+                .unwrap()
+        };
+        assert_eq!(phase.position(), position);
+        assert_eq!(phase.comparison(), pending);
+        assert!(
+            phase
+                .operands()
+                .iter()
+                .zip(operands)
+                .all(|(a, b)| a.same(&b))
+        );
+        let semantics = bench.arena().semantics();
+        let args = Args::new(&[], bench.arena().objects(), &semantics);
+        if phase
+            .complete(
+                args,
+                &snapshot,
+                changed_buffers,
+                changed_callback,
+                position,
+                true,
+            )
+            .unwrap()
+        {
+            missing.push(label);
+        }
+        // Keep every independent rejection visible in the mutation receipt.
+        merge = Merge::new(3);
+        assert_eq!(merge.comparison(), Some(pending));
+    }
+    let phase = {
+        let semantics = bench.arena().semantics();
+        let args = Args::new(&[], bench.arena().objects(), &semantics);
+        merge
+            .bind_comparison(args, &snapshot, buffers, callback, position, operands)
+            .unwrap()
+            .unwrap()
+    };
+    bench
+        .arena_mut()
+        .list_set(sorted.handle().unwrap(), 2, Value::Int(4))
+        .unwrap();
+    {
+        let semantics = bench.arena().semantics();
+        let args = Args::new(&[], bench.arena().objects(), &semantics);
+        if phase
+            .complete(args, &snapshot, buffers, callback, position, true)
+            .unwrap()
+        {
+            missing.push("same-price initialized buffer member changed");
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "sort phase accepted: {}",
+        missing.join(", ")
+    );
+    assert_eq!(merge.position(), position, "abandoned phases never advance");
+    bench
+        .arena_mut()
+        .list_set(sorted.handle().unwrap(), 2, snapshot[2])
+        .unwrap();
+    let phase = {
+        let semantics = bench.arena().semantics();
+        let args = Args::new(&[], bench.arena().objects(), &semantics);
+        merge
+            .bind_comparison(args, &snapshot, buffers, callback, position, operands)
+            .unwrap()
+            .unwrap()
+    };
+    {
+        let semantics = bench.arena().semantics();
+        let args = Args::new(&[], bench.arena().objects(), &semantics);
+        assert!(
+            phase
+                .complete(args, &snapshot, buffers, callback, position, true)
+                .unwrap()
+        );
+    }
+    assert_eq!(merge.position().dest, position.dest + 1);
+    assert!(
+        merge.place(false).is_err(),
+        "one answer consumes one comparison"
     );
 }
 
