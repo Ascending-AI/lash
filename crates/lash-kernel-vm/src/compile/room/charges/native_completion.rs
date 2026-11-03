@@ -86,6 +86,34 @@ pub(super) fn derive(
     ))
 }
 
+/// The packet compiler emits this exact ordered set before its native site.
+/// Keep their canonical identities for verification, while completion owes
+/// only its formula. No runtime consumer can declare a paid prefix.
+pub(super) fn after_closes(
+    exe: &Executable,
+    code: compile::CodeId,
+    statement: compile::StmtId,
+    range: OpRange,
+    paid: &[expr::Close],
+) -> Result<(Vec<Close>, Vec<Formula>, Point), Refused> {
+    let (stream, stmt, _) = exe.statement(statement);
+    let canonical = match stmt.form {
+        compile::Form::While { test, .. }
+            if range.start >= test.start && range.end() <= test.end() =>
+        {
+            test
+        }
+        _ => stmt.ops,
+    };
+    let expected = super::event_packet::regions_before(stream, canonical, range.start)?;
+    if paid.len() <= 1 || paid != expected {
+        return Err(Refused::Source);
+    }
+    let (mut closes, formulas, at) = derive(exe, code, statement, range, None)?;
+    closes[0].regions = expected.into();
+    Ok((closes, formulas, at))
+}
+
 pub(super) fn depth(
     exe: &Executable,
     statement: compile::StmtId,
@@ -139,6 +167,32 @@ impl ChargeProgram {
         program.verify(exe, code)?;
         Ok(program)
     }
+    pub(crate) fn native_after_closes(
+        exe: &Executable,
+        code: compile::CodeId,
+        statement: compile::StmtId,
+        pc: u32,
+        paid: &[expr::Close],
+    ) -> Result<Self, Refused> {
+        let range = OpRange { start: pc, len: 1 };
+        let (closes, formulas, at) = after_closes(exe, code, statement, range, paid)?;
+        let program = Self {
+            source: Arc::clone(&exe.code(code).source_room),
+            coverage: Coverage::NativeAfterCloses,
+            native_depth: Some(depth(exe, statement, pc, true)?),
+            statement,
+            range,
+            closes: closes.into(),
+            formulas: formulas.into(),
+            fixed: 0,
+            recording: exe.charging(),
+            first: at.clone(),
+            through: at,
+        };
+        program.verify(exe, code)?;
+        Ok(program)
+    }
+
     /// A speculative packet still owes its authenticated original close.
     /// Its debt bills that close before native completion, with strict slice
     /// admission. The supplied physical metadata must equal the source close.

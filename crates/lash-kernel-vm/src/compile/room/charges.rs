@@ -20,6 +20,7 @@ enum Coverage {
     Span,
     NativeCompletion,
     NativePacket(Option<expr::Close>),
+    NativeAfterCloses,
     EventPacket(Option<expr::Close>),
     ConstructorPacket { unpaid: u32, quote: u64 },
 }
@@ -89,7 +90,9 @@ impl ChargeDebt<'_> {
         let strict = match self.program.coverage {
             Coverage::Span => return None,
             Coverage::NativeCompletion | Coverage::ConstructorPacket { .. } => false,
-            Coverage::NativePacket(_) | Coverage::EventPacket(_) => true,
+            Coverage::NativePacket(_) | Coverage::NativeAfterCloses | Coverage::EventPacket(_) => {
+                true
+            }
         };
         Some(crate::admission::Allowance {
             occurrences: vec![],
@@ -188,6 +191,13 @@ impl ChargeProgram {
             Coverage::NativePacket(close) => {
                 native_completion::derive(exe, code, self.statement, self.range, Some(close))?
             }
+            Coverage::NativeAfterCloses => native_completion::after_closes(
+                exe,
+                code,
+                self.statement,
+                self.range,
+                self.closes.first().ok_or(Refused::Source)?.regions.as_ref(),
+            )?,
             Coverage::EventPacket(close) => {
                 event_packet::derive(exe, code, self.statement, self.range, close)?
             }
@@ -209,12 +219,9 @@ impl ChargeProgram {
                 self.range.start,
                 false,
             )?),
-            Coverage::NativePacket(_) => Some(native_completion::depth(
-                exe,
-                self.statement,
-                self.range.start,
-                true,
-            )?),
+            Coverage::NativePacket(_) | Coverage::NativeAfterCloses => Some(
+                native_completion::depth(exe, self.statement, self.range.start, true)?,
+            ),
         };
         if self.native_depth != native_depth {
             return Err(Refused::Source);

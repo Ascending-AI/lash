@@ -182,9 +182,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .source
             .as_ref()
             .is_some_and(|source| source.original.is_some());
-        if !original
-            && (site.concat(self.exe).is_some() || function.kernels(self.exe).concat.is_some())
-        {
+        if site.concat(self.exe).is_some() || function.kernels(self.exe).concat.is_some() {
             let native = NativeSite {
                 lib: site.lib,
                 close: site.close,
@@ -203,6 +201,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 source::ValuePublication::Unavailable
                     if !matches!(function.run, LibRun::Native { .. }) => {}
                 source::ValuePublication::Declined | source::ValuePublication::Unavailable => {
+                    if original {
+                        return Err(self.at_operands(site.pc, site.reg, args));
+                    }
                     if let Some(close) = &site.close
                         && !self.close(close)
                     {

@@ -82,12 +82,10 @@ pub(super) fn derive(
     ))
 }
 
-pub(super) fn pending_regions(
+pub(super) fn regions_before(
     stream: &compile::Stream,
     canonical: OpRange,
     pc: u32,
-    pending: Option<expr::Close>,
-    last_only: bool,
 ) -> Result<Vec<expr::Close>, Refused> {
     let mut regions = Vec::new();
     for index in canonical.start..pc {
@@ -105,6 +103,17 @@ pub(super) fn pending_regions(
             _ => {}
         }
     }
+    Ok(regions)
+}
+
+pub(super) fn pending_regions(
+    stream: &compile::Stream,
+    canonical: OpRange,
+    pc: u32,
+    pending: Option<expr::Close>,
+    last_only: bool,
+) -> Result<Vec<expr::Close>, Refused> {
+    let mut regions = regions_before(stream, canonical, pc)?;
     // Ordinary event sites retain only their current close. Earlier operand
     // closes have already completed in the packet prefix.
     if last_only && regions.len() > 1 {

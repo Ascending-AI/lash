@@ -273,7 +273,7 @@ impl KernelMachine {
             native_storage::SourceNative { recipe, charges: &charges, inputs, operands },
             |arena, _, edits, prepared| {
                 debug_assert!(edits.is_empty());
-                let native_storage::NativePublication { storage, holding, units } = prepared;
+                let native_storage::NativePublication { storage, holding, units, .. } = prepared;
                 let value = storage.value();
                 completion = Some((
                     units,

@@ -412,6 +412,82 @@ fn accumulations_agree() {
         text_certificates.iter().all(|count| *count > 0),
         "native concat and join must publish through staged text storage: {text_certificates:?}"
     );
+    // K-CHG-001: a text completion consumes the same accepted constructor
+    // prefix. Its native fee and only the remaining fixed tape settle once.
+    let prefix_text = scalar_document(
+        r#"let parts = ["a", "b"] let joined = text.join(parts, "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyzé😀") do perform 0(joined) as Any return joined"#,
+    );
+    for record in [false, true] {
+        let reference = run_selected(
+            &prefix_text,
+            record,
+            u64::MAX,
+            super::super::embedder::ROOMY,
+            Layout(0),
+            (super::ExecutionMode::Source, false),
+            true,
+        );
+        let charged = reference.2.last().unwrap().1.charged.unwrap();
+        let limits = [
+            super::super::embedder::ROOMY,
+            Bounds {
+                charge_limit: charged - 1,
+                ..super::super::embedder::ROOMY
+            },
+            Bounds {
+                charge_limit: charged,
+                ..super::super::embedder::ROOMY
+            },
+            Bounds {
+                memory: 512,
+                ..super::super::embedder::ROOMY
+            },
+            Bounds {
+                memory: 1024,
+                ..super::super::embedder::ROOMY
+            },
+        ];
+        for (limit, bounds) in limits.into_iter().enumerate() {
+            for slice in [u64::MAX, 1, 7] {
+                let cold = slice != u64::MAX;
+                let expected = run_selected(
+                    &prefix_text,
+                    record,
+                    slice,
+                    bounds,
+                    Layout(0),
+                    (super::ExecutionMode::Source, cold),
+                    true,
+                );
+                for mode in [
+                    super::ExecutionMode::Generic,
+                    super::ExecutionMode::Specialized,
+                ] {
+                    crate::machine::islands::take_original_text_publications();
+                    let actual = run_selected(
+                        &prefix_text,
+                        record,
+                        slice,
+                        bounds,
+                        Layout(0),
+                        (mode, cold),
+                        true,
+                    );
+                    let receipts = crate::machine::islands::take_original_text_publications();
+                    assert_eq!(
+                        actual, expected,
+                        "accepted text prefix {mode:?}, record={record}, slice={slice}, limit={limit}"
+                    );
+                    if limit == 0 && slice == u64::MAX {
+                        assert!(
+                            receipts > 0,
+                            "the staged text consumer must settle the actual original receipt: {mode:?}, record={record}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// K-MACH-008 / LogicalHeldV1: a text prefix publishes its actual live-outs

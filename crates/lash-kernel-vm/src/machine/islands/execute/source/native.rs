@@ -12,18 +12,11 @@ use room::{
 use crate::machine::islands::compiled;
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
-    fn native_publication_room(&self, frame: &Values<'_, '_>) -> bool {
-        if frame
-            .state
-            .source
-            .as_ref()
-            .is_some_and(|source| source.original.is_some())
-        {
-            // The receipt records the canonical remaining tape at acceptance.
-            !self.tight && self.projection().is_none() && self.storage_room(0)
-        } else {
-            self.resident_room(0)
-        }
+    fn native_publication_room(&self) -> bool {
+        // Canonical source admission owns both quiet and detailed debt. The
+        // installed contract and detached preparation decline actual cold
+        // inputs; unrelated cold objects cannot exclude this publication.
+        !self.tight && self.projection().is_none() && self.storage_room(0)
     }
 
     pub(in crate::machine::islands::execute) fn publish_native_value(
@@ -33,13 +26,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         args: &[Value],
     ) -> Result<ValuePublication, HeapFault> {
         let join = matches!(site.direct(self.exe), Some(Direct::TextJoin));
-        if frame
-            .state
-            .source
-            .as_ref()
-            .is_none_or(|source| source.original.is_none())
-            && (join || self.exe.lib(site.lib).kernels(self.exe).concat.is_some())
-        {
+        if join || self.exe.lib(site.lib).kernels(self.exe).concat.is_some() {
             match self.publish_text_value(frame, site, args, join)? {
                 ValuePublication::Unavailable => {}
                 published => return Ok(published),
@@ -56,8 +43,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &OperatorSite,
         args: &[Value],
     ) -> Result<ValuePublication, HeapFault> {
-        if !self.native_publication_room(frame)
-            || self.arena.any_cold()
+        if !self.native_publication_room()
             || site.root.is_some()
             || site.counted.is_some()
             || site.act.is_some()
@@ -102,8 +88,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     ) -> Result<ValuePublication, HeapFault> {
         let function = self.exe.lib(site.lib);
         let text = !prepared && function.header.signature.result == lash_kernel_value::Type::Text;
-        if !self.native_publication_room(frame)
-            || self.arena.any_cold()
+        if !self.native_publication_room()
             || function.limit.is_some()
             || function.shares_params
             || args.len() > function.arity
@@ -195,7 +180,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             Ok(Some(contract)) if native_storage::supports(&contract) => contract,
             Err(doc::NativeError::Host(error)) => return Err(error),
             Err(doc::NativeError::Malformed(reason)) => return Err(malformed(reason)),
-            _ => return Ok(ValuePublication::Unavailable),
+            _ => {
+                return Ok(ValuePublication::Unavailable);
+            }
         };
         let collection = contract
             .events
@@ -389,6 +376,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             known: answer.map(|(value, _)| (value, 0)),
         };
         let result = &mut frame.regs[site.reg as usize];
+        let tape = activation
+            .original
+            .is_none()
+            .then_some(self.recorder)
+            .flatten();
         let published = self.publish_source_boundary(
             frame.state.callee,
             activation,
@@ -400,7 +392,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 operands,
             },
             |arena, _, edits, prepared| {
-                let native_storage::NativePublication { storage, .. } = prepared;
+                let native_storage::NativePublication { storage, debt, .. } = prepared;
+                if let Some(tape) = tape {
+                    debt.record(tape);
+                }
                 debug_assert!(edits.is_empty());
                 *result = storage.value();
                 storage.publish(arena);

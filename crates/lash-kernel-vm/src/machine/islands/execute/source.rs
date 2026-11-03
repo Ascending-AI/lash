@@ -10,7 +10,7 @@ mod native;
 mod parameters;
 mod text;
 #[cfg(test)]
-pub(crate) use text::take_text_publications;
+pub(crate) use text::{take_original_text_publications, take_text_publications};
 pub(in crate::machine::islands::execute) enum ValuePublication {
     Unavailable,
     Declined,

@@ -64,10 +64,11 @@ pub(in crate::machine) struct SourceNative<'a> {
     pub(in crate::machine) inputs: Vec<Owner>,
     pub(in crate::machine) operands: Vec<Value>,
 }
-pub(in crate::machine) struct NativePublication {
+pub(in crate::machine) struct NativePublication<'program> {
     pub(in crate::machine) storage: PreparedNative,
     pub(in crate::machine) holding: lash_kernel_state::kernel_internals::logical::Holding,
     pub(in crate::machine) units: u64,
+    pub(in crate::machine) debt: room::charges::ChargeDebt<'program>,
 }
 enum NativeBinding {
     Ordinary(room::publication::BoundEvent),
@@ -77,8 +78,8 @@ enum NativeEvent<'a> {
     Ordinary(room::publication::PreparedEvent<'a>),
     Original(room::publication::OriginalPrepared<'a>),
 }
-impl BoundaryPreparation for SourceNative<'_> {
-    type Prepared = NativePublication;
+impl<'program> BoundaryPreparation for SourceNative<'program> {
+    type Prepared = NativePublication<'program>;
     fn prepare<'a>(
         self,
         arena: &'a mut Arena,
@@ -109,13 +110,13 @@ impl BoundaryPreparation for SourceNative<'_> {
             }))
     }
 }
-impl SourceNative<'_> {
+impl<'program> SourceNative<'program> {
     fn prepare_inner<'a>(
         self,
         arena: &'a mut Arena,
         entry: ExternalEntry<'_>,
         original: Option<&room::charges::AcceptedOriginalPrefix>,
-    ) -> Result<Option<(NativeEvent<'a>, NativePublication)>, HeapFault> {
+    ) -> Result<Option<(NativeEvent<'a>, NativePublication<'program>)>, HeapFault> {
         use room::publication::{ExactRoots, ExternalFacts};
         let ExternalEntry {
             event,
@@ -130,7 +131,7 @@ impl SourceNative<'_> {
                 transaction,
                 storage,
             },
-            (bound, holding, units),
+            (bound, holding, debt),
         )) = self.recipe.prepare_boundary(
             arena,
             &self.inputs,
@@ -199,7 +200,7 @@ impl SourceNative<'_> {
                     heap.pages(),
                     page,
                 )?;
-                Ok(Some((bound, holding, debt.units())))
+                Ok(Some((bound, holding, debt)))
             },
         )?
         else {
@@ -219,7 +220,8 @@ impl SourceNative<'_> {
                 NativePublication {
                     storage,
                     holding,
-                    units,
+                    units: debt.units(),
+                    debt,
                 },
             ))),
             Err(PublicationError::Miss(_)) => Ok(None),

@@ -14,10 +14,18 @@ use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use std::sync::Arc;
 
 #[cfg(test)]
-thread_local! { static TEXTS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) }; }
+thread_local! {
+    static TEXTS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
+    static ORIGINAL_TEXTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
 #[cfg(test)]
 pub(crate) fn take_text_publications() -> [u64; 2] {
     TEXTS.with(|counts| counts.replace([0; 2]))
+}
+
+#[cfg(test)]
+pub(crate) fn take_original_text_publications() -> u64 {
+    ORIGINAL_TEXTS.with(|counts| counts.replace(0))
 }
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
@@ -169,7 +177,20 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             unpaid: Some(unpaid),
             ..start.clone()
         };
-        if let Some(frontier) = activation.frontier.as_mut()
+        let original = activation.original.is_some();
+        if let Some(receipt) = activation.original.as_ref() {
+            let Some(frontier) = activation.frontier.as_mut() else {
+                return Ok(ValuePublication::Declined);
+            };
+            if !receipt.enter_event(
+                frontier,
+                &mut store.borrow_mut(),
+                start.clone(),
+                self.charged,
+            )? {
+                return Ok(ValuePublication::Declined);
+            }
+        } else if let Some(frontier) = activation.frontier.as_mut()
             && frontier.departs(&start)
         {
             frontier.handoff(&mut store.borrow_mut(), start.clone())?;
@@ -361,21 +382,47 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let memory_bound = self.memory_bound;
         let published = storage
             .boundary(&mut ledger, self.heap, |transaction, ledger, apply, _| {
-                let prepared = match bound.finish_external(frontier, ledger, transaction) {
-                    Ok(prepared) => prepared,
-                    Err(room::publication::PublicationError::Miss(_)) => return Ok(false),
-                    Err(room::publication::PublicationError::Heap(error)) => return Err(error),
-                };
-                let Some(accepted) = prepared.admit(frontier, ledger, resources, memory_bound)?
-                else {
-                    return Ok(false);
-                };
-                let balance = accepted
-                    .publish_event(frontier, ledger, |arena, edits| apply(arena, edits))
-                    .map_err(|error| match error {
-                        room::publication::PublicationError::Heap(error) => error,
-                        room::publication::PublicationError::Miss(reason) => malformed(reason),
-                    })?;
+                use room::publication::PublicationError;
+                let balance = if let Some(receipt) = activation.original.as_ref() {
+                    let bound = match bound.with_original_native(frontier, ledger, receipt, &debt) {
+                        Ok(bound) => bound,
+                        Err(PublicationError::Miss(_)) => return Ok(false),
+                        Err(PublicationError::Heap(error)) => return Err(error),
+                    };
+                    let prepared = match bound.finish_external(frontier, ledger, transaction) {
+                        Ok(prepared) => prepared,
+                        Err(PublicationError::Miss(_)) => return Ok(false),
+                        Err(PublicationError::Heap(error)) => return Err(error),
+                    };
+                    let Some(accepted) =
+                        prepared.admit(frontier, ledger, resources, memory_bound)?
+                    else {
+                        return Ok(false);
+                    };
+                    accepted.publish_original_event(
+                        frontier,
+                        ledger,
+                        &mut activation.original,
+                        |arena, edits| apply(arena, edits),
+                        self.recorder,
+                    )
+                } else {
+                    let prepared = match bound.finish_external(frontier, ledger, transaction) {
+                        Ok(prepared) => prepared,
+                        Err(PublicationError::Miss(_)) => return Ok(false),
+                        Err(PublicationError::Heap(error)) => return Err(error),
+                    };
+                    let Some(accepted) =
+                        prepared.admit(frontier, ledger, resources, memory_bound)?
+                    else {
+                        return Ok(false);
+                    };
+                    accepted.publish_event(frontier, ledger, |arena, edits| apply(arena, edits))
+                }
+                .map_err(|error| match error {
+                    PublicationError::Heap(error) => error,
+                    PublicationError::Miss(reason) => malformed(reason),
+                })?;
                 self.logical_memory.set(balance.total()?);
                 Ok(true)
             })?
@@ -384,8 +431,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(ValuePublication::Declined);
         }
         frame.regs[site.reg as usize] = value;
-        if let Some(tape) = self.recorder {
+        if !original && let Some(tape) = self.recorder {
             debt.record(tape);
+        }
+        #[cfg(test)]
+        if original {
+            ORIGINAL_TEXTS.with(|counts| counts.set(counts.get() + 1));
         }
         #[cfg(any(test, feature = "testing"))]
         crate::machine::islands::witness::native_text_published();

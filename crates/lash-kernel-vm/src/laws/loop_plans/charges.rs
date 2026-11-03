@@ -12,6 +12,7 @@ pub(super) fn compiled_charges() {
     calls::pure_calls();
     member_closes();
     constructor_debt();
+    native_after_ordered_closes();
     for layout in [0, 1, 42, u64::MAX] {
         let text = super::super::layout::scalar_document(
             "let x = flat.add(0, flat.mul(2, 3)) set x = flat.add(x, 4) return x",
@@ -788,4 +789,142 @@ fn constructor_debt() {
             "the original close settles once after every constructor publication"
         );
     }
+}
+
+/// K-CHG-001: a packet which emitted several original closes owes only its
+/// native formula. The compiler authenticates their complete ordered identity.
+fn native_after_ordered_closes() {
+    let mut witnessed = 0;
+    for layout in [0, 2, 0x5eed] {
+        let text = r#"main { let f = fn(input) {
+            let first = json.decode(input, "number", "by_spelling", "record")
+            let second = json.decode(input, "number", "by_spelling", "record")
+            return (first, second)
+        } return apply f("null") }"#;
+        let (mut program, library) = Embedder::with(
+            text,
+            Setup {
+                layout: crate::Layout(layout),
+                probes: Some(crate::laws::layout::helper_probes),
+                ..Setup::default()
+            },
+        )
+        .program(false);
+        program.library = crate::PreparedLibrary::with_layout(
+            std::sync::Arc::clone(&library.registry),
+            crate::Layout(layout),
+        );
+        let admitted = program
+            .library
+            .admit(&program.document, Default::default(), &program.selection)
+            .unwrap_or_else(|_| panic!("ordered native source admitted"));
+        let exe = admitted
+            .executable(
+                &program.document,
+                &program.library,
+                &program.documents,
+                &program.functions,
+                &program.instances,
+            )
+            .unwrap_or_else(|_| panic!("ordered native compiled"));
+        for plan in exe.islands.plans.iter() {
+            if exe.code(plan.code).params.len() != 1 {
+                continue;
+            }
+            for statement in &plan.body.statements {
+                let (stream, stmt, _) = exe.statement(statement.id);
+                let mut paid = Vec::new();
+                for pc in stmt.ops.start..stmt.ops.end() {
+                    let op = stream.ops[pc as usize];
+                    if let Op::Region { region, total } = op {
+                        paid.push(crate::compile::expr::Close {
+                            region: region.0,
+                            head: pc,
+                            total,
+                        });
+                    } else if !op.kind().in_region() {
+                        if matches!(op, Op::Call { .. }) && paid.len() > 1 {
+                            let charges = ChargeProgram::native_after_closes(
+                                &exe,
+                                plan.code,
+                                statement.id,
+                                pc,
+                                &paid,
+                            )
+                            .unwrap();
+                            assert_eq!(charges.verify(&exe, plan.code), Ok(()));
+                            let arguments =
+                                ["null", "number", "by_spelling", "record"].map(|text| {
+                                    Value::Text(
+                                        lash_kernel_doc::arena::ShortText::new(text).unwrap(),
+                                    )
+                                });
+                            let values = [FormulaValues {
+                                arguments: &arguments,
+                                result: Value::Null,
+                            }];
+                            let debt = charges.bind(&values).unwrap();
+                            let completion =
+                                ChargeProgram::native_completion(&exe, plan.code, statement.id, pc)
+                                    .unwrap();
+                            assert_eq!(debt.units(), completion.bind(&values).unwrap().units());
+                            let tape = crate::observe::ChargeTape::new();
+                            debt.record(&tape);
+                            let expected = crate::observe::ChargeTape::new();
+                            completion.bind(&values).unwrap().record(&expected);
+                            assert_eq!(
+                                tape.steps(),
+                                expected.steps(),
+                                "already emitted closes cannot replay"
+                            );
+                            assert!(debt.native_allowance(7).unwrap().strict);
+                            assert!(
+                                ChargeProgram::native_after_closes(
+                                    &exe,
+                                    plan.code,
+                                    statement.id,
+                                    pc,
+                                    &paid[1..]
+                                )
+                                .is_err(),
+                                "missing original close"
+                            );
+                            let mut reordered = paid.clone();
+                            reordered.swap(0, 1);
+                            assert!(
+                                ChargeProgram::native_after_closes(
+                                    &exe,
+                                    plan.code,
+                                    statement.id,
+                                    pc,
+                                    &reordered
+                                )
+                                .is_err(),
+                                "reordered original close"
+                            );
+                            let mut wrong = paid.clone();
+                            wrong[0].total += 1;
+                            assert!(
+                                ChargeProgram::native_after_closes(
+                                    &exe,
+                                    plan.code,
+                                    statement.id,
+                                    pc,
+                                    &wrong
+                                )
+                                .is_err(),
+                                "another close total"
+                            );
+                            witnessed += 1;
+                        }
+                        paid.clear();
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        witnessed > 0,
+        "the owning corpus must compile actual multiple-close native sites"
+    );
 }

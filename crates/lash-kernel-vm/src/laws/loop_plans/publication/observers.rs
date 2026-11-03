@@ -21,7 +21,11 @@ pub(super) fn isolation() {
                 ..Setup::default()
             },
         );
-        let (program, _) = run.program(false);
+        let (mut program, library) = run.program(false);
+        program.library = crate::PreparedLibrary::with_layout(
+            Arc::clone(&library.registry),
+            crate::Layout(layout),
+        );
         let admitted = program
             .library
             .admit(&program.document, Default::default(), &program.selection)
