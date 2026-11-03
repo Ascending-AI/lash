@@ -299,18 +299,32 @@ pub(in crate::laws) fn helper_probes(
         "helper.reduce",
         registry.register(definition, None).unwrap(),
     ));
-    let length = ids["list.len"];
+    // Collection-prefix witnesses need the installed resource contract. The
+    // deliberately uncertified Len also pins a real publication refusal.
+    let length = out
+        .iter()
+        .find(|(name, _)| *name == "resident.len")
+        .unwrap()
+        .1;
     let definition = lash_kernel_doc::parse_definition(&format!(
-        "function helper.copy(values: List(Any)) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\nuse list.len = @{length}\nbody {{ let out = [] for value in values metered 2 {{ set out[list.len(out)] = value }} return out }}"
+        "function helper.copy(values: List(Any)) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\nuse resident.len = @{length}\nbody {{ let out = [] for value in values metered 2 {{ set out[resident.len(out)] = value }} return out }}"
     )).unwrap();
     out.push(("helper.copy", registry.register(definition, None).unwrap()));
+    let definition = lash_kernel_doc::parse_definition(&format!(
+        "function helper.copy_uncertified(values: List(Any)) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\nuse list.len = @{}\nbody {{ let out = [] for value in values metered 2 {{ set out[list.len(out)] = value }} return out }}", ids["list.len"]
+    )).unwrap();
+    out.push((
+        "helper.copy_uncertified",
+        registry.register(definition, None).unwrap(),
+    ));
     let addition = add;
     let definition = lash_kernel_doc::parse_definition(&format!(
         "function helper.place(values: List(Any), target: List(Any), position: Int) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\nuse flat.add = @{addition}\nbody {{ for value in values metered 2 {{ set target[position] = value set position = flat.add(position, 1) }} return (target, position) }}"
     )).unwrap();
     out.push(("helper.place", registry.register(definition, None).unwrap()));
+    let visit_length = ids["list.len"];
     let definition = lash_kernel_doc::parse_definition(&format!(
-        "function helper.visit(values: List(Any), bound: Int) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\nuse same = @{same}\nuse flat.add = @{add}\nuse list.len = @{length}\nbody {{ let out = [] let i = 0 for value in values metered 2 {{ if same(i, bound) {{ break }} if same(value, ()) {{ set i = flat.add(i, 1) }} else {{ set out[list.len(out)] = value }} set i = flat.add(i, 1) }} return (out, i) }}"
+        "function helper.visit(values: List(Any), bound: Int) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\nuse same = @{same}\nuse flat.add = @{add}\nuse list.len = @{visit_length}\nbody {{ let out = [] let i = 0 for value in values metered 2 {{ if same(i, bound) {{ break }} if same(value, ()) {{ set i = flat.add(i, 1) }} else {{ set out[list.len(out)] = value }} set i = flat.add(i, 1) }} return (out, i) }}"
     )).unwrap();
     out.push(("helper.visit", registry.register(definition, None).unwrap()));
     struct Lookalike;
@@ -355,27 +369,30 @@ pub(in crate::laws) fn helper_probes(
                 .unwrap(),
         ));
     }
-    let references = ["num.add", "num.lt", "list.len"]
-        .map(|name| (name, ids[name]))
-        .into_iter()
-        .chain(
-            ["same", "bool.not", "num.min", "list.get"]
-                .map(|name| (name, out.iter().find(|(key, _)| *key == name).unwrap().1)),
-        )
-        .map(|(name, id)| format!("use {name} = @{id}\n"))
-        .collect::<String>();
+    let references = [
+        ("num.add", ids["num.add"]),
+        ("num.lt", ids["num.lt"]),
+        ("resident.len", length),
+    ]
+    .into_iter()
+    .chain(
+        ["same", "bool.not", "num.min", "list.get"]
+            .map(|name| (name, out.iter().find(|(key, _)| *key == name).unwrap().1)),
+    )
+    .map(|(name, id)| format!("use {name} = @{id}\n"))
+    .collect::<String>();
     for (name, params, body) in [
         (
             "helper.scan",
             "values: List(Any), list: Bool",
             r#"
             let i = 0 let out = []
-            while num.lt(i, list.len(values)) metered 2 {
+            while num.lt(i, resident.len(values)) metered 2 {
                 let present = false let value = absent
-                if list { if num.lt(i, list.len(values)) {
+                if list { if num.lt(i, resident.len(values)) {
                     set value = values[i] set present = bool.not(same(value, ()))
                 } }
-                if present { set out[list.len(out)] = value }
+                if present { set out[resident.len(out)] = value }
                 set i = num.add(i, 1)
             }
             return out
@@ -386,7 +403,7 @@ pub(in crate::laws) fn helper_probes(
             "values: List(Any), compare: Any",
             r#"
             let sorted = values let out = [0, 0, 0, 0]
-            let n = list.len(sorted) let width = 1
+            let n = resident.len(sorted) let width = 1
             while num.lt(width, n) metered 2 {
                 let dest = 0 let end = 0 let mid = 0 let left = 0 let right = 0
                 for unused in values metered 2 {
@@ -793,11 +810,12 @@ const MERGE: &str = r#"main {
 }"#;
 
 const LOOKALIKE_COUNTERS: &str = r#"main {
+    let uncertified = invoke helper.copy_uncertified([1, (), 2, 3])
     let copied = invoke helper.scan_lookalike([1, (), 2, 3], true)
     let compare = fn(a, b) { if num.lt(a, b) { return -1 } if num.lt(b, a) { return 1 } return 0 }
     let merged = null
     try { set merged = invoke helper.merge_lookalike([3, 1, 2, 1], compare) } catch err { set merged = err.kind }
-    return (copied, merged)
+    return (copied, merged, uncertified)
 }"#;
 
 /// K-CHG-007 / K-MACH-008: helper and callback frames preserve every

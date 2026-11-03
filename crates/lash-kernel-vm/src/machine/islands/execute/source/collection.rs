@@ -69,8 +69,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             ),
         };
         match accepted {
-            Ok(false) => None,
-            Ok(true) => {
+            Ok(None) => None,
+            Ok(Some(_)) => {
                 #[cfg(test)]
                 super::super::merge::source_publication_accepted(_index);
                 Some(Ok(Next::Continue))

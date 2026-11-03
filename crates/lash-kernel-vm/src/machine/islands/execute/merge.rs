@@ -52,11 +52,14 @@ macro_rules! collection_entry {
                         match &answer {
                             None => Exit::Guard,
                             Some(Err(_)) => Exit::Boundary,
-                            Some(Ok(_)) => Exit::Commit,
+                            Some(Ok((_, region::CollectionContinuation::Callback))) => {
+                                Exit::Callback
+                            }
+                            Some(Ok((_, region::CollectionContinuation::Commit))) => Exit::Commit,
                         },
                     );
                 }
-                answer
+                answer.map(|answer| answer.map(|(next, _)| next))
             }
         }
     };

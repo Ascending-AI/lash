@@ -9,13 +9,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         &mut self,
         frame: &mut Values<'_, 'e>,
         packet: &CollectionPacket<S>,
-    ) -> Option<Result<Next, Stop>>
+    ) -> Option<Result<(Next, CollectionContinuation), Stop>>
     where
         CollectionSite<S>: CollectionCandidate,
     {
         match self.try_source_publication(frame, packet) {
-            Ok(false) => None,
-            Ok(true) => Some(Ok(Next::Continue)),
+            Ok(None) => None,
+            Ok(Some(exit)) => Some(Ok((Next::Continue, exit))),
             Err(error) => Some(Err(self.halt(error.into()))),
         }
     }
@@ -23,27 +23,27 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         &mut self,
         frame: &mut Values<'_, 'e>,
         packet: &CollectionPacket<S>,
-    ) -> Result<bool, HeapFault>
+    ) -> Result<Option<CollectionContinuation>, HeapFault>
     where
         CollectionSite<S>: CollectionCandidate,
     {
         let Some(site) = packet.proof.get().and_then(Option::as_ref) else {
-            return Ok(false);
+            return Ok(None);
         };
         if self.deferred_end.is_some() || self.spent() || self.projection().is_some() {
-            return Ok(false);
+            return Ok(None);
         }
         self.logical.flush(self.arena, self.heap)?;
         let Some(source) = frame.state.source.as_ref() else {
-            return Ok(false);
+            return Ok(None);
         };
         if source.original.is_some() || source.frontier.is_none() {
-            return Ok(false);
+            return Ok(None);
         }
         let invocation = source.invocation.clone();
         let compiled = frame.state.callee.compiled;
         let Some(placement) = &compiled.placement else {
-            return Ok(false);
+            return Ok(None);
         };
         let store = self.logical.ledger();
         let occurrence = Occurrence {
@@ -73,7 +73,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 frame.slots,
             )?
             else {
-                return Ok(false);
+                return Ok(None);
             };
             for exit in site.positions(occurrence) {
                 if let Some(facts) = site.candidate(
@@ -96,21 +96,18 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         exit,
                     },
                 ) {
-                    // Guest callbacks retain their precise source frames and
-                    // saved roles at this handoff.
-                    if facts.transfer.continuation == CollectionContinuation::Callback {
-                        continue;
-                    }
+                    // A callback exit publishes only the verified prefix. The
+                    // original call and its saved roles execute at transfer.pc.
                     candidate = Some(facts);
                     break;
                 }
             }
         }
         let Some(mut facts) = candidate else {
-            return Ok(false);
+            return Ok(None);
         };
         if !facts.reserve(frame)? {
-            return Ok(false);
+            return Ok(None);
         }
         let activation = frame
             .state
@@ -118,7 +115,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .as_mut()
             .ok_or_else(|| malformed("collection activation disappeared"))?;
         let Some(frontier) = activation.frontier.as_mut() else {
-            return Ok(false);
+            return Ok(None);
         };
         let ledger = store.borrow();
         let Some(dense) = placement.capture(
@@ -129,7 +126,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             frame.slots,
         )?
         else {
-            return Ok(false);
+            return Ok(None);
         };
         let safe_point = self.charged;
         let resources = SourceResources {
@@ -152,7 +149,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             self.memory_bound,
         )?
         else {
-            return Ok(false);
+            return Ok(None);
         };
         drop(ledger);
         let balance = accepted.publish_boundary(
@@ -162,7 +159,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             self.recorder,
         )?;
         self.logical_memory.set(balance.total()?);
+        let continuation = transfer.continuation;
         self.install_collection_transfer(frame, transfer);
-        Ok(true)
+        Ok(Some(continuation))
     }
 }
