@@ -173,6 +173,7 @@ pub(super) enum Stands {
 /// A virtual frame as the exit converts it.
 pub(super) struct Level {
     source: source::Activation,
+    texts: Vec<crate::compile::room::publication::text::TextOwnership>,
     /// The original library completion owner, including its ordered arguments.
     library: Option<super::LibraryCall>,
     boundary: Option<crate::compile::LibId>,
@@ -385,9 +386,6 @@ struct Island<'a, const OBSERVING: bool> {
     /// unchecked while its operators take their typed paths.
     covered: bool,
     scratch: &'a mut Scratch,
-    /// The running accumulator statement's text (FIG-6795), which its heap
-    /// operations' concatenation may extend.
-    accumulator: Option<crate::compile::Accumulator>,
 }
 
 impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
@@ -951,6 +949,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         library: Option<super::LibraryCall>,
         boundary: Option<crate::compile::LibId>,
         activation: source::Activation,
+        texts: Vec<crate::compile::room::publication::text::TextOwnership>,
     ) {
         let plan = callee.plan;
         let captured = callee.captured;
@@ -967,6 +966,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         exit.regs.clear();
         exit.levels.push(Level {
             source: activation,
+            texts,
             library,
             boundary,
             link: self.link,
@@ -1159,8 +1159,9 @@ fn record(tape: &ChargeTape, stream: &Stream, region: u32) {
     }
 }
 
-/// Validated source coordinates and evaluated operands of a paid action.
-struct ActionSuffix {
+/// Validated source coordinates and evaluated operands of a source suffix.
+struct SourceSuffix {
+    inputs: Option<lash_kernel_exec::RegRange>,
     stmt: StmtId,
     source_pc: u32,
     after: usize,

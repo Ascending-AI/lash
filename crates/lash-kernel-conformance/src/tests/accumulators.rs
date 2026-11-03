@@ -137,6 +137,10 @@ fn linear_text_accumulators_keep_every_version_they_extend() {
         };
         let (reference, census) =
             crate::projection::counted(|| finished::<0>(&natural, case, u64::MAX));
+        println!(
+            "{}: accepted buffer transfers {}",
+            case.name, census.accumulated
+        );
         if (census.accumulated > 0) != *extends {
             failures.push(format!(
                 "{}: extended its text {} times: {census:?}",

@@ -87,7 +87,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             Opcode::Loop => {
                 let sites::Loop { id, header, texts } = &code.sites.loop_[packet.x as usize];
 
-                frame.state.texts.retain(|(slot, _)| !texts.contains(slot));
+                frame
+                    .state
+                    .texts
+                    .retain(|token| !texts.contains(&token.physical()));
                 frame.state.control.push(Position::Loop {
                     id: *id,
                     header: *header,
@@ -110,7 +113,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 if *via {
                     return Err(self.at(*pc));
                 }
-                frame.state.texts.retain(|(slot, _)| !texts.contains(slot));
+                frame
+                    .state
+                    .texts
+                    .retain(|token| !texts.contains(&token.physical()));
                 let cursor = Cursor::over(regs[*reg as usize], false).map_err(|_| self.at(*pc))?;
                 frame.state.control.push(Position::Loop {
                     id: *id,
@@ -316,11 +322,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         }
                     };
                 }
-                if let Destination::Write(write) = to
-                    && write.accumulates
-                {
-                    self.accumulate(frame, write.at);
-                }
                 let mut values = [Value::Absent; 3];
                 let given = match inputs {
                     OperatorInputs::Registers(args) => {
@@ -336,6 +337,45 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     OperatorInputs::Scalar(_) => unreachable!("scalar inputs returned above"),
                 };
                 return self.operator_destination(frame, site, &values[..given], *covered, to);
+            }
+            Opcode::TextWrite => {
+                use super::super::code::NativeInputs;
+                let sites::TextWrite {
+                    site,
+                    text_inputs,
+                    write,
+                } = &code.sites.text_write[packet.x as usize];
+                let mut values = [Value::Absent; MAX_ARGS];
+                let count = match text_inputs {
+                    NativeInputs::Registers(args) => {
+                        for (value, reg) in values.iter_mut().zip(args.iter()) {
+                            *value = frame.regs[*reg as usize];
+                        }
+                        args.len()
+                    }
+                    NativeInputs::Source(reads) => {
+                        self.source_inputs(frame, reads, &mut values)?;
+                        reads.len()
+                    }
+                };
+                if self
+                    .publish_text_write(frame, site, write, &values[..count])
+                    .map_err(|error| self.halt(error.into()))?
+                    == Some(true)
+                {
+                    return self.finish_statement(frame, write.leaves, None);
+                }
+                if frame
+                    .state
+                    .source
+                    .as_ref()
+                    .is_none_or(|source| source.original.is_none())
+                    && let Some(close) = &site.close
+                    && !self.close(close)
+                {
+                    return Err(self.at_operands(close.head, site.reg, &values[..count]));
+                }
+                return Err(self.at_operands(site.pc, site.reg, &values[..count]));
             }
             Opcode::Native => {
                 let sites::Native { site, args } = &code.sites.native[packet.x as usize];
@@ -590,11 +630,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     frame.regs[site.reg as usize]
                 };
                 return self.write_value(frame, site, value);
-            }
-            Opcode::Accumulate => {
-                let at = &(packet.x as usize);
-
-                self.accumulate(frame, *at);
             }
             Opcode::Publish => {
                 let site = &code.sites.publish[packet.x as usize];

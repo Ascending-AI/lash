@@ -34,28 +34,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     }
 
     #[inline(always)]
-    pub(super) fn accumulate(&mut self, frame: &mut Values<'_, 'e>, at: usize) {
-        let left = match frame.slots[at] {
-            SlotState::Value(Value::LongText(text)) => Some(text),
-            _ => None,
-        };
-        let mut owned = false;
-        frame.state.texts.retain(|(slot, text)| {
-            if *slot != at {
-                return true;
-            }
-            owned |= left == Some(*text);
-            false
-        });
-        let owned = owned && left.is_some_and(|text| self.arena.extensible(text));
-        self.accumulator = left.map(|left| crate::compile::Accumulator {
-            left,
-            owned,
-            made: None,
-        });
-    }
-
-    #[inline(always)]
     pub(super) fn operator_destination(
         &mut self,
         frame: &mut Values<'_, 'e>,

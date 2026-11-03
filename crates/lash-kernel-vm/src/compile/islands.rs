@@ -104,8 +104,6 @@ pub(crate) enum Kind {
         reg: u32,
         at: u32,
         bind: bool,
-        /// A linear text accumulator (FIG-6795): see [`Former::accumulates`].
-        accumulates: bool,
     },
     If {
         cond: Expr,
@@ -328,7 +326,6 @@ pub(super) fn form(
             readable,
             writable,
             loop_test,
-            loops: Vec::new(),
             charged: code.charged,
         };
         let body = former.block(code.body);
@@ -390,8 +387,6 @@ fn mark(tables: &mut Tables, islands: &Islands, codes: u32) {
 struct Former<'a> {
     charged: bool,
     loop_test: u64,
-    /// The loops around the statement being formed, innermost last.
-    loops: Vec<StmtId>,
     tables: &'a Tables,
     library: &'a Prepared,
     blocks: u32,
@@ -547,7 +542,7 @@ impl Former<'_> {
                     reg: cond.0,
                     cost: self.loop_test,
                     metered,
-                    body: self.loop_body(id, body),
+                    body: self.block(body),
                     otherwise: else_block.map(|block| self.block(block)),
                 }
             }
@@ -571,7 +566,7 @@ impl Former<'_> {
                     cost: self.loop_test,
                     metered,
                     at: slot,
-                    body: self.loop_body(id, body),
+                    body: self.block(body),
                     otherwise: else_block.map(|block| self.block(block)),
                 }
             }
@@ -621,7 +616,7 @@ impl Former<'_> {
                     reg: cond.0,
                     cost: self.loop_test,
                     metered,
-                    body: self.loop_body(id, body),
+                    body: self.block(body),
                     otherwise: else_block.map(|block| self.block(block)),
                 },
             });
@@ -786,8 +781,6 @@ impl Former<'_> {
             ) if self.writable(local.slot) => {
                 let value = self.admitted(tree.take(src)?)?;
                 Kind::Write {
-                    accumulates: !matches!(tree.last, Op::Bind { .. } | Op::BindShared { .. })
-                        && self.accumulates(&value, local.at),
                     value,
                     close,
                     pc: end,
@@ -925,7 +918,7 @@ impl Former<'_> {
                     cost: self.loop_test,
                     metered,
                     at,
-                    body: self.loop_body(id, body),
+                    body: self.block(body),
                     otherwise: else_block.map(|block| self.block(block)),
                 }
             }
@@ -1082,82 +1075,6 @@ impl Former<'_> {
                     })
                     .is_some()
         })
-    }
-
-    /// Loop `id`'s body block, formed inside the loop.
-    fn loop_body(&mut self, id: StmtId, body: BlockId) -> Block {
-        self.loops.push(id);
-        let block = self.block(body);
-        self.loops.pop();
-        block
-    }
-
-    /// Whether `value`, written to the variable at `at` inside a loop, is a
-    /// linear text accumulator (FIG-6795): a library operator's
-    /// or native's call whose first operand reads the slot, with no guest
-    /// call, and the only read of the slot in the innermost loop's source.
-    /// No statement of the loop then observes the value the write replaces,
-    /// so where that value is a long text the statement's own concatenation
-    /// made, the next concatenation of it may take its storage.
-    fn accumulates(&self, value: &Expr, at: u32) -> bool {
-        fn bare(expr: &Expr) -> &Expr {
-            match &expr.kind {
-                ExprKind::Pin(value) => bare(value),
-                _ => expr,
-            }
-        }
-        fn plain(expr: &Expr) -> bool {
-            !matches!(
-                expr.kind,
-                ExprKind::Call { .. }
-                    | ExprKind::Cond { .. }
-                    | ExprKind::Schedule { .. }
-                    | ExprKind::Act
-            ) && expr.operands().all(plain)
-        }
-        let Some(&id) = self.loops.last() else {
-            return false;
-        };
-        let first = match &bare(value).kind {
-            ExprKind::Operator { args, .. } | ExprKind::Native { args, .. } => matches!(
-                args.first().map(|first| &bare(first).kind),
-                Some(ExprKind::Local { local, scoped: false, .. }) if local.at == at
-            ),
-            _ => false,
-        };
-        first && plain(value) && self.reads(self.stmt(id), at) == 1
-    }
-
-    fn stmt(&self, id: StmtId) -> &Stmt {
-        &self.tables.stmts[(id.0 - self.stmts) as usize]
-    }
-
-    /// How many source ops of statement `stmt`, its test and its blocks
-    /// read the variable at `at`.
-    fn reads(&self, stmt: &Stmt, at: u32) -> usize {
-        let ops = |range: lash_kernel_exec::OpRange| {
-            self.tables.stream.ops[range.start as usize..range.end() as usize]
-                .iter()
-                .filter(|op| matches!(op, Op::Local { local, .. } if local.at == at))
-                .count()
-        };
-        let test = match &stmt.form {
-            Form::While { test, .. } => ops(*test),
-            _ => 0,
-        };
-        ops(stmt.ops)
-            + test
-            + stmt
-                .form
-                .blocks()
-                .into_iter()
-                .flat_map(|block| {
-                    self.tables.blocks[(block.0 - self.blocks) as usize]
-                        .stmts
-                        .iter()
-                })
-                .map(|inner| self.reads(self.stmt(*inner), at))
-                .sum::<usize>()
     }
 
     /// Whether slot `slot` is one an island binds and writes.

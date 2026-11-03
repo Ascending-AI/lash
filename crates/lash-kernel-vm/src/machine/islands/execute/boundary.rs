@@ -10,7 +10,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         &mut self,
         callee: Callee<'e>,
         state: &mut crate::machine::Frame,
-        suffix: Option<&super::ActionSuffix>,
+        suffix: Option<&super::SourceSuffix>,
     ) -> Option<Frame<'e>> {
         let mut window = self.scratch.windows.pop().unwrap_or_default();
         let control = &mut window.control;
@@ -131,13 +131,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             loop_input: None,
             cleaning: state.cleaning,
         });
+        frame.texts = std::mem::take(&mut state.texts);
         Some(frame)
     }
 
-    pub(in crate::machine::islands) fn action_suffix(
+    pub(in crate::machine::islands) fn source_suffix(
         &mut self,
         frame: &mut Frame<'e>,
-        suffix: &super::ActionSuffix,
+        suffix: &super::SourceSuffix,
         values: &crate::machine::registers::Registers,
     ) {
         frame.pc = suffix.after;
@@ -262,6 +263,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             return None;
         }
         state.source_frontier = activation.frontier;
+        state.texts = std::mem::take(&mut active.state.texts);
         state.cleaning = activation.cleaning;
         self.scratch.exit = Exit::default();
         self.recycle(active);
@@ -279,7 +281,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         recovery: &'e Recovery,
         stop: Stop,
     ) -> Answer {
-        self.give_back();
         if let Some(sampling) = self.sampling {
             sampling.statement(active.callee.plan.code, active.statement);
         }
@@ -563,6 +564,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             library.filter(|_| !frame.state.callee.plan.charged),
             frame.state.boundary,
             activation,
+            std::mem::take(&mut frame.state.texts),
         );
     }
 }

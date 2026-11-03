@@ -186,6 +186,11 @@ impl KernelMachine {
         loop {
             let source_pc = pc as u32;
             let op = ops[pc];
+            if matches!(op, Op::Operator { .. } | Op::Call { .. })
+                && let Some(ran) = self.register_native_suffix(host, running, pc)?
+            {
+                return Ok(ran);
+            }
             pc += 1;
             match op {
                 Op::Region { region, total } => {

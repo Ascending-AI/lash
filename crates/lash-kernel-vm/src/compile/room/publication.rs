@@ -22,6 +22,7 @@ mod exact;
 pub(crate) mod member_region;
 pub(crate) mod observers;
 mod region;
+pub(crate) mod text;
 mod unit;
 pub(crate) use exact::{
     BoundEvent, ExactEvent, ExactRoots, ExternalFacts, OriginalBound, OriginalPrepared,

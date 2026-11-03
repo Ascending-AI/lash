@@ -47,6 +47,17 @@ macro_rules! check_field {
     ($record:ident, $stream:ident, held) => {
         $record.held.verify($stream)?;
     };
+    ($record:ident, $stream:ident, text_inputs) => {
+        if let NativeInputs::Source(reads) = &$record.text_inputs {
+            for read in reads {
+                if !read.source().verify($stream, read.reg()) {
+                    return Err(crate::compile::islands::Refused::Region {
+                        region: read.source().pc(),
+                    });
+                }
+            }
+        }
+    };
     ($record:ident, $stream:ident, $other:ident) => {
         let _ = &$record.$other;
     };
@@ -273,7 +284,6 @@ operations! {
         }
     }
     hot_tuples {
-        Accumulate (usize)
         LoopDone (u32)
         Open (usize)
         Unbind (usize)
@@ -336,6 +346,11 @@ operations! {
             }
         }
         [Native native] {
+            TextWrite text_write {
+                site: NativeSite,
+                text_inputs: NativeInputs,
+                write: Box<WriteSite>,
+            }
             ScopePrefix scope_prefix {
                 ahead: u64,
                 miss: u32,
@@ -600,6 +615,95 @@ impl Code {
         Some(code)
     }
 
+    /// An evaluated text native resumes the same TextWrite packet. Input reads
+    /// have already published, so this entry uses their authenticated registers.
+    pub(super) fn text_suffixes(&mut self, stream: &Stream) -> Option<Vec<(u32, usize)>> {
+        let mut suffixes = Vec::new();
+        for (at, packet) in self.packets.iter().enumerate() {
+            let pair = match packet.opcode {
+                Opcode::TextWrite => {
+                    let entry = &self.sites.text_write[packet.x as usize];
+                    Some((entry.site.clone(), entry.write.clone()))
+                }
+                Opcode::Operator => {
+                    let entry = &self.sites.operator[packet.x as usize];
+                    if let Destination::Write(write) = &entry.to {
+                        Some((
+                            NativeSite {
+                                lib: entry.site.lib,
+                                close: entry.site.close,
+                                charges: entry.site.charges.clone(),
+                                pc: entry.site.pc,
+                                reg: entry.site.reg,
+                                depth: entry.site.depth,
+                            },
+                            write.clone(),
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                Opcode::Format => {
+                    let entry = &self.sites.format[packet.x as usize].value;
+                    Some((
+                        NativeSite {
+                            lib: entry.append.lib,
+                            close: entry.append.close,
+                            charges: entry.append.charges.clone(),
+                            pc: entry.append.pc,
+                            reg: entry.append.reg,
+                            depth: entry.append.depth,
+                        },
+                        entry.write.clone(),
+                    ))
+                }
+                Opcode::Write => {
+                    let write = &self.sites.write[packet.x as usize].site;
+                    if let Some(plan) = &write.text {
+                        self.sites
+                            .native
+                            .iter()
+                            .find(|entry| entry.site.pc == plan.native_pc())
+                            .map(|entry| (entry.site.clone(), write.clone()))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            if let Some((site, write)) = pair
+                && write.text.is_some()
+            {
+                let op = stream.ops.get(site.pc as usize)?;
+                let inputs: Box<[_]> = op.reads().iter().map(|reg| reg.0).collect();
+                suffixes.push((site, write, inputs, at + 1));
+            }
+        }
+        let mut entries = Vec::new();
+        for (site, write, inputs, after) in suffixes {
+            let pc = site.pc;
+            let live = inputs.clone();
+            let op = Op::TextWrite {
+                site,
+                text_inputs: NativeInputs::Registers(inputs),
+                write,
+            };
+            let at = self.packets.len();
+            let recovery = Self::recovery(&op, live);
+            let packet = self.encode(op)?;
+            self.packets.push(packet);
+            self.recovery.push(recovery);
+            let op = Op::Jump(after);
+            let recovery = Self::recovery(&op, Box::new([]));
+            let packet = self.encode(op)?;
+            self.packets.push(packet);
+            self.recovery.push(recovery);
+            entries.push((pc, at));
+        }
+        entries.sort_unstable_by_key(|(pc, _)| *pc);
+        Some(entries)
+    }
+
     /// Compiler input facts select the same semantic site and decoder as
     /// register operands. No direct-input operation survives publication.
     fn input_packet(&mut self, op: Op) -> Option<Packet> {
@@ -667,7 +771,7 @@ impl Code {
                         Reason::ResidentRead
                     }
                     Op::Operator { .. } | Op::Unit { .. } => Reason::Operator,
-                    Op::Native { .. } => Reason::Native,
+                    Op::Native { .. } | Op::TextWrite { .. } => Reason::Native,
                     Op::Call { .. } => Reason::Call,
                     Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => {
                         Reason::Binding
@@ -682,7 +786,7 @@ impl Code {
             },
             #[cfg(any(test, feature = "perf-witness"))]
             library: match op {
-                Op::Native { site, .. } => Some(site.lib),
+                Op::Native { site, .. } | Op::TextWrite { site, .. } => Some(site.lib),
                 Op::Operator { site, .. } => Some(site.lib),
                 Op::Call { site, .. } => site.library,
                 _ => None,
@@ -732,7 +836,6 @@ impl Code {
             Op::Jump(to) => at(to).and_then(|x| packet(Opcode::Jump, 0, 0, x, 0)),
             Op::Open(block) => at(block).and_then(|x| packet(Opcode::Open, 0, 0, x, 0)),
             Op::LoopDone(leaves) => packet(Opcode::LoopDone, 0, 0, leaves, 0),
-            Op::Accumulate(index) => at(index).and_then(|x| packet(Opcode::Accumulate, 0, 0, x, 0)),
             Op::Return { reg, pc } => packet(Opcode::Return, 0, reg, pc, 0),
             Op::Field { dst, field, miss } => {
                 at(field).and_then(|x| packet(Opcode::Field, 0, dst, x, miss))

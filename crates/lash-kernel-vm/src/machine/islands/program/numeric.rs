@@ -180,7 +180,7 @@ fn fixed(op: Op, exe: &Executable) -> Op {
     };
     let destination = match &to {
         Destination::Register => true,
-        Destination::Write(write) => !write.accumulates && !exe.lib(site.lib).kernels(exe).append,
+        Destination::Write(write) => write.text.is_none() && !exe.lib(site.lib).kernels(exe).append,
     };
     if !eligible(&site, exe)
         || !destination

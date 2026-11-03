@@ -149,7 +149,8 @@ impl KernelMachine {
             return Ok(None);
         };
         let gate = self.gate(task, host.observes_sites())?;
-        let suffix = Some(super::ActionSuffix {
+        let suffix = Some(super::SourceSuffix {
+            inputs: None,
             stmt: running.id,
             source_pc: pc as u32,
             after,

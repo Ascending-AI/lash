@@ -170,7 +170,7 @@ impl Position {
 #[derive(Default)]
 pub(super) struct Window {
     control: Vec<Position>,
-    texts: Vec<(usize, ArenaHandle)>,
+    texts: Vec<crate::compile::room::publication::text::TextOwnership>,
 }
 
 pub(super) struct Frame<'e> {
@@ -185,7 +185,7 @@ pub(super) struct Frame<'e> {
     control: Vec<Position>,
     /// Each accumulator slot whose long text its own statement made in its
     /// loop's running activation, which nothing else holds (FIG-6795).
-    texts: Vec<(usize, ArenaHandle)>,
+    texts: Vec<crate::compile::room::publication::text::TextOwnership>,
     statement: Option<StmtId>,
     continuation: Option<CallContinuation<'e>>,
     returned: Option<ReturnOperand>,
@@ -774,21 +774,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         self.transient = self
             .transient
             .saturating_sub(std::mem::take(&mut frame.state.transient));
-    }
-
-    /// A statement that stops after its accumulator's concatenation took
-    /// its operand's storage gives the storage back, so its source owner
-    /// runs it over the text it read.
-    pub(super) fn give_back(&mut self) {
-        if let Some(crate::compile::Accumulator {
-            left,
-            made: Some(made),
-            ..
-        }) = self.accumulator.take()
-            && let Some(len) = made.moved
-        {
-            self.arena.unextend_text(left, made.text, len);
-        }
     }
 
     fn activate(&mut self, frame: &mut Values<'_, 'e>) {

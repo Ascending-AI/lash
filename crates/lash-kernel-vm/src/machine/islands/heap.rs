@@ -79,7 +79,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             declined: false,
             body_paths: false,
             held: None,
-            accumulator: self.accumulator.take(),
             keyed: None,
             absent: self.scratch.absent.take(),
         };
@@ -89,7 +88,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             cx.args.is_empty(),
             "a native exit must release its scratch operands"
         );
-        self.accumulator = cx.accumulator.take();
         self.scratch.absent = cx.absent.take();
         let events = if self.tape.is_some() {
             let mut events = Vec::new();

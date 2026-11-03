@@ -870,6 +870,7 @@ impl KernelMachine {
         }
         frame.invocation = activation.invocation.id();
         frame.source_frontier = activation.frontier;
+        frame.texts = level.texts;
         if let Some(mut frame) = new {
             frame.logical = Some(super::super::logical_held::FrameRoots::restore(
                 self.logical.clone(),
@@ -975,6 +976,78 @@ impl KernelMachine {
         }
     }
 
+    /// Evaluated native operands re-enter the same source suffix as a delivered
+    /// action. The canonical text/write descriptor still decides acceptance.
+    pub(in crate::machine) fn register_native_suffix(
+        &mut self,
+        host: &mut dyn Host,
+        running: &Running<'_>,
+        pc: usize,
+    ) -> Eval<Option<super::super::stream::Ran>> {
+        #[cfg(any(test, feature = "testing"))]
+        if self.islands.source_only {
+            return Ok(None);
+        }
+        let task = running.task;
+        let Some(plan) = running.exe.island_of(self.frame(task)?.code) else {
+            return Ok(None);
+        };
+        let Some(compiled) = running
+            .exe
+            .island_plan(plan)
+            .and_then(|program| self.islands.compiled(program, running.exe))
+        else {
+            return Ok(None);
+        };
+        let Some(after) = compiled.native_suffix(pc) else {
+            return Ok(None);
+        };
+        let Some(
+            lash_kernel_exec::Op::Operator { args, .. } | lash_kernel_exec::Op::Call { args, .. },
+        ) = running.stream.ops.get(pc).copied()
+        else {
+            return Ok(None);
+        };
+        let Some(Some(site)) = running.stream.source_sites.get(pc) else {
+            return Ok(None);
+        };
+        // A declined prefix already stands at this exact native. It must run
+        // source once rather than recursively retrying its own materialization.
+        if self
+            .frame(task)?
+            .source_frontier
+            .as_ref()
+            .is_some_and(|frontier| frontier.position().at.site == **site)
+        {
+            return Ok(None);
+        }
+        let mut gate = self.gate(task, host.observes_sites())?;
+        if gate.projecting || gate.observed || self.arena.borrow_mut().boundary_due() {
+            return Ok(None);
+        }
+        if self
+            .regs
+            .prepare_source_inputs(running.stream, pc as u32)?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        gate.open = true;
+        let suffix = Some(super::SourceSuffix {
+            inputs: Some(args),
+            stmt: running.id,
+            source_pc: pc as u32,
+            after,
+            defer: false,
+        });
+        let completion =
+            self.resume_projecting::<false>(gate, task, host, running.exe, plan, suffix)?;
+        Ok(completion.map(|completion| match completion {
+            super::super::Completion::Normal => super::super::stream::Ran::Step,
+            departure => super::super::stream::Ran::Depart(departure),
+        }))
+    }
+
     pub(super) fn resume_projecting<const OBSERVING: bool>(
         &mut self,
         mut gate: Gate,
@@ -982,7 +1055,7 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
         plan: u32,
-        suffix: Option<super::ActionSuffix>,
+        suffix: Option<super::SourceSuffix>,
     ) -> Eval<Option<super::super::Completion>> {
         let Some(program) = exe.island_plan(plan) else {
             return Ok(None);
@@ -1120,7 +1193,11 @@ impl KernelMachine {
                 suffix.source_pc,
                 &self.logical.ledger().borrow(),
             )?;
-            executor.action_suffix(&mut active, &suffix, &self.regs);
+            executor.source_suffix(&mut active, &suffix, &self.regs);
+            if let Some(inputs) = suffix.inputs {
+                self.regs
+                    .take_source_arguments(inputs.start.ix(), inputs.len as usize);
+            }
         }
         let ran = executor.execute(&mut active);
         if ran.is_ok() {
@@ -1369,7 +1446,6 @@ fn open<'a, const OBSERVING: bool>(
         swift: false,
         covered: false,
         scratch,
-        accumulator: None,
     }
 }
 

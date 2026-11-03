@@ -503,3 +503,206 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         Ok(ValuePublication::Published(value))
     }
 }
+
+impl<const OBSERVING: bool> Island<'_, OBSERVING> {
+    pub(in crate::machine::islands::execute) fn publish_text_write(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        site: &NativeSite,
+        write: &super::super::super::compiled::WriteSite,
+        arguments: &[Value],
+    ) -> Result<Option<bool>, HeapFault> {
+        let Some(plan) = &write.text else {
+            return Ok(None);
+        };
+        if OBSERVING
+            || self.projection().is_some()
+            || self.deferred_end.is_some()
+            || self.arena.boundary_due()
+        {
+            return Ok(Some(false));
+        }
+        let Some(statement_id) = frame.state.statement else {
+            return Ok(Some(false));
+        };
+        let callee = frame.state.callee;
+        if !plan.matches(self.exe, callee.plan.code, statement_id, site.pc, write.pc) {
+            return Ok(Some(false));
+        }
+        let (stream, _, _) = self.exe.statement(statement_id);
+        let Some(op) = stream.ops.get(site.pc as usize) else {
+            return Ok(Some(false));
+        };
+        if op.reads().len() != arguments.len()
+            || !op
+                .reads()
+                .iter()
+                .zip(arguments)
+                .all(|(reg, value)| frame.regs[reg.0 as usize].same(value))
+        {
+            return Ok(Some(false));
+        }
+        self.logical.flush(self.arena, self.heap)?;
+        let store = self.logical.ledger();
+        let activation = frame
+            .state
+            .source
+            .as_mut()
+            .ok_or_else(|| malformed("text write has no source activation"))?;
+        let occurrence = Occurrence {
+            task: self.task,
+            invocation: activation.invocation.id(),
+            loops: frame
+                .state
+                .control
+                .iter()
+                .filter_map(|control| match control {
+                    Position::Loop { id, started, .. } => {
+                        Some((self.exe.stmt(*id).site.clone(), started.saturating_sub(1)))
+                    }
+                    _ => None,
+                })
+                .collect(),
+            action: None,
+        };
+        let start = plan.start(occurrence);
+        if let Some(receipt) = activation.original.as_ref() {
+            let Some(frontier) = activation.frontier.as_mut() else {
+                return Ok(Some(false));
+            };
+            if !receipt.enter_event(
+                frontier,
+                &mut store.borrow_mut(),
+                start.clone(),
+                self.charged,
+            )? {
+                return Ok(Some(false));
+            }
+        } else if let Some(frontier) = activation.frontier.as_mut()
+            && frontier.departs(&start)
+        {
+            frontier.handoff(&mut store.borrow_mut(), start.clone())?;
+        }
+        if activation.frontier.is_none() {
+            let document = self
+                .exe
+                .instances
+                .get(&callee.link)
+                .ok_or_else(|| malformed("text write has no document"))?;
+            let kernel = doc::KernelVersion::of(document.kernel())
+                .ok_or_else(|| malformed("text write has an unsupported kernel"))?;
+            activation.frontier = Some(
+                self.exe
+                    .code(callee.plan.code)
+                    .source_room
+                    .frontier(
+                        &store.borrow(),
+                        self.heap,
+                        &activation.invocation,
+                        callee.link,
+                        kernel,
+                        start,
+                    )
+                    .map_err(|_| malformed("text write frontier failed authentication"))?,
+            );
+        }
+        let frontier = activation
+            .frontier
+            .as_mut()
+            .ok_or_else(|| malformed("text write frontier disappeared"))?;
+        let placement = callee
+            .compiled
+            .placement
+            .as_ref()
+            .ok_or_else(|| malformed("text write placement disappeared"))?;
+        let mut ledger = store.borrow_mut();
+        let Some(dense) = placement.capture(
+            callee.plan.code,
+            &activation.invocation,
+            &ledger,
+            self.heap,
+            frame.slots,
+        )?
+        else {
+            return Ok(Some(false));
+        };
+        let prior = frame
+            .state
+            .texts
+            .iter()
+            .find(|token| token.physical() == write.at);
+        let Some(prepared) = plan.prepare(
+            self.exe,
+            self.arena,
+            &ledger,
+            self.heap,
+            frontier,
+            &activation.invocation,
+            &dense,
+            arguments,
+            prior,
+            activation.original.as_ref(),
+            self.charged,
+        )?
+        else {
+            return Ok(Some(false));
+        };
+        let safe_point = self.charged;
+        let resources = SourceResources {
+            charged: &mut self.charged,
+            counters: self.counters,
+            bound: self.bound,
+            slice: self.slice_end,
+            depth: (self.base + u64::from(self.depth)).saturating_sub(1),
+            limit: self.call_depth,
+            safe_point,
+        };
+        let Some(done) = prepared.publish(
+            frontier,
+            &mut ledger,
+            self.heap,
+            &mut activation.original,
+            resources,
+            self.memory_bound,
+            self.recorder,
+        )?
+        else {
+            return Ok(Some(false));
+        };
+        frame.slots[write.at] = SlotState::Value(done.value);
+        frame.regs[site.reg as usize] = done.value;
+        frame
+            .state
+            .texts
+            .retain(|token| token.physical() != write.at);
+        if let Some(token) = done.ownership {
+            frame.state.texts.push(token);
+        }
+        self.logical_memory.set(done.balance.total()?);
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::execution::accumulated(
+            &self.scratch.census,
+            self.scratch.counting,
+            done.moved,
+        );
+        #[cfg(not(any(test, feature = "perf-witness")))]
+        let _ = done.moved;
+        #[cfg(test)]
+        {
+            super::super::super::ACCUMULATED.with(|n| n.set(n.get() + 1));
+            TEXTS.with(|counts| {
+                let mut n = counts.get();
+                n[0] += 1;
+                counts.set(n);
+            });
+        }
+        if self.exe.lib(site.lib).kernels(self.exe).text_body.is_some() {
+            #[cfg(test)]
+            BODY_TEXTS.with(|counts| counts.set(counts.get() + 1));
+            #[cfg(test)]
+            super::super::super::TEXT_APPENDED.with(|n| n.set(n.get() + 1));
+        }
+        witnessed!(TextAppend, Commit);
+        Ok(Some(true))
+    }
+}

@@ -1,5 +1,7 @@
 //! A forwarding text body uses source lifetime algebra and the installed native.
 use super::*;
+#[path = "../publication/text/body.rs"]
+mod prepared;
 use crate::compile::{self, CodeId, Executable, LibId, LibRun};
 
 pub(crate) struct TextBody {

@@ -111,6 +111,7 @@ pub(crate) struct StatementEntry {
 
 #[derive(Clone)]
 pub(crate) struct WriteSite {
+    pub(crate) text: Option<std::sync::Arc<crate::compile::room::publication::text::TextWrite>>,
     pub(crate) begin: Option<StatementEntry>,
     pub(crate) reads: Option<Box<[Read]>>,
     pub(crate) at: usize,
@@ -123,8 +124,6 @@ pub(crate) struct WriteSite {
     pub(crate) charges: Option<std::sync::Arc<crate::compile::room::charges::ChargeProgram>>,
     pub(in crate::machine::islands) covered: bool,
     pub(in crate::machine::islands) leaves: u32,
-    /// A linear text accumulator's write (FIG-6795).
-    pub(in crate::machine::islands) accumulates: bool,
 }
 
 pub(super) struct Build<'e> {
@@ -441,6 +440,7 @@ impl<'e> Build<'e> {
             let covered = close.is_some_and(|close| self.cover(u64::from(close.total)));
             self.emit(Op::Write {
                 site: Box::new(WriteSite {
+                    text: None,
                     begin: Some(StatementEntry {
                         id: statement.id,
                         index,
@@ -456,7 +456,6 @@ impl<'e> Build<'e> {
                     charges: self.write_charges(statement.id, *pc, *close),
                     covered,
                     leaves: statement.leaves,
-                    accumulates: false,
                 }),
             });
             self.open = None;
@@ -705,22 +704,19 @@ impl<'e> Build<'e> {
                 reg,
                 at,
                 bind,
-                accumulates,
+                ..
             } => {
-                // A write that may stop after its concatenation took its
-                // operand's storage would leave the slot a text with none.
-                let accumulates =
-                    *accumulates && !*bind && close.is_none() && !self.shared[*at as usize];
-                if accumulates {
-                    self.emit(Op::Accumulate(*at as usize));
-                    if let Some(texts) = self.texts.last_mut() {
-                        texts.push(*at as usize);
-                    }
-                }
                 self.expr(value)?;
+                let text = self.text_write(value.pc, *pc, *at as usize, *close);
+                if text.is_some()
+                    && let Some(texts) = self.texts.last_mut()
+                {
+                    texts.push(*at as usize);
+                }
                 let covered = close.is_some_and(|close| self.cover(u64::from(close.total)));
                 self.emit(Op::Write {
                     site: Box::new(WriteSite {
+                        text,
                         begin: None,
                         reads: None,
                         at: *at as usize,
@@ -732,7 +728,6 @@ impl<'e> Build<'e> {
                         charges: self.write_charges(statement.id, *pc, *close),
                         covered,
                         leaves: statement.leaves,
-                        accumulates,
                     }),
                 });
                 self.fuse_accumulation();

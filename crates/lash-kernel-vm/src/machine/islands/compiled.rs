@@ -131,6 +131,7 @@ pub(crate) struct Compiled {
     pub(super) registers: usize,
     headers: Box<[(u32, usize)]>,
     actions: Box<[(u32, usize)]>,
+    native_suffixes: Box<[(u32, usize)]>,
     pub(super) cell_parameters: usize,
     pub(super) cleanups: bool,
     cleanup: Box<[Cleanup]>,
@@ -292,6 +293,7 @@ impl OperatorSite {
 }
 
 /// A compiled general native call.
+#[derive(Clone)]
 pub(crate) struct NativeSite {
     pub(super) lib: LibId,
     pub(super) close: Option<Close>,
@@ -548,7 +550,8 @@ impl Compiled {
         } else {
             None
         };
-        let code = super::code::Code::lower(&mut cx.ops, &mut cx.blocks)?;
+        let mut code = super::code::Code::lower(&mut cx.ops, &mut cx.blocks)?;
+        let native_suffixes = code.text_suffixes(stream)?;
         code.verify(stream).ok()?;
         code.verify_families(plan, exe).ok()?;
         if (cx.registers + code.sites.try_.len()) as u64 * super::SLOT_BYTES > super::ISLAND_HOLD {
@@ -616,6 +619,7 @@ impl Compiled {
             registers: cx.registers,
             headers: headers.into(),
             actions: actions.into(),
+            native_suffixes: native_suffixes.into(),
             cell_parameters: plan
                 .params
                 .iter()
@@ -660,6 +664,14 @@ impl Compiled {
             .binary_search_by_key(&pc, |(pc, _)| *pc)
             .ok()
             .map(|at| self.actions[at].1)
+    }
+
+    pub(super) fn native_suffix(&self, source: usize) -> Option<usize> {
+        let pc = u32::try_from(source).ok()?;
+        self.native_suffixes
+            .binary_search_by_key(&pc, |(pc, _)| *pc)
+            .ok()
+            .map(|at| self.native_suffixes[at].1)
     }
 
     pub(super) fn pending_slots(&self) -> usize {

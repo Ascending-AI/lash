@@ -212,7 +212,14 @@ fn accumulations_agree() {
     let reference = run(true, u64::MAX, super::super::embedder::ROOMY);
     crate::machine::islands::TEXT_APPENDED.with(|n| n.set(0));
     crate::machine::islands::take_body_text_publications();
+    crate::compile::room::publication::text::take_transfers();
     let natural = run(false, u64::MAX, super::super::embedder::ROOMY);
+    let transfers = crate::compile::room::publication::text::take_transfers();
+    assert!(
+        transfers > 0,
+        "the native/write certificate must transfer actual private buffers"
+    );
+    println!("accepted native/write buffer transfers: {transfers}");
     assert!(
         crate::machine::islands::take_body_text_publications() > 0,
         "the forwarding helper must publish its real compiled body under text acceptance"

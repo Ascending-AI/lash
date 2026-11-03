@@ -134,6 +134,23 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             reg: site.append.reg,
             depth: site.append.depth,
         };
+        match self
+            .publish_text_write(frame, &native, &site.write, &args)
+            .map_err(|error| self.halt(error.into()))?
+        {
+            Some(true) => {
+                witnessed!(FormatAppend, Commit);
+                return self.finish_statement(frame, site.write.leaves, None);
+            }
+            Some(false) => {
+                // Keep the evaluated join and any genuine original receipt for
+                // the exact append. The old buffer is still fully readable.
+                self.spill(frame, &site.appending);
+                self.scratch.exit.mapped = true;
+                return Err(self.at_operands(site.append.pc, site.append.reg, &args));
+            }
+            None => {}
+        }
         let answer = match self
             .publish_text_value(frame, &native, &args, false)
             .map_err(|error| self.halt(error.into()))?

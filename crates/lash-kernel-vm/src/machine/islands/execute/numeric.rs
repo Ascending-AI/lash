@@ -124,6 +124,26 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 reg: site.reg,
                 depth: site.depth,
             };
+            if let Destination::Write(write) = to {
+                match self
+                    .publish_text_write(frame, &native, write, args)
+                    .map_err(|error| self.halt(error.into()))?
+                {
+                    Some(true) => {
+                        return self.finish_statement(frame, write.leaves, None).map(Some);
+                    }
+                    Some(false) => {
+                        if !original
+                            && let Some(close) = &site.close
+                            && !self.close(close)
+                        {
+                            return Err(self.at_operands(close.head, site.reg, args));
+                        }
+                        return Err(self.at_operands(site.pc, site.reg, args));
+                    }
+                    None => {}
+                }
+            }
             match self
                 .publish_text_value(frame, &native, args, false)
                 .map_err(|error| self.halt(error.into()))?
