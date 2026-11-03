@@ -925,3 +925,7 @@ pub(crate) struct KindTest {
     pub(super) literal: Value,
     pub(super) memo: crate::compile::kind_test::KindMemo,
 }
+
+#[cfg(test)]
+#[path = "compiled/repeat_laws.rs"]
+pub(crate) mod repeat_laws;

@@ -22,6 +22,7 @@ macro_rules! stop {
 
 pub(super) struct Window {
     pub(super) iteration_max: Option<u64>,
+    pub(super) occurrences: u64,
 }
 
 /// The induction and accumulator stay in their native Rust domain. Value
@@ -324,6 +325,9 @@ impl Repeat {
         let (mut saved_before, mut saved_after) = (None, None);
         let mut iterations = 0u64;
         loop {
+            if iterations == window.occurrences {
+                stop!(Prefix);
+            }
             let mut inputs = Inputs {
                 counter,
                 previous: counter,
@@ -520,6 +524,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Ok(0);
         };
+        let Some(Position::Loop { started, .. }) = frame.state.control.last() else {
+            return Err(self.halt(fault("a repeated header left its loop")));
+        };
+        // Limit the batch before staging any work. The next source test
+        // remains unpaid, including when no loop occurrence is available.
+        let occurrences = u64::MAX - *started;
         let safe_point = self.charged;
         let header = cost.saturating_add(metered);
         // The ordinary header following the admitted prefix remains unpaid.
@@ -542,6 +552,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             frame,
             Window {
                 iteration_max: site.iteration_max,
+                occurrences,
             },
             &ledger,
             self.arena,

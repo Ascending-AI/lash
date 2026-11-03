@@ -4,6 +4,7 @@ use crate::machine::islands::witness::Counts;
 
 pub(super) fn runtime(collect: &impl Fn(Counts)) {
     native::runtime();
+    occurrences::runtime();
     // K-EVAL-008 / K-EFF-008: actual helper bodies keep their logical
     // invocations and action occurrences inside one loop publication.
     let helper = super::super::embedder::fragment(
@@ -133,3 +134,6 @@ pub(super) fn runtime(collect: &impl Fn(Counts)) {
 
 #[path = "repeated_calls/native.rs"]
 mod native;
+
+#[path = "repeated_calls/occurrences.rs"]
+mod occurrences;

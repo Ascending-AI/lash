@@ -165,7 +165,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 if repeated != 0
                     && let Some(Position::Loop { started, .. }) = frame.state.control.last_mut()
                 {
-                    *started += repeated;
+                    *started = started
+                        .checked_add(repeated)
+                        .ok_or_else(|| self.halt(fault("loop occurrence overflow")))?;
                 }
                 self.covered = false;
                 if let Some((at, next_cursor, value)) = next {
@@ -178,7 +180,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     *cursor = Some(next_cursor);
                     match value {
                         Some(value) => {
-                            *started += 1;
+                            *started = started
+                                .checked_add(1)
+                                .ok_or_else(|| self.halt(fault("loop occurrence overflow")))?;
                             frame.slots[at] = if frame.state.callee.plan.shared[at] {
                                 SlotState::Cell(self.arena.new_cell(value))
                             } else {
@@ -204,7 +208,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         else {
                             return Err(self.halt(fault("a while test left its loop")));
                         };
-                        *started += 1;
+                        *started = started
+                            .checked_add(1)
+                            .ok_or_else(|| self.halt(fault("loop occurrence overflow")))?;
                     }
                     Value::Bool(false) => frame.state.pc = *otherwise,
                     _ => return Err(self.at(*pc)),
