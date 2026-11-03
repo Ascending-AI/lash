@@ -99,8 +99,7 @@ fn run(source: &str, record: bool, slice: u64, bounds: Bounds, layout: Layout) -
         slice,
         bounds,
         layout,
-        super::ExecutionMode::Specialized,
-        false,
+        (super::ExecutionMode::Specialized, false),
         false,
     )
 }
@@ -111,8 +110,7 @@ fn run_selected(
     slice: u64,
     bounds: Bounds,
     layout: Layout,
-    mode: super::ExecutionMode,
-    cold: bool,
+    (mode, cold): (super::ExecutionMode, bool),
     native: bool,
 ) -> Observation {
     let mut embedder = Embedder::with(
@@ -255,8 +253,7 @@ fn accumulations_agree() {
             slice,
             super::super::embedder::ROOMY,
             Layout(0),
-            super::ExecutionMode::Source,
-            cold,
+            (super::ExecutionMode::Source, cold),
             false,
         );
         for mode in [
@@ -269,8 +266,7 @@ fn accumulations_agree() {
                 slice,
                 super::super::embedder::ROOMY,
                 Layout(0),
-                mode,
-                cold,
+                (mode, cold),
                 false,
             );
             assert_eq!(
@@ -321,8 +317,7 @@ fn accumulations_agree() {
             slice,
             super::super::embedder::ROOMY,
             Layout(0),
-            super::ExecutionMode::Source,
-            cold,
+            (super::ExecutionMode::Source, cold),
             false,
         );
         for mode in [
@@ -336,8 +331,7 @@ fn accumulations_agree() {
                     slice,
                     super::super::embedder::ROOMY,
                     Layout(0),
-                    mode,
-                    cold,
+                    (mode, cold),
                     false,
                 ),
                 expected,
@@ -369,8 +363,7 @@ fn accumulations_agree() {
             slice,
             super::super::embedder::ROOMY,
             Layout(0),
-            super::ExecutionMode::Source,
-            cold,
+            (super::ExecutionMode::Source, cold),
             true,
         );
         for mode in [
@@ -383,8 +376,7 @@ fn accumulations_agree() {
                 slice,
                 super::super::embedder::ROOMY,
                 Layout(0),
-                mode,
-                cold,
+                (mode, cold),
                 true,
             );
             assert_eq!(
@@ -458,7 +450,7 @@ fn prepared_text_prefixes() {
     for surviving in [0, 2, 3] {
         let result = Cx::prepare_text_prefix(
             &mut arena,
-            &mut ledger,
+            &ledger,
             &heap,
             &[left, right],
             &[left_handle],
@@ -513,7 +505,7 @@ fn prepared_text_prefixes() {
     assert!(
         Cx::prepare_text_prefix(
             &mut arena,
-            &mut ledger,
+            &ledger,
             &heap,
             &[short, right],
             &[],
@@ -541,7 +533,7 @@ fn prepared_text_prefixes() {
     let held = arena.held();
     let result = Cx::prepare_text_prefix(
         &mut arena,
-        &mut ledger,
+        &ledger,
         &heap,
         &[left, parts, empty, right],
         &[left_handle],
@@ -573,7 +565,7 @@ fn prepared_text_prefixes() {
     // Ok without invoking the accepted publication also consumes no storage.
     let failed = Cx::prepare_text_prefix(
         &mut arena,
-        &mut ledger,
+        &ledger,
         &heap,
         &[left, right],
         &[left_handle],
@@ -591,7 +583,7 @@ fn prepared_text_prefixes() {
     assert_eq!(read(&arena, left), original);
     let result = Cx::prepare_text_prefix(
         &mut arena,
-        &mut ledger,
+        &ledger,
         &heap,
         &[left, right],
         &[left_handle],
@@ -621,7 +613,7 @@ fn prepared_text_prefixes() {
     // Shared/self operands copy; moving them would corrupt the old alias.
     let result = Cx::prepare_text_prefix(
         &mut arena,
-        &mut ledger,
+        &ledger,
         &heap,
         &[left],
         &[],
@@ -651,7 +643,7 @@ fn prepared_text_prefixes() {
     let current = result.1[0];
     let result = Cx::prepare_text_prefix(
         &mut arena,
-        &mut ledger,
+        &ledger,
         &heap,
         &[current, right],
         &[current.handle().unwrap()],
@@ -694,7 +686,7 @@ fn prepared_text_prefixes() {
     let reopened = cold_arena.text(&final_text);
     let cold_result = Cx::prepare_text_prefix(
         &mut cold_arena,
-        &mut ledger,
+        &ledger,
         &cold_heap,
         &[reopened, right],
         &[reopened.handle().unwrap()],

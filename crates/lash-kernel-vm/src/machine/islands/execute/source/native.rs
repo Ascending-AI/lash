@@ -51,6 +51,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let native = NativeSite {
             lib: site.lib,
             close: site.close,
+            charges: site.charges.clone(),
             pc: site.pc,
             reg: site.reg,
             depth: site.depth,
@@ -92,7 +93,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(statement) = frame.state.statement else {
             return Ok(ValuePublication::Unavailable);
         };
-        let statement_id = statement;
         let (stream, statement, _) = self.exe.statement(statement);
         let Some(at) = stream
             .source_sites
@@ -102,13 +102,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(ValuePublication::Unavailable);
         };
         let source = &self.exe.code(frame.state.callee.plan.code).source_room;
-        let Ok(charges) = room::charges::ChargeProgram::native_packet(
-            self.exe,
-            frame.state.callee.plan.code,
-            statement_id,
-            site.pc,
-            self.accounting.then_some(site.close).flatten(),
-        ) else {
+        let Some(charges) = site.charges.as_deref() else {
             return Ok(ValuePublication::Unavailable);
         };
         let Ok(unpaid) = source.next_after_commit(at) else {
@@ -381,7 +375,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             prefix,
             native_storage::SourceNative {
                 recipe,
-                charges: &charges,
+                charges,
                 inputs,
                 operands,
             },

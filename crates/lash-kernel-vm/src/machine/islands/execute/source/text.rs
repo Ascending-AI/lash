@@ -113,13 +113,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Ok(ValuePublication::Unavailable);
         };
-        let Ok(charges) = room::charges::ChargeProgram::native_packet(
-            self.exe,
-            callee.plan.code,
-            statement_id,
-            site.pc,
-            self.accounting.then_some(site.close).flatten(),
-        ) else {
+        let Some(charges) = site.charges.as_deref() else {
             return Ok(ValuePublication::Unavailable);
         };
         let Some(activation) = frame.state.source.as_mut() else {
@@ -267,12 +261,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let arena = storage.arena();
         let debt = charges.bind_measured(
             &[room::charges::FormulaValues {
-                arguments,
+                arguments: &evaluated.arguments,
                 result: value,
             }],
             |_, input, measure| {
                 let value = match input {
-                    crate::compile::Source::Arg(at) => arguments.get(at),
+                    crate::compile::Source::Arg(at) => evaluated.arguments.get(at),
                     crate::compile::Source::Result => Some(&value),
                     crate::compile::Source::Nothing => None,
                 };

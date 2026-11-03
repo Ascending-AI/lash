@@ -353,6 +353,22 @@ impl<'e> Build<'e> {
         .map(std::sync::Arc::new)
     }
 
+    fn native_charges(
+        &self,
+        pc: u32,
+        close: Option<Close>,
+    ) -> Option<std::sync::Arc<crate::compile::room::charges::ChargeProgram>> {
+        crate::compile::room::charges::ChargeProgram::native_packet(
+            self.exe,
+            self.placement.as_ref()?.code(),
+            self.statement?,
+            pc,
+            self.charged.then_some(close).flatten(),
+        )
+        .ok()
+        .map(std::sync::Arc::new)
+    }
+
     fn statement(&mut self, statement: &Statement, index: usize) -> Option<()> {
         self.statement = Some(statement.id);
         self.captures.clear();
@@ -1053,6 +1069,7 @@ impl<'e> Build<'e> {
                 }
                 let direct = (closes.len() <= 1).then(|| self.reads(args)).flatten();
                 if let Some(reads) = direct {
+                    site.charges = self.native_charges(pc, site.close);
                     let consumed: Vec<_> = reads.iter().map(Read::reg).collect();
                     let covered = site.pair(self.exe).is_some()
                         && reads.len() == 2
@@ -1072,6 +1089,7 @@ impl<'e> Build<'e> {
                 let args = self.args(args)?;
                 site.close = self.ordered_closes(closes, reg);
                 site.fixed = site.close.map_or(0, |close| u64::from(close.total));
+                site.charges = self.native_charges(pc, site.close);
                 let covered = site.pair(self.exe).is_some()
                     && args.len() == 2
                     && self.cover(site.fixed.saturating_add(site.table(self.exe).max()));
@@ -1097,6 +1115,7 @@ impl<'e> Build<'e> {
                 let mut site = NativeSite {
                     lib: *lib,
                     close: closes.first().copied(),
+                    charges: None,
                     pc,
                     reg,
                     depth: if extra > 0 {
@@ -1109,6 +1128,7 @@ impl<'e> Build<'e> {
                 if closes.len() <= 1
                     && let Some(reads) = self.reads(args)
                 {
+                    site.charges = self.native_charges(pc, site.close);
                     let consumed: Vec<_> = reads.iter().map(Read::reg).collect();
                     self.open = None;
                     self.emit(Op::Native {
@@ -1120,6 +1140,7 @@ impl<'e> Build<'e> {
                 }
                 let args = self.args(args)?;
                 site.close = self.ordered_closes(closes, reg);
+                site.charges = self.native_charges(pc, site.close);
                 self.open = None;
                 self.emit(Op::Native {
                     site,

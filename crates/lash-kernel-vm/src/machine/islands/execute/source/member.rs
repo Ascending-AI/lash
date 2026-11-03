@@ -76,7 +76,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 member: Member::Variable,
                 next: Some(value),
             },
-            self.accounting.then_some(site.close).flatten(),
+            site.charges.as_deref(),
         )
         .map(Some)
     }
@@ -87,7 +87,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         pc: u32,
         operands: &[(u32, Value)],
         edit: MemberEdit,
-        close: Option<crate::compile::expr::Close>,
+        charges: Option<&room::charges::ChargeProgram>,
     ) -> Result<bool, HeapFault> {
         let MemberEdit { handle, .. } = edit;
         // Keep the existing physical eligibility guard until its replacement
@@ -100,20 +100,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         };
         // Store packets follow their canonical Pay packets. Cell writes keep
         // their own close and submit that unpaid debt with the boundary.
-        let charges = if matches!(edit.member, Member::Variable) {
-            let Ok(charges) = room::charges::ChargeProgram::event_packet(
-                self.exe,
-                frame.state.callee.plan.code,
-                statement,
-                pc,
-                close,
-            ) else {
-                return Ok(false);
-            };
-            Some(charges)
-        } else {
-            None
-        };
+        if matches!(edit.member, Member::Variable) && charges.is_none() {
+            return Ok(false);
+        }
         let (stream, statement, _) = self.exe.statement(statement);
         let Some(roles) = statement.source_roles_at(stream, pc) else {
             return Ok(false);
@@ -263,7 +252,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             occurrences: vec![],
             before: 0,
             units: 0,
-            close,
+            close: None,
             strict: false,
             depth: 0,
             safe_point: self.charged,
@@ -280,7 +269,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 allowance,
             },
             crate::machine::source_publication::SourceMember {
-                charges: charges.as_ref(),
+                charges,
                 edit: edit.clone(),
                 inputs,
                 operands: values,

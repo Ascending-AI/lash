@@ -180,6 +180,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             let native = NativeSite {
                 lib: site.lib,
                 close: site.close,
+                charges: site.charges.clone(),
                 pc: site.pc,
                 reg: site.reg,
                 depth: site.depth,

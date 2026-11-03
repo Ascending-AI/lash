@@ -1161,6 +1161,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             let native = NativeSite {
                 lib: site.lib,
                 close: None,
+                charges: None,
                 pc: site.miss,
                 reg: site.reg,
                 depth: Depth::None,

@@ -212,6 +212,8 @@ pub(crate) struct OperatorSite {
     pub(crate) checked: bool,
     pub(crate) lib: LibId,
     pub(super) close: Option<Close>,
+    /// The canonical source close and formula, compiled with this packet.
+    pub(super) charges: Option<std::sync::Arc<crate::compile::room::charges::ChargeProgram>>,
     /// What its close charges.
     pub(super) fixed: u64,
     pub(super) pc: u32,
@@ -282,6 +284,7 @@ pub(crate) struct HeapSite {
 pub(crate) struct NativeSite {
     pub(super) lib: LibId,
     pub(super) close: Option<Close>,
+    pub(super) charges: Option<std::sync::Arc<crate::compile::room::charges::ChargeProgram>>,
     pub(super) pc: u32,
     pub(super) reg: u32,
     /// The depth its prepared entry's template checks.
@@ -850,6 +853,7 @@ pub(super) fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSit
         checked: invoke.is_some_and(|invoke| invoke.checked),
         lib: *lib,
         close,
+        charges: None,
         fixed: close.map_or(0, |close| u64::from(close.total)),
         pc,
         reg,
