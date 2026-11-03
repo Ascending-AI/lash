@@ -53,7 +53,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     small = [x, y];
                     &small
                 }
-                [first, second, third] if inputs.member().is_none() => {
+                [first, second, third] => {
                     let x = self
                         .operand(frame, first)
                         .inspect_err(|_| self.call_prefix(site, callee))?;
@@ -70,19 +70,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     &triple
                 }
                 args => {
-                    if let Some(property) = inputs.member()
-                        && let [target, key, value] = args
-                        && let Some(values) = self.pure_call_values(frame, [target, key, value])
-                        && let Some(answer) =
-                            self.member_write(frame.state.statement, property, site.close, &values)
-                    {
-                        answer?;
-                        frame.regs[site.reg as usize] = values[2];
-                        if site.after != 0 {
-                            self.admit(site.after);
-                        }
-                        return Ok(Next::Continue);
-                    }
                     wide = [Value::Absent; MAX_ARGS];
                     for (index, arg) in args.iter().enumerate() {
                         wide[index] = self.operand(frame, arg).inspect_err(|_| {

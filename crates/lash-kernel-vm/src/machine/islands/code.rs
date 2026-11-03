@@ -44,9 +44,6 @@ macro_rules! check_field {
     ($record:ident, $stream:ident, write) => {
         $record.write.verify($stream)?;
     };
-    ($record:ident, $stream:ident, resident) => {
-        $record.resident.verify($stream)?;
-    };
     ($record:ident, $stream:ident, held) => {
         $record.held.verify($stream)?;
     };
@@ -62,12 +59,6 @@ macro_rules! check_tuple {
             .map_err(crate::compile::islands::Refused::Room)?;
     };
     (Format, $record:ident, $stream:ident) => {
-        $record.value.verify($stream)?;
-    };
-    (Update, $record:ident, $stream:ident) => {
-        $record.value.verify($stream)?;
-    };
-    (Access, $record:ident, $stream:ident) => {
         $record.value.verify($stream)?;
     };
     ($other:ident, $record:ident, $stream:ident) => {
@@ -126,7 +117,6 @@ macro_rules! operations {
             pub(in crate::machine::islands) struct Heap {
                 pub(in crate::machine::islands) site: HeapSite,
                 pub(in crate::machine::islands) args: Box<[u32]>,
-                pub(in crate::machine::islands) resident: Option<HeapKernel>,
             }
             $( $( pub(in crate::machine::islands) struct $name {
                 $( pub(in crate::machine::islands) $field: $ty, )*
@@ -242,8 +232,6 @@ operations! {
         Heap {
             site: HeapSite,
             args: Box<[u32]>,
-            resident: Option<HeapKernel>,
-            inputs: HeapInputs,
         }
         Native {
             site: NativeSite,
@@ -455,8 +443,6 @@ operations! {
     tuples {
         Certified certified(Box<compiled::resource::CertifiedStatement>)
         Cold cold(Deferred)
-        Access access(Box<AccessSite>)
-        Update update(Box<compiled::Update>)
         Format format(Box<compiled::Format>)
     }
     units { EndLoop }
@@ -483,25 +469,6 @@ pub(crate) enum NativeInputs {
 pub(crate) enum KindInput {
     Register(u32),
     Source(Read),
-}
-
-pub(crate) enum HeapInputs {
-    Registers,
-    Read(Box<[Read; 2]>),
-    Write(Box<[Read; 3]>),
-}
-
-/// Source-certified resident selection at an ordinary heap call. Arguments,
-/// fallback, recovery and result installation belong to that single call.
-pub(crate) enum HeapKernel {
-    Read {
-        units: compiled::MemberAccess,
-        to: Destination,
-    },
-    Write {
-        property: Box<compiled::MemberWrite>,
-        finish: Option<u32>,
-    },
 }
 
 /// Cold source roles are independent of the physical packet operands.
@@ -625,33 +592,10 @@ impl Code {
                 });
                 (Opcode::Operator, x, None)
             }
-            Op::Heap {
-                site,
-                args,
-                resident,
-                inputs,
-            } => {
-                let reads = match inputs {
-                    HeapInputs::Registers => None,
-                    HeapInputs::Read(reads)
-                        if matches!(&resident, Some(HeapKernel::Read { .. })) =>
-                    {
-                        Some((*reads).into_iter().collect::<Box<[_]>>())
-                    }
-                    HeapInputs::Write(reads)
-                        if matches!(&resident, Some(HeapKernel::Write { .. })) =>
-                    {
-                        Some((*reads).into_iter().collect::<Box<[_]>>())
-                    }
-                    _ => return None,
-                };
+            Op::Heap { site, args } => {
                 let x = u32::try_from(self.sites.heap.len()).ok()?;
-                self.sites.heap.push(sites::Heap {
-                    site,
-                    args,
-                    resident,
-                });
-                (Opcode::Heap, x, reads)
+                self.sites.heap.push(sites::Heap { site, args });
+                (Opcode::Heap, x, None)
             }
             Op::Native { site, inputs } => {
                 let (args, reads) = match inputs {
@@ -709,9 +653,7 @@ impl Code {
                     Op::Local { .. } | Op::Session { .. } | Op::Field { .. } | Op::Index { .. } => {
                         Reason::ResidentRead
                     }
-                    Op::Operator { .. } | Op::Unit { .. } | Op::Kind { .. } | Op::Access(_) => {
-                        Reason::Operator
-                    }
+                    Op::Operator { .. } | Op::Unit { .. } | Op::Kind { .. } => Reason::Operator,
                     Op::Native { .. } | Op::Heap { .. } => Reason::Native,
                     Op::Call { .. } => Reason::Call,
                     Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => {
@@ -815,33 +757,6 @@ impl Code {
     pub(super) fn entry(&self, at: usize) -> Option<&StatementEntry> {
         let packet = self.packets[at];
         (packet.opcode == Opcode::Begin).then(|| &self.sites.begin[packet.x as usize])
-    }
-
-    pub(super) fn operator(&self, at: usize) -> &OperatorSite {
-        let packet = self.body(at);
-        let at = packet.x as usize;
-        match packet.opcode {
-            Opcode::Operator => &self.sites.operator[at].site,
-            _ => unreachable!("a verified scalar dependency names an operator site"),
-        }
-    }
-
-    pub(super) fn write(&self, at: usize) -> &WriteSite {
-        let packet = self.body(at);
-        assert!(
-            packet.opcode == Opcode::Write,
-            "a verified initializer names a source write"
-        );
-        &self.sites.write[packet.x as usize].site
-    }
-
-    pub(super) fn access(&self, at: usize) -> &AccessSite {
-        let packet = self.body(at);
-        assert!(
-            packet.opcode == Opcode::Access,
-            "a verified access dependency names its site"
-        );
-        &self.sites.access[packet.x as usize].value
     }
 
     pub(super) fn loop_exit(&self, at: usize) -> usize {

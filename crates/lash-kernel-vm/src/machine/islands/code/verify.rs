@@ -58,8 +58,7 @@ impl Closes for sites::Kind {
 
 impl Closes for sites::Heap {
     fn verify(&self, stream: &Stream) -> Result<(), Refused> {
-        self.site.verify(stream)?;
-        self.resident.verify(stream)
+        self.site.verify(stream)
     }
 }
 
@@ -67,14 +66,6 @@ impl Closes for compiled::Format {
     fn verify(&self, stream: &Stream) -> Result<(), Refused> {
         self.join.verify(stream)?;
         self.append.verify(stream)?;
-        self.write.verify(stream)
-    }
-}
-
-impl Closes for compiled::Update {
-    fn verify(&self, stream: &Stream) -> Result<(), Refused> {
-        self.read.verify(stream)?;
-        self.scalar.verify(stream)?;
         self.write.verify(stream)
     }
 }
@@ -92,21 +83,6 @@ impl Closes for Destination {
             Self::Register => Ok(()),
             Self::Write(site) => site.verify(stream),
         }
-    }
-}
-
-impl Closes for HeapKernel {
-    fn verify(&self, stream: &Stream) -> Result<(), Refused> {
-        match self {
-            Self::Read { to, .. } => to.verify(stream),
-            Self::Write { .. } => Ok(()),
-        }
-    }
-}
-
-impl Closes for AccessSite {
-    fn verify(&self, stream: &Stream) -> Result<(), Refused> {
-        self.kind.verify(stream)
     }
 }
 

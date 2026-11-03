@@ -87,18 +87,12 @@ impl Slab {
     pub(super) fn dispatched(&mut self, packet: Packet, code: &super::super::code::Code) {
         self.packets += 1;
         let specialized = match packet.opcode {
-            Opcode::Format
-            | Opcode::Update
-            | Opcode::Access
-            | Opcode::Collection
-            | Opcode::ReturnLiteral
-            | Opcode::Kind => true,
+            Opcode::Format | Opcode::Collection | Opcode::ReturnLiteral | Opcode::Kind => true,
             Opcode::Operator => {
                 let site = &code.sites.operator[packet.x as usize];
                 matches!(site.inputs, super::super::code::OperatorInputs::Scalar(_))
                     || matches!(site.to, Destination::Write(_))
             }
-            Opcode::Write => code.sites.write[packet.x as usize].site.access.is_some(),
             Opcode::Header => code.sites.header[packet.x as usize].repeat.is_some(),
             _ => false,
         };

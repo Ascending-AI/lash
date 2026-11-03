@@ -12,14 +12,10 @@ pub enum Family {
     SourceUnit,
     /// A fixed-arity scalar packet and its shared destination.
     Scalar,
-    /// A source-certified member guard, read and optional consumer.
-    GuardedRead,
     /// An owned append preserving the original text until acceptance.
     TextAppend,
     /// A fixed typed repeat graph.
     Repeated,
-    /// A member read, scalar consumer and local write.
-    ReadUpdate,
     /// Parts construction, join, append and local write.
     FormatAppend,
     /// A stable merge prefix or its post-callback placement.

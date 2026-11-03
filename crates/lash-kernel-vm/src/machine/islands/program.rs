@@ -2,24 +2,16 @@
 //! recursion survives compilation; live source registers accompany each exit.
 
 use super::*;
-use crate::machine::islands::code::{
-    HeapInputs, HeapKernel, KindInput, NativeInputs, OperatorInputs, ScalarInputs,
-};
+use crate::machine::islands::code::{KindInput, NativeInputs, OperatorInputs, ScalarInputs};
 
 #[path = "program/accumulation.rs"]
 mod accumulation;
-#[path = "program/update.rs"]
-mod update;
-pub(crate) use update::Update;
 #[path = "program/format.rs"]
 mod format;
 pub(crate) use format::Format;
 #[path = "program/numeric.rs"]
 mod numeric;
 pub(crate) use numeric::{CallInputs, Destination, Operand};
-#[path = "program/access.rs"]
-mod access;
-pub(crate) use access::{AccessShape, AccessSite};
 #[path = "program/guarded.rs"]
 mod guarded;
 #[path = "program/merge.rs"]
@@ -96,9 +88,6 @@ pub(crate) struct StoreInputs {
     pub(crate) roles: [usize; 3],
 }
 
-/// The most arms a guarded read enters.
-pub(crate) const GUARDED_ARMS: usize = 4;
-
 #[derive(Clone)]
 pub(crate) struct StatementEntry {
     pub(crate) id: StmtId,
@@ -110,7 +99,6 @@ pub(crate) struct StatementEntry {
 pub(crate) struct WriteSite {
     pub(crate) begin: Option<StatementEntry>,
     pub(crate) reads: Option<Box<[Read]>>,
-    pub(crate) access: Option<AccessStart>,
     pub(crate) at: usize,
     pub(crate) shared: bool,
     pub(crate) reg: u32,
@@ -123,14 +111,6 @@ pub(crate) struct WriteSite {
     pub(in crate::machine::islands) leaves: u32,
     /// A linear text accumulator's write (FIG-6795).
     pub(in crate::machine::islands) accumulates: bool,
-}
-
-/// A write may start the following member kernel. The source write remains
-/// its only fallback, and another initializer is an index into that stream.
-#[derive(Clone, Copy)]
-pub(crate) struct AccessStart {
-    pub(crate) head: usize,
-    pub(crate) init: Option<usize>,
 }
 
 pub(super) struct Build<'e> {
@@ -451,7 +431,6 @@ impl<'e> Build<'e> {
             let covered = close.is_some_and(|close| self.cover(u64::from(close.total)));
             self.emit(Op::Write {
                 site: Box::new(WriteSite {
-                    access: None,
                     begin: Some(StatementEntry {
                         id: statement.id,
                         index,
@@ -732,7 +711,6 @@ impl<'e> Build<'e> {
                 let covered = close.is_some_and(|close| self.cover(u64::from(close.total)));
                 self.emit(Op::Write {
                     site: Box::new(WriteSite {
-                        access: None,
                         begin: None,
                         reads: None,
                         at: *at as usize,
@@ -862,7 +840,6 @@ impl<'e> Build<'e> {
                 then_,
                 else_,
             } => {
-                let head = self.ops.len();
                 self.expr(cond)?;
                 self.close(*close, *reg);
                 self.open = None;
@@ -883,7 +860,6 @@ impl<'e> Build<'e> {
                     opens: [then_entry, else_entry],
                 };
                 self.ops[jump].op = Op::Jump(self.ops.len());
-                self.guard(head);
             }
             StatementKind::Cold => {
                 self.emit(Op::Cold(Deferred::Source(
@@ -1078,7 +1054,7 @@ impl<'e> Build<'e> {
                         (self.root.is_some() || invoke.is_some_and(|invoke| invoke.call))
                             && matches!(function.run, LibRun::Body(_)),
                     );
-                    let site = HeapSite {
+                    let mut site = HeapSite {
                         lib: *lib,
                         close: closes.first().copied(),
                         pc,
@@ -1091,7 +1067,15 @@ impl<'e> Build<'e> {
                             .and_then(|invoke| invoke.act),
                         root: self.root,
                     };
-                    return self.heap(site, args, closes);
+                    let args = self.args(args)?;
+                    site.close = self.ordered_closes(closes, reg);
+                    self.open = None;
+                    self.emit(Op::Heap {
+                        site,
+                        args: args.clone(),
+                    });
+                    self.result(reg, &args);
+                    return Some(());
                 };
                 site.root = self.root;
                 site.counted = site.counted.or_else(|| {
@@ -1256,41 +1240,6 @@ impl<'e> Build<'e> {
                             .act
                             .and_then(|act| self.stream.nested[act.ix()].kind.operator_lib())
                     });
-                if !read
-                    && args.len() == 2
-                    && let Some(lib) = library
-                    && let Some(extra) = super::answer_depth(self.exe, lib)
-                    && let Some(units) = self.member_charge(lib)
-                {
-                    let depth = Depth::Template(extra);
-                    self.site(depth, true);
-                    let inputs = match inputs {
-                        Some((None, reads)) => HeapInputs::Read(reads.try_into().ok()?),
-                        Some((Some(_), _)) => unreachable!(),
-                        None => HeapInputs::Registers,
-                    };
-                    self.emit(Op::Heap {
-                        site: HeapSite {
-                            lib,
-                            close: closes.first().copied(),
-                            pc,
-                            reg,
-                            depth,
-                            checked: invoke.checked || self.root_checked(),
-                            counted: invoke.counted(),
-                            act: invoke.act,
-                            root: self.root,
-                        },
-                        args: args.clone(),
-                        resident: Some(HeapKernel::Read {
-                            units,
-                            to: Destination::Register,
-                        }),
-                        inputs,
-                    });
-                    self.result(reg, &args);
-                    return Some(());
-                }
                 let after = self.start();
                 let mut call_site = CallSite {
                     checked: invoke.checked || self.root_checked(),
@@ -1310,13 +1259,7 @@ impl<'e> Build<'e> {
                     after,
                 };
                 if let Some((callee, reads)) = inputs {
-                    let member = if callee.is_none() {
-                        self.member_write(&call_site, &reads)
-                    } else {
-                        None
-                    };
                     call_site.inputs = Some(Box::new(CallInputs {
-                        member,
                         callee: callee.map(Operand::from),
                         args: reads.into_vec().into_iter().map(Operand::from).collect(),
                     }));

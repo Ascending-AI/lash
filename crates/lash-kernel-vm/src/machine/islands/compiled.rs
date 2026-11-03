@@ -19,8 +19,8 @@ pub(super) mod resource;
 pub(crate) use super::code::Op;
 use program::Build;
 pub(super) use program::{
-    AccessShape, AccessSite, CallInputs, CollectionAppend, CollectionStep, Destination, Format,
-    Merge, Operand, Placement, ReadSlot, Reduction, Update, Visit, WriteSite,
+    CallInputs, CollectionAppend, CollectionStep, Destination, Format, Merge, Operand, Placement,
+    ReadSlot, Reduction, Visit, WriteSite,
 };
 pub(crate) use program::{Instruction, Read, StatementEntry, StoreInputs};
 
@@ -291,15 +291,6 @@ impl OperatorSite {
     }
 }
 
-/// A source-certified member read and its formula's scalar prices.
-#[derive(Clone, Copy)]
-pub(crate) enum MemberAccess {
-    Float(u64),
-    Int { zero: u64, nonzero: u64 },
-    Map(Option<crate::compile::LengthCharge>),
-    Append { units: u64, values: u32 },
-}
-
 /// A prepared heap operation keeps the same semantic call coordinates.
 pub(crate) struct HeapSite {
     pub(super) lib: LibId,
@@ -376,24 +367,6 @@ pub(crate) struct CallSite {
     pub(super) after: u64,
 }
 
-/// A helper's certified member write with its source admission and formula.
-pub(crate) struct MemberWrite {
-    pub(super) element: Option<u64>,
-    pub(super) guard: lash_kernel_state::arena::Key,
-    pub(super) accepts: [bool; 2],
-    pub(super) values: u32,
-    pub(super) lookup: Option<lash_kernel_state::arena::Key>,
-    pub(super) charge: MemberCharge,
-    pub(super) before: u64,
-    pub(super) occurrence: Option<usize>,
-    pub(super) depth: u32,
-}
-
-pub(crate) enum MemberCharge {
-    Known(u64),
-    Text(crate::compile::LengthCharge),
-}
-
 /// Where library `lib`'s body call may answer immediately: an uncharged
 /// body of its own parameters whose prepared entry is not statement
 /// metered. The call depth its immediate paths need beyond the caller's.
@@ -441,26 +414,6 @@ impl Compiled {
     }
 
     #[cfg(test)]
-    pub(crate) fn corrupt_heap_result_close(&mut self) -> Option<u32> {
-        for site in &mut self.code.sites.heap {
-            if let Some(super::code::HeapKernel::Read {
-                to: Destination::Write(write),
-                ..
-            }) = &mut site.resident
-            {
-                let region = u32::MAX;
-                write.close = Some(Close {
-                    region,
-                    head: 0,
-                    total: 0,
-                });
-                return Some(region);
-            }
-        }
-        None
-    }
-
-    #[cfg(test)]
     pub(crate) fn corrupt_packet_role(&mut self, stream: &Stream) -> bool {
         self.code.corrupt_call_role(stream)
     }
@@ -476,10 +429,6 @@ impl Compiled {
 
     #[cfg(test)]
     pub(crate) fn corrupt_family_roles(&mut self) -> bool {
-        if let Some(site) = self.code.sites.update.first_mut() {
-            site.value.consumed = Box::default();
-            return true;
-        }
         if let Some(site) = self.code.sites.format.first_mut() {
             site.value.joined = Box::default();
             return true;
@@ -581,9 +530,7 @@ impl Compiled {
         cx.charged = plan.charged;
         cx.block(&plan.body)?;
         if fused {
-            cx.access_edges();
             cx.numeric();
-            cx.updates();
             cx.formats();
         }
         if fused && !plan.charged && stream.layout.0.is_multiple_of(2) {

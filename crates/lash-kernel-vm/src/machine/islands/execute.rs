@@ -11,7 +11,6 @@ use super::*;
 use crate::machine::loops::{Cursor, Guard, Header};
 use crate::machine::{Completion, LibraryCall, TryPhase};
 
-mod access;
 mod accumulate;
 mod boundary;
 mod call;
@@ -28,7 +27,6 @@ mod format;
 mod repeat;
 pub(super) mod source;
 mod storage;
-mod update;
 #[cfg(test)]
 pub(super) use storage::StackPlacement;
 use storage::Values;

@@ -774,24 +774,6 @@ fn observe_source_or_register(
         assert!(witnesses.is_empty());
     }
     if mode == Mode::Specialized
-        && slice == u64::MAX
-        && !taped
-        && layout == Layout(0)
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(READ_ADD_WRITE)
-    {
-        use crate::machine::islands::witness::{Exit, Family};
-        assert!(
-            witnesses
-                .get(&(Family::ReadUpdate, Exit::Commit))
-                .copied()
-                .unwrap_or(0)
-                > 0,
-            "the read/add/write checkpoint must commit its complete family: {witnesses:?}"
-        );
-        println!("read/add/write checkpoint exits: {witnesses:?}");
-    }
-    if mode == Mode::Specialized
         && layout == Layout(0)
         && slice == u64::MAX
         && !taped
@@ -861,10 +843,6 @@ fn direct_call_entry_agrees() {
         definition("pause(x: Any)", "do perform 0(x) as Any return x"),
         definition("typed(x: Int)", "return x"),
         definition("maker(a: Any, b?: Any)", "return fn() { return (a, b) }"),
-    );
-    verify_checkpoint_maps(
-        "main { let reader = fn(obj) { let value = 0 set value = invoke helper.element_map_any(obj, \"a\") return value } return apply reader(map{\"a\":255}) }",
-        CheckpointProjection::Close,
     );
     for body in [
         SAVED_MEMBER,
@@ -939,8 +917,8 @@ fn direct_call_entry_agrees() {
         "let a = 0 let b = 100 let f = fn(x) { set a = flat.add(a, x) do perform 0(a) as Any return a } let g = fn(x) { set b = flat.add(b, x) return b } let first = apply f(2) let second = apply g(3) return (first, second, apply f(4))",
     ] {
         let source = format!("{definitions}main {{ {body} }}");
-        if [READ_ADD_WRITE, FORMATTED_APPEND].contains(&body) {
-            verify_checkpoint_maps(&source, CheckpointProjection::Roles);
+        if body == FORMATTED_APPEND {
+            verify_checkpoint_maps(&source);
         }
         let bounds = super::super::embedder::ROOMY;
         let reference = observe(&source, Layout(1), u64::MAX, bounds, true);
@@ -1335,16 +1313,10 @@ fn direct_call_entry_agrees() {
     println!("direct call entry: {comparisons} paired runs");
     CHECKPOINT_EXITS.with_borrow(|counts| {
         use crate::machine::islands::witness::{Exit, Family};
-        for (family, exits) in [
-            (
-                Family::ReadUpdate,
-                &[Exit::Commit, Exit::Guard, Exit::Partial][..],
-            ),
-            (
-                Family::FormatAppend,
-                &[Exit::Commit, Exit::Prefix, Exit::Partial][..],
-            ),
-        ] {
+        for (family, exits) in [(
+            Family::FormatAppend,
+            &[Exit::Commit, Exit::Prefix, Exit::Partial][..],
+        )] {
             for exit in exits {
                 assert!(
                     counts.get(&(family, *exit)).copied().unwrap_or(0) > 0,
@@ -1509,13 +1481,7 @@ fn placement_witness(source: &str, body: &str) {
     }
 }
 
-#[derive(Clone, Copy)]
-enum CheckpointProjection {
-    Roles,
-    Close,
-}
-
-fn verify_checkpoint_maps(source: &str, projection: CheckpointProjection) {
+fn verify_checkpoint_maps(source: &str) {
     let (program, _) = Embedder::with(
         source,
         Setup {
@@ -1543,34 +1509,14 @@ fn verify_checkpoint_maps(source: &str, projection: CheckpointProjection) {
             continue;
         };
         assert_eq!(code.verify_family_projections(plan, &exe), Ok(()));
-        match projection {
-            CheckpointProjection::Roles => {
-                if code.corrupt_family_roles() {
-                    assert_eq!(
-                        code.verify_family_projections(plan, &exe),
-                        Err(crate::compile::islands::Refused::Calls),
-                        "a family cannot omit a committed prefix's source roles"
-                    );
-                    checked += 1;
-                }
-            }
-            CheckpointProjection::Close => {
-                if let Some(region) = code.corrupt_heap_result_close() {
-                    assert_eq!(
-                        code.verify_packets(plan.stream(&exe)),
-                        Err(crate::compile::islands::Refused::Region { region })
-                    );
-                    checked += 1;
-                }
-            }
+        if code.corrupt_family_roles() {
+            assert_eq!(
+                code.verify_family_projections(plan, &exe),
+                Err(crate::compile::islands::Refused::Calls),
+                "a family cannot omit a committed prefix's source roles"
+            );
+            checked += 1;
         }
     }
-    assert!(
-        checked > 0,
-        "{}",
-        match projection {
-            CheckpointProjection::Roles => "the checkpoint must form a verified family",
-            CheckpointProjection::Close => "the checkpoint must form a heap result write",
-        }
-    );
+    assert!(checked > 0, "the checkpoint must form a verified family");
 }

@@ -76,24 +76,6 @@ fn literal(value: Value, source: &Expr) -> bool {
     }
 }
 
-fn operand(operand: &Operand, source: &Expr, plan: &IslandPlan) -> bool {
-    if operand.reg() != source.reg
-        || operand
-            .source()
-            .is_some_and(|read| unpin(source).read != Some(read))
-    {
-        return false;
-    }
-    match operand {
-        Operand::Register(_) => true,
-        Operand::Literal { value, .. } => literal(*value, source),
-        Operand::Local { at, .. } | Operand::Cell { at, .. } => {
-            matches!(unpin(source).kind, Expression::Local { local, scoped: false, .. } if local.at as usize == *at)
-                && plan.shared[*at] == matches!(operand, Operand::Cell { .. })
-        }
-    }
-}
-
 fn operator<'a>(site: &OperatorSite, source: &'a Expr) -> Option<&'a [Expr]> {
     let source = unpin(source);
     let Expression::Operator {
@@ -113,118 +95,6 @@ fn operator<'a>(site: &OperatorSite, source: &'a Expr) -> Option<&'a [Expr]> {
         && site.checked == invoke.is_some_and(|call| call.checked)
         && site.counted == invoke.and_then(|call| call.counted()))
     .then_some(args)
-}
-
-fn scalar_kernel(site: &OperatorSite, exe: &Executable) -> bool {
-    let lib = exe.lib(site.lib);
-    crate::compile::numeric_pair(lib, site.checked).is_some()
-        && lib
-            .specialization
-            .prepared
-            .as_ref()
-            .and_then(|(_, fast)| fast.scalar())
-            .is_some()
-}
-
-fn read_charge(site: &Update, exe: &Executable) -> bool {
-    let lib = exe.lib(site.read.lib);
-    let Some(path) = lib
-        .specialization
-        .prepared
-        .as_ref()
-        .and_then(|(entry, _)| entry.element())
-    else {
-        return false;
-    };
-    if path.room != 2 {
-        return false;
-    }
-    use lash_kernel_doc::plan::Element;
-    match (path.operation, site.charge) {
-        (Element::ReadMap, MemberAccess::Map(actual)) => {
-            match (actual, lib.charge.short_text_charge(1)) {
-                (None, None) => true,
-                (Some(actual), Some(canonical)) => (0..=lash_kernel_doc::arena::ShortText::MAX
-                    as u64)
-                    .all(|length| actual.units(length) == canonical.units(length)),
-                _ => false,
-            }
-        }
-        (Element::ReadInt, MemberAccess::Int { zero, nonzero }) => {
-            lib.charge.known_charge(&[None, Some(Value::Int(0))], None) == Some(zero)
-                && lib.charge.known_charge(&[None, Some(Value::Int(1))], None) == Some(nonzero)
-        }
-        (Element::Read, MemberAccess::Float(units)) => {
-            lib.charge.known_charge(
-                &[None, Some(Value::Float(lash_kernel_doc::Float::new(0.0)))],
-                None,
-            ) == Some(units)
-        }
-        _ => false,
-    }
-}
-
-impl Update {
-    fn source(&self, plan: &IslandPlan, exe: &Executable) -> Option<()> {
-        if !scalar_kernel(&self.scalar, exe) || !read_charge(self, exe) {
-            return None;
-        }
-        let value = written(&self.write, plan)?;
-        let statement = write(&plan.body, self.write.pc)?;
-        let args = operator(&self.scalar, value)?;
-        let [a, b] = args else {
-            return None;
-        };
-        if !operand(&self.left, a, plan)
-            || !operand(&self.right, b, plan)
-            || self.consumed.as_ref() != [a.reg, b.reg]
-        {
-            return None;
-        }
-        let candidate = [unpin(a), unpin(b)]
-            .into_iter()
-            .find(|expr| expr.reg == self.read.reg)?;
-        let read = if matches!(candidate.kind, Expression::Act) {
-            statement.root.as_ref()?
-        } else {
-            candidate
-        };
-        if read.pc != self.read.pc {
-            return None;
-        }
-        let (args, lib, close) = match &read.kind {
-            Expression::Call {
-                invoke,
-                args,
-                closes,
-                ..
-            } => {
-                let lib = invoke
-                    .act
-                    .and_then(|act| plan.stream(exe).nested[act.ix()].kind.operator_lib())?;
-                (args, lib, closes.first().copied())
-            }
-            Expression::Operator {
-                lib, args, closes, ..
-            } => (args, *lib, closes.first().copied()),
-            _ => return None,
-        };
-        if self.read.lib != lib
-            || self.read.close != close
-            || args.len() != 2
-            || self.args.as_ref() != args.iter().map(|expr| expr.reg).collect::<Vec<_>>()
-        {
-            return None;
-        }
-        if let Some(reads) = &self.reads {
-            for (read, source) in reads.iter().zip(args.iter()) {
-                if !operand(&Operand::from(*read), source, plan) {
-                    return None;
-                }
-            }
-        }
-        Some(())
-    }
 }
 
 impl Format {
@@ -361,9 +231,6 @@ impl Code {
     ) -> Result<(), Refused> {
         for site in &self.sites.unit {
             verified_unit(site, plan, exe).ok_or(Refused::Calls)?;
-        }
-        for site in &self.sites.update {
-            site.value.source(plan, exe).ok_or(Refused::Calls)?;
         }
         for site in &self.sites.format {
             site.value.source(plan, exe).ok_or(Refused::Calls)?;

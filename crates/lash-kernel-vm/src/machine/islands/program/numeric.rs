@@ -1,4 +1,4 @@
-//! Lower scalar sites after guarded paths have claimed their instructions.
+//! Lower scalar sites and relocate the remaining instruction inventory.
 //! There is one final inventory: fused consumers are removed, and every
 //! physical edge is projected through the same relocation table.
 
@@ -7,16 +7,40 @@ use crate::machine::islands::MAX_ARGS;
 use std::collections::BTreeSet;
 
 impl Build<'_> {
+    pub(super) fn reads(&mut self, args: &[Expr]) -> Option<Box<[Read]>> {
+        if !self.fused {
+            return None;
+        }
+        let reads = args
+            .iter()
+            .map(|arg| match arg.kind {
+                Kind::Const(value) => Some(Read::Literal {
+                    reg: arg.reg,
+                    value,
+                    source: arg.read?,
+                }),
+                Kind::Local { local, miss, .. } => Some(Read::Local {
+                    reg: arg.reg,
+                    at: local.at as usize,
+                    shared: self.shared[local.at as usize],
+                    miss,
+                    source: arg.read?,
+                }),
+                _ => None,
+            })
+            .collect::<Option<Box<[_]>>>()?;
+        for read in &reads {
+            self.registers = self.registers.max(read.reg() as usize + 1);
+        }
+        Some(reads)
+    }
+
     pub(in crate::machine::islands) fn numeric(&mut self) {
-        let mut protected = BTreeSet::new();
         let mut targets = BTreeSet::new();
         for instruction in &mut self.ops {
             instruction.op.addresses(&mut |at| {
                 targets.insert(*at);
             });
-            if let Op::Access(site) = &instruction.op {
-                protected.extend(site.source.iter().copied());
-            }
         }
         for block in &self.blocks {
             targets.extend(block.starts.iter().copied());
@@ -28,67 +52,47 @@ impl Build<'_> {
         let mut old = source.into_iter().enumerate().peekable();
         while let Some((at, mut instruction)) = old.next() {
             relocation[at] = self.ops.len();
-            if !protected.contains(&at) {
-                instruction.op = fixed(instruction.op, self.exe);
-                if let Op::Heap {
-                    resident: Some(HeapKernel::Write { finish, .. }),
-                    ..
-                }
-                | Op::Store { finish, .. } = &mut instruction.op
-                    && let Some((next, following)) = old.peek()
-                    && !targets.contains(next)
-                    && following.begin.is_none()
-                    && matches!(following.op, Op::Done { empty: None, .. })
-                {
-                    let Some((next, following)) = old.next() else {
-                        unreachable!()
-                    };
-                    relocation[next] = self.ops.len();
-                    let Op::Done { leaves, .. } = following.op else {
-                        unreachable!()
-                    };
-                    *finish = Some(leaves);
-                }
-                let candidate = match &instruction.op {
-                    Op::Operator {
-                        site,
-                        inputs: OperatorInputs::Scalar(_),
-                        to: Destination::Register,
-                        ..
-                    } => Some(site.reg),
-                    Op::Heap {
-                        site,
-                        resident:
-                            Some(HeapKernel::Read {
-                                to: Destination::Register,
-                                ..
-                            }),
-                        ..
-                    } => Some(site.reg),
-                    _ => None,
+            instruction.op = fixed(instruction.op, self.exe);
+            if let Op::Store { finish, .. } = &mut instruction.op
+                && let Some((next, following)) = old.peek()
+                && !targets.contains(next)
+                && following.begin.is_none()
+                && matches!(following.op, Op::Done { empty: None, .. })
+            {
+                let Some((next, following)) = old.next() else {
+                    unreachable!()
                 };
-                if let Some(reg) = candidate
-                    && let Some((next, following)) = old.peek()
-                    && !protected.contains(next)
-                    && !targets.contains(next)
-                    && following.begin.is_none()
-                    && matches!(&following.op, Op::Write { site } if site.reg == reg && site.begin.is_none() && site.reads.is_none())
-                {
-                    let Some((next, following)) = old.next() else {
-                        unreachable!("the write was matched");
-                    };
-                    relocation[next] = self.ops.len();
-                    let Op::Write { site: write } = following.op else {
-                        unreachable!()
-                    };
-                    match &mut instruction.op {
-                        Op::Operator { to, .. }
-                        | Op::Heap {
-                            resident: Some(HeapKernel::Read { to, .. }),
-                            ..
-                        } => *to = Destination::Write(write),
-                        _ => unreachable!(),
-                    }
+                relocation[next] = self.ops.len();
+                let Op::Done { leaves, .. } = following.op else {
+                    unreachable!()
+                };
+                *finish = Some(leaves);
+            }
+            let candidate = match &instruction.op {
+                Op::Operator {
+                    site,
+                    inputs: OperatorInputs::Scalar(_),
+                    to: Destination::Register,
+                    ..
+                } => Some(site.reg),
+                _ => None,
+            };
+            if let Some(reg) = candidate
+                && let Some((next, following)) = old.peek()
+                && !targets.contains(next)
+                && following.begin.is_none()
+                && matches!(&following.op, Op::Write { site } if site.reg == reg && site.begin.is_none() && site.reads.is_none())
+            {
+                let Some((next, following)) = old.next() else {
+                    unreachable!("the write was matched");
+                };
+                relocation[next] = self.ops.len();
+                let Op::Write { site: write } = following.op else {
+                    unreachable!()
+                };
+                match &mut instruction.op {
+                    Op::Operator { to, .. } => *to = Destination::Write(write),
+                    _ => unreachable!(),
                 }
             }
             self.ops.push(instruction);
@@ -234,40 +238,6 @@ impl Op {
             | Self::Cond { otherwise, .. }
             | Self::Branch { otherwise, .. } => visit(otherwise),
             Self::Jump(to) => visit(to),
-            Self::Write { site } => {
-                if let Some(access) = &mut site.access {
-                    visit(&mut access.head);
-                    if let Some(init) = &mut access.init {
-                        visit(init);
-                    }
-                }
-            }
-            Self::Access(site) => {
-                visit(&mut site.after);
-                if let Some(short) = &mut site.short {
-                    visit(&mut short.after);
-                }
-                for at in &mut site.source {
-                    visit(at);
-                }
-                if let AccessShape::Length { convert, .. } = &mut site.shape {
-                    visit(convert);
-                }
-                if let AccessShape::Index {
-                    test, validation, ..
-                } = &mut site.shape
-                {
-                    visit(test);
-                    if let Some(checks) = validation {
-                        for at in checks {
-                            visit(at);
-                        }
-                    }
-                }
-                if let Some(consumer) = &mut site.consumer {
-                    visit(&mut consumer.operator);
-                }
-            }
             _ => {}
         }
     }
@@ -355,16 +325,11 @@ pub(crate) enum Destination {
 /// Reads evaluated inside a call, before its close and admission. Their
 /// values become caller roots only when the call suspends that caller.
 pub(crate) struct CallInputs {
-    pub(super) member: Option<Box<super::super::MemberWrite>>,
     pub(in crate::machine::islands) callee: Option<Operand>,
     pub(in crate::machine::islands) args: Box<[Operand]>,
 }
 
 impl CallInputs {
-    pub(in crate::machine::islands) fn member(&self) -> Option<&super::super::MemberWrite> {
-        self.member.as_deref()
-    }
-
     pub(in crate::machine::islands) fn reads(&self) -> impl Iterator<Item = &Operand> {
         self.callee.iter().chain(self.args.iter())
     }
