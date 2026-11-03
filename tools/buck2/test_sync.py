@@ -559,7 +559,7 @@ def check_queue_priority() -> None:
             remote += 1
             assert re.search(r"\bpriority = RE_PRIORITY,", call), f"{path.name}: a remote-enabled CommandExecutorConfig passes no priority = RE_PRIORITY"
             assert path.name == "platforms.bzl" or re.search(r'load\(":platforms.bzl",[^)]*"RE_PRIORITY"', text), path.name
-    assert remote == 5, remote
+    assert remote == 6, remote
 
 
 def check_ownership() -> None:
@@ -963,11 +963,15 @@ def check_native_inputs() -> None:
         for target in package["targets"]
         if "hermetic-postgres" in target.get("tags", [])
     }
-    assert set(hermetic) == {
+    # Every postgres service test carries the tag; the schema generators and
+    # replay bench that provision a hermetic server carry it too, without being
+    # service test targets.
+    postgres_tests = {
         label for label in inventory["service_test_targets"]["postgres"] if "__fv_" not in label
-    }, sorted(hermetic)
+    }
+    assert postgres_tests <= set(hermetic), sorted(hermetic)
     assert all(tags == ["hermetic-postgres"] for tags in hermetic.values()), hermetic
-    assert set(hermetic) <= set(inventory["workspace_dev_test_targets"])
+    assert postgres_tests <= set(inventory["workspace_dev_test_targets"])
 
 
 def check_dev_profile_wildcard_projection() -> None:
@@ -1056,7 +1060,9 @@ def check_dependency_and_profile_projection() -> None:
         unit for unit in inventory["feature_lane_units"]
         if unit["label"] == seam["harness"]
     ]
-    assert seam_units and all(unit["features"] == ["rlm"] for unit in seam_units)
+    assert seam_units and all(
+        unit["features"] == ["codemode", "rlm"] for unit in seam_units
+    )
     policy = tomllib.loads((HERE / "package-policy.toml").read_text())
     expected_seams = set(policy["ui_fixtures"]["lash-runtime"]["store_seam"])
     assert {pathlib.Path(path).stem for path in seam["fixtures"]} == expected_seams
@@ -1248,8 +1254,7 @@ def check_external_buildscripts() -> None:
     assert metadata_edges == {
         "aws-lc-rs-1-build-script-run": ["aws-lc-sys-0.45-build-script-main-run[metadata]"],
         "rustls-0.23-build-script-run": [
-            "aws-lc-rs-1-build-script-run[metadata]",
-            "ring-0.17-build-script-run[metadata]",
+            "aws-lc-rs-1-build-script-run[metadata]"
         ],
         "wasm-bindgen-0.2-build-script-run": [
             "wasm-bindgen-shared-0.2-build-script-run[metadata]"
@@ -1493,8 +1498,11 @@ def check_direct_buck_generator() -> None:
         if target["kind"] == "custom-build-compile"
     }
     assert build_scripts == {
+        "//crates/lash-dialect-typescript:build_script__build",
+        "//crates/lash-ext-ts-helpers:build_script__build",
+        "//crates/lash-kernel-engine:build_script__build",
+        "//crates/lash-kernel-releases:build_script__build",
         "//crates/lash-perf:build_script__build",
-        "//crates/lash-vm-worker:build_script__build",
     }
     bins_units = [
         unit for unit in inventory["feature_lane_units"]
@@ -1523,11 +1531,11 @@ def check_schema_source_inputs() -> None:
     """
     root = (ROOT / "BUCK").read_text(encoding="utf-8")
     calls = re.findall(r"(?ms)^schema_(?:documents|check)\(\n.*?^\)\n", root)
-    assert len(calls) == 4, f"expected four schema rule calls, found {len(calls)}"
+    assert len(calls) == 2, f"expected two schema rule calls, found {len(calls)}"
     labels = set()
     for call in calls:
         labels.update(re.findall(r"^\s+script = \"(//[^\"]+)\"", call, re.M))
-        checked = re.search(r"(?ms)^    checked = \[(.*?)^    \]", call)
+        checked = re.search(r"(?ms)^    checked = (.*?)^    \]", call)
         if checked:
             labels.update(re.findall(r"\"(//[^\"]+)\"", checked.group(1)))
     assert labels, "schema rules name no cross-package source inputs"
@@ -2001,7 +2009,24 @@ def check_no_first_party_build_dependency() -> None:
         for target in groups["build"].values()
         if not target.startswith("//third-party/")
     )
-    assert not first_party, f"first-party build-dependency edges: {first_party}"
+    # The kernel-release catalog's build script reads kernel crates (FIG-7425);
+    # those declared edges are the whole allowance.
+    kernel_release_edges = {
+        "lash-kernel-engine -> //crates/lash-kernel-releases:lash-kernel-releases",
+        "lash-kernel-releases -> //crates/lash-ext-date-ecma:lash-ext-date-ecma",
+        "lash-kernel-releases -> //crates/lash-ext-py-core:lash-ext-py-core",
+        "lash-kernel-releases -> //crates/lash-ext-py-helpers:lash-ext-py-helpers",
+        "lash-kernel-releases -> //crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
+        "lash-kernel-releases -> //crates/lash-ext-ts-core:lash-ext-ts-core",
+        "lash-kernel-releases -> //crates/lash-ext-ts-helpers:lash-ext-ts-helpers",
+        "lash-kernel-releases -> //crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
+        "lash-kernel-releases -> //crates/lash-kernel-dialect:lash-kernel-dialect",
+        "lash-kernel-releases -> //crates/lash-kernel-doc:lash-kernel-doc",
+        "lash-kernel-releases -> //crates/lash-kernel-lib:lash-kernel-lib",
+        "lash-kernel-releases -> //crates/lash-kernel-value:lash-kernel-value",
+        "lash-kernel-releases -> //crates/lash-kernel-vm:lash-kernel-vm",
+    }
+    assert set(first_party) == kernel_release_edges, first_party
 
 
 def check_facade_completeness() -> None:

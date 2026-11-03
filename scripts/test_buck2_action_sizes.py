@@ -67,12 +67,21 @@ class CollectTest(unittest.TestCase):
         lines = [
             record(tool="test-setup.sh"),
             record(tool="generate-xml.sh"),
-            record(exit_status="137"),
             record(wall_ms=999),
             "torn line",
             "1789424023\tcrate=lash_core\tno-separator",
         ]
         self.assertEqual(sizes.collect(lines, CRATES), {})
+        # A kill supplies no compile sample but keeps its OOM evidence.
+        killed = record(exit_status="137") + "\tworker_memory_kb=8388608"
+        measured = sizes.collect([killed], CRATES)
+        self.assertEqual(
+            [
+                (len(samples.records), samples.oom_kills)
+                for samples in measured.values()
+            ],
+            [(0, 1)],
+        )
 
     def test_first_party_crates_come_from_workspace_targets(self) -> None:
         metadata = {
@@ -89,7 +98,11 @@ class CollectTest(unittest.TestCase):
         }
         self.assertEqual(
             sizes.first_party_crates(metadata),
-            {("lash-sim", "lash_sim"), ("lash-sim", "logical_turn")},
+            {
+                ("lash-sim", "lash_sim"),
+                ("lash-sim", "logical_turn"),
+                ("lash-sim", "build_script_build"),
+            },
         )
 
 
@@ -107,33 +120,30 @@ class TableTest(unittest.TestCase):
         lines = [record(cores=2.25)] * 20
         self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 3)
 
-    def test_s1_compile_sizing_uses_each_workers_slot_share(self) -> None:
-        for cpus, slots, expected in ((40, 32, 2), (80, 48, 1)):
+    def test_s1_worker_shape_does_not_price_compile_cpu(self) -> None:
+        # CPU books sustained demand, not a share of the worker's cores: the
+        # same measured cores price identically on different worker shapes.
+        for cpus, slots in ((40, 32), (80, 48)):
             with self.subTest(cpus=cpus):
                 line = record(cores=1.6, peak_bytes=2 * GIB)
                 line = line.replace("worker_cpu_count=40", f"worker_cpu_count={cpus}")
                 line = line.replace("worker_max_inflight=32", f"worker_max_inflight={slots}")
-                self.assertEqual(table([line] * 20)["lash-internal-core/lash_core"]["cpu_count"], expected)
+                self.assertEqual(table([line] * 20)["lash-internal-core/lash_core"]["cpu_count"], 2)
 
-    def test_s1_mixed_workers_use_the_p95_of_each_samples_share(self) -> None:
+    def test_s1_mixed_workers_share_one_sustained_mean(self) -> None:
         i9 = record(cores=1.6, peak_bytes=2 * GIB)
         box02 = i9.replace("worker_cpu_count=40", "worker_cpu_count=80").replace("worker_max_inflight=32", "worker_max_inflight=48")
-        self.assertEqual(table([box02] * 19 + [i9])["lash-internal-core/lash_core"]["cpu_count"], 1)
+        self.assertEqual(table([box02] * 19 + [i9])["lash-internal-core/lash_core"]["cpu_count"], 2)
         self.assertEqual(table([box02] * 18 + [i9] * 2)["lash-internal-core/lash_core"]["cpu_count"], 2)
-
-    def test_s1_missing_worker_metadata_refuses_compile_sizing(self) -> None:
-        line = record().replace("\tworker_cpu_count=40", "").replace("\tworker_max_inflight=32", "")
-        with self.assertRaisesRegex(ValueError, "worker.*metadata"):
-            table([line] * 20)
 
     def test_s1_per_log_worker_metadata_reaches_compile_sizing(self) -> None:
         line = record(cores=1.6, peak_bytes=2 * GIB)
         line = line.replace("\tworker_cpu_count=40", "").replace("\tworker_max_inflight=32", "")
-        for cpus, slots, expected in ((40, 32, 2), (80, 48, 1)):
+        for cpus, slots in ((40, 32), (80, 48)):
             metadata = {"captured.log": {"worker_cpu_count": cpus, "worker_max_inflight": slots}}
             with mock.patch.object(pathlib.Path, "read_text", return_value="\n".join([line] * 20)):
                 lines = sizes.read_lines([pathlib.Path("captured.log")], 0, metadata)
-                self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], expected)
+                self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 2)
                 with self.assertRaisesRegex(ValueError, "missing worker metadata"):
                     sizes.read_lines([pathlib.Path("unknown.log")], 0, metadata)
 
@@ -141,7 +151,10 @@ class TableTest(unittest.TestCase):
         lines = [record(cores=1.0, requested_cpu="1")] * 200
         lines += [record(cores=2.0, requested_cpu="4")] * 20
         entry = table(lines)["lash-internal-core/lash_core"]
-        self.assertEqual(entry["cpu_count"], 2)
+        # 240 core-seconds over 220 seconds is a sustained 1.09 cores.
+        self.assertEqual(entry["cpu_count"], 1)
+        self.assertEqual(entry["mean_cores"], 1.09)
+        self.assertEqual(entry["cpu_samples"], 220)
         self.assertEqual(entry["samples"], 220)
 
     def test_memory_is_the_p99_peak_with_margin(self) -> None:
@@ -177,9 +190,12 @@ class TableTest(unittest.TestCase):
         self.assertEqual(entry["p99_peak_bytes"], GIB)
         self.assertEqual(entry["memory_kb"], 3145728)
 
-    def test_a_row_at_the_defaults_is_dropped(self) -> None:
+    def test_a_measured_row_inside_the_defaults_is_kept_as_evidence(self) -> None:
         lines = [record(pkg="lash-sim", crate="logical_turn", cores=1.0)] * 20
-        self.assertNotIn("lash-sim/logical_turn", table(lines))
+        entry = table(lines)["lash-sim/logical_turn"]
+        self.assertEqual(entry["cpu_count"], sizes.DEFAULT_CPU_COUNT)
+        self.assertEqual(entry["memory_kb"], sizes.DEFAULT_MEMORY_KB)
+        self.assertEqual(entry["cpu_samples"], 20)
 
     def test_the_minimum_floor_keeps_and_roughly_sizes_a_row(self) -> None:
         saved = dict(sizes.MINIMUM_MEMORY_KB)
@@ -230,9 +246,11 @@ class TableTest(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertIn(key, crates, "a row that names no first-party crate is dead")
                 self.assertEqual(
-                    sorted(entry),
+                    sorted(set(entry) - sizes.OOM_KEYS),
                     [
                         "cpu_count",
+                        "cpu_samples",
+                        "mean_cores",
                         "memory_kb",
                         "p95_cores",
                         "p99_peak_bytes",
@@ -242,20 +260,33 @@ class TableTest(unittest.TestCase):
                 )
                 self.assertTrue(
                     entry["memory_kb"] > sizes.DEFAULT_MEMORY_KB
-                    or entry["cpu_count"] > sizes.DEFAULT_CPU_COUNT,
-                    "an entry that asks for no more than the defaults is noise",
+                    or entry["cpu_count"] > sizes.DEFAULT_CPU_COUNT
+                    or "cpu_samples" in entry
+                    or entry.get("oom_kills")
+                    or key in sizes.MINIMUM_MEMORY_KB,
+                    "an entry inside the defaults stays only as evidence or an explicit floor",
                 )
-                # These committed measurements predate per-worker metadata.
-                self.assertEqual(entry["cpu_count"], sizes.cpu_count_for(entry["p95_cores"], slot_share=1.6))
+                # CPU is sustained demand: the stored mean_cores is the
+                # unrounded mean rounded to two decimals.
+                self.assertTrue(
+                    sizes.cpu_count_for(entry["mean_cores"] - 0.005)
+                    <= entry["cpu_count"]
+                    <= sizes.cpu_count_for(entry["mean_cores"] + 0.005),
+                )
                 self.assertEqual(entry["memory_kb"] % sizes.MEMORY_GRANULARITY_KB, 0)
                 self.assertGreaterEqual(entry["memory_kb"] * 1024, entry["peak_bytes"])
                 self.assertGreaterEqual(
-                    entry["memory_kb"], sizes.MINIMUM_MEMORY_KB.get(key, 0)
+                    entry["memory_kb"],
+                    max(
+                        sizes.MINIMUM_MEMORY_KB.get(key, 0),
+                        entry.get("oom_floor_kb", 0),
+                    ),
                 )
                 self.assertTrue(
                     entry["samples"] >= sizes.MIN_SAMPLES
-                    or key in sizes.MINIMUM_MEMORY_KB,
-                    "an unmeasured row survives only on an explicit minimum",
+                    or key in sizes.MINIMUM_MEMORY_KB
+                    or entry.get("oom_kills"),
+                    "an unmeasured row survives only on an explicit minimum or OOM evidence",
                 )
 
 
@@ -286,7 +317,14 @@ class ClippyTableTest(unittest.TestCase):
         lines = [clippy_record(peak_bytes=90 * 1024 * 1024)] * 19
         measured = sizes.collect(lines, CRATES, clippy=True)
         self.assertEqual(sizes.clippy_table(measured), {})
-        kept = {"cpu_count": 1, "memory_kb": 786432, "samples": 40}
+        kept = {
+            "cpu_count": 1,
+            "cpu_samples": 19,
+            "mean_cores": 1.0,
+            "memory_kb": 786432,
+            "p95_cores": 1.0,
+            "samples": 40,
+        }
         self.assertEqual(
             sizes.clippy_table(measured, {"lash-internal-core/lash_core": kept}),
             {"lash-internal-core/lash_core": kept},
@@ -308,8 +346,11 @@ class ClippyTableTest(unittest.TestCase):
                 self.assertGreaterEqual(entry["memory_kb"], sizes.CLIPPY_FLOOR_KB)
                 self.assertGreaterEqual(entry["memory_kb"] * 1024, entry["peak_bytes"])
                 self.assertGreaterEqual(entry["samples"], sizes.MIN_SAMPLES)
-                # These committed measurements predate per-worker metadata.
-                self.assertEqual(entry["cpu_count"], sizes.cpu_count_for(entry["p95_cores"], slot_share=1.6))
+                self.assertTrue(
+                    sizes.cpu_count_for(entry["mean_cores"] - 0.005)
+                    <= entry["cpu_count"]
+                    <= sizes.cpu_count_for(entry["mean_cores"] + 0.005),
+                )
 
 
 def run_record(
@@ -477,16 +518,27 @@ class TestRunTableTest(unittest.TestCase):
         for label, entry in checked_in.items():
             with self.subTest(label=label):
                 self.assertIn(label, labels)
-                self.assertEqual(
-                    sorted(entry),
-                    [
+                # A measured row carries mean_cores; a row kept unmeasured
+                # retains whatever shape it was written with.
+                self.assertTrue(
+                    {
                         "cpu_count",
                         "memory_kb",
                         "p95_cores",
                         "p99_peak_bytes",
                         "peak_bytes",
                         "samples",
-                    ],
+                    }
+                    <= set(entry)
+                    <= {
+                        "cpu_count",
+                        "mean_cores",
+                        "memory_kb",
+                        "p95_cores",
+                        "p99_peak_bytes",
+                        "peak_bytes",
+                        "samples",
+                    },
                 )
                 self.assertGreaterEqual(entry["memory_kb"] * 1024, entry["p99_peak_bytes"])
                 self.assertTrue(

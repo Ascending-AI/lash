@@ -162,7 +162,7 @@ EXPAND_STEP = re.compile(
     r"\s*to_version:\s*(?P<to>[^,{}]+),"
 )
 POSTGRES_ALIAS_DEFINITION = re.compile(
-    r"const\s+SCHEMA_VERSION\s*:\s*i32\s*=\s*lash_core_execution::compat::"
+    r"const\s+SCHEMA_VERSION\s*:\s*i32\s*=\s*lash_core_store::compat::"
     r"(?P<constant>[A-Z][A-Z0-9_]*)\s+as\s+i32\s*;"
 )
 POSTGRES_HEADER = re.compile(r"\A-- lash-postgres-store schema, component version (\d+)\.\n")

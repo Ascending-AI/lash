@@ -931,6 +931,7 @@
     "driver::tests::rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint": 1,
     "driver::tests::structured_lash_vm_step_output_keeps_diagnostic_fields_in_projected_history": 2,
     "driver::tests::terminal_step_without_committed_transcript_renders_unchanged": 1,
+    "driver_state::tests::the_driver_refuses_unstamped_and_foreign_driver_state": 1,
     "executor::cell_segment::tests::segment_bindings_refuse_untyped_payloads": 1,
     "executor::host_bridge::mcp_media_tests::printing_an_mcp_content_block_attaches_its_stored_media": 34,
     "executor::state::authority_split_tests::rlm_worker_envelope_carries_no_grant_or_binding": 27,
@@ -1020,6 +1021,7 @@
     "native::tests::a_natural_finish_schema_still_lets_prose_end_the_turn": 386,
     "native::tests::a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints": 321,
     "native::tests::a_step_archive_survives_both_driver_checkpoint_paths": 243,
+    "native::tests::configured_prompt_is_instructions": 193,
     "native::tests::factory_selects_native_abi_and_completed_cell_events": 56,
     "native::tests::multiple_calls_spend_one_stall_attempt_and_answer_every_id": 43,
     "native::tests::native_driver_stops_at_budget_before_queued_provider_response": 69,
@@ -1088,6 +1090,7 @@
     "projection::transport::tests::reserved_projection_key_round_trips_as_plain_record": 1,
     "projection::transport::tests::reserved_projection_key_survives_in_plain_seed_data": 1,
     "projection::transport::tests::undefined_uses_json_stringify_container_rules": 1,
+    "prompt_contract_tests::durable_sleep_is_taught_for_native_execution": 49,
     "prompt_contract_tests::the_native_prompt_names_its_transport_and_carries_no_cell_syntax": 93,
     "prompt_sections::tests::a_modules_tools_render_under_one_heading": 5,
     "prompt_sections::tests::a_section_renders_the_same_text_wherever_the_host_places_it": 3,
@@ -1186,10 +1189,7 @@
     "tool_catalog::tests::native_rlm_and_validation_share_one_pinned_definition_under_registry_drift": 47,
     "tool_catalog::tests::rlm_catalog_rejects_members_with_only_retired_binding_key": 15,
     "tool_catalog::tests::rlm_catalog_rejects_members_without_tool_binding": 59,
-    "tool_catalog::tests::typescript_tool_prose_is_rendered_verbatim": 31,
-    "driver_state::tests::the_driver_refuses_unstamped_and_foreign_driver_state": 1,
-    "native::tests::configured_prompt_is_instructions": 193,
-    "prompt_contract_tests::durable_sleep_is_taught_for_native_execution": 49
+    "tool_catalog::tests::typescript_tool_prose_is_rendered_verbatim": 31
   },
   "//crates/lash-sim:crash_matrix__test": {
     "a_code_cell_cut_at_every_label_resumes_from_its_snapshot": 29451,

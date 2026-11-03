@@ -40,6 +40,7 @@ class CheckTests(unittest.TestCase):
         return gate.check(self.repo)
 
     def test_every_static_form_is_refused(self) -> None:
+        self.write("crates/lash-dialect-typescript/src/lib.rs", "mod forms;\n")
         self.write(
             "crates/lash-dialect-typescript/src/forms.rs",
             """\
@@ -76,6 +77,7 @@ class CheckTests(unittest.TestCase):
         self.assertIn(gate.WORKER_CRATE, problems[0])
 
     def test_an_allowlisted_static_passes_under_its_enclosing_fn(self) -> None:
+        self.write("crates/lash-kernel-vm/src/lib.rs", "mod table;\n")
         self.write(
             "crates/lash-kernel-vm/src/table.rs",
             """\
@@ -89,6 +91,7 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(self.problems(), [])
 
     def test_the_entry_names_the_scope_so_a_second_same_named_static_is_refused(self) -> None:
+        self.write("crates/lash-kernel-vm/src/lib.rs", "mod table;\n")
         self.write(
             "crates/lash-kernel-vm/src/table.rs",
             """\
@@ -118,6 +121,7 @@ class CheckTests(unittest.TestCase):
         self.assertIn("matches no static item", problems[0])
 
     def test_lifetimes_comments_strings_and_other_trees_are_not_statics(self) -> None:
+        self.write("crates/lash-kernel-vm/src/lib.rs", "mod quiet;\n")
         self.write(
             "crates/lash-kernel-vm/src/quiet.rs",
             """\

@@ -58,9 +58,10 @@ selection_python="${LIBTEST_SELECTION_PYTHON:-python3}"
 if [[ "$labels_only" = false && "$suite" = pg-pool-wait ]]; then
   # This law exercises real performance entry points, including their
   # durability guard. Inspect the server before compiling or running tests.
-  postgres_probe=(psql "${LASH_POSTGRES_DATABASE_URL:?PostgreSQL URL is required}")
   if [[ -n "${POSTGRES_SERVICE_CONTAINER:-}" ]]; then
     postgres_probe=(docker exec "$POSTGRES_SERVICE_CONTAINER" psql -U lash -d lash)
+  else
+    postgres_probe=(psql "${LASH_POSTGRES_DATABASE_URL:?PostgreSQL URL is required}")
   fi
   settings="$("${postgres_probe[@]}" -XAtq -v ON_ERROR_STOP=1 -c \
     "SELECT current_setting('fsync'), current_setting('synchronous_commit')")"

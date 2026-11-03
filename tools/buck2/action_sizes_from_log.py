@@ -89,8 +89,8 @@ The rule, per `<package>/<crate>`:
   row re-executes every action of its targets on a cold cache. A refresh
   therefore keeps the row in force unless the request moves by a whole CPU or
   by at least 512 MiB. Anonymous p99 must remain below 80% of the request.
-* A row that asks for no more than the defaults is dropped: absence from the
-  file *is* the default request.
+* A measured row inside the defaults stays in the file: its `samples` and
+  `mean_cores` are the evidence the next refresh moves by hysteresis.
 
 Target kinds (`--events`)
 -------------------------
@@ -1266,6 +1266,18 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
         ("test-run-sizes.json", test_rows),
     ):
         (ROOT / "tools/buck2" / name).write_text(render(rows), encoding="utf-8")
+
+
+OOM_KEYS = frozenset(
+    {
+        "oom_kills",
+        "oom_floor_kb",
+        "oom_peak_bytes",
+        "oom_max_request_kb",
+        "oom_all_killed_request_kb",
+        "worker_memory_kb",
+    }
+)
 
 
 def oom_evidence(samples: Samples) -> dict:

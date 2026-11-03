@@ -543,7 +543,13 @@ def evaluate_first_party_flags(
     rustc_flags = evaluated_starlark_function(
         ROOT / "tools/buck2/lash_rust.bzl",
         "_rustc_flags",
-        {"select": select, "FIRST_PARTY_OPT_LEVELS": opt_levels},
+        {
+            "select": select,
+            "FIRST_PARTY_OPT_LEVELS": opt_levels,
+            # kiln.perf_iteration is an opt-in compare mode; the gate
+            # evaluates the reference build's geometry, where it is off.
+            "_PERF_ITERATION": False,
+        },
     )
     return rustc_flags(package, [], [])
 
@@ -560,7 +566,12 @@ def evaluate_third_party_flags(
     profile_kwargs = evaluated_starlark_function(
         ROOT / "tools/buck2/third_party.bzl",
         "_profile_kwargs",
-        {"select": select, "THIRD_PARTY_OPT_LEVELS": opt_levels},
+        {
+            "select": select,
+            "THIRD_PARTY_OPT_LEVELS": opt_levels,
+            # The reference build's config defaults: kiln.console off.
+            "read_config": lambda *args: args[-1],
+        },
     )
     result = profile_kwargs({"env": {"CARGO_PKG_NAME": package}, "rustc_flags": []})
     flags = result.get("rustc_flags")

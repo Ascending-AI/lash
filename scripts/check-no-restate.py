@@ -70,11 +70,6 @@ PERMANENT = (
               "still use the deleted engine"),
     Allowance(("scripts/check-no-restate.py", "scripts/test_check_no_restate.py"),
                "this gate and its self-tests"),
-    Allowance(("crates/lash-core/src/protocol_copy.rs",
-                "crates/lash-protocol-rlm/src/prompt_sections/tests.rs",
-                "crates/lash-protocol-standard/src/prompt_tests.rs"),
-               "the English verb in model-facing guidance, whose bytes are behaviour",
-               re.compile(r"do not restate conclusions")),
 )
 
 PENDING = ()

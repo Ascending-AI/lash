@@ -222,9 +222,9 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
         # build's descriptor writes the version after it.
         compat = "crates/lash-core-store/src/compat.rs"
         for path, constant, default, synthetic in [
-            (compat, "POSTGRES_SCHEMA_VERSION", 1, 1),
-            (compat, "SQLITE_CORE_SCHEMA_VERSION", 1, 1),
-            ("crates/lash-vm-runtime/src/formats.rs", "KERNEL_DOCUMENT_SCHEMA_VERSION", 1, 2),
+            (compat, "POSTGRES_SCHEMA_VERSION", 35, 35),
+            (compat, "SQLITE_CORE_SCHEMA_VERSION", 23, 23),
+            ("crates/lash-vm-runtime/src/formats.rs", "KERNEL_DOCUMENT_SCHEMA_VERSION", 7, 8),
         ]:
             row = by_name[f"{path}:{constant}"]
             if at_cut:
@@ -488,7 +488,7 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             artifact.write_text(reset_artifact)
             lib = repo / "crates/lash-postgres-store/src/lib.rs"
             reset_lib = lib.read_text()
-            alias = "const SCHEMA_VERSION: i32 = lash_core_execution::compat::POSTGRES_SCHEMA_VERSION as i32;"
+            alias = "const SCHEMA_VERSION: i32 = lash_core_store::compat::POSTGRES_SCHEMA_VERSION as i32;"
             self.assertIn(alias, reset_lib)
             lib.write_text(reset_lib.replace(alias, "const SCHEMA_VERSION: i32 = 1;"))
             errors = baseline.postgres_stamp_mismatches(repo)

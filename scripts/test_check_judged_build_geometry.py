@@ -90,11 +90,9 @@ class JudgedBuildGeometryTests(unittest.TestCase):
     def test_runtime_testing_feature_on_a_judged_host_fails(self) -> None:
         manifest = self.root / "examples" / "agent-workbench" / "Cargo.toml"
         text = manifest.read_text(encoding="utf-8")
-        text = text.replace(
-            'lash = { workspace = true, features = ["rlm", "sqlite", "postgres", "mcp", "http-transport", "openai"] }',
-            'lash = { workspace = true, features = ["rlm", "sqlite", "postgres", "mcp", "http-transport", "openai", "testing"] }',
-            1,
-        )
+        needle = '"dialect-python"] }'
+        self.assertIn(needle, text)
+        text = text.replace(needle, '"dialect-python", "testing"] }', 1)
         manifest.write_text(text, encoding="utf-8")
         failures = self.run_gate()
         self.assertTrue(
@@ -116,9 +114,16 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         # still boots, so nothing else notices.
         rules = self.root / "tools/buck2/lash_rust.bzl"
         text = rules.read_text(encoding="utf-8")
-        flag_line = '"-Cdebug-assertions=no",'
-        self.assertIn(flag_line, text)
-        rules.write_text(text.replace(flag_line, "", 1), encoding="utf-8")
+        judged_arm = '"//tools/buck2:profile_judged": ["-Cdebug-assertions=no", "-Coverflow-checks=no"],'
+        self.assertIn(judged_arm, text)
+        rules.write_text(
+            text.replace(
+                judged_arm,
+                '"//tools/buck2:profile_judged": ["-Coverflow-checks=no"],',
+                1,
+            ),
+            encoding="utf-8",
+        )
         failures = self.run_gate()
         self.assertTrue(any("first-party target rustc_flags" in f for f in failures), failures)
 
@@ -134,10 +139,14 @@ class JudgedBuildGeometryTests(unittest.TestCase):
     def test_judged_select_cannot_change_optimization_geometry(self) -> None:
         rules = self.root / "tools/buck2/lash_rust.bzl"
         text = rules.read_text(encoding="utf-8")
-        flag = '"-Cdebug-assertions=no",'
-        self.assertIn(flag, text)
+        judged_arm = '"//tools/buck2:profile_judged": ["-Cdebug-assertions=no", "-Coverflow-checks=no"],'
+        self.assertIn(judged_arm, text)
         rules.write_text(
-            text.replace(flag, flag + '\n            "-Copt-level=3",', 1),
+            text.replace(
+                judged_arm,
+                '"//tools/buck2:profile_judged": ["-Cdebug-assertions=no", "-Coverflow-checks=no", "-Copt-level=3"],',
+                1,
+            ),
             encoding="utf-8",
         )
         failures = self.run_gate()

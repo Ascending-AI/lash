@@ -54,3 +54,8 @@ fn every_guarded_surface_decodes_its_supported_range() {
 fn unknown_version_is_refused_with_zero_mutation() {
     laws::unknown_version_is_refused_with_zero_mutation(OWNER, &probes());
 }
+
+#[test]
+fn history_reads_are_epoch_invariant_and_writers_are_deterministic() {
+    laws::history_reads_are_epoch_invariant_and_writers_are_deterministic(OWNER, &probes());
+}

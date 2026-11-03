@@ -73,15 +73,14 @@ class NoRestateTests(unittest.TestCase):
             self.assertEqual(gate.check(root, ()), [])
 
     def test_a_permanent_exception_passes_and_a_line_scoped_one_holds_only_its_line(self) -> None:
-        prompt = "crates/lash-protocol-standard/src/prompt.rs"
-        self.assertEqual(self.findings({
-            "docs/testing/substrate-port-ledger.toml": f"# {ENGINE} double\n",
-            prompt: '"- do not restate conclusions."\n',
-        }), [])
-        found = self.findings({prompt: '"- do not restate conclusions."\n'
-                                       f"// the {ENGINE} host\n"})
+        ledger = "docs/testing/substrate-port-ledger.toml"
+        self.assertEqual(self.findings({ledger: f"# {ENGINE} double\n"}), [])
+        scoped = (gate.Allowance(("src/a.rs",), "a lane removes the rest",
+                                 re.compile(r"allowed")),)
+        found = self.findings({"src/a.rs": f"allowed {ENGINE.lower()} wording\n// the {ENGINE} host\n"},
+                              pending=scoped)
         self.assertEqual(len(found), 1)
-        self.assertTrue(found[0].startswith(f"{prompt}:2:"), found)
+        self.assertTrue(found[0].startswith("src/a.rs:2:"), found)
 
     def test_a_settled_adr_and_its_index_row_pass_and_a_live_adr_fails(self) -> None:
         settled = f"docs/adr/0104-{ENGINE.lower()}-engine.md"

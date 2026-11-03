@@ -114,8 +114,8 @@ fn unknown_version_is_refused_with_zero_mutation() {
 }
 
 #[test]
-fn upcast_preserves_immutable_bytes_and_hashes() {
-    laws::upcast_preserves_immutable_bytes_and_hashes(OWNER, &probes());
+fn history_reads_are_epoch_invariant_and_writers_are_deterministic() {
+    laws::history_reads_are_epoch_invariant_and_writers_are_deterministic(OWNER, &probes());
 }
 """
 
@@ -460,7 +460,7 @@ reason = "a projection identity, not a stored-format version"
     def test_a_guarded_owner_must_run_every_law(self) -> None:
         self.write(
             "crates/demo/src/guarded_surface_tests.rs",
-            LAWS.replace("laws::upcast_preserves_immutable_bytes_and_hashes", "skipped"),
+            LAWS.replace("laws::history_reads_are_epoch_invariant_and_writers_are_deterministic", "skipped"),
         )
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)

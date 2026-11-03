@@ -104,6 +104,11 @@ def _store_tests_stub_bin() -> str:
         '#!/usr/bin/env bash\nprintf "%s\\n" "buck2 $*"\n', encoding="utf-8"
     )
     hermetic.chmod(0o755)
+    docker = directory / "docker"
+    docker.write_text(
+        "#!/usr/bin/env bash\nprintf 'on|on\\n'\n", encoding="utf-8"
+    )
+    docker.chmod(0o755)
     python = directory / "python3"
     python.write_text(
         "#!/usr/bin/env bash\n"
@@ -151,6 +156,7 @@ def store_suite_branches(suite: str) -> tuple[str, str]:
         # `scripts/ci/with-service.sh` exports the slot count to every suite
         # it wraps; the sharded PostgreSQL suite refuses to run without it.
         environment["LASH_POSTGRES_SLOT_COUNT"] = "4"
+        environment["POSTGRES_SERVICE_CONTAINER"] = "stub"
         result = subprocess.run(
             ["bash", str(STORE_TESTS), suite],
             cwd=ROOT,
@@ -1324,7 +1330,8 @@ finalize_mutation_gate
             postgres_mutation,
         )
         self.assertIn("LASH_POSTGRES_DATABASE_URL", postgres_mutation)
-        self.assertIn('"$@" --jobs "$mutation_jobs"', postgres_mutation)
+        self.assertIn('run_mutants_recorded "$name" "$artifact" "$@"', postgres_mutation)
+        self.assertIn('--jobs "$mutation_jobs"', gate)
 
         derive_jobs = shell_function_body(gate, "derive_mutation_jobs")
         harness = f"""\
@@ -1549,6 +1556,7 @@ derive_mutation_jobs() {{
             "ignored-only": ("--test_arg=--ignored", ("--run-ignored ignored-only", " --ignored")),
             "single-threaded": ("--test_arg=--test-threads=1", ("-j1", "--test-threads=1")),
             "nocapture": ("--test_arg=--nocapture", ("--no-capture", "--nocapture")),
+            "private-postgres": ("--jobs 32", ("cargo test -p",)),
         }
 
         # Parity for every suite, uniform or shaped: both halves render a real
@@ -1718,6 +1726,12 @@ derive_mutation_jobs() {{
                 "loadtest-worker-synthetic-next",
                 "regress-stable-features",
                 "host-features",
+                "facade-law-features",
+                "kernel-synthetic-next",
+                "linked-format-carry",
+                "perf-cell-memory",
+                "perf-console",
+                "provider-signatures",
             },
             set(lanes),
         )
@@ -1773,7 +1787,7 @@ derive_mutation_jobs() {{
         runtime_floors = {
             label: floor for label, floor in floors.items() if "crates/lash:" in label
         }
-        self.assertEqual([130], list(runtime_floors.values()))
+        self.assertEqual([134], list(runtime_floors.values()))
         self.assertNotIn(next(iter(runtime_floors)), inventory["feature_lane_test_args"])
 
     def test_filtered_conformance_selections_hold_nonzero_floors(self) -> None:

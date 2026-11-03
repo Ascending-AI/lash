@@ -610,7 +610,10 @@ class CiMachineryTreeTests(unittest.TestCase):
         )
         stores = plan("scripts/ci/store-tests.sh")
         self.assertEqual("true", stores["stores"])
-        self.assertEqual("false", stores["rust"])
+        # `hermetic-build.sh check` reads the suite table through
+        # check_postgres_gate_coverage.py under every family, so a
+        # store-tests.sh diff selects rust too.
+        self.assertEqual("true", stores["rust"])
         self.assertEqual("true", plan("scripts/ci/buck2_event_digest.py")["rust"])
         # A crate change beside a script keeps the build input's families.
         mixed = plan("scripts/ci_plan.py", "crates/lash-core/src/lib.rs")
@@ -1108,9 +1111,11 @@ class PreciseDevTestScopeTests(unittest.TestCase):
         self.assertTrue(self.scope("schemas/host/kernel-document/deleted.schema.json").broad)
 
     def test_the_justfile_selects_only_its_recipes_contract_tests(self) -> None:
-        tests = frozenset({"scripts/test_with_service.py", "scripts/test_test_xml.py"})
+        tests = frozenset(
+            {"scripts/test_confidence_gate_ci_contract.py", "scripts/test_test_xml.py"}
+        )
         scope = self.scope("justfile", scripts=tests)
-        self.assertEqual(("scripts/test_with_service.py",), scope.script_tests)
+        self.assertEqual(("scripts/test_confidence_gate_ci_contract.py",), scope.script_tests)
         self.assertFalse(scope.broad or scope.repository)
         self.assertEqual(((), (), ()), (scope.packages, scope.targets, scope.files))
 

@@ -425,8 +425,12 @@ DOC_SUFFIXES = frozenset({".md", ".rst", ".txt"})
 RUST_RUNTIME_DOC_INPUTS = frozenset(
     {
         "crates/lash/docs/instrumentation-contract.md",
-        "docs/kernel/library-text-json.md",
+        "docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md",
+        "docs/agents/logging-and-events.md",
+        "docs/architecture/tracing.md",
         "docs/kernel/semantics.md",
+        "docs/plugins.md",
+        "docs/workflow-hosts.md",
     }
 )
 
@@ -479,13 +483,28 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     "scripts/ci_ensure_run.sh": "run by hand to recover a CI run GitHub dropped",
     "scripts/example-core-shutdown-e2e.sh": "run by hand as step one of runbooks/example-core-shutdown/runbook.md",
     "scripts/ci/cargo-parity.sh": "run by hand through kiln gate to check Cargo's isolated package graphs; docs/agents/hermetic-build.md documents the command",
+    "scripts/binary_size.py": "run by hand as a perf instrument; docs/perf/instruments/binary-size.md documents the command",
+    "scripts/build-compare-references.py": "run by hand to record compare references; docs/perf/compare-bench.md documents it",
+    "scripts/compiler_self_profile.py": "run by hand as a perf instrument; docs/perf/instruments/compiler-self-profile.md documents the command",
+    "scripts/effect_phases.py": "run by hand as a perf instrument; docs/perf/instruments/replay-traffic.md documents the command",
+    "scripts/fixtures/test-deletion-evidence.json": "the FIG-528 deletion audit's recorded nominations and dispositions; read by reviewers, run by nothing",
+    "scripts/perf/kernel/kland-gate6-paired.sh": "run by hand for the paired kernel baseline; docs/perf/instruments/kernel-gate6.md documents the command",
+    "scripts/perf/kernel/workflows.py": "run by hand for the workflow program comparison; docs/perf/instruments/kernel-vs-embedded.md documents the command",
+    "scripts/profile_heap.py": "run by hand as a perf instrument; docs/perf/instruments/heap-profiles.md documents the command",
+    "scripts/profile_paged_heap.py": "run by hand as a perf instrument; docs/perf/instruments/cpu-profiles.md documents the command",
+    "scripts/record-helper-differential.py": "run by hand to record the two expected differential fixtures",
+    "scripts/record-kernel-helper-catalog.py": "run by hand to record the kernel helper catalog for review",
 }
 
 # Directories a CI script reads whole, one file per change -- the
 # replay-divergence shards. Name matching cannot see the glob, so each
 # directory declares its reader here: every tracked file under the key is
 # consumed by the value, which passes its own families on transitively.
-SHARD_DIR_READERS: Mapping[str, str] = {}
+SHARD_DIR_READERS: Mapping[str, str] = {
+    "scripts/ci/pg-diagnostic": "scripts/ci/with-service.sh",
+    "scripts/perf/kernel/embedded": "scripts/perf/kernel/embedded.py",
+    "scripts/perf/kernel/workflows": "scripts/perf/kernel/workflows.py",
+}
 
 # The plan outputs a `ci.yml` job may read that are not families. A job's
 # families are the family outputs it reads (`_job_families`); an output in

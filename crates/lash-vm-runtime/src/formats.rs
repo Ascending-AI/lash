@@ -40,8 +40,16 @@ const _: () = assert!(LASH_KERNEL_VERSION == KernelVersion::NEWEST.number());
 /// format_manifest = "KernelDocument"
 /// version_surface = "migrate"
 /// version_unguarded = "kernel token encoding: pre-1.0 changes require a reset, never a record upcaster"
+#[cfg(not(feature = "synthetic-next"))]
 pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 7;
+/// The synthetic successor of kernel document schema version 7.
+#[cfg(feature = "synthetic-next")]
+/// format_manifest = "KernelDocument"
+/// version_surface = "migrate"
+/// version_unguarded = "kernel token encoding: pre-1.0 changes require a reset, never a record upcaster"
+pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 8;
 
+#[cfg(not(feature = "synthetic-next"))]
 const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMENT_GRAMMAR_VERSION);
 
 /// A parked run: the machine's state as a checkpoint root page

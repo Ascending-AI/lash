@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -31,9 +32,11 @@ POSTGRES_STORE_JOBS = ("postgres-store", "postgres-store-synthetic-next")
 def store_suites(job: dict) -> list[str]:
     """The suites a job's steps hand to store-tests.sh, in step order."""
     return [
-        item["run"].split("scripts/ci/store-tests.sh", 1)[1].split()[0]
+        match.group(1)
         for item in job["steps"]
-        if "scripts/ci/store-tests.sh" in item.get("run", "")
+        for match in re.finditer(
+            r"scripts/ci/store-tests\.sh\s+([A-Za-z0-9-]+)", item.get("run", "")
+        )
     ]
 
 
@@ -425,6 +428,7 @@ class TestShardHelperTests(unittest.TestCase):
                 """#!/usr/bin/env python3
 import json
 import os
+import re
 import sys
 
 if sys.argv[1:] == ["--list", "--format", "terse"]:

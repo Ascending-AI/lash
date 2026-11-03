@@ -106,8 +106,8 @@ else
   case "$area" in
     store) selected_packages=(lash-internal-sqlite-store lash-internal-postgres-store) ;;
     process) selected_packages=(lash-internal-core-execution lash-internal-core-worker) ;;
-    effect-host) selected_packages=(lash-internal-core-execution lash-internal-core-effect lash-internal-conformance) ;;
-    provider) selected_packages=(lash-internal-core-execution lash-internal-core-llm lash-internal-sansio) ;;
+    effect-host) selected_packages=(lash-internal-core-execution lash-internal-core-effect) ;;
+    provider) selected_packages=(lash-internal-core-execution lash-internal-core-llm lash-internal-protocol-types) ;;
     protocol) selected_packages=(lash-internal-protocol-rlm lash-internal-protocol-standard) ;;
     sim) selected_packages=(lash-sim) ;;
   esac
@@ -119,15 +119,13 @@ else
         --file 'crates/lash-core-worker/src/runtime/process_worker/*.rs'
         --file 'crates/lash-core-execution/src/runtime/work/*.rs'
         --file 'crates/lash-core-execution/src/session/process_handles.rs'
-        --file 'crates/lash-core-execution/src/tool_provider/process*.rs'
+        --file 'crates/lash-core-execution/src/tool_provider/*.rs'
       )
       ;;
     effect-host)
       area_mutation_file_args=(
         --file 'crates/lash-core-execution/src/runtime/effect/**/*.rs'
         --file 'crates/lash-core-effect/src/*.rs'
-        --file 'crates/lash-conformance/src/conformance/await_event_cold.rs'
-        --file 'crates/lash-conformance/src/conformance/effect_host.rs'
       )
       ;;
     provider)
@@ -2290,7 +2288,7 @@ run_lash_core_direct_model_mutation_evidence() {
     -- --locked -p lash-internal-core-execution --lib direct
   run_mutants_recorded "lash-core model token-limit survivors" "${out_dir}/mutants-lash-core-model-targeted" \
     cargo mutants \
-    -p lash-internal-sansio \
+    -p lash-internal-protocol-types \
     --file crates/lash-protocol-types/src/llm_profile.rs \
     --re 'LlmProfileMetadata::new|LlmProfileMetadata::with_limits|LlmProfileMetadataBuilder::build|OutputTokenLimits::new|LlmProfileMetadata::context_window_tokens|RecordedLlmProfile::context_window_tokens|LlmProfileConfig::context_window_tokens' \
     --baseline skip \
@@ -2298,7 +2296,7 @@ run_lash_core_direct_model_mutation_evidence() {
     --timeout "$timeout" \
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-core-model-targeted" \
-    -- --locked -p lash-internal-sansio --lib llm_profile
+    -- --locked -p lash-internal-protocol-types --lib llm_profile
 }
 
 run_lash_sim_runtime_completion_mutation_evidence() {
