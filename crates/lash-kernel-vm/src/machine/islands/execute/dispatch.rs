@@ -360,6 +360,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         return Ok(Next::Continue);
                     }
                     source::ValuePublication::Declined => {
+                        if frame
+                            .state
+                            .source
+                            .as_ref()
+                            .is_some_and(|source| source.original.is_some())
+                        {
+                            return Err(self.at_operands(site.pc, site.reg, &values[..given]));
+                        }
                         if let Some(close) = &site.close
                             && !self.close(close)
                         {
@@ -368,6 +376,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         return Err(self.at_operands(site.pc, site.reg, &values[..given]));
                     }
                     source::ValuePublication::Unavailable => {}
+                }
+                if frame
+                    .state
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| source.original.is_some())
+                {
+                    return Err(self.at_operands(site.pc, site.reg, &values[..given]));
                 }
                 let answer = self.retaining(&mut frame.state.transient, |island| {
                     island.native(site, &values, given)
@@ -589,7 +605,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             Opcode::Close => {
                 let sites::Close { close, covered, .. } = &code.sites.close[packet.x as usize];
 
-                if !self.close_in(close, *covered) {
+                if !self.defer_original_close(frame, close)? && !self.close_in(close, *covered) {
                     return Err(self.at(close.head));
                 }
             }
@@ -628,6 +644,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     Some(true) => {}
                     Some(false) => return Err(self.at(site.pc)),
                     None => {
+                        if frame
+                            .state
+                            .source
+                            .as_ref()
+                            .is_some_and(|source| source.original.is_some())
+                        {
+                            return Err(self.at_held(site.pc, site.reg, value));
+                        }
                         if !self.write_session(site.name, value, site.bind) {
                             return Err(self.at(site.pc));
                         }

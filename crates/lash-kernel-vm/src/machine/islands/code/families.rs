@@ -269,15 +269,13 @@ impl Format {
             return None;
         };
         let expected: Vec<_> = items.iter().map(|item| item.reg).collect();
-        let replay_guard = *miss < parts.pc && items.first().is_some_and(|item| item.pc < *miss);
         (*make == crate::compile::expr::Make::List
             && self.parts.make == *make
             && self.parts.reg == parts.reg
             && self.parts.items.as_ref() == expected
             && self.parts.members == items.len()
             && self.parts.ahead == *ahead
-            && self.parts.miss == *miss
-            && self.parts.replay_guard == replay_guard)
+            && self.parts.miss == *miss)
             .then_some(())
     }
 }

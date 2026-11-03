@@ -11,6 +11,33 @@ pub(in crate::machine::islands::execute) struct OriginalConstruction<'a> {
     pub(in crate::machine::islands::execute) construction: storage::Construction<'a>,
 }
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
+    pub(in crate::machine::islands::execute) fn defer_original_close(
+        &mut self,
+        frame: &Values<'_, '_>,
+        close: &crate::compile::expr::Close,
+    ) -> Result<bool, Stop> {
+        let Some(source) = frame.state.source.as_ref() else {
+            return Ok(false);
+        };
+        let Some(original) = source.original.as_ref() else {
+            return Ok(false);
+        };
+        let Some(frontier) = source.frontier.as_ref() else {
+            return Err(self.at(close.head));
+        };
+        if original
+            .defer_close(
+                frontier,
+                &self.logical.ledger().borrow(),
+                close,
+                self.charged,
+            )
+            .is_err()
+        {
+            return Err(self.at(close.head));
+        }
+        Ok(true)
+    }
     pub(in crate::machine::islands::execute) fn publish_original_construction(
         &mut self,
         callee: Callee<'_>,
@@ -24,12 +51,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if let Some(frontier) = activation.frontier.as_mut()
             && frontier.departs(&prefix.start)
         {
-            // An existing receipt owns the previous exact prefix. It must be
-            // consumed by source before a different source path can be entered.
-            if activation.original.is_some() {
-                return Ok(None);
+            if let Some(original) = activation.original.as_ref() {
+                if !original.enter_event(
+                    frontier,
+                    &mut store.borrow_mut(),
+                    prefix.start.clone(),
+                    self.charged,
+                )? {
+                    return Ok(None);
+                }
+            } else {
+                frontier.handoff(&mut store.borrow_mut(), prefix.start.clone())?;
             }
-            frontier.handoff(&mut store.borrow_mut(), prefix.start.clone())?;
         }
         let ledger = store.borrow();
         if activation.frontier.is_none() {

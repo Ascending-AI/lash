@@ -210,41 +210,6 @@ impl Cx<'_> {
                 .is_some_and(|bytes| bytes <= self.free())
     }
 
-    /// Builds `object`, as the reference's construction does.
-    pub(crate) fn build(&mut self, object: NewObject) -> Option<Value> {
-        let bound = self.arena.object_bound(&object);
-        self.made(bound, |arena| arena.create(object))
-    }
-
-    /// Makes what `make` creates, which the arena's install bound gives
-    /// `bound` for, as the reference's construction does: `None`, having
-    /// made nothing, where the room does not hold it.
-    pub(crate) fn made(
-        &mut self,
-        bound: u64,
-        make: impl FnOnce(&mut Arena) -> Result<Value, NativeError>,
-    ) -> Option<Value> {
-        if self.memory && bound > self.free() {
-            return None;
-        }
-        let made = make(self.arena);
-        self.created(made)
-    }
-
-    /// What a construction made, or the fault that ends the run.
-    fn created(&mut self, made: Result<Value, NativeError>) -> Option<Value> {
-        match made {
-            Ok(value) => Some(value),
-            Err(error) => {
-                self.fault = Some(match error {
-                    NativeError::Host(error) => error,
-                    error => HeapFault::Malformed(error.to_string()),
-                });
-                None
-            }
-        }
-    }
-
     /// What `plan` charges a call of `args` that gave `result`, measured
     /// as the reference measures it. With a write held, a formula that
     /// measures a graph the write may change uses its projected flat

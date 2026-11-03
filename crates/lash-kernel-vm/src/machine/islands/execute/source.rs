@@ -37,7 +37,7 @@ pub(in crate::machine::islands) struct Activation {
 }
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
-    fn source_return_frame(&self, frame: &storage::Values<'_, '_>) -> bool {
+    pub(super) fn source_return_frame(&self, frame: &storage::Values<'_, '_>) -> bool {
         // An uncharged resident library still owes its semantic caller's
         // completion formula. Its ordinary return owns that final boundary.
         if (frame.state.resident && !frame.state.callee.plan.charged)

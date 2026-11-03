@@ -361,27 +361,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     /// may have committed its first operation), then add the live outer
     /// operands. Neither scratch positions nor this physical cursor persist.
     pub(super) fn spill(&mut self, frame: &Values<'_, '_>, live: &[u32]) {
-        if frame.state.continuation.is_none() {
-            for restart in &frame.state.callee.compiled.restarts {
-                if frame.state.statement == Some(restart.statement)
-                    && self.scratch.exit.at == Some(restart.head)
-                    && matches!(frame.regs[restart.saved as usize + 1], Value::Bool(true))
-                {
-                    let value = frame.regs[restart.saved as usize];
-                    if let Some((_, held)) = self
-                        .scratch
-                        .exit
-                        .regs
-                        .iter_mut()
-                        .find(|(reg, _)| *reg == restart.reg)
-                    {
-                        *held = value;
-                    } else {
-                        self.scratch.exit.regs.push((restart.reg, value));
-                    }
-                }
-            }
-        }
         for reg in live {
             if !self.scratch.exit.regs.iter().any(|(at, _)| at == reg) {
                 self.scratch
@@ -553,11 +532,21 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if let Some((statement, pc)) = source {
             self.restore_expression_scopes(frame.slots, statement, pc);
         }
-        if let Err(error) = self
-            .source_clear_operands(frame)
-            .and_then(|()| self.source_bindings(frame))
-            .and_then(|()| self.logical.flush(self.arena, self.heap))
-        {
+        let published = frame
+            .state
+            .source
+            .as_ref()
+            .is_some_and(|source| source.original.is_some());
+        let rebuilt = if published {
+            // The accepted receipt owns these exact roots. Source adopts its
+            // bank synchronously; projecting slots here would destroy them.
+            self.logical.flush(self.arena, self.heap)
+        } else {
+            self.source_clear_operands(frame)
+                .and_then(|()| self.source_bindings(frame))
+                .and_then(|()| self.logical.flush(self.arena, self.heap))
+        };
+        if let Err(error) = rebuilt {
             self.halt(error.into());
             return;
         }

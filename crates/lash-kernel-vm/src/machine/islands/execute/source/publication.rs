@@ -47,12 +47,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             },
             logical_memory: self.logical_memory,
         }
-        .publish_external(
+        .publish_external_remaining(
             &activation.invocation,
             &mut activation.frontier,
             prefix,
             prepare,
             semantic,
+            (&mut activation.original, self.recorder),
         )
         .map_err(|halt| match halt {
             crate::machine::Halt::Heap(error) => *error,
@@ -95,12 +96,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             },
             logical_memory: self.logical_memory,
         }
-        .publish_departure(
+        .publish_departure_remaining(
             &activation.invocation,
             &mut activation.frontier,
             recipe,
             (),
             |_, _, ()| {},
+            (&mut activation.original, self.recorder),
         )
         .map_err(|halt| match halt {
             crate::machine::Halt::Heap(error) => *error,

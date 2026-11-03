@@ -200,52 +200,74 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let kernel = doc::KernelVersion::of(document.kernel())
             .ok_or_else(|| malformed("session source kernel is unsupported"))?;
         let safe_point = self.charged;
-        let published = Context {
-            admission: Admission::Envelope(self.memory_bound),
-            source,
-            link: frame.state.callee.link,
-            kernel,
-            logical: &self.logical,
-            heap: self.heap,
-            arena: self.arena,
-            session: self.session,
-            resources: SourceResources {
-                charged: &mut self.charged,
-                counters: self.counters,
-                bound: self.bound,
-                slice: self.slice_end,
-                depth: (self.base + u64::from(self.depth)).saturating_sub(1),
-                limit: self.call_depth,
-                safe_point,
-            },
-            logical_memory: self.logical_memory,
-        }
-        .publish_event(
-            &activation.invocation,
-            &mut activation.frontier,
-            publication::Prefix {
-                interval,
-                facts,
-                start,
-                next,
-                allowance,
-            },
-            ExactRoots {
-                inputs,
-                outputs: vec![(output, PV::Existing(input))],
-                ..Default::default()
-            },
-            Successor::Normal,
-            storage,
-            |_, session, edits, storage| {
-                debug_assert!(edits.is_empty());
-                storage.publish(session);
-            },
-        )
-        .map_err(|halt| match halt {
-            crate::machine::Halt::Heap(error) => *error,
-            _ => malformed("an accepted session envelope ended the run"),
-        })?;
+        let prefix = publication::Prefix {
+            interval,
+            facts,
+            start,
+            next,
+            allowance,
+        };
+        let published = if activation.original.is_some() {
+            let Some(charges) = site.charges.as_deref() else {
+                return Ok(Some(false));
+            };
+            self.publish_source_boundary(
+                frame.state.callee,
+                activation,
+                prefix,
+                super::binding::SourceTransfer {
+                    charges,
+                    inputs,
+                    input,
+                    output,
+                },
+                |_, session, edits, ()| {
+                    debug_assert!(edits.is_empty());
+                    storage.publish(session);
+                },
+            )?
+        } else {
+            Context {
+                admission: Admission::Envelope(self.memory_bound),
+                source,
+                link: frame.state.callee.link,
+                kernel,
+                logical: &self.logical,
+                heap: self.heap,
+                arena: self.arena,
+                session: self.session,
+                resources: SourceResources {
+                    charged: &mut self.charged,
+                    counters: self.counters,
+                    bound: self.bound,
+                    slice: self.slice_end,
+                    depth: (self.base + u64::from(self.depth)).saturating_sub(1),
+                    limit: self.call_depth,
+                    safe_point,
+                },
+                logical_memory: self.logical_memory,
+            }
+            .publish_event(
+                &activation.invocation,
+                &mut activation.frontier,
+                prefix,
+                ExactRoots {
+                    inputs,
+                    outputs: vec![(output, PV::Existing(input))],
+                    ..Default::default()
+                },
+                Successor::Normal,
+                storage,
+                |_, session, edits, storage| {
+                    debug_assert!(edits.is_empty());
+                    storage.publish(session);
+                },
+            )
+            .map_err(|halt| match halt {
+                crate::machine::Halt::Heap(error) => *error,
+                _ => malformed("an accepted session envelope ended the run"),
+            })?
+        };
         if published {
             match self
                 .scratch

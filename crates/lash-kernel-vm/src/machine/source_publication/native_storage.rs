@@ -69,6 +69,14 @@ pub(in crate::machine) struct NativePublication {
     pub(in crate::machine) holding: lash_kernel_state::kernel_internals::logical::Holding,
     pub(in crate::machine) units: u64,
 }
+enum NativeBinding {
+    Ordinary(room::publication::BoundEvent),
+    Original(room::publication::OriginalBound),
+}
+enum NativeEvent<'a> {
+    Ordinary(room::publication::PreparedEvent<'a>),
+    Original(room::publication::OriginalPrepared<'a>),
+}
 impl BoundaryPreparation for SourceNative<'_> {
     type Prepared = NativePublication;
     fn prepare<'a>(
@@ -76,6 +84,38 @@ impl BoundaryPreparation for SourceNative<'_> {
         arena: &'a mut Arena,
         entry: ExternalEntry<'_>,
     ) -> Result<Option<(room::publication::PreparedEvent<'a>, Self::Prepared)>, HeapFault> {
+        Ok(self
+            .prepare_inner(arena, entry, None)?
+            .map(|(event, storage)| {
+                let NativeEvent::Ordinary(event) = event else {
+                    unreachable!("ordinary native requested");
+                };
+                (event, storage)
+            }))
+    }
+    fn prepare_remaining<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: ExternalEntry<'_>,
+        original: &room::charges::AcceptedOriginalPrefix,
+    ) -> Result<Option<(room::publication::OriginalPrepared<'a>, Self::Prepared)>, HeapFault> {
+        Ok(self
+            .prepare_inner(arena, entry, Some(original))?
+            .map(|(event, storage)| {
+                let NativeEvent::Original(event) = event else {
+                    unreachable!("remaining native requested");
+                };
+                (event, storage)
+            }))
+    }
+}
+impl SourceNative<'_> {
+    fn prepare_inner<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: ExternalEntry<'_>,
+        original: Option<&room::charges::AcceptedOriginalPrefix>,
+    ) -> Result<Option<(NativeEvent<'a>, NativePublication)>, HeapFault> {
         use room::publication::{ExactRoots, ExternalFacts};
         let ExternalEntry {
             event,
@@ -146,6 +186,15 @@ impl BoundaryPreparation for SourceNative<'_> {
                 ) else {
                     return Ok(None);
                 };
+                let bound = if let Some(original) = original {
+                    match bound.with_original_native(frontier, ledger, original, &debt) {
+                        Ok(bound) => NativeBinding::Original(bound),
+                        Err(PublicationError::Miss(_)) => return Ok(None),
+                        Err(PublicationError::Heap(error)) => return Err(error),
+                    }
+                } else {
+                    NativeBinding::Ordinary(bound)
+                };
                 let holding = lash_kernel_state::kernel_internals::logical::Holding::from_page(
                     heap.pages(),
                     page,
@@ -156,7 +205,15 @@ impl BoundaryPreparation for SourceNative<'_> {
         else {
             return Ok(None);
         };
-        match bound.finish_external(frontier, ledger, transaction) {
+        let prepared = match bound {
+            NativeBinding::Ordinary(bound) => bound
+                .finish_external(frontier, ledger, transaction)
+                .map(NativeEvent::Ordinary),
+            NativeBinding::Original(bound) => bound
+                .finish_external(frontier, ledger, transaction)
+                .map(NativeEvent::Original),
+        };
+        match prepared {
             Ok(prepared) => Ok(Some((
                 prepared,
                 NativePublication {

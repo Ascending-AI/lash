@@ -11,19 +11,19 @@ use room::{
 
 /// An exact local move retains the evaluated RHS provenance. Its source
 /// charge close and owner transfer share the same affine acceptance.
-struct SourceTransfer<'a> {
-    charges: &'a room::charges::ChargeProgram,
-    inputs: Vec<Owner>,
-    input: Owner,
-    output: Owner,
+pub(super) struct SourceTransfer<'a> {
+    pub(super) charges: &'a room::charges::ChargeProgram,
+    pub(super) inputs: Vec<Owner>,
+    pub(super) input: Owner,
+    pub(super) output: Owner,
 }
-impl crate::machine::source_publication::BoundaryPreparation for SourceTransfer<'_> {
-    type Prepared = ();
-    fn prepare<'a>(
+impl<'c> SourceTransfer<'c> {
+    fn bind(
         self,
-        arena: &'a mut Arena,
+        arena: &Arena,
         entry: crate::machine::source_publication::ExternalEntry<'_>,
-    ) -> Result<Option<(room::publication::PreparedEvent<'a>, ())>, HeapFault> {
+    ) -> Result<Option<(room::publication::BoundEvent, room::charges::ChargeDebt<'c>)>, HeapFault>
+    {
         let crate::machine::source_publication::ExternalEntry {
             event,
             frontier,
@@ -57,6 +57,42 @@ impl crate::machine::source_publication::BoundaryPreparation for SourceTransfer<
         ) else {
             return Ok(None);
         };
+        Ok(Some((bound, debt)))
+    }
+}
+impl crate::machine::source_publication::BoundaryPreparation for SourceTransfer<'_> {
+    type Prepared = ();
+    fn prepare<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: crate::machine::source_publication::ExternalEntry<'_>,
+    ) -> Result<Option<(room::publication::PreparedEvent<'a>, ())>, HeapFault> {
+        let (frontier, ledger, heap) = (entry.frontier, entry.ledger, entry.heap);
+        let Some((bound, _)) = self.bind(arena, entry)? else {
+            return Ok(None);
+        };
+        let registration = arena.registration().map_err(publication::native_fault)?;
+        match bound.prepare(frontier, ledger, registration, heap) {
+            Ok(prepared) => Ok(Some((prepared, ()))),
+            Err(room::publication::PublicationError::Miss(_)) => Ok(None),
+            Err(room::publication::PublicationError::Heap(error)) => Err(error),
+        }
+    }
+    fn prepare_remaining<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: crate::machine::source_publication::ExternalEntry<'_>,
+        original: &room::charges::AcceptedOriginalPrefix,
+    ) -> Result<Option<(room::publication::OriginalPrepared<'a>, ())>, HeapFault> {
+        let (frontier, ledger, heap) = (entry.frontier, entry.ledger, entry.heap);
+        let Some((bound, debt)) = self.bind(arena, entry)? else {
+            return Ok(None);
+        };
+        let bound = match bound.with_original_native(frontier, ledger, original, &debt) {
+            Ok(bound) => bound,
+            Err(room::publication::PublicationError::Miss(_)) => return Ok(None),
+            Err(room::publication::PublicationError::Heap(error)) => return Err(error),
+        };
         let registration = arena.registration().map_err(publication::native_fault)?;
         match bound.prepare(frontier, ledger, registration, heap) {
             Ok(prepared) => Ok(Some((prepared, ()))),
@@ -74,7 +110,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         value: Value,
     ) -> Result<Option<bool>, HeapFault> {
         if site.accumulates
-            || self.tape.is_some()
+            || (self.tape.is_some()
+                && frame
+                    .state
+                    .source
+                    .as_ref()
+                    .is_none_or(|source| source.original.is_none()))
             || self.projection().is_some()
             || (!site.bind && matches!(frame.slots[site.at], SlotState::Empty))
         {

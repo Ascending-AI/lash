@@ -601,6 +601,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         self.depth = 0;
                         return Ok(value);
                     }
+                    let original = active
+                        .source
+                        .as_ref()
+                        .is_some_and(|source| source.original.is_some());
                     match self
                         .publish_return_suffix(&mut slab.view(active), value, &completion)
                         .map_err(|error| self.halt(error.into()))?
@@ -614,7 +618,20 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             let stop = self.at_held(returned.pc, returned.reg, value);
                             return self.slow_exit(active, &mut callers, slab, recovery, stop);
                         }
-                        source::ValuePublication::Published(_) => completion.record(self.recorder),
+                        source::ValuePublication::Published(_) => {
+                            if !original {
+                                completion.record(self.recorder);
+                            }
+                        }
+                        source::ValuePublication::Unavailable if original => {
+                            let Some(returned) = active.returned else {
+                                return Err(
+                                    self.halt(fault("original return lost its source operand"))
+                                );
+                            };
+                            let stop = self.at_held(returned.pc, returned.reg, value);
+                            return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                        }
                         source::ValuePublication::Unavailable => {
                             self.charged += completion.units;
                             completion.record(self.recorder);
@@ -998,6 +1015,18 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     #[inline(always)]
     fn returning(&mut self, frame: &mut Values<'_, 'e>, value: Value) -> Result<Next, Stop> {
+        if frame
+            .state
+            .source
+            .as_ref()
+            .is_some_and(|source| source.original.is_some())
+            && !self.source_return_frame(frame)
+        {
+            let Some(returned) = frame.state.returned else {
+                return Err(self.halt(fault("original return lost its source operand")));
+            };
+            return Err(self.at_held(returned.pc, returned.reg, value));
+        }
         // A catch-only scope has no work on a successful return. Keep
         // that return's source coordinate for a library formula refusal.
         if !frame.state.may_clean || !frame.state.callee.compiled.cleanups {

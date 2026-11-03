@@ -17,6 +17,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .publish_construction(frame, site)
             .map_err(|error| self.halt(error.into()))?
         {
+            source::ValuePublication::Published(_) if site.original.continues() => {
+                Ok(Next::Continue)
+            }
             source::ValuePublication::Published(_) => Err(self.at(site.pc + 1)),
             source::ValuePublication::Declined | source::ValuePublication::Unavailable => {
                 Err(self.at(site.miss))
@@ -36,6 +39,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .publish_record_construction(frame, site)
             .map_err(|error| self.halt(error.into()))?
         {
+            source::ValuePublication::Published(_) if site.original.continues() => {
+                Ok(Next::Continue)
+            }
             source::ValuePublication::Published(_) => Err(self.at(site.pc + 1)),
             source::ValuePublication::Declined | source::ValuePublication::Unavailable => {
                 Err(self.at(site.miss))
@@ -52,6 +58,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .publish_closure_construction(frame, site)
             .map_err(|error| self.halt(error.into()))?
         {
+            source::ValuePublication::Published(_) if site.original.continues() => {
+                Ok(Next::Continue)
+            }
             source::ValuePublication::Published(_) => Err(self.at(site.pc + 1)),
             source::ValuePublication::Declined | source::ValuePublication::Unavailable => {
                 Err(self.at(site.miss))

@@ -26,7 +26,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if !self.source_literal(frame, source, dst, literal, original)? {
             return Err(self.at(source.unpaid()));
         }
-        Err(self.at(source.pc() + 1))
+        if original.continues() {
+            Ok(Next::Continue)
+        } else {
+            Err(self.at(source.pc() + 1))
+        }
     }
 
     /// A certified concatenation of resident texts retains the native's

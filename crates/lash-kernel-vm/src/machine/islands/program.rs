@@ -771,6 +771,7 @@ impl<'e> Build<'e> {
                 self.expr(value)?;
                 self.close(*close, *reg);
                 self.emit(Op::Publish {
+                    charges: self.write_charges(statement.id, *pc, *close),
                     name: *name,
                     reg: *reg,
                     pc: *pc,
@@ -1354,15 +1355,11 @@ impl<'e> Build<'e> {
                 for item in items {
                     self.expr(item)?;
                 }
-                let replay_guard = *make == Make::List
-                    && *miss < pc
-                    && items.first().is_some_and(|item| item.pc < *miss);
                 let items: Box<[_]> = items.iter().map(|item| item.reg).collect();
                 self.emit(Op::Make {
                     pc,
                     original: self.constructor_original(pc)?,
                     ahead: *ahead,
-                    replay_guard,
                     make: *make,
                     items: items.clone(),
                     reg,

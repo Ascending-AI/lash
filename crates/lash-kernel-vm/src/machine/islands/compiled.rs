@@ -128,7 +128,6 @@ pub(crate) struct Compiled {
     pub(super) cell_parameters: usize,
     pub(super) cleanups: bool,
     cleanup: Box<[Cleanup]>,
-    pub(super) restarts: Box<[Restart]>,
     room: u32,
     observes: bool,
     #[allow(
@@ -136,15 +135,6 @@ pub(crate) struct Compiled {
         reason = "phase-one source projection; consumed by ledger admission later"
     )]
     pub(crate) source_room: std::sync::Arc<crate::compile::room::Source>,
-}
-
-/// Private copies used only when a source region's charge close refuses.
-#[derive(Clone, Copy)]
-pub(crate) struct Restart {
-    pub(super) statement: StmtId,
-    pub(super) head: u32,
-    pub(super) reg: u32,
-    pub(super) saved: u32,
 }
 
 pub(super) struct Block {
@@ -665,7 +655,6 @@ impl Compiled {
             blocks: cx.blocks,
             cleanups: cleanup.iter().any(|entry| entry.finally.is_some()),
             cleanup: cleanup.into(),
-            restarts: Box::default(),
             code,
             registers: cx.registers,
             headers: headers.into(),

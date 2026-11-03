@@ -6,26 +6,6 @@ use crate::compile::{Cx, Meter};
 
 mod answer;
 
-struct MapEntries<I>(I);
-
-impl<I: ExactSizeIterator<Item = Value>> Iterator for MapEntries<I> {
-    type Item = (Value, Value);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        Some((self.0.next()?, self.0.next()?))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.len(), Some(self.len()))
-    }
-}
-
-impl<I: ExactSizeIterator<Item = Value>> ExactSizeIterator for MapEntries<I> {
-    fn len(&self) -> usize {
-        self.0.len() / 2
-    }
-}
-
 /// An accepted operation retains its ordered charges until the caller commits
 /// its counted action. A scalar native has one formula; a helper has its body
 /// events, which must never be collapsed into that formula's total.
@@ -502,81 +482,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         true
     }
 
-    #[inline(never)]
-    pub(super) fn make(
-        &mut self,
-        make: crate::compile::expr::Make,
-        values: impl ExactSizeIterator<Item = Value> + Clone,
-    ) -> Option<Value> {
-        use crate::compile::expr::Make;
-        if make == Make::Map
-            && values.len().is_multiple_of(2)
-            && self.resident_room(self.arena.table_bound(values.len() / 2))
-        {
-            for (key, _) in MapEntries(values.clone()) {
-                self.arena.key(&key).ok()?;
-            }
-            return self.arena.create_map(MapEntries(values)).ok();
-        }
-        // Small argument lists already fit the register executor's operand
-        // allowance. Build their inline arena sequence without a temporary Vec.
-        if make == Make::List
-            && values.len() <= MAX_ARGS
-            && self.resident_room(self.arena.sequence_bound(values.len()))
-        {
-            let count = values.len();
-            let mut items = [Value::Absent; MAX_ARGS];
-            for (to, value) in items.iter_mut().zip(values) {
-                *to = value;
-            }
-            #[cfg(test)]
-            super::DIRECT_COLLECTIONS.with(|n| n.set(n.get() + 1));
-            return Some(self.arena.create_list(&items[..count]));
-        }
-        let values = values.collect::<Vec<_>>();
-        if matches!(make, Make::List | Make::Tuple)
-            && self.resident_room(self.arena.sequence_bound(values.len()))
-        {
-            #[cfg(test)]
-            super::DIRECT_COLLECTIONS.with(|n| n.set(n.get() + 1));
-            return match make {
-                Make::Tuple => self.arena.tuple(values, self.limits.value_depth()).ok(),
-                Make::List => self
-                    .arena
-                    .create(lash_kernel_doc::NewObject::List(values))
-                    .ok(),
-                _ => unreachable!(),
-            };
-        }
-        self.heap(0, false, |cx| match make {
-            Make::Tuple => {
-                let bound = cx.arena.sequence_bound(values.len());
-                if !cx.fits(bound) {
-                    return None;
-                }
-                cx.arena.tuple(values, cx.limits.value_depth()).ok()
-            }
-            Make::List => cx.build(lash_kernel_doc::NewObject::List(values)),
-            Make::Set => {
-                for value in &values {
-                    cx.arena.key(value).ok()?;
-                }
-                cx.build(lash_kernel_doc::NewObject::Set(values))
-            }
-            Make::Map => {
-                let mut entries = Vec::with_capacity(values.len() / 2);
-                for pair in values.as_chunks::<2>().0 {
-                    cx.arena.key(&pair[0]).ok()?;
-                    entries.push((pair[0], pair[1]));
-                }
-                cx.build(lash_kernel_doc::NewObject::Map(entries))
-            }
-        })
-        .map(|answer| answer.value)
-    }
-
-    /// The empty tuple [`Self::make`] builds, without an operation's
-    /// context: it charges nothing and only needs its room.
+    /// The empty tuple without an operation's context. It charges nothing
+    /// and only needs its room.
     pub(super) fn empty_tuple(&mut self) -> Option<Value> {
         let free = self
             .ceiling
@@ -587,29 +494,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return None;
         }
         self.arena.tuple(Vec::new(), self.limits.value_depth()).ok()
-    }
-
-    pub(super) fn record(
-        &mut self,
-        names: &[Value],
-        values: impl ExactSizeIterator<Item = Value>,
-    ) -> Option<Value> {
-        if self.resident_room(self.arena.table_bound(values.len())) {
-            #[cfg(test)]
-            super::DIRECT_COLLECTIONS.with(|n| n.set(n.get() + 1));
-            return self
-                .arena
-                .create(lash_kernel_doc::NewObject::Record(
-                    names.iter().copied().zip(values).collect(),
-                ))
-                .ok();
-        }
-        self.heap(0, false, |cx| {
-            cx.build(lash_kernel_doc::NewObject::Record(
-                names.iter().copied().zip(values).collect(),
-            ))
-        })
-        .map(|answer| answer.value)
     }
 
     pub(super) fn remove(&mut self, target: Value, index: Value) -> Option<()> {
@@ -737,69 +621,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             Value::ObjectRef(cell) => Some(cell),
             _ => None,
         })
-    }
-
-    /// A closure of `code` over the cells of the variables it shares, made
-    /// as the reference makes it; `None`, having made nothing, where a
-    /// captured variable has no cell yet or the room does not hold it.
-    pub(super) fn fresh_closure(
-        &mut self,
-        callee: Callee<'_>,
-        slots: &Slots,
-        code: CodeId,
-    ) -> Option<ArenaHandle> {
-        let target = self.exe.code(code);
-        let lash_kernel_value::sites::Unit::Library(function) = target.site.unit else {
-            return None;
-        };
-        let mut cells = Vec::with_capacity(target.captures.len());
-        for capture in &target.captures {
-            let cell = match slots.get(capture.outer_at as usize)? {
-                SlotState::Cell(cell) => *cell,
-                _ if callee.captured != RESIDENT => {
-                    let index = callee
-                        .plan
-                        .captures
-                        .iter()
-                        .position(|at| *at == capture.outer_at)?;
-                    self.scratch.captured[callee.captured as usize + index].1
-                }
-                _ => return None,
-            };
-            cells.push(cell);
-        }
-        let (exe, link) = (self.exe, callee.link);
-        let answer = self.heap(0, false, |cx| {
-            if !cx.fits(cx.arena.sequence_bound(cells.len())) {
-                return None;
-            }
-            let identity = std::sync::Arc::new(lash_kernel_doc::arena::ClosureIdentity {
-                capture_names: target.capture_names.clone(),
-                callable: lash_kernel_value::names::CallableId { link, function },
-                site: lash_kernel_doc::linked_site::LinkedSite {
-                    link,
-                    site: target
-                        .created
-                        .clone()
-                        .unwrap_or_else(|| target.site.clone()),
-                },
-            });
-            let closure = cx.arena.new_closure(identity, cells);
-            cx.arena
-                .found_closure_code(
-                    closure,
-                    lash_kernel_doc::arena::LocalCode {
-                        executable: exe.local(),
-                        code: code.0,
-                    },
-                )
-                .ok()?;
-            Some(Value::Closure(closure))
-        })?;
-        match answer.value {
-            Value::Closure(closure) => Some(closure),
-            _ => None,
-        }
     }
 }
 

@@ -363,7 +363,6 @@ operations! {
                 pc: u32,
                 ahead: u64,
                 original: std::sync::Arc<crate::compile::room::charges::OriginalPrefix>,
-                replay_guard: bool,
                 make: crate::compile::expr::Make,
                 items: Box<[u32]>,
                 reg: u32,
@@ -443,6 +442,7 @@ operations! {
                 opens: [Option<usize>; 2],
             }
             Publish publish {
+                charges: Option<std::sync::Arc<crate::compile::room::charges::ChargeProgram>>,
                 name: u32,
                 reg: u32,
                 pc: u32,

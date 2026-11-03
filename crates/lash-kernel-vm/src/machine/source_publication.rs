@@ -148,13 +148,21 @@ pub(in crate::machine) struct ExternalEntry<'a> {
     pub(in crate::machine) prefix: Prefix,
     pub(in crate::machine) resources: crate::admission::ResourceFacts,
 }
-pub(in crate::machine) trait BoundaryPreparation {
+pub(in crate::machine) trait BoundaryPreparation: Sized {
     type Prepared;
     fn prepare<'a>(
         self,
         arena: &'a mut Arena,
         entry: ExternalEntry<'_>,
     ) -> Result<Option<(room::publication::PreparedEvent<'a>, Self::Prepared)>, HeapFault>;
+    fn prepare_remaining<'a>(
+        self,
+        _arena: &'a mut Arena,
+        _entry: ExternalEntry<'_>,
+        _original: &room::charges::AcceptedOriginalPrefix,
+    ) -> Result<Option<(room::publication::OriginalPrepared<'a>, Self::Prepared)>, HeapFault> {
+        Ok(None)
+    }
 }
 
 /// An envelope miss leaves its island at the instruction for exact source.

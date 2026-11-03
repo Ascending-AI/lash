@@ -53,6 +53,10 @@ type OriginalInput<'a> = (
     &'a [Value],
     Option<&'a room::charges::AcceptedOriginalPrefix>,
 );
+enum OriginalRequest<'a> {
+    Prefix(OriginalInput<'a>),
+    Remaining(&'a room::charges::AcceptedOriginalPrefix),
+}
 impl BoundaryPreparation for Construction<'_> {
     type Prepared = Prepared;
     fn prepare<'a>(
@@ -69,6 +73,21 @@ impl BoundaryPreparation for Construction<'_> {
             })
         })
     }
+    fn prepare_remaining<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: ExternalEntry<'_>,
+        original: &room::charges::AcceptedOriginalPrefix,
+    ) -> Result<Option<(room::publication::OriginalPrepared<'a>, Prepared)>, HeapFault> {
+        Ok(self
+            .prepare_inner(arena, entry, Some(OriginalRequest::Remaining(original)))?
+            .map(|(event, storage)| {
+                let ConstructionEvent::Original(event) = event else {
+                    unreachable!("remaining construction requested");
+                };
+                (event, storage)
+            }))
+    }
 }
 impl Construction<'_> {
     /// The same detached graph and source checks, with compiler-owned original
@@ -79,7 +98,7 @@ impl Construction<'_> {
         entry: ExternalEntry<'_>,
         original: OriginalInput<'_>,
     ) -> Result<Option<(room::publication::OriginalPrepared<'a>, Prepared)>, HeapFault> {
-        self.prepare_inner(arena, entry, Some(original))
+        self.prepare_inner(arena, entry, Some(OriginalRequest::Prefix(original)))
             .map(|prepared| {
                 prepared.map(|(event, storage)| {
                     let ConstructionEvent::Original(event) = event else {
@@ -93,7 +112,7 @@ impl Construction<'_> {
         self,
         arena: &'a mut Arena,
         entry: ExternalEntry<'_>,
-        original: Option<OriginalInput<'_>>,
+        original: Option<OriginalRequest<'_>>,
     ) -> Result<Option<(ConstructionEvent<'a>, Prepared)>, HeapFault> {
         use room::publication::{ExactRoots, ExternalFacts};
         let ExternalEntry {
@@ -255,22 +274,33 @@ impl Construction<'_> {
             return Ok(None);
         };
 
-        let bound = if let Some((program, registers, previous)) = original {
-            match bound.with_original_prefix(
-                frontier,
-                ledger,
-                graph.registration.arena(),
-                heap,
-                program,
-                registers,
-                previous,
-            ) {
-                Ok(bound) => BoundConstruction::Original(bound),
-                Err(PublicationError::Miss(_)) => return Ok(None),
-                Err(PublicationError::Heap(error)) => return Err(error),
+        let bound = match original {
+            None => BoundConstruction::Ordinary(bound),
+            Some(original) => {
+                let original = match original {
+                    OriginalRequest::Prefix((program, registers, previous)) => bound
+                        .with_original_prefix(
+                            frontier,
+                            ledger,
+                            graph.registration.arena(),
+                            heap,
+                            program,
+                            registers,
+                            previous,
+                        ),
+                    OriginalRequest::Remaining(original) => {
+                        let Some(debt) = debt.as_ref() else {
+                            return Ok(None);
+                        };
+                        bound.with_original_native(frontier, ledger, original, debt)
+                    }
+                };
+                match original {
+                    Ok(bound) => BoundConstruction::Original(bound),
+                    Err(PublicationError::Miss(_)) => return Ok(None),
+                    Err(PublicationError::Heap(error)) => return Err(error),
+                }
             }
-        } else {
-            BoundConstruction::Ordinary(bound)
         };
         let (transaction, mut storage) =
             graph.into_boundary(ledger, heap, &self.inputs, dependencies)?;

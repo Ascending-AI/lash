@@ -3,10 +3,6 @@
 use super::*;
 use logical::{BoundaryTransaction, Dependencies, Owner as Root, RootValue, Slot};
 mod literal;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "unpublished H original-prefix return API")
-)]
 mod original;
 
 pub(crate) struct DepartureExit {

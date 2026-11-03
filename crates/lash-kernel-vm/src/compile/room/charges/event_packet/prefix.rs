@@ -12,6 +12,40 @@ struct Region {
     paid: usize,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Continuation {
+    Source,
+    Constructor,
+    Native,
+    Write,
+    Return,
+}
+impl Continuation {
+    fn of(stream: &compile::Stream, pc: u32) -> Self {
+        match stream.ops[pc as usize] {
+            Op::MakeList { .. }
+            | Op::MakeTuple { .. }
+            | Op::MakeMap { .. }
+            | Op::MakeSet { .. }
+            | Op::MakeRecord { .. }
+            | Op::Closure { .. } => Self::Constructor,
+            Op::Const { c, .. }
+                if matches!(stream.consts[c.ix()], compile::Constant::Deferred(_)) =>
+            {
+                Self::Constructor
+            }
+            Op::Call { .. } | Op::Operator { .. } => Self::Native,
+            Op::Bind { .. }
+            | Op::BindShared { .. }
+            | Op::WriteLocal { .. }
+            | Op::BindSession { .. }
+            | Op::WriteSession { .. } => Self::Write,
+            Op::Return { .. } => Self::Return,
+            _ => Self::Source,
+        }
+    }
+}
+
 /// Cached with the constructor site, independently of physical runtime state.
 pub(crate) struct OriginalPrefix {
     source: Arc<Source>,
@@ -20,6 +54,7 @@ pub(crate) struct OriginalPrefix {
     statement: compile::StmtId,
     at: Point,
     next: u32,
+    continuation: Continuation,
     stop: u32,
     end: Option<Point>,
     regions: Box<[Region]>,
@@ -162,6 +197,7 @@ impl OriginalPrefix {
             statement,
             at,
             next,
+            continuation: Continuation::of(stream, next),
             stop,
             end,
             regions: regions.into(),
@@ -175,6 +211,9 @@ impl OriginalPrefix {
         }))
     }
 
+    pub(crate) fn continues(&self) -> bool {
+        self.continuation != Continuation::Source
+    }
     pub(crate) fn values(&self, mut read: impl FnMut(u32) -> Value) -> Vec<Value> {
         let mut values = vec![Value::Absent; self.registers];
         for (reg, role) in &self.roles {
@@ -201,6 +240,7 @@ impl OriginalPrefix {
         quote: u64,
     ) -> bool {
         self.pc() == pc
+            && self.continuation == Continuation::of(stream, self.next)
             && self.unpaid() == unpaid
             && self
                 .regions
@@ -328,6 +368,45 @@ impl OriginalPrefix {
 }
 
 impl AcceptedOriginalPrefix {
+    pub(crate) fn enter_event(
+        &self,
+        frontier: &mut Frontier,
+        ledger: &mut Ledger,
+        start: crate::compile::room::publication::Position,
+        charged: u64,
+    ) -> Result<bool, doc::heap::HeapFault> {
+        if !self.belongs(frontier, ledger)
+            || self.paid_at != charged
+            || start.occurrence != self.occurrence
+            || start.unpaid.as_ref() != Some(&start.at)
+            || frontier.position.unpaid.as_ref() != Some(&start.at)
+        {
+            return Ok(false);
+        }
+        if frontier.departs(&start) {
+            frontier.handoff(ledger, start)?;
+        }
+        Ok(true)
+    }
+    pub(crate) fn defer_close(
+        &self,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        close: &expr::Close,
+        charged: u64,
+    ) -> Result<(), Refused> {
+        if !self.belongs(frontier, ledger)
+            || self.paid_at != charged
+            || !self
+                .program
+                .regions
+                .iter()
+                .any(|region| region.close == *close)
+        {
+            return Err(Refused::Source);
+        }
+        Ok(())
+    }
     fn valid_recovery(&self) -> bool {
         self.program.roles.len() == self.roles.len()
             && self

@@ -32,6 +32,8 @@ pub(super) fn derive(
         op,
         Op::WriteLocal { .. }
             | Op::Bind { .. }
+            | Op::BindSession { .. }
+            | Op::WriteSession { .. }
             | Op::BindShared { .. }
             | Op::LetBind { .. }
             | Op::LetBindShared { .. }
