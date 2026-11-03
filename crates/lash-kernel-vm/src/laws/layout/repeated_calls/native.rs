@@ -37,10 +37,27 @@ fn probes(
         .find(|(name, _)| *name == "flat.add")
         .unwrap()
         .1;
-    let implementation = Arc::clone(registry.get(&add).unwrap().native().unwrap());
-    for (name, known) in [("wrapped.known", true), ("wrapped.unknown", false)] {
+    for (name, known, primitive) in [
+        ("wrapped.known", true, add),
+        ("wrapped.unknown", false, add),
+        (
+            "wrapped.lt",
+            true,
+            functions
+                .iter()
+                .find(|(name, _)| *name == "flat.lt")
+                .unwrap()
+                .1,
+        ),
+    ] {
+        let implementation = Arc::clone(registry.get(&primitive).unwrap().native().unwrap());
+        let operation = if name == "wrapped.lt" {
+            "flat.lt"
+        } else {
+            "flat.add"
+        };
         let definition = lash_kernel_doc::parse_definition(&format!(
-            "function {name}(a: Any, b: Any) -> Any\nkernel 1\ncharge sum(7, size(a), size(b), size(result))\nuse flat.add = @{add}\nnative\nbody {{ return flat.add(a,b) }}"
+            "function {name}(a: Any, b: Any) -> Any\nkernel 1\ncharge sum(7, size(a), size(b), size(result))\nuse {operation} = @{primitive}\nnative\nbody {{ return {operation}(a,b) }}"
         )).unwrap();
         functions.push((
             name,
@@ -146,9 +163,13 @@ fn observe(
 }
 pub(super) fn runtime() {
     use crate::machine::islands::compiled::{take_loop_invocations, take_loop_publications};
-    for (name, eligible) in [("wrapped.known", true), ("wrapped.unknown", false)] {
+    for (name, eligible, test, invocations) in [
+        ("wrapped.known", true, "wrapped.lt", 8),
+        ("wrapped.known", true, "flat.lt", 4),
+        ("wrapped.unknown", false, "flat.lt", 0),
+    ] {
         let source = scalar_document(&format!(
-            "let i = 0 let s = 0 while flat.lt(i,4) {{ set s = flat.add(s,flat.mul(i,i)) let previous = flat.identity(i) set i = invoke {name}(previous,1) }} return (s,i)"
+            "let i = 0 let s = 0 while {test}(i,4) {{ set s = flat.add(s,flat.mul(i,i)) let previous = flat.identity(i) set i = invoke {name}(previous,1) }} return (s,i)"
         ));
         take_loop_publications();
         take_loop_invocations();
@@ -172,7 +193,7 @@ pub(super) fn runtime() {
         );
         assert_eq!(
             take_loop_invocations(),
-            if eligible { 4 } else { 0 },
+            invocations,
             "completed source invocations: {name}"
         );
         for layout in [Layout(0), Layout(1), Layout(2), Layout(u64::MAX)] {
