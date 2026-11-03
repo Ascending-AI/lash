@@ -211,12 +211,13 @@ impl VerifiedCall {
                     return None;
                 }
                 let mut captures = Vec::with_capacity(cells.len());
-                for (name, cell) in body.capture_names.iter().zip(cells) {
+                for (capture, cell) in body.captures.iter().zip(cells) {
+                    let binding = body.slots.get(capture.inner as usize)?;
                     let slot = slot(
                         &self.source,
                         &Owner::Binding {
-                            declared: self.source.site.clone(),
-                            name: name.clone(),
+                            declared: binding.declared.clone(),
+                            name: binding.name.clone(),
                         },
                     )
                     .ok()?;

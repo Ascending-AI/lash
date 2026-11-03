@@ -13,16 +13,20 @@ use std::sync::Arc;
 
 pub(super) fn identities() {
     for layout in [0, 42] {
-        for (rooted, foreign_binding, earlier, captured, mutates) in [
-            (false, false, false, false, false),
-            (true, false, false, false, false),
-            (false, true, false, false, false),
-            (true, true, false, false, false),
-            (false, false, true, false, false),
-            (false, false, false, true, false),
-            (true, false, false, true, false),
-            (false, false, false, true, true),
+        for (rooted, foreign_binding, earlier, captured, mutates, two) in [
+            (false, false, false, false, false, false),
+            (true, false, false, false, false, false),
+            (false, true, false, false, false, false),
+            (true, true, false, false, false, false),
+            (false, false, true, false, false, false),
+            (false, false, false, true, false, false),
+            (true, false, false, true, false, false),
+            (false, false, false, true, true, false),
+            (false, false, false, true, false, true),
+            (true, false, false, true, false, true),
         ] {
+            let reversed =
+                lash_kernel_value::Name::new("seed") < lash_kernel_value::Name::new("offset");
             let expression = if earlier {
                 "(apply f(1, 2), apply f(3, 4))"
             } else if rooted {
@@ -33,15 +37,28 @@ pub(super) fn identities() {
             let definition = crate::laws::embedder::fragment(&format!(
                 "function callback(f: Any, outer: Any) -> Any\nkernel 1\nmetering statements\nbody {{ let answer = {expression} return answer }}"
             ));
-            let make_body = if mutates {
+            let make_body = if two {
+                if reversed {
+                    "return fn(a, b) { return flat.rem(offset, seed) }"
+                } else {
+                    "return fn(a, b) { return flat.rem(seed, offset) }"
+                }
+            } else if mutates {
                 "return fn(a, b) { set seed = flat.rem(a, b) return seed }"
             } else {
                 "return fn(a, b) { return flat.rem(a, seed) }"
             };
+            let make_params = if two {
+                "seed: Any, offset: Any"
+            } else {
+                "seed: Any"
+            };
             let maker = crate::laws::embedder::fragment(&format!(
-                "function make(seed: Any) -> Any\nkernel 1\nmetering statements\nbody {{ {make_body} }}"
+                "function make({make_params}) -> Any\nkernel 1\nmetering statements\nbody {{ {make_body} }}"
             ));
-            let first = if captured {
+            let first = if two {
+                "call make(9, 7)"
+            } else if captured {
                 "call make(9)"
             } else {
                 "fn(a, b) { return flat.rem(a, b) }"
@@ -113,7 +130,11 @@ pub(super) fn identities() {
                     .map(|index| CodeId(index as u32))
                     .find(|id| {
                         exe.code(*id).created.is_some()
-                            && exe.code(*id).capture_names == [lash_kernel_value::Name::new("seed")]
+                            && exe.code(*id).capture_names.len() == if two { 2 } else { 1 }
+                            && exe
+                                .code(*id)
+                                .capture_names
+                                .contains(&lash_kernel_value::Name::new("seed"))
                             && exe.code(*id).source_room.params.as_ref()
                                 == [
                                     lash_kernel_value::Name::new("a"),
@@ -233,7 +254,26 @@ pub(super) fn identities() {
                 program.link
             };
             let cell = captured.then(|| arena.new_cell(Value::Int(9)));
-            let cells: Vec<_> = cell.into_iter().collect();
+            let offset = two.then(|| arena.new_cell(Value::Int(7)));
+            let cells: Vec<_> = if let Some(offset) = offset {
+                let seed = cell.unwrap();
+                let names: Vec<_> = code
+                    .captures
+                    .iter()
+                    .map(|capture| code.slots[capture.inner as usize].name.clone())
+                    .collect();
+                assert_ne!(
+                    names, code.capture_names,
+                    "the fixture must distinguish cell order from the sorted identity set"
+                );
+                if reversed {
+                    vec![offset, seed]
+                } else {
+                    vec![seed, offset]
+                }
+            } else {
+                cell.into_iter().collect()
+            };
             let actual = Value::Closure(arena.new_closure(identity(defining_link), cells.clone()));
             let foreign = Value::Closure(arena.new_closure(
                 identity(lash_kernel_value::LinkId::from_bytes([99; 32])),
@@ -418,7 +458,11 @@ pub(super) fn identities() {
                 .evaluate_scoped(&exe, callee, &scope, 0, &arena, &roles)
                 .unwrap()
                 .unwrap();
-            assert!(candidate.result().same(&Value::Int(3)));
+            let expected = if two { if reversed { 7 } else { 2 } } else { 3 };
+            assert!(
+                candidate.result().same(&Value::Int(expected)),
+                "the actual ordered capture values, rather than their equal prices, determine the answer"
+            );
             assert_eq!(
                 candidate.peak(),
                 lash_kernel_doc::LogicalHeldV1::FRAME
@@ -475,9 +519,18 @@ pub(super) fn identities() {
                         },
                     )
                     .unwrap();
-                assert_eq!(during[1].captures.len(), 1);
+                assert_eq!(during[1].captures.len(), if two { 2 } else { 1 });
                 assert_eq!(
-                    during[1].captures[0].1, cell,
+                    during[1]
+                        .captures
+                        .iter()
+                        .map(|(_, actual)| *actual)
+                        .collect::<Vec<_>>(),
+                    cells,
+                    "cold capture roles preserve the actual environment order"
+                );
+                assert!(
+                    during[1].captures.iter().any(|(_, actual)| *actual == cell),
                     "cold callee recovery retains the actual shared cell"
                 );
                 arena.cell_set(cell, Value::Int(10)).unwrap();
