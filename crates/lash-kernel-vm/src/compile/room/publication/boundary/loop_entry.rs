@@ -94,11 +94,9 @@ fn path(
     last: Point,
     interval: Arc<CompiledInterval>,
     successor: Successor,
-    header: bool,
-    ending: bool,
-    statement: StmtId,
+    header: Option<(StmtId, bool)>,
 ) -> Result<Path, Refused> {
-    let charges = if header {
+    let charges = if let Some((statement, ending)) = header {
         vec![ChargeProgram::loop_header(exe, code, statement, ending)?]
     } else {
         vec![]
@@ -185,9 +183,7 @@ impl LoopEntry {
                     test.clone(),
                     interval,
                     Successor::Cursor(true),
-                    true,
-                    false,
-                    statement,
+                    Some((statement, false)),
                 )?;
                 let next = path(
                     exe,
@@ -196,9 +192,7 @@ impl LoopEntry {
                     test.clone(),
                     source.compile_event(&test, ExitKind::Normal)?,
                     Successor::Cursor(true),
-                    true,
-                    false,
-                    statement,
+                    Some((statement, false)),
                 )?;
                 let commit = Point {
                     site: site.clone(),
@@ -211,9 +205,7 @@ impl LoopEntry {
                     commit.clone(),
                     source.compile_event(&commit, ExitKind::Normal)?,
                     Successor::Normal,
-                    true,
-                    true,
-                    statement,
+                    Some((statement, true)),
                 )?;
                 Shape::For {
                     input,
@@ -235,9 +227,7 @@ impl LoopEntry {
                     test.clone(),
                     Arc::clone(&interval),
                     Successor::Condition(true),
-                    false,
-                    false,
-                    statement,
+                    None,
                 )?;
                 let no = path(
                     exe,
@@ -246,9 +236,7 @@ impl LoopEntry {
                     test.clone(),
                     interval,
                     Successor::Condition(false),
-                    false,
-                    true,
-                    statement,
+                    None,
                 )?;
                 Shape::While { condition, yes, no }
             }
@@ -345,7 +333,7 @@ impl LoopEntry {
                     slot(&self.source, &Owner::Operand(self.site.child(0))).map_err(|_| fail())?;
                 let plan = if value.is_some() {
                     if !matches!(
-                        activation.state(*item).as_ref(),
+                        activation.state(*item),
                         Some(crate::machine::SlotState::Empty)
                     ) {
                         return Ok(None);
@@ -480,14 +468,13 @@ impl LoopEntry {
                     })
                     .cloned()
                     .collect();
-                let event_inputs =
-                    if event.point.phase == Phase::Commit && event.point.site == self.site {
-                        &inputs[..]
-                    } else if matches!(self.shape, Shape::While { .. }) {
-                        &inputs[..]
-                    } else {
-                        &[]
-                    };
+                let event_inputs = if matches!(self.shape, Shape::While { .. })
+                    || (event.point.phase == Phase::Commit && event.point.site == self.site)
+                {
+                    &inputs[..]
+                } else {
+                    &[]
+                };
                 EventContext {
                     earlier: &[],
                     source: &self.source,

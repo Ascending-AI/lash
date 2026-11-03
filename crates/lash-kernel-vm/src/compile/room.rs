@@ -1056,9 +1056,7 @@ impl Source {
             doc::Node::Expr(_)
                 | doc::Node::Action(_)
                 | doc::Node::Stmt(
-                    doc::Stmt::For { via: None, .. }
-                        | doc::Stmt::While { .. }
-                        | doc::Stmt::Let { .. }
+                    doc::Stmt::Let { .. }
                         | doc::Stmt::Do { .. }
                         | doc::Stmt::Assign { .. }
                         | doc::Stmt::Remove { .. }

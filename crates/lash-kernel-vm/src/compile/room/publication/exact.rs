@@ -657,7 +657,9 @@ impl Source {
         successor: Successor,
     ) -> Result<Point, Refused> {
         match at.phase {
-            Phase::Commit | Phase::Restore => self.next_after_commit(&at.site),
+            Phase::Commit | Phase::Restore => self
+                .next_after_commit(&at.site)
+                .or_else(|_| self.next_after_loop_commit(at)),
             Phase::Open => self.compile_leaf(&at.site).map(|(_, next, _)| next),
             Phase::Test => match successor {
                 Successor::Condition(taken) => self
@@ -689,6 +691,50 @@ impl Source {
             _ => Err(Refused::Path),
         }
     }
+    fn next_after_loop_commit(&self, at: &Point) -> Result<Point, Refused> {
+        self.verify()?;
+        if at.phase != Phase::Commit
+            || at.site.unit != self.site.unit
+            || !at.site.path.starts_with(&self.site.path)
+            || at.site.path.len() <= self.site.path.len()
+            || !self.room.events.contains_key(at)
+        {
+            return Err(Refused::Path);
+        }
+        let mut parent = at.site.clone();
+        let index = parent.path.pop().ok_or(Refused::Path)?;
+        let mut node = doc::Node::Block(&self.body);
+        for index in &parent.path[self.site.path.len()..] {
+            node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+        }
+        let doc::Node::Block(block) = node else {
+            return Err(Refused::Path);
+        };
+        if !matches!(
+            block.get(index as usize),
+            Some(doc::Stmt::For { via: None, .. } | doc::Stmt::While { .. })
+        ) {
+            return Err(Refused::Source);
+        }
+        if (index as usize) + 1 < block.len() {
+            self.first_event(&parent.child(index.checked_add(1).ok_or(Refused::Path)?))
+        } else {
+            let next = Point {
+                phase: if parent == self.site {
+                    Phase::Fallthrough
+                } else {
+                    Phase::Leave
+                },
+                site: parent,
+            };
+            self.room
+                .events
+                .contains_key(&next)
+                .then_some(next)
+                .ok_or(Refused::Path)
+        }
+    }
+
     fn exact_scope_successor(&self, at: &Site, successor: Successor) -> Result<Point, Refused> {
         if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
             return Err(Refused::Path);

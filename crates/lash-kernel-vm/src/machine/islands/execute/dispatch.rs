@@ -94,13 +94,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     self.progressed();
                 }
                 if at.is_some() {
-                    if let Some(entry) = entry {
-                        if self
+                    if let Some(entry) = entry
+                        && self
                             .publish_loop_entry(frame, entry, None, *otherwise)
                             .map_err(|e| self.halt(e.into()))?
-                        {
-                            return Ok(Next::Continue);
-                        }
+                    {
+                        return Ok(Next::Continue);
                     }
                     self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
                     return Err(Stop);
@@ -159,13 +158,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     .transient
                     .saturating_sub(std::mem::take(&mut frame.state.transient));
                 let value = regs[*reg as usize];
-                if let Some(entry) = entry {
-                    if self
+                if let Some(entry) = entry
+                    && self
                         .publish_loop_entry(frame, entry, Some(value), *otherwise)
                         .map_err(|e| self.halt(e.into()))?
-                    {
-                        return Ok(Next::Continue);
-                    }
+                {
+                    return Ok(Next::Continue);
                 }
                 return Err(self.at(*pc));
             }
