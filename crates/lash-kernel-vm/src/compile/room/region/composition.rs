@@ -56,6 +56,7 @@ pub(crate) struct IterationEffects<'plan> {
     survivors: Vec<(Slot, Value)>,
     first_offset: Option<u64>,
     completed: u64,
+    completion_offsets: Vec<u64>,
     depth: u64,
     occurrences: Vec<usize>,
 }
@@ -71,6 +72,9 @@ impl IterationEffects<'_> {
     }
     pub(crate) fn invocation_offsets(&self) -> Option<(u64, u64)> {
         self.first_offset.map(|first| (first, self.completed))
+    }
+    pub(crate) fn completion_offsets(&self) -> &[u64] {
+        &self.completion_offsets
     }
     pub(crate) fn depth(&self) -> u64 {
         self.depth
@@ -174,6 +178,11 @@ impl VerifiedIteration {
             survivors,
         })
     }
+    pub(crate) fn reservation_width(&self) -> Option<u64> {
+        self.calls().try_fold(0u64, |width, call| {
+            width.checked_add(call.reservation_width()?)
+        })
+    }
     pub(crate) fn entries(&self) -> &[Slot] {
         &self.entries
     }
@@ -232,6 +241,8 @@ impl VerifiedIteration {
         let mut peak = 0_i128;
         let mut scalar_index = 0;
         let mut call_index = 0;
+        let mut completed = 0u64;
+        let mut completion_offsets = Vec::new();
         let mut depth = 0;
         let mut occurrences = Vec::new();
         let mut formulas = BTreeMap::new();
@@ -279,13 +290,21 @@ impl VerifiedIteration {
                         || !candidate.matches_call(call, caller)
                         || calls.first().is_some_and(|first| {
                             !candidate.same_scope(first)
-                                || first.offset().checked_add(call_index as u64)
-                                    != Some(candidate.offset())
+                                || first.offset().checked_add(completed) != Some(candidate.offset())
                         })
                     {
                         return Ok(None);
                     }
                     call_index += 1;
+                    completed = completed
+                        .checked_add(candidate.completed_invocations())
+                        .ok_or_else(invalid)?;
+                    completion_offsets.extend(
+                        candidate
+                            .completions()
+                            .iter()
+                            .map(|completion| completion.offset()),
+                    );
                     let mut atom_bytes = 0_i128;
                     if let Some(atoms) = atoms {
                         for (index, input) in atoms.iter().enumerate() {
@@ -371,7 +390,8 @@ impl VerifiedIteration {
             },
             survivors: live.into_iter().collect(),
             first_offset: calls.first().map(|call| call.offset()),
-            completed: calls.len() as u64,
+            completed,
+            completion_offsets,
             depth,
             occurrences,
         }))
@@ -473,7 +493,7 @@ fn topology(source: &Arc<Source>, pieces: &[Piece]) -> Result<Topology, Refused>
     })
 }
 
-fn scalar_balance(
+pub(in crate::compile::room::region::calls) fn scalar_balance(
     region: &ScalarRegion,
     arena: &Arena,
     facts: &ScalarRegionValues<'_>,

@@ -25,6 +25,8 @@
 
 mod arrays;
 mod bitwise;
+#[cfg(test)]
+mod contract_laws;
 mod conversions;
 mod number_index;
 mod strings;
@@ -206,6 +208,15 @@ struct Relate {
 }
 
 impl NativeFunction for Relate {
+    fn resource_contract(
+        &self,
+        args: lash_kernel_doc::Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        relate(self.relation, args.values())
+            .map(|answer| lash_kernel_doc::NativeResourceContract::returned(args, &answer))
+            .transpose()
+    }
+
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
         use lash_kernel_doc::scalar::ScalarOp;
         lash_kernel_doc::NativeSpecialization {

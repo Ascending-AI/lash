@@ -19,6 +19,7 @@ pub(crate) struct ComposedDebt<'a> {
     caller: ChargeDebt<'a>,
     body: Vec<ChargeDebt<'a>>,
     units: u64,
+    nested: Vec<(usize, super::super::Point, ComposedDebt<'a>)>,
 }
 
 impl ComposedCharges {
@@ -134,7 +135,40 @@ impl ComposedCharges {
             caller,
             body,
             units,
+            nested: Vec::new(),
         })
+    }
+
+    pub(in crate::compile::room) fn bind_nested<'a>(
+        &'a self,
+        caller: &[FormulaValues<'_>],
+        body: &[Vec<FormulaValues<'_>>],
+        nested: Vec<(super::super::Point, ComposedDebt<'a>)>,
+    ) -> Option<ComposedDebt<'a>> {
+        let mut debt = self.bind(caller, body)?;
+        for (at, child) in nested {
+            if !Arc::ptr_eq(&child.program.caller.source, &self.callee)
+                || child.program.caller.through != at
+            {
+                return None;
+            }
+            let index = self
+                .body
+                .iter()
+                .position(|program| program.closes.iter().any(|close| close.at == at))?;
+            if debt
+                .nested
+                .iter()
+                .any(|(prior, point, _)| *prior == index && *point == at)
+            {
+                return None;
+            }
+            debt.units = debt
+                .units
+                .checked_add(child.units.checked_sub(child.caller.units())?)?;
+            debt.nested.push((index, at, child));
+        }
+        Some(debt)
     }
 
     #[cfg(test)]
@@ -169,12 +203,33 @@ impl ComposedDebt<'_> {
                 record_event(event, &self.caller, tape);
             }
             if last {
-                for debt in &self.body {
-                    debt.record(tape);
-                }
+                self.record_body(tape);
                 for event in &close.tape {
                     if matches!(event, TapeEvent::Formula(_)) {
                         record_event(event, &self.caller, tape);
+                    }
+                }
+            }
+        }
+    }
+    fn record_body(&self, tape: &crate::observe::ChargeTape) {
+        for (index, debt) in self.body.iter().enumerate() {
+            for close in &debt.program.closes {
+                for event in &close.tape {
+                    if !matches!(event, TapeEvent::Formula(_)) {
+                        record_event(event, debt, tape);
+                    }
+                }
+                for (_, _, child) in self
+                    .nested
+                    .iter()
+                    .filter(|(program, at, _)| *program == index && *at == close.at)
+                {
+                    child.record_body(tape);
+                }
+                for event in &close.tape {
+                    if matches!(event, TapeEvent::Formula(_)) {
+                        record_event(event, debt, tape);
                     }
                 }
             }
@@ -368,7 +423,7 @@ fn body_programs(
                     return Ok(true);
                 }
             }
-            crate::compile::Form::Plain => {}
+            crate::compile::Form::Plain | crate::compile::Form::Action(_) => {}
             _ => return Err(Refused::Source),
         }
         if matches!(stream.ops[stmt.ops.end() as usize - 1], Op::Return { .. }) {

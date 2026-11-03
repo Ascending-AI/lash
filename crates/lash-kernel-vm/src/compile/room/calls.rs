@@ -2,6 +2,8 @@
 //! not a second frame executor, and every cold role keeps its defining Source.
 #[path = "calls/binding.rs"]
 mod binding;
+#[path = "calls/nested.rs"]
+mod nested;
 #[path = "calls/paths.rs"]
 mod paths;
 #[cfg_attr(
@@ -402,6 +404,27 @@ impl VerifiedCall {
         first_unpaid: u32,
         selected: Option<CodeId>,
     ) -> Result<Self, Refused> {
+        let mut context = nested::CompileContext::new(caller);
+        Self::compile_in(
+            exe,
+            caller,
+            statement,
+            pc,
+            first_unpaid,
+            selected,
+            &mut context,
+        )
+    }
+
+    fn compile_in(
+        exe: &Executable,
+        caller: CodeId,
+        statement: StmtId,
+        pc: u32,
+        first_unpaid: u32,
+        selected: Option<CodeId>,
+        context: &mut nested::CompileContext,
+    ) -> Result<Self, Refused> {
         let target = target::resolve(exe, caller, statement, pc, selected)?;
         let source = Arc::clone(&exe.code(target.code).source_room);
         source.verify()?;
@@ -478,6 +501,7 @@ impl VerifiedCall {
             .checked_add(1)
             .and_then(|end| end.checked_sub(first_unpaid))
             .ok_or(Refused::Path)?;
+        context.enter(target.code)?;
         let paths = paths::compile(
             exe,
             caller,
@@ -487,7 +511,10 @@ impl VerifiedCall {
                 len,
             },
             target.code,
-        )?;
+            context,
+        );
+        context.leave(target.code);
+        let paths = paths?;
         let callable_origin = if target.dynamic {
             Some(target::root_slot(&caller_source, &target.at)?)
         } else {
@@ -756,7 +783,7 @@ impl VerifiedCall {
 
     #[cfg(test)]
     pub(crate) fn understate_frame_for_law(&mut self) {
-        self.paths[0].region.peaks = Box::new([]);
+        self.paths[0].region.understate_peak();
     }
     #[cfg(test)]
     pub(crate) fn omit_caller_role_for_law(&mut self) {
@@ -805,6 +832,7 @@ impl<'a> BoundCall<'a> {
             &self.call.paths[self.path],
             &self.caller_formulas,
             &self.body_formulas,
+            &[],
         )
     }
     pub(crate) fn recovery_after(
@@ -821,6 +849,7 @@ impl<'a> BoundCall<'a> {
                 values: &self.values,
                 path: self.path,
                 captures: &[],
+                recovery: None,
             },
             at,
             caller_occurrence,
@@ -841,6 +870,7 @@ fn bind_debt<'a>(
     path: &'a paths::BodyPath,
     caller_formulas: &[(Vec<Value>, Value)],
     body_formulas: &[Vec<(Vec<Value>, Value)>],
+    nested: &[nested::Evaluated],
 ) -> Option<ComposedDebt<'a>> {
     let caller: Vec<_> = caller_formulas
         .iter()
@@ -861,7 +891,23 @@ fn bind_debt<'a>(
                 .collect()
         })
         .collect();
-    path.charges.bind(&caller, &body)
+    let mut children = Vec::new();
+    if let nested::BodyRegion::Composed(plan) = &path.region {
+        for child in nested {
+            let call = plan.calls.get(child.index)?;
+            let evaluated = &child.body;
+            let debt = bind_debt(
+                call.paths.get(evaluated.path)?,
+                &evaluated.caller_formulas,
+                &evaluated.body_formulas,
+                &evaluated.nested,
+            )?;
+            children.push((call.at.clone(), debt));
+        }
+    } else if !nested.is_empty() {
+        return None;
+    }
+    path.charges.bind_nested(&caller, &body, children)
 }
 
 /// A verified return edge, distinct from the caller's original action exit.
@@ -925,16 +971,8 @@ impl VerifiedCall {
         if self.paths.is_empty()
             || self.paths.iter().any(|path| {
                 !Arc::ptr_eq(path.region.source(), &self.source)
-                    || !matches!(
-                        path.region.interval.exit(),
-                        ExitKind::Return | ExitKind::Normal
-                    )
-                    || path
-                        .region
-                        .interval
-                        .events()
-                        .last()
-                        .is_none_or(|event| event.point != leave)
+                    || !matches!(path.region.exit(), ExitKind::Return | ExitKind::Normal)
+                    || path.region.last_point() != Some(&leave)
             })
         {
             return Err(Refused::Source);
@@ -961,6 +999,7 @@ struct CalleeValues<'a> {
     values: &'a [Value],
     path: usize,
     captures: &'a [(Slot, doc::arena::ArenaHandle)],
+    recovery: Option<&'a [(Point, Vec<(Slot, Value)>)]>,
 }
 fn call_recovery(
     call: &VerifiedCall,
@@ -977,9 +1016,26 @@ fn call_recovery(
     {
         return None;
     }
-    let region = &call.paths.get(body.path)?.region;
-    let index = region.recovery.iter().position(|map| &map.after == at)?;
-    let map = &region.recovery[index];
+    let (after, unpaid, roles) = if let Some(recovery) = body.recovery {
+        let index = recovery.iter().position(|(point, _)| point == at)?;
+        (
+            recovery[index].0.clone(),
+            recovery.get(index + 1).map(|(point, _)| point.clone()),
+            recovery[index].1.clone(),
+        )
+    } else {
+        let region = call.paths.get(body.path)?.region.scalar()?;
+        let index = region.recovery.iter().position(|map| &map.after == at)?;
+        let map = &region.recovery[index];
+        (
+            map.after.clone(),
+            region.recovery.get(index + 1).map(|map| map.after.clone()),
+            map.roles
+                .iter()
+                .map(|(slot, fact)| (*slot, body.values[fact.index()]))
+                .collect(),
+        )
+    };
     let digest =
         |at: &Point, roles: &[(Slot, Value)], captures: &[(Slot, doc::arena::ArenaHandle)]| {
             let mut encoding = TokenWriter::new();
@@ -1014,12 +1070,7 @@ fn call_recovery(
         roles: caller_values.to_vec(),
         captures: Vec::new(),
     };
-    let roles: Vec<_> = map
-        .roles
-        .iter()
-        .map(|(slot, fact)| (*slot, body.values[fact.index()]))
-        .collect();
-    let captures = if map.after.site == call.source.site && map.after.phase == Phase::Leave {
+    let captures = if after.site == call.source.site && after.phase == Phase::Leave {
         &[][..]
     } else {
         body.captures
@@ -1027,9 +1078,9 @@ fn call_recovery(
     let callee = CallRecovery {
         source: Arc::clone(&call.source),
         position: super::super::publication::Position {
-            at: map.after.clone(),
-            unpaid: region.recovery.get(index + 1).map(|map| map.after.clone()),
-            recovery: digest(&map.after, &roles, captures),
+            at: after.clone(),
+            unpaid,
+            recovery: digest(&after, &roles, captures),
             occurrence: super::super::publication::Occurrence {
                 task: caller_occurrence.task,
                 invocation: invocation.id(),

@@ -43,6 +43,77 @@ pub(crate) struct ScopedCall<'call> {
     target: Option<Rc<BoundCallable>>,
     caller_values: Vec<(Slot, Value)>,
     evaluated: EvaluatedArguments,
+    completions: Vec<ScopedCompletion>,
+    occurrences: Vec<usize>,
+}
+
+pub(crate) struct ScopedCompletion {
+    source: Arc<Source>,
+    leave: Point,
+    invocation: logical::Invocation,
+    caller: logical::Invocation,
+    offset: u64,
+    saved: Vec<(Slot, Value)>,
+    occurrence: Option<usize>,
+}
+impl ScopedCompletion {
+    pub(crate) fn source(&self) -> &Arc<Source> {
+        &self.source
+    }
+    pub(crate) fn leave(&self) -> &Point {
+        &self.leave
+    }
+    pub(crate) fn invocation(&self) -> &logical::Invocation {
+        &self.invocation
+    }
+    pub(crate) fn caller(&self) -> &logical::Invocation {
+        &self.caller
+    }
+    pub(crate) fn offset(&self) -> u64 {
+        self.offset
+    }
+    pub(crate) fn saved_roles(&self) -> &[(Slot, Value)] {
+        &self.saved
+    }
+}
+fn completed_calls(
+    call: &VerifiedCall,
+    evaluated: &EvaluatedArguments,
+    range: &logical::InvocationRange,
+    offset: u64,
+    caller: &logical::Invocation,
+    saved: &[(Slot, Value)],
+    out: &mut Vec<ScopedCompletion>,
+) -> Option<()> {
+    let invocation = range.invocation(offset)?;
+    if let nested::BodyRegion::Composed(body) = &call.paths.get(evaluated.path)?.region {
+        for child in &evaluated.nested {
+            completed_calls(
+                body.calls.get(child.index)?,
+                &child.body,
+                range,
+                offset.checked_add(child.offset)?,
+                &invocation,
+                &child.saved,
+                out,
+            )?;
+        }
+    } else if !evaluated.nested.is_empty() {
+        return None;
+    }
+    out.push(ScopedCompletion {
+        source: Arc::clone(&call.source),
+        leave: Point {
+            site: call.source.site.clone(),
+            phase: Phase::Leave,
+        },
+        invocation,
+        caller: caller.clone(),
+        offset,
+        saved: saved.to_vec(),
+        occurrence: call.occurrence,
+    });
+    Some(())
 }
 
 impl VerifiedCall {
@@ -227,6 +298,20 @@ impl VerifiedCall {
         let Some(caller_values) = caller_values else {
             return Ok(None);
         };
+        let mut completions = Vec::new();
+        if completed_calls(
+            self,
+            &evaluated,
+            &scope.range,
+            offset,
+            &scope.caller,
+            &caller_values,
+            &mut completions,
+        )
+        .is_none()
+        {
+            return Ok(None);
+        }
         Ok(Some(ScopedCall {
             call: self,
             identity: Rc::clone(&scope.identity),
@@ -239,6 +324,11 @@ impl VerifiedCall {
             target: self.callable.and(scope.target.as_ref().map(Rc::clone)),
             caller_values,
             evaluated,
+            occurrences: completions
+                .iter()
+                .filter_map(|completion| completion.occurrence)
+                .collect(),
+            completions,
         }))
     }
 }
@@ -295,7 +385,7 @@ impl<'call> ScopedCall<'call> {
                 peak_extra: self.evaluated.peak,
                 retained_delta: self.evaluated.delta,
             },
-            exit: self.call.paths[self.evaluated.path].region.interval.exit(),
+            exit: self.call.paths[self.evaluated.path].region.exit(),
         }
     }
 
@@ -334,28 +424,24 @@ impl<'call> ScopedCall<'call> {
         self.offset
     }
     pub(super) fn roles(&self) -> impl Iterator<Item = (Slot, Value)> + '_ {
-        let region = &self.call.paths[self.evaluated.path].region;
         let arguments = self
             .call
             .argument_slots
             .iter()
-            .zip(self.call.parameters.iter())
-            .map(move |(slot, parameter)| {
-                let fact = region
-                    .entries
-                    .iter()
-                    .find(|entry| entry.slot == *parameter)
-                    .unwrap_or_else(|| unreachable!("compiled formal"))
-                    .live
-                    .fact;
-                (*slot, self.evaluated.values[fact.index()])
-            });
+            .copied()
+            .zip(self.evaluated.arguments.iter().copied());
         arguments
             .chain(self.caller_values.iter().copied())
             .chain(self.callable.iter().map(|(slot, value, _)| (*slot, *value)))
     }
     pub(crate) fn completed_invocations(&self) -> u64 {
-        1
+        self.completions.len() as u64
+    }
+    pub(crate) fn next_offset(&self) -> Option<u64> {
+        self.offset.checked_add(self.completed_invocations())
+    }
+    pub(crate) fn completions(&self) -> &[ScopedCompletion] {
+        &self.completions
     }
     pub(crate) fn result(&self) -> Value {
         self.evaluated.result
@@ -375,13 +461,14 @@ impl<'call> ScopedCall<'call> {
         &self.invocation
     }
     pub(crate) fn occurrences(&self) -> &[usize] {
-        self.call.occurrence.as_slice()
+        &self.occurrences
     }
     pub(crate) fn debt(&self) -> Option<ComposedDebt<'call>> {
         bind_debt(
             &self.call.paths[self.evaluated.path],
             &self.evaluated.caller_formulas,
             &self.evaluated.body_formulas,
+            &self.evaluated.nested,
         )
     }
     pub(crate) fn recovery_after(
@@ -405,6 +492,7 @@ impl<'call> ScopedCall<'call> {
                 values: &self.evaluated.values,
                 path: self.evaluated.path,
                 captures: &captures,
+                recovery: Some(&self.evaluated.recovery),
             },
             at,
             occurrence,

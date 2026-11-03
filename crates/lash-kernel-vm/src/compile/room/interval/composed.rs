@@ -182,6 +182,56 @@ fn completion(
 }
 
 impl Source {
+    pub(in crate::compile::room) fn compile_composed_body(
+        self: &Arc<Self>,
+        exe: &Executable,
+        code: CodeId,
+        selected: &[Selection],
+        calls: &[Arc<VerifiedCall>],
+    ) -> Result<(Arc<ComposedInterval>, ExitKind), Refused> {
+        verify_calls(self, exe, code, calls)?;
+        if selected.len() > 4096
+            || !matches!(selected.first(), Some(Selection::Event { at, .. }) if *at == point(&self.site, Phase::Enter))
+            || !matches!(selected.last(), Some(Selection::Event { at, .. }) if *at == point(&self.site, Phase::Leave))
+        {
+            return Err(Refused::Path);
+        }
+        let mut trace = ComposedTrace {
+            trace: Trace {
+                source: self,
+                selected,
+                cursor: 0,
+                events: vec![],
+                stop: false,
+            },
+            allowed: calls,
+            completed: vec![],
+        };
+        let exit = evaluate::walk(self, &self.site, &mut trace, 4096)?;
+        if trace.trace.cursor != selected.len()
+            || trace.completed.len() != calls.len()
+            || !matches!(exit, ExitKind::Return | ExitKind::Normal)
+        {
+            return Err(Refused::Path);
+        }
+        Ok((
+            Arc::new(ComposedInterval {
+                source: Arc::clone(self),
+                executable: exe.local(),
+                code,
+                route: selected.into(),
+                events: trace
+                    .trace
+                    .events
+                    .into_iter()
+                    .map(|(event, _)| event)
+                    .collect(),
+                calls: trace.completed.into(),
+            }),
+            exit,
+        ))
+    }
+
     pub(crate) fn compile_composed_loop(
         self: &Arc<Self>,
         exe: &Executable,

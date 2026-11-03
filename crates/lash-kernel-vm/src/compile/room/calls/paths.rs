@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) struct BodyPath {
-    pub(super) region: ScalarRegion,
+    pub(super) region: super::nested::BodyRegion,
     pub(super) natives: Box<[Native]>,
     pub(super) charges: ComposedCharges,
 }
@@ -13,6 +13,10 @@ struct Route<'a> {
     choices: &'a BTreeMap<Site, bool>,
     selected: Vec<Selection>,
     missing: Option<Site>,
+    exe: &'a Executable,
+    code: CodeId,
+    context: &'a mut super::nested::CompileContext,
+    calls: Vec<Arc<VerifiedCall>>,
 }
 impl evaluate::Events for Route<'_> {
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
@@ -30,6 +34,19 @@ impl evaluate::Events for Route<'_> {
             .kind;
         self.selected.push(Selection::Event { at, exit });
         Ok(exit)
+    }
+    fn resume_call(
+        &mut self,
+        source: &Source,
+        at: &Point,
+        exit: ExitKind,
+    ) -> Result<Option<CallCompletion>, Refused> {
+        let Some(call) = super::nested::resolve(self.exe, self.code, at, self.context)? else {
+            return Ok(None);
+        };
+        let completion = call.completion(source, at, exit)?;
+        self.calls.push(call);
+        Ok(Some(completion))
     }
     fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
         let Some(&taken) = self.choices.get(site) else {
@@ -50,6 +67,7 @@ pub(super) fn compile(
     statement: StmtId,
     range: OpRange,
     callee: CodeId,
+    context: &mut super::nested::CompileContext,
 ) -> Result<Box<[BodyPath]>, Refused> {
     let source = &exe.code(callee).source_room;
     let mut pending = vec![BTreeMap::new()];
@@ -62,6 +80,10 @@ pub(super) fn compile(
             choices: &choices,
             selected: vec![],
             missing: None,
+            exe,
+            code: callee,
+            context,
+            calls: Vec::new(),
         };
         let walked = evaluate::walk(source, &source.site, &mut route, 4096);
         if let Some(site) = route.missing {
@@ -88,13 +110,26 @@ pub(super) fn compile(
             continue;
         }
         let path = (|| {
-            let interval = source.compile_interval(&source.site, &route.selected, 4096)?;
-            let region = if exe.code(callee).captures.is_empty() {
-                source.compile_scalar(interval, true)?
+            let (region, natives) = if route.calls.is_empty() {
+                let interval = source.compile_interval(&source.site, &route.selected, 4096)?;
+                let scalar = if exe.code(callee).captures.is_empty() {
+                    source.compile_scalar(interval, true)?
+                } else {
+                    source.compile_callback_body(interval)?
+                };
+                let natives = natives(exe, source, &scalar)?;
+                (super::nested::BodyRegion::Scalar(Box::new(scalar)), natives)
             } else {
-                source.compile_callback_body(interval)?
+                (
+                    super::nested::BodyRegion::Composed(Box::new(super::nested::Body::compile(
+                        exe,
+                        callee,
+                        &route.selected,
+                        &route.calls,
+                    )?)),
+                    Box::new([]) as Box<[Native]>,
+                )
             };
-            let natives = natives(exe, source, &region)?;
             let charges =
                 ComposedCharges::compile(exe, caller, statement, range, callee, &route.selected)?;
             Ok::<_, Refused>(BodyPath {
@@ -187,9 +222,9 @@ pub(super) fn verify_coverage(call: &VerifiedCall) -> Result<(), Refused> {
     if call.paths.is_empty()
         || call.paths.iter().enumerate().any(|(index, path)| {
             !Arc::ptr_eq(path.region.source(), &call.source)
-                || call.paths[..index].iter().any(|prior| {
-                    prior.region.interval.selections() == path.region.interval.selections()
-                })
+                || call.paths[..index]
+                    .iter()
+                    .any(|prior| prior.region.selections() == path.region.selections())
         })
     {
         return Err(Refused::Source);
@@ -203,6 +238,15 @@ pub(super) fn evaluate_native(
     arena: &Arena,
     values: &[Value],
 ) -> Result<Option<(Vec<Value>, Value)>, doc::heap::HeapFault> {
+    Ok(evaluate_native_room(native, exe, arena, values)?.map(|(input, answer, _)| (input, answer)))
+}
+
+pub(super) fn evaluate_native_room(
+    native: &Native,
+    exe: &Executable,
+    arena: &Arena,
+    values: &[Value],
+) -> Result<Option<(Vec<Value>, Value, CheckedRoom)>, doc::heap::HeapFault> {
     let Some(input) = native
         .inputs
         .iter()
@@ -262,5 +306,8 @@ pub(super) fn evaluate_native(
     if contract != expected {
         return Ok(None);
     }
-    Ok(Some((input, answer)))
+    let Some(room) = CheckedRoom::native(function.specialization.function, &contract) else {
+        return Ok(None);
+    };
+    Ok(Some((input, answer, room)))
 }

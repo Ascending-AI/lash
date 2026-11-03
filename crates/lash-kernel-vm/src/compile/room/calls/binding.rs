@@ -24,10 +24,14 @@ impl VerifiedCall {
             body_formulas,
             depth,
             path,
+            ..
         }) = self.evaluate_arguments(exe, arena, arguments, &[])?
         else {
             return Ok(None);
         };
+        if self.paths[path].region.scalar().is_none() {
+            return Ok(None);
+        }
         let logical::Owner::Frame { task, .. } = caller_invocation.frame() else {
             return Ok(None);
         };
@@ -87,7 +91,9 @@ impl VerifiedCall {
         path: &super::paths::BodyPath,
         index: usize,
     ) -> Result<Option<EvaluatedArguments>, doc::heap::HeapFault> {
-        let region = &path.region;
+        let Some(region) = path.region.scalar() else {
+            return self.evaluate_nested_path(exe, arena, arguments, path, index);
+        };
         let mut values = vec![Value::Null; region.fact_count()];
         let mut prices = vec![0_i128; region.prices];
         let price = |value: &Value, arena: &Arena| -> Result<i128, doc::heap::HeapFault> {
@@ -203,46 +209,8 @@ impl VerifiedCall {
         if delta != price(&result, arena)? - given {
             return Ok(None);
         }
-        if let Some(lib) = self.library
-            && !compile::import_result_fits(&exe.lib(lib).header.signature.result, result)
-        {
+        if !self.validate_result(exe, arena, arguments, result)? {
             return Ok(None);
-        }
-        if let Some(lib) = self.library {
-            let function = exe.lib(lib);
-            if let LibRun::Native {
-                native,
-                body: Some(_),
-            } = &function.run
-            {
-                let expected = doc::NativeResourceContract::value(
-                    doc::NativeResourceExit::Returned,
-                    u64::try_from(price(&result, arena)?).map_err(|_| {
-                        doc::heap::HeapFault::Malformed("scalar call holding".into())
-                    })?,
-                    doc::NativeResourceOrigin::Immutable,
-                );
-                let actual = function
-                    .specialization
-                    .prepared
-                    .as_ref()
-                    .and_then(|(entry, _)| entry.call(arguments));
-                if actual.is_none_or(|answer| !answer.same(&result)) {
-                    return Ok(None);
-                }
-                match native.resource_contract(doc::Args::new(
-                    arguments,
-                    arena.objects(),
-                    &arena.semantics(),
-                )) {
-                    Ok(Some(contract)) if contract == expected => {}
-                    Err(doc::NativeError::Host(error)) => return Err(error),
-                    Err(doc::NativeError::Malformed(reason)) => {
-                        return Err(doc::heap::HeapFault::Malformed(reason.into()));
-                    }
-                    _ => return Ok(None),
-                }
-            }
         }
         let caller_formulas = path
             .charges
@@ -277,17 +245,88 @@ impl VerifiedCall {
             result,
             peak,
             delta,
+            recovery: region
+                .recovery
+                .iter()
+                .map(|map| {
+                    (
+                        map.after.clone(),
+                        map.roles
+                            .iter()
+                            .map(|(slot, fact)| (*slot, values[fact.index()]))
+                            .collect(),
+                    )
+                })
+                .collect(),
             values,
             caller_formulas,
             body_formulas,
             depth,
+            arguments: arguments.to_vec(),
+            nested: Vec::new(),
             path: index,
         }))
+    }
+    pub(super) fn validate_result(
+        &self,
+        exe: &Executable,
+        arena: &Arena,
+        arguments: &[Value],
+        result: Value,
+    ) -> Result<bool, doc::heap::HeapFault> {
+        let price = |value: &Value, arena: &Arena| -> Result<i128, doc::heap::HeapFault> {
+            Ok(i128::from(arena.logical_local(value)?))
+        };
+        if let Some(lib) = self.library
+            && !compile::import_result_fits(&exe.lib(lib).header.signature.result, result)
+        {
+            return Ok(false);
+        }
+        if let Some(lib) = self.library {
+            let function = exe.lib(lib);
+            if let LibRun::Native {
+                native,
+                body: Some(_),
+            } = &function.run
+            {
+                let expected = doc::NativeResourceContract::value(
+                    doc::NativeResourceExit::Returned,
+                    u64::try_from(price(&result, arena)?).map_err(|_| {
+                        doc::heap::HeapFault::Malformed("scalar call holding".into())
+                    })?,
+                    doc::NativeResourceOrigin::Immutable,
+                );
+                let actual = function
+                    .specialization
+                    .prepared
+                    .as_ref()
+                    .and_then(|(entry, _)| entry.call(arguments));
+                if actual.is_none_or(|answer| !answer.same(&result)) {
+                    return Ok(false);
+                }
+                match native.resource_contract(doc::Args::new(
+                    arguments,
+                    arena.objects(),
+                    &arena.semantics(),
+                )) {
+                    Ok(Some(contract)) if contract == expected => {}
+                    Err(doc::NativeError::Host(error)) => return Err(error),
+                    Err(doc::NativeError::Malformed(reason)) => {
+                        return Err(doc::heap::HeapFault::Malformed(reason.into()));
+                    }
+                    _ => return Ok(false),
+                }
+            }
+        }
+        Ok(true)
     }
 }
 
 pub(super) struct EvaluatedArguments {
     pub(super) result: Value,
+    pub(super) arguments: Vec<Value>,
+    pub(super) recovery: Vec<(Point, Vec<(Slot, Value)>)>,
+    pub(super) nested: Vec<super::nested::Evaluated>,
     pub(super) peak: u64,
     pub(super) delta: i128,
     pub(super) values: Vec<Value>,

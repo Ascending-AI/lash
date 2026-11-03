@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) fn helper_compilation() {
+    nested_compilation();
     while_test_compilation();
     native_iteration_compilation();
     // The supplied call compiler must retain a guarded scalar helper's
@@ -524,6 +525,18 @@ pub(super) fn helper_compilation() {
                 effects.invocation_offsets(),
                 Some((0, if call_form == 5 { 2 } else { 1 }))
             );
+            assert_eq!(
+                iteration.reservation_width(),
+                Some(if call_form == 5 { 2 } else { 1 })
+            );
+            assert_eq!(
+                effects.completion_offsets(),
+                if call_form == 5 {
+                    &[0, 1][..]
+                } else {
+                    &[0][..]
+                }
+            );
             let expected_fee = if helper_body.starts_with("if") {
                 49
             } else {
@@ -704,6 +717,270 @@ pub(super) fn helper_compilation() {
                 "same-price native continuation answers must authenticate"
             );
         }
+    }
+}
+
+fn nested_compilation() {
+    use crate::compile::room::{placement::BindingPlacement, region::calls::VerifiedCall};
+    use lash_kernel_doc::Value;
+    use lash_kernel_state::{arena::Arena, kernel_internals::logical::Ledger};
+    for (name, argument, answer, width) in [
+        ("body.chain", 5, 5, 2),
+        ("body.guarded_chain", 0, 0, 1),
+        ("body.charged_chain", 5, 10, 2),
+    ] {
+        let invoke = if name == "body.charged_chain" {
+            "invoke "
+        } else {
+            ""
+        };
+        let text = scalar_document(&format!(
+            "let answer = {invoke}{name}({argument}) return answer"
+        ));
+        let run = Embedder::with(
+            &text,
+            Setup {
+                probes: Some(body_helper_probes),
+                ..Setup::default()
+            },
+        );
+        let (program, _) = run.program(true);
+        let admitted = program
+            .library
+            .admit(&program.document, Default::default(), &program.selection)
+            .unwrap_or_else(|_| panic!("nested source admitted"));
+        let exe = admitted
+            .executable(
+                &program.document,
+                &program.library,
+                &program.documents,
+                &program.functions,
+                &program.instances,
+            )
+            .unwrap_or_else(|_| panic!("nested executable"));
+        let caller = exe
+            .islands
+            .plans
+            .iter()
+            .find(|plan| {
+                let source = &exe.code(plan.code).source_room;
+                source.params.is_empty()
+                    && source.body.len() == 2
+                    && matches!(source.body[0], lash_kernel_doc::Stmt::Let { .. })
+                    && source.site.unit != lash_kernel_value::sites::Unit::Main
+            })
+            .unwrap();
+        let statement = caller.body.statements[0].id;
+        let (stream, stmt, _) = exe.statement(statement);
+        let pc = (stmt.ops.start..stmt.ops.end())
+            .find(|pc| {
+                matches!(
+                    stream.ops[*pc as usize],
+                    lash_kernel_exec::Op::Nested { .. } | lash_kernel_exec::Op::Act
+                )
+            })
+            .unwrap();
+        let call = VerifiedCall::compile(&exe, caller.code, statement, pc)
+            .expect("finite pure nested bodies must compose");
+        assert_eq!(call.reservation_width(), Some(width));
+        let mut ledger = Ledger::fresh();
+        let mut arena = Arena::new();
+        let heap = run.machine.source_law_heap();
+        let (invocation, entered) = ledger
+            .prepare_enter(
+                lash_kernel_doc::TaskId::MAIN,
+                &mut arena,
+                heap.pages(),
+                &[],
+                &[],
+            )
+            .unwrap();
+        ledger
+            .commit(entered.admit(u64::MAX).ok().unwrap())
+            .unwrap();
+        let placement = BindingPlacement::compile(&exe, caller.code).unwrap();
+        let physical: Vec<_> = (0..exe.code(caller.code).slots.len())
+            .map(|_| crate::machine::SlotState::Empty)
+            .collect();
+        let activation = placement
+            .capture(caller.code, &invocation, &ledger, heap, &physical)
+            .unwrap()
+            .unwrap();
+        let range = ledger
+            .reserve_invocations(lash_kernel_doc::TaskId::MAIN, width)
+            .unwrap();
+        let mut scope = call
+            .bind_scope(
+                &exe,
+                call.callee(),
+                &ledger,
+                &invocation,
+                &activation,
+                range,
+            )
+            .unwrap();
+        let roles: Vec<_> = call
+            .scope_roles()
+            .map(|slot| (slot, Value::Int(argument)))
+            .collect();
+        let candidate = call
+            .evaluate_scoped(&exe, call.callee(), &scope, 0, &arena, &roles)
+            .unwrap()
+            .expect("nested source/result/native contracts must authenticate");
+        assert!(candidate.result().same(&Value::Int(answer)));
+        assert_eq!(candidate.completed_invocations(), width);
+        assert_eq!(candidate.next_offset(), Some(width));
+        if width == 2 {
+            assert_eq!(
+                candidate
+                    .completions()
+                    .iter()
+                    .map(|completion| completion.offset())
+                    .collect::<Vec<_>>(),
+                [1, 0]
+            );
+            let child = &candidate.completions()[0];
+            assert_eq!(child.caller(), candidate.invocation());
+            assert_eq!(child.invocation().id(), candidate.invocation().id() + 1);
+            assert!(!std::sync::Arc::ptr_eq(child.source(), call.source()));
+            assert_eq!(child.leave().site, child.source().site);
+            assert_eq!(
+                child.saved_roles().len(),
+                if name == "body.charged_chain" { 2 } else { 1 }
+            );
+            assert!(
+                child
+                    .saved_roles()
+                    .iter()
+                    .all(|(_, value)| value.same(&Value::Int(argument)))
+            );
+        } else {
+            let wrong: Vec<_> = call
+                .scope_roles()
+                .map(|slot| (slot, Value::Int(5)))
+                .collect();
+            assert!(
+                call.evaluate_scoped(&exe, call.callee(), &scope, 0, &arena, &wrong)
+                    .unwrap()
+                    .is_none(),
+                "an input reaching a shared closure path must still hand off"
+            );
+        }
+        let debt = candidate.debt().unwrap();
+        if name != "body.charged_chain" {
+            assert_eq!(
+                debt.units(),
+                3 + 7 + 2 * (1 + u64::from(argument != 0)),
+                "formula-metered nested bodies keep the original caller forms and outer formula"
+            );
+        }
+        let tape = crate::ChargeTape::new();
+        debt.record(&tape);
+        assert_eq!(
+            tape.steps()
+                .iter()
+                .map(|weight| weight.units())
+                .sum::<u64>(),
+            debt.units()
+        );
+        let source_run = |source: &str| {
+            let mut run = Embedder::with(
+                source,
+                Setup {
+                    probes: Some(body_helper_probes),
+                    ..Setup::default()
+                },
+            );
+            let tape = crate::ChargeTape::new();
+            run.machine.record_charges(tape.clone());
+            let end = loop {
+                run.machine.force_source_execution();
+                match run.run() {
+                    Step::Ended(end) => break end,
+                    Step::Slice => {}
+                    Step::Parked(_) => panic!("pure nested source must not park"),
+                }
+            };
+            (
+                format!("{:?}", result(end)),
+                run.machine.meters().charged.unwrap(),
+                tape.steps(),
+            )
+        };
+        let actual = source_run(&text);
+        let control = source_run(&scalar_document(&format!(
+            "let answer = {answer} return answer"
+        )));
+        assert_eq!(actual.0, control.0);
+        assert_eq!(
+            debt.units(),
+            actual.1 - control.1 + 2,
+            "composed debt replaces the control's literal and Let closes"
+        );
+        let composed = tape.steps();
+        assert!(
+            control.2.iter().enumerate().any(|(index, weight)| {
+                weight.units() == 1
+                    && control
+                        .2
+                        .get(index + 1)
+                        .is_some_and(|next| next.units() == 1)
+                    && control.2[..index]
+                        .iter()
+                        .chain(composed.iter())
+                        .chain(control.2[index + 2..].iter())
+                        .copied()
+                        .collect::<Vec<_>>()
+                        == actual.2
+            }),
+            "nested debt must retain the exact source tape order"
+        );
+        assert_eq!(
+            scope.completed(),
+            0,
+            "evaluation must not consume any reserved invocation"
+        );
+        assert!(
+            call.evaluate_scoped(&exe, call.callee(), &scope, width, &arena, &roles)
+                .unwrap()
+                .is_none(),
+            "an exhausted range cannot mint another call"
+        );
+        if width > 1 {
+            let short = ledger
+                .reserve_invocations(lash_kernel_doc::TaskId::MAIN, width - 1)
+                .unwrap();
+            let short = call
+                .bind_scope(
+                    &exe,
+                    call.callee(),
+                    &ledger,
+                    &invocation,
+                    &activation,
+                    short,
+                )
+                .unwrap();
+            assert!(
+                call.evaluate_scoped(&exe, call.callee(), &short, 0, &arena, &roles)
+                    .unwrap()
+                    .is_none(),
+                "all nested IDs must fit before admitting any candidate"
+            );
+            assert_eq!(short.completed(), 0);
+        }
+        let abandoned = call
+            .evaluate_scoped(&exe, call.callee(), &scope, 0, &arena, &roles)
+            .unwrap()
+            .unwrap();
+        drop(abandoned);
+        assert_eq!(
+            scope.completed(),
+            0,
+            "abandoning a candidate cannot consume IDs"
+        );
+        scope.complete(candidate).unwrap();
+        assert_eq!(scope.completed(), width);
+        assert_eq!(scope.finish().unwrap().1, width);
     }
 }
 
@@ -988,6 +1265,8 @@ fn native_iteration_compilation() {
         .unwrap()
         .unwrap();
     assert_eq!(effects.invocation_offsets(), None);
+    assert_eq!(iteration.reservation_width(), Some(0));
+    assert!(effects.completion_offsets().is_empty());
     assert_eq!(effects.room().retained_delta, 1);
     assert!(
         matches!(effects.survivors(), [(slot, value)] if *slot == iteration.entries()[0] && value.same(&Value::Int(1)))
@@ -1074,6 +1353,39 @@ fn body_helper_probes(
     functions.push((
         "body.lt",
         registry.register(definition, Some(implementation)).unwrap(),
+    ));
+    let identity = functions
+        .iter()
+        .find(|(name, _)| *name == "flat.identity")
+        .unwrap()
+        .1;
+    let implementation = std::sync::Arc::clone(registry.get(&identity).unwrap().native().unwrap());
+    let inner = lash_kernel_doc::parse_definition(&format!("function body.identity(value: Any) -> Any\nkernel 1\ncharge sum(7, size(value), size(result))\nuse flat.identity = @{identity}\nnative\nbody {{ return flat.identity(value) }}")).unwrap();
+    let inner = registry
+        .register(inner, Some(std::sync::Arc::clone(&implementation)))
+        .unwrap();
+    functions.push(("body.identity", inner));
+    let chain = lash_kernel_doc::parse_definition(&format!("function body.chain(value: Any) -> Any\nkernel 1\ncharge sum(7, size(value), size(result))\nuse body.identity = @{inner}\nnative\nbody {{ let output = invoke body.identity(value) return output }}")).unwrap();
+    functions.push((
+        "body.chain",
+        registry.register(chain, Some(implementation)).unwrap(),
+    ));
+    let charged = lash_kernel_doc::parse_definition(&format!("function body.charged_identity(value: Any) -> Any\nkernel 1\nmetering statements\nuse flat.identity = @{identity}\nbody {{ return flat.identity(value) }}")).unwrap();
+    let charged = registry.register(charged, None).unwrap();
+    let charged_chain = lash_kernel_doc::parse_definition(&format!("function body.charged_chain(value: Any) -> Any\nkernel 1\nmetering statements\nuse flat.identity = @{identity}\nuse flat.add = @{add}\nuse body.charged_identity = @{charged}\nbody {{ let saved = flat.identity(value) let output = invoke body.charged_identity(value) return flat.add(saved, output) }}")).unwrap();
+    functions.push(("body.charged_identity", charged));
+    functions.push((
+        "body.charged_chain",
+        registry.register(charged_chain, None).unwrap(),
+    ));
+    let identity_native = std::sync::Arc::clone(registry.get(&identity).unwrap().native().unwrap());
+    let (guarded, locals) = lash_kernel_doc::parse_definition_with_locals(&format!("function body.guarded_chain(value: Any) -> Any\nkernel 1\ncharge sum(7, size(value), size(result))\nuse flat.lt = @{lt}\nuse flat.identity = @{identity}\nnative\nbody {{ if flat.lt(value, 1) {{ return value }} let latent = 0 return fn() {{ set latent = flat.identity(latent) return latent }} }}")).unwrap();
+    for local in locals {
+        registry.register(local, None).unwrap();
+    }
+    functions.push((
+        "body.guarded_chain",
+        registry.register(guarded, Some(identity_native)).unwrap(),
     ));
     functions
 }
