@@ -16,6 +16,7 @@ mod accumulate;
 mod boundary;
 mod call;
 mod dispatch;
+pub(crate) mod member_region;
 mod resource;
 #[cfg(test)]
 pub(crate) use resource::{take_certified_statements, take_composed_statements};

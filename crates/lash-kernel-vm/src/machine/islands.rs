@@ -47,6 +47,8 @@ pub(crate) mod compiled;
 pub(crate) mod cx;
 mod entry;
 mod execute;
+#[cfg(test)]
+pub(crate) use execute::member_region;
 mod heap;
 mod native;
 use execute::source;
