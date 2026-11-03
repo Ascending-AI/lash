@@ -80,6 +80,54 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         })
     }
 
+    pub(super) fn publish_source_departure(
+        &mut self,
+        callee: Callee<'_>,
+        activation: &mut Activation,
+        recipe: crate::machine::source_publication::return_storage::ReturnRecipe,
+    ) -> Result<bool, HeapFault> {
+        let source = &self.exe.code(callee.plan.code).source_room;
+        let document = self
+            .exe
+            .instances
+            .get(&callee.link)
+            .ok_or_else(|| malformed("source link has no admitted document"))?;
+        let kernel = doc::KernelVersion::of(document.kernel())
+            .ok_or_else(|| malformed("source kernel is unsupported"))?;
+        let safe_point = self.charged;
+        Context {
+            admission: Admission::Envelope(self.memory_bound),
+            source,
+            link: callee.link,
+            kernel,
+            logical: &self.logical,
+            heap: self.heap,
+            arena: self.arena,
+            session: self.session,
+            resources: SourceResources {
+                charged: &mut self.charged,
+                counters: self.counters,
+                bound: self.bound,
+                slice: self.slice_end,
+                depth: (self.base + u64::from(self.depth)).saturating_sub(1),
+                limit: self.call_depth,
+                safe_point,
+            },
+            logical_memory: self.logical_memory,
+        }
+        .publish_departure(
+            &activation.invocation,
+            &mut activation.frontier,
+            recipe,
+            (),
+            |_, _, ()| {},
+        )
+        .map_err(|halt| match halt {
+            crate::machine::Halt::Heap(error) => *error,
+            _ => malformed("an envelope departure ended the run"),
+        })
+    }
+
     pub(super) fn publish_source_prepared<S: StoragePreparation>(
         &mut self,
         callee: Callee<'_>,

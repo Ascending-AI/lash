@@ -1,11 +1,11 @@
 //! A do statement releases its actual RHS before the operand bank clears.
 use super::*;
 use crate::compile::room::{
-    ExitKind, Measure, Owner as Selector, Phase, Point, publication::Occurrence,
+    ExitKind, Measure, Owner as Selector, Phase, Point,
+    publication::{ExactRoots, Occurrence, Successor},
 };
 use crate::machine::{Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::JournalEvent;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
 impl KernelMachine {
@@ -148,7 +148,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_event(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -176,13 +176,12 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || {
-                Program::new(vec![JournalEvent {
-                    inputs: vec![input],
-                    ..Default::default()
-                }])
+            ExactRoots {
+                inputs: vec![input],
+                ..Default::default()
             },
-            Reserve(move |_: &mut Arena| Ok(Some(bank))),
+            Successor::Normal,
+            bank,
             |_, _, edits, bank| {
                 debug_assert!(edits.is_empty());
                 bank.publish();

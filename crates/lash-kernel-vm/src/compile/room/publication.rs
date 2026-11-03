@@ -14,6 +14,8 @@ use lash_kernel_state::{
     },
 };
 use std::collections::BTreeSet;
+mod departure;
+pub(crate) use departure::DepartureExit;
 mod exact;
 mod region;
 pub(crate) use exact::{ExactEvent, ExactRoots, ExternalFacts, PreparedEvent, Successor};

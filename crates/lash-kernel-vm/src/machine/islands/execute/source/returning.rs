@@ -113,12 +113,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Ok(ValuePublication::Declined);
         };
-        let crate::machine::source_publication::return_storage::ReturnRecipe {
-            mut prefix,
-            program,
-        } = recipe;
         drop(ledger);
-        prefix.allowance.units = completion.units;
+        let mut recipe = recipe;
+        recipe.allowance.units = completion.units;
+        recipe.debt = completion.debt.clone();
         #[cfg(test)]
         if !frame.state.callee.plan.charged
             && self.base + u64::from(self.depth) == 2
@@ -126,13 +124,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         {
             return Ok(ValuePublication::Declined);
         }
-        let published = self.publish_source(
-            frame.state.callee,
-            activation,
-            prefix,
-            || program.clone(),
-            |_, edits| debug_assert!(edits.is_empty()),
-        )?;
+        let published = self.publish_source_departure(frame.state.callee, activation, recipe)?;
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::return_published();

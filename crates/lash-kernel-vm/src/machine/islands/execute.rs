@@ -44,6 +44,7 @@ struct CallContinuation<'e> {
 /// A checked library formula, unpaid until the selected return commits.
 struct LibraryCompletion {
     units: u64,
+    debt: Option<crate::compile::room::charges::ReturnDebt>,
 }
 
 impl LibraryCompletion {

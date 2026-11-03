@@ -4,7 +4,7 @@
 use super::*;
 use crate::machine::{Completion, Control, Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
-use return_storage::{Carried, ReturnInput, ReturnRecipe};
+use return_storage::{Carried, ReturnInput};
 
 impl KernelMachine {
     pub(in crate::machine) fn publish_source_departure(
@@ -214,7 +214,21 @@ impl KernelMachine {
                 else {
                     return Ok(None);
                 };
-                Some((lib, units))
+                let Some(debt) = room::charges::ReturnDebt::bind(
+                    running.exe,
+                    &source,
+                    room::Point {
+                        site: running.stmt.site.clone(),
+                        phase: room::Phase::Commit,
+                    },
+                    lib,
+                    &args,
+                    value,
+                    &self.arena.borrow(),
+                ) else {
+                    return Ok(None);
+                };
+                Some((lib, units, debt))
             }
             None => None,
         };
@@ -241,10 +255,7 @@ impl KernelMachine {
         let mut arena = self.arena.borrow_mut();
         #[cfg(test)]
         let loop_ordinal = loops.last().map(|(_, ordinal)| *ordinal);
-        let Some(ReturnRecipe {
-            mut prefix,
-            program,
-        }) = (ReturnInput {
+        let Some(mut recipe) = (ReturnInput {
             source: &source,
             invocation: &invocation,
             task: running.task,
@@ -263,7 +274,8 @@ impl KernelMachine {
             return Ok(None);
         };
         drop(ledger);
-        prefix.allowance.units = fee.as_ref().map_or(0, |(_, units)| *units);
+        recipe.allowance.units = fee.as_ref().map_or(0, |(_, units, _)| *units);
+        recipe.debt = fee.as_ref().map(|(_, _, debt)| debt.clone());
         let document = running
             .exe
             .instances
@@ -316,19 +328,17 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_departure(
             &invocation,
             &mut frame.source_frontier,
-            prefix,
-            || program.clone(),
-            Reserve(move |_: &mut Arena| Ok(Some((bank, departure)))),
-            |_, _, edits, (bank, departure)| {
-                debug_assert!(edits.is_empty());
+            recipe,
+            (bank, departure),
+            |_, _, (bank, departure)| {
                 if let Some((bank, _)) = bank {
                     bank.publish();
                 }
                 // The ordinary unwind then takes the physical blocks and
-                // records the same pending holding the journal transferred.
+                // records the same pending holding the boundary transferred.
                 if suspend.is_none() && caught.is_none() {
                     *logical = None;
                 }
@@ -340,12 +350,12 @@ impl KernelMachine {
         );
         drop(arena);
         let published = match (published, &fee) {
-            (Err(halt), Some((lib, units))) => {
+            (Err(halt), Some((lib, units, _))) => {
                 return Err(self.refused_at_body_return(running.exe, *lib, *units, halt));
             }
             (published, _) => published?,
         };
-        if published && let Some((lib, units)) = fee {
+        if published && let Some((lib, units, _)) = fee {
             self.in_formula(lib, true, |_| ());
             self.observe_paid(units);
         }

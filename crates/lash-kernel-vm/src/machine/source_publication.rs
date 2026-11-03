@@ -3,6 +3,7 @@ mod binding;
 mod calling;
 mod cell;
 mod closure;
+mod departure;
 mod end;
 mod exact;
 pub(in crate::machine) mod frame_entry;

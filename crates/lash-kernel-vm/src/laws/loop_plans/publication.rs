@@ -1,6 +1,7 @@
 use super::*;
 mod borrowed;
 mod construction;
+mod departure;
 mod exact;
 mod fields;
 mod resume;
@@ -9,6 +10,7 @@ mod resume;
 /// and an exclusive shared admission; equal byte deltas cannot replace them.
 pub(super) fn checked_source_publication() {
     exact::events();
+    departure::exits();
     resume::calls();
     borrowed::entry();
     fields::names();

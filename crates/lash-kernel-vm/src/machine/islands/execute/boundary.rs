@@ -434,21 +434,36 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         {
             return self
                 .library_return(frame, value)
-                .map(|()| LibraryCompletion { units: 0 });
+                .map(|()| LibraryCompletion {
+                    units: 0,
+                    debt: None,
+                });
         }
         if frame.state.callee.plan.charged {
-            return Ok(LibraryCompletion { units: 0 });
+            return Ok(LibraryCompletion {
+                units: 0,
+                debt: None,
+            });
         }
         let Some(caller) =
             caller.filter(|caller| caller.state.callee.plan.charged && self.exe.charging())
         else {
-            return Ok(LibraryCompletion { units: 0 });
+            return Ok(LibraryCompletion {
+                units: 0,
+                debt: None,
+            });
         };
         let Some(CallContinuation { site, args, .. }) = caller.state.continuation else {
-            return Ok(LibraryCompletion { units: 0 });
+            return Ok(LibraryCompletion {
+                units: 0,
+                debt: None,
+            });
         };
         let Some(lib) = site.library else {
-            return Ok(LibraryCompletion { units: 0 });
+            return Ok(LibraryCompletion {
+                units: 0,
+                debt: None,
+            });
         };
         let args: Vec<_> = args
             .iter()
@@ -464,14 +479,32 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 tape.prepare_push()
                     .map_err(|error| self.halt(error.into()))?;
             }
-            return Ok(LibraryCompletion { units });
+            let source = &self.exe.code(frame.state.callee.plan.code).source_room;
+            let debt = frame.state.returned.and_then(|returned| {
+                crate::compile::room::charges::ReturnDebt::bind(
+                    self.exe,
+                    source,
+                    crate::compile::room::Point {
+                        site: self.exe.stmt(returned.statement).site.clone(),
+                        phase: crate::compile::room::Phase::Commit,
+                    },
+                    lib,
+                    &args,
+                    value,
+                    self.arena,
+                )
+            });
+            return Ok(LibraryCompletion { units, debt });
         }
         #[cfg(any(test, feature = "perf-witness"))]
         {
             self.scratch.exit.reason = Some(Reason::Charge);
         }
         self.library_return(frame, value)
-            .map(|()| LibraryCompletion { units: 0 })
+            .map(|()| LibraryCompletion {
+                units: 0,
+                debt: None,
+            })
     }
 
     fn library_return(&mut self, frame: &Values<'_, 'e>, value: Value) -> Result<(), Stop> {

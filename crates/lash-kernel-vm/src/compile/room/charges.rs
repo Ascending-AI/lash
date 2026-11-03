@@ -9,6 +9,8 @@ use std::sync::Arc;
 pub(crate) mod composition;
 mod event_packet;
 mod native_completion;
+mod returning;
+pub(crate) use returning::ReturnDebt;
 #[derive(Clone, Copy)]
 enum Coverage {
     Span,
