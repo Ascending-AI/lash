@@ -12,9 +12,6 @@ pub(in crate::compile::room::charges) fn derive(
     quote: u64,
 ) -> Result<(Vec<Close>, Vec<Formula>, Point), Refused> {
     let (stream, stmt, _) = exe.statement(statement);
-    if range.len != 1 || range.start < stmt.ops.start || range.end() > stmt.ops.end() {
-        return Err(Refused::Source);
-    }
     let canonical = match stmt.form {
         compile::Form::While { test, .. }
             if range.start >= test.start && range.end() <= test.end() =>
@@ -23,6 +20,9 @@ pub(in crate::compile::room::charges) fn derive(
         }
         _ => stmt.ops,
     };
+    if range.len != 1 || range.start < canonical.start || range.end() > canonical.end() {
+        return Err(Refused::Source);
+    }
     canonical_span(exe, code, statement, canonical)?;
     let prefix =
         expr::ConstructorPrefix::compile(stream, canonical, range.start).ok_or(Refused::Source)?;

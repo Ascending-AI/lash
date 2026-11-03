@@ -109,6 +109,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         args: &[Value],
         to: &Destination,
     ) -> Result<Option<Next>, Stop> {
+        #[cfg(test)]
+        if self.scratch.chilled {
+            return Ok(None);
+        }
         let function = self.exe.lib(site.lib);
         let original = frame
             .state

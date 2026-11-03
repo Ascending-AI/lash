@@ -171,7 +171,11 @@ impl OriginalPrefix {
             return Err(Refused::Source);
         }
         let next = pc.checked_add(1).ok_or(Refused::Path)?;
-        let stop = (next..stmt.ops.end())
+        let canonical = match stmt.form {
+            compile::Form::While { test, .. } if pc >= test.start && pc < test.end() => test,
+            _ => stmt.ops,
+        };
+        let stop = (next..canonical.end())
             .find(|pc| {
                 let op = stream.ops[*pc as usize];
                 matches!(op, Op::Region { .. }) || !op.kind().in_region()

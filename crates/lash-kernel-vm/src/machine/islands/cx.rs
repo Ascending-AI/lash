@@ -302,39 +302,6 @@ impl Cx<'_> {
         paths.charges.valid().then_some((value?, paths.charges))
     }
 
-    /// A single staged write can add at most its new members and extent
-    /// to a seen-set deep walk. The monotone formula at these upper
-    /// measurements admits completion before any write commits.
-    pub(crate) fn completion_fits(
-        &self,
-        function: &Lib,
-        args: &[Value],
-        result: &Value,
-        room: u64,
-    ) -> bool {
-        let added = match self.held.as_ref().map(|held| &held.write) {
-            None | Some(Prepared::Unset { .. }) => Some((0, 0)),
-            Some(Prepared::List { value, .. }) => crate::data::deep_size(self.arena, value)
-                .ok()
-                .map(|deep| (1, deep.saturating_add(1))),
-            Some(Prepared::Table { key, written, .. }) => crate::data::deep_size(self.arena, key)
-                .ok()
-                .zip(crate::data::deep_size(self.arena, written).ok())
-                .map(|(key, value)| (2, key.saturating_add(value).saturating_add(2))),
-        };
-        added
-            .and_then(|(size, deep)| {
-                measured_formula_with_growth(
-                    self.arena,
-                    &function.charge,
-                    args,
-                    Some(result),
-                    size,
-                    deep,
-                )
-            })
-            .is_some_and(|units| units <= room)
-    }
 }
 
 /// [`entry`], a record's short key answered absent by the proof in
@@ -448,35 +415,13 @@ pub(crate) fn measured_formula(
     args: &[Value],
     result: Option<&Value>,
 ) -> Option<u64> {
-    measured_formula_with_growth(arena, plan, args, result, 0, 0)
-}
-
-pub(in crate::machine) fn measured_prepared_formula(
-    arena: &lash_kernel_state::arena::PreparedInstallation<'_>,
-    plan: &Plan,
-    args: &[Value],
-    result: &Value,
-) -> Option<u64> {
-    measured_formula_with_growth(arena, plan, args, Some(result), 0, 0)
-}
-
-fn measured_formula_with_growth(
-    arena: &impl crate::data::ChargeArena,
-    plan: &Plan,
-    args: &[Value],
-    result: Option<&Value>,
-    size_growth: u64,
-    deep_growth: u64,
-) -> Option<u64> {
     measured_formula_by(plan, |source, measure| {
         let value = match source {
             Source::Arg(index) => args.get(index),
             Source::Result => result,
             Source::Nothing => None,
         };
-        value.map_or(Some(0), |value| {
-            value_measure(arena, value, measure, size_growth, deep_growth)
-        })
+        value.map_or(Some(0), |value| value_measure(arena, value, measure))
     })
 }
 
@@ -501,24 +446,17 @@ fn value_measure(
     arena: &impl crate::data::ChargeArena,
     value: &Value,
     measure: Measure,
-    size_growth: u64,
-    deep_growth: u64,
 ) -> Option<u64> {
     if let Some(units) = immediate_measure(value, measure) {
         return Some(units);
     }
-    let units = match measure {
+    match measure {
         Measure::Size => crate::data::view_size(arena, value),
         Measure::DeepSize => crate::data::view_deep_size(arena, value),
         Measure::NestedSize => crate::data::view_nested_size(arena, value),
         Measure::Magnitude => Ok(crate::data::view_magnitude(arena, value)),
     }
-    .ok()?;
-    Some(units.saturating_add(match measure {
-        Measure::Size => size_growth,
-        Measure::DeepSize => deep_growth,
-        Measure::NestedSize | Measure::Magnitude => 0,
-    }))
+    .ok()
 }
 
 /// Whether `plan`, charging a call of `args` that gave `result`, measures

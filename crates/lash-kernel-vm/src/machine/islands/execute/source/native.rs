@@ -25,6 +25,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &NativeSite,
         args: &[Value],
     ) -> Result<ValuePublication, HeapFault> {
+        #[cfg(test)]
+        if self.scratch.chilled {
+            return Ok(ValuePublication::Unavailable);
+        }
         let join = matches!(site.direct(self.exe), Some(Direct::TextJoin));
         if join || self.exe.lib(site.lib).kernels(self.exe).concat.is_some() {
             match self.publish_text_value(frame, site, args, join)? {
