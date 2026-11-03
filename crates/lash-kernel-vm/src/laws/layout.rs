@@ -1413,9 +1413,14 @@ fn typed_repeat_agrees() {
             crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.get()) > 0,
             "real typed iterations execute"
         );
+        assert_eq!(
+            crate::machine::islands::compiled::take_loop_publications(),
+            1,
+            "the complete roomy scalar loop publishes once"
+        );
         assert!(
-            crate::machine::islands::compiled::take_loop_publications() > 0,
-            "actual loop-scoped source publications execute"
+            crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.get()) > 1,
+            "one source publication carries multiple actual iterations"
         );
         let compare = |bounds, slice, cold, record| {
             collect(packet_modes(&source, bounds, slice, cold, record))
