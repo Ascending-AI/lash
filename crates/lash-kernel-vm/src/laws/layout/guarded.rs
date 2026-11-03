@@ -1,4 +1,4 @@
-//! Guarded reads run their source instructions' path whole.
+//! Guarded member paths preserve source semantics across execution modes.
 
 use super::*;
 
@@ -6,7 +6,7 @@ use super::*;
 /// TypeScript's guards: a kind test, then a unary test of the record's
 /// membership of the brand key or a bounds test of the list's length.
 /// Installing/removing a brand, changing record layouts and changing list
-/// lengths revoke the access proofs. Holes retain their source conversion.
+/// lengths change the source guards. Holes retain their source conversion.
 /// Branded, short, non-collection and refreshed operands fail a guard;
 /// finite slices and charge limits end inside the guarded path; a park
 /// separates the calls. Earlier fused scalar writes and distinct field names
@@ -110,8 +110,7 @@ type Guarded = (
     Vec<Request>,
 );
 
-/// A run of [`GUARDED`]; `record` keeps a charge tape, which no guarded
-/// read runs under: the reference.
+/// A run of [`GUARDED`]; `record` retains the original charge tape.
 fn guarded(record: bool, slice: u64, bounds: Bounds) -> Guarded {
     guarded_run(GUARDED, record, slice, bounds)
 }
