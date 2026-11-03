@@ -1204,9 +1204,6 @@ impl<'e> Build<'e> {
                     inputs: None,
                     root: self.root,
                     library,
-                    answers: library
-                        .filter(|lib| self.exe.lib(*lib).arity == args.len())
-                        .and_then(|lib| super::answer_depth(self.exe, lib)),
                     callee: declared,
                     close: closes.first().copied(),
                     pc,

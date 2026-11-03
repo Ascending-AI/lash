@@ -340,10 +340,6 @@ pub(crate) struct CallSite {
     pub(super) inputs: Option<Box<CallInputs>>,
     /// The source library call and root action, retained on materialization.
     pub(super) library: Option<LibId>,
-    /// The call depth its library's prepared answer needs beyond the
-    /// caller's, where its partial prepared paths may answer before
-    /// entering the ordinary body ([`answer_depth`]).
-    pub(super) answers: Option<u32>,
     pub(super) root: Option<StmtId>,
     pub(super) callee: Option<CodeId>,
     pub(super) close: Option<Close>,

@@ -4,8 +4,6 @@
 use super::*;
 use crate::compile::{Cx, Meter};
 
-mod answer;
-
 /// An accepted operation retains its ordered charges until the caller commits
 /// its counted action. A scalar native has one formula; a helper has its body
 /// events, which must never be collapsed into that formula's total.
@@ -129,110 +127,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             value,
             events,
             admission,
-        })
-    }
-
-    pub(super) fn heap_answer(
-        &mut self,
-        lib: crate::compile::LibId,
-        args: &[Value],
-        deepest: Option<u32>,
-        checked: bool,
-        (before, strict): (u64, bool),
-        occurrence: Option<usize>,
-    ) -> Option<HeapAnswer> {
-        let function = self.exe.lib(lib);
-        let signature = &function.header.signature;
-        let operator = deepest.is_some();
-        if let Some(extra) = deepest
-            && function.specialization.prepared.is_some()
-        {
-            let running = self.base + u64::from(self.depth);
-            if (function.operation() && running > self.call_depth)
-                || running.saturating_add(u64::from(extra)) > self.call_depth
-            {
-                return None;
-            }
-        }
-        if let Some(answer) = self.lookup_answer(function, args, before, occurrence)
-            && (!checked || crate::compile::import_result_fits(&signature.result, answer.value))
-        {
-            return Some(answer);
-        }
-        self.heap_at(occurrence, before, strict, |cx| {
-            let value = if operator && function.specialization.prepared.is_some() {
-                cx.operate_on(function, args, Fresh::default())
-            } else {
-                cx.native_on(function, args, Fresh::default())
-            }?;
-            (!checked || crate::compile::import_result_fits(&signature.result, value))
-                .then_some(value)
-        })
-    }
-
-    fn lookup_answer(
-        &self,
-        function: &crate::compile::Lib,
-        args: &[Value],
-        before: u64,
-        occurrence: Option<usize>,
-    ) -> Option<HeapAnswer> {
-        let (entry, _) = function.specialization.prepared.as_ref()?;
-        use lash_kernel_doc::plan::Element;
-        let element = entry.element()?.operation;
-        if !matches!(element, Element::ReadInt | Element::ReadMap)
-            || OBSERVING
-            || self.tight
-            || !self.resident_room(0)
-        {
-            return None;
-        }
-        #[cfg(test)]
-        if self.scratch.chilled {
-            return None;
-        }
-        let value = match (element, args) {
-            (Element::ReadInt, [Value::List(list), Value::Int(index)]) => {
-                let index = u64::try_from(*index).ok()?;
-                if index >= self.arena.len(*list).ok()? {
-                    return None;
-                }
-                self.arena.item(*list, index).ok()??
-            }
-            (Element::ReadMap, [Value::Map(map), Value::Text(key)]) => {
-                self.arena.table_get_text(*map, key).ok()??
-            }
-            _ => return None,
-        };
-        if self.arena.summary_of(&value).depth as usize > self.limits.value_depth() {
-            return None;
-        }
-        let units = if self.charging {
-            function
-                .charge
-                .immediate(args, Fresh::default(), &value)
-                .or_else(|| {
-                    crate::compile::measured_formula(
-                        self.arena,
-                        &function.charge,
-                        args,
-                        Some(&value),
-                    )
-                })?
-        } else {
-            0
-        };
-        let admission = self.source_admission(occurrence, before, units, None, false)?;
-        Some(HeapAnswer {
-            value,
-            admission,
-            events: self.tape.map(|_| {
-                if units == 0 {
-                    Vec::new()
-                } else {
-                    vec![Weight::Atomic(units)]
-                }
-            }),
         })
     }
 
