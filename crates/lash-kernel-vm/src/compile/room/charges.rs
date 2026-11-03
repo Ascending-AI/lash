@@ -12,7 +12,7 @@ pub(in crate::compile::room) mod settled;
 pub(in crate::compile::room) use event_packet::prefix::OriginalPayment;
 #[cfg(test)]
 pub(crate) use event_packet::prefix::OriginalReplay;
-pub(crate) use event_packet::prefix::{AcceptedOriginalPrefix, OriginalPrefix};
+pub(crate) use event_packet::prefix::{AcceptedOriginalPrefix, OriginalCompiler, OriginalPrefix};
 mod native_completion;
 mod returning;
 pub(crate) use returning::ReturnDebt;

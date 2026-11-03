@@ -136,6 +136,7 @@ pub(crate) struct AccessStart {
 pub(super) struct Build<'e> {
     pub(super) placement: Option<std::sync::Arc<crate::compile::room::placement::BindingPlacement>>,
     exe: &'e Executable,
+    originals: crate::compile::room::charges::OriginalCompiler<'e>,
     stream: &'e Stream,
     shared: &'e [bool],
     root: Option<StmtId>,
@@ -165,6 +166,7 @@ impl<'e> Build<'e> {
     ) -> Self {
         Self {
             placement: None,
+            originals: crate::compile::room::charges::OriginalCompiler::new(exe),
             exe,
             stream,
             shared,
@@ -337,13 +339,9 @@ impl<'e> Build<'e> {
             _ => stmt.ops,
         };
         let prefix = crate::compile::expr::ConstructorPrefix::compile(self.stream, range, pc)?;
-        crate::compile::room::charges::OriginalPrefix::compile(
-            self.exe,
-            self.placement.as_ref()?.code(),
-            statement,
-            &prefix,
-        )
-        .ok()
+        self.originals
+            .compile(self.placement.as_ref()?.code(), statement, &prefix)
+            .ok()
     }
 
     fn write_charges(

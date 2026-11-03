@@ -3,7 +3,7 @@ use super::*;
 use crate::compile::room::publication::{Frontier, Occurrence};
 use lash_kernel_exec::charge::RegionEvent;
 use lash_kernel_state::kernel_internals::logical::{Ledger, PublicationValue};
-use std::rc::Rc;
+use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
 struct Region {
     close: expr::Close,
@@ -96,14 +96,68 @@ pub(crate) struct OriginalReplay {
     pub(crate) roles: Box<[(u32, Site, PublicationValue)]>,
 }
 
+/// Verification belongs to one build borrowing an immutable executable. No
+/// verdict survives that borrow or substitutes for a constructor's exact close.
+pub(crate) struct OriginalCompiler<'e> {
+    exe: &'e Executable,
+    checked: RefCell<BTreeSet<(compile::CodeId, compile::StmtId, u32, u32)>>,
+}
+
+impl<'e> OriginalCompiler<'e> {
+    pub(crate) fn new(exe: &'e Executable) -> Self {
+        Self {
+            exe,
+            checked: RefCell::new(BTreeSet::new()),
+        }
+    }
+
+    pub(crate) fn compile(
+        &self,
+        code: compile::CodeId,
+        statement: compile::StmtId,
+        prefix: &expr::ConstructorPrefix,
+    ) -> Result<Arc<OriginalPrefix>, Refused> {
+        let exe = self.exe;
+        let (stream, stmt, _) = exe.statement(statement);
+        let pc = prefix.pc();
+        let canonical = match stmt.form {
+            compile::Form::While { test, .. } if pc >= test.start && pc < test.end() => test,
+            _ => stmt.ops,
+        };
+        let key = (code, statement, canonical.start, canonical.len);
+        {
+            let mut checked = self.checked.borrow_mut();
+            if !checked.contains(&key) {
+                ChargeProgram::constructor_packet(exe, code, statement, prefix)?;
+                checked.insert(key);
+            }
+        }
+        let actual =
+            expr::ConstructorPrefix::compile(stream, canonical, pc).ok_or(Refused::Source)?;
+        if actual != *prefix {
+            return Err(Refused::Exit);
+        }
+        OriginalPrefix::from_constructor(exe, code, statement, prefix)
+    }
+}
+
 impl OriginalPrefix {
+    #[cfg(test)]
     pub(crate) fn compile(
         exe: &Executable,
         code: compile::CodeId,
         statement: compile::StmtId,
         prefix: &expr::ConstructorPrefix,
     ) -> Result<Arc<Self>, Refused> {
-        ChargeProgram::constructor_packet(exe, code, statement, prefix)?;
+        OriginalCompiler::new(exe).compile(code, statement, prefix)
+    }
+
+    fn from_constructor(
+        exe: &Executable,
+        code: compile::CodeId,
+        statement: compile::StmtId,
+        prefix: &expr::ConstructorPrefix,
+    ) -> Result<Arc<Self>, Refused> {
         let (stream, stmt, _) = exe.statement(statement);
         let pc = prefix.pc();
         let at = source_point(
@@ -113,6 +167,9 @@ impl OriginalPrefix {
                 .ok_or(Refused::Source)?,
             stream.ops[pc as usize],
         );
+        if at.phase != crate::compile::room::Phase::Commit {
+            return Err(Refused::Source);
+        }
         let next = pc.checked_add(1).ok_or(Refused::Path)?;
         let stop = (next..stmt.ops.end())
             .find(|pc| {
