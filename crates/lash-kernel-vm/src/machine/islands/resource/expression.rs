@@ -123,7 +123,9 @@ impl Expression {
                     let LibRun::Native { body: None, .. } = function.run else {
                         return None;
                     };
-                    if function.limit.is_some()
+                    if function.specialization.native.text_append
+                        || function.specialization.native.text_join
+                        || function.limit.is_some()
                         || function.shares_params
                         || function.arity != args.len()
                         || function.specialization.prepared.as_ref()?.0.depth() != 0

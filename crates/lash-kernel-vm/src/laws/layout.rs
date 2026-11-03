@@ -960,6 +960,7 @@ fn call_probes(
 mod calls;
 mod guarded;
 mod helpers;
+mod native_codecs;
 mod windows;
 
 pub(super) use helpers::{HELPERS, helper_probes};

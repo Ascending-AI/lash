@@ -176,7 +176,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         args: &[Value],
         to: &Destination,
     ) -> Result<Option<Next>, Stop> {
-        if site.concat(self.exe).is_some() {
+        let function = self.exe.lib(site.lib);
+        if site.concat(self.exe).is_some() || function.kernels(self.exe).concat.is_some() {
             let native = NativeSite {
                 lib: site.lib,
                 close: site.close,
@@ -192,7 +193,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 source::ValuePublication::Published(value) => {
                     return self.destination(frame, site.reg, value, to).map(Some);
                 }
-                source::ValuePublication::Declined => {
+                source::ValuePublication::Unavailable
+                    if !matches!(function.run, LibRun::Native { .. }) => {}
+                source::ValuePublication::Declined | source::ValuePublication::Unavailable => {
                     if let Some(close) = &site.close
                         && !self.close(close)
                     {
@@ -200,7 +203,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                     return Err(self.at_operands(site.pc, site.reg, args));
                 }
-                source::ValuePublication::Unavailable => {}
             }
         }
         if matches!(to, Destination::Write(write) if write.accumulates) {

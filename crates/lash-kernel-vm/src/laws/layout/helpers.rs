@@ -171,6 +171,9 @@ pub(in crate::laws) fn helper_probes(
             "text.join" => "text.join",
             "text.repeat" => "text.repeat",
             "text.slice" => "text.slice",
+            "json.decode" => "json.decode",
+            "json.stringify" => "json.stringify",
+            "json.render" => "json.render",
             _ => continue,
         };
         out.push((name, registry.register(definition, Some(native)).unwrap()));
@@ -1372,9 +1375,9 @@ fn shared_parameters_claim_the_entry_nursery() {
 fn native_boundaries_agree() {
     use super::ExecutionMode;
     const SOURCE: &str = "main { let xs = resident.optional() let ys = resident.boundary(1) let n = list.len(xs) let value = resident.boundary(0) return (value, n, list.get(ys, 0)) }";
-    let observe = |mode, layout, cold, taped, bounds| {
+    let observe = |source: &str, mode, layout, cold, taped, bounds| {
         let mut run = Embedder::with(
-            SOURCE,
+            source,
             Setup {
                 probes: Some(helper_probes),
                 layout,
@@ -1389,6 +1392,7 @@ fn native_boundaries_agree() {
         }
         run.machine.take_native_publications();
         let mut counts = [0; 5];
+        let mut boundaries = Vec::new();
         let end = loop {
             match mode {
                 ExecutionMode::Source => run.machine.force_source_execution(),
@@ -1402,6 +1406,20 @@ fn native_boundaries_agree() {
             {
                 *total += value;
             }
+            if matches!(step, Step::Parked(_)) {
+                let balance = run
+                    .machine
+                    .logical_balance()
+                    .expect("native source owner balance");
+                boundaries.push((
+                    run.machine.semantic_checkpoint(),
+                    [
+                        balance.entity_local_bytes,
+                        balance.root_and_control_bytes,
+                        balance.entities,
+                    ],
+                ));
+            }
             match step {
                 Step::Ended(end) => break end,
                 Step::Slice => {
@@ -1412,20 +1430,47 @@ fn native_boundaries_agree() {
                         }
                     }
                 }
-                Step::Parked(_) => panic!("native boundary fixture cannot park"),
+                Step::Parked(_) => {
+                    assert_ne!(source, SOURCE, "native boundary fixture cannot park");
+                    if cold {
+                        run.reopen(layout, true);
+                        if taped {
+                            run.machine.record_charges(tape.clone());
+                        }
+                    }
+                    run.deliver_next();
+                }
             }
         };
+        let balance = run
+            .machine
+            .logical_balance()
+            .expect("native final owner balance");
         (
             (
                 end,
                 run.machine.meters().charged,
                 lash_kernel_exec::Weight::expand(tape.steps()),
+                boundaries,
+                run.requests,
+                [
+                    balance.entity_local_bytes,
+                    balance.root_and_control_bytes,
+                    balance.entities,
+                ],
             ),
             counts,
         )
     };
     let roomy = super::super::embedder::ROOMY;
-    let (reference, source_counts) = observe(ExecutionMode::Source, Layout(0), false, false, roomy);
+    let (reference, source_counts) = observe(
+        SOURCE,
+        ExecutionMode::Source,
+        Layout(0),
+        false,
+        false,
+        roomy,
+    );
     assert_eq!(
         result(reference.0.clone()),
         Datum::Tuple(vec![int(7), int(2), int(7)])
@@ -1441,7 +1486,7 @@ fn native_boundaries_agree() {
                 ExecutionMode::Generic,
                 ExecutionMode::Specialized,
             ] {
-                let (actual, counts) = observe(mode, layout, cold, false, roomy);
+                let (actual, counts) = observe(SOURCE, mode, layout, cold, false, roomy);
                 assert_eq!(
                     actual, reference,
                     "native boundary {mode:?}, {layout:?}, cold={cold}"
@@ -1458,10 +1503,10 @@ fn native_boundaries_agree() {
                     );
                 }
             }
-            let taped = observe(ExecutionMode::Source, layout, cold, true, roomy).0;
+            let taped = observe(SOURCE, ExecutionMode::Source, layout, cold, true, roomy).0;
             for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
                 assert_eq!(
-                    observe(mode, layout, cold, true, roomy).0,
+                    observe(SOURCE, mode, layout, cold, true, roomy).0,
                     taped,
                     "native canonical cold charge tape"
                 );
@@ -1474,10 +1519,18 @@ fn native_boundaries_agree() {
             charge_limit,
             ..roomy
         };
-        let exact = observe(ExecutionMode::Source, Layout(0), false, true, bounds).0;
+        let exact = observe(
+            SOURCE,
+            ExecutionMode::Source,
+            Layout(0),
+            false,
+            true,
+            bounds,
+        )
+        .0;
         for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
             assert_eq!(
-                observe(mode, Layout(2), true, true, bounds).0,
+                observe(SOURCE, mode, Layout(2), true, true, bounds).0,
                 exact,
                 "native first charge refusal at {charge_limit}"
             );
@@ -1485,10 +1538,18 @@ fn native_boundaries_agree() {
     }
     for memory in [128, 229, 230, 256, 512] {
         let bounds = Bounds { memory, ..roomy };
-        let exact = observe(ExecutionMode::Source, Layout(0), false, true, bounds).0;
+        let exact = observe(
+            SOURCE,
+            ExecutionMode::Source,
+            Layout(0),
+            false,
+            true,
+            bounds,
+        )
+        .0;
         for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
             assert_eq!(
-                observe(mode, Layout(2), true, true, bounds).0,
+                observe(SOURCE, mode, Layout(2), true, true, bounds).0,
                 exact,
                 "native normalized first memory refusal at {memory}"
             );
@@ -1497,4 +1558,5 @@ fn native_boundaries_agree() {
     println!(
         "certified native runtime publications: precise {source_counts:?}; packet, graph, scratch, optional and cold witnesses checked"
     );
+    super::native_codecs::agree(&observe);
 }

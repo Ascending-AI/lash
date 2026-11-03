@@ -30,7 +30,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     ) -> Result<ValuePublication, HeapFault> {
         let function = self.exe.lib(site.lib);
         if OBSERVING
-            || self.tape.is_some()
             || self.projection().is_some()
             || self.deferred_end.is_some()
             || self.arena.boundary_due()

@@ -90,6 +90,7 @@ type Observation = (
     Vec<(&'static str, crate::Meters, [u64; 3])>,
     Vec<lash_kernel_state::semantic::Checkpoint>,
     Vec<Request>,
+    Vec<lash_kernel_exec::Weight>,
 );
 
 fn run(source: &str, record: bool, slice: u64, bounds: Bounds, layout: Layout) -> Observation {
@@ -123,8 +124,9 @@ fn run_selected(
             ..Setup::default()
         },
     );
+    let tape = crate::ChargeTape::new();
     if record {
-        embedder.machine.record_charges(crate::ChargeTape::new());
+        embedder.machine.record_charges(tape.clone());
     }
     let (mut stops, mut checkpoints) = (Vec::new(), Vec::new());
     let end = loop {
@@ -156,7 +158,7 @@ fn run_selected(
             checkpoints.push(embedder.machine.semantic_checkpoint());
             embedder.reopen(layout, true);
             if record {
-                embedder.machine.record_charges(crate::ChargeTape::new());
+                embedder.machine.record_charges(tape.clone());
             }
         }
         match step {
@@ -179,6 +181,7 @@ fn run_selected(
         stops,
         checkpoints,
         embedder.requests,
+        lash_kernel_exec::Weight::expand(tape.steps()),
     )
 }
 
@@ -192,6 +195,7 @@ fn accumulations_agree() {
     let source = scalar_document(
         r#"let s = "" let sum = 0 let i = 0 while flat.lt(i, 40) { set s = law.append(s, "é😀") set sum = flat.add(sum, 3) set i = flat.add(i, 1) } do perform 0("middle") as Any let old = s let j = 0 while flat.lt(j, 3) { set s = text.concat(s, "!") set j = flat.add(j, 1) } let huge = 9223372036854775807 try { set huge = flat.add(huge, 1) } catch err { print huge } let f = -0.0 set f = flat.add(f, 0.0) return (s, old, sum, huge, f)"#,
     );
+    let without_tape = |(a, b, c, d, e, _): Observation| (a, b, c, d, e);
     let taken = || crate::machine::islands::ACCUMULATED.with(|n| n.replace(0));
     let reference_body = run(
         &source,
@@ -205,8 +209,11 @@ fn accumulations_agree() {
     let reference = run(true, u64::MAX, super::super::embedder::ROOMY);
     crate::machine::islands::TEXT_APPENDED.with(|n| n.set(0));
     let natural = run(false, u64::MAX, super::super::embedder::ROOMY);
-    assert_eq!(natural, reference);
-    assert_eq!(natural, reference_body);
+    assert_eq!(
+        without_tape(natural.clone()),
+        without_tape(reference.clone())
+    );
+    assert_eq!(without_tape(natural), without_tape(reference_body));
     assert!(
         taken() > 0,
         "accumulation must run as one register instruction"
@@ -217,8 +224,8 @@ fn accumulations_agree() {
     );
     for slice in [1, 2, 3, 5, 11, 31, 67] {
         assert_eq!(
-            run(false, slice, super::super::embedder::ROOMY),
-            run(true, slice, super::super::embedder::ROOMY),
+            without_tape(run(false, slice, super::super::embedder::ROOMY)),
+            without_tape(run(true, slice, super::super::embedder::ROOMY)),
             "slice {slice}"
         );
     }
@@ -229,8 +236,8 @@ fn accumulations_agree() {
             ..super::super::embedder::ROOMY
         };
         assert_eq!(
-            run(false, u64::MAX, bounds),
-            run(true, u64::MAX, bounds),
+            without_tape(run(false, u64::MAX, bounds)),
+            without_tape(run(true, u64::MAX, bounds)),
             "charge {limit}"
         );
     }
@@ -240,8 +247,8 @@ fn accumulations_agree() {
             ..super::super::embedder::ROOMY
         };
         assert_eq!(
-            run(false, u64::MAX, bounds),
-            run(true, u64::MAX, bounds),
+            without_tape(run(false, u64::MAX, bounds)),
+            without_tape(run(true, u64::MAX, bounds)),
             "memory {memory}"
         );
     }
@@ -281,6 +288,7 @@ fn accumulations_agree() {
                 actual.4, expected.4,
                 "owned append requests {mode:?}, slice={slice}"
             );
+            assert_eq!(actual.5, expected.5, "owned append canonical charge tape");
             assert_eq!(actual.2.len(), expected.2.len(), "owned append stop count");
             for (at, (actual, expected)) in actual.2.iter().zip(&expected.2).enumerate() {
                 assert_eq!(
@@ -355,37 +363,51 @@ fn accumulations_agree() {
         r#"let s = "abcdefghijklmnopé😀" let old = s let parts = ["é😀", "tag"] let separator = "|" let i = 0 while flat.lt(i, 3) { let joined = text.join(parts, separator) set s = law.native_concat(s, joined) set i = flat.add(i, 1) } do perform 0(s) as Any return (s, old)"#,
     );
     crate::machine::islands::take_text_publications();
-    for slice in [u64::MAX, 1, 7] {
-        let cold = slice != u64::MAX;
-        let expected = run_selected(
-            &native_formatted,
-            false,
-            slice,
-            super::super::embedder::ROOMY,
-            Layout(0),
-            (super::ExecutionMode::Source, cold),
-            true,
-        );
-        for mode in [
-            super::ExecutionMode::Generic,
-            super::ExecutionMode::Specialized,
-        ] {
-            let actual = run_selected(
+    let mut native_publications = [0; 2];
+    for record in [false, true] {
+        for slice in [u64::MAX, 1, 7] {
+            let cold = slice != u64::MAX;
+            let expected = run_selected(
                 &native_formatted,
-                false,
+                record,
                 slice,
                 super::super::embedder::ROOMY,
                 Layout(0),
-                (mode, cold),
+                (super::ExecutionMode::Source, cold),
                 true,
             );
-            assert_eq!(
-                actual, expected,
-                "native text source/packet/cold agreement {mode:?}, slice={slice}"
-            );
+            for mode in [
+                super::ExecutionMode::Generic,
+                super::ExecutionMode::Specialized,
+            ] {
+                crate::machine::islands::take_text_publications();
+                let actual = run_selected(
+                    &native_formatted,
+                    record,
+                    slice,
+                    super::super::embedder::ROOMY,
+                    Layout(0),
+                    (mode, cold),
+                    true,
+                );
+                let publications = crate::machine::islands::take_text_publications();
+                if slice == u64::MAX {
+                    assert!(
+                        publications.iter().all(|count| *count > 0),
+                        "native text must use staged source acceptance with record={record}, mode={mode:?}: {publications:?}"
+                    );
+                }
+                for (sum, count) in native_publications.iter_mut().zip(publications) {
+                    *sum += count;
+                }
+                assert_eq!(
+                    actual, expected,
+                    "native text source/packet/cold agreement {mode:?}, slice={slice}"
+                );
+            }
         }
     }
-    let text_certificates = crate::machine::islands::take_text_publications();
+    let text_certificates = native_publications;
     assert!(
         text_certificates.iter().all(|count| *count > 0),
         "native concat and join must publish through staged text storage: {text_certificates:?}"

@@ -548,8 +548,9 @@ impl PreparedNative {
 }
 
 /// A kind check suffices only for unconstrained containers. A resident list
-/// with a supported scalar item contract checks every actual member; nested
-/// or cold shapes retain the ordinary signature handler.
+/// with a constrained item contract checks every actual resident member.
+/// Enum, union, tuple and set parameters retain their canonical type checks;
+/// cold or unsupported shapes use the ordinary signature handler.
 pub(in crate::machine) fn resident_argument_fits(
     arena: &Arena,
     ty: &lash_kernel_value::Type,
@@ -558,14 +559,35 @@ pub(in crate::machine) fn resident_argument_fits(
     if let Some(check) = crate::compile::import_result_check(ty) {
         return check(value);
     }
+    use lash_kernel_value::Type;
     match (ty, value) {
-        (lash_kernel_value::Type::List(item), Value::List(handle)) => {
-            let Some(check) = crate::compile::import_result_check(item) else {
-                return false;
-            };
-            arena
-                .sequence(handle)
-                .is_ok_and(|values| values.iter().copied().all(check))
+        (Type::Enum(members), value @ (Value::Text(_) | Value::LongText(_))) => arena
+            .semantics()
+            .text(&value)
+            .is_ok_and(|text| members.iter().any(|member| member == text)),
+        (Type::Union(members), value) => members
+            .iter()
+            .any(|ty| resident_argument_fits(arena, ty, value)),
+        (Type::Tuple(items), Value::Tuple(handle)) => arena.sequence(handle).is_ok_and(|values| {
+            values.len() == items.len()
+                && items
+                    .iter()
+                    .zip(values)
+                    .all(|(ty, value)| resident_argument_fits(arena, ty, *value))
+        }),
+        (Type::List(item), Value::List(handle)) => arena.sequence(handle).is_ok_and(|values| {
+            values
+                .iter()
+                .all(|value| resident_argument_fits(arena, item, *value))
+        }),
+        (Type::Set(item), Value::Set(handle)) => {
+            arena.semantics().entries(handle).is_ok_and(|values| {
+                values
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .all(|pair| resident_argument_fits(arena, item, pair[0]))
+            })
         }
         _ => false,
     }
