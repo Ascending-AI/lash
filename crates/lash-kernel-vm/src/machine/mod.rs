@@ -34,6 +34,7 @@ mod public_value;
 mod queue;
 mod raises;
 mod refine;
+pub(crate) mod region_isa;
 pub(crate) mod registers;
 mod session;
 pub(crate) mod sites;

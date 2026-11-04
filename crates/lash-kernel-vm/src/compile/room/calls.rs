@@ -6,6 +6,8 @@ mod binding;
 mod nested;
 #[path = "calls/paths.rs"]
 mod paths;
+#[path = "calls/region_isa.rs"]
+pub(crate) mod region_isa;
 #[cfg_attr(
     not(test),
     expect(dead_code, reason = "loop lane wires the scope call API next")

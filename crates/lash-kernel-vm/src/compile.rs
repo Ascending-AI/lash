@@ -57,6 +57,7 @@ mod occurrences;
 mod parameters;
 mod preparation;
 mod reads;
+pub(crate) mod region_isa;
 pub(crate) mod room;
 mod scopes;
 mod template_meter;
