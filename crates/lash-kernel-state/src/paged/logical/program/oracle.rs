@@ -246,6 +246,7 @@ impl EvaluatedProgram {
             state: ledger.state.clone(),
             identity: Rc::clone(&ledger.identity),
             revision: ledger.revision,
+            facts: Default::default(),
         };
         let before = ledger.balance()?.total()?;
         let mut peak = before;
@@ -434,6 +435,7 @@ impl EvaluatedProgram {
             );
             projected.extend(prepared.projected);
             draft.state = prepared.next;
+            draft.facts = Default::default();
         }
         if !scratches.is_empty() {
             return Err(invalid("source scratch survives publication").into());

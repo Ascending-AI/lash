@@ -59,6 +59,7 @@ fn budget() -> SealBudget {
 /// acyclic body across cold restore. A speculative admission publishes nothing.
 #[test]
 fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
+    root_authority::cached_transfers();
     let (heap, pages) = fresh();
     let access = heap.pages().clone();
     let mut ledger = Ledger::fresh();

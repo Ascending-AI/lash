@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 mod codec;
 mod dependencies;
+mod facts;
 mod member_batch;
 pub use dependencies::Dependencies;
 mod graph;
@@ -453,6 +454,7 @@ pub struct Ledger {
     state: State,
     identity: Rc<()>,
     revision: u64,
+    facts: std::cell::RefCell<facts::Facts>,
 }
 /// A process-local dependency stamp. Every committed owner, member, departure
 /// or normalization change invalidates it. It cannot authenticate another run
@@ -485,6 +487,7 @@ impl Prepared {
             state: self.next,
             identity: Rc::clone(&self.identity),
             revision: self.revision,
+            facts: Default::default(),
         };
         draft.normalize(access, limits)?;
         self.next = draft.state;
@@ -507,6 +510,7 @@ impl Prepared {
             state: before.state.clone(),
             identity: Rc::new(()),
             revision: before.revision,
+            facts: Default::default(),
         };
         swept.normalize(access, limits)?;
         let garbage = before
@@ -561,6 +565,7 @@ impl Ledger {
             },
             identity: Rc::new(()),
             revision: 0,
+            facts: Default::default(),
         }
     }
     pub fn open(root: LedgerRoot) -> Result<Self, HeapFault> {
@@ -575,6 +580,7 @@ impl Ledger {
             },
             identity: Rc::new(()),
             revision: 0,
+            facts: Default::default(),
         };
         ledger.balance()?;
         Ok(ledger)
@@ -639,6 +645,7 @@ impl Ledger {
             .revision
             .checked_add(1)
             .ok_or_else(|| invalid("logical revision overflow"))?;
+        self.facts.get_mut().clear();
         Ok(())
     }
     /// Commit one proven release of present, distinct owners in place,
@@ -706,10 +713,7 @@ impl Ledger {
         access: &Access<'_>,
         changes: Vec<(Owner, Option<Holding>)>,
     ) -> Result<(), HeapFault> {
-        self.revision = self
-            .revision
-            .checked_add(1)
-            .ok_or_else(|| invalid("logical revision overflow"))?;
+        self.handoff()?;
         let mut edit = Edit {
             state: std::mem::replace(&mut self.state, State::vacant()),
             access,
@@ -719,13 +723,6 @@ impl Ledger {
         let edited = edit.roots(changes);
         self.state = edit.state;
         edited
-    }
-    pub fn holding(&self, owner: Owner, access: &Access<'_>) -> Result<Option<Holding>, HeapFault> {
-        Ok(self
-            .state
-            .roots(owner)
-            .get(&owner_key(owner), access)?
-            .map(|v| v.value))
     }
     pub fn prepare(
         &self,
@@ -868,6 +865,7 @@ impl Ledger {
             .revision
             .checked_add(1)
             .ok_or_else(|| invalid("logical revision overflow"))?;
+        self.facts.get_mut().clear();
         semantic();
         self.state = next;
         self.revision = revision;

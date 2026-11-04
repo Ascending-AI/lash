@@ -299,7 +299,7 @@ impl Ledger {
                 Holding::from_page(access, value)?
             }
             RootValue::Value(value) if !matches!(owner, Owner::Frame { .. }) => {
-                Holding::from_native(arena, access, value)?
+                self.project_value(arena, access, value)?
             }
             RootValue::Existing(from) => self
                 .holding(*from, access)?
@@ -326,23 +326,42 @@ impl Ledger {
         outputs: &[(Owner, RootValue<'_>)],
         pending: &mut Vec<EntityId>,
     ) -> Result<Vec<(Owner, Option<Holding>)>, HeapFault> {
+        // Small source exits need no owner-set indexes. Larger boundaries retain
+        // logarithmic duplicate checks, with the same current-view admission.
+        let large = inputs.len() + outputs.len() > 32;
         let mut consumed = BTreeSet::new();
-        let mut roots = BTreeMap::new();
-        for owner in inputs {
-            if !consumed.insert(*owner) {
+        for (index, owner) in inputs.iter().enumerate() {
+            let unique = if large {
+                consumed.insert(*owner)
+            } else {
+                !inputs[..index].contains(owner)
+            };
+            if !unique {
                 return Err(invalid("source input occurs twice"));
             }
-            if self.holding(*owner, access)?.is_none() {
+            if !self.present(*owner, access)? {
                 return Err(invalid("source input owner is absent"));
             }
-            roots.insert(*owner, None);
         }
+        let mut roots = Vec::with_capacity(inputs.len() + outputs.len());
         let mut produced = BTreeSet::new();
-        for (owner, value) in outputs {
-            if !produced.insert(*owner) {
+        for (index, (owner, value)) in outputs.iter().enumerate() {
+            let unique = if large {
+                produced.insert(*owner)
+            } else {
+                !outputs[..index]
+                    .iter()
+                    .any(|(previous, _)| previous == owner)
+            };
+            if !unique {
                 return Err(invalid("source output occurs twice"));
             }
-            if !consumed.contains(owner) && self.holding(*owner, access)?.is_some() {
+            let consumed = if large {
+                consumed.contains(owner)
+            } else {
+                inputs.contains(owner)
+            };
+            if !consumed && self.present(*owner, access)? {
                 return Err(invalid(&format!(
                     "source destination was not consumed: {owner:?}, inputs {inputs:?}"
                 )));
@@ -354,10 +373,21 @@ impl Ledger {
                 }
                 Ok(())
             })?;
-            roots.insert(*owner, Some(holding));
+            roots.push((*owner, Some(holding)));
         }
-        Ok(roots.into_iter().collect())
+        for owner in inputs {
+            let replaced = if large {
+                produced.contains(owner)
+            } else {
+                outputs.iter().any(|(output, _)| output == owner)
+            };
+            if !replaced {
+                roots.push((*owner, None));
+            }
+        }
+        Ok(roots)
     }
+
     pub(super) fn allocate_membership(
         &self,
         arena: &mut Arena,
@@ -436,6 +466,7 @@ impl Prepared {
             state: self.next,
             identity: self.identity,
             revision: self.revision,
+            facts: Default::default(),
         };
         let mut next = staged.prepare_ownership(arena, access, inputs, outputs)?;
         next.projected.extend(self.projected);

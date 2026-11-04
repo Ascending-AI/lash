@@ -219,6 +219,7 @@ impl Ledger {
             return Err(invalid("normalized membership and trace costs disagree"));
         }
         graph.edit.state.refinements = refinements;
+        self.facts.get_mut().clear();
         self.state = graph.edit.state;
         self.revision = revision;
         Ok(())

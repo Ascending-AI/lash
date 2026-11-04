@@ -301,6 +301,7 @@ impl<'a> BoundaryTransaction<'a> {
             state: self.prepared.next.clone(),
             identity: Rc::clone(&self.prepared.identity),
             revision: self.prepared.revision,
+            facts: Default::default(),
         }
     }
     pub fn peak(&self) -> u64 {
@@ -368,6 +369,7 @@ impl<'a> BoundaryTransaction<'a> {
             state: self.prepared.next,
             identity: self.prepared.identity,
             revision: self.prepared.revision,
+            facts: Default::default(),
         };
         let PreparedMember {
             mut prepared,
