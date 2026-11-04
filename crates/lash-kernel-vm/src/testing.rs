@@ -4,6 +4,8 @@
 use crate::{Bounds, CellStart, KernelMachine, OpenError, PreparedLibrary, Program, StartError};
 use lash_kernel_state::paged::{Checkpoint, PageSource};
 
+pub mod region_isa;
+
 /// The execution paths an embedder can compare without naming VM layout.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ExecutionStrategy {
