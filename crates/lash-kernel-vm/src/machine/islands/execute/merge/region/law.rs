@@ -117,7 +117,10 @@ impl Compiled {
                         set(merge.lists[1], out);
                         set(merge.order, Value::Int(if case == 0 { 1 } else { 0 }));
                         if *tail {
-                            set(merge.from_right, Value::Bool(false));
+                            set(
+                                merge.right_flag().expect("stream merge flag"),
+                                Value::Bool(false),
+                            );
                         }
                         // These are the saved pre-callback operands. Tail must
                         // read the current list, without overwriting either.
@@ -706,7 +709,7 @@ impl Compiled {
                 }
             }
             CollectionCase::Merge(shape) if !tail => {
-                initial[shape.from_right] = SlotState::Empty;
+                initial[shape.right_flag().expect("stream merge flag")] = SlotState::Empty;
                 for block in shape.compared {
                     for at in &self.blocks[block].declares {
                         initial[*at as usize] = SlotState::Empty;

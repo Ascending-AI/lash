@@ -172,6 +172,7 @@ impl BoundRecurrence<'_, '_> {
         self,
         registration: Registration<'a>,
         heap: &PagedHeap,
+        entry: Option<room::publication::boundary::CallEntry<'_>>,
     ) -> Result<Option<logical::BoundaryTransaction<'a>>, HeapFault> {
         if self.iterations == 0 {
             return Ok(None);
@@ -198,7 +199,7 @@ impl BoundRecurrence<'_, '_> {
         }
         if let Some(calls) = self.calls {
             let (range, completed) = calls
-                .finish()
+                .finish(entry.ok_or_else(|| invalid("loop lost its source entry"))?)
                 .ok_or_else(|| invalid("loop invocation range changed"))?;
             transaction = transaction.complete_invocations(range, completed, heap.pages())?;
         }

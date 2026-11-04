@@ -125,10 +125,7 @@ pub(super) fn helper_compilation() {
                 },
             };
             use lash_kernel_doc::Value;
-            use lash_kernel_state::{
-                arena::Arena,
-                kernel_internals::logical::{Ledger, RootValue},
-            };
+            use lash_kernel_state::{arena::Arena, kernel_internals::logical::RootValue};
             let call = std::sync::Arc::new(call.unwrap());
             let mut compiled_calls = vec![std::sync::Arc::clone(&call)];
             if call_form == 5 {
@@ -204,9 +201,10 @@ pub(super) fn helper_compilation() {
                     .is_err(),
                 "a caller resume cannot disappear from a composed source path"
             );
-            let mut ledger = Ledger::fresh();
             let mut arena = Arena::new();
             let heap = embedder.machine.source_law_heap();
+            let store = heap.logical_ledger();
+            let mut ledger = store.borrow_mut();
             let initial = Value::Int(0);
             let bindings: Vec<_> = iteration
                 .entries()
@@ -237,12 +235,24 @@ pub(super) fn helper_compilation() {
                 .capture(caller.code, &invocation, &ledger, heap, &physical)
                 .unwrap()
                 .unwrap();
+            drop(ledger);
+            let frontier = scope_frontier(
+                &exe,
+                caller.code,
+                &call,
+                &store.borrow(),
+                heap,
+                &invocation,
+                program.link,
+            );
+            let ledger = store.borrow();
             let reservation = ledger
                 .reserve_invocations(lash_kernel_doc::TaskId::MAIN, 4)
                 .unwrap();
             let scope = call
                 .bind_scope(
                     &exe,
+                    frontier.call_entry().unwrap(),
                     call.callee(),
                     &ledger,
                     &invocation,
@@ -723,7 +733,7 @@ pub(super) fn helper_compilation() {
 fn nested_compilation() {
     use crate::compile::room::{placement::BindingPlacement, region::calls::VerifiedCall};
     use lash_kernel_doc::Value;
-    use lash_kernel_state::{arena::Arena, kernel_internals::logical::Ledger};
+    use lash_kernel_state::arena::Arena;
     for (name, argument, answer, width) in [
         ("body.chain", 5, 5, 2),
         ("body.guarded_chain", 0, 0, 1),
@@ -783,9 +793,10 @@ fn nested_compilation() {
         let call = VerifiedCall::compile(&exe, caller.code, statement, pc)
             .expect("finite pure nested bodies must compose");
         assert_eq!(call.reservation_width(), Some(width));
-        let mut ledger = Ledger::fresh();
         let mut arena = Arena::new();
         let heap = run.machine.source_law_heap();
+        let store = heap.logical_ledger();
+        let mut ledger = store.borrow_mut();
         let (invocation, entered) = ledger
             .prepare_enter(
                 lash_kernel_doc::TaskId::MAIN,
@@ -806,12 +817,24 @@ fn nested_compilation() {
             .capture(caller.code, &invocation, &ledger, heap, &physical)
             .unwrap()
             .unwrap();
+        drop(ledger);
+        let frontier = scope_frontier(
+            &exe,
+            caller.code,
+            &call,
+            &store.borrow(),
+            heap,
+            &invocation,
+            program.link,
+        );
+        let ledger = store.borrow();
         let range = ledger
             .reserve_invocations(lash_kernel_doc::TaskId::MAIN, width)
             .unwrap();
         let mut scope = call
             .bind_scope(
                 &exe,
+                frontier.call_entry().unwrap(),
                 call.callee(),
                 &ledger,
                 &invocation,
@@ -953,6 +976,7 @@ fn nested_compilation() {
             let short = call
                 .bind_scope(
                     &exe,
+                    frontier.call_entry().unwrap(),
                     call.callee(),
                     &ledger,
                     &invocation,
@@ -980,7 +1004,10 @@ fn nested_compilation() {
         );
         scope.complete(candidate).unwrap();
         assert_eq!(scope.completed(), width);
-        assert_eq!(scope.finish().unwrap().1, width);
+        assert_eq!(
+            scope.finish(frontier.call_entry().unwrap()).unwrap().1,
+            width
+        );
     }
 }
 
@@ -1117,10 +1144,7 @@ fn native_iteration_compilation() {
         },
     };
     use lash_kernel_doc::Value;
-    use lash_kernel_state::{
-        arena::Arena,
-        kernel_internals::logical::{Ledger, RootValue},
-    };
+    use lash_kernel_state::{arena::Arena, kernel_internals::logical::RootValue};
     let text = scalar_document("let i = 0 while flat.lt(i, 4) { set i = flat.add(i, 1) } return i");
     let embedder = Embedder::with(
         &text,
@@ -1164,7 +1188,7 @@ fn native_iteration_compilation() {
     let region = iteration.scalars().next().unwrap();
     let mut arena = Arena::new();
     let heap = embedder.machine.source_law_heap();
-    let mut ledger = Ledger::fresh();
+    let mut ledger = lash_kernel_state::kernel_internals::logical::Ledger::fresh();
     let initial = Value::Int(0);
     let bindings: Vec<_> = iteration
         .entries()
@@ -1388,4 +1412,36 @@ fn body_helper_probes(
         registry.register(guarded, Some(identity_native)).unwrap(),
     ));
     functions
+}
+
+fn scope_frontier(
+    exe: &crate::compile::Executable,
+    code: crate::compile::CodeId,
+    call: &crate::compile::room::region::calls::VerifiedCall,
+    ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
+    heap: &lash_kernel_state::kernel_internals::PagedHeap,
+    invocation: &lash_kernel_state::kernel_internals::logical::Invocation,
+    link: lash_kernel_value::LinkId,
+) -> crate::compile::room::publication::Frontier {
+    exe.code(code)
+        .source_room
+        .frontier(
+            ledger,
+            heap,
+            invocation,
+            link,
+            lash_kernel_doc::KernelVersion::One,
+            crate::compile::room::publication::Position {
+                at: call.at().clone(),
+                unpaid: Some(call.at().clone()),
+                recovery: [0; 32],
+                occurrence: crate::compile::room::publication::Occurrence {
+                    task: lash_kernel_doc::TaskId::MAIN,
+                    invocation: invocation.id(),
+                    loops: vec![],
+                    action: None,
+                },
+            },
+        )
+        .unwrap()
 }

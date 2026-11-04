@@ -50,18 +50,7 @@ impl Polynomial {
             })
     }
     fn dominates(&self, other: &Self) -> bool {
-        if self.fixed < other.fixed {
-            return false;
-        }
-        self.terms.keys().chain(other.terms.keys()).all(|key| {
-            let left = self.terms.get(key).copied().unwrap_or(0);
-            let right = other.terms.get(key).copied().unwrap_or(0);
-            if matches!(key.1, Measure::MemberDelta(_) | Measure::CallDelta { .. }) {
-                left == right
-            } else {
-                left >= right
-            }
-        })
+        proof::dominates(self, other)
     }
 }
 struct ChargeSpan {

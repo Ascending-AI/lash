@@ -3,15 +3,14 @@
 use super::super::super::placement::DenseActivation;
 use super::binding::EvaluatedArguments;
 use super::*;
+use crate::compile::room::publication::boundary::{CallEntry, ScopeEntry};
 use std::{cell::Cell, rc::Rc};
 #[path = "../region/composition.rs"]
 pub(crate) mod iteration;
 #[path = "scope/settlement.rs"]
 mod settlement;
-#[cfg(test)]
+pub(crate) use settlement::ScopedPrefix;
 pub(in crate::compile::room) use settlement::ScopedPrefixParts;
-#[cfg(test)]
-pub(crate) use settlement::{ScopedPrefix, SettledCall};
 
 pub(crate) struct CallScope<'ledger> {
     ledger: &'ledger Ledger,
@@ -21,6 +20,7 @@ pub(crate) struct CallScope<'ledger> {
     range: logical::InvocationRange,
     identity: Rc<Cell<u64>>,
     target: Option<Rc<BoundCallable>>,
+    entry: ScopeEntry,
 }
 
 struct BoundCallable {
@@ -121,9 +121,14 @@ fn completed_calls(
 impl VerifiedCall {
     /// The activation and range authenticate once while the scope's immutable
     /// ledger borrow excludes publications, handoffs and normalization.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actual source entry, activation and affine invocation range"
+    )]
     pub(crate) fn bind_scope<'ledger>(
         &self,
         exe: &Executable,
+        entry: CallEntry<'_>,
         resolved_code: CodeId,
         ledger: &'ledger Ledger,
         caller: &logical::Invocation,
@@ -133,7 +138,7 @@ impl VerifiedCall {
         if self.callable.is_some() {
             return None;
         }
-        self.scope_entry(exe, resolved_code, ledger, caller, activation, range)
+        self.scope_entry(exe, entry, resolved_code, ledger, caller, activation, range)
     }
 
     /// The actual callable and defining origin authenticate once for this
@@ -145,6 +150,7 @@ impl VerifiedCall {
     pub(crate) fn bind_callback_scope<'ledger>(
         &self,
         exe: &Executable,
+        entry: CallEntry<'_>,
         ledger: &'ledger Ledger,
         arena: &Arena,
         caller: &logical::Invocation,
@@ -168,7 +174,8 @@ impl VerifiedCall {
         let snapshot = self.authenticate_callable(exe, arena, callable)?;
         handles.extend(snapshot.captures.iter().map(|(_, cell, _)| *cell));
         let dependencies = logical::Dependencies::capture(ledger, arena, &handles)?;
-        let mut scope = self.scope_entry(exe, self.callee, ledger, caller, activation, range)?;
+        let mut scope =
+            self.scope_entry(exe, entry, self.callee, ledger, caller, activation, range)?;
         scope.target = Some(Rc::new(BoundCallable {
             value: callable,
             code: self.callee,
@@ -179,9 +186,14 @@ impl VerifiedCall {
         Some(scope)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actual source entry, activation and affine invocation range"
+    )]
     fn scope_entry<'ledger>(
         &self,
         exe: &Executable,
+        entry: CallEntry<'_>,
         resolved_code: CodeId,
         ledger: &'ledger Ledger,
         caller: &logical::Invocation,
@@ -204,6 +216,7 @@ impl VerifiedCall {
             range,
             identity: Rc::new(Cell::new(0)),
             target: None,
+            entry: entry.bind(exe, &self.caller_source, caller)?,
         })
     }
 
@@ -359,9 +372,8 @@ impl CallScope<'_> {
     }
     /// Feed this pair to BoundaryTransaction::complete_invocations in the
     /// source-authenticated loop exit. Unused reserved IDs remain unconsumed.
-    pub(crate) fn finish(self) -> Option<(logical::InvocationRange, u64)> {
-        self.range
-            .is_current(self.ledger, &self.caller)
+    pub(crate) fn finish(self, entry: CallEntry<'_>) -> Option<(logical::InvocationRange, u64)> {
+        (self.entry.accepts(entry) && self.range.is_current(self.ledger, &self.caller))
             .then_some((self.range, self.identity.get()))
     }
 }

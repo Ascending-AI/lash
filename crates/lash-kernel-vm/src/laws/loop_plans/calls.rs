@@ -110,9 +110,10 @@ pub(super) fn pure_calls() {
                 Value::Int(4)
             };
         }
-        let mut ledger = Ledger::fresh();
         let mut arena = Arena::new();
         let heap = run.machine.source_law_heap();
+        let store = heap.logical_ledger();
+        let mut ledger = store.borrow_mut();
         let (invocation, entered) = ledger
             .prepare_enter(TaskId::MAIN, &mut arena, heap.pages(), &[], &[])
             .unwrap();
@@ -479,6 +480,17 @@ pub(super) fn pure_calls() {
             call.scope_roles()
                 .all(|slot| roles.iter().any(|(actual, _)| *actual == slot))
         );
+        drop(ledger);
+        let frontier = scope_frontier(
+            &exe,
+            caller.code,
+            &call,
+            &store.borrow(),
+            heap,
+            &invocation,
+            program.link,
+        );
+        let mut ledger = store.borrow_mut();
         let start = ledger.prospective_invocation(TaskId::MAIN).id();
         let foreign = Ledger::fresh()
             .reserve_invocations(TaskId::MAIN, 4)
@@ -486,6 +498,7 @@ pub(super) fn pure_calls() {
         assert!(
             call.bind_scope(
                 &exe,
+                frontier.call_entry().unwrap(),
                 call.callee(),
                 &ledger,
                 &invocation,
@@ -499,6 +512,7 @@ pub(super) fn pure_calls() {
         let mut scope = call
             .bind_scope(
                 &exe,
+                frontier.call_entry().unwrap(),
                 call.callee(),
                 &ledger,
                 &invocation,
@@ -588,7 +602,7 @@ pub(super) fn pure_calls() {
             .unwrap();
         drop(abandoned);
         assert_eq!(scope.completed(), 2);
-        let (reservation, completed) = scope.finish().unwrap();
+        let (reservation, completed) = scope.finish(frontier.call_entry().unwrap()).unwrap();
         let prepared = ledger
             .prepare_ownership(&mut arena, heap.pages(), &[], &[])
             .unwrap()
@@ -611,6 +625,7 @@ pub(super) fn pure_calls() {
         assert!(
             call.bind_scope(
                 &exe,
+                frontier.call_entry().unwrap(),
                 call.callee(),
                 &ledger,
                 &invocation,
@@ -709,9 +724,10 @@ fn entry_calls() {
             .find(|pc| matches!(stream.ops[*pc as usize], Op::Nested { .. }))
             .unwrap();
         let call = VerifiedCall::compile(&exe, caller.code, statement, pc).unwrap();
-        let mut ledger = Ledger::fresh();
         let mut arena = Arena::new();
         let heap = run.machine.source_law_heap();
+        let store = heap.logical_ledger();
+        let mut ledger = store.borrow_mut();
         let (invocation, entered) = ledger
             .prepare_enter(TaskId::MAIN, &mut arena, heap.pages(), &[], &[])
             .unwrap();
@@ -828,9 +844,10 @@ fn guarded_calls() {
                             panic!("guarded {target} root={rooted}: {error:?}")
                         });
                     assert_eq!(call.verify(&exe), Ok(()));
-                    let mut ledger = Ledger::fresh();
                     let mut arena = Arena::new();
                     let heap = run.machine.source_law_heap();
+                    let store = heap.logical_ledger();
+                    let mut ledger = store.borrow_mut();
                     let (invocation, entered) = ledger
                         .prepare_enter(TaskId::MAIN, &mut arena, heap.pages(), &[], &[])
                         .unwrap();
@@ -845,10 +862,22 @@ fn guarded_calls() {
                         .capture(caller.code, &invocation, &ledger, heap, &physical)
                         .unwrap()
                         .unwrap();
+                    drop(ledger);
+                    let frontier = scope_frontier(
+                        &exe,
+                        caller.code,
+                        &call,
+                        &store.borrow(),
+                        heap,
+                        &invocation,
+                        program.link,
+                    );
+                    let mut ledger = store.borrow_mut();
                     let reservation = ledger.reserve_invocations(TaskId::MAIN, 2).unwrap();
                     let scope = call
                         .bind_scope(
                             &exe,
+                            frontier.call_entry().unwrap(),
                             call.callee(),
                             &ledger,
                             &invocation,
@@ -1078,4 +1107,36 @@ fn guarded_probes(
         ));
     }
     functions
+}
+
+fn scope_frontier(
+    exe: &crate::compile::Executable,
+    code: crate::compile::CodeId,
+    call: &VerifiedCall,
+    ledger: &Ledger,
+    heap: &lash_kernel_state::kernel_internals::PagedHeap,
+    invocation: &lash_kernel_state::kernel_internals::logical::Invocation,
+    link: lash_kernel_value::LinkId,
+) -> crate::compile::room::publication::Frontier {
+    exe.code(code)
+        .source_room
+        .frontier(
+            ledger,
+            heap,
+            invocation,
+            link,
+            lash_kernel_doc::KernelVersion::One,
+            crate::compile::room::publication::Position {
+                at: call.at().clone(),
+                unpaid: Some(call.at().clone()),
+                recovery: [0; 32],
+                occurrence: Occurrence {
+                    task: TaskId::MAIN,
+                    invocation: invocation.id(),
+                    loops: vec![],
+                    action: None,
+                },
+            },
+        )
+        .unwrap()
 }

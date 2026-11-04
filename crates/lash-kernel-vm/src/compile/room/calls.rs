@@ -608,6 +608,15 @@ impl VerifiedCall {
     pub(in crate::compile::room) fn owns_debt(&self, debt: &ComposedDebt<'_>) -> bool {
         self.paths.iter().any(|path| debt.belongs_to(&path.charges))
     }
+    pub(in crate::compile::room) fn argument_roles(&self) -> impl Iterator<Item = Slot> + '_ {
+        self.argument_slots.iter().copied()
+    }
+    pub(in crate::compile::room) fn caller_statement(&self) -> StmtId {
+        self.statement
+    }
+    pub(in crate::compile::room) fn root_arguments(&self) -> Option<&[ScalarInput]> {
+        self.root_atoms.as_deref()
+    }
     pub(crate) fn callee(&self) -> CodeId {
         self.callee
     }

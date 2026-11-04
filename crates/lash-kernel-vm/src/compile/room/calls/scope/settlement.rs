@@ -9,6 +9,7 @@ pub(crate) struct ScopedPrefix<'plan> {
     completed: u64,
     dependencies: logical::Dependencies,
     calls: Vec<SettledCall<'plan>>,
+    entry: ScopeEntry,
 }
 
 pub(in crate::compile::room) struct ScopedPrefixParts<'plan> {
@@ -154,6 +155,7 @@ impl CallScope<'_> {
             completed: offset,
             dependencies,
             calls: completed,
+            entry: self.entry,
         }))
     }
 }
@@ -165,8 +167,15 @@ impl<'plan> ScopedPrefix<'plan> {
     pub(in crate::compile::room) fn caller(&self) -> &logical::Invocation {
         &self.caller
     }
-    pub(in crate::compile::room) fn current(&self, ledger: &Ledger, arena: &Arena) -> bool {
-        self.range.is_current(ledger, &self.caller) && self.dependencies.is_current(ledger, arena)
+    pub(in crate::compile::room) fn current(
+        &self,
+        ledger: &Ledger,
+        arena: &Arena,
+        frontier: &crate::compile::room::publication::Frontier,
+    ) -> bool {
+        self.entry.current(frontier)
+            && self.range.is_current(ledger, &self.caller)
+            && self.dependencies.is_current(ledger, arena)
     }
     pub(in crate::compile::room) fn into_parts(self) -> ScopedPrefixParts<'plan> {
         let Self {
@@ -249,14 +258,24 @@ impl VerifiedCall {
             ExitKind::Normal
         };
         let completion = self.completion(&self.caller_source, &self.at, exit)?;
-        CompiledPublication::compile_scoped(
+        CompiledPublication::compile_statements(
             exe,
             self.caller,
             self.paths[0].charges.caller().first().clone(),
             completion.resume().clone(),
             Successor::Normal,
-            vec![Arc::clone(self)],
+            vec![
+                crate::compile::room::publication::boundary::schedule::StatementSite::Call {
+                    first: self.paths[0].charges.caller().first().clone(),
+                    through: completion.resume().clone(),
+                    call: Arc::clone(self),
+                    continuation: Box::default(),
+                    prefix: None,
+                    suffix: None,
+                },
+            ],
             BoundaryNeeds::default(),
+            &[],
         )
     }
 }
@@ -274,7 +293,7 @@ impl<'plan> ScopedPrefix<'plan> {
     ) -> Result<
         Option<
             crate::compile::room::publication::boundary::BoundPublication<
-                crate::compile::room::publication::boundary::scoped::ScopedCharges<'plan>,
+                crate::compile::room::publication::boundary::schedule::StatementCharges<'plan>,
             >,
         >,
         doc::heap::HeapFault,
@@ -328,6 +347,20 @@ impl<'plan> ScopedPrefix<'plan> {
             )],
             members: vec![],
         };
-        plan.bind_scoped(frontier, ledger, arena, heap, evidence, self, proposed)
+        plan.bind_statements(
+            frontier,
+            ledger,
+            arena,
+            heap,
+            evidence,
+            vec![
+                crate::compile::room::publication::boundary::schedule::StatementWork::Call {
+                    prefix: None,
+                    suffix: None,
+                },
+            ],
+            Some(self),
+            proposed,
+        )
     }
 }

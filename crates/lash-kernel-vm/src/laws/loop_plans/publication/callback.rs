@@ -11,7 +11,12 @@ use lash_kernel_state::{
 };
 use std::sync::Arc;
 
+#[path = "callback/initial.rs"]
+mod initial;
+
 pub(super) fn identities() {
+    initial::payment();
+    production_callbacks();
     for layout in [0, 42] {
         for (rooted, foreign_binding, earlier, captured, mutates, two) in [
             (false, false, false, false, false, false),
@@ -366,11 +371,33 @@ pub(super) fn identities() {
                 .capture(caller.code, &invocation, &ledger, heap, &physical)
                 .unwrap()
                 .unwrap();
+            drop(ledger);
+            let frontier = call_caller_frontier(
+                &exe,
+                &call,
+                &store.borrow(),
+                heap,
+                &invocation,
+                program.link,
+                room::publication::Position {
+                    at: call.at().clone(),
+                    unpaid: Some(call.at().clone()),
+                    recovery: [0; 32],
+                    occurrence: room::publication::Occurrence {
+                        task: TaskId::MAIN,
+                        invocation: invocation.id(),
+                        loops: vec![],
+                        action: None,
+                    },
+                },
+            );
+            let ledger = store.borrow();
             let initial = ledger.prospective_invocation(TaskId::MAIN).id();
             if foreign_binding {
                 assert!(
                     call.bind_callback_scope(
                         &exe,
+                        frontier.call_entry().unwrap(),
                         &ledger,
                         &arena,
                         &invocation,
@@ -387,6 +414,7 @@ pub(super) fn identities() {
             assert!(
                 call.bind_scope(
                     &exe,
+                    frontier.call_entry().unwrap(),
                     callee,
                     &ledger,
                     &invocation,
@@ -399,6 +427,7 @@ pub(super) fn identities() {
             assert!(
                 call.bind_callback_scope(
                     &exe,
+                    frontier.call_entry().unwrap(),
                     &ledger,
                     &arena,
                     &invocation,
@@ -413,6 +442,7 @@ pub(super) fn identities() {
                 alternate
                     .bind_callback_scope(
                         &exe,
+                        frontier.call_entry().unwrap(),
                         &ledger,
                         &arena,
                         &invocation,
@@ -426,6 +456,7 @@ pub(super) fn identities() {
             assert!(
                 call.bind_callback_scope(
                     &exe,
+                    frontier.call_entry().unwrap(),
                     &ledger,
                     &arena,
                     &invocation,
@@ -440,6 +471,7 @@ pub(super) fn identities() {
             let scope = call
                 .bind_callback_scope(
                     &exe,
+                    frontier.call_entry().unwrap(),
                     &ledger,
                     &arena,
                     &invocation,
@@ -659,6 +691,15 @@ fn affine_callback(
         link,
         start.clone(),
     );
+    let foreign_frontier = call_caller_frontier(
+        exe,
+        call,
+        &initial_ledger,
+        heap,
+        caller,
+        link,
+        start.clone(),
+    );
     drop(initial_ledger);
     let mut locked = store.borrow_mut();
     let ledger = &mut *locked;
@@ -687,6 +728,22 @@ fn affine_callback(
                 .is_some_and(|(slot, _)| matches!(slot, logical::Slot::Operand(_)))
         )
     );
+    {
+        let (scope, candidate) = evaluate_callback(
+            exe, &frontier, call, activation, caller, roles, actual, arena, ledger,
+        );
+        let prefix = scope
+            .consume_prefix(arena, vec![candidate])
+            .unwrap()
+            .unwrap();
+        assert!(
+            prefix
+                .bind_call_for_law(&plan, &foreign_frontier, ledger, arena, heap, next.clone())
+                .unwrap()
+                .is_none(),
+            "an equal-position foreign Frontier cannot substitute the actual entry"
+        );
+    }
     let mut charged = 0;
     let count = call_scope_occurrences(call, exe);
     let mut counters = crate::machine::tasks::Occurrences::for_source_law(count);
@@ -696,8 +753,9 @@ fn affine_callback(
         (u64::MAX, u64::MAX, true),
         (u64::MAX, u64::MAX, false),
     ] {
-        let (scope, candidate) =
-            evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+        let (scope, candidate) = evaluate_callback(
+            exe, &frontier, call, activation, caller, roles, actual, arena, ledger,
+        );
         let memory = if memory == 0 {
             before_total + candidate.peak() - 1
         } else {
@@ -772,8 +830,9 @@ fn affine_callback(
         assert_eq!(frontier.position(), &start);
     }
     {
-        let (scope, first) =
-            evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+        let (scope, first) = evaluate_callback(
+            exe, &frontier, call, activation, caller, roles, actual, arena, ledger,
+        );
         let second = call
             .evaluate_scoped(exe, call.callee(), &scope, 1, arena, roles)
             .unwrap()
@@ -788,10 +847,12 @@ fn affine_callback(
         drop(prefix);
         assert_eq!(ledger.prospective_invocation(TaskId::MAIN).id(), first_id);
     }
-    let (foreign_scope, foreign_candidate) =
-        evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
-    let (scope, candidate) =
-        evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+    let (foreign_scope, foreign_candidate) = evaluate_callback(
+        exe, &frontier, call, activation, caller, roles, actual, arena, ledger,
+    );
+    let (scope, candidate) = evaluate_callback(
+        exe, &frontier, call, activation, caller, roles, actual, arena, ledger,
+    );
     drop(candidate);
     assert!(
         scope
@@ -802,8 +863,9 @@ fn affine_callback(
     );
     drop(foreign_scope);
     if captured {
-        let (scope, candidate) =
-            evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+        let (scope, candidate) = evaluate_callback(
+            exe, &frontier, call, activation, caller, roles, actual, arena, ledger,
+        );
         let prefix = scope
             .consume_prefix(arena, vec![candidate])
             .unwrap()
@@ -832,8 +894,9 @@ fn affine_callback(
         Value::List(handle) => Some(*handle),
         _ => None,
     }) {
-        let (scope, candidate) =
-            evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+        let (scope, candidate) = evaluate_callback(
+            exe, &frontier, call, activation, caller, roles, actual, arena, ledger,
+        );
         let prefix = scope
             .consume_prefix(arena, vec![candidate])
             .unwrap()
@@ -848,8 +911,9 @@ fn affine_callback(
         );
         arena.list_set(outer, 0, Value::Int(9)).unwrap();
     }
-    let (scope, candidate) =
-        evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+    let (scope, candidate) = evaluate_callback(
+        exe, &frontier, call, activation, caller, roles, actual, arena, ledger,
+    );
     let debt = candidate.debt().unwrap();
     let expected_units = debt.units();
     let expected_tape = crate::ChargeTape::new();
@@ -860,8 +924,9 @@ fn affine_callback(
         .unwrap();
     drop(prefix);
     assert_eq!(ledger.prospective_invocation(TaskId::MAIN).id(), first_id);
-    let (scope, candidate) =
-        evaluate_callback(exe, call, activation, caller, roles, actual, arena, ledger);
+    let (scope, candidate) = evaluate_callback(
+        exe, &frontier, call, activation, caller, roles, actual, arena, ledger,
+    );
     let peak = candidate.peak();
     let delta = candidate.delta()
         - if roles
@@ -997,6 +1062,7 @@ fn call_scope_occurrences(call: &VerifiedCall, exe: &crate::compile::Executable)
 )]
 fn evaluate_callback<'ledger, 'plan>(
     exe: &crate::compile::Executable,
+    frontier: &room::publication::Frontier,
     call: &'plan VerifiedCall,
     activation: &room::placement::DenseActivation<'_>,
     caller: &logical::Invocation,
@@ -1011,6 +1077,7 @@ fn evaluate_callback<'ledger, 'plan>(
     let scope = call
         .bind_callback_scope(
             exe,
+            frontier.call_entry().unwrap(),
             ledger,
             arena,
             caller,
@@ -1024,4 +1091,263 @@ fn evaluate_callback<'ledger, 'plan>(
         .unwrap()
         .unwrap();
     (scope, candidate)
+}
+
+/// K-EVAL-008: a production callback composes nested wrappers, rebinding after
+/// capture mutation and retaining each repeated call's ordered source debt.
+fn production_callbacks() {
+    use crate::laws::layout::ExecutionMode;
+    use crate::{Bounds, Machine, Step};
+    let definition = |signature: &str, body: &str| {
+        crate::laws::embedder::fragment(&format!(
+            "function {signature} -> Any\nkernel 1\nmetering statements\nbody {{ {body} }}"
+        ))
+    };
+    let definitions = format!(
+        "definition \"{}\"\ndefinition \"{}\"\ndefinition \"{}\"\n",
+        definition("leaf(a: Any, b: Any)", "return flat.add(a, b)"),
+        definition(
+            "middle(a: Any, b: Any)",
+            "return flat.add(7, invoke leaf(a, b))"
+        ),
+        definition(
+            "fold(f: Any, xs: Any)",
+            "let total = 0 for x in xs { set total = apply f(total, x) } return total"
+        )
+    );
+    let exercise = definition(
+        "exercise()",
+        "let seed = 3 let f = fn(a, b) { return flat.add(seed, invoke middle(a, b)) } let alias = f let xs = [1, 1, 2] let first = call fold(alias, xs) set seed = 9 let second = call fold(f, xs) return (first, second)",
+    );
+    let source =
+        format!("{definitions}definition \"{exercise}\"\nmain {{ return call exercise() }}");
+    let observe = |source: &str, mode, bounds: Bounds, slice, taped| {
+        let mut run = Embedder::with(
+            source,
+            Setup {
+                bounds,
+                slice,
+                probes: Some(crate::laws::layout::scalar_probes),
+                ..Setup::default()
+            },
+        );
+        let tape = crate::ChargeTape::new();
+        if taped {
+            run.machine.record_charges(tape.clone());
+        }
+        run.machine.take_callback_acceptances();
+        let mut accepted = 0;
+        let mut prefixes = Vec::new();
+        let end = loop {
+            match mode {
+                ExecutionMode::Source => run.machine.force_source_execution(),
+                ExecutionMode::Generic => run.machine.force_generic_packets(),
+                ExecutionMode::Specialized => {}
+            }
+            let step = run.run();
+            accepted += run.machine.take_callback_acceptances();
+            let balance = run.machine.logical_balance().unwrap();
+            prefixes.push((
+                run.machine.meters(),
+                [
+                    balance.entity_local_bytes,
+                    balance.root_and_control_bytes,
+                    balance.entities,
+                ],
+                (!matches!(step, Step::Ended(_))).then(|| run.machine.semantic_checkpoint()),
+            ));
+            match step {
+                Step::Ended(end) => break format!("{end:?}"),
+                Step::Slice => {}
+                Step::Parked(_) => {
+                    run.deliver_next();
+                }
+            }
+        };
+        (
+            (
+                end,
+                run.world.printed,
+                run.requests,
+                run.machine.meters().charged,
+                tape.steps(),
+                prefixes,
+            ),
+            accepted,
+        )
+    };
+    let roomy = crate::laws::embedder::ROOMY;
+    let header = crate::laws::embedder::fragment(
+        "function walk(xs: Any, f: Any) -> Any\nkernel 1\ncharge 1\nbody { let out = [] for x in xs metered 2 { let y = apply f(x) set out[list.len(out)] = y } return out }",
+    );
+    let header_source = format!(
+        "definition \"{header}\"\nmain {{ let xs = [1] let cb = fn(x) {{ return x }} return invoke walk(xs, cb) }}"
+    );
+    let header_total = observe(&header_source, ExecutionMode::Source, roomy, u64::MAX, true)
+        .0
+        .3
+        .unwrap();
+    for charge_limit in 0..=header_total {
+        let bounds = Bounds {
+            charge_limit,
+            ..roomy
+        };
+        let exact = observe(
+            &header_source,
+            ExecutionMode::Source,
+            bounds,
+            u64::MAX,
+            true,
+        )
+        .0;
+        for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
+            assert_eq!(
+                observe(&header_source, mode, bounds, u64::MAX, true).0,
+                exact,
+                "paid initial loop header at charge {charge_limit}, {mode:?}"
+            );
+        }
+    }
+
+    let (reference, _) = observe(&source, ExecutionMode::Source, roomy, u64::MAX, true);
+    for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
+        let (actual, accepted) = observe(&source, mode, roomy, u64::MAX, true);
+        assert_eq!(
+            actual, reference,
+            "nested callback source behavior {mode:?}"
+        );
+        if mode == ExecutionMode::Specialized {
+            assert_eq!(
+                accepted, 6,
+                "each callback must use the production affine source publication"
+            );
+        }
+    }
+    // Find the source success edges, then compare the exact refusal and
+    // success prefixes on both packet paths at those same bounds.
+    let mut low = 0;
+    let mut high = roomy.memory;
+    while low + 1 < high {
+        let middle = low + (high - low) / 2;
+        let actual = observe(
+            &source,
+            ExecutionMode::Source,
+            Bounds {
+                memory: middle,
+                ..roomy
+            },
+            u64::MAX,
+            true,
+        )
+        .0;
+        if actual.0 == reference.0 {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    let exact_memory = high;
+    let exact_depth = (1..=roomy.call_depth)
+        .find(|depth| {
+            observe(
+                &source,
+                ExecutionMode::Source,
+                Bounds {
+                    call_depth: *depth,
+                    ..roomy
+                },
+                u64::MAX,
+                true,
+            )
+            .0
+            .0 == reference.0
+        })
+        .expect("source callback succeeds within its roomy depth");
+    for bounds in [
+        Bounds {
+            memory: exact_memory - 1,
+            ..roomy
+        },
+        Bounds {
+            memory: exact_memory,
+            ..roomy
+        },
+        Bounds {
+            memory: exact_memory + 1,
+            ..roomy
+        },
+        Bounds {
+            call_depth: exact_depth - 1,
+            ..roomy
+        },
+        Bounds {
+            call_depth: exact_depth,
+            ..roomy
+        },
+        Bounds {
+            call_depth: exact_depth + 1,
+            ..roomy
+        },
+    ] {
+        let exact = observe(&source, ExecutionMode::Source, bounds, u64::MAX, true).0;
+        for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
+            assert_eq!(
+                observe(&source, mode, bounds, u64::MAX, true).0,
+                exact,
+                "callback exact cutoff {mode:?} {bounds:?}"
+            );
+        }
+    }
+    let exact_charge = reference.3.unwrap();
+    for bounds in [
+        Bounds {
+            charge_limit: 0,
+            ..roomy
+        },
+        Bounds {
+            charge_limit: exact_charge - 1,
+            ..roomy
+        },
+        Bounds {
+            charge_limit: exact_charge,
+            ..roomy
+        },
+    ] {
+        let exact = observe(&source, ExecutionMode::Source, bounds, u64::MAX, true).0;
+        for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
+            assert_eq!(
+                observe(&source, mode, bounds, u64::MAX, true).0,
+                exact,
+                "callback cutoff {mode:?} {bounds:?}"
+            );
+        }
+    }
+    let exact = observe(&source, ExecutionMode::Source, roomy, 7, true).0;
+    for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
+        assert_eq!(
+            observe(&source, mode, roomy, 7, true).0,
+            exact,
+            "callback unpaid suffix {mode:?}"
+        );
+    }
+    for body in [
+        "if flat.lt(1, b) { throw \"stop\" } return flat.add(a,b)",
+        "do perform 0(\"callback\") as Any return flat.add(a,b)",
+        "set seed = flat.add(seed,1) return flat.add(a,b)",
+    ] {
+        let exercise = definition(
+            "exercise()",
+            &format!("let seed = 0 let f = fn(a,b) {{ {body} }} return call fold(f,[1,2,3])"),
+        );
+        let source =
+            format!("{definitions}definition \"{exercise}\"\nmain {{ return call exercise() }}");
+        let exact = observe(&source, ExecutionMode::Source, roomy, 7, true).0;
+        for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
+            assert_eq!(
+                observe(&source, mode, roomy, 7, true).0,
+                exact,
+                "opaque callback must hand off {body}"
+            );
+        }
+    }
 }

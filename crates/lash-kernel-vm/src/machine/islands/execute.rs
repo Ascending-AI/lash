@@ -444,6 +444,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                     Opcode::Begin => {
                         let begin = &code.sites.begin[packet.x as usize];
+                        match self.callback_statement(&mut slab.view(active), begin.id) {
+                            Ok(true) => continue,
+                            Ok(false) => {}
+                            Err(error) => {
+                                let stop = self.halt(error.into());
+                                return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                            }
+                        }
                         if let Err(stop) =
                             self.begin(&mut slab.view(active), begin.id, begin.index, begin.ahead)
                         {

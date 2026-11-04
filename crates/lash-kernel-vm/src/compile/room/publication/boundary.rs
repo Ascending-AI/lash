@@ -2,10 +2,11 @@
 //! Consumers never supply fee or peak totals to the publication owner.
 use super::super::charges::{ChargeDebt, ChargeProgram, settled::SettledDebt};
 pub(in crate::compile::room) mod schedule;
-#[cfg(test)]
-pub(in crate::compile::room) mod scoped;
 use super::*;
+mod entry;
 mod loop_entry;
+pub(crate) use entry::CallEntry;
+pub(in crate::compile::room) use entry::ScopeEntry;
 use lash_kernel_state::{
     arena::Arena,
     kernel_internals::logical::{Dependencies, PublicationValue, RootValue},
@@ -48,8 +49,6 @@ pub(crate) struct CompiledPublication {
     charges: Box<[Arc<ChargeProgram>]>,
     needs: BoundaryNeeds,
     statements: Option<StatementSchedule>,
-    #[cfg(test)]
-    callbacks: Option<scoped::ScopedSchedule>,
 }
 
 /// The entry revision and proposed source exit cannot be rebound after this
@@ -122,8 +121,6 @@ impl CompiledPublication {
             charges: charges.into(),
             needs,
             statements: None,
-            #[cfg(test)]
-            callbacks: None,
         }))
     }
 
@@ -175,10 +172,6 @@ impl CompiledPublication {
         debts: Vec<ChargeDebt<'_>>,
         proposed: Position,
     ) -> Result<Option<BoundPublication>, HeapFault> {
-        #[cfg(test)]
-        if self.callbacks.is_some() {
-            return Ok(None);
-        }
         if self.statements.is_some() || debts.len() != self.charges.len() {
             return Ok(None);
         }

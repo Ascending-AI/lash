@@ -291,7 +291,8 @@ impl Body {
         live: &mut BTreeSet<Slot>,
     ) -> Result<Part, Refused> {
         let incoming: Vec<_> = live.iter().copied().collect();
-        let region = source.compile_scalar_region_from(interval.scalar(start, end)?, &incoming)?;
+        let region =
+            source.compile_scalar_mode(interval.scalar(start, end)?, false, &incoming, true)?;
         for (slot, _) in region.entries() {
             if !live.remove(&slot) {
                 return Err(Refused::Retained);
@@ -320,6 +321,7 @@ impl VerifiedCall {
         exe: &Executable,
         arena: &Arena,
         arguments: &[Value],
+        captures: &[(Slot, doc::arena::ArenaHandle, Value)],
         path: &paths::BodyPath,
         index: usize,
     ) -> Result<Option<EvaluatedArguments>, doc::heap::HeapFault> {
@@ -362,6 +364,14 @@ impl VerifiedCall {
                             return Ok(None);
                         };
                         values[fact.index()] = *value;
+                    }
+                    for capture in &region.captures {
+                        let Some((_, _, value)) =
+                            captures.iter().find(|(slot, _, _)| *slot == capture.slot)
+                        else {
+                            return Ok(None);
+                        };
+                        values[capture.live.fact.index()] = *value;
                     }
                     let mut rooms = Vec::new();
                     for result in &region.results {

@@ -422,6 +422,43 @@ impl KernelMachine {
                         return self.source_done(running, source_pc, ran);
                     }
                 }
+                Op::ForIn { iterable } => {
+                    let admitted = self.region;
+                    self.close_region(running.stream);
+                    let code = self.frame(task)?.code;
+                    let paid = admitted.and_then(|admitted| {
+                        let close = (running.stmt.ops.start..source_pc).find_map(|head| {
+                            match running.stream.ops[head as usize] {
+                                Op::Region { region, total } if region == admitted.region => {
+                                    Some(crate::compile::expr::Close {
+                                        region: region.0,
+                                        head,
+                                        total,
+                                    })
+                                }
+                                _ => None,
+                            }
+                        })?;
+                        crate::compile::room::publication::boundary::PaidLoopInput::record(
+                            running.exe,
+                            code,
+                            running.id,
+                            close,
+                            admitted.entry,
+                            self.charged,
+                        )
+                    });
+                    let flow =
+                        self.for_start(task, host, running.exe, running.id, at(iterable), paid)?;
+                    return self.source_done(
+                        running,
+                        source_pc,
+                        match flow {
+                            Flow::Done => Ran::Done,
+                            Flow::Step => Ran::Step,
+                        },
+                    );
+                }
                 op => {
                     self.close_region(running.stream);
                     if let Some(ran) = self.run_rare(host, running, op)? {
@@ -775,9 +812,6 @@ impl KernelMachine {
                 self.remove_index(target, target + 1)?;
                 Ran::Done
             }
-            Op::ForIn { iterable } => {
-                ran(self.for_start(task, host, exe, running.id, at(iterable))?)
-            }
             Op::While => {
                 self.frame(task)?.control.push(Control::While {
                     stmt: running.id,
@@ -847,6 +881,7 @@ impl KernelMachine {
             | Op::LetBind { .. }
             | Op::LetBindShared { .. }
             | Op::LetEnd { .. }
+            | Op::ForIn { .. }
             | Op::End => return Err(fault("the stream's loop runs this op itself").into()),
         };
         Ok(Some(ran))

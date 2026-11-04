@@ -8,6 +8,7 @@
 //! on when its frame returns ([`KernelMachine::header_answered`]).
 
 use std::sync::Arc;
+mod initial;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{NativeError, Retry, TaskId, Value};
@@ -270,6 +271,7 @@ impl KernelMachine {
         exe: &Executable,
         stmt: StmtId,
         iterable: Reg,
+        paid: Option<crate::compile::room::publication::boundary::PaidLoopInput>,
     ) -> Status {
         let value = self.take(iterable);
         let Some(via) = via_of(exe, stmt) else {
@@ -279,6 +281,9 @@ impl KernelMachine {
                     "`for` iterates a list, a tuple, a map or a set",
                 );
             };
+            if self.publish_initial_for_entry(task, exe, stmt, &cursor, paid.as_ref())? {
+                return Ok(Flow::Step);
+            }
             self.frame(task)?.control.push(Control::For {
                 stmt,
                 cursor,

@@ -110,8 +110,13 @@ impl CollectionExits {
                 }
             }
             CollectionStep::Merge(merge) => {
-                exits.commit = Some(committed(site(merge.body, 4)?)?);
-                exits.callback = Some(committed(site(merge.compared[1], 1)?)?);
+                if merge.loop_.is_some() {
+                    exits.commit = Some(committed(site(merge.body, 6)?)?);
+                    exits.callback = Some(committed(site(merge.body, 2)?)?);
+                } else {
+                    exits.commit = Some(committed(site(merge.body, 4)?)?);
+                    exits.callback = Some(committed(site(merge.compared[1], 1)?)?);
+                }
             }
         }
         Some(exits)
@@ -561,7 +566,7 @@ impl Reduction {
         cx: CollectionRegion<'_>,
         exit: room::publication::Position,
     ) -> Option<CollectionFacts> {
-        let depth = match self.depth {
+        let depth = match self.native_depth()? {
             Depth::None => 0,
             Depth::Operation(extra) => {
                 if extra <= 1 {
@@ -580,7 +585,7 @@ impl Reduction {
             vec![(self.accumulator, answer)],
             None,
             cx.committed()?,
-            cx.after(self.body, 1)?,
+            cx.after(self.body, self.statements)?,
             exit,
         )
     }
@@ -697,6 +702,44 @@ impl Merge {
         cx: CollectionRegion<'_>,
         exit: room::publication::Position,
     ) -> Option<CollectionFacts> {
+        if self.loop_.is_some() {
+            let [dest, end, mid, left, right, width, n] = self
+                .counters
+                .map(|at| cx.int(at))
+                .map(|value| value.unwrap_or(-1));
+            (0 <= dest
+                && dest < n
+                && 0 <= left
+                && left < mid
+                && mid <= end
+                && right < end
+                && mid <= right
+                && end <= n
+                && width > 0)
+                .then_some(())?;
+            let permitted = cx.boolean(self.tests[1], &[Value::Int(right), Value::Int(end)])?;
+            permitted.then_some(())?;
+            cx.choose(self.body, 0, true)?;
+            let sorted = cx.list(self.lists[0])?;
+            let first = cx.item(sorted, left as u64)?;
+            let second = cx.item(sorted, right as u64)?;
+            return cx.finish(
+                self.items.into_iter().zip([first, second]).collect(),
+                None,
+                cx.exits.callback.clone()?,
+                CollectionTransfer {
+                    continuation: CollectionContinuation::Callback,
+                    writes: Vec::new(),
+                    leave: None,
+                    clears: Vec::new(),
+                    resume: None,
+                    blocks: vec![(self.body, 3)],
+                    pc: self.callback,
+                },
+                exit,
+            );
+        }
+        let setup = self.setup.as_ref()?;
         let [dest, mut end, mut mid, mut left, mut right, n] = [
             cx.int(self.counters[0])?,
             cx.int(self.counters[1])?,
@@ -710,15 +753,15 @@ impl Merge {
             .then_some(())?;
         (dest < n).then_some(())?;
         let sorted = cx.list(self.lists[0])?;
-        let starts = cx.boolean(self.start, &[Value::Int(dest), Value::Int(end)])?;
+        let starts = cx.boolean(setup.start, &[Value::Int(dest), Value::Int(end)])?;
         cx.choose(self.body, 0, starts)?;
         if starts {
             let width = cx.int(self.counters[5])?;
             (0..(1 << 48)).contains(&width).then_some(())?;
-            let sum = cx.integer(self.sums[0], &[Value::Int(dest), Value::Int(width)])?;
-            mid = cx.integer(self.minimum[0], &[Value::Int(sum), Value::Int(n)])?;
-            let sum = cx.integer(self.sums[1], &[Value::Int(mid), Value::Int(width)])?;
-            end = cx.integer(self.minimum[1], &[Value::Int(sum), Value::Int(n)])?;
+            let sum = cx.integer(setup.sums[0], &[Value::Int(dest), Value::Int(width)])?;
+            mid = cx.integer(setup.minimum[0], &[Value::Int(sum), Value::Int(n)])?;
+            let sum = cx.integer(setup.sums[1], &[Value::Int(mid), Value::Int(width)])?;
+            end = cx.integer(setup.minimum[1], &[Value::Int(sum), Value::Int(n)])?;
             left = dest;
             right = mid;
         }
@@ -745,7 +788,7 @@ impl Merge {
                 );
             }
             writes.extend([
-                (self.from_right, Value::Bool(false)),
+                (setup.from_right, Value::Bool(false)),
                 (self.items[0], first),
                 (self.items[1], second),
             ]);
@@ -787,7 +830,7 @@ impl Merge {
             .copied()
             .zip([destination, end, mid, left, right].map(Value::Int))
             .collect();
-        writes.push((self.from_right, Value::Bool(from_right)));
+        writes.push((setup.from_right, Value::Bool(from_right)));
         cx.finish(
             writes,
             Some((out, dest as u64, item)),
@@ -802,9 +845,43 @@ impl Merge {
         cx: CollectionRegion<'_>,
         exit: room::publication::Position,
     ) -> Option<CollectionFacts> {
+        if self.loop_.is_some() {
+            let order = cx.value(self.order)?;
+            cx.boolean(self.order_guard?, &[order, order])?
+                .then_some(())?;
+            cx.choose(self.body, 4, true)?;
+            let from_right = cx.boolean(self.tests[2], &[Value::Int(0), order])?;
+            cx.choose(self.body, 5, from_right)?;
+            let selected = self.counters[if from_right { 4 } else { 3 }];
+            let dest = cx.int(self.counters[0])?;
+            let index = cx.int(selected)?;
+            (0..(1 << 48)).contains(&(dest | index)).then_some(())?;
+            let out = cx.list(self.lists[1])?;
+            (dest as u64 <= cx.arena.len(out).ok()?).then_some(())?;
+            let item = cx.value(self.items[usize::from(from_right)])?;
+            let advanced = cx.integer(
+                self.advances[usize::from(!from_right)],
+                &[Value::Int(index), Value::Int(1)],
+            )?;
+            let destination = cx.integer(self.advances[2], &[Value::Int(dest), Value::Int(1)])?;
+            let mut transfer = cx.after(self.body, 7)?;
+            transfer.blocks.clear();
+            transfer.resume = Some((self.body, 7));
+            return cx.finish(
+                vec![
+                    (self.counters[0], Value::Int(destination)),
+                    (selected, Value::Int(advanced)),
+                ],
+                Some((out, dest as u64, item)),
+                cx.committed()?,
+                transfer,
+                exit,
+            );
+        }
+        let setup = self.setup.as_ref()?;
         // The callback cannot write this private local. A false order guard
         // retains the source's initialized false value rather than resetting it.
-        matches!(cx.value(self.from_right)?, Value::Bool(false)).then_some(())?;
+        matches!(cx.value(setup.from_right)?, Value::Bool(false)).then_some(())?;
         let from_right = cx.boolean(self.tests[2], &[Value::Int(0), cx.value(self.order)?])?;
         cx.choose(self.compared[1], 4, from_right)?;
         cx.choose(self.body, 3, from_right)?;
@@ -841,7 +918,7 @@ impl Merge {
             vec![
                 (self.counters[0], Value::Int(destination)),
                 (selected, Value::Int(advanced)),
-                (self.from_right, Value::Bool(from_right)),
+                (setup.from_right, Value::Bool(from_right)),
             ],
             Some((out, dest as u64, item)),
             cx.committed()?,

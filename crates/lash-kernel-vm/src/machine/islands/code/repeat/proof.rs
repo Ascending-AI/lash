@@ -405,6 +405,7 @@ impl Proof {
     pub(in crate::machine::islands) fn scope<'ledger>(
         &self,
         exe: &Executable,
+        entry: Option<room::publication::boundary::CallEntry<'_>>,
         ledger: &'ledger Ledger,
         invocation: &Invocation,
         activation: &DenseActivation<'_>,
@@ -425,6 +426,7 @@ impl Proof {
         let range = ledger.reserve_invocations(task, capacity)?;
         Some(Some(call.call.bind_scope(
             exe,
+            entry?,
             call.call.callee(),
             ledger,
             invocation,

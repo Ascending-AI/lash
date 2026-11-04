@@ -1,10 +1,13 @@
 //! Source value flow authenticates a finite collection result before storage.
 //! Fact indices are source-local, independent of physical slots and family tags.
 use super::*;
+use crate::compile::room::publication::sort::CallbackProgram;
 use crate::compile::{Entry as NativeEntry, LibId, LibRun};
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_state::kernel_internals::logical::{self, Slot};
 use std::collections::BTreeSet;
+#[path = "proof/callback.rs"]
+mod callback;
 
 #[path = "proof/evaluate.rs"]
 mod evaluate;
@@ -20,6 +23,12 @@ pub(super) enum ValueRule {
         library: LibId,
         arguments: Box<[usize]>,
         after_member: bool,
+    },
+    Callback {
+        call: Arc<region::calls::VerifiedCall>,
+        at: Point,
+        arguments: Box<[usize]>,
+        roles: Box<[(Slot, usize)]>,
     },
     Item {
         target: usize,
@@ -43,6 +52,8 @@ pub(super) struct Compiled {
     pub(super) depth: u64,
 }
 struct Compiler<'a> {
+    callback: Option<&'a CallbackProgram>,
+    callback_results: BTreeMap<Site, usize>,
     source: &'a Source,
     slots: Arc<OwnerSlots>,
     values: Vec<ValueRule>,
@@ -150,6 +161,9 @@ impl Compiler<'_> {
         self.slot(owner)
     }
     fn event(&mut self, exe: &Executable, event: &Event) -> Result<EventRule, Refused> {
+        if callback::handles(self, event) {
+            return callback::compile_event(self, event);
+        }
         if !event.entities.is_empty() {
             return Err(Refused::Source);
         }
@@ -388,7 +402,33 @@ impl Compiled {
         source: &Arc<Source>,
         events: &[Arc<CompiledInterval>],
     ) -> Result<Self, Refused> {
+        Self::compile_with_callback(exe, source, events, None)
+    }
+
+    pub(super) fn compile_with_callback(
+        exe: &Executable,
+        source: &Arc<Source>,
+        events: &[Arc<CompiledInterval>],
+        callback: Option<&CallbackProgram>,
+    ) -> Result<Self, Refused> {
+        Self::compile_events(
+            exe,
+            source,
+            events.iter().flat_map(|interval| interval.events()),
+            callback,
+        )
+    }
+
+    fn compile_events<'event>(
+        exe: &Executable,
+        source: &Arc<Source>,
+        events: impl Iterator<Item = &'event Event>,
+        callback: Option<&CallbackProgram>,
+    ) -> Result<Self, Refused> {
+        let mut events = events.peekable();
         let mut cx = Compiler {
+            callback,
+            callback_results: BTreeMap::new(),
             source,
             slots: source.owner_slots()?,
             values: Vec::new(),
@@ -398,15 +438,10 @@ impl Compiled {
             written: BTreeSet::new(),
             depth: 0,
             member_seen: false,
-            first: events
-                .first()
-                .and_then(|interval| interval.events().next())
-                .ok_or(Refused::Source)?
-                .point
-                .clone(),
+            first: events.peek().ok_or(Refused::Source)?.point.clone(),
         };
         let mut rules = Vec::new();
-        for event in events.iter().flat_map(|interval| interval.events()) {
+        for event in events {
             rules.push(cx.event(exe, event)?);
         }
         if rules.iter().filter(|rule| rule.member.is_some()).count() > 1 {
@@ -421,5 +456,51 @@ impl Compiled {
             written: cx.written.into_iter().collect(),
             depth: cx.depth,
         })
+    }
+}
+
+/// Dominance compares the complete union of ordered source facts. Signed
+/// member/call deltas require equality; other measures are nonnegative.
+pub(super) fn dominates(left: &Polynomial, right: &Polynomial) -> bool {
+    use std::cmp::Ordering;
+    if left.fixed < right.fixed {
+        return false;
+    }
+    let mut left = left.terms.iter().peekable();
+    let mut right = right.terms.iter().peekable();
+    loop {
+        let (key, a, b) = match (left.peek(), right.peek()) {
+            (Some((a, _)), Some((b, _))) => match a.cmp(b) {
+                Ordering::Less => {
+                    let (key, value) = left.next().unwrap_or_else(|| unreachable!());
+                    (key, *value, 0)
+                }
+                Ordering::Equal => {
+                    let (key, a) = left.next().unwrap_or_else(|| unreachable!());
+                    let (_, b) = right.next().unwrap_or_else(|| unreachable!());
+                    (key, *a, *b)
+                }
+                Ordering::Greater => {
+                    let (key, value) = right.next().unwrap_or_else(|| unreachable!());
+                    (key, 0, *value)
+                }
+            },
+            (Some(_), None) => {
+                let (key, value) = left.next().unwrap_or_else(|| unreachable!());
+                (key, *value, 0)
+            }
+            (None, Some(_)) => {
+                let (key, value) = right.next().unwrap_or_else(|| unreachable!());
+                (key, 0, *value)
+            }
+            (None, None) => return true,
+        };
+        if matches!(key.1, Measure::MemberDelta(_) | Measure::CallDelta { .. }) {
+            if a != b {
+                return false;
+            }
+        } else if a < b {
+            return false;
+        }
     }
 }

@@ -169,19 +169,20 @@ fn source_programs(
             continue;
         }
         completed.push(exit.0.clone());
-        for program in room::CollectionProgram::compile_paths(
+        let Ok(paths) = room::CollectionProgram::compile_paths(
             exe,
             placement.code(),
             first.clone(),
             exit.0.clone(),
-        )
-        .ok()?
-        {
+        ) else {
+            continue;
+        };
+        for program in paths {
             program.verify(exe).ok()?;
             programs.push(Arc::new(program));
         }
     }
-    Some(programs.into())
+    (!programs.is_empty()).then(|| programs.into())
 }
 
 impl<S> CollectionSite<S> {
@@ -330,7 +331,7 @@ impl ReduceSite {
             .iter()
             .find(|site| std::ptr::eq(&site.shape, shape))?;
         let step = CollectionStep::Reduce(shape.clone());
-        let function = exe.lib(shape.lib);
+        let function = exe.lib(shape.callback_site.library()?);
         // Body reductions require core's composed source/call acceptance. A
         // prepared scalar entry is not authority to skip their logical frame.
         if !matches!(
@@ -408,7 +409,7 @@ site!(
     |s: &Merge| s.counters[..5]
         .iter()
         .copied()
-        .chain([s.from_right])
+        .chain(s.right_flag())
         .chain(s.items)
         .collect::<Vec<_>>(),
     prepare_head
@@ -427,12 +428,38 @@ impl MergeTailSite {
             .iter()
             .find(|site| std::ptr::eq(&site.shape.0, shape))?;
         let step = CollectionStep::Merge(shape.clone());
+        if shape.loop_.is_some() {
+            let reads: Vec<_> = [
+                shape.counters[0],
+                shape.counters[3],
+                shape.counters[4],
+                shape.order,
+                shape.lists[1],
+            ]
+            .into_iter()
+            .chain(shape.items)
+            .collect();
+            let inputs = Inputs::compile(
+                compiled,
+                &reads,
+                &[shape.counters[0], shape.counters[3], shape.counters[4]],
+            )?;
+            let mut exits = CollectionExits::compile(&step, exe, compiled)?;
+            exits.callback = None;
+            let programs = source_programs(exe, compiled, &exits, shape.body, Some(4))?;
+            return Some(Self {
+                shape: MergeTail(shape.clone()),
+                exits,
+                inputs,
+                programs,
+            });
+        }
         let reads: Vec<_> = [
             shape.counters[0],
             shape.counters[3],
             shape.counters[4],
             shape.order,
-            shape.from_right,
+            shape.right_flag()?,
         ]
         .into_iter()
         .chain(shape.lists)
@@ -442,7 +469,7 @@ impl MergeTailSite {
             shape.counters[0],
             shape.counters[3],
             shape.counters[4],
-            shape.from_right,
+            shape.right_flag()?,
         ];
         let mut inputs = Inputs::compile(compiled, &reads, &writes)?;
         let clears: Vec<_> = shape

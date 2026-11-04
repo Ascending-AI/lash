@@ -1,6 +1,9 @@
 //! Recognize a stable merge from its complete source data flow. The fast
 //! steps retain the source body and callback coordinates for every exit.
 use super::*;
+#[path = "merge/callback.rs"]
+pub(in crate::machine::islands) mod callback;
+use callback::Callback;
 
 #[derive(Clone)]
 pub(crate) enum CollectionStep {
@@ -39,13 +42,16 @@ pub(crate) struct Reduction {
     pub(in crate::machine::islands) accumulator: usize,
     pub(in crate::machine::islands) item: usize,
     pub(in crate::machine::islands) body: usize,
-    pub(in crate::machine::islands) lib: LibId,
-    pub(in crate::machine::islands) checked: bool,
     pub(in crate::machine::islands) reverse: bool,
-    pub(in crate::machine::islands) depth: Depth,
+    pub(in crate::machine::islands) callback_site: Callback,
+    pub(in crate::machine::islands) statements: usize,
 }
 
 impl Reduction {
+    pub(in crate::machine::islands) fn native_depth(&self) -> Option<Depth> {
+        self.callback_site.native().map(|(_, _, depth)| depth)
+    }
+
     /// Canonical immediate reduction, shared by ordinary and region exits.
     /// No caller is allowed to replace a mixed numeric or checked call with
     /// an integer recurrence that changes its result or error boundary.
@@ -55,6 +61,7 @@ impl Reduction {
         accumulator: Value,
         item: Value,
     ) -> Option<Value> {
+        let (lib, checked, _) = self.callback_site.native()?;
         if !matches!(accumulator, Value::Int(_) | Value::Float(_))
             || !matches!(item, Value::Int(_) | Value::Float(_))
         {
@@ -65,7 +72,7 @@ impl Reduction {
         } else {
             [accumulator, item]
         };
-        let function = exe.lib(self.lib);
+        let function = exe.lib(lib);
         let native_entry = matches!(function.run, LibRun::Native { .. })
             .then(|| function.specialization.native.immediate.map(Entry::Native))
             .flatten();
@@ -76,7 +83,7 @@ impl Reduction {
                 .as_ref()
                 .map(|(entry, _)| entry)
         })?;
-        let signature = self.checked.then_some(&function.header.signature);
+        let signature = checked.then_some(&function.header.signature);
         if signature.is_some_and(|signature| {
             !signature
                 .params
@@ -149,23 +156,43 @@ pub(crate) struct Placement {
 
 #[derive(Clone)]
 pub(crate) struct Merge {
-    pub(in crate::machine::islands) start: LibId,
-    pub(in crate::machine::islands) sums: [LibId; 2],
-    pub(in crate::machine::islands) minimum: [LibId; 2],
+    pub(in crate::machine::islands) setup: Option<MergeSetup>,
+    pub(in crate::machine::islands) loop_: Option<StmtId>,
     pub(in crate::machine::islands) tests: [LibId; 3],
     pub(in crate::machine::islands) advances: [LibId; 3], // right, left, destination
     pub(in crate::machine::islands) counters: [usize; 7], // dest, end, mid, left, right, width, n
     pub(in crate::machine::islands) lists: [usize; 2],    // sorted, out
-    pub(in crate::machine::islands) from_right: usize,
     pub(in crate::machine::islands) items: [usize; 2],
     pub(in crate::machine::islands) order: usize,
+    pub(in crate::machine::islands) order_guard: Option<LibId>,
     pub(in crate::machine::islands) body: usize,
     pub(in crate::machine::islands) compared: [usize; 2],
     pub(in crate::machine::islands) callback: usize,
+    pub(in crate::machine::islands) callback_site: Callback,
+}
+
+#[derive(Clone)]
+pub(in crate::machine::islands) struct MergeSetup {
+    pub(in crate::machine::islands) start: LibId,
+    pub(in crate::machine::islands) sums: [LibId; 2],
+    pub(in crate::machine::islands) minimum: [LibId; 2],
+    pub(in crate::machine::islands) from_right: usize,
+}
+impl Merge {
+    pub(in crate::machine::islands) fn right_flag(&self) -> Option<usize> {
+        self.setup.as_ref().map(|setup| setup.from_right)
+    }
+}
+#[derive(Clone, Copy)]
+struct RunContext {
+    counters: [u32; 7],
 }
 
 impl Build<'_> {
     pub(in crate::machine::islands) fn merges(&mut self, source: &SourceBlock) {
+        if !self.fused {
+            return;
+        }
         for statement in &source.statements {
             match &statement.kind {
                 StatementKind::For { body, .. } => {
@@ -191,7 +218,7 @@ impl Build<'_> {
                             });
                         }
                     }
-                    if let Some(merge) = self.merge(body) {
+                    if let Some(merge) = self.merge(statement, body, None) {
                         let head = self.blocks[merge.body].starts[0] - 1;
                         if self.ops[head].kernel.is_some()
                             || !matches!(self.ops[head].op, Op::Open(block) if block == merge.body)
@@ -230,6 +257,20 @@ impl Build<'_> {
                     self.merges(body);
                 }
                 StatementKind::While { body, .. } => {
+                    if let Some(merge) = self.merge(statement, body, self.merge_context(source)) {
+                        let head = self.blocks[merge.body].starts[0] - 1;
+                        if self.ops[head].kernel.is_none()
+                            && matches!(self.ops[head].op, Op::Open(block) if block == merge.body)
+                        {
+                            let tail = self.blocks[merge.body].starts[4];
+                            let step = std::sync::Arc::new(CollectionStep::Merge(merge));
+                            self.ops[head].kernel = Some(CollectionKernel {
+                                step: step.clone(),
+                                tail: false,
+                            });
+                            self.ops[tail].kernel = Some(CollectionKernel { step, tail: true });
+                        }
+                    }
                     if let Some(read) = self.read_slot(body) {
                         let head = self.blocks[read.body].starts[0] - 1;
                         if self.ops[head].kernel.is_none()
@@ -308,37 +349,32 @@ impl Build<'_> {
         let StatementKind::For { at: item, .. } = loop_.kind else {
             return None;
         };
-        body.declares.iter().all(|at| *at == item).then_some(())?;
-        let [write] = body.statements.as_ref() else {
-            return None;
-        };
-        let StatementKind::Write { bind: false, .. } = write.kind else {
-            return None;
-        };
-        let (accumulator, value) = assigned(write, false)?;
-        (item != accumulator && !self.shared[item as usize] && !self.shared[accumulator as usize])
-            .then_some(())?;
-        let value = unpin(value);
-        let (lib, args, checked) = match &value.kind {
-            Kind::Operator {
-                lib, args, invoke, ..
-            } => (*lib, &**args, invoke.is_some_and(|invoke| invoke.checked)),
-            Kind::Native { lib, args, .. } => (*lib, &**args, false),
-            Kind::Call { invoke, args, .. } => {
-                let lib = invoke
-                    .act
-                    .and_then(|act| self.stream.nested[act.ix()].kind.operator_lib())
-                    .or_else(|| match &self.exe.stmt(write.id).form {
-                        crate::compile::Form::Action(action) => match &action.kind {
-                            crate::compile::ActionKind::Call { callee, .. } => callee.library(),
-                            _ => None,
-                        },
-                        _ => None,
-                    })?;
-                (lib, &**args, invoke.checked)
+        let (write, call, temporary) = match body.statements.as_ref() {
+            [write] => (write, write, None),
+            [call, write] => {
+                let (temporary, _) = assigned(call, true)?;
+                let (_, value) = self.collection_value(write, false)?;
+                (local(&value)? == temporary && !self.shared[temporary as usize]).then_some(())?;
+                (write, call, Some(temporary))
             }
             _ => return None,
         };
+        body.declares
+            .iter()
+            .all(|at| *at == item || Some(*at) == temporary)
+            .then_some(())?;
+        let (accumulator, value) = self.collection_value(write, false)?;
+        (item != accumulator
+            && !self.shared[item as usize]
+            && !self.shared[accumulator as usize]
+            && temporary.is_none_or(|slot| slot != item && slot != accumulator))
+        .then_some(())?;
+        let application = if temporary.is_some() {
+            assigned(call, true)?.1
+        } else {
+            &value
+        };
+        let (callback_site, args) = self.callback(call.id, application)?;
         let [first, second] = args else { return None };
         let roles = [local(first)?, local(second)?];
         let reverse = if roles == [accumulator, item] {
@@ -348,41 +384,13 @@ impl Build<'_> {
         } else {
             return None;
         };
-        let function = self.exe.lib(lib);
-        function.limit.is_none().then_some(())?;
-        let native_entry = matches!(function.run, LibRun::Native { .. })
-            .then(|| function.specialization.native.immediate.map(Entry::Native))
-            .flatten();
-        let entry = native_entry.as_ref().or_else(|| {
-            function
-                .specialization
-                .prepared
-                .as_ref()
-                .map(|(entry, _)| entry)
-        })?;
-        entry.immediate().then_some(())?;
-        let depth = match function.run {
-            LibRun::Body(_) => Depth::Template(super::super::answer_depth(self.exe, lib)?),
-            LibRun::Native { .. } => {
-                let extra = entry.depth();
-                if function.operation() {
-                    Depth::Operation(extra)
-                } else if extra > 0 {
-                    Depth::Template(extra)
-                } else {
-                    Depth::None
-                }
-            }
-            _ => return None,
-        };
         Some(Reduction {
             accumulator: accumulator as usize,
             item: item as usize,
             body: self.blocks.iter().position(|block| block.id == body.id)?,
-            lib,
-            checked,
             reverse,
-            depth,
+            callback_site,
+            statements: body.statements.len(),
         })
     }
 
@@ -705,7 +713,41 @@ impl Build<'_> {
         })
     }
 
-    fn merge(&self, body: &SourceBlock) -> Option<Merge> {
+    fn merge(
+        &self,
+        loop_: &Statement,
+        body: &SourceBlock,
+        context: Option<RunContext>,
+    ) -> Option<Merge> {
+        match loop_.kind {
+            StatementKind::For { .. } => self.merge_stream(body),
+            StatementKind::While { .. } => self.merge_runs(loop_, body, context?),
+            _ => None,
+        }
+    }
+
+    fn collection_value<'s>(
+        &self,
+        statement: &'s Statement,
+        binding: bool,
+    ) -> Option<(u32, std::borrow::Cow<'s, Expr>)> {
+        if let Some((at, value)) = assigned(statement, binding) {
+            return Some((at, std::borrow::Cow::Borrowed(value)));
+        }
+        matches!(statement.kind, StatementKind::Cold).then_some(())?;
+        let (stream, statement, _) = self.exe.statement(statement.id);
+        let mut tree = crate::compile::expr::statement(stream, statement.ops, false)?;
+        let (local, src) = match tree.last {
+            lash_kernel_exec::Op::WriteLocal { local, src } if !binding => (local, src),
+            lash_kernel_exec::Op::Bind { local, src } if binding => (local, src),
+            _ => return None,
+        };
+        let value = tree.take(src)?;
+        tree.spent().then_some(())?;
+        Some((local.at, std::borrow::Cow::Owned(value)))
+    }
+
+    fn merge_stream(&self, body: &SourceBlock) -> Option<Merge> {
         let [head, start, compare, place, advance] = &*body.statements else {
             return None;
         };
@@ -747,24 +789,13 @@ impl Build<'_> {
         let [sorted, at] = self.merge_locals(first_value, "list.get")?;
         (at == left && self.merge_locals(second_value, "list.get")? == [sorted, right])
             .then_some(())?;
-        // The callback and coercion themselves always run their original
-        // instructions. Only their surrounding pure bookkeeping is fused.
         let (output, application) = assigned(apply, true)?;
-        let Kind::Call { callee, args, .. } = &unpin(application).kind else {
-            return None;
-        };
-        let [first_argument, second_argument] = &**args else {
+        let (callback_site, args) = self.callback(apply.id, application)?;
+        let [first_argument, second_argument] = args else {
             return None;
         };
         (local(first_argument)? == first_slot && local(second_argument)? == second_slot)
             .then_some(())?;
-        match callee {
-            crate::compile::expr::Callee::Read(value) => {
-                let at = local(value)?;
-                (!self.shared[at as usize]).then_some(())?;
-            }
-            crate::compile::expr::Callee::Declared(_) => {}
-        };
         let (order, _) = assigned(coerce, true)?;
         let (positive, yes, no) = branch(test)?;
         let order_test = self.primitive(positive, 2)?;
@@ -814,22 +845,162 @@ impl Build<'_> {
         let block = |id| self.blocks.iter().position(|block| block.id == id);
         let compared = [block(outer.id)?, block(comparison.id)?];
         Some(Merge {
-            start: start_test,
-            sums: [sum_mid, sum_end],
-            minimum: [min_mid, min_end],
+            order_guard: None,
+            setup: Some(MergeSetup {
+                start: start_test,
+                sums: [sum_mid, sum_end],
+                minimum: [min_mid, min_end],
+                from_right: from_right as usize,
+            }),
+            loop_: None,
             tests: [left_test, right_test, order_test],
             advances: [advance_right, advance_left, advance_dest],
             counters: [dest, end, mid, left, right, width, n].map(|at| at as usize),
             lists: [sorted as usize, out as usize],
-            from_right: from_right as usize,
             items: [first_slot as usize, second_slot as usize],
             order: order as usize,
             body: block(body.id)?,
             compared,
             callback: self.blocks[compared[1]].starts[2],
+            callback_site,
         })
     }
 
+    fn merge_context(&self, block: &SourceBlock) -> Option<RunContext> {
+        let [mid, cap_mid, end, cap_end, left, right, dest, ..] = &*block.statements else {
+            return None;
+        };
+        let (middle, sum) = self.collection_value(mid, true)?;
+        let [start, width] = self.merge_locals(&sum, "num.add")?;
+        let clamp = |stmt: &Statement, target| {
+            let (test, yes, no) = branch(stmt)?;
+            let test = self.collection_condition(stmt, test)?;
+            let [length, compared] = self.merge_locals(&test, "num.lt")?;
+            let [write] = plain(yes)?;
+            let (at, value) = self.collection_value(write, false)?;
+            (at == target && compared == target && local(&value)? == length).then_some(())?;
+            empty(no)?;
+            Some(length)
+        };
+        let n = clamp(cap_mid, middle)?;
+        let (bound, sum) = self.collection_value(end, true)?;
+        (self.merge_locals(&sum, "num.add")? == [middle, width] && clamp(cap_end, bound)? == n)
+            .then_some(())?;
+        let (left, from) = self.collection_value(left, true)?;
+        (local(&from)? == start).then_some(())?;
+        let (right, from) = self.collection_value(right, true)?;
+        (local(&from)? == middle).then_some(())?;
+        let (dest, from) = self.collection_value(dest, true)?;
+        (local(&from)? == start).then_some(())?;
+        Some(RunContext {
+            counters: [dest, bound, middle, left, right, width, n],
+        })
+    }
+
+    fn merge_runs(
+        &self,
+        loop_: &Statement,
+        body: &SourceBlock,
+        context: RunContext,
+    ) -> Option<Merge> {
+        let StatementKind::While { cond, .. } = &loop_.kind else {
+            return None;
+        };
+        let condition = self.collection_condition(loop_, cond)?;
+        let [dest, end, mid, left, right, _, _] = context.counters;
+        (self.merge_locals(&condition, "num.lt")? == [left, mid]).then_some(())?;
+        let left_test = self.primitive(&condition, 2)?;
+        let [guard, first, second, apply, ordered, place, advance] = &*body.statements else {
+            return None;
+        };
+        let (condition, yes, no) = branch(guard)?;
+        let condition = self.collection_condition(guard, condition)?;
+        (self.merge_locals(&condition, "num.lt")? == [right, end]).then_some(())?;
+        let right_test = self.primitive(&condition, 2)?;
+        empty(yes)?;
+        let [depart] = plain(no)?;
+        matches!(
+            depart.kind,
+            StatementKind::Depart {
+                continuing: false,
+                ..
+            }
+        )
+        .then_some(())?;
+        let read = |statement: &Statement| {
+            let (slot, value) = self.collection_value(statement, true)?;
+            let Kind::Index { target, index, .. } = &unpin(&value).kind else {
+                return None;
+            };
+            Some((slot, local(target)?, local(index)?))
+        };
+        let (first_slot, sorted, at) = read(first)?;
+        let (second_slot, same_sorted, at2) = read(second)?;
+        (at == left && at2 == right && sorted == same_sorted).then_some(())?;
+        let (order, application) = assigned(apply, true)?;
+        let (callback_site, arguments) = self.callback(apply.id, application)?;
+        let [first, second] = arguments else {
+            return None;
+        };
+        (local(first)? == first_slot && local(second)? == second_slot).then_some(())?;
+        let (condition, yes, _) = branch(ordered)?;
+        let condition = self.collection_condition(ordered, condition)?;
+        (self.merge_locals(&condition, "same")? == [order, order]).then_some(())?;
+        let order_guard = self.primitive(&condition, 2)?;
+        empty(yes)?;
+        let (condition, yes, no) = branch(place)?;
+        let condition = self.collection_condition(place, condition)?;
+        let order_test = self.primitive(&condition, 2)?;
+        let [zero, ordered] = self.merge_args(&condition, "num.lt")?;
+        (matches!(unpin(zero).kind, Kind::Const(Value::Int(0))) && local(ordered)? == order)
+            .then_some(())?;
+        let [take_right, step_right] = plain(yes)?;
+        let [take_left, step_left] = plain(no)?;
+        let put = |statement: &Statement, item| {
+            let StatementKind::Store {
+                operands,
+                target,
+                index: Some(index),
+                value,
+                field: None,
+                ..
+            } = &statement.kind
+            else {
+                return None;
+            };
+            let operand = |reg| operands.iter().find(|expr| expr.reg == reg).and_then(local);
+            (operand(*index)? == dest && operand(*value)? == item).then_some(())?;
+            operand(*target)
+        };
+        let out = put(take_right, second_slot)?;
+        (put(take_left, first_slot)? == out).then_some(())?;
+        let (right2, advance_right) = self.increment(step_right)?;
+        let (left2, advance_left) = self.increment(step_left)?;
+        let (dest2, advance_dest) = self.increment(advance)?;
+        (right2 == right && left2 == left && dest2 == dest).then_some(())?;
+        let mut roles = context.counters.to_vec();
+        roles.extend([sorted, out, first_slot, second_slot, order]);
+        roles.sort_unstable();
+        (roles.windows(2).all(|pair| pair[0] != pair[1])
+            && roles.iter().all(|at| !self.shared[*at as usize]))
+        .then_some(())?;
+        let body = self.blocks.iter().position(|block| block.id == body.id)?;
+        Some(Merge {
+            setup: None,
+            order_guard: Some(order_guard),
+            loop_: Some(loop_.id),
+            tests: [left_test, right_test, order_test],
+            advances: [advance_right, advance_left, advance_dest],
+            counters: context.counters.map(|at| at as usize),
+            lists: [sorted as usize, out as usize],
+            items: [first_slot as usize, second_slot as usize],
+            order: order as usize,
+            body,
+            compared: [body, body],
+            callback: self.blocks[body].starts[3],
+            callback_site,
+        })
+    }
     fn primitive(&self, value: &Expr, arity: usize) -> Option<LibId> {
         let lib = match &unpin(value).kind {
             Kind::Operator { lib, invoke, .. }
@@ -885,10 +1056,10 @@ impl Build<'_> {
         ))
     }
     fn increment(&self, statement: &Statement) -> Option<(u32, LibId)> {
-        let (slot, value) = assigned(statement, false)?;
-        let [from, one] = self.merge_args(value, "num.add")?;
+        let (slot, value) = self.collection_value(statement, false)?;
+        let [from, one] = self.merge_args(&value, "num.add")?;
         (local(from)? == slot && matches!(one.kind, Kind::Const(Value::Int(1))))
-            .then_some((slot, self.primitive(value, 2)?))
+            .then_some((slot, self.primitive(&value, 2)?))
     }
     fn placed(&self, statement: &Statement, [dest, sorted, at]: [u32; 3]) -> Option<u32> {
         let StatementKind::Store {

@@ -283,10 +283,19 @@ impl Repeat {
         memory_bound: u64,
         tape: Option<&crate::observe::ChargeTape>,
     ) -> Result<Option<Run<'plan, 'ledger>>, HeapFault> {
-        let Some(calls) =
-            self.proof
-                .scope(exe, ledger, invocation, activation, resources.capacity())
-        else {
+        let Some(calls) = self.proof.scope(
+            exe,
+            frame
+                .state
+                .source
+                .as_ref()
+                .and_then(|source| source.frontier.as_ref())
+                .and_then(|frontier| frontier.call_entry()),
+            ledger,
+            invocation,
+            activation,
+            resources.capacity(),
+        ) else {
             return Ok(None);
         };
         let Some(mut bound) = self
@@ -640,7 +649,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 return Err(Stop);
             }
         };
-        let transaction = match bound.prepare(registration, self.heap) {
+        let transaction = match bound.prepare(
+            registration,
+            self.heap,
+            frame
+                .state
+                .source
+                .as_ref()
+                .and_then(|source| source.frontier.as_ref())
+                .and_then(|frontier| frontier.call_entry()),
+        ) {
             Ok(Some(transaction)) => transaction,
             Ok(None) => return Ok(0),
             Err(error) => {

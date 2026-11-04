@@ -19,8 +19,8 @@ pub(super) mod resource;
 pub(crate) use super::code::Op;
 use program::Build;
 pub(super) use program::{
-    CallInputs, CollectionAppend, CollectionPacket, CollectionStep, Destination, Format, Merge,
-    Operand, Placement, ReadSlot, Reduction, Visit, WriteSite,
+    CallInputs, CollectionAppend, CollectionCallback, CollectionPacket, CollectionStep,
+    Destination, Format, Merge, Operand, Placement, ReadSlot, Reduction, Visit, WriteSite,
 };
 pub(crate) use program::{Instruction, Read, StatementEntry, StoreInputs};
 
@@ -350,24 +350,6 @@ pub(crate) struct CallSite {
     pub(super) site: u32,
     /// The most the segment from its return charges; 0 where none follows.
     pub(super) after: u64,
-}
-
-/// Where library `lib`'s body call may answer immediately: an uncharged
-/// body of its own parameters whose prepared entry is not statement
-/// metered. The call depth its immediate paths need beyond the caller's.
-pub(crate) fn answer_depth(exe: &Executable, lib: LibId) -> Option<u32> {
-    let function = exe.lib(lib);
-    let LibRun::Body(code) = function.run else {
-        return None;
-    };
-    if function.shares_params || exe.code(code).charged {
-        return None;
-    }
-    let (prepared, _) = function.specialization.prepared.as_ref()?;
-    if matches!(prepared, Entry::Template { template, .. } if template.metered.is_some()) {
-        return None;
-    }
-    Some(prepared.deepest(&|id| exe.lib(id), &|id| exe.library_lib(id)))
 }
 
 /// A whole typed scalar loop, compiled from its verified ordered facts.

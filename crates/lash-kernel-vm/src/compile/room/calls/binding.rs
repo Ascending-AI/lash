@@ -92,7 +92,7 @@ impl VerifiedCall {
         index: usize,
     ) -> Result<Option<EvaluatedArguments>, doc::heap::HeapFault> {
         let Some(region) = path.region.scalar() else {
-            return self.evaluate_nested_path(exe, arena, arguments, path, index);
+            return self.evaluate_nested_path(exe, arena, arguments, captures, path, index);
         };
         let Some(placement) = &path.placement else {
             return Ok(None);

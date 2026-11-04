@@ -16,6 +16,7 @@ pub(crate) use numeric::{CallInputs, Destination, Operand};
 mod merge;
 use crate::compile::expr::{Callee, Make};
 use crate::compile::islands::{Block as SourceBlock, Kind as StatementKind, Statement, unit_test};
+pub(in crate::machine::islands) use merge::callback::Callback as CollectionCallback;
 pub(crate) use merge::{
     Append as CollectionAppend, CollectionStep, Merge, Placement, ReadSlot, Reduction, Visit,
 };

@@ -250,6 +250,92 @@ impl LoopEntry {
             shape,
         }))
     }
+    /// The source bank already owns this read's holding and its canonical
+    /// close has paid. Adopt that occurrence before publishing the header.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one paid initial iterable and its actual source activation"
+    )]
+    pub(crate) fn adopt_paid_input(
+        &self,
+        frontier: &mut Frontier,
+        invocation: &Invocation,
+        ledger: &mut Ledger,
+        arena: &mut Arena,
+        heap: &PagedHeap,
+        slots: &[crate::machine::SlotState],
+        walked: Value,
+        paid: Option<&PaidLoopInput>,
+        charged: u64,
+    ) -> Result<bool, HeapFault> {
+        let Shape::For {
+            input, read, first, ..
+        } = &self.shape
+        else {
+            return Ok(false);
+        };
+        let Some(paid) = paid else { return Ok(false) };
+        if frontier.proven
+            || !Arc::ptr_eq(&self.source, &frontier.source)
+            || frontier.position.unpaid.as_ref() != Some(read)
+            || frontier.position.occurrence.invocation != invocation.id()
+            || !Arc::ptr_eq(&paid.source, &self.source)
+            || paid.statement != self.statement
+            || paid.paid_at != charged
+        {
+            return Ok(false);
+        }
+        let Some(activation) =
+            self.placement
+                .capture(self.placement.code(), invocation, ledger, heap, slots)?
+        else {
+            return Ok(false);
+        };
+        if !activation.current(&self.source, ledger, invocation)
+            || activation
+                .value(*input)
+                .is_none_or(|actual| !actual.same(&walked))
+            || !holding_matches(ledger, arena, heap, invocation.owner(*input), walked)?
+        {
+            return Ok(false);
+        }
+        let operand = slot(&self.source, &Owner::Operand(read.site.clone()))
+            .map_err(|_| fault("initial iterable owner"))?;
+        if !holding_matches(ledger, arena, heap, invocation.owner(operand), walked)? {
+            return Ok(false);
+        }
+        let (Value::List(handle) | Value::Tuple(handle)) = walked else {
+            return Ok(false);
+        };
+        if arena
+            .item(handle, 0)
+            .map_err(|error| HeapFault::Malformed(error.to_string()))?
+            .is_none()
+        {
+            return Ok(false);
+        }
+        let Some(next) = first
+            .interval
+            .events()
+            .last()
+            .map(|event| event.point.clone())
+        else {
+            return Ok(false);
+        };
+        if next
+            != (Point {
+                site: self.site.clone(),
+                phase: Phase::Test,
+            })
+        {
+            return Ok(false);
+        }
+        let mut position = frontier.position.clone();
+        position.at = read.clone();
+        position.unpaid = Some(next);
+        frontier.handoff(ledger, position)?;
+        Ok(true)
+    }
     pub(crate) fn item_at(&self) -> Option<usize> {
         match self.shape {
             Shape::For { item_at, .. } => Some(item_at),
