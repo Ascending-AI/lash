@@ -319,22 +319,25 @@ impl Expression {
                     ) {
                         return Ok(None);
                     }
-                    let Some((entry, _)) = function.specialization.prepared.as_ref() else {
-                        return Ok(None);
-                    };
-                    let Some(value) = entry.call(&arguments).filter(|value| scalar(*value)) else {
+                    let Some(value) = function
+                        .prepared_scalar(arena, &arguments)
+                        .filter(|value| scalar(*value))
+                    else {
                         return Ok(None);
                     };
                     if !compile::import_result_fits(&function.header.signature.result, value) {
                         return Ok(None);
                     }
-                    // A pair or prepared entry says nothing about scratch. Only
-                    // the installed implementation's input contract proves it.
-                    let contract = match native.resource_contract(lash_kernel_doc::Args::new(
+                    let query = native.resource_contract(lash_kernel_doc::Args::new(
                         &arguments,
                         arena.objects(),
                         &arena.semantics(),
-                    )) {
+                    ));
+                    let query = match query {
+                        Ok(None) => function.canonical_scalar_contract(arena, &arguments, value),
+                        other => other,
+                    };
+                    let contract = match query {
                         Ok(Some(contract)) => contract,
                         Err(lash_kernel_doc::NativeError::Host(error)) => return Err(error),
                         Err(lash_kernel_doc::NativeError::Malformed(reason)) => {

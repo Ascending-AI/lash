@@ -4,6 +4,7 @@
 use super::*;
 mod member;
 mod original;
+mod root;
 pub(crate) use logical::PublicationValue as ExactValue;
 use logical::{BoundaryTransaction, Dependencies, Owner as RootOwner, RootValue};
 pub(crate) use original::{OriginalBound, OriginalPrepared};
@@ -96,7 +97,10 @@ impl ExactEvent {
         if events.next().is_some()
             || interval.owner() != source.owner
             || interval.defining_source() != &source.site
-            || interval.exit() != ExitKind::Normal
+            || !(interval.exit() == ExitKind::Normal
+                || (at.phase == Phase::Enter
+                    && interval.exit() == ExitKind::Action
+                    && source.root_action(&at).is_ok()))
         {
             return Err(Refused::Source);
         }
@@ -216,6 +220,11 @@ impl ExactEvent {
             return Err(Refused::Source);
         }
         self.check_external_roots(&roots, &external, &next.occurrence)?;
+        let mut external = external;
+        if self.source.root_action(&self.at).is_ok() {
+            self.check_root_native(arena, &roots, &external)?;
+            external.native = None;
+        }
         self.bind_view(
             frontier, ledger, arena, heap, execution, roots, next, allowance, resources, external,
             None,
@@ -310,8 +319,8 @@ impl ExactEvent {
         if external.native.is_some() || external.member.is_some() {
             let slots = self.source.owner_slots()?;
             let event = self.interval.events().next().ok_or(Refused::Path)?;
-            let expected: Vec<_> = event
-                .inputs
+            let inputs = self.source.native_inputs(&event.point)?;
+            let expected: Vec<_> = inputs
                 .iter()
                 .map(|input| {
                     slots
@@ -673,6 +682,13 @@ impl Source {
         successor: Successor,
     ) -> Result<Point, Refused> {
         match at.phase {
+            Phase::Enter => {
+                self.root_action(at)?;
+                Ok(Point {
+                    site: at.site.clone(),
+                    phase: Phase::Commit,
+                })
+            }
             Phase::Commit | Phase::Restore => self
                 .next_after_commit(&at.site)
                 .or_else(|_| self.next_after_loop_commit(at)),

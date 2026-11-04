@@ -28,6 +28,7 @@ mod publication;
 mod read;
 mod resuming;
 mod returning;
+mod root;
 mod scope;
 mod session;
 mod unit;

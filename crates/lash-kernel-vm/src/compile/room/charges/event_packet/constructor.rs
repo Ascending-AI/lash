@@ -78,6 +78,7 @@ impl ChargeProgram {
                 quote: expr::units(prefix.pending()),
             },
             native_depth: Some(0),
+            native_occurrence: None,
             statement,
             range,
             closes: closes.into(),

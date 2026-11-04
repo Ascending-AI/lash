@@ -226,38 +226,6 @@ impl<'program> SourceNative<'program> {
     }
 }
 
-fn validate_known_scalar(
-    function: &crate::compile::Lib,
-    arena: &Arena,
-    args: &[Value],
-    expected: Value,
-) -> Option<Value> {
-    let (entry, _) = function.specialization.prepared.as_ref()?;
-    let actual = match args {
-        [Value::Int(a), Value::Int(b)] if entry.pair().and_then(|pair| pair.ints).is_some() => {
-            doc::scalar::ints(entry.pair()?.ints?, *a, *b)?
-        }
-        [Value::Float(a), Value::Float(b)]
-            if entry.pair().and_then(|pair| pair.floats).is_some() =>
-        {
-            doc::scalar::floats(entry.pair()?.floats?, *a, *b)?
-        }
-        [
-            a @ (Value::Text(_) | Value::LongText(_)),
-            b @ (Value::Text(_) | Value::LongText(_)),
-        ] if function.specialization.native.text_relation.is_some() => {
-            let semantics = arena.semantics();
-            doc::scalar::texts(
-                function.specialization.native.text_relation?,
-                semantics.text(a).ok()?,
-                semantics.text(b).ok()?,
-            )?
-        }
-        _ => entry.call(args)?,
-    };
-    actual.same(&expected).then_some(expected)
-}
-
 impl NativeStorage<'_> {
     /// Bind source facts before the transaction takes registration's arena
     /// borrow. Returning None abandons storage and all provisional identities.
@@ -377,7 +345,9 @@ impl NativeStorage<'_> {
                 {
                     return Ok(None);
                 }
-                let Some(value) = validate_known_scalar(self.function, arena, &self.args, value)
+                let Some(value) = self
+                    .function
+                    .validate_known_scalar(arena, &self.args, value)
                 else {
                     return Ok(None);
                 };
@@ -830,47 +800,44 @@ mod scalar_validation_tests {
         );
         let arena = Arena::new();
         assert!(matches!(
-            validate_known_scalar(
-                function,
-                &arena,
-                &[Value::Int(3), Value::Int(4)],
-                Value::Int(7)
-            ),
+            function.validate_known_scalar(&arena, &[Value::Int(3), Value::Int(4)], Value::Int(7)),
             Some(Value::Int(7))
         ));
         assert!(
-            validate_known_scalar(
-                function,
-                &arena,
-                &[Value::Int(3), Value::Int(4)],
-                Value::Int(8)
-            )
-            .is_none()
+            function
+                .validate_known_scalar(&arena, &[Value::Int(3), Value::Int(4)], Value::Int(8))
+                .is_none()
         );
         assert!(
-            validate_known_scalar(
-                function,
-                &arena,
-                &[Value::Int(i64::MAX), Value::Int(1)],
-                Value::Int(0)
-            )
-            .is_none()
+            function
+                .validate_known_scalar(
+                    &arena,
+                    &[Value::Int(i64::MAX), Value::Int(1)],
+                    Value::Int(0)
+                )
+                .is_none()
         );
         let float = |value| Value::Float(doc::Float::new(value));
         assert!(
-            validate_known_scalar(function, &arena, &[float(1.0), float(2.0)], float(3.0))
+            function
+                .validate_known_scalar(&arena, &[float(1.0), float(2.0)], float(3.0))
                 .is_some()
         );
         assert!(
-            validate_known_scalar(function, &arena, &[float(1.0), float(2.0)], float(4.0))
+            function
+                .validate_known_scalar(&arena, &[float(1.0), float(2.0)], float(4.0))
                 .is_none()
         );
         let text = |value: &str| Value::Text(doc::arena::ShortText::new(value).unwrap());
         let args = [text("😀"), text("\u{e000}")];
         assert!(matches!(
-            validate_known_scalar(function, &arena, &args, Value::Bool(true)),
+            function.validate_known_scalar(&arena, &args, Value::Bool(true)),
             Some(Value::Bool(true))
         ));
-        assert!(validate_known_scalar(function, &arena, &args, Value::Bool(false)).is_none());
+        assert!(
+            function
+                .validate_known_scalar(&arena, &args, Value::Bool(false))
+                .is_none()
+        );
     }
 }

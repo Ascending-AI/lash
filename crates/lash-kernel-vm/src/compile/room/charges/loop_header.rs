@@ -95,6 +95,7 @@ impl ChargeProgram {
             source: Arc::clone(&exe.code(code).source_room),
             coverage: Coverage::LoopHeader(ending),
             native_depth: None,
+            native_occurrence: None,
             statement,
             range: OpRange {
                 start: exe.stmt(statement).ops.start,

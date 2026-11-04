@@ -147,6 +147,7 @@ impl ChargeProgram {
             source: Arc::clone(&exe.code(code).source_room),
             coverage: Coverage::EventPacket(pending),
             native_depth: Some(0),
+            native_occurrence: None,
             statement,
             range,
             closes: closes.into(),

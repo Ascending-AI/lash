@@ -36,6 +36,7 @@ mod raises;
 mod refine;
 pub(crate) mod registers;
 mod session;
+pub(crate) use session::SourceSessionReads;
 pub(crate) mod sites;
 mod source_publication;
 mod steps;
