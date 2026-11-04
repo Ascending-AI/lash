@@ -146,8 +146,7 @@ pub(super) fn apply(
     commit: &Committing<'_>,
     write: &TurnWrite,
 ) -> Answer<()> {
-    // Every write but an advance (which takes them) may change the phase roots.
-    if !matches!(write, TurnWrite::Advance { .. }) {
+    if matches!(write, TurnWrite::Terminal { .. }) {
         commit.open_roots.forget();
     }
     match write {
@@ -267,6 +266,12 @@ pub(super) fn apply(
                     if let Some(answer) = consumed {
                         commit.retired.stored(answer);
                     }
+                    *commit.open_roots.0.borrow_mut() = Some(PhaseRoots {
+                        session: session.as_str().to_owned(),
+                        run: run.as_str().to_owned(),
+                        checkpoint: Some(next),
+                        answer: None,
+                    });
                     Ok(Ok(()))
                 }
                 None => refuse(DomainRefusal::TurnNotOpen {
@@ -293,7 +298,15 @@ pub(super) fn apply(
                 )
                 .optional()?;
             match recorded {
-                Some(()) => Ok(Ok(())),
+                Some(()) => {
+                    if let Some(roots) = commit.open_roots.0.borrow_mut().as_mut()
+                        && roots.session == session.as_str()
+                        && roots.run == run.as_str()
+                    {
+                        roots.answer = Some(answer.to_hex());
+                    }
+                    Ok(Ok(()))
+                }
                 None => refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
                     run: run.clone(),
@@ -576,7 +589,6 @@ pub(super) fn apply_session_commit(
     prepared: &Result<lash_core_store::store::RuntimeCommitPlanner, DurableError>,
     planned_under: lash_core_store::store::FleetFormat,
 ) -> Answer<lash_core_store::store::RuntimeCommitReceipt> {
-    commit.open_roots.forget();
     // A fleet move changes the versions a plan emits. Reclassify against
     // the fleet read by this transaction, just as the public store does.
     let replanned;
@@ -947,8 +959,8 @@ pub(super) struct PhaseRoots {
 /// The open turn's phase root and receipt as an owner commit's fenced turn
 /// read saw them, before its writes (FIG-6617). Only this module's writes
 /// change a phase row, and the transaction holds the database's write lock,
-/// so they hold until a write of this commit changes the row: any turn
-/// write but a tool-call count forgets them, and an advance takes them.
+/// so journal, namespace, working-state and session-head writes preserve
+/// them. Answers and advances replace their known roots; an end forgets them.
 #[derive(Default)]
 pub(crate) struct OpenRoots(std::cell::RefCell<Option<PhaseRoots>>);
 
