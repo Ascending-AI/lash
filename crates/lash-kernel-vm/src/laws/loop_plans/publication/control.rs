@@ -412,4 +412,81 @@ fn runtime() {
             "exact control refusal and paid prefix"
         );
     }
+    // The generic observations above are an independent packet oracle. Also
+    // require the specialized run to use an accepted whole-region publication.
+    let region_observe = |layout, cold, precise, bounds: Bounds| {
+        let mut run = Embedder::with(
+            source,
+            Setup {
+                layout,
+                bounds,
+                slice: if cold { 1 } else { u64::MAX },
+                ..Default::default()
+            },
+        );
+        let tape = crate::ChargeTape::new();
+        run.machine.record_charges(tape.clone());
+        witness::begin();
+        let mut holdings = Vec::new();
+        let end = loop {
+            if precise {
+                run.machine.force_source_execution();
+            }
+            match run.run() {
+                Step::Ended(end) => break end,
+                Step::Slice => {
+                    holdings.push((run.machine.meters(), run.machine.semantic_checkpoint()));
+                    if cold {
+                        run.reopen(layout, true);
+                        run.machine.record_charges(tape.clone());
+                    }
+                }
+                Step::Parked(_) => panic!("pure control fixture cannot park"),
+            }
+        };
+        (
+            end,
+            run.machine.meters(),
+            lash_kernel_exec::Weight::expand(tape.steps()),
+            holdings,
+        )
+    };
+    for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
+        let expected = region_observe(layout, false, true, roomy);
+        crate::machine::islands::take_certified_statements();
+        let actual = region_observe(layout, false, false, roomy);
+        assert_eq!(
+            actual, expected,
+            "compiled region charge prefix and holdings"
+        );
+        assert!(
+            crate::machine::islands::take_certified_statements() > 0,
+            "the specialized observation must publish an accepted compiled region"
+        );
+        assert_eq!(
+            region_observe(layout, true, false, roomy),
+            region_observe(layout, true, true, roomy),
+            "compiled region cold charge prefix and holdings"
+        );
+    }
+    for bounds in [
+        Bounds {
+            charge_limit: 3,
+            ..roomy
+        },
+        Bounds {
+            memory: 512,
+            ..roomy
+        },
+        Bounds {
+            call_depth: 1,
+            ..roomy
+        },
+    ] {
+        assert_eq!(
+            region_observe(Layout(2), true, false, bounds),
+            region_observe(Layout(2), true, true, bounds),
+            "compiled region refusal preserves its exact charge prefix and holdings"
+        );
+    }
 }

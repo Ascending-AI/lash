@@ -98,7 +98,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let target = source.transfer_target(at);
         match target {
             Some(room::TransferTarget::Binding | room::TransferTarget::NativeInput) => true,
-            Some(room::TransferTarget::RootReturn) => self.source_return_frame(frame),
+            Some(room::TransferTarget::RootReturn) => true,
             None => false,
         }
     }

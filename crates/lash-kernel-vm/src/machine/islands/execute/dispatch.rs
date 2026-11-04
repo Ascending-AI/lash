@@ -253,7 +253,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     index,
                     ahead,
                     value,
-                    close: _,
+                    close,
                     source,
                     literal_prefix,
                     reg,
@@ -272,6 +272,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 self.begin(frame, *id, *index, *ahead)?;
                 if !self.source_constant(frame, *source, *reg, *value, Some(literal_prefix))? {
                     return Err(self.at(source.unpaid()));
+                }
+                if frame
+                    .state
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| source.original.is_none())
+                    && let Some(close) = close
+                    && !self.close(close)
+                {
+                    return Err(self.at_held(close.head, *reg, *value));
                 }
                 if frame.state.recovery
                     || (self.public_return && self.depth == 1 && frame.state.may_clean)

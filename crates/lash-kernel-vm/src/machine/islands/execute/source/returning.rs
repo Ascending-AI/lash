@@ -10,12 +10,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         completion: &LibraryCompletion,
     ) -> Result<ValuePublication, HeapFault> {
         if !self.source_return_frame(frame)
-            || (self.tape.is_some()
-                && frame
-                    .state
-                    .source
-                    .as_ref()
-                    .is_none_or(|source| source.original.is_none()))
             || self.projection().is_some()
             || frame
                 .state

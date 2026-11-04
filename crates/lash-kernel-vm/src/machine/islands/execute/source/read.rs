@@ -168,6 +168,17 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         value: Value,
         original: Option<&std::sync::Arc<room::charges::OriginalPrefix>>,
     ) -> Result<bool, Stop> {
+        // An immediate read owns no detached storage or paid prefix. Leave
+        // its canonical close to the ordinary consumer of that source value.
+        if value.handle().is_none()
+            && frame
+                .state
+                .source
+                .as_ref()
+                .is_some_and(|source| source.original.is_none())
+        {
+            return self.source_input(frame, read, reg, Input::Native(value), None);
+        }
         let Some(original) = original else {
             // Without a verified original prefix the source evaluator must
             // enter before this read acquires an owner or pays a close.
@@ -207,21 +218,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(statement_id) = frame.state.statement else {
             return Ok(false);
         };
-        // Body and catch reads of a try without cleanup leave by their
-        // ordinary raise or block suffix; a pending departure needs its recipe.
-        if frame.state.control.iter().any(|control| match control {
-            Position::Try { phase, .. } => {
-                frame.state.callee.compiled.cleanups || matches!(phase, Phase::Finally(_))
-            }
-            _ => false,
-        }) || frame
-            .state
-            .source
-            .as_ref()
-            .is_some_and(|source| source.cleaning.is_some())
-        {
-            return Ok(false);
-        }
         let (stream, statement, _) = self.exe.statement(statement_id);
         let range = match statement.form {
             crate::compile::Form::While { test, .. }
@@ -362,7 +358,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         },
                     )
                     .map_err(|error| self.halt(error.into()))?;
-                if let Some(value) = value {
+                if let Some(value) = value
+                    && !frame.state.operands.is_empty()
+                {
                     frame.regs[reg as usize] = value;
                 }
                 value.is_some()
@@ -370,7 +368,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             Input::Native(value) => {
                 let original = original
                     .map(|program| (program, program.values(|reg| frame.regs[reg as usize])));
-                let result = &mut frame.regs[reg as usize];
+                // ReturnLiteral carries its immediate outside the operand bank.
+                let result =
+                    (!frame.state.operands.is_empty()).then(|| &mut frame.regs[reg as usize]);
                 self.publish_source_boundary(
                     frame.state.callee,
                     activation,
@@ -387,7 +387,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     },
                     |_, _, edits, storage| {
                         debug_assert!(edits.is_empty());
-                        *result = storage;
+                        if let Some(result) = result {
+                            *result = storage;
+                        }
                     },
                 )
                 .map_err(|error| self.halt(error.into()))?
