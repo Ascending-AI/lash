@@ -101,6 +101,14 @@ static SQL: LazyLock<TurnStatements> =
 lash_store_sql::statements! {
     /// SQLite avoids an index update when the old root is already NULL.
     struct SqliteTurnStatements @ "durable_turn_sqlite" {
+        /// Append the next journal row only while its admitted run is open.
+        append_journal = "INSERT INTO turn_journal (session_id, run, seq, inputs)
+             SELECT session_id, run,
+                 (SELECT COALESCE(MAX(seq) + 1, 0) FROM turn_journal
+                  WHERE session_id = ?1 AND run = ?2), ?3
+             FROM session_runs WHERE session_id = ?1 AND run = ?2
+               AND admission_json IS NOT NULL AND terminal_kind IS NULL";
+
         /// Advance without rewriting an already empty answer root.
         advance_without_answer = "UPDATE turn_phases
              SET phase = ?3, phase_arg = ?4, iteration = ?5, checkpoint_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?6), CASE WHEN ?6 IS NOT NULL THEN -1 END),
@@ -318,21 +326,17 @@ pub(super) fn apply(
             run,
             inputs,
         } => {
-            let open = tx
-                .statement(SQL.open_named_run.sql())?
-                .query_row([session.as_str(), run.as_str()], |_| Ok(()))
-                .optional()?;
-            if open.is_none() {
+            let appended = tx.statement(SQLITE_SQL.append_journal.sql())?.execute([
+                session.as_str(),
+                run.as_str(),
+                inputs.as_str(),
+            ])?;
+            if appended == 0 {
                 return refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
                     run: run.clone(),
                 });
             }
-            tx.statement(SQL.append_journal.sql())?.execute([
-                session.as_str(),
-                run.as_str(),
-                inputs.as_str(),
-            ])?;
             Ok(Ok(()))
         }
         TurnWrite::Namespaces {
