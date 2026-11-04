@@ -226,6 +226,38 @@ impl<'program> SourceNative<'program> {
     }
 }
 
+fn validate_known_scalar(
+    function: &crate::compile::Lib,
+    arena: &Arena,
+    args: &[Value],
+    expected: Value,
+) -> Option<Value> {
+    let (entry, _) = function.specialization.prepared.as_ref()?;
+    let actual = match args {
+        [Value::Int(a), Value::Int(b)] if entry.pair().and_then(|pair| pair.ints).is_some() => {
+            doc::scalar::ints(entry.pair()?.ints?, *a, *b)?
+        }
+        [Value::Float(a), Value::Float(b)]
+            if entry.pair().and_then(|pair| pair.floats).is_some() =>
+        {
+            doc::scalar::floats(entry.pair()?.floats?, *a, *b)?
+        }
+        [
+            a @ (Value::Text(_) | Value::LongText(_)),
+            b @ (Value::Text(_) | Value::LongText(_)),
+        ] if function.specialization.native.text_relation.is_some() => {
+            let semantics = arena.semantics();
+            doc::scalar::texts(
+                function.specialization.native.text_relation?,
+                semantics.text(a).ok()?,
+                semantics.text(b).ok()?,
+            )?
+        }
+        _ => entry.call(args)?,
+    };
+    actual.same(&expected).then_some(expected)
+}
+
 impl NativeStorage<'_> {
     /// Bind source facts before the transaction takes registration's arena
     /// borrow. Returning None abandons storage and all provisional identities.
@@ -345,17 +377,11 @@ impl NativeStorage<'_> {
                 {
                     return Ok(None);
                 }
-                match self
-                    .function
-                    .specialization
-                    .prepared
-                    .as_ref()
-                    .and_then(|(entry, _)| entry.call(&self.args))
-                {
-                    Some(actual) if actual.same(&value) => Some(value),
-                    Some(_) => return Ok(None),
-                    None => None,
-                }
+                let Some(value) = validate_known_scalar(self.function, arena, &self.args, value)
+                else {
+                    return Ok(None);
+                };
+                Some(value)
             }
             None => None,
         };
@@ -743,5 +769,108 @@ pub(in crate::machine) fn published(
 impl crate::machine::KernelMachine {
     pub(crate) fn take_native_publications(&self) -> [u64; 5] {
         NATIVE_PUBLICATIONS.with(|counts| counts.replace([0; 5]))
+    }
+}
+
+#[cfg(test)]
+mod scalar_validation_tests {
+    use super::*;
+    use crate::laws::embedder::{Embedder, Setup};
+
+    #[test]
+    fn known_answers_use_their_kernel_and_reject_disagreement() {
+        struct Kernel;
+        impl doc::NativeFunction for Kernel {
+            fn call(&self, _: doc::NativeCall<'_, '_>) -> Result<Value, doc::NativeError> {
+                panic!("kernel validation must not execute the native");
+            }
+            fn prepare(&self) -> Option<doc::PreparedNative> {
+                Some(doc::PreparedNative {
+                    pair: Some(doc::scalar::Pair {
+                        ints: Some(doc::scalar::ScalarOp::Add),
+                        floats: Some(doc::scalar::ScalarOp::Add),
+                    }),
+                    entry: |_| panic!("an available kernel must not replay the prepared entry"),
+                    charged_entry: None,
+                    operation: "law.kernel_validation",
+                })
+            }
+            fn specialization(&self) -> doc::NativeSpecialization {
+                doc::NativeSpecialization {
+                    immediate: self.prepare(),
+                    text_relation: Some(doc::scalar::ScalarOp::Lt),
+                    ..Default::default()
+                }
+            }
+        }
+        fn probes(
+            registry: &mut doc::FunctionRegistry,
+            _: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+        ) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
+            let definition = doc::parse_definition("function law.kernel_validation(a: Any, b: Any) -> Any\nkernel 1\ncharge 5\nnative\n").unwrap();
+            vec![(
+                "law.kernel_validation",
+                registry
+                    .register(definition, Some(std::sync::Arc::new(Kernel)))
+                    .unwrap(),
+            )]
+        }
+        let run = Embedder::with(
+            "main { return law.kernel_validation(3, 4) }",
+            Setup {
+                probes: Some(probes),
+                ..Default::default()
+            },
+        );
+        let function = run.machine.exe.lib(
+            run.machine
+                .exe
+                .library_lib(&run.library.ids["law.kernel_validation"])
+                .unwrap(),
+        );
+        let arena = Arena::new();
+        assert!(matches!(
+            validate_known_scalar(
+                function,
+                &arena,
+                &[Value::Int(3), Value::Int(4)],
+                Value::Int(7)
+            ),
+            Some(Value::Int(7))
+        ));
+        assert!(
+            validate_known_scalar(
+                function,
+                &arena,
+                &[Value::Int(3), Value::Int(4)],
+                Value::Int(8)
+            )
+            .is_none()
+        );
+        assert!(
+            validate_known_scalar(
+                function,
+                &arena,
+                &[Value::Int(i64::MAX), Value::Int(1)],
+                Value::Int(0)
+            )
+            .is_none()
+        );
+        let float = |value| Value::Float(doc::Float::new(value));
+        assert!(
+            validate_known_scalar(function, &arena, &[float(1.0), float(2.0)], float(3.0))
+                .is_some()
+        );
+        assert!(
+            validate_known_scalar(function, &arena, &[float(1.0), float(2.0)], float(4.0))
+                .is_none()
+        );
+        let text = |value: &str| Value::Text(doc::arena::ShortText::new(value).unwrap());
+        let args = [text("😀"), text("\u{e000}")];
+        assert!(matches!(
+            validate_known_scalar(function, &arena, &args, Value::Bool(true)),
+            Some(Value::Bool(true))
+        ));
+        assert!(validate_known_scalar(function, &arena, &args, Value::Bool(false)).is_none());
     }
 }
