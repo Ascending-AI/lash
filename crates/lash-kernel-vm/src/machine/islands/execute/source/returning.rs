@@ -67,14 +67,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some((_, rhs)) = roles.iter().find(|(reg, _)| reg.0 == returned.reg) else {
             return Ok(ValuePublication::Unavailable);
         };
-        if frame
-            .state
-            .source
-            .as_ref()
-            .is_none_or(|source| source.original.is_none())
-        {
-            self.source_bindings(frame)?;
-        }
         let activation = frame
             .state
             .source

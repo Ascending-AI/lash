@@ -8,6 +8,7 @@ mod frame_entry;
 mod initial_entry;
 mod loop_entry;
 mod member;
+mod member_read;
 mod native;
 mod parameters;
 mod text;
@@ -31,7 +32,7 @@ use super::*;
 use crate::compile::room::{self, publication::Frontier};
 use crate::machine::source_publication::{LeafExecution, LeafFacts, ScopeLoop};
 use lash_kernel_doc::{self as doc, heap::HeapFault};
-use lash_kernel_state::kernel_internals::logical::{Invocation, Owner, PublicationValue};
+use lash_kernel_state::kernel_internals::logical::{Invocation, Owner, RootValue};
 
 pub(in crate::machine::islands) struct Activation {
     pub(in crate::machine::islands) invocation: Invocation,
@@ -169,7 +170,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .source
             .as_ref()
             .ok_or_else(|| malformed("packet caller has no source activation"))?;
-        self.source_bindings(frame)?;
         let code = self.exe.code(frame.state.callee.plan.code);
         let source = &code.source_room;
         let slots = source
@@ -183,8 +183,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let roles = statement
             .source_roles_at(stream, site.pc)
             .ok_or_else(|| malformed("packet call has no source operand projection"))?;
+        self.logical.flush(self.arena, self.heap)?;
+        let store = self.logical.ledger();
+        let ledger = store.borrow();
         let mut inputs = Vec::new();
         for (reg, site) in roles.iter() {
+            if !args.contains(&reg.0) {
+                continue;
+            }
             let owner = slots
                 .root(
                     &room::Owner::Operand((**site).clone()),
@@ -192,13 +198,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     activation.invocation.id(),
                 )
                 .ok_or_else(|| malformed("packet argument has no source owner"))?;
-            self.logical
-                .replace(owner, Some(PublicationValue::Native(frame.regs[reg.ix()])));
-            if args.contains(&reg.0) {
-                inputs.push(owner);
+            if ledger.holding(owner, self.heap.pages())?.is_none() {
+                return Err(malformed(
+                    "packet argument lost its accepted source holding",
+                ));
             }
+            inputs.push(owner);
         }
-        self.logical.flush(self.arena, self.heap)?;
         Ok(inputs)
     }
 
@@ -206,7 +212,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         &self,
         frame: &storage::Values<'_, '_>,
         site: &compiled::CallSite,
-    ) -> Result<Vec<(Owner, Value)>, HeapFault> {
+    ) -> Result<Vec<(Owner, Owner)>, HeapFault> {
         let activation = frame
             .state
             .source
@@ -222,7 +228,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 let owner = slots
                     .continuation(&role.site, self.task, activation.invocation.id())
                     .ok_or_else(|| malformed("packet continuation has no canonical owner"))?;
-                saved.push((owner, frame.regs[role.reg.ix()]));
+                let input = slots
+                    .root(
+                        &room::Owner::Operand(role.site.clone()),
+                        self.task,
+                        activation.invocation.id(),
+                    )
+                    .ok_or_else(|| malformed("packet continuation has no accepted source input"))?;
+                saved.push((owner, input));
             }
         }
         Ok(saved)
@@ -231,115 +244,29 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(super) fn source_called(
         &mut self,
         frame: &storage::Values<'_, '_>,
-        saved: &[(Owner, Value)],
-    ) -> Result<(), HeapFault> {
-        self.source_clear_operands(frame)?;
-        for (owner, value) in saved {
-            self.logical
-                .replace(*owner, Some(PublicationValue::Native(*value)));
-        }
-        self.logical.flush(self.arena, self.heap)
-    }
-
-    pub(super) fn source_clear_operands(
-        &self,
-        frame: &storage::Values<'_, '_>,
+        saved: &[(Owner, Owner)],
     ) -> Result<(), HeapFault> {
         let activation = frame
             .state
             .source
             .as_ref()
-            .ok_or_else(|| malformed("packet frame has no source activation"))?;
-        self.logical
-            .clear_operands(&activation.invocation, self.heap.pages())
-    }
-
-    pub(super) fn source_bindings(&self, frame: &storage::Values<'_, '_>) -> Result<(), HeapFault> {
-        let activation = frame
-            .state
-            .source
-            .as_ref()
-            .ok_or_else(|| malformed("packet frame has no source activation"))?;
-        let code = self.exe.code(frame.state.callee.plan.code);
-        for (at, state) in frame.slots.iter().enumerate() {
-            let owner = code
-                .source_room
-                .binding_root(code.slots_by_at[at], self.task, activation.invocation.id())
-                .ok_or_else(|| malformed("packet binding has no source owner"))?;
-            let Owner::Value { slot, .. } = owner else {
-                return Err(malformed("packet binding has another owner class"));
-            };
-            self.logical.replace(owner, source_value(slot, *state));
-        }
-        self.source_controls(frame)
-    }
-
-    fn source_controls(&self, frame: &storage::Values<'_, '_>) -> Result<(), HeapFault> {
-        use crate::machine::controls::Roles;
-        let activation = frame
-            .state
-            .source
-            .as_ref()
-            .ok_or_else(|| malformed("packet controls have no source activation"))?;
-        let source = &self.exe.code(frame.state.callee.plan.code).source_room;
-        let slots = source
-            .owner_slots()
-            .map_err(|_| malformed("packet source controls failed verification"))?;
-        for owner in slots.control_roots(self.task, activation.invocation.id()) {
-            self.logical.replace(owner, None);
-        }
-        let publish =
-            |selector: room::Owner, value: Option<PublicationValue>| -> Result<(), HeapFault> {
-                if let Some(value) = value {
-                    let owner = slots
-                        .root(&selector, self.task, activation.invocation.id())
-                        .ok_or_else(|| malformed("packet control has no canonical owner"))?;
-                    self.logical.replace(owner, Some(value));
-                }
-                Ok(())
-            };
-        for position in &frame.state.control {
-            let control = position.projected(frame.state.callee.compiled, &frame.pending);
-            match crate::machine::controls::roles(&control) {
-                Some(Roles::For {
-                    stmt,
-                    cursor,
-                    header,
-                    initial,
-                }) if !initial => {
-                    let site = &self.exe.stmt(stmt).site;
-                    publish(
-                        room::Owner::LoopCursor(site.clone()),
-                        cursor.map(PublicationValue::Native),
-                    )?;
-                    publish(
-                        room::Owner::LoopHeader(site.clone()),
-                        header.map(PublicationValue::Native),
-                    )?;
-                }
-                Some(Roles::Try { stmt, pending }) => publish(
-                    room::Owner::PendingDeparture(self.exe.stmt(stmt).site.clone()),
-                    pending.map(crate::machine::controls::Departed::source),
-                )?,
-                _ => {}
-            }
-        }
-        if let Some(cleaning) = activation.cleaning {
-            publish(
-                room::Owner::ActiveDeparture(source.site.clone()),
-                Some(PublicationValue::Native(
-                    cleaning.unwrap_or_else(|value| value),
-                )),
-            )?;
-        }
-        Ok(())
+            .ok_or_else(|| malformed("packet caller has no source activation"))?;
+        self.logical.flush(self.arena, self.heap)?;
+        let store = self.logical.ledger();
+        let mut ledger = store.borrow_mut();
+        let inputs = ledger.invocation_operands(&activation.invocation, self.heap.pages())?;
+        let outputs = saved
+            .iter()
+            .map(|(output, input)| (*output, RootValue::Existing(*input)))
+            .collect::<Vec<_>>();
+        ledger.transfer_source(self.arena, self.heap, &inputs, &outputs)
     }
 
     pub(super) fn source_returned(
         &mut self,
         frame: &storage::Values<'_, '_>,
         site: &compiled::CallSite,
-        value: Value,
+        _value: Value,
     ) -> Result<(), HeapFault> {
         let activation = frame
             .state
@@ -358,6 +285,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let roles = statement
             .source_roles_at(stream, site.pc)
             .ok_or_else(|| malformed("packet return has no source projection"))?;
+        self.logical.flush(self.arena, self.heap)?;
+        let store = self.logical.ledger();
+        let mut ledger = store.borrow_mut();
+        let mut inputs = Vec::new();
+        let mut outputs = Vec::new();
         for (_, at) in roles.iter() {
             let owner = owners
                 .root(
@@ -366,7 +298,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     activation.invocation.id(),
                 )
                 .ok_or_else(|| malformed("packet return operand has no owner"))?;
-            self.logical.replace(owner, None);
+            if ledger.holding(owner, self.heap.pages())?.is_some() {
+                inputs.push(owner);
+            }
         }
         if let Some(act) = site.act {
             for role in &stream.nested[act.ix()].roles {
@@ -380,13 +314,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         activation.invocation.id(),
                     )
                     .ok_or_else(|| malformed("packet return role has no source owner"))?;
-                self.logical.replace(continuation, None);
-                self.logical.replace(
-                    operand,
-                    Some(PublicationValue::Native(frame.regs[role.reg.ix()])),
-                );
+                inputs.push(continuation);
+                outputs.push((operand, RootValue::Existing(continuation)));
             }
         }
+        let incoming = Owner::Incoming(self.task);
+        inputs.push(incoming);
         if site.act.is_some()
             && let Some(Some(at)) = stream.source_sites.get(site.pc as usize)
         {
@@ -397,11 +330,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     activation.invocation.id(),
                 )
                 .ok_or_else(|| malformed("packet call result has no source owner"))?;
-            self.logical
-                .replace(owner, Some(PublicationValue::Native(value)));
+            outputs.push((owner, RootValue::Existing(incoming)));
         }
-        self.logical.replace(Owner::Incoming(self.task), None);
-        self.logical.flush(self.arena, self.heap)
+        ledger.transfer_source(self.arena, self.heap, &inputs, &outputs)
     }
 
     pub(super) fn source_leave(
@@ -421,8 +352,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
 fn source_value(
     slot: lash_kernel_state::kernel_internals::logical::Slot,
     state: SlotState,
-) -> Option<PublicationValue> {
-    use lash_kernel_state::kernel_internals::logical::Slot;
+) -> Option<lash_kernel_state::kernel_internals::logical::PublicationValue> {
+    use lash_kernel_state::kernel_internals::logical::{PublicationValue, Slot};
     match state {
         SlotState::Empty => None,
         SlotState::Value(value) => Some(PublicationValue::Native(value)),

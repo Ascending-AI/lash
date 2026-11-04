@@ -919,13 +919,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             let published = self
                 .publish_nested_leave(frame, block)
                 .map_err(|error| self.halt(error.into()))?;
+            if !published {
+                // The precise Leave still owns these declarations. Keep its
+                // completed block in place so source consumes the same roots.
+                self.scratch.exit.stands = Some(Stands::Statement);
+                return Err(Stop);
+            }
             frame.state.control.pop();
             let block = &frame.state.callee.compiled.blocks[block];
-            if !published {
-                for at in &block.declares {
-                    frame.slots[*at as usize] = SlotState::Empty;
-                }
-            }
             frame.state.pc = block.after;
         }
         if frame.state.control.is_empty() {

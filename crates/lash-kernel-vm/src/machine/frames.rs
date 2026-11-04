@@ -458,12 +458,7 @@ impl Frame {
         if let Some(logical) = &self.logical {
             logical.replace(at, self.slots.values[at as usize], value);
         }
-        let at = at as usize;
-        self.slots.values[at] = value;
-        if !self.slots.changed[at] {
-            self.slots.changed[at] = true;
-            self.slots.edits.push(at);
-        }
+        self.restore_slot(at, value);
     }
 
     /// Whether a projection has variables of this frame to write.
@@ -1063,7 +1058,6 @@ impl Frames {
                     &self.exe,
                     &self.access,
                 )?);
-                frame.control.activate();
             }
             self.cache.push((index, frame));
         }

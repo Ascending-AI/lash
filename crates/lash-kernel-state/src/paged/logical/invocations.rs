@@ -229,7 +229,7 @@ impl Ledger {
     ) -> Result<Vec<Owner>, HeapFault> {
         self.owners_under(codec::invocation_key(task, invocation), access)
     }
-    pub(super) fn invocation_operands(
+    pub fn invocation_operands(
         &self,
         invocation: &Invocation,
         access: &Access<'_>,

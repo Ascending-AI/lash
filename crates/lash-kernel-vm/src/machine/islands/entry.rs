@@ -619,7 +619,36 @@ impl KernelMachine {
                     | super::super::Control::For { started: 0, .. }
             )
         );
-        match self.next_iteration(task, host, exe)? {
+        let next = self.next_iteration(task, host, exe);
+        if initial
+            && matches!(
+                exe.stmt(stmt).form,
+                crate::compile::Form::For { via: None, .. }
+            )
+        {
+            // Source ForIn consumes its evaluated iterable when its first
+            // header answers or refuses. The packet's initial iteration has
+            // the same input lifetime, even when no source bank was placed.
+            self.logical_flush()?;
+            let frame = self.frame(task)?;
+            let source = &exe.code(frame.code).source_room;
+            let owner = source
+                .owner_slots()
+                .map_err(|_| fault("initial for ownership failed verification"))?
+                .root(
+                    &crate::compile::room::Owner::LoopCursor(exe.stmt(stmt).site.clone()),
+                    task,
+                    frame.invocation,
+                )
+                .ok_or_else(|| fault("initial for input has no canonical owner"))?;
+            let store = self.logical.ledger();
+            let mut ledger = store.borrow_mut();
+            if ledger.holding(owner, self.heap.pages())?.is_some() {
+                ledger.transfer_source(&mut self.arena.borrow_mut(), &self.heap, &[owner], &[])?;
+                self.logical_memory.set(ledger.balance()?.total()?);
+            }
+        }
+        match next? {
             Flow::Done if !initial => Ok(super::super::Completion::Normal),
             Flow::Done => self.resumed(task, exe, (stmt, super::super::stream::Ran::Done)),
             Flow::Step => self.resumed(task, exe, (stmt, super::super::stream::Ran::Step)),
@@ -715,12 +744,14 @@ impl KernelMachine {
             frame.public_result = Some(exe.lib(lib).header.signature.result.clone());
         }
         frame.link = level.link;
-        frame.control.replace(level.control);
+        // Placement adopts an already-published activation. Replaying these
+        // controls as new source edits can resurrect a consumed loop cursor.
+        frame.control = level.control.into();
         if let Some(stmt) = action {
             frame.awaiting = Some(stmt);
         }
         for (at, slot) in level.slots.into_iter().enumerate() {
-            frame.set_slot(at as u32, slot);
+            frame.restore_slot(at as u32, slot);
         }
         if let Some((stmt, act, pending)) = pending {
             frame.stand_at(act, pending);
@@ -746,8 +777,6 @@ impl KernelMachine {
             )?);
             self.task(task)?.frames.push(frame);
         }
-        self.logical_flush_continuation(task, exe)?;
-        self.logical_reconstruct_controls(task, exe)?;
         self.logical_flush()?;
         Ok(top)
     }

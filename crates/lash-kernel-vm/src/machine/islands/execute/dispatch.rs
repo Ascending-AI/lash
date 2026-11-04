@@ -548,22 +548,44 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 };
             }
             Opcode::Field => {
-                let (dst, field, miss) = (&packet.dst, &(packet.x as usize), &packet.y);
+                let sites::Field {
+                    dst,
+                    field,
+                    miss,
+                    pc,
+                } = &code.sites.field[packet.x as usize];
 
                 let x = regs[*dst as usize];
-                regs[*dst as usize] = self
+                let value = self
                     .field(x, *field)
                     .ok_or_else(|| self.at_held(*miss, *dst, x))?;
+                if !self
+                    .publish_member_read(frame, *pc, *dst, value)
+                    .map_err(|error| self.halt(error.into()))?
+                {
+                    return Err(self.at_held(*miss, *dst, x));
+                }
             }
             Opcode::Index => {
-                let sites::Index { dst, site, miss } = &code.sites.index[packet.x as usize];
+                let sites::Index {
+                    dst,
+                    site,
+                    miss,
+                    pc,
+                } = &code.sites.index[packet.x as usize];
 
                 let (x, at) = (regs[*dst as usize], regs[*dst as usize + 1]);
-                regs[*dst as usize] = self
+                let value = self
                     .retaining(&mut frame.state.transient, |island| {
                         island.item(*site, x, at)
                     })
                     .ok_or_else(|| self.at_operands(*miss, *dst, &[x, at]))?;
+                if !self
+                    .publish_member_read(frame, *pc, *dst, value)
+                    .map_err(|error| self.halt(error.into()))?
+                {
+                    return Err(self.at_operands(*miss, *dst, &[x, at]));
+                }
             }
             Opcode::Call => {
                 let sites::Call { site, read, args } = &code.sites.call[packet.x as usize];
@@ -700,8 +722,23 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                     _ => return Err(self.at(*pc)),
                 };
-                self.source_clear_operands(frame)
+                self.logical
+                    .flush(self.arena, self.heap)
                     .map_err(|error| self.halt(error.into()))?;
+                let activation =
+                    frame.state.source.as_ref().ok_or_else(|| {
+                        self.halt(fault("packet branch has no source invocation"))
+                    })?;
+                let store = self.logical.ledger();
+                let released = {
+                    let mut ledger = store.borrow_mut();
+                    let inputs =
+                        ledger.invocation_operands(&activation.invocation, self.heap.pages());
+                    inputs.and_then(|inputs| {
+                        ledger.transfer_source(self.arena, self.heap, &inputs, &[])
+                    })
+                };
+                released.map_err(|error| self.halt(error.into()))?;
                 self.transient = self
                     .transient
                     .saturating_sub(std::mem::take(&mut frame.state.transient));

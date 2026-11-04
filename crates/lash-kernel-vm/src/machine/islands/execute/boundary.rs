@@ -192,7 +192,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             state.source_frontier = activation.frontier;
         }
         for (at, slot) in values.slots.iter().enumerate() {
-            state.set_slot(at as u32, *slot);
+            state.restore_slot(at as u32, *slot);
         }
         self.recycle(&mut values);
         slab.release(active);
@@ -211,21 +211,20 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             return None;
         }
         state.link = active.state.callee.link;
-        state.control.replace(
-            active
-                .state
-                .control
-                .iter()
-                .map(|position| {
-                    let mut control = Control::Block {
-                        block: active.state.callee.compiled.blocks[0].id,
-                        next: 0,
-                    };
-                    position.project(active.state.callee.compiled, &active.pending, &mut control);
-                    control
-                })
-                .collect(),
-        );
+        state.control = (active
+            .state
+            .control
+            .iter()
+            .map(|position| {
+                let mut control = Control::Block {
+                    block: active.state.callee.compiled.blocks[0].id,
+                    next: 0,
+                };
+                position.project(active.state.callee.compiled, &active.pending, &mut control);
+                control
+            })
+            .collect::<Vec<_>>())
+        .into();
         let Some(stmt) = active.state.statement else {
             unreachable!("a scheduler handoff has a statement");
         };
@@ -234,13 +233,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         };
         self.restore_expression_scopes(active.slots, stmt, pc);
         for (at, slot) in active.slots.iter().enumerate() {
-            state.set_slot(at as u32, *slot);
+            state.restore_slot(at as u32, *slot);
         }
         if active.state.callee.captured != super::RESIDENT {
             for (index, at) in active.state.callee.plan.captures.iter().enumerate() {
                 let (_, cell) =
                     self.scratch.captured[active.state.callee.captured as usize + index];
-                state.set_slot(*at, SlotState::Cell(cell));
+                state.restore_slot(*at, SlotState::Cell(cell));
             }
         }
         // The disjoint source register owner receives the ordered live prefix
@@ -542,21 +541,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if let Some((statement, pc)) = source {
             self.restore_expression_scopes(frame.slots, statement, pc);
         }
-        let published = frame
-            .state
-            .source
-            .as_ref()
-            .is_some_and(|source| source.original.is_some());
-        let rebuilt = if published {
-            // The accepted receipt owns these exact roots. Source adopts its
-            // bank synchronously; projecting slots here would destroy them.
-            self.logical.flush(self.arena, self.heap)
-        } else {
-            self.source_clear_operands(frame)
-                .and_then(|()| self.source_bindings(frame))
-                .and_then(|()| self.logical.flush(self.arena, self.heap))
-        };
-        if let Err(error) = rebuilt {
+        // Every packet binding and scope change already owns its accepted
+        // source roots. Recovery retains that publication; only the physical
+        // placement is reconstructed here.
+        if let Err(error) = self.logical.flush(self.arena, self.heap) {
             self.halt(error.into());
             return;
         }

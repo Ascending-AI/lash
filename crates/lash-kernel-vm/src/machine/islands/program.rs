@@ -1164,6 +1164,7 @@ impl<'e> Build<'e> {
             } => {
                 self.expr(target)?;
                 self.emit(Op::Field {
+                    pc,
                     dst: reg,
                     field: field.ix(),
                     miss: *miss,
@@ -1179,6 +1180,7 @@ impl<'e> Build<'e> {
                 self.expr(target)?;
                 self.expr(index)?;
                 self.emit(Op::Index {
+                    pc,
                     site: crate::compile::ReadSite::new(site.0, self.stream.layout),
                     dst: reg,
                     miss: *miss,

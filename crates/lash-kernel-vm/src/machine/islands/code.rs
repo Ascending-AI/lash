@@ -269,11 +269,6 @@ operations! {
             miss: u32,
             source: Option<crate::compile::expr::SourceRead>,
         }
-        Field {
-            dst: u32,
-            field: usize,
-            miss: u32,
-        }
         Bind {
             at: usize,
             src: u32,
@@ -408,10 +403,17 @@ operations! {
             }
         }
         [] {
+            Field field {
+                dst: u32,
+                field: usize,
+                miss: u32,
+                pc: u32,
+            }
             Index index {
                 site: Option<crate::compile::ReadSite>,
                 dst: u32,
                 miss: u32,
+                pc: u32,
             }
             Call call {
                 site: CallSite,
@@ -837,9 +839,6 @@ impl Code {
             Op::Open(block) => at(block).and_then(|x| packet(Opcode::Open, 0, 0, x, 0)),
             Op::LoopDone(leaves) => packet(Opcode::LoopDone, 0, 0, leaves, 0),
             Op::Return { reg, pc } => packet(Opcode::Return, 0, reg, pc, 0),
-            Op::Field { dst, field, miss } => {
-                at(field).and_then(|x| packet(Opcode::Field, 0, dst, x, miss))
-            }
             Op::Effect(pc) => packet(Opcode::Effect, 0, 0, pc, 0),
             Op::Spawn(pc) => packet(Opcode::Spawn, 0, 0, pc, pc),
             Op::Yield(pc) => packet(Opcode::Yield, 0, 0, pc, pc),

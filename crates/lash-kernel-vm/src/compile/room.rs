@@ -303,7 +303,6 @@ pub(crate) struct OwnerSlots {
     pub(crate) owner: doc::constant_pool::PoolOwner,
     pub(crate) source: Site,
     slots: BTreeMap<Owner, u32>,
-    controls: Box<[Owner]>,
     scopes: BTreeMap<Owner, Site>,
     aliases: BTreeMap<Owner, Owner>,
     binding_slots: BTreeMap<Owner, (u32, bool)>,
@@ -321,7 +320,6 @@ impl PartialEq for OwnerSlots {
         self.owner == other.owner
             && self.source == other.source
             && self.slots == other.slots
-            && self.controls == other.controls
             && self.scopes == other.scopes
             && self.aliases == other.aliases
             && self.binding_slots == other.binding_slots
@@ -790,9 +788,6 @@ impl Source {
                     }
                 }
                 let (scopes, aliases, binding_slots) = root_owners::form(self, &owners)?;
-                let controls = owners.iter().filter(|owner| matches!(owner,
-                    Owner::LoopCursor(_) | Owner::LoopHeader(_)
-                    | Owner::PendingDeparture(_) | Owner::ActiveDeparture(_))).cloned().collect();
                 let slots = owners
                     .into_iter()
                     .enumerate()
@@ -804,7 +799,6 @@ impl Source {
                     owner: self.owner,
                     source: self.site.clone(),
                     slots,
-                    controls,
                     scopes,
                     aliases,
                     binding_slots,

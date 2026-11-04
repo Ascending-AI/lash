@@ -188,15 +188,6 @@ impl OwnerSlots {
             slot: Slot::Continuation(index),
         })
     }
-    pub(crate) fn control_roots(
-        &self,
-        task: TaskId,
-        invocation: u64,
-    ) -> impl Iterator<Item = Root> + '_ {
-        self.controls
-            .iter()
-            .filter_map(move |owner| self.root(owner, task, invocation))
-    }
     pub(crate) fn root(&self, owner: &Owner, task: TaskId, invocation: u64) -> Option<Root> {
         let mut owner = owner;
         while let Some(target) = self.aliases.get(owner) {

@@ -36,7 +36,6 @@ pub(super) enum Roles {
         stmt: StmtId,
         cursor: Option<Value>,
         header: Option<Value>,
-        initial: bool,
     },
     Try {
         stmt: StmtId,
@@ -49,13 +48,11 @@ pub(super) fn roles(control: &Control) -> Option<Roles> {
             stmt,
             cursor,
             header,
-            started,
             ..
         } => Some(Roles::For {
             stmt: *stmt,
             cursor: cursor.walked(),
             header: header.held(),
-            initial: *started == 0 && matches!(header, super::loops::Header::Body),
         }),
         Control::Try { stmt, phase } => Some(Roles::Try {
             stmt: *stmt,
@@ -133,11 +130,6 @@ impl Controls {
             self.dirty.push(at);
         }
     }
-    pub(super) fn activate(&mut self) {
-        for at in 0..self.values.len() {
-            self.changed(at);
-        }
-    }
     pub(super) fn push(&mut self, control: Control) {
         let at = self.values.len();
         self.values.push(control);
@@ -185,6 +177,7 @@ impl Controls {
         self.removed.clear();
         self.marked.fill(false);
     }
+    #[cfg(test)]
     pub(super) fn replace(&mut self, values: Vec<Control>) {
         self.clear();
         for value in values {

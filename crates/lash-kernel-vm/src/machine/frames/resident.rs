@@ -10,7 +10,7 @@ use lash_kernel_state::kernel_internals::resident::frame_values;
 use lash_kernel_state::kernel_internals::tree::Cell;
 use lash_kernel_state::paged::FrameRecord;
 
-use super::{Frames, row};
+use super::{Frame, Frames, SlotState, row};
 
 impl Frames {
     /// Gives `out` what the frames hold: a row's values by their page
@@ -108,5 +108,17 @@ impl Frames {
                 .ok_or_else(|| HeapFault::Malformed("frame stack holding cost overflow".into()))?;
         }
         Ok(bytes)
+    }
+}
+
+impl Frame {
+    /// Reconstruct physical placement after the source ownership has committed.
+    pub(in crate::machine) fn restore_slot(&mut self, at: u32, value: SlotState) {
+        let at = at as usize;
+        self.slots.values[at] = value;
+        if !self.slots.changed[at] {
+            self.slots.changed[at] = true;
+            self.slots.edits.push(at);
+        }
     }
 }

@@ -105,6 +105,29 @@ impl Ledger {
             .map_err(|_| invalid("carry root cost overflow"))?;
         self.publish(accepted, || ())
     }
+    /// Transfer explicit live source owners in one canonical graph publication.
+    /// Every consumed owner must exist; outputs may borrow an existing holding
+    /// without projecting its value again. No replacements are deferred.
+    pub fn transfer_source(
+        &mut self,
+        arena: &mut Arena,
+        heap: &PagedHeap,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+    ) -> Result<(), HeapFault> {
+        if inputs.is_empty() && outputs.is_empty() {
+            return Ok(());
+        }
+        let mut registration = arena
+            .registration()
+            .map_err(|error| invalid(&error.to_string()))?;
+        let prepared =
+            self.prepare_source_ownership(registration.arena(), heap, inputs, outputs)?;
+        let accepted = prepared
+            .admit(u64::MAX)
+            .map_err(|_| invalid("source transfer holding overflow"))?;
+        self.publish(accepted, || registration.commit())
+    }
     pub fn enter_source(
         &mut self,
         task: TaskId,
