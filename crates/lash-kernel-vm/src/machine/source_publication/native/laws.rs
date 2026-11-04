@@ -655,3 +655,183 @@ fn native_units(
         .unwrap()
         .units()
 }
+
+#[test]
+fn prepared_scalar_answers_supply_only_graph_free_contracts() {
+    use crate::laws::embedder::{Embedder, Setup};
+    struct PreparedIdentity;
+    impl doc::NativeFunction for PreparedIdentity {
+        fn call(&self, _: doc::NativeCall<'_, '_>) -> Result<doc::Value, doc::NativeError> {
+            panic!("an absent contract cannot authorize ordinary native execution")
+        }
+        fn prepare(&self) -> Option<doc::PreparedNative> {
+            Some(doc::PreparedNative {
+                pair: None,
+                entry: |args| match args {
+                    [value] => Some(*value),
+                    _ => None,
+                },
+                charged_entry: None,
+                operation: "law.prepared_identity",
+            })
+        }
+    }
+    fn probes(
+        registry: &mut doc::FunctionRegistry,
+        _: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+    ) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
+        let definition = doc::parse_definition(
+            "function law.prepared_identity(value: Any) -> Any\nkernel 1\ncharge sum(5, size(value), size(result))\nnative\n",
+        ).unwrap();
+        vec![(
+            "law.prepared_identity",
+            registry
+                .register(definition, Some(Arc::new(PreparedIdentity)))
+                .unwrap(),
+        )]
+    }
+    let run = Embedder::with(
+        "main { return law.prepared_identity(7) }",
+        Setup {
+            probes: Some(probes),
+            ..Setup::default()
+        },
+    );
+    let machine = &run.machine;
+    let id = run.library.ids["law.prepared_identity"];
+    let function = machine.exe.lib(machine.exe.library_lib(&id).unwrap());
+    let code = machine.exe.main.unwrap();
+    let statement = machine.exe.block(machine.exe.code(code).body).stmts[0];
+    let (stream, stmt, _) = machine.exe.statement(statement);
+    let pc = (stmt.ops.start..stmt.ops.end())
+        .find(|pc| {
+            matches!(
+                stream.ops[*pc as usize],
+                lash_kernel_exec::Op::Call { .. } | lash_kernel_exec::Op::Operator { .. }
+            )
+        })
+        .unwrap();
+    let charges =
+        room::charges::ChargeProgram::native_completion(&machine.exe, code, statement, pc).unwrap();
+    let owner = |slot| Owner::Value {
+        task: doc::TaskId::MAIN,
+        invocation: 1,
+        slot: Slot::Operand(slot),
+    };
+    let mut failures = Vec::new();
+    for kind in 0..3 {
+        let mut arena = Arena::new();
+        let ledger = Rc::new(RefCell::new(Ledger::fresh()));
+        let mut nursery = doc::Nursery::unaccounted(arena.objects());
+        let list = nursery.allocate(doc::NewObject::List(vec![doc::Value::Int(9)]));
+        let tuple = nursery.allocate(doc::NewObject::Tuple(vec![list]));
+        arena.install(nursery.into_new()).unwrap();
+        let value = match kind {
+            0 => doc::Value::Int(7),
+            1 => list,
+            _ => tuple,
+        };
+        let input = ledger
+            .borrow()
+            .prepare_source_boundary(
+                arena.registration().unwrap(),
+                &machine.heap,
+                &[],
+                &[(
+                    owner(0),
+                    lash_kernel_state::kernel_internals::logical::RootValue::Value(&value),
+                )],
+            )
+            .unwrap()
+            .admit(u64::MAX)
+            .ok()
+            .unwrap();
+        input.publish(&mut ledger.borrow_mut(), |_, _| {}).unwrap();
+        let before = (
+            ledger.borrow().balance().unwrap(),
+            arena.next_provisional(),
+            arena.allocations(),
+        );
+        let contract = doc::NativeResourceContract::returned(
+            doc::Args::new(&[value], arena.objects(), &arena.semantics()),
+            &value,
+        )
+        .unwrap();
+        let recipe = |known, contract| NativeStorage {
+            contract,
+            function,
+            args: vec![value],
+            output: owner(1),
+            at: Point {
+                site: Site::new(Unit::Main, vec![0]),
+                phase: Phase::Commit,
+            },
+            release: vec![].into(),
+            ledger: Rc::clone(&ledger),
+            heap: &machine.heap,
+            charging: true,
+            limits: machine.limits,
+            room: None,
+            known,
+        };
+        {
+            let prepared = recipe(Some((value, 0)), contract.clone())
+                .prepare_for_law(&mut arena, &[owner(0)])
+                .unwrap();
+            if kind == 0 {
+                if let Some(prepared) = prepared {
+                    assert!(prepared.storage.value().same(&value));
+                    assert_eq!(prepared.storage.contract(), &contract);
+                    assert_eq!(
+                        native_units(&charges, &prepared.storage),
+                        9,
+                        "K-CHG-004: 5 + size(7) + size(7) is 9"
+                    );
+                    drop(prepared);
+                } else {
+                    failures.push("canonical prepared scalar declined");
+                }
+            } else {
+                if prepared.is_some() {
+                    failures.push(if kind == 1 {
+                        "mutable graph without contract accepted"
+                    } else {
+                        "immutable container with graph without contract accepted"
+                    });
+                }
+                drop(prepared);
+            }
+        }
+        if kind == 0 {
+            for guard in 0..4 {
+                let mut wrong = recipe(Some((value, 0)), contract.clone());
+                match guard {
+                    0 => wrong.known = Some((doc::Value::Int(8), 0)),
+                    1 => wrong.args.clear(),
+                    2 => wrong.contract.output.bytes += 1,
+                    _ => wrong.known = None,
+                }
+                if wrong
+                    .prepare_for_law(&mut arena, &[owner(0)])
+                    .unwrap()
+                    .is_some()
+                {
+                    failures.push("scalar authority guard accepted changed facts");
+                }
+            }
+        }
+        assert_eq!(
+            (
+                ledger.borrow().balance().unwrap(),
+                arena.next_provisional(),
+                arena.allocations()
+            ),
+            before,
+            "speculation publishes no roots, grants or allocations",
+        );
+    }
+    assert!(
+        failures.is_empty(),
+        "prepared scalar contract law: {failures:?}"
+    );
+}

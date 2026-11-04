@@ -319,21 +319,21 @@ impl NativeStorage<'_> {
         {
             return Ok(None);
         }
-        // The installed implementation, not a caller-authored declaration,
-        // authenticates the changing input facts. Unknown contracts decline.
-        match native.resource_contract(doc::Args::new(
+        // The implementation authenticates the changing input facts. An absent
+        // declaration requires its checked prepared scalar answer below.
+        let explicit_contract = match native.resource_contract(doc::Args::new(
             &self.args,
             arena.objects(),
             &arena.semantics(),
         )) {
-            Ok(Some(contract)) if contract == self.contract => {}
+            Ok(Some(contract)) if contract == self.contract => true,
+            Ok(None) => false,
             Err(doc::NativeError::Host(error)) => return Err(error),
             Err(doc::NativeError::Malformed(reason)) => return Err(malformed(reason)),
             _ => return Ok(None),
-        }
+        };
         let known = match self.known {
-            // A scalar Pair/entry does not prove the installed implementation
-            // has no scratch. Only its input-evaluated contract can do so.
+            // Explicit scratch phases still require ordinary native execution.
             Some(_) if !self.contract.events.is_empty() => None,
             Some((value, depth)) => {
                 if depth != 0
@@ -359,6 +359,19 @@ impl NativeStorage<'_> {
             }
             None => None,
         };
+        if !explicit_contract {
+            let Some(value) = known else {
+                return Ok(None);
+            };
+            let canonical = doc::NativeResourceContract::returned(
+                doc::Args::new(&self.args, arena.objects(), &arena.semantics()),
+                &value,
+            )
+            .map_err(native_fault)?;
+            if canonical != self.contract {
+                return Ok(None);
+            }
+        }
         let (value, work, depth, new) = if let Some(value) = known {
             (value, 0, 0, vec![])
         } else {
