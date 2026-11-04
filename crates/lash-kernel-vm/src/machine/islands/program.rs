@@ -326,15 +326,8 @@ impl<'e> Build<'e> {
         &self,
         pc: u32,
     ) -> Option<std::sync::Arc<crate::compile::room::charges::OriginalPrefix>> {
-        let statement = self.statement?;
-        let stmt = self.exe.stmt(statement);
-        let range = match stmt.form {
-            crate::compile::Form::While { test, .. } if pc >= test.start && pc < test.end() => test,
-            _ => stmt.ops,
-        };
-        let prefix = crate::compile::expr::ConstructorPrefix::compile(self.stream, range, pc)?;
         self.originals
-            .compile(self.placement.as_ref()?.code(), statement, &prefix)
+            .compile(self.placement.as_ref()?.code(), self.statement?, pc)
             .ok()
     }
 

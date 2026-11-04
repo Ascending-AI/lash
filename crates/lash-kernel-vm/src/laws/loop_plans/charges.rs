@@ -782,7 +782,10 @@ fn constructor_debt() {
                 continue;
             };
             let original = crate::compile::room::charges::OriginalPrefix::compile(
-                &exe, body.code, statement, &prefix,
+                &exe,
+                body.code,
+                statement,
+                prefix.pc(),
             )
             .unwrap();
             assert!(original.matches_constructor(
