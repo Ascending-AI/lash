@@ -28,12 +28,13 @@ pub(super) fn derive(
         .ops
         .get(range.start as usize)
         .ok_or(Refused::Source)?;
-    let (lib, args) = match op {
-        Op::Call { lib, args } | Op::Operator { lib, args } => (LibId(lib.0), args),
+    let (lib, arguments) = match op {
+        Op::Call { lib, args } | Op::Operator { lib, args } => (LibId(lib.0), args.len as usize),
         Op::Nested { act, args } => match stream.nested.get(act.ix()).map(|nested| &nested.kind) {
-            Some(compile::NestedKind::Body(lib)) => (*lib, args),
+            Some(compile::NestedKind::Body(lib)) => (*lib, args.len as usize),
             _ => return Err(Refused::Source),
         },
+        Op::Act => root_call(exe, statement, range.start)?,
         _ => return Err(Refused::Source),
     };
     let function = exe.lib(lib);
@@ -55,7 +56,9 @@ pub(super) fn derive(
         .and_then(Option::as_deref)
         .ok_or(Refused::Source)?;
     let at = source_point(stream, site, op);
-    if at.phase != super::super::Phase::Commit {
+    if at.phase != super::super::Phase::Commit
+        && !(matches!(op, Op::Act) && at.phase == super::super::Phase::Enter)
+    {
         return Err(Refused::Source);
     }
     let mut formulas = Vec::new();
@@ -76,10 +79,17 @@ pub(super) fn derive(
             }
         }
     }
+    if pending.is_some() && matches!(op, Op::Act) && exe.code(code).charged {
+        tape.extend((0..arguments).map(|_| {
+            TapeEvent::Fixed(Weight::Atomic(
+                doc::plan::FormCharge::Argument.measurement().0,
+            ))
+        }));
+    }
     completion(
         exe,
         lib,
-        args.len as usize,
+        arguments,
         at.clone(),
         &mut formulas,
         &mut tape,
@@ -124,6 +134,35 @@ pub(super) fn after_closes(
     Ok((closes, formulas, at))
 }
 
+/// Authenticate the rooted action ABI against its original source call.
+fn root_call(
+    exe: &Executable,
+    statement: compile::StmtId,
+    pc: u32,
+) -> Result<(LibId, usize), Refused> {
+    let (stream, stmt, _) = exe.statement(statement);
+    let compile::Form::Action(action) = &stmt.form else {
+        return Err(Refused::Source);
+    };
+    let compile::ActionKind::Call { callee, args } = &action.kind else {
+        return Err(Refused::Source);
+    };
+    if pc != stmt.ops.start
+        || stream
+            .source_sites
+            .get(pc as usize)
+            .and_then(Option::as_deref)
+            != Some(&action.site)
+    {
+        return Err(Refused::Source);
+    }
+    let lib = match callee {
+        compile::Callee::Library(lib) | compile::Callee::CheckedHelper(lib) => *lib,
+        _ => return Err(Refused::Source),
+    };
+    Ok((lib, args.len()))
+}
+
 pub(super) fn depth(
     exe: &Executable,
     statement: compile::StmtId,
@@ -139,6 +178,7 @@ pub(super) fn depth(
                 _ => return Err(Refused::Source),
             }
         }
+        Some(Op::Act) => root_call(exe, statement, pc)?.0,
         _ => return Err(Refused::Source),
     };
     let function = exe.lib(lib);

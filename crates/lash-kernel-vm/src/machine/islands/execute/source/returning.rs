@@ -181,13 +181,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(ValuePublication::Declined);
         }
         let published = self.publish_source_departure(frame.state.callee, activation, recipe)?;
-        #[cfg(test)]
-        if completion.units == 4 {
-            eprintln!(
-                "[DEBUG-r53-fee] return published={published} units={} charged={}",
-                completion.units, self.charged
-            );
-        }
+
         #[cfg(any(test, feature = "testing"))]
         if published && !suspended {
             crate::machine::islands::witness::return_published();

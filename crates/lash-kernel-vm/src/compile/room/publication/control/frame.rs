@@ -386,7 +386,7 @@ impl FrameCaller<'_> {
             .map_err(|_| fault("caller owners failed verification"))?;
         let root = |selector: &Owner| slots.root(selector, task, self.invocation.id());
         let mut expected_inputs = Vec::new();
-        let (phase, exit) = if self.entry.guest {
+        let (phase, exit) = if self.entry.guest && matches!(self.entry.kind, NestedKind::Call(_)) {
             (Phase::Enter, ExitKind::Action)
         } else {
             (Phase::Commit, ExitKind::Normal)
@@ -404,6 +404,21 @@ impl FrameCaller<'_> {
             .events()
             .next()
             .ok_or_else(|| fault("caller entry disappeared"))?;
+        // A native-backed body is an uncounted source Commit. Its function
+        // identity includes the canonical metering contract; selecting another
+        // body with the same arguments must not authenticate that Commit.
+        if let NestedKind::Body(lib) = self.entry.kind {
+            let callee = exe.lib(lib).specialization.resource;
+            if !event.peak.measures().any(|measure| {
+                matches!(measure, Measure::CallPeak { at, callee: actual }
+                    if at == &self.entry.site && *actual == callee)
+            }) || !event.delta.measures().any(|measure| {
+                matches!(measure, Measure::CallDelta { at, callee: actual }
+                    if at == &self.entry.site && *actual == callee)
+            }) {
+                return Ok(false);
+            }
+        }
         let mut roles = event.inputs.iter();
         if matches!(self.entry.kind, NestedKind::Call(NestedCallee::Read)) {
             let Some(input) = roles.next().and_then(root) else {
@@ -473,4 +488,140 @@ fn root_value(value: &PV) -> Option<RootValue<'_>> {
         PV::Page(value) => RootValue::Page(value),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::laws::embedder::Embedder;
+    use lash_kernel_doc::TaskId;
+
+    #[test]
+    fn uncounted_body_entry_rejects_another_completion_contract() {
+        fn register(
+            registry: &mut doc::FunctionRegistry,
+            _: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+        ) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
+            [("probe.first", 1), ("probe.second", 2)].into_iter().map(|(name, charge)| {
+                let definition = doc::parse_definition(&format!("function {name}(n: Any) -> Any\nkernel 1\ncharge {charge}\nnative\nbody {{ return n }}")).unwrap();
+                (name, registry.register(definition, None).unwrap())
+            }).collect()
+        }
+        let run = Embedder::with(
+            "main { let a = probe.first(7) return probe.second(a) }",
+            crate::laws::embedder::Setup {
+                probes: Some(register),
+                ..Default::default()
+            },
+        );
+        let (program, _) = run.program(false);
+        let admitted = program
+            .library
+            .admit(&program.document, Default::default(), &program.selection)
+            .unwrap_or_else(|_| panic!("body contract admission"));
+        let exe = admitted
+            .executable(
+                &program.document,
+                &program.library,
+                &program.documents,
+                &program.functions,
+                &program.instances,
+            )
+            .unwrap_or_else(|_| panic!("body contract executable"));
+        let main = exe.main.unwrap();
+        let statement = exe.block(exe.code(main).body).stmts[0];
+        let (stream, _, _) = exe.statement(statement);
+        let entry = stream
+            .nested
+            .iter()
+            .find(|entry| matches!(entry.kind, NestedKind::Body(_)))
+            .unwrap();
+        let NestedKind::Body(first) = entry.kind else {
+            unreachable!()
+        };
+        let second = (0..exe.lib_count())
+            .map(|index| crate::compile::LibId(index as u32))
+            .find(|lib| exe.lib(*lib).header.name.as_str() == "probe.second")
+            .unwrap();
+        assert_ne!(
+            exe.lib(first).specialization.function,
+            exe.lib(second).specialization.function
+        );
+        let target = |lib| match exe.lib(lib).run {
+            LibRun::Body(code)
+            | LibRun::Native {
+                body: Some(code), ..
+            } => code,
+            _ => panic!("the contract must run its body"),
+        };
+        let heap = run.machine.source_law_heap();
+        let store = heap.logical_ledger();
+        let mut ledger = store.borrow_mut();
+        let mut arena = Arena::new();
+        let (invocation, entered) = ledger
+            .prepare_enter(TaskId::MAIN, &mut arena, heap.pages(), &[], &[])
+            .unwrap();
+        ledger.commit(entered.admit(4096).ok().unwrap()).unwrap();
+        let source = Arc::clone(&exe.code(main).source_room);
+        let interval = source
+            .compile_event(
+                &Point {
+                    site: entry.site.clone(),
+                    phase: Phase::Commit,
+                },
+                ExitKind::Normal,
+            )
+            .unwrap();
+        let event = interval.events().next().unwrap();
+        let input = source
+            .owner_slots()
+            .unwrap()
+            .root(&event.inputs[0], TaskId::MAIN, invocation.id())
+            .unwrap();
+        let arguments = [(Some(input), Value::Int(7))];
+        let check = |entry: &Nested, target| {
+            FrameCaller {
+                source: Arc::clone(&source),
+                invocation: invocation.clone(),
+                entry,
+                callable: None,
+                save: true,
+            }
+            .check(
+                &exe,
+                target,
+                program.link,
+                &ledger,
+                &arena,
+                heap,
+                &arguments,
+                &[],
+                &[input],
+                &mut Vec::new(),
+            )
+            .unwrap()
+        };
+        assert!(
+            entry.guest,
+            "the guest flag does not turn a Body into a counted Call"
+        );
+        assert!(check(entry, target(first)));
+        let forged = Nested {
+            guest: entry.guest,
+            site: entry.site.clone(),
+            suffix: Arc::clone(&entry.suffix),
+            occurrence: entry.occurrence,
+            depth: entry.depth,
+            kind: NestedKind::Body(second),
+            operator: entry.operator,
+            island: entry.island,
+            resume: entry.resume,
+            dst: entry.dst,
+            roles: Box::default(),
+        };
+        assert!(
+            !check(&forged, target(second)),
+            "another completion charge cannot authenticate this Commit"
+        );
+    }
 }

@@ -445,22 +445,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             });
         }
         if let Some(completion) = &frame.state.resident_completion {
-            #[cfg(test)]
-            if self
-                .exe
-                .lib(completion.call.lib)
-                .header
-                .name
-                .as_str()
-                .starts_with("helper.element")
-            {
-                eprintln!(
-                    "[DEBUG-r53-fee] resident {} bill={} charged={}",
-                    self.exe.lib(completion.call.lib).header.name,
-                    completion.charging,
-                    self.charged
-                );
-            }
             if !completion.charging {
                 return Ok(LibraryCompletion {
                     units: 0,
@@ -513,22 +497,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         root: bool,
     ) -> Result<LibraryCompletion, Stop> {
         let units = measured_formula(self.arena, &self.exe.lib(lib).charge, args, Some(&value));
-        #[cfg(test)]
-        if self
-            .exe
-            .lib(lib)
-            .header
-            .name
-            .as_str()
-            .starts_with("helper.element")
-        {
-            eprintln!(
-                "[DEBUG-r53-fee] measured {} units={units:?} charged={} resident={}",
-                self.exe.lib(lib).header.name,
-                self.charged,
-                frame.state.resident
-            );
-        }
+
         if let Some(units) = units.filter(|units| self.root_fits(0, *units, root)) {
             if units != 0
                 && let Some(tape) = self.recorder

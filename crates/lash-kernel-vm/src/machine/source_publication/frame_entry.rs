@@ -46,15 +46,6 @@ impl KernelMachine {
     ) -> Eval<Option<Box<Frame>>> {
         let code = exe.code(call.code);
         let source = Arc::clone(&code.source_room);
-        #[cfg(test)]
-        let debug_entry = frame
-            .library
-            .as_ref()
-            .is_some_and(|call| exe.lib(call.lib).header.name.as_str() == "probe.counter");
-        #[cfg(test)]
-        if debug_entry {
-            eprintln!("[DEBUG-r53-shared] frame entry {:?}", source.site);
-        }
         source
             .verify()
             .map_err(|_| malformed("frame entry source failed verification"))?;
@@ -98,10 +89,6 @@ impl KernelMachine {
         let Some((caller, ordinal)) =
             self.prepare_frame_caller(task_id, exe, &CallerArguments::from(&call), &mut encoding)?
         else {
-            #[cfg(test)]
-            if debug_entry {
-                eprintln!("[DEBUG-r53-shared] declined caller");
-            }
             return Ok(Some(frame));
         };
         let callee = caller.callee;
@@ -159,10 +146,6 @@ impl KernelMachine {
             caller.roles(),
         )?
         else {
-            #[cfg(test)]
-            if debug_entry {
-                eprintln!("[DEBUG-r53-shared] declined bank");
-            }
             return Ok(Some(frame));
         };
         caller.authenticate(&bank)?;
@@ -305,10 +288,6 @@ impl KernelMachine {
             &dependencies,
         )?
         else {
-            #[cfg(test)]
-            if debug_entry {
-                eprintln!("[DEBUG-r53-shared] declined publication");
-            }
             return Ok(Some(frame));
         };
         let mut memory = MemoryLimit::of(
@@ -367,10 +346,6 @@ impl KernelMachine {
             .admit(limit)
             .map_err(|_| malformed("entry peak passed its granted memory limit"))?;
         let Some(accepted) = resources.admit_interval(&facts, &allowance, accepted)? else {
-            #[cfg(test)]
-            if debug_entry {
-                eprintln!("[DEBUG-r53-shared] declined admission");
-            }
             return Ok(Some(frame));
         };
         drop(ledger);

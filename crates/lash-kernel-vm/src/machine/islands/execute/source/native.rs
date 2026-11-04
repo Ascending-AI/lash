@@ -95,19 +95,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         kernel: Option<(Value, u64)>,
     ) -> Result<ValuePublication, HeapFault> {
         let function = self.exe.lib(site.lib);
-        #[cfg(test)]
-        if function.header.name.as_str() == "tuple.get" {
-            eprintln!(
-                "[DEBUG-r53-tuple] native entered pc={} charges={} original={}",
-                site.pc,
-                site.charges.is_some(),
-                frame
-                    .state
-                    .source
-                    .as_ref()
-                    .is_some_and(|source| source.original.is_some())
-            );
-        }
+
         let text = !prepared && function.header.signature.result == lash_kernel_value::Type::Text;
         if !self.native_publication_room()
             || function.limit.is_some()
@@ -194,10 +182,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 self.answered(function, fast, &arguments, answer)
             });
         let prepared = resident.is_none() && answer.is_some();
-        #[cfg(test)]
-        if function.header.name.as_str() == "tuple.get" {
-            eprintln!("[DEBUG-r53-tuple] resident={}", resident.is_some());
-        }
+
         let LibRun::Native { native, .. } = &function.run else {
             return Ok(ValuePublication::Unavailable);
         };

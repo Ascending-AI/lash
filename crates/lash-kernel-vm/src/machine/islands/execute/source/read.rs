@@ -180,8 +180,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return self.source_input(frame, read, reg, Input::Native(value), None);
         }
         let Some(original) = original else {
-            #[cfg(test)]
-            eprintln!("[DEBUG-r53-read] missing original program pc={}", read.pc());
             // Without a verified original prefix the source evaluator must
             // enter before this read acquires an owner or pays a close.
             return Ok(false);
@@ -398,21 +396,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             }
         };
         if !published {
-            #[cfg(test)]
-            if self.slice_end == u64::MAX && self.memory_bound >= 1 << 20 && self.fits(read.quote())
-            {
-                eprintln!(
-                    "[DEBUG-r53-read] declined pc={} native={:?} receipt={} program={}",
-                    read.pc(),
-                    value.native().map(|value| value.kind()),
-                    frame
-                        .state
-                        .source
-                        .as_ref()
-                        .is_some_and(|source| source.original.is_some()),
-                    original.is_some()
-                );
-            }
             return Err(self.at(read.unpaid()));
         }
         #[cfg(test)]

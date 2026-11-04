@@ -104,7 +104,23 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         match target {
             Some(room::TransferTarget::Binding | room::TransferTarget::NativeInput) => true,
             Some(room::TransferTarget::RootReturn) => true,
-            None => false,
+            None => {
+                let Some(id) = frame.state.statement else {
+                    return false;
+                };
+                let statement = self.exe.stmt(id);
+                // Scoped returns use the canonical departure suffix, including
+                // a pending cleanup owner, just as a top-level return does.
+                self.source_departure_frame(frame)
+                    && at.unit == statement.site.unit
+                    && at.path.starts_with(&statement.site.child(0).path)
+                    && source
+                        .compile_departure_suffix(&room::Point {
+                            site: statement.site.clone(),
+                            phase: room::Phase::Commit,
+                        })
+                        .is_ok()
+            }
         }
     }
 
