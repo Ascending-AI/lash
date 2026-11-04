@@ -33,6 +33,11 @@ pub(crate) struct Reg<T> {
     index: u32,
     kind: PhantomData<fn() -> T>,
 }
+impl<T> Reg<T> {
+    pub(crate) fn index(&self) -> u32 {
+        self.index
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Pc(u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
