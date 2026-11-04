@@ -155,7 +155,12 @@ enum Part {
         region: Box<ScalarRegion>,
         natives: Box<[Native]>,
     },
-    Call(usize),
+    Call {
+        index: usize,
+        saved: Box<[Slot]>,
+        result: Slot,
+        resume: Point,
+    },
 }
 pub(super) struct Body {
     source: Arc<Source>,
@@ -232,8 +237,9 @@ impl Body {
                 if call.recovery.iter().any(|slot| !live.contains(slot)) {
                     return Err(Refused::Retained);
                 }
-                live.insert(slot(&source, &Owner::Operand(call.at.site.clone()))?);
-                parts.push(Part::Call(index));
+                let saved = live.iter().copied().collect();
+                let result = slot(&source, &Owner::Operand(call.at.site.clone()))?;
+                live.insert(result);
                 let boundary = interval
                     .calls()
                     .iter()
@@ -243,6 +249,12 @@ impl Body {
                 {
                     return Err(Refused::Source);
                 }
+                parts.push(Part::Call {
+                    index,
+                    saved,
+                    result,
+                    resume: boundary.resume().clone(),
+                });
                 cursor += 2;
                 start = cursor;
             } else {
@@ -404,7 +416,12 @@ impl VerifiedCall {
                         live.insert(*slot, values[fact.fact.index()]);
                     }
                 }
-                Part::Call(index) => {
+                Part::Call {
+                    index,
+                    saved,
+                    result,
+                    resume,
+                } => {
                     let call = &body.calls[*index];
                     if let Some(atoms) = &call.root_atoms {
                         let mut bytes = 0i128;
@@ -435,11 +452,13 @@ impl VerifiedCall {
                     if call.recovery.iter().any(|slot| !live.contains_key(slot)) {
                         return Ok(None);
                     }
-                    let saved = live
+                    let Some(saved) = saved
                         .iter()
-                        .filter(|(slot, _)| !call.argument_slots.contains(slot))
-                        .map(|(slot, value)| (*slot, *value))
-                        .collect();
+                        .map(|slot| Some((*slot, *live.get(slot)?)))
+                        .collect::<Option<Vec<_>>>()
+                    else {
+                        return Ok(None);
+                    };
                     recovery.push((
                         call.at.clone(),
                         live.iter().map(|(slot, value)| (*slot, *value)).collect(),
@@ -459,21 +478,9 @@ impl VerifiedCall {
                     for slot in &call.argument_slots {
                         live.remove(slot);
                     }
-                    live.insert(
-                        slot(&body.source, &Owner::Operand(call.at.site.clone()))
-                            .map_err(|_| invalid())?,
-                        evaluated.result,
-                    );
-                    let resume = body
-                        .interval
-                        .calls()
-                        .iter()
-                        .find(|edge| edge.entry().0 == &call.at)
-                        .ok_or_else(invalid)?
-                        .resume()
-                        .clone();
+                    live.insert(*result, evaluated.result);
                     recovery.push((
-                        resume,
+                        resume.clone(),
                         live.iter().map(|(slot, value)| (*slot, *value)).collect(),
                     ));
                     nested.push(Evaluated {
@@ -520,7 +527,7 @@ impl VerifiedCall {
         Ok(Some(EvaluatedArguments {
             result,
             arguments: arguments.to_vec(),
-            recovery,
+            recovery: Some(recovery),
             nested,
             peak: u64::try_from(peak.max(0)).map_err(|_| invalid())?,
             delta,

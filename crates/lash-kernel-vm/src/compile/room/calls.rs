@@ -492,6 +492,7 @@ impl VerifiedCall {
                 len,
             },
             target.code,
+            &parameters,
             context,
         );
         context.leave(target.code);

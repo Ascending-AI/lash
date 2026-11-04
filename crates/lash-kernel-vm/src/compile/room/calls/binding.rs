@@ -94,6 +94,9 @@ impl VerifiedCall {
         let Some(region) = path.region.scalar() else {
             return self.evaluate_nested_path(exe, arena, arguments, path, index);
         };
+        let Some(placement) = &path.placement else {
+            return Ok(None);
+        };
         let mut values = vec![Value::Null; region.fact_count()];
         let mut prices = vec![0_i128; region.prices];
         let price = |value: &Value, arena: &Arena| -> Result<i128, doc::heap::HeapFault> {
@@ -109,7 +112,7 @@ impl VerifiedCall {
         }
         let mut given = 0_i128;
         let mut padded = 0_i128;
-        for (index, parameter) in self.parameters.iter().enumerate() {
+        for (index, entry) in placement.parameters.iter().enumerate() {
             let value = arguments.get(index).copied().unwrap_or(Value::Absent);
             if let Some(lib) = self.library {
                 let param = &exe.lib(lib).header.signature.params[index];
@@ -119,9 +122,7 @@ impl VerifiedCall {
                     return Ok(None);
                 }
             }
-            let Some(entry) = region.entries.iter().find(|entry| entry.slot == *parameter) else {
-                return Ok(None);
-            };
+            let entry = &region.entries[*entry];
             values[entry.live.fact.index()] = value;
             let amount = price(&value, arena)?;
             prices[entry.live.price] = amount;
@@ -131,20 +132,17 @@ impl VerifiedCall {
                 padded += amount;
             }
         }
-        let mut computed = BTreeMap::new();
+        let mut computed = vec![None; path.natives.len()];
         let mut depth = 1_u64;
-        for result in &region.results {
+        for (result, placed) in region.results.iter().zip(&placement.results) {
             let value = match result.origin {
                 Origin::Literal(value) => value,
                 Origin::Read(input) => values[input.fact.index()],
                 Origin::Computed => {
-                    let Some(native) = path
-                        .natives
-                        .iter()
-                        .find(|native| native.result == result.live.fact)
-                    else {
+                    let Some(index) = placed.native else {
                         return Ok(None);
                     };
+                    let native = &path.natives[index];
                     let Some((input, answer)) =
                         super::paths::evaluate_native(native, exe, arena, &values)?
                     else {
@@ -152,7 +150,7 @@ impl VerifiedCall {
                     };
                     let function = exe.lib(native.lib);
                     depth = depth.max(1 + u64::from(function.operation()));
-                    computed.insert(native.at.clone(), (input, answer));
+                    computed[index] = Some((input, answer));
                     answer
                 }
             };
@@ -169,10 +167,11 @@ impl VerifiedCall {
             }
             values[result.live.fact.index()] = value;
             prices[result.live.price] = price(&value, arena)?;
-            if region.guards.iter().any(|(fact, taken)| {
-                *fact == result.live.fact
-                    && !matches!(value, Value::Bool(actual) if actual == *taken)
-            }) {
+            if placed
+                .guards
+                .iter()
+                .any(|taken| !matches!(value, Value::Bool(actual) if actual == *taken))
+            {
                 return Ok(None);
             }
         }
@@ -227,14 +226,13 @@ impl VerifiedCall {
         let Some(caller_formulas) = caller_formulas else {
             return Ok(None);
         };
-        let body_formulas = path
-            .charges
-            .body()
+        let body_formulas = placement
+            .body_formulas
             .iter()
-            .map(|program| {
-                program
-                    .formulas()
-                    .map(|(at, _, _)| computed.get(at).cloned())
+            .map(|formulas| {
+                formulas
+                    .iter()
+                    .map(|index| computed[*index].clone())
                     .collect::<Option<Vec<_>>>()
             })
             .collect::<Option<Vec<_>>>();
@@ -245,19 +243,9 @@ impl VerifiedCall {
             result,
             peak,
             delta,
-            recovery: region
-                .recovery
-                .iter()
-                .map(|map| {
-                    (
-                        map.after.clone(),
-                        map.roles
-                            .iter()
-                            .map(|(slot, fact)| (*slot, values[fact.index()]))
-                            .collect(),
-                    )
-                })
-                .collect(),
+            // Scalar recovery retains the evaluated fact vector and uses the
+            // immutable source map only when a handoff requests a prefix.
+            recovery: None,
             values,
             caller_formulas,
             body_formulas,
@@ -325,7 +313,7 @@ impl VerifiedCall {
 pub(super) struct EvaluatedArguments {
     pub(super) result: Value,
     pub(super) arguments: Vec<Value>,
-    pub(super) recovery: Vec<RecoveryState>,
+    pub(super) recovery: Option<Vec<RecoveryState>>,
     pub(super) nested: Vec<super::nested::Evaluated>,
     pub(super) peak: u64,
     pub(super) delta: i128,

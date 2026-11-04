@@ -494,7 +494,7 @@ impl<'call> ScopedCall<'call> {
                 values: &self.evaluated.values,
                 path: self.evaluated.path,
                 captures: &captures,
-                recovery: Some(&self.evaluated.recovery),
+                recovery: self.evaluated.recovery.as_deref(),
             },
             at,
             occurrence,

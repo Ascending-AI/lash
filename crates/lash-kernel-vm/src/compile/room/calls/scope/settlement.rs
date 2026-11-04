@@ -218,7 +218,7 @@ impl SettledCall<'_> {
                 values: &self.evaluated.values,
                 path: self.evaluated.path,
                 captures: &self.captures,
-                recovery: Some(&self.evaluated.recovery),
+                recovery: self.evaluated.recovery.as_deref(),
             },
             at,
             occurrence,

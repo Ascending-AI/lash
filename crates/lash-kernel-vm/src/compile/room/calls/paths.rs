@@ -6,6 +6,82 @@ pub(super) struct BodyPath {
     pub(super) region: super::nested::BodyRegion,
     pub(super) natives: Box<[Native]>,
     pub(super) charges: ComposedCharges,
+    pub(super) placement: Option<ScalarPlacement>,
+}
+
+/// Source topology is immutable. Values, contracts and prices still bind for
+/// each occurrence; these indices replace searches through that topology.
+pub(super) struct ScalarPlacement {
+    pub(super) parameters: Box<[usize]>,
+    pub(super) results: Box<[ResultPlacement]>,
+    pub(super) body_formulas: Box<[Box<[usize]>]>,
+}
+pub(super) struct ResultPlacement {
+    pub(super) native: Option<usize>,
+    pub(super) guards: Box<[bool]>,
+}
+impl ScalarPlacement {
+    fn compile(
+        region: &ScalarRegion,
+        natives: &[Native],
+        parameters: &[Slot],
+        charges: &ComposedCharges,
+    ) -> Result<Self, Refused> {
+        let parameters = parameters
+            .iter()
+            .map(|slot| {
+                region
+                    .entries
+                    .iter()
+                    .position(|entry| entry.slot == *slot)
+                    .ok_or(Refused::Source)
+            })
+            .collect::<Result<_, _>>()?;
+        let results = region
+            .results
+            .iter()
+            .map(|result| {
+                let native = if matches!(result.origin, Origin::Computed) {
+                    Some(
+                        natives
+                            .iter()
+                            .position(|native| native.result == result.live.fact)
+                            .ok_or(Refused::Source)?,
+                    )
+                } else {
+                    None
+                };
+                Ok(ResultPlacement {
+                    native,
+                    guards: region
+                        .guards
+                        .iter()
+                        .filter_map(|(fact, taken)| (*fact == result.live.fact).then_some(*taken))
+                        .collect(),
+                })
+            })
+            .collect::<Result<_, Refused>>()?;
+        let body_formulas = charges
+            .body()
+            .iter()
+            .map(|program| {
+                program
+                    .formulas()
+                    .map(|(at, _, _)| {
+                        natives
+                            .iter()
+                            .position(|native| &native.at == at)
+                            .ok_or(Refused::Source)
+                    })
+                    .collect::<Result<Box<[_]>, _>>()
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
+            parameters,
+            results,
+            body_formulas,
+        })
+    }
 }
 
 struct Route<'a> {
@@ -67,6 +143,7 @@ pub(super) fn compile(
     statement: StmtId,
     range: OpRange,
     callee: CodeId,
+    parameters: &[Slot],
     context: &mut super::nested::CompileContext,
 ) -> Result<Box<[BodyPath]>, Refused> {
     let source = &exe.code(callee).source_room;
@@ -132,10 +209,15 @@ pub(super) fn compile(
             };
             let charges =
                 ComposedCharges::compile(exe, caller, statement, range, callee, &route.selected)?;
+            let placement = region
+                .scalar()
+                .map(|region| ScalarPlacement::compile(region, &natives, parameters, &charges))
+                .transpose()?;
             Ok::<_, Refused>(BodyPath {
                 region,
                 natives,
                 charges,
+                placement,
             })
         })();
         if let Ok(path) = path {
