@@ -84,6 +84,7 @@ impl Machine for KernelMachine {
                 observer.work_witness = false;
             }
         }
+        self.retire_source_bank(&[]).map_err(MachineError::Heap)?;
         self.regs.clear();
         if result.is_ok() {
             self.tasks
@@ -91,10 +92,11 @@ impl Machine for KernelMachine {
                 .map_err(MachineError::Heap)?;
         }
         self.logical
-            .flush(&mut self.arena.borrow_mut(), &self.heap)
+            .borrow_mut()
+            .transfer_source(&mut self.arena.borrow_mut(), &self.heap, &[], &[])
             .map_err(MachineError::Heap)?;
         self.logical
-            .ledger()
+            .clone()
             .borrow_mut()
             .handoff()
             .map_err(MachineError::Heap)?;
@@ -191,7 +193,7 @@ impl Machine for KernelMachine {
         let task = pending.task;
         self.waits.write(key, pending, self.heap.pages())?;
         self.logical_incoming(task, &Incoming::Outcome(wait))?;
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let requeue = self
             .frame(task)
             .map(|frame| super::actions::then_yields(&exe, frame))
@@ -203,7 +205,7 @@ impl Machine for KernelMachine {
         Ok(Delivered::Accepted)
     }
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
-        self.logical_flush().map_err(SealError::Heap)?;
+        self.publish_logical_meter().map_err(SealError::Heap)?;
         let sealed = self.seal_projection(budget)?;
         self.publish_logical_meter().map_err(SealError::Heap)?;
         self.projecting = sealed.is_none();
@@ -365,8 +367,7 @@ impl KernelMachine {
             lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
         ));
         arena.borrow_mut().watch_logical_members();
-        let logical =
-            lash_kernel_state::kernel_internals::logical::Lifecycle::new(heap.logical_ledger());
+        let logical = heap.logical_ledger();
         let machine = Self {
             logical: logical.clone(),
             logical_memory: Default::default(),
@@ -400,7 +401,7 @@ impl KernelMachine {
             functions: root.functions,
             host: root.host.clone(),
             heap,
-            session: super::session::Session::with_lifecycle(logical),
+            session: super::session::Session::default(),
             pins: Pins::default(),
             projecting: false,
             charging: true,

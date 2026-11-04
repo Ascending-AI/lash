@@ -75,7 +75,7 @@ impl KernelMachine {
     #[inline]
     pub(super) fn capacity_held(&self) -> u64 {
         // An open source region publishes before its balance is read.
-        let _ = self.logical_flush();
+        let _ = self.publish_logical_meter();
         self.logical_memory.get()
     }
 
@@ -94,7 +94,7 @@ impl KernelMachine {
     /// a balance past the bound.
     #[inline]
     pub(super) fn capacity_check(&mut self) -> Result<(), Halt> {
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         #[cfg(any(test, feature = "perf-witness"))]
         if let Some(observer) = crate::perf_witness::memory_observer() {
             observer(self.memory_ledger());
@@ -158,7 +158,7 @@ impl KernelMachine {
             arena.release(&mut roots);
             arena.recount_resident();
         }
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         Ok(())
     }
 

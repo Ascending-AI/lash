@@ -18,8 +18,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if !inputs.is_empty() && inputs.len() != args.len() {
             return Ok(None);
         }
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let invocation = ledger.prospective_invocation(self.task);
         let arguments = args

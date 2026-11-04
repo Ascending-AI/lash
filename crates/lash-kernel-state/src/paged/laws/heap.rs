@@ -1102,7 +1102,7 @@ fn a_cold_text_length_observation_reads_no_payload_leaf() {
 /// directory. Header work includes every child reference in its budget.
 #[test]
 fn a_header_seal_budgets_every_child_reference() {
-    use crate::paged::logical::{Lifecycle, Owner, PublicationValue};
+    use crate::paged::logical::{Owner, RootValue};
     use lash_kernel_value::names::Name;
     use lash_kernel_value::tokens::{TokenCodec, TokenWriter};
     let (mut heap, pages) = fresh();
@@ -1110,16 +1110,24 @@ fn a_header_seal_budgets_every_child_reference() {
         .allocate_object(ObjectInit::List(vec![int(7)]))
         .unwrap();
     let mut arena = crate::arena::Arena::from_ordinal(heap.next_ordinal());
-    let lifecycle = Lifecycle::new(heap.logical_ledger());
-    lifecycle.replace(
-        Owner::session(&Name::new("live")),
-        Some(PublicationValue::Page(PageValue::List(list))),
-    );
-    lifecycle.replace(
-        Owner::Ended(lash_kernel_doc::TaskId(1)),
-        Some(PublicationValue::Page(PageValue::List(list))),
-    );
-    lifecycle.flush(&mut arena, &heap).unwrap();
+    heap.logical_ledger()
+        .borrow_mut()
+        .transfer_source(
+            &mut arena,
+            &heap,
+            &[],
+            &[
+                (
+                    Owner::session(&Name::new("live")),
+                    RootValue::Page(&PageValue::List(list)),
+                ),
+                (
+                    Owner::Ended(lash_kernel_doc::TaskId(1)),
+                    RootValue::Page(&PageValue::List(list)),
+                ),
+            ],
+        )
+        .unwrap();
     let mut root = heap
         .seal(SealBudget {
             pages: u64::MAX,

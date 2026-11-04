@@ -73,12 +73,13 @@ pub(crate) fn start(
         lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
     ));
     arena.borrow_mut().watch_logical_members();
-    let logical =
-        lash_kernel_state::kernel_internals::logical::Lifecycle::new(heap.logical_ledger());
+    let logical = heap.logical_ledger();
     if start.session.is_some() {
-        logical.flush(&mut arena.borrow_mut(), &heap)?;
         logical
-            .ledger()
+            .borrow_mut()
+            .transfer_source(&mut arena.borrow_mut(), &heap, &[], &[])?;
+        logical
+            .clone()
             .borrow_mut()
             .begin_cell(&mut arena.borrow_mut(), &heap)?;
     }
@@ -119,7 +120,7 @@ pub(crate) fn start(
         function_origins: Default::default(),
         limiters: Limiters::default(),
         session_cell: matches!(start.target, Target::Main),
-        session: Session::with_lifecycle(logical.clone()),
+        session: Session::default(),
         pins: Pins::default(),
         projecting: false,
         charging: false,
@@ -514,11 +515,11 @@ pub(crate) fn start(
                 .find_map(|(captured, cell)| (captured == name).then_some(*cell))
                 .ok_or_else(|| arguments("root capture is absent".into()))?;
             machine
-                .frame(TaskId::MAIN)
-                .map_err(|e| start_interrupt("callable frame", e.into()))?
-                .set_slot(local.at, SlotState::Cell(cell));
+                .set_source_slot(TaskId::MAIN, local.at, SlotState::Cell(cell))
+                .map_err(|e| start_interrupt("callable frame", e.into()))?;
         }
     }
+    machine.retire_source_bank(&[])?;
     machine.regs.clear();
     machine
         .publish_roots()
@@ -531,7 +532,6 @@ pub(crate) fn start(
 /// a projection point (seam C, FIG-6748).
 #[derive(Default)]
 pub(super) struct Session {
-    logical: Option<lash_kernel_state::kernel_internals::logical::Lifecycle>,
     bindings: std::collections::HashMap<Arc<[u8]>, Resident>,
     /// How many writes the cell has made: what orders the bindings it
     /// wrote since the last projection point.
@@ -539,14 +539,6 @@ pub(super) struct Session {
 }
 
 impl Session {
-    pub(super) fn with_lifecycle(
-        logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
-    ) -> Self {
-        Self {
-            logical: Some(logical),
-            ..Self::default()
-        }
-    }
     /// Visits the value of every binding the cell holds: what an arena
     /// collection keeps.
     pub(super) fn each_value(&self, visit: &mut dyn FnMut(&Value)) {
@@ -563,12 +555,6 @@ impl Session {
     /// Binds `name` to `value`, written now: the binding the cell holds,
     /// or a new one it declares.
     pub(super) fn write(&mut self, name: &BindingName, value: Value) {
-        if let Some(logical) = &self.logical {
-            logical.replace(
-                lash_kernel_state::kernel_internals::logical::Owner::session(&name.name),
-                Some(lash_kernel_state::kernel_internals::logical::PublicationValue::Native(value)),
-            );
-        }
         let written = Some(self.writes);
         self.writes += 1;
         match self.bindings.get_mut(&name.key) {
@@ -853,14 +839,6 @@ impl KernelMachine {
                 // The value is what the heap's slot holds: it stays with
                 // the cell, clean, until the cell writes the name.
                 let value = self.admit_page(&page)?;
-                self.logical.replace(
-                    lash_kernel_state::kernel_internals::logical::Owner::session(&name.name),
-                    Some(
-                        lash_kernel_state::kernel_internals::logical::PublicationValue::Native(
-                            value,
-                        ),
-                    ),
-                );
                 self.session.bindings.insert(
                     Arc::clone(&name.key),
                     Resident {
@@ -876,14 +854,6 @@ impl KernelMachine {
             }
             Some(BoundRecord::Shared(id)) => {
                 let cell = project::admit_cell(&mut self.arena.borrow_mut(), id);
-                self.logical.replace(
-                    lash_kernel_state::kernel_internals::logical::Owner::session(&name.name),
-                    Some(
-                        lash_kernel_state::kernel_internals::logical::PublicationValue::Native(
-                            Value::ObjectRef(cell),
-                        ),
-                    ),
-                );
                 Some(self.in_arena(|arena| arena.cell(cell)).map_err(
                     |interrupt| match interrupt {
                         Interrupt::Halt(halt) => *halt,
@@ -916,6 +886,24 @@ impl KernelMachine {
         {
             return Ok(false);
         }
+        self.publish_logical_meter()?;
+        let store = self.logical.clone();
+        let mut ledger = store.borrow_mut();
+        let owner = lash_kernel_state::kernel_internals::logical::Owner::session(&name.name);
+        let inputs = if ledger.holding(owner, self.heap.pages())?.is_some() {
+            vec![owner]
+        } else {
+            Vec::new()
+        };
+        ledger.transfer_source(
+            &mut self.arena.borrow_mut(),
+            &self.heap,
+            &inputs,
+            &[(
+                owner,
+                lash_kernel_state::kernel_internals::logical::RootValue::Value(&value),
+            )],
+        )?;
         self.session.write(name, value);
         Ok(true)
     }
@@ -947,7 +935,10 @@ impl KernelMachine {
         arena
             .walk(&roots)
             .map_err(|error| fault(&error.to_string()))?;
-        Ok(self.logical.rekey(&mut arena, &self.heap)?)
+        Ok(self
+            .logical
+            .borrow_mut()
+            .transfer_source(&mut arena, &self.heap, &[], &[])?)
     }
 
     /// Gives the session bindings written since the last projection point
@@ -983,6 +974,7 @@ impl KernelMachine {
             });
         }
         self.tasks.end_execution()?;
+        self.retire_source_bank(&[])?;
         self.regs.clear();
         self.pins.values.clear();
         self.pins.borrowed.clear();
@@ -1016,7 +1008,7 @@ impl KernelMachine {
         if population.closure_entities > 0 || population.task_edges > 0 {
             self.refine_resident(true)?;
         }
-        // Lifecycle roots name sealed trees. A cell may finish before its
+        // Source roots name sealed trees. A cell may finish before its
         // first park, so its session still has only transient pages here.
         self.heap.seal_session_root(
             &mut lash_kernel_state::kernel_internals::tree::SealWork::new(
@@ -1034,10 +1026,14 @@ impl KernelMachine {
         dropped.sort();
         let (carried, functions, not_carried) =
             self.save_dropped(classification.carried, &dropped)?;
+        self.logical.borrow_mut().transfer_source(
+            &mut self.arena.borrow_mut(),
+            &self.heap,
+            &[],
+            &[],
+        )?;
         self.logical
-            .flush(&mut self.arena.borrow_mut(), &self.heap)?;
-        self.logical
-            .ledger()
+            .clone()
             .borrow_mut()
             .carry(&self.heap, carried, functions)?;
         let carry = self.heap.carry(CarryRoots {

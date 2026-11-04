@@ -17,7 +17,7 @@ use lash_kernel_state::arena::Arena;
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::census_impl::Census;
 use lash_kernel_state::kernel_internals::family_impl::FrozenBase;
-use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, PublicationValue};
+use lash_kernel_state::kernel_internals::logical::{Owner, RootValue};
 use lash_kernel_state::kernel_internals::metadata::metadata_key;
 use lash_kernel_state::kernel_internals::tree::Tree;
 use lash_kernel_state::paged::{
@@ -47,7 +47,6 @@ pub enum SessionValue {
 /// A carried session opened for its host.
 pub struct SessionEditor {
     heap: PagedHeap,
-    logical: Lifecycle,
     bindings: Tree<BindingRecord>,
     functions: KeyedRoot,
     changed: bool,
@@ -83,10 +82,8 @@ impl SessionEditor {
             ),
             None => (Tree::new(false), KeyedRoot::Empty),
         };
-        let logical = Lifecycle::new(heap.logical_ledger());
         Ok(Self {
             heap,
-            logical,
             bindings,
             functions,
             changed: false,
@@ -309,8 +306,20 @@ impl SessionEditor {
         };
         self.bindings
             .write(metadata_key(name), record, self.heap.pages())?;
-        self.logical
-            .replace(Owner::session(name), Some(PublicationValue::Page(value)));
+        let store = self.heap.logical_ledger();
+        let mut ledger = store.borrow_mut();
+        let owner = Owner::session(name);
+        let inputs = if ledger.holding(owner, self.heap.pages())?.is_some() {
+            vec![owner]
+        } else {
+            Vec::new()
+        };
+        ledger.transfer_source(
+            &mut Arena::new(),
+            &self.heap,
+            &inputs,
+            &[(owner, RootValue::Page(&value))],
+        )?;
         self.changed = true;
         Ok(())
     }
@@ -326,7 +335,12 @@ impl SessionEditor {
             .remove(&metadata_key(name), self.heap.pages())?
             .is_some();
         if removed {
-            self.logical.replace(Owner::session(name), None);
+            self.heap.logical_ledger().borrow_mut().transfer_source(
+                &mut Arena::new(),
+                &self.heap,
+                &[Owner::session(name)],
+                &[],
+            )?;
         }
         self.changed |= removed;
         Ok(removed)
@@ -443,7 +457,12 @@ impl SessionEditor {
             return Ok(false);
         }
         self.functions = sealed(functions, &mut self.heap)?;
-        self.logical.replace(Owner::saved(name), None);
+        self.heap.logical_ledger().borrow_mut().transfer_source(
+            &mut Arena::new(),
+            &self.heap,
+            &[Owner::saved(name)],
+            &[],
+        )?;
         self.remove(name)?;
         self.changed = true;
         Ok(true)
@@ -469,7 +488,6 @@ impl SessionEditor {
         );
         self.bindings.seal(self.heap.pages(), &mut work)?;
         let bindings = self.bindings.keyed_root()?;
-        self.logical.flush(&mut Arena::new(), &self.heap)?;
         self.heap.carry(CarryRoots {
             bindings,
             functions: self.functions,

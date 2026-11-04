@@ -25,7 +25,7 @@ impl KernelMachine {
         value: doc::Value,
     ) -> Result<Option<(StmtId, u32)>, Halt> {
         self.logical_flush_controls(task_id, exe)?;
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let (source, link, invocation, roots, id, pc, at, occurrence, saved, cold, index, ordinal) = {
             let frame = self.frame(task_id)?;
             let (Some(id), Some(act), Some(pending), Some(logical)) = (
@@ -172,7 +172,7 @@ impl KernelMachine {
         let slots = source
             .owner_slots()
             .map_err(|_| malformed("call resumption source owners failed verification"))?;
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let mut inputs = Vec::new();
         let mut outputs = Vec::new();

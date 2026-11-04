@@ -1,4 +1,5 @@
 //! Statements and control: blocks, loops, `try`, calls and returns.
+mod resuming;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{Measure, TaskId, Value};
@@ -200,10 +201,9 @@ impl KernelMachine {
     /// Removes the innermost control entry and ends the variables it
     /// declared.
     fn pop_control(&mut self, task: TaskId, exe: &Executable) -> Result<(), Halt> {
-        let frame = self.frame(task)?;
-        if let Some(Control::Block { block, .. }) = frame.control.pop() {
+        if let Some(Control::Block { block, .. }) = self.frame(task)?.control.pop() {
             for at in &exe.block(block).declares {
-                frame.set_slot(*at, SlotState::Empty);
+                self.set_source_slot(task, *at, SlotState::Empty)?;
             }
         }
         Ok(())
@@ -291,21 +291,29 @@ impl KernelMachine {
                 let at = super::raises::unwinding(self.frame(task)?, exe);
                 self.raise_unwinds(task, at);
             }
-            let frame = self.frame(task)?;
-            // The statement the call stood in is left behind, with the
-            // continuation it saved there.
-            if let (Some(roots), Some(id), Some(act), Some(_)) = (
-                &frame.logical,
-                frame.awaiting,
-                frame.nested,
-                frame.pending.peek(),
-            ) {
-                let bank = roots.bank();
-                let entry = &exe.statement(id).0.nested[act.ix()];
-                for role in &entry.roles {
-                    bank.release(bank.continuation(&role.site)?);
+            let inputs = {
+                let frame = self.frame(task)?;
+                let mut inputs = Vec::new();
+                if let (Some(roots), Some(id), Some(act), Some(_)) = (
+                    &frame.logical,
+                    frame.awaiting,
+                    frame.nested,
+                    frame.pending.peek(),
+                ) {
+                    let bank = roots.bank();
+                    for role in &exe.statement(id).0.nested[act.ix()].roles {
+                        inputs.push(bank.continuation(&role.site)?);
+                    }
                 }
-            }
+                inputs
+            };
+            self.logical.borrow_mut().transfer_source(
+                &mut self.arena.borrow_mut(),
+                &self.heap,
+                &inputs,
+                &[],
+            )?;
+            let frame = self.frame(task)?;
             frame.awaiting = None;
             frame.nested = None;
             frame.pending.take();
@@ -329,10 +337,11 @@ impl KernelMachine {
                     };
                     // Source handlers have gone. The policy is an ordinary
                     // call, and its result leaves this frame directly.
-                    for at in 0..exe.code(frame.code).slots_by_at.len() {
-                        frame.set_slot(at as u32, SlotState::Empty);
+                    let slots = exe.code(frame.code).slots_by_at.len();
+                    for at in 0..slots {
+                        self.set_source_slot(task, at as u32, SlotState::Empty)?;
                     }
-                    frame.awaiting = Some(stmt);
+                    self.frame(task)?.awaiting = Some(stmt);
                     self.frame(task)?.statement =
                         lash_kernel_state::paged::SiteRef::new(site, self.heap.pages())?;
                     self.regs.statement(exe.stmt(stmt).regs);
@@ -501,10 +510,10 @@ impl KernelMachine {
     ) -> Result<Option<Result<Value, Value>>, Halt> {
         let code = exe.code(self.frame(task)?.code);
         let statement = lash_kernel_state::paged::SiteRef::new(&code.site, self.heap.pages())?;
-        let frame = self.frame(task)?;
         for at in 0..code.slots_by_at.len() {
-            frame.set_slot(at as u32, SlotState::Empty);
+            self.set_source_slot(task, at as u32, SlotState::Empty)?;
         }
+        let frame = self.frame(task)?;
         frame.statement = statement;
         frame.awaiting = None;
         let settle = matches!(
@@ -592,7 +601,7 @@ impl KernelMachine {
         // The popped frame still owns its arguments and departure until
         // its completion formula closes. Resolve queued native values
         // before a charge refusal can release their physical storage.
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         self.refresh_charging(task)?;
         if self.charging
             && let Some(call) = &frame.library
@@ -918,9 +927,13 @@ impl KernelMachine {
         admission: Option<super::operation_entry::OperationEntry>,
     ) -> Eval<()> {
         self.logical_flush_controls(task, exe)?;
-        self.logical
-            .flush(&mut self.arena.borrow_mut(), &self.heap)?;
-        self.logical.ledger().borrow_mut().handoff()?;
+        self.logical.borrow_mut().transfer_source(
+            &mut self.arena.borrow_mut(),
+            &self.heap,
+            &[],
+            &[],
+        )?;
+        self.logical.borrow_mut().handoff()?;
         let Call {
             capture,
             library,
@@ -1005,10 +1018,10 @@ impl KernelMachine {
             frame.library = Some(LibraryCall { lib, args });
         }
         for ((_, local), cell) in code.free.iter().zip(captures) {
-            frame.set_slot(local.at, SlotState::Cell(*cell));
+            frame.restore_slot(local.at, SlotState::Cell(*cell));
         }
         for (capture, cell) in code.captures.iter().zip(captures) {
-            frame.set_slot(capture.inner_at, SlotState::Cell(*cell));
+            frame.restore_slot(capture.inner_at, SlotState::Cell(*cell));
         }
         frame = match self.publish_prepared_frame_entry(
             task,
@@ -1088,7 +1101,7 @@ impl KernelMachine {
         {
             self.storage.value_moves += 1;
         }
-        self.frame(task)?.set_slot(at, state);
+        self.set_source_slot(task, at, state)?;
         Ok(())
     }
 
@@ -1396,11 +1409,24 @@ impl KernelMachine {
         // therefore publish together at the statement's safe point.
         self.waits.remove(&key, self.heap.pages())?;
         let value = self.admit_page(&value)?;
-        self.logical.replace(
-            lash_kernel_state::kernel_internals::logical::Owner::Incoming(task),
-            Some(lash_kernel_state::kernel_internals::logical::PublicationValue::Native(value)),
-        );
-        self.logical_flush()?;
+        {
+            use lash_kernel_state::kernel_internals::logical::{Owner, RootValue};
+            let store = self.logical.clone();
+            let mut ledger = store.borrow_mut();
+            let owner = Owner::Incoming(task);
+            let inputs = if ledger.holding(owner, self.heap.pages())?.is_some() {
+                vec![owner]
+            } else {
+                Vec::new()
+            };
+            ledger.transfer_source(
+                &mut self.arena.borrow_mut(),
+                &self.heap,
+                &inputs,
+                &[(owner, RootValue::Value(&value))],
+            )?;
+        }
+        self.publish_logical_meter()?;
         if failed {
             self.wait_raised(task, wait, &value);
             Err(Interrupt::raised(value))
@@ -1511,143 +1537,6 @@ impl KernelMachine {
             self.charge(charge)?;
         }
         Ok(value)
-    }
-
-    /// Completes the statement the top frame waits in with `value`, what
-    /// its action yielded, and runs the statement on from the action
-    /// (`K-EVAL-003`). A statement's own action leaves the value in
-    /// register 0 and resumes after its action op, where the statement
-    /// binds, writes or drops it. A nested action's resume entry loads the
-    /// saved roles into their registers under this layout and the value
-    /// into the action's, and the statement goes on from the op after the
-    /// action's, charging nothing again (`K-EVAL-008`). Gives the statement
-    /// and how its range ended.
-    pub(super) fn finish_action(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn Host,
-        exe: &Executable,
-        value: Value,
-        origin: ResultOrigin,
-    ) -> Eval<(StmtId, Ran)> {
-        if matches!(origin, ResultOrigin::Returned)
-            && let Some((id, pc)) = self.publish_source_call_resume(task, exe, value)?
-        {
-            let running = Running::new(task, exe, id);
-            let ran = match self.register_action_suffix(host, &running, pc as usize)? {
-                Some(ran) => ran,
-                None => self.run(host, &running, pc as usize)?,
-            };
-            return Ok((id, ran));
-        }
-        self.logical.replace(
-            lash_kernel_state::kernel_internals::logical::Owner::Incoming(task),
-            None,
-        );
-        let frame = self.frame(task)?;
-        let Some(id) = frame.awaiting.take() else {
-            return Err(fault("a value arrived at no statement").into());
-        };
-        let nested = frame.nested.take();
-        let pending = frame.pending.take();
-        if nested.is_none()
-            && pending.is_none()
-            && matches!(exe.stmt(id).form, Form::ReturnVia { .. })
-        {
-            if self.return_leaves_run(task)? {
-                self.copy_out_returned(&value, &exe.stmt(id).site)?;
-            }
-            return Ok((id, Ran::Depart(Completion::Return(Box::new(value)))));
-        }
-        // A `for`'s protocol hook answered from its frame: the header
-        // goes on (`K-ITER-005`).
-        if nested.is_none() && pending.is_none() && self.in_header(task)? {
-            let ran = match self.header_answered(task, host, exe, value)? {
-                super::ops::Flow::Done => Ran::Done,
-                super::ops::Flow::Step => Ran::Step,
-            };
-            return Ok((id, ran));
-        }
-        let running = Running::new(task, exe, id);
-        let (Some(act), Some(pending)) = (nested, pending) else {
-            if nested.is_some() {
-                return Err(fault("a resuming nested action has no saved continuation").into());
-            }
-            // The value is in no variable until the statement binds it.
-            self.put(0, value);
-            if matches!(origin, ResultOrigin::Delivered) {
-                self.pin(0)?;
-            } else {
-                self.borrow_value(self.regs[0]);
-            }
-            if let Some(ran) = self.register_action_suffix(host, &running, running.stmt.resume())? {
-                return Ok((id, ran));
-            }
-            return match self.run(host, &running, running.stmt.resume())? {
-                Ran::Done => Ok((id, Ran::Done)),
-                _ => Err(fault("an action's statement did not complete").into()),
-            };
-        };
-        let entry = running
-            .stream
-            .nested
-            .get(act.ix())
-            .ok_or_else(|| fault("a pending action has no resume entry"))?;
-        let mut saved = pending.roles;
-        for (index, role) in entry.roles.iter().enumerate() {
-            // Saved in the entry's order, unless a restore admitted them
-            // in another layout's.
-            let at = match saved.get(index) {
-                Some(stood) if stood.site == role.suffix => index,
-                _ => saved
-                    .iter()
-                    .position(|stood| stood.site == role.suffix)
-                    .ok_or_else(|| fault("a saved continuation role is missing"))?,
-            };
-            // Back in the register it was evaluated to, as if the
-            // statement had never stopped.
-            self.put(role.reg.0 as usize, saved[at].value);
-        }
-        if saved.capacity() > 0 {
-            saved.clear();
-            self.storage.roles.push(saved);
-        }
-        // The value is in no variable until the statement uses it.
-        self.put(entry.dst.0 as usize, value);
-        if matches!(origin, ResultOrigin::Delivered) {
-            self.pin(entry.dst.0 as usize)?;
-        } else {
-            self.borrow_value(self.regs[entry.dst.0 as usize]);
-        }
-        let pc = running.stmt.ops.start as usize + entry.resume as usize;
-        let ran = match self.register_action_suffix(host, &running, pc)? {
-            Some(ran) => ran,
-            None => self.run(host, &running, pc)?,
-        };
-        Ok((id, ran))
-    }
-
-    /// The statement a resume ran on has ended its range as `ran` says: in
-    /// its block, its step edge is taken; a `while` condition's value goes
-    /// to its loop; a departure is the frame's.
-    pub(super) fn resumed(
-        &mut self,
-        task: TaskId,
-        exe: &Executable,
-        (stmt, ran): (StmtId, Ran),
-    ) -> Eval<Completion> {
-        match ran {
-            Ran::Done => {
-                self.take_edge_of(task, exe, stmt)?;
-                Ok(Completion::Normal)
-            }
-            Ran::Step => Ok(Completion::Normal),
-            Ran::Depart(completion) => Ok(completion),
-            Ran::Tested(value) => {
-                self.tested(task, value)?;
-                Ok(Completion::Normal)
-            }
-        }
     }
 }
 

@@ -36,7 +36,7 @@ impl KernelMachine {
         let Ok((at, unpaid, interval)) = source.compile_leaf(site) else {
             return Ok(false);
         };
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let Some(bank) = self.regs.prepare_source_output(running.stream, pc)? else {
             return Ok(false);
         };

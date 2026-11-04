@@ -65,7 +65,7 @@ impl KernelMachine {
         else {
             return Ok(false);
         };
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let physical_room =
             (self.bounds.memory_meter != crate::MemoryMeter::Off).then(|| self.capacity_headroom());
         // A preparation borrows the register bank. Retain only its immutable
@@ -129,7 +129,7 @@ impl KernelMachine {
             .clone();
         let released = self
             .logical
-            .ledger()
+            .clone()
             .borrow()
             .release_cost(&inputs, self.heap.pages())?;
         let active = self
@@ -169,7 +169,7 @@ impl KernelMachine {
             output,
             at: at.clone(),
             release: release.clone(),
-            ledger: self.logical.ledger(),
+            ledger: self.logical.clone(),
             heap: &self.heap,
             charging: self.charging,
             limits: self.limits,

@@ -75,38 +75,6 @@ impl Ledger {
         let roots = self.ownership_changes(arena, access, inputs, outputs, &mut pending)?;
         self.prepare_root_event(arena, heap, roots, pending, members)
     }
-    /// The runtime adapter already records one final replacement per owner.
-    /// Removing an unpublished owner is a no-op; all other root validation and
-    /// entity membership use the same checked event as source transfers.
-    pub(super) fn prepare_runtime_event(
-        &self,
-        arena: &mut Arena,
-        heap: &PagedHeap,
-        replacements: &[super::lifecycle::Replacement],
-        members: &[crate::arena::MemberEvent],
-    ) -> Result<Prepared, HeapFault> {
-        let access = heap.pages();
-        let mut pending = Vec::new();
-        let mut roots = Vec::with_capacity(replacements.len());
-        for (owner, next) in replacements {
-            let holding = if let Some(value) = next {
-                let holding = self.project_root(arena, access, owner, &value.root())?;
-                holding.each_edge(access, &mut |edge| {
-                    if let Identity::Object(entity) = edge.target {
-                        pending.push(entity);
-                    }
-                    Ok(())
-                })?;
-                Some(holding)
-            } else if self.holding(*owner, access)?.is_some() {
-                None
-            } else {
-                continue;
-            };
-            roots.push((*owner, holding));
-        }
-        self.prepare_root_event(arena, heap, roots, pending, members)
-    }
     fn prepare_root_event(
         &self,
         arena: &mut Arena,
@@ -375,7 +343,9 @@ impl Ledger {
                 return Err(invalid("source output occurs twice"));
             }
             if !consumed.contains(owner) && self.holding(*owner, access)?.is_some() {
-                return Err(invalid("source destination was not consumed"));
+                return Err(invalid(&format!(
+                    "source destination was not consumed: {owner:?}, inputs {inputs:?}"
+                )));
             }
             let holding = self.project_root(arena, access, owner, value)?;
             holding.each_edge(access, &mut |edge| {

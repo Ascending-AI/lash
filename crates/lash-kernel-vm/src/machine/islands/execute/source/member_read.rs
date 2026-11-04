@@ -57,7 +57,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let slots = source
             .owner_slots()
             .map_err(|_| malformed("member read source owners failed verification"))?;
-        self.logical.flush(self.arena, self.heap)?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
         let activation = frame
             .state
             .source
@@ -83,7 +85,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             dependencies.extend(frame.regs[reg.ix()].handle());
         }
         let holding = Holding::from_native(self.arena, self.heap.pages(), &value)?;
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let ledger = store.borrow();
         for input in &inputs {
             if ledger.holding(*input, self.heap.pages())?.is_none() {

@@ -106,7 +106,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Ok(unpaid) = source.next_after_commit(&entry.site) else {
             return Ok(false);
         };
-        self.logical.flush(self.arena, self.heap)?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
         let activation = frame
             .state
             .source
@@ -115,7 +117,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let slots = source
             .owner_slots()
             .map_err(|_| malformed("packet restoration source owners failed verification"))?;
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let mut inputs = Vec::new();
         let mut outputs = Vec::new();

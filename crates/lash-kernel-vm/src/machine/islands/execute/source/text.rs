@@ -154,8 +154,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             inputs.push(root((**site).clone())?);
         }
         let output = root(at.site.clone())?;
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         let mut encoding = TokenWriter::new();
         encoding.seq(2);
         encoding.text("lash.source.text");
@@ -542,8 +544,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         {
             return Ok(Some(false));
         }
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         let activation = frame
             .state
             .source

@@ -58,7 +58,7 @@ impl KernelMachine {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(false);
         };
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let Some(bank) = self.regs.prepare_source_transfer(src)? else {
             return Ok(false);
         };
@@ -104,7 +104,7 @@ impl KernelMachine {
         if output != Owner::session(&binding.name) {
             return Ok(false);
         }
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let held = ledger.holding(output, self.heap.pages())?.is_some();
         if !bind && !held {

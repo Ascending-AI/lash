@@ -48,9 +48,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(roles) = statement.source_roles_at(stream, site.pc) else {
             return Ok(None);
         };
-        self.logical
-            .flush(self.arena, self.heap)
-            .map_err(|error| self.halt(error.into()))?;
+        let transfer = self
+            .logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[]);
+        transfer.map_err(|error| self.halt(error.into()))?;
         let activation =
             frame.state.source.as_mut().ok_or_else(|| {
                 self.halt(malformed("packet call has no source activation").into())
@@ -59,7 +61,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             self.halt(malformed("packet call source owners failed verification").into())
         })?;
         let invocation = activation.invocation.id();
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let mut borrowed = Vec::new();
         let mut dependencies = Vec::new();

@@ -66,7 +66,7 @@ impl KernelMachine {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(false);
         };
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let Some(bank) = self.regs.prepare_source_output(running.stream, pc)? else {
             return Ok(false);
         };

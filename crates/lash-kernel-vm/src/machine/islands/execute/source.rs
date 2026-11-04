@@ -144,10 +144,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 source_value(slot, *state).map(|value| (slot, value))
             })
             .collect::<Vec<_>>();
-        self.logical.flush(self.arena, self.heap)?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
         let invocation = self
             .logical
-            .ledger()
+            .clone()
             .borrow_mut()
             .enter_source(self.task, self.arena, self.heap, inputs, &bindings)?;
         self.logical_memory
@@ -185,8 +187,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let roles = statement
             .source_roles_at(stream, site.pc)
             .ok_or_else(|| malformed("packet call has no source operand projection"))?;
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let mut inputs = Vec::new();
         for (reg, site) in roles.iter() {
@@ -253,8 +257,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .source
             .as_ref()
             .ok_or_else(|| malformed("packet caller has no source activation"))?;
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         let mut ledger = store.borrow_mut();
         let inputs = ledger.invocation_operands(&activation.invocation, self.heap.pages())?;
         let outputs = saved
@@ -287,8 +293,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let roles = statement
             .source_roles_at(stream, site.pc)
             .ok_or_else(|| malformed("packet return has no source projection"))?;
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         let mut ledger = store.borrow_mut();
         let mut inputs = Vec::new();
         let mut outputs = Vec::new();
@@ -342,8 +350,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         activation: &Activation,
         value: Value,
     ) -> Result<(), HeapFault> {
-        self.logical.flush(self.arena, self.heap)?;
-        self.logical.ledger().borrow_mut().leave_source(
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        self.logical.borrow_mut().leave_source(
             &activation.invocation,
             self.arena,
             self.heap,
@@ -395,8 +405,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             loops: vec![],
             action: None,
         });
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         if let Some(frontier) = activation.frontier.as_mut()
             && frontier.departs(&start)
         {

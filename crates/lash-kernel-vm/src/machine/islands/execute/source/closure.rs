@@ -81,7 +81,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(ValuePublication::Unavailable);
         };
-        self.logical.flush(self.arena, self.heap)?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
         let mut entities = capture_buffer(captures.len())?;
         for handle in &captures {
             let Some(entity) = self
@@ -109,7 +111,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 activation.invocation.id(),
             )
             .ok_or_else(|| malformed("closure result has no canonical source owner"))?;
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         if store.borrow().holding(output, self.heap.pages())?.is_some() {
             return Ok(ValuePublication::Declined);
         }

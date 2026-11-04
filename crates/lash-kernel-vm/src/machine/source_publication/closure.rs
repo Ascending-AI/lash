@@ -66,7 +66,7 @@ impl KernelMachine {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(false);
         };
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         // Captures may still be cold after reopen. Validate the actual cell
         // heads through the machine's retry owner before reserving a closure.
         for capture in &captures {

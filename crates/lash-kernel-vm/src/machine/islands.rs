@@ -310,7 +310,7 @@ struct Island<'a, const OBSERVING: bool> {
     public_return: bool,
     task: lash_kernel_doc::TaskId,
     heap: &'a lash_kernel_state::kernel_internals::PagedHeap,
-    logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
+    logical: std::rc::Rc<std::cell::RefCell<lash_kernel_state::kernel_internals::logical::Ledger>>,
     logical_memory: &'a std::cell::Cell<u64>,
     memory_bound: u64,
     link: lash_kernel_value::LinkId,

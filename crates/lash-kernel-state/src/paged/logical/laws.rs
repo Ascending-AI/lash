@@ -581,10 +581,12 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         use crate::paged::{EditEpoch, SemanticHeap};
         let (mut live, pages) = fresh();
         let mut arena = crate::arena::Arena::new();
-        let lifecycle = Lifecycle::new(live.logical_ledger());
-        lifecycle.flush(&mut arena, &live).unwrap();
-        let invocation = lifecycle
-            .ledger()
+        let store = live.logical_ledger();
+        store
+            .borrow_mut()
+            .transfer_source(&mut arena, &live, &[], &[])
+            .unwrap();
+        let invocation = store
             .borrow_mut()
             .enter_source(
                 TaskId::MAIN,
@@ -599,11 +601,22 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
             .unwrap();
         live.seal(budget()).unwrap().unwrap();
         let original = live.sealed_root().unwrap();
-        lifecycle.replace(
-            invocation.owner(Slot::Binding(0)),
-            Some(PublicationValue::Native(lash_kernel_doc::Value::Int(0))),
-        );
-        lifecycle.flush(&mut arena, &live).unwrap();
+        store
+            .borrow_mut()
+            .transfer_source(
+                &mut arena,
+                &live,
+                &[invocation.owner(Slot::Binding(0))],
+                &[(
+                    invocation.owner(Slot::Binding(0)),
+                    RootValue::Value(&lash_kernel_doc::Value::Int(0)),
+                )],
+            )
+            .unwrap();
+        store
+            .borrow_mut()
+            .transfer_source(&mut arena, &live, &[], &[])
+            .unwrap();
         assert!(
             live.sealed_root().is_none(),
             "a source publication invalidates the old heap header"
@@ -643,18 +656,40 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         // changes. A later root overwrite retains the self-cycle until trace.
         arena.watch_logical_members();
         let cycle = arena.create_list(&[]);
-        lifecycle.replace(
-            invocation.owner(Slot::Binding(0)),
-            Some(PublicationValue::Native(cycle)),
-        );
-        lifecycle.flush(&mut arena, &live).unwrap();
+        store
+            .borrow_mut()
+            .transfer_source(
+                &mut arena,
+                &live,
+                &[invocation.owner(Slot::Binding(0))],
+                &[(invocation.owner(Slot::Binding(0)), RootValue::Value(&cycle))],
+            )
+            .unwrap();
+        store
+            .borrow_mut()
+            .transfer_source(&mut arena, &live, &[], &[])
+            .unwrap();
         arena.list_set(cycle.handle().unwrap(), 0, cycle).unwrap();
-        lifecycle.flush(&mut arena, &live).unwrap();
-        lifecycle.replace(
-            invocation.owner(Slot::Binding(0)),
-            Some(PublicationValue::Native(lash_kernel_doc::Value::Null)),
-        );
-        lifecycle.flush(&mut arena, &live).unwrap();
+        store
+            .borrow_mut()
+            .transfer_source(&mut arena, &live, &[], &[])
+            .unwrap();
+        store
+            .borrow_mut()
+            .transfer_source(
+                &mut arena,
+                &live,
+                &[invocation.owner(Slot::Binding(0))],
+                &[(
+                    invocation.owner(Slot::Binding(0)),
+                    RootValue::Value(&lash_kernel_doc::Value::Null),
+                )],
+            )
+            .unwrap();
+        store
+            .borrow_mut()
+            .transfer_source(&mut arena, &live, &[], &[])
+            .unwrap();
         assert_eq!(
             live.logical_ledger()
                 .borrow()
@@ -683,7 +718,10 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         // adapter flushes. The canonical mutation still owns a cycle identity.
         let elided = arena.create_list(&[]);
         arena.list_set(elided.handle().unwrap(), 0, elided).unwrap();
-        lifecycle.flush(&mut arena, &live).unwrap();
+        store
+            .borrow_mut()
+            .transfer_source(&mut arena, &live, &[], &[])
+            .unwrap();
         assert_eq!(
             live.logical_ledger()
                 .borrow()
@@ -1257,15 +1295,29 @@ fn checked_program_and_warm_balance() {
     let entity = heap.allocate_object(ObjectInit::List(vec![])).unwrap();
     let mut arena = crate::arena::Arena::from_ordinal(heap.next_ordinal());
     arena.watch_logical_members();
-    let lifecycle = Lifecycle::new(heap.logical_ledger());
+    let store = heap.logical_ledger();
     let root = Owner::Incoming(TaskId::MAIN);
-    lifecycle.replace(root, Some(PublicationValue::Page(PageValue::List(entity))));
-    lifecycle.flush(&mut arena, &heap).unwrap();
+    store
+        .borrow_mut()
+        .transfer_source(
+            &mut arena,
+            &heap,
+            &[],
+            &[(root, RootValue::Page(&PageValue::List(entity)))],
+        )
+        .unwrap();
+    store
+        .borrow_mut()
+        .transfer_source(&mut arena, &heap, &[], &[])
+        .unwrap();
     let balance = heap.logical_balance().unwrap();
     assert_eq!(balance.total().unwrap(), 48);
     let handle = arena.proxy(entity, ProxyKind::List);
-    lifecycle.flush(&mut arena, &heap).unwrap();
-    lifecycle.ledger().borrow_mut().handoff().unwrap();
+    store
+        .borrow_mut()
+        .transfer_source(&mut arena, &heap, &[], &[])
+        .unwrap();
+    store.borrow_mut().handoff().unwrap();
     let fact = heap
         .logical_ledger()
         .borrow()

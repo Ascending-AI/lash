@@ -111,7 +111,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if !interval.scope_release(source, closing) {
             return Ok(false);
         }
-        self.logical.flush(self.arena, self.heap)?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
         let activation = frame
             .state
             .source
@@ -124,7 +126,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             room::Owner::Scope(closing.clone()),
             room::Owner::Operands(closing.clone()),
         ];
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let live = ledger.invocation_owners(&activation.invocation, self.heap.pages())?;
         let members = frame.state.callee.compiled.blocks[block]

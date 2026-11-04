@@ -33,7 +33,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if self.deferred_end.is_some() || self.spent() || self.projection().is_some() {
             return Ok(None);
         }
-        self.logical.flush(self.arena, self.heap)?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
         let Some(source) = frame.state.source.as_ref() else {
             return Ok(None);
         };
@@ -45,7 +47,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let Some(placement) = &compiled.placement else {
             return Ok(None);
         };
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let occurrence = Occurrence {
             task: self.task,
             invocation: invocation.id(),

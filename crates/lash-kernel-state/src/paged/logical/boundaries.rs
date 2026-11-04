@@ -115,18 +115,24 @@ impl Ledger {
         inputs: &[Owner],
         outputs: &[(Owner, RootValue<'_>)],
     ) -> Result<(), HeapFault> {
-        if inputs.is_empty() && outputs.is_empty() {
-            return Ok(());
-        }
-        let mut registration = arena
-            .registration()
-            .map_err(|error| invalid(&error.to_string()))?;
-        let prepared =
-            self.prepare_source_ownership(registration.arena(), heap, inputs, outputs)?;
-        let accepted = prepared
-            .admit(u64::MAX)
-            .map_err(|_| invalid("source transfer holding overflow"))?;
-        self.publish(accepted, || registration.commit())
+        self.rekey(&arena.take_rekeyed(), heap.pages())?;
+        let events = arena.take_member_events();
+        let result = (|| {
+            if inputs.is_empty() && outputs.is_empty() && events.is_empty() {
+                return Ok(());
+            }
+            let mut registration = arena
+                .registration()
+                .map_err(|error| invalid(&error.to_string()))?;
+            let prepared =
+                self.prepare_source_event(registration.arena(), heap, inputs, outputs, &events)?;
+            let accepted = prepared
+                .admit(u64::MAX)
+                .map_err(|_| invalid("source transfer holding overflow"))?;
+            self.publish(accepted, || registration.commit())
+        })();
+        arena.return_member_events(events, result.is_ok());
+        result
     }
     pub fn enter_source(
         &mut self,

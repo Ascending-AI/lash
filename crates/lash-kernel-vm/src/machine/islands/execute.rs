@@ -333,7 +333,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     /// Publish the open source region as one runtime event.
     fn close_region(&mut self) -> Result<(), crate::machine::HeapFault> {
-        self.logical.flush(self.arena, self.heap)?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
         self.logical_memory
             .set(self.heap.logical_balance()?.total()?);
         Ok(())

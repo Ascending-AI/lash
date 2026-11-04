@@ -82,8 +82,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         };
         let input_selector = room::Owner::Operand((**rhs).clone());
         let input = root(input_selector)?;
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         let ledger = store.borrow();
         if ledger.holding(input, self.heap.pages())?.is_none() {
             return Ok(ValuePublication::Unavailable);

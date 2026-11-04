@@ -233,7 +233,7 @@ impl KernelMachine {
             None => None,
         };
         self.logical_flush_controls(running.task, running.exe)?;
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let bank = match rhs {
             Some((src, rhs)) => {
                 let Some(bank) = self.regs.prepare_source_return(src, rhs)? else {
@@ -250,7 +250,7 @@ impl KernelMachine {
             (None, room::ExitKind::Continue) => Completion::Continue,
             _ => return Err(malformed("source departure differs from its statement").into()),
         };
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let mut arena = self.arena.borrow_mut();
         #[cfg(test)]

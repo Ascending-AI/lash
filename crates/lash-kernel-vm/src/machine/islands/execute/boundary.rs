@@ -122,7 +122,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame.source = Some(super::super::source::Activation {
             invocation: self
                 .logical
-                .ledger()
+                .clone()
                 .borrow()
                 .invocation(self.task, state.invocation, self.heap.pages())
                 .ok()?,
@@ -544,7 +544,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         // Every packet binding and scope change already owns its accepted
         // source roots. Recovery retains that publication; only the physical
         // placement is reconstructed here.
-        if let Err(error) = self.logical.flush(self.arena, self.heap) {
+        let transfer = self
+            .logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[]);
+        if let Err(error) = transfer {
             self.halt(error.into());
             return;
         }

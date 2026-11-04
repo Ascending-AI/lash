@@ -41,8 +41,10 @@ impl Context<'_> {
             dependencies,
             debt,
         } = recipe;
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         if let Some(frontier) = frontier.as_mut()
             && frontier.departs(&start)
         {

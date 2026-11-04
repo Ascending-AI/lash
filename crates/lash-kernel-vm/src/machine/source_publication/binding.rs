@@ -83,7 +83,7 @@ impl KernelMachine {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(false);
         };
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let mut measures = std::collections::BTreeMap::new();
         let member = if let Some(handle) = cell {
             if !source.assigns_cell(&at.site) {
@@ -96,7 +96,7 @@ impl KernelMachine {
                 (bank.owner(), bank.value())
             };
             self.in_arena(|arena| arena.cell(handle))?;
-            let store = self.logical.ledger();
+            let store = self.logical.clone();
             let pages = self.heap.pages().clone();
             let (delta, released, bytes) = self.in_arena(|arena| {
                 let ledger = store.borrow();
@@ -195,7 +195,7 @@ impl KernelMachine {
             .ok_or_else(|| malformed("source binding has no canonical owner"))?;
         let mut inputs = vec![input];
         if assignment && cell.is_none() {
-            let store = self.logical.ledger();
+            let store = self.logical.clone();
             let ledger = store.borrow();
             let released = ledger.release_cost(&[output], self.heap.pages())?;
             inputs.push(output);

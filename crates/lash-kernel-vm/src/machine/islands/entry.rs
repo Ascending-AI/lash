@@ -243,10 +243,20 @@ impl KernelMachine {
         match ran {
             None => Ok(None),
             Some(Ran::Returned(value)) => {
-                self.logical.replace(
-                    lash_kernel_state::kernel_internals::logical::Owner::Incoming(running.task),
-                    None,
-                );
+                {
+                    let owner =
+                        lash_kernel_state::kernel_internals::logical::Owner::Incoming(running.task);
+                    let store = self.logical.clone();
+                    let mut ledger = store.borrow_mut();
+                    if ledger.holding(owner, self.heap.pages())?.is_some() {
+                        ledger.transfer_source(
+                            &mut self.arena.borrow_mut(),
+                            &self.heap,
+                            &[owner],
+                            &[],
+                        )?;
+                    }
+                }
                 self.put(out, value);
                 self.borrow_value(value);
                 Ok(Some(Flow::Done))
@@ -629,7 +639,7 @@ impl KernelMachine {
             // Source ForIn consumes its evaluated iterable when its first
             // header answers or refuses. The packet's initial iteration has
             // the same input lifetime, even when no source bank was placed.
-            self.logical_flush()?;
+            self.publish_logical_meter()?;
             let frame = self.frame(task)?;
             let source = &exe.code(frame.code).source_room;
             let owner = source
@@ -641,7 +651,7 @@ impl KernelMachine {
                     frame.invocation,
                 )
                 .ok_or_else(|| fault("initial for input has no canonical owner"))?;
-            let store = self.logical.ledger();
+            let store = self.logical.clone();
             let mut ledger = store.borrow_mut();
             if ledger.holding(owner, self.heap.pages())?.is_some() {
                 ledger.transfer_source(&mut self.arena.borrow_mut(), &self.heap, &[owner], &[])?;
@@ -777,7 +787,7 @@ impl KernelMachine {
             )?);
             self.task(task)?.frames.push(frame);
         }
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         Ok(top)
     }
 
@@ -827,7 +837,7 @@ impl KernelMachine {
                 let frame = self.frame(task)?;
                 frame.control.pop();
                 for at in &exe.block(block).declares {
-                    frame.set_slot(*at, SlotState::Empty);
+                    self.set_source_slot(task, *at, SlotState::Empty)?;
                 }
             }
             return self.block_ended(task, host, exe);
@@ -1084,7 +1094,7 @@ impl KernelMachine {
                 frame.invocation,
                 &exe.stmt(suffix.stmt).site,
                 suffix.source_pc,
-                &self.logical.ledger().borrow(),
+                &self.logical.borrow(),
             )?;
             executor.source_suffix(&mut active, &suffix, &self.regs);
             if let Some(inputs) = suffix.inputs {
@@ -1129,11 +1139,25 @@ impl KernelMachine {
                 // run those cleanups again. Packet reads published their
                 // operands before consumers that ran physically; the returned
                 // statement leaves none live under a refused completion fee.
-                let access = self.heap.pages().clone();
-                let frame = self.frame(task)?;
-                frame.control.clear();
-                if let Some(roots) = &frame.logical {
-                    roots.clear_operands(&access)?;
+                let invocation = {
+                    let frame = self.frame(task)?;
+                    frame.control.clear();
+                    frame
+                        .logical
+                        .as_ref()
+                        .map(|roots| roots.invocation().clone())
+                };
+                if let Some(invocation) = invocation {
+                    self.publish_logical_meter()?;
+                    let store = self.logical.clone();
+                    let mut ledger = store.borrow_mut();
+                    let inputs = ledger.invocation_operands(&invocation, self.heap.pages())?;
+                    ledger.transfer_source(
+                        &mut self.arena.borrow_mut(),
+                        &self.heap,
+                        &inputs,
+                        &[],
+                    )?;
                 }
                 Ok(Some(super::super::Completion::Return(Box::new(value))))
             }
@@ -1172,7 +1196,8 @@ impl KernelMachine {
 pub(in crate::machine) struct Ground<'a> {
     pub(in crate::machine) task: TaskId,
     pub(in crate::machine) heap: &'a lash_kernel_state::kernel_internals::PagedHeap,
-    pub(in crate::machine) logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
+    pub(in crate::machine) logical:
+        std::rc::Rc<std::cell::RefCell<lash_kernel_state::kernel_internals::logical::Ledger>>,
     pub(in crate::machine) memory_bound: u64,
     pub(in crate::machine) logical_memory: &'a std::cell::Cell<u64>,
     pub(in crate::machine) link: lash_kernel_value::LinkId,

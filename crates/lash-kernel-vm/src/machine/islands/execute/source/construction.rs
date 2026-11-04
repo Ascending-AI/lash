@@ -127,8 +127,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             values.push(frame.regs[*reg as usize]);
         }
         let output = root(&room::Owner::Operand(at.site.clone()))?;
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         let ledger = store.borrow();
         for input in &inputs {
             if ledger.holding(*input, self.heap.pages())?.is_none() {

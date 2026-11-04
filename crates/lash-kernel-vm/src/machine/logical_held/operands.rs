@@ -1,13 +1,14 @@
 use super::*;
 use crate::compile::room::{Owner as Selector, OwnerSlots};
 use lash_kernel_doc::TaskId;
-use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, PublicationValue};
+use lash_kernel_state::kernel_internals::logical::{Ledger, Owner};
 use lash_kernel_value::sites::Site;
 use std::sync::Arc;
+use std::{cell::RefCell, rc::Rc};
 
 #[derive(Clone)]
 pub(in crate::machine) struct BankRoots {
-    pub(super) lifecycle: Lifecycle,
+    pub(in crate::machine) ledger: Rc<RefCell<Ledger>>,
     pub(super) task: TaskId,
     pub(super) invocation: u64,
     pub(super) slots: Arc<OwnerSlots>,
@@ -34,12 +35,5 @@ impl BankRoots {
         self.slots
             .continuation(site, self.task, self.invocation)
             .ok_or_else(|| HeapFault::Malformed("continuation has another source role".into()))
-    }
-    pub(in crate::machine) fn acquire(&self, owner: Owner, value: Value) {
-        self.lifecycle
-            .replace(owner, Some(PublicationValue::Native(value)));
-    }
-    pub(in crate::machine) fn release(&self, owner: Owner) {
-        self.lifecycle.replace(owner, None);
     }
 }

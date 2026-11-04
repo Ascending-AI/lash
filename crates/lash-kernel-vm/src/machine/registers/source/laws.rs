@@ -80,11 +80,13 @@ fn source_operands_follow_consumption_and_ignore_register_mirrors() {
         "an accepted join cannot rename a receipt from its spent child site"
     );
     assert!(
-        owners.take(Reg(19), &leaf).is_err(),
+        owners.take(Reg(19), &leaf, &projection).is_err(),
         "the branch owner was transferred"
     );
     assert!(matches!(
-        owners.take(Reg(19), &selected).map(|held| held.value),
+        owners
+            .take(Reg(19), &selected, &projection)
+            .map(|held| held.value),
         Ok(Value::Int(7))
     ));
     assert!(owners.is_empty());
@@ -197,7 +199,7 @@ return null
     );
     let end = live.run_to_end(&[]);
     assert!(matches!(end, crate::End::Finished(_)));
-    live.machine.logical_flush().unwrap();
+    live.machine.publish_logical_meter().unwrap();
     let balance = live
         .machine
         .heap
@@ -218,7 +220,7 @@ try { return [7] } finally { do perform 0(\"cleanup\") as Any }
 }",
     );
     assert!(matches!(cleanup.run(), crate::Step::Parked(_)));
-    cleanup.machine.logical_flush().unwrap();
+    cleanup.machine.publish_logical_meter().unwrap();
     let held = cleanup
         .machine
         .heap
@@ -270,7 +272,7 @@ try { return [7] } finally { do perform 0(\"cleanup\") as Any }
         delivered
     );
     assert!(matches!(cleanup.run_to_end(&[]), crate::End::Finished(_)));
-    cleanup.machine.logical_flush().unwrap();
+    cleanup.machine.publish_logical_meter().unwrap();
     assert_eq!(
         cleanup
             .machine
@@ -293,7 +295,7 @@ return null
 }",
     );
     assert!(matches!(looping.run(), crate::Step::Parked(_)));
-    looping.machine.logical_flush().unwrap();
+    looping.machine.publish_logical_meter().unwrap();
     let held = looping
         .machine
         .heap
@@ -313,7 +315,7 @@ return null
     looping.reopen(crate::Layout::default(), false);
     looping.deliver("loop");
     assert!(matches!(looping.run_to_end(&[]), crate::End::Finished(_)));
-    looping.machine.logical_flush().unwrap();
+    looping.machine.publish_logical_meter().unwrap();
     let held = looping
         .machine
         .heap
@@ -375,7 +377,7 @@ return null
         frozen
     );
     assert!(matches!(incoming.run_to_end(&[]), crate::End::Finished(_)));
-    incoming.machine.logical_flush().unwrap();
+    incoming.machine.publish_logical_meter().unwrap();
     let family = incoming
         .machine
         .heap

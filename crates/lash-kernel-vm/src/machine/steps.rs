@@ -47,7 +47,7 @@ impl KernelMachine {
             let frame = self.frame(task)?;
             if let Some(Control::Block { block, .. }) = frame.control.pop() {
                 for at in &exe.block(block).declares {
-                    frame.set_slot(*at, SlotState::Empty);
+                    self.set_source_slot(task, *at, SlotState::Empty)?;
                 }
             }
         }

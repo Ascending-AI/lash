@@ -184,7 +184,7 @@ impl KernelMachine {
             return Ok(false);
         };
         self.logical_flush_controls(task_id, exe)?;
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let groups = vec![
             Selector::Scope(at.site.clone()),
             Selector::Operands(at.site.clone()),
@@ -193,7 +193,7 @@ impl KernelMachine {
             .owner_slots()
             .map_err(|_| malformed("scope owners failed verification"))?;
         let mut inputs = BTreeSet::new();
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let live = ledger.frame_owners(task_id, invocation, self.heap.pages())?;
         for group in &groups {

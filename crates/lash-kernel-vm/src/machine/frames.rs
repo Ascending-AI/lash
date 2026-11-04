@@ -453,14 +453,6 @@ impl Frame {
         &self.slots.values
     }
 
-    #[inline]
-    pub(super) fn set_slot(&mut self, at: u32, value: SlotState) {
-        if let Some(logical) = &self.logical {
-            logical.replace(at, self.slots.values[at as usize], value);
-        }
-        self.restore_slot(at, value);
-    }
-
     /// Whether a projection has variables of this frame to write.
     fn has_edits(&self) -> bool {
         !self.owned || !self.slots.edits.is_empty()
@@ -896,7 +888,7 @@ pub(super) struct Frames {
     arena: SharedArena,
     logical: Option<(
         lash_kernel_doc::TaskId,
-        lash_kernel_state::kernel_internals::logical::Lifecycle,
+        std::rc::Rc<std::cell::RefCell<lash_kernel_state::kernel_internals::logical::Ledger>>,
     )>,
     exe: Arc<Executable>,
     arrival: Arrival,
@@ -976,7 +968,9 @@ impl Frames {
     pub(super) fn logical_context(
         &mut self,
         task: lash_kernel_doc::TaskId,
-        lifecycle: lash_kernel_state::kernel_internals::logical::Lifecycle,
+        lifecycle: std::rc::Rc<
+            std::cell::RefCell<lash_kernel_state::kernel_internals::logical::Ledger>,
+        >,
     ) {
         self.logical = Some((task, lifecycle));
     }

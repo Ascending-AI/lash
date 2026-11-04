@@ -162,7 +162,7 @@ impl KernelMachine {
     /// advances the sweep generation. It retires the results of the ended
     /// tasks nothing reaches only when `retires` (FIG-6791).
     pub(super) fn refine_resident(&mut self, retires: bool) -> Result<(), Halt> {
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         // A changed object's members are read from its body: one partly on
         // its pages is decoded first.
         let cold = self.arena.borrow().changed_cold();
@@ -302,7 +302,7 @@ mod laws {
                 .regs
                 .source_complete(stream, pc, &projection)
                 .unwrap();
-            machine.logical_flush().unwrap();
+            machine.publish_logical_meter().unwrap();
         }
         observe_operand(machine, &stream, 0);
         // Source ownership survives a cleared physical mirror.
@@ -345,6 +345,7 @@ mod laws {
             (baseline.0 + 16, baseline.1),
             "only the completed action result remains"
         );
+        machine.retire_source_bank(&[]).unwrap();
         machine.regs.kill_statement();
         assert_eq!(normalized_operands(machine), baseline);
     }

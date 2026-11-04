@@ -333,7 +333,7 @@ impl Publication {
 }
 
 pub(super) struct Tasks {
-    logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
+    logical: std::rc::Rc<std::cell::RefCell<lash_kernel_state::kernel_internals::logical::Ledger>>,
     rows: Tree<TaskRecord>,
     cache: Vec<Option<(u64, Box<Task>)>>,
     /// Dirty counters outlive eviction of a task's execution coordinates.
@@ -350,7 +350,9 @@ pub(super) struct Tasks {
 }
 impl Tasks {
     pub(super) fn open(
-        logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
+        logical: std::rc::Rc<
+            std::cell::RefCell<lash_kernel_state::kernel_internals::logical::Ledger>,
+        >,
         rows: Tree<TaskRecord>,
         access: Access<'static>,
         arena: SharedArena,
@@ -371,7 +373,9 @@ impl Tasks {
         }
     }
     pub(super) fn new(
-        logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
+        logical: std::rc::Rc<
+            std::cell::RefCell<lash_kernel_state::kernel_internals::logical::Ledger>,
+        >,
         access: Access<'static>,
         arena: SharedArena,
         exe: Arc<Executable>,
@@ -929,22 +933,32 @@ impl super::KernelMachine {
         task: TaskId,
         outcome: Result<Value, Value>,
     ) -> Result<(), Halt> {
-        use lash_kernel_state::kernel_internals::logical::{Owner, PublicationValue};
+        use lash_kernel_state::kernel_internals::logical::{Owner, RootValue};
+        self.publish_logical_meter()?;
         let owner = if task == TaskId::MAIN {
             Owner::Incoming(task)
         } else {
             Owner::Ended(task)
         };
-        if task != TaskId::MAIN {
-            self.logical.replace(Owner::Incoming(task), None);
+        {
+            let store = self.logical.clone();
+            let mut ledger = store.borrow_mut();
+            let mut inputs = Vec::new();
+            for input in [Owner::Incoming(task), owner] {
+                if !inputs.contains(&input) && ledger.holding(input, self.heap.pages())?.is_some() {
+                    inputs.push(input);
+                }
+            }
+            ledger.transfer_source(
+                &mut self.arena.borrow_mut(),
+                &self.heap,
+                &inputs,
+                &[(
+                    owner,
+                    RootValue::Value(outcome.as_ref().unwrap_or_else(|value| value)),
+                )],
+            )?;
         }
-        self.logical.replace(
-            owner,
-            Some(PublicationValue::Native(
-                *outcome.as_ref().unwrap_or_else(|value| value),
-            )),
-        );
-        self.logical_flush()?;
         self.identify_session()?;
         let pages = self.heap.pages().clone();
         let result = {
@@ -953,7 +967,9 @@ impl super::KernelMachine {
                 Ok(value) => Ok(project::project(&mut arena, &pages, value)?),
                 Err(value) => Err(project::project(&mut arena, &pages, value)?),
             };
-            self.logical.rekey(&mut arena, &self.heap)?;
+            self.logical
+                .borrow_mut()
+                .transfer_source(&mut arena, &self.heap, &[], &[])?;
             result
         };
         self.observe(Event::TaskEnded(task));

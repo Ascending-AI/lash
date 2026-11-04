@@ -37,7 +37,7 @@ impl KernelMachine {
     pub(crate) fn logical_balance(
         &self,
     ) -> Result<lash_kernel_state::kernel_internals::logical::Balance, HeapFault> {
-        self.logical.ledger().borrow().balance()
+        self.logical.borrow().balance()
     }
 
     pub(super) fn logical_incoming(
@@ -45,7 +45,7 @@ impl KernelMachine {
         task: lash_kernel_doc::TaskId,
         incoming: &super::Incoming,
     ) -> Result<(), HeapFault> {
-        use lash_kernel_state::kernel_internals::logical::{Owner, PublicationValue};
+        use lash_kernel_state::kernel_internals::logical::{Owner, RootValue};
         let value = match incoming {
             super::Incoming::Value(value) | super::Incoming::Raise(value) => Some(value.clone()),
             super::Incoming::Joined(joined) => self.tasks.ended_result(*joined)?,
@@ -70,23 +70,40 @@ impl KernelMachine {
                 let (CommittedOutcomeRecord::Completed(frozen)
                 | CommittedOutcomeRecord::Failed(frozen)
                 | CommittedOutcomeRecord::Rejected(frozen)) = outcome;
-                self.logical.replace(
-                    Owner::Incoming(task),
-                    Some(PublicationValue::Frozen(frozen)),
-                );
+                let store = self.logical.clone();
+                let mut ledger = store.borrow_mut();
+                let owner = Owner::Incoming(task);
+                let inputs = if ledger.holding(owner, self.heap.pages())?.is_some() {
+                    vec![owner]
+                } else {
+                    Vec::new()
+                };
+                ledger.transfer_source(
+                    &mut self.arena.borrow_mut(),
+                    &self.heap,
+                    &inputs,
+                    &[(owner, RootValue::Frozen(&frozen))],
+                )?;
                 return Ok(());
             }
         };
         if let Some(value) = value {
-            self.logical
-                .replace(Owner::Incoming(task), Some(PublicationValue::Page(value)));
+            let store = self.logical.clone();
+            let mut ledger = store.borrow_mut();
+            let owner = Owner::Incoming(task);
+            let inputs = if ledger.holding(owner, self.heap.pages())?.is_some() {
+                vec![owner]
+            } else {
+                Vec::new()
+            };
+            ledger.transfer_source(
+                &mut self.arena.borrow_mut(),
+                &self.heap,
+                &inputs,
+                &[(owner, RootValue::Page(&value))],
+            )?;
         }
         Ok(())
-    }
-    pub(super) fn logical_flush(&self) -> Result<(), HeapFault> {
-        self.logical
-            .flush(&mut self.arena.borrow_mut(), &self.heap)?;
-        self.publish_logical_meter()
     }
     pub(super) fn publish_logical_meter(&self) -> Result<(), HeapFault> {
         self.logical_memory
@@ -117,8 +134,25 @@ impl KernelMachine {
             heap: &self.heap,
         };
         self.regs.source_entry(values, &projection)?;
-        self.regs.source_entry_roots(self.logical.clone());
-        self.logical_flush()
+        self.publish_logical_meter()?;
+        let store = self.logical.clone();
+        let outputs = self.regs.source_entry_roots(&store.borrow(), &projection)?;
+        let roots = outputs
+            .iter()
+            .map(|(owner, value)| {
+                (
+                    *owner,
+                    lash_kernel_state::kernel_internals::logical::RootValue::Value(value),
+                )
+            })
+            .collect::<Vec<_>>();
+        store.borrow_mut().transfer_source(
+            &mut self.arena.borrow_mut(),
+            &self.heap,
+            &[],
+            &roots,
+        )?;
+        self.publish_logical_meter()
     }
     /// Opens the statement's source bank at `pc`. Gives whether it adopted
     /// a returned call's accepted resumption there rather than projecting
@@ -131,7 +165,7 @@ impl KernelMachine {
         pc: u32,
     ) -> Result<bool, super::Halt> {
         let invocation = self.frame(task)?.invocation;
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         if self
             .regs
             .begin_source_resume(task, invocation, &stmt.site, pc, &store.borrow())?
@@ -140,21 +174,52 @@ impl KernelMachine {
         }
         let exe = std::sync::Arc::clone(&self.exe);
         self.logical_flush_controls(task, &exe)?;
-        self.logical_flush()?;
-        let access = self.heap.pages().clone();
-        let roots = if let Some(roots) = &self.frame(task)?.logical {
-            roots.clear_operands(&access)?;
-            Some(roots.bank())
+        self.publish_logical_meter()?;
+        let roots = self.frame(task)?.logical.as_ref().map(|roots| roots.bank());
+        let preserve = if let Some(roots) = &roots {
+            stmt.source_roles_at(stream, pc)
+                .ok_or_else(|| HeapFault::Malformed("source resume has no role map".into()))?
+                .iter()
+                .map(|(_, site)| roots.operand(site))
+                .collect::<Result<Vec<_>, _>>()?
         } else {
-            None
+            Vec::new()
         };
+        self.retire_source_bank(&preserve)?;
+        if let Some(roots) = &roots {
+            let roles = stmt.source_roles_at(stream, pc).ok_or_else(|| {
+                HeapFault::Malformed("source resume has no canonical role map".into())
+            })?;
+            let mut ledger = store.borrow_mut();
+            let mut inputs = Vec::new();
+            let mut outputs = Vec::new();
+            for (_, site) in roles.iter() {
+                let output = roots.operand(site)?;
+                if ledger.holding(output, self.heap.pages())?.is_some() {
+                    continue;
+                }
+                let input = roots.continuation(site)?;
+                if ledger.holding(input, self.heap.pages())?.is_none() {
+                    return Err(HeapFault::Malformed(
+                        format!("source resume has no accepted operand or continuation: statement {:?}, pc {pc}, role {site:?}, owner {output:?}", stmt.site),
+                    )
+                    .into());
+                }
+                inputs.push(input);
+                outputs.push((
+                    output,
+                    lash_kernel_state::kernel_internals::logical::RootValue::Existing(input),
+                ));
+            }
+            ledger.transfer_source(&mut self.arena.borrow_mut(), &self.heap, &inputs, &outputs)?;
+        }
         self.regs.source_context(roots);
         let projection = Projection {
             arena: &self.arena,
             heap: &self.heap,
         };
         self.regs.source_begin(stream, stmt, pc, &projection)?;
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         Ok(false)
     }
     pub(super) fn source_complete_joins(
@@ -174,7 +239,82 @@ impl KernelMachine {
             heap: &self.heap,
         };
         self.regs.source_complete(running.stream, pc, &projection)?;
+        self.publish_logical_meter()?;
         self.source_complete_joins(running, pc)
+    }
+    /// The statement owns these exact receipts, including refusal exits. A
+    /// prior frame/return publication may already have consumed a receipt.
+    pub(super) fn retire_source_bank(
+        &self,
+        preserve: &[lash_kernel_state::kernel_internals::logical::Owner],
+    ) -> Result<(), HeapFault> {
+        self.logical.borrow_mut().transfer_source(
+            &mut self.arena.borrow_mut(),
+            &self.heap,
+            &[],
+            &[],
+        )?;
+        let store = self.logical.clone();
+        let mut ledger = store.borrow_mut();
+        let mut inputs = Vec::new();
+        for owner in self.regs.source_owners() {
+            if !preserve.contains(&owner)
+                && !inputs.contains(&owner)
+                && ledger.holding(owner, self.heap.pages())?.is_some()
+            {
+                inputs.push(owner);
+            }
+        }
+        ledger.transfer_source(&mut self.arena.borrow_mut(), &self.heap, &inputs, &[])
+    }
+    /// Restore the permanent evaluator's continuation from accepted source
+    /// roots. The result and saved operands move together; no physical value
+    /// is reintroduced as a replacement for a missing continuation owner.
+    pub(super) fn transfer_precise_result(
+        &mut self,
+        running: &super::stream::Running<'_>,
+        pc: u32,
+        result: lash_kernel_exec::Reg,
+        value: &Value,
+    ) -> Result<(), super::Halt> {
+        use lash_kernel_state::kernel_internals::logical::{Owner, RootValue};
+        let bank = self
+            .frame(running.task)?
+            .logical
+            .as_ref()
+            .ok_or_else(|| HeapFault::Malformed("source result has no invocation".into()))?
+            .bank();
+        let roles = running
+            .stmt
+            .source_roles_at(running.stream, pc)
+            .ok_or_else(|| HeapFault::Malformed("source result has no continuation map".into()))?;
+        let store = self.logical.clone();
+        let mut ledger = store.borrow_mut();
+        let incoming = Owner::Incoming(running.task);
+        let held = ledger.holding(incoming, self.heap.pages())?.is_some();
+        let mut inputs = if held { vec![incoming] } else { Vec::new() };
+        let mut outputs = Vec::with_capacity(roles.len());
+        for (reg, site) in roles.iter() {
+            let output = bank.operand(site)?;
+            if *reg == result {
+                outputs.push((
+                    output,
+                    if held {
+                        RootValue::Existing(incoming)
+                    } else {
+                        RootValue::Value(value)
+                    },
+                ));
+            } else {
+                let input = bank.continuation(site)?;
+                inputs.push(input);
+                outputs.push((output, RootValue::Existing(input)));
+            }
+        }
+        let transferred =
+            ledger.transfer_source(&mut self.arena.borrow_mut(), &self.heap, &inputs, &outputs);
+        transferred?;
+        Ok(())
     }
     pub(super) fn source_atom(&mut self, index: usize, value: Value) -> Result<(), HeapFault> {
         let projection = Projection {

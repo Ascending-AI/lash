@@ -48,7 +48,7 @@ impl KernelMachine {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(false);
         };
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let rhs = site.child(0);
         let Some(bank) = self.regs.prepare_source_end(&rhs)? else {
             return Ok(false);
@@ -66,7 +66,7 @@ impl KernelMachine {
         let value = bank.value();
         let released = self
             .logical
-            .ledger()
+            .clone()
             .borrow()
             .release_cost(&[input], self.heap.pages())?;
         let release = interval

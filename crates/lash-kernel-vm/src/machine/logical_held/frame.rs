@@ -5,11 +5,10 @@ use crate::compile::{CodeId, Executable, room::Source};
 use crate::machine::{Frame, Halt, SlotState, controls::Departed};
 use lash_kernel_doc::TaskId;
 use lash_kernel_state::kernel_internals::logical::{
-    Invocation, Lifecycle, Owner, PublicationValue, Slot,
+    Invocation, Ledger, Owner, PublicationValue, Slot,
 };
 use lash_kernel_state::kernel_internals::tree::Access;
-use std::cell::{Cell, RefCell};
-use std::collections::BTreeSet;
+use std::cell::Cell;
 use std::sync::Arc;
 
 pub(in crate::machine) struct FrameRoots {
@@ -17,12 +16,11 @@ pub(in crate::machine) struct FrameRoots {
     invocation: Invocation,
     source: Arc<Source>,
     by_at: Arc<[u32]>,
-    control_owners: RefCell<BTreeSet<Owner>>,
     active_departure: Cell<bool>,
 }
 impl FrameRoots {
     pub(in crate::machine) fn prepared(
-        lifecycle: Lifecycle,
+        lifecycle: std::rc::Rc<std::cell::RefCell<Ledger>>,
         task: TaskId,
         invocation: Invocation,
         source: Arc<Source>,
@@ -33,7 +31,7 @@ impl FrameRoots {
         })?;
         Ok(Self {
             bank: super::BankRoots {
-                lifecycle,
+                ledger: lifecycle.clone(),
                 task,
                 invocation: invocation.id(),
                 slots,
@@ -41,7 +39,6 @@ impl FrameRoots {
             invocation,
             source,
             by_at,
-            control_owners: RefCell::new(BTreeSet::new()),
             active_departure: Cell::new(false),
         })
     }
@@ -51,20 +48,15 @@ impl FrameRoots {
     pub(in crate::machine) fn bank(&self) -> super::BankRoots {
         self.bank.clone()
     }
-    /// Re-entry replaces packet operand mirrors with the actual live source
-    /// roles in the same pending ownership journal. Continuations stay owned.
-    pub(in crate::machine) fn clear_operands(&self, access: &Access<'_>) -> Result<(), HeapFault> {
-        self.bank.lifecycle.clear_operands(&self.invocation, access)
-    }
     pub(in crate::machine) fn restore(
-        lifecycle: Lifecycle,
+        lifecycle: std::rc::Rc<std::cell::RefCell<Ledger>>,
         task: TaskId,
         frame: &Frame,
         exe: &Executable,
         access: &Access<'_>,
     ) -> Result<Self, HeapFault> {
         let invocation = lifecycle
-            .ledger()
+            .clone()
             .borrow()
             .invocation(task, frame.invocation, access)?;
         let source = Arc::clone(&exe.code(frame.code).source_room);
@@ -73,13 +65,12 @@ impl FrameRoots {
             .map_err(|_| HeapFault::Malformed("source ownership verification failed".into()))?;
         Ok(Self {
             bank: super::BankRoots {
-                lifecycle,
+                ledger: lifecycle.clone(),
                 task,
                 invocation: invocation.id(),
                 slots,
             },
             invocation,
-            control_owners: RefCell::new(BTreeSet::new()),
             active_departure: Cell::new(
                 frame.cleaning.is_some()
                     || frame.awaiting.is_some_and(|stmt| {
@@ -90,48 +81,53 @@ impl FrameRoots {
             by_at: Arc::clone(&exe.code(frame.code).slots_by_at),
         })
     }
-    pub(in crate::machine) fn replace(&self, at: u32, old: SlotState, next: SlotState) {
-        if matches!((old, next), (SlotState::Empty, SlotState::Empty)) {
-            return;
-        }
-        let index = self.by_at[at as usize];
-        let slot = binding_slot(&self.source, index);
-        self.bank
-            .lifecycle
-            .replace(self.invocation.owner(slot), source_value(slot, next));
+    pub(in crate::machine) fn binding(&self, at: u32) -> (Owner, Slot) {
+        let slot = binding_slot(&self.source, self.by_at[at as usize]);
+        (self.invocation.owner(slot), slot)
     }
     fn role(
         &self,
         selector: crate::compile::room::Owner,
         value: Option<PublicationValue>,
-        access: &Access<'_>,
+        projection: &Projection<'_>,
     ) -> Result<(), HeapFault> {
+        use lash_kernel_state::kernel_internals::logical::RootValue;
         let bank = &self.bank;
         let owner = bank
             .slots
             .root(&selector, bank.task, bank.invocation)
             .ok_or_else(|| HeapFault::Malformed("source control has no canonical owner".into()))?;
-        let mut owned = self.control_owners.borrow_mut();
-        if let Some(value) = value {
-            self.bank.lifecycle.replace(owner, Some(value));
-            owned.insert(owner);
-        } else if owned.remove(&owner)
-            || self
-                .bank
-                .lifecycle
-                .ledger()
-                .borrow()
-                .holding(owner, access)?
-                .is_some()
-        {
-            self.bank.lifecycle.replace(owner, None);
-        }
-        Ok(())
+        let mut ledger = bank.ledger.borrow_mut();
+        let inputs = if ledger.holding(owner, projection.heap.pages())?.is_some() {
+            vec![owner]
+        } else {
+            Vec::new()
+        };
+        let outputs = value
+            .as_ref()
+            .map(|value| {
+                (
+                    owner,
+                    match value {
+                        PublicationValue::Native(value) => RootValue::Value(value),
+                        PublicationValue::Departure => RootValue::Departure,
+                        _ => unreachable!("source controls own values or departure records"),
+                    },
+                )
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        ledger.transfer_source(
+            &mut projection.arena.borrow_mut(),
+            projection.heap,
+            &inputs,
+            &outputs,
+        )
     }
     pub(in crate::machine) fn departure(
         &self,
         value: Option<Departed>,
-        access: &Access<'_>,
+        projection: &Projection<'_>,
     ) -> Result<(), HeapFault> {
         if value.is_none() && !self.active_departure.get() {
             return Ok(());
@@ -139,7 +135,7 @@ impl FrameRoots {
         self.role(
             crate::compile::room::Owner::ActiveDeparture(self.source.site.clone()),
             value.map(Departed::source),
-            access,
+            projection,
         )?;
         self.active_departure.set(value.is_some());
         Ok(())
@@ -149,7 +145,7 @@ impl FrameRoots {
         controls: &mut crate::machine::controls::Controls,
         cleaning: &Option<Result<Value, Value>>,
         exe: &Executable,
-        access: &Access<'_>,
+        projection: &Projection<'_>,
     ) -> Result<(), HeapFault> {
         use crate::compile::room::Owner as Selector;
         use crate::machine::controls::Roles;
@@ -157,7 +153,7 @@ impl FrameRoots {
             return Ok(());
         }
         let bank = &self.bank;
-        let record = |selector, value| self.role(selector, value, access);
+        let record = |selector, value| self.role(selector, value, projection);
         controls.flush(|role, keep| match role {
             Roles::For {
                 stmt,
@@ -193,7 +189,7 @@ impl FrameRoots {
                 Some(Departed::Value(
                     *value.as_ref().unwrap_or_else(|value| value),
                 )),
-                access,
+                projection,
             )?;
         }
         Ok(())
@@ -205,7 +201,7 @@ fn binding_slot(source: &Source, index: u32) -> Slot {
     };
     slot
 }
-fn source_value(slot: Slot, state: SlotState) -> Option<PublicationValue> {
+pub(in crate::machine) fn source_value(slot: Slot, state: SlotState) -> Option<PublicationValue> {
     match state {
         SlotState::Empty => None,
         SlotState::Value(value) => Some(PublicationValue::Native(value)),
@@ -216,16 +212,68 @@ fn source_value(slot: Slot, state: SlotState) -> Option<PublicationValue> {
     }
 }
 impl KernelMachine {
+    /// A precise source binding owns its old root until this transfer commits.
+    pub(in crate::machine) fn set_source_slot(
+        &mut self,
+        task: TaskId,
+        at: u32,
+        value: SlotState,
+    ) -> Result<(), Halt> {
+        let change = {
+            let frame = self.frame(task)?;
+            frame.logical.as_ref().map(|roots| {
+                let (owner, slot) = roots.binding(at);
+                (owner, source_value(slot, value))
+            })
+        };
+        if let Some((owner, value)) = change {
+            self.publish_logical_meter()?;
+            let store = self.logical.clone();
+            let mut ledger = store.borrow_mut();
+            let inputs = if ledger.holding(owner, self.heap.pages())?.is_some() {
+                vec![owner]
+            } else {
+                Vec::new()
+            };
+            let output = value
+                .as_ref()
+                .map(|value| {
+                    use lash_kernel_state::kernel_internals::logical::RootValue;
+                    (
+                        owner,
+                        match value {
+                            PublicationValue::Native(value) => RootValue::Value(value),
+                            PublicationValue::Capture(handle) => RootValue::Capture(*handle),
+                            _ => unreachable!("a source slot is a value or a capture"),
+                        },
+                    )
+                })
+                .into_iter()
+                .collect::<Vec<_>>();
+            ledger.transfer_source(&mut self.arena.borrow_mut(), &self.heap, &inputs, &output)?;
+        }
+        self.frame(task)?.restore_slot(at, value);
+        Ok(())
+    }
+
     pub(in crate::machine) fn logical_departure(
         &mut self,
         task: TaskId,
         value: Option<Departed>,
     ) -> Result<(), Halt> {
-        let access = self.heap.pages().clone();
-        if let Some(frame) = self.task(task)?.frames.last_mut()?
+        self.task(task)?;
+        let projection = Projection {
+            arena: &self.arena,
+            heap: &self.heap,
+        };
+        let task = self
+            .tasks
+            .get_mut(task.0 as usize)?
+            .ok_or_else(|| crate::machine::fault("no task"))?;
+        if let Some(frame) = task.frames.last_mut()?
             && let Some(roots) = &frame.logical
         {
-            roots.departure(value, &access)?;
+            roots.departure(value, &projection)?;
         }
         Ok(())
     }
@@ -235,11 +283,19 @@ impl KernelMachine {
         task: TaskId,
         exe: &Executable,
     ) -> Result<(), Halt> {
-        let access = self.heap.pages().clone();
-        if let Some(frame) = self.task(task)?.frames.last_mut()?
+        self.task(task)?;
+        let projection = Projection {
+            arena: &self.arena,
+            heap: &self.heap,
+        };
+        let task = self
+            .tasks
+            .get_mut(task.0 as usize)?
+            .ok_or_else(|| crate::machine::fault("no task"))?;
+        if let Some(frame) = task.frames.last_mut()?
             && let Some(roots) = &frame.logical
         {
-            roots.controls(&mut frame.control, &frame.cleaning, exe, &access)?;
+            roots.controls(&mut frame.control, &frame.cleaning, exe, &projection)?;
         }
         Ok(())
     }
@@ -265,9 +321,13 @@ impl KernelMachine {
                 source_value(slot, *state).map(|value| (slot, value))
             })
             .collect::<Vec<_>>();
-        self.logical
-            .flush(&mut self.arena.borrow_mut(), &self.heap)?;
-        let invocation = self.logical.ledger().borrow_mut().enter_source(
+        self.logical.borrow_mut().transfer_source(
+            &mut self.arena.borrow_mut(),
+            &self.heap,
+            &[],
+            &[],
+        )?;
+        let invocation = self.logical.borrow_mut().enter_source(
             task,
             &mut self.arena.borrow_mut(),
             &self.heap,
@@ -276,13 +336,12 @@ impl KernelMachine {
         )?;
         let roots = FrameRoots {
             bank: super::BankRoots {
-                lifecycle: self.logical.clone(),
+                ledger: self.logical.clone(),
                 task,
                 invocation: invocation.id(),
                 slots,
             },
             invocation,
-            control_owners: RefCell::new(BTreeSet::new()),
             active_departure: Cell::new(false),
             source: Arc::clone(&compiled.source_room),
             by_at: Arc::clone(&compiled.slots_by_at),
@@ -299,9 +358,13 @@ impl KernelMachine {
         value: Value,
     ) -> Result<(), HeapFault> {
         if let Some(roots) = &frame.logical {
-            self.logical
-                .flush(&mut self.arena.borrow_mut(), &self.heap)?;
-            self.logical.ledger().borrow_mut().leave_source(
+            self.logical.borrow_mut().transfer_source(
+                &mut self.arena.borrow_mut(),
+                &self.heap,
+                &[],
+                &[],
+            )?;
+            self.logical.borrow_mut().leave_source(
                 &roots.invocation,
                 &mut self.arena.borrow_mut(),
                 &self.heap,

@@ -5,7 +5,7 @@ use crate::compile::{Stmt, Stream};
 use crate::machine::logical_held::{BankRoots, Held, Projection};
 pub(super) use entry::EntryInputs;
 use lash_kernel_doc::{Value, heap::HeapFault};
-use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, PublicationValue, Slot};
+use lash_kernel_state::kernel_internals::logical::{Ledger, Owner, RootValue, Slot};
 fn invalid(problem: &str) -> HeapFault {
     HeapFault::Malformed(problem.into())
 }
@@ -17,7 +17,6 @@ use std::sync::Arc;
 pub(super) struct Operands {
     export: Option<entry::ExportEntry>,
     roots: Option<BankRoots>,
-    entry_roots: Option<Lifecycle>,
     values: Vec<Operand>,
     /// Receipts for source operands transferred to a callee invocation.
     transferred: Vec<Operand>,
@@ -379,17 +378,33 @@ impl Operands {
         self.clear();
         self.roots = roots;
     }
-    pub(super) fn entry_roots(&mut self, lifecycle: Lifecycle) {
+    pub(super) fn entry_roots(
+        &mut self,
+        ledger: &Ledger,
+        projection: &Projection<'_>,
+    ) -> Result<Vec<(Owner, Value)>, HeapFault> {
+        let mut outputs = Vec::with_capacity(self.entry.len());
         for (index, held) in self.entry.iter_mut().enumerate() {
             let owner = Owner::Value {
                 task: lash_kernel_doc::TaskId::MAIN,
                 invocation: 0,
                 slot: Slot::Argument(index as u32),
             };
-            lifecycle.replace(owner, Some(PublicationValue::Native(held.value)));
+            if ledger.holding(owner, projection.heap.pages())?.is_some() {
+                return Err(invalid("entry argument destination is already owned"));
+            }
             held.owner = Some(owner);
+            outputs.push((owner, held.value));
         }
-        self.entry_roots = Some(lifecycle);
+        Ok(outputs)
+    }
+    pub(super) fn live_owners(&self) -> impl Iterator<Item = Owner> + '_ {
+        self.values
+            .iter()
+            .map(|operand| &operand.held)
+            .chain(&self.atoms)
+            .chain(&self.entry)
+            .filter_map(|held| held.owner)
     }
     pub(super) fn take_arguments(&mut self, start: usize, count: usize) -> Vec<Owner> {
         if let Some(owners) = self.take_export_arguments(start, count) {
@@ -416,24 +431,7 @@ impl Operands {
     pub(super) fn clear(&mut self) {
         self.export = None;
         for operand in &self.values {
-            if let (Some(roots), Some(owner)) = (&self.roots, operand.held.owner) {
-                roots.release(owner);
-            }
             self.positions[operand.reg.ix()] = usize::MAX;
-        }
-        if let Some(roots) = &self.roots {
-            for held in &self.atoms {
-                if let Some(owner) = held.owner {
-                    roots.release(owner);
-                }
-            }
-        }
-        if let Some(lifecycle) = self.entry_roots.take() {
-            for held in &self.entry {
-                if let Some(owner) = held.owner {
-                    lifecycle.replace(owner, None);
-                }
-            }
         }
         self.values.clear();
         self.transferred.clear();
@@ -485,17 +483,28 @@ impl Operands {
             .source_roles_at(stream, pc)
             .ok_or_else(|| invalid("source resume has no operand projection"))?;
         for (reg, site) in roles.iter() {
-            if let Some(roots) = &self.roots {
-                roots.release(roots.continuation(site)?);
-            }
+            let value = *registers
+                .get(reg.ix())
+                .ok_or_else(|| invalid("source resume operand is missing"))?;
+            let held = if let Some(roots) = &self.roots {
+                let owner = roots.operand(site)?;
+                let holding = roots
+                    .ledger
+                    .borrow()
+                    .holding(owner, projection.heap.pages())?
+                    .ok_or_else(|| invalid("source resume lost its canonical operand"))?;
+                Held {
+                    value,
+                    holding,
+                    owner: Some(owner),
+                }
+            } else {
+                projection.hold(value)?
+            };
             self.put(Operand {
                 reg: *reg,
                 site: Arc::clone(site),
-                held: projection.hold(
-                    *registers
-                        .get(reg.ix())
-                        .ok_or_else(|| invalid("source resume operand is missing"))?,
-                )?,
+                held,
             })?;
         }
         Ok(())
@@ -524,7 +533,13 @@ impl Operands {
                     .ok_or_else(|| invalid("source atom has no site"))?,
                 index as u32,
             )?;
-            roots.acquire(owner, value);
+            let transferred = roots.ledger.borrow_mut().transfer_source(
+                &mut projection.arena.borrow_mut(),
+                projection.heap,
+                &[],
+                &[(owner, RootValue::Value(&value))],
+            );
+            transferred?;
             held.owner = Some(owner);
         }
         self.atoms.push(held);
@@ -546,7 +561,7 @@ impl Operands {
         ) {
             return Ok(());
         }
-        self.complete_joins(stream, pc)
+        self.complete_joins(stream, pc, projection)
     }
     pub(super) fn complete_value(
         &mut self,
@@ -562,22 +577,7 @@ impl Operands {
         if matches!(op, Op::Region { .. } | Op::Pin { .. }) {
             return Ok(());
         }
-        if matches!(op, Op::End) {
-            self.clear();
-            return Ok(());
-        }
-        if matches!(op, Op::Act) {
-            if let Some(roots) = &self.roots {
-                for held in &self.atoms {
-                    if let Some(owner) = held.owner {
-                        roots.release(owner);
-                    }
-                }
-            }
-            self.atoms.clear();
-            self.atom_site = None;
-        }
-        let range = match op {
+        let reads = match op {
             Op::MakeTuple { items }
             | Op::MakeList { items }
             | Op::MakeSet { items }
@@ -585,42 +585,128 @@ impl Operands {
             | Op::MakeRecord { values: items, .. }
             | Op::Call { args: items, .. }
             | Op::Operator { args: items, .. }
-            | Op::Nested { args: items, .. } => Some(items),
-            _ => None,
+            | Op::Nested { args: items, .. } => items.regs().collect::<Vec<_>>(),
+            _ => op.reads(),
         };
-        match range {
-            Some(range) => {
-                for reg in range.regs() {
-                    self.consume(reg, stream, pc)?;
-                }
-            }
-            None => {
-                for reg in op.reads() {
-                    self.consume(reg, stream, pc)?;
+        let mut inputs = Vec::new();
+        if matches!(op, Op::End) {
+            inputs.extend(self.live_owners());
+        }
+        for reg in &reads {
+            if let Some(operand) = self
+                .positions
+                .get(reg.ix())
+                .and_then(|at| self.values.get(*at))
+            {
+                inputs.extend(operand.held.owner);
+            } else {
+                let transferred = self
+                    .transferred
+                    .iter()
+                    .find(|operand| operand.reg == *reg)
+                    .filter(|_| {
+                        matches!(
+                            op,
+                            Op::ForIn { .. }
+                                | Op::Call { .. }
+                                | Op::Nested { .. }
+                                | Op::Operator { .. }
+                        )
+                    })
+                    .ok_or_else(|| {
+                        invalid(&format!(
+                            "source input has no owner: op {op:?}, pc {pc}, register {reg:?}"
+                        ))
+                    })?;
+                let expected = self
+                    .roots
+                    .as_ref()
+                    .map(|roots| roots.operand(&transferred.site))
+                    .transpose()?;
+                if transferred.held.owner != expected {
+                    return Err(invalid("source transfer names another owner"));
                 }
             }
         }
-        if let Some(reg) = op.writes() {
-            self.put(Operand {
+        if matches!(op, Op::Act) {
+            inputs.extend(self.atoms.iter().filter_map(|held| held.owner));
+        }
+        let output = if let Some(reg) = op.writes() {
+            let site = Arc::clone(
+                stream.source_sites[pc as usize]
+                    .as_ref()
+                    .ok_or_else(|| invalid("source output has no site"))?,
+            );
+            if self.positions.get(reg.ix()).is_none() {
+                return Err(invalid("source output register is missing"));
+            }
+            if self.positions[reg.ix()] != usize::MAX && !reads.contains(&reg) {
+                return Err(invalid("source output overwrites an unconsumed operand"));
+            }
+            self.values
+                .try_reserve(1)
+                .map_err(|_| HeapFault::Exhausted {
+                    resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+                })?;
+            Some(Operand {
                 reg,
-                site: Arc::clone(
-                    stream.source_sites[pc as usize]
-                        .as_ref()
-                        .ok_or_else(|| invalid("source output has no site"))?,
-                ),
+                site,
                 held: projection.hold(registers[reg.ix()])?,
-            })?;
+            })
+        } else {
+            None
+        };
+        if let Some(roots) = &self.roots {
+            let outputs = output
+                .as_ref()
+                .map(|output| {
+                    Ok::<_, HeapFault>((
+                        roots.operand(&output.site)?,
+                        RootValue::Value(&output.held.value),
+                    ))
+                })
+                .transpose()?
+                .into_iter()
+                .collect::<Vec<_>>();
+            let transferred = roots.ledger.borrow_mut().transfer_source(
+                &mut projection.arena.borrow_mut(),
+                projection.heap,
+                &inputs,
+                &outputs,
+            );
+            transferred?;
+        }
+        if matches!(op, Op::End) {
+            self.clear();
+            return Ok(());
+        }
+        if matches!(op, Op::Act) {
+            self.atoms.clear();
+            self.atom_site = None;
+        }
+        for reg in reads {
+            self.consume(reg, stream, pc)
+                .unwrap_or_else(|_| unreachable!("prepared source consumption"));
+        }
+        if let Some(output) = output {
+            self.put(output)
+                .unwrap_or_else(|_| unreachable!("prepared source output"));
         }
         Ok(())
     }
     #[cfg(test)]
-    pub(super) fn complete_joins(&mut self, stream: &Stream, pc: u32) -> Result<(), HeapFault> {
+    pub(super) fn complete_joins(
+        &mut self,
+        stream: &Stream,
+        pc: u32,
+        projection: &Projection<'_>,
+    ) -> Result<(), HeapFault> {
         if !self.active {
             return Err(invalid("source join has no active owner bank"));
         }
         if let Some(joins) = stream.source_joins.get(&pc) {
             for join in joins {
-                self.complete_join(join)?;
+                self.complete_join(join, projection)?;
             }
         }
         Ok(())
@@ -628,6 +714,7 @@ impl Operands {
     pub(super) fn complete_join(
         &mut self,
         join: &crate::compile::SourceJoin,
+        projection: &Projection<'_>,
     ) -> Result<(), HeapFault> {
         if !self.active {
             return Err(invalid("source join has no active owner bank"));
@@ -647,11 +734,17 @@ impl Operands {
             )));
         }
         if let Some(roots) = &self.roots {
-            if let Some(owner) = operand.held.owner {
-                roots.release(owner);
-            }
+            let input = operand
+                .held
+                .owner
+                .ok_or_else(|| invalid("source join has no accepted input"))?;
             let owner = roots.operand(&join.to)?;
-            roots.acquire(owner, operand.held.value);
+            roots.ledger.borrow_mut().transfer_source(
+                &mut projection.arena.borrow_mut(),
+                projection.heap,
+                &[input],
+                &[(owner, RootValue::Existing(input))],
+            )?;
             operand.held.owner = Some(owner);
         }
         operand.site = Arc::clone(&join.to);
@@ -659,7 +752,7 @@ impl Operands {
     }
     fn consume(&mut self, reg: Reg, stream: &Stream, pc: u32) -> Result<(), HeapFault> {
         let op = stream.ops[pc as usize];
-        if self.remove(reg).is_some() {
+        if self.remove_value(reg).is_some() {
             return Ok(());
         }
         // A completed packet call, like a protocol open, has already
@@ -703,18 +796,10 @@ impl Operands {
         *at = self.values.len();
         if let Some(roots) = &self.roots {
             let owner = roots.operand(&operand.site)?;
-            roots.acquire(owner, operand.held.value);
             operand.held.owner = Some(owner);
         }
         self.values.push(operand);
         Ok(())
-    }
-    fn remove(&mut self, reg: Reg) -> Option<Operand> {
-        let operand = self.remove_value(reg)?;
-        if let (Some(roots), Some(owner)) = (&self.roots, operand.held.owner) {
-            roots.release(owner);
-        }
-        Some(operand)
     }
     fn remove_value(&mut self, reg: Reg) -> Option<Operand> {
         let at = *self.positions.get(reg.ix())?;
@@ -728,7 +813,12 @@ impl Operands {
         }
         Some(value)
     }
-    pub(super) fn take(&mut self, reg: Reg, site: &Site) -> Result<Held, HeapFault> {
+    pub(super) fn take(
+        &mut self,
+        reg: Reg,
+        site: &Site,
+        projection: &Projection<'_>,
+    ) -> Result<Held, HeapFault> {
         let at = *self
             .positions
             .get(reg.ix())
@@ -740,13 +830,25 @@ impl Operands {
         if operand.site.as_ref() != site {
             return Err(invalid("continuation names another source operand"));
         }
+        if let Some(roots) = &self.roots {
+            let input = operand
+                .held
+                .owner
+                .ok_or_else(|| invalid("saved role has no accepted source input"))?;
+            let output = roots.continuation(site)?;
+            roots.ledger.borrow_mut().transfer_source(
+                &mut projection.arena.borrow_mut(),
+                projection.heap,
+                &[input],
+                &[(output, RootValue::Existing(input))],
+            )?;
+        }
         let mut held = self
-            .remove(reg)
+            .remove_value(reg)
             .ok_or_else(|| invalid("continuation source operand disappeared"))?
             .held;
         if let Some(roots) = &self.roots {
             let owner = roots.continuation(site)?;
-            roots.acquire(owner, held.value);
             held.owner = Some(owner);
         }
         Ok(held)

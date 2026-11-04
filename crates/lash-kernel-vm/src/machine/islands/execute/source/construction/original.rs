@@ -26,12 +26,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Err(self.at(close.head));
         };
         if original
-            .defer_close(
-                frontier,
-                &self.logical.ledger().borrow(),
-                close,
-                self.charged,
-            )
+            .defer_close(frontier, &self.logical.borrow(), close, self.charged)
             .is_err()
         {
             return Err(self.at(close.head));
@@ -45,9 +40,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         prefix: publication::Prefix,
         candidate: OriginalConstruction<'_>,
     ) -> Result<Option<Value>, HeapFault> {
-        self.logical.flush(self.arena, self.heap)?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
         let source = &self.exe.code(callee.plan.code).source_room;
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         if let Some(frontier) = activation.frontier.as_mut()
             && frontier.departs(&prefix.start)
         {

@@ -118,8 +118,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 .map(Some)
                 .ok_or_else(|| malformed("packet entry input has no source owner"))
         };
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let invocation = ledger.prospective_invocation(self.task);
         let code = self.exe.code(target.plan.code);

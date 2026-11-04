@@ -164,14 +164,21 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         value: Value,
         original: Option<&std::sync::Arc<room::charges::OriginalPrefix>>,
     ) -> Result<bool, Stop> {
-        let original = frame
-            .state
-            .source
-            .as_ref()
-            .is_some_and(|source| source.original.is_some())
-            .then_some(original)
-            .flatten();
-        self.source_input(frame, read, reg, Input::Native(value), original)
+        let Some(original) = original else {
+            // Without a verified original prefix the source evaluator must
+            // enter before this read acquires an owner or pays a close.
+            return Ok(false);
+        };
+        let literal = match value {
+            Value::Null => doc::Literal::Null,
+            Value::Absent => doc::Literal::Absent,
+            Value::Bool(value) => doc::Literal::Bool(value),
+            Value::Int(value) => doc::Literal::Int(value.into()),
+            Value::Float(value) => doc::Literal::Float(value),
+            Value::Text(value) => doc::Literal::Text(value.as_str().into()),
+            _ => return Err(self.halt(malformed("resident literal has another value kind").into())),
+        };
+        self.source_input(frame, read, reg, Input::Literal(&literal), Some(original))
     }
 
     pub(in crate::machine::islands::execute) fn source_literal(
@@ -261,9 +268,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 activation.invocation.id(),
             )
             .ok_or_else(|| self.halt(malformed("packet read has no canonical owner").into()))?;
-        self.logical
-            .flush(self.arena, self.heap)
-            .map_err(|error| self.halt(error.into()))?;
+        let transfer = self
+            .logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[]);
+        transfer.map_err(|error| self.halt(error.into()))?;
         let mut encoding = TokenWriter::new();
         encoding.seq(4);
         encoding.text("lash.source.packet-read");

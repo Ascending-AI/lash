@@ -1025,8 +1025,7 @@ impl KernelMachine {
         let code = frame.code;
         match frame.slot(local.at) {
             SlotState::Value(_) => {
-                self.frame(task)?
-                    .set_slot(local.at, SlotState::Value(value));
+                self.set_source_slot(task, local.at, SlotState::Value(value))?;
             }
             SlotState::Cell(cell) => {
                 let cell = *cell;

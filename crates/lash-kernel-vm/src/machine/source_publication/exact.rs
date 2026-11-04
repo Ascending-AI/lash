@@ -20,8 +20,10 @@ impl Context<'_> {
         prepare: S,
         semantic: impl FnOnce(&mut Arena, &mut Session, Vec<MemberEdit>, S::Prepared),
     ) -> Result<bool, Halt> {
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         if let Some(frontier) = frontier.as_mut()
             && frontier.departs(&prefix.start)
         {
@@ -119,8 +121,10 @@ impl Context<'_> {
         let Some(original) = receipt.as_ref() else {
             return self.publish_external(invocation, frontier, prefix, prepare, semantic);
         };
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         let Some(frontier) = frontier.as_mut() else {
             return Ok(false);
         };
@@ -201,8 +205,10 @@ impl Context<'_> {
         storage: S,
         semantic: impl FnOnce(&mut Arena, &mut Session, Vec<MemberEdit>, S),
     ) -> Result<bool, Halt> {
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         if let Some(frontier) = frontier.as_mut()
             && frontier.departs(&prefix.start)
         {

@@ -372,7 +372,7 @@ struct Task {
 /// A kernel machine. It implements [`Machine`]; an embedder drives it with
 /// `run` and `deliver`.
 pub struct KernelMachine {
-    logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
+    logical: std::rc::Rc<std::cell::RefCell<lash_kernel_state::kernel_internals::logical::Ledger>>,
     /// Last checked publication of the shared logical ledger. Meters remain
     /// infallible; ledger faults are returned at the publication boundary.
     logical_memory: std::cell::Cell<u64>,
@@ -732,7 +732,7 @@ impl KernelMachine {
     }
 
     fn publish(&mut self, coordinates: bool) -> Result<(), Halt> {
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::publish();
         self.identify(coordinates)?;
@@ -800,7 +800,10 @@ impl KernelMachine {
         walked
             .and_then(|()| arena.walk(&transient))
             .map_err(|error| fault(&error.to_string()))?;
-        Ok(self.logical.rekey(&mut arena, &self.heap)?)
+        Ok(self
+            .logical
+            .borrow_mut()
+            .transfer_source(&mut arena, &self.heap, &[], &[])?)
     }
 
     /// Gives what `values` reach their durable ids, as a projection point
@@ -812,7 +815,10 @@ impl KernelMachine {
             .walk(&roots)
             .and_then(|()| arena.walk_dirty())
             .map_err(|error| fault(&error.to_string()))?;
-        Ok(self.logical.rekey(&mut arena, &self.heap)?)
+        Ok(self
+            .logical
+            .borrow_mut()
+            .transfer_source(&mut arena, &self.heap, &[], &[])?)
     }
 
     /// Writes every object the arena changed to the heap: what a
@@ -857,7 +863,9 @@ impl KernelMachine {
     pub(super) fn page_form(&self, value: &Value) -> Result<PageValue, Halt> {
         let mut arena = self.arena.borrow_mut();
         let page = project::project(&mut arena, self.heap.pages(), value)?;
-        self.logical.rekey(&mut arena, &self.heap)?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(&mut arena, &self.heap, &[], &[])?;
         Ok(page)
     }
 
@@ -865,8 +873,10 @@ impl KernelMachine {
     /// needs, from the heap or its pages.
     pub(super) fn warm(&mut self, handle: ArenaHandle, chunk: u32) -> Result<(), Halt> {
         let mut arena = self.arena.borrow_mut();
-        self.logical.flush(&mut arena, &self.heap)?;
-        self.logical.ledger().borrow_mut().handoff()?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(&mut arena, &self.heap, &[], &[])?;
+        self.logical.borrow_mut().handoff()?;
         let ledger = self.heap.logical_ledger();
         let fact = if arena
             .facts(handle)
@@ -1115,13 +1125,14 @@ impl KernelMachine {
         let result = self.step_protected(task, host, exe, program);
         // The prepared statement owns the kill set, including on park,
         // raise and halt exits. Clean up before the driver sees the result.
+        self.retire_source_bank(&[])?;
         self.regs.kill_statement();
         if self.bounds.memory_meter != crate::MemoryMeter::Off {
             self.pins.clear();
         }
         if result.is_ok() {
             self.logical_flush_controls(task, exe)?;
-            self.logical_flush()?;
+            self.publish_logical_meter()?;
         }
         self.tasks.protect(None);
         result
@@ -1181,10 +1192,6 @@ impl KernelMachine {
         incoming: Incoming,
     ) -> Eval<Completion> {
         let value = self.resume(task, exe, incoming);
-        self.logical.replace(
-            lash_kernel_state::kernel_internals::logical::Owner::Incoming(task),
-            None,
-        );
         let value = value?;
         let ran = self.finish_action(task, host, exe, value, exec::ResultOrigin::Delivered)?;
         self.resumed(task, exe, ran)

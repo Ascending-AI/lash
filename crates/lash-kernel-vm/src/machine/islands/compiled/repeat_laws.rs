@@ -60,7 +60,7 @@ pub(crate) fn action_counts(machine: &mut KernelMachine) -> Vec<u64> {
 pub(crate) fn invocation_cursor(machine: &KernelMachine) -> u64 {
     machine
         .logical
-        .ledger()
+        .clone()
         .borrow()
         .prospective_invocation(lash_kernel_doc::TaskId(0))
         .id()

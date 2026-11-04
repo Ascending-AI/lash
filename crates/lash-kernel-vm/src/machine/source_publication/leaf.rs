@@ -47,7 +47,7 @@ impl KernelMachine {
         let Ok((at, unpaid, interval)) = source.compile_leaf(site) else {
             return Ok(false);
         };
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let Some(bank) = self.regs.prepare_source_leaf(
             running.stream,
             pc,
@@ -87,7 +87,7 @@ impl KernelMachine {
             .logical
             .as_ref()
             .ok_or_else(|| malformed("precise source has no entered invocation"))?;
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let Ok(placement) = room::placement::BindingPlacement::compile(running.exe, frame.code)
         else {
             return Ok(false);

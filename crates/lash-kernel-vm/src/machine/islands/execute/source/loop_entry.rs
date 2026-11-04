@@ -46,7 +46,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         } else {
             (None, None, condition)
         };
-        self.logical.flush(self.arena, self.heap)?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
         let Some(activation) = frame.state.source.as_ref() else {
             return Ok(false);
         };
@@ -56,7 +58,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(frontier) = activation.frontier.as_ref() else {
             return Ok(false);
         };
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let Some(bound) = entry.bind(
             frontier,

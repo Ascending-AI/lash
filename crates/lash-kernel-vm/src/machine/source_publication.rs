@@ -37,7 +37,7 @@ use lash_kernel_state::{
     arena::Arena,
     kernel_internals::{
         PagedHeap,
-        logical::{Invocation, Lifecycle, MemberEdit},
+        logical::{Invocation, Ledger, MemberEdit},
     },
 };
 use std::{cell::Cell, sync::Arc};
@@ -207,7 +207,7 @@ pub(in crate::machine) struct Context<'a> {
     pub(in crate::machine) source: &'a Arc<room::Source>,
     pub(in crate::machine) link: lash_kernel_value::content_ids::LinkId,
     pub(in crate::machine) kernel: doc::KernelVersion,
-    pub(in crate::machine) logical: &'a Lifecycle,
+    pub(in crate::machine) logical: &'a std::rc::Rc<std::cell::RefCell<Ledger>>,
     pub(in crate::machine) heap: &'a PagedHeap,
     pub(in crate::machine) arena: &'a mut Arena,
     pub(in crate::machine) session: &'a mut Session,

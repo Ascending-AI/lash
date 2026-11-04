@@ -12,7 +12,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(selected) = &site.source else {
             return Ok(false);
         };
-        self.logical.flush(self.arena, self.heap)?;
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
         let activation = frame
             .state
             .source
@@ -21,7 +23,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if activation.original.is_some() {
             return Ok(false);
         }
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let occurrence = Occurrence {
             task: self.task,
             invocation: activation.invocation.id(),

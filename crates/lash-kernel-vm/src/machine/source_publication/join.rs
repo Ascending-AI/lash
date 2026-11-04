@@ -29,17 +29,21 @@ impl KernelMachine {
                 closed |= scope.is_some();
                 if !self.publish_source_join(running, join, scope)? {
                     if let Some(local) = scope {
-                        self.frame(running.task)?
-                            .set_slot(local.at, SlotState::Empty);
+                        self.set_source_slot(running.task, local.at, SlotState::Empty)?;
                     }
-                    self.regs.source_complete_join(join)?;
+                    self.publish_logical_meter()?;
+                    let projection = crate::machine::logical_held::Projection {
+                        arena: &self.arena,
+                        heap: &self.heap,
+                    };
+                    self.regs.source_complete_join(join, &projection)?;
                 }
             }
         }
         if !closed {
             return Err(malformed("expression scope close has no source join").into());
         }
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         Ok(())
     }
 
@@ -80,7 +84,7 @@ impl KernelMachine {
             site: (*join.to).clone(),
             phase: Phase::Commit,
         };
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let Some(bank) = self.regs.prepare_source_join(join)? else {
             return Ok(false);
         };
@@ -113,7 +117,7 @@ impl KernelMachine {
             let binding = source
                 .binding_root(local.slot, running.task, roots.invocation().id())
                 .ok_or_else(|| malformed("expression scope has no canonical binding"))?;
-            let store = self.logical.ledger();
+            let store = self.logical.clone();
             let ledger = store.borrow();
             let released = ledger.release_cost(&[binding], self.heap.pages())?;
             inputs.push(binding);

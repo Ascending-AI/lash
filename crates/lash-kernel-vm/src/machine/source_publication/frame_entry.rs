@@ -164,12 +164,12 @@ impl KernelMachine {
             if param.shared {
                 shared_values.push(value);
             } else {
-                frame.set_slot(param.at, SlotState::Value(value));
+                frame.restore_slot(param.at, SlotState::Value(value));
             }
         }
         #[cfg(any(test, feature = "testing"))]
         let shared = !shared_values.is_empty();
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let invocation = ledger.prospective_invocation(task_id);
         let mut arena = self.arena.borrow_mut();
@@ -198,7 +198,7 @@ impl KernelMachine {
                     body: VirtualBody::NativeVariable(*value),
                 });
                 shared_ids.push((*handle, entity));
-                frame.set_slot(param.at, SlotState::Cell(*handle));
+                frame.restore_slot(param.at, SlotState::Cell(*handle));
             }
         }
         let mut outputs = buffer(code.slots_by_at.len() + caller.roles().len())?;

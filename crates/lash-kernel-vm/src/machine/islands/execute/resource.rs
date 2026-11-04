@@ -48,10 +48,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let invocation = activation.invocation.clone();
         // During construction this closes the preceding, unmigrated family.
         // The scalar prefix itself never records an interior replacement.
-        self.logical
-            .flush(self.arena, self.heap)
-            .map_err(|error| self.halt(error.into()))?;
-        let store = self.logical.ledger();
+        let transfer = self
+            .logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[]);
+        transfer.map_err(|error| self.halt(error.into()))?;
+        let store = self.logical.clone();
         let ledger = store.borrow();
         let Some(evaluated) = certificate
             .evaluate(

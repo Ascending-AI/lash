@@ -460,7 +460,7 @@ impl KernelMachine {
         // Publish it now, even if the following metered charge refuses.
         let _ = self.frame(task)?.control.last_mut();
         self.logical_flush_controls(task, exe)?;
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         self.warm_cursor(task)?;
         // Borrowed by field, so that the loop's position can be read
         // against the arena.

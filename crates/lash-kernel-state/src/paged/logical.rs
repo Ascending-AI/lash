@@ -22,8 +22,6 @@ mod graph;
 mod invocations;
 pub use invocations::{Invocation, InvocationRange};
 mod boundaries;
-mod lifecycle;
-pub use lifecycle::Lifecycle;
 mod members;
 mod observers;
 pub use observers::ObserverExclusion;

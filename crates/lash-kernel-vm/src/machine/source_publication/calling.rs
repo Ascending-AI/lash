@@ -34,7 +34,7 @@ impl KernelMachine {
             return Ok(None);
         };
         self.logical_flush_controls(running.task, running.exe)?;
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let Some(bank) = self.regs.prepare_source_arguments(arguments)? else {
             return Ok(None);
         };
@@ -174,8 +174,10 @@ impl Context<'_> {
         storage: S,
         semantic: impl FnOnce(&mut Arena, &mut Session, S),
     ) -> Result<bool, Halt> {
-        self.logical.flush(self.arena, self.heap)?;
-        let store = self.logical.ledger();
+        self.logical
+            .borrow_mut()
+            .transfer_source(self.arena, self.heap, &[], &[])?;
+        let store = self.logical.clone();
         if let Some(frontier) = frontier.as_mut()
             && frontier.departs(&prefix.start)
         {

@@ -724,14 +724,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                     _ => return Err(self.at(*pc)),
                 };
-                self.logical
-                    .flush(self.arena, self.heap)
-                    .map_err(|error| self.halt(error.into()))?;
+                let transfer =
+                    self.logical
+                        .borrow_mut()
+                        .transfer_source(self.arena, self.heap, &[], &[]);
+                transfer.map_err(|error| self.halt(error.into()))?;
                 let activation =
                     frame.state.source.as_ref().ok_or_else(|| {
                         self.halt(fault("packet branch has no source invocation"))
                     })?;
-                let store = self.logical.ledger();
+                let store = self.logical.clone();
                 let released = {
                     let mut ledger = store.borrow_mut();
                     let inputs =

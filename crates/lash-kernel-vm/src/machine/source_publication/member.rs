@@ -237,7 +237,7 @@ impl KernelMachine {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(false);
         };
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let Some(bank) = self.regs.prepare_source_inputs(running.stream, pc)? else {
             return Ok(false);
         };
@@ -274,7 +274,7 @@ impl KernelMachine {
             member,
             next,
         };
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let slots = source
             .owner_slots()
             .map_err(|_| malformed("list store owners failed verification"))?;

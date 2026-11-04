@@ -58,7 +58,7 @@ impl KernelMachine {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(None);
         };
-        self.logical_flush()?;
+        self.publish_logical_meter()?;
         let Some(bank) = self.regs.prepare_source_transfer(cond)? else {
             return Ok(None);
         };
@@ -76,7 +76,7 @@ impl KernelMachine {
         let input = bank.owner();
         let released = self
             .logical
-            .ledger()
+            .clone()
             .borrow()
             .release_cost(&[input], self.heap.pages())?;
         let document = running

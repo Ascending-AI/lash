@@ -27,7 +27,7 @@ impl KernelMachine {
             (frame.code, frame.invocation)
         };
         let source = &running.exe.code(code).source_room;
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let replay = prefix
             .into_replay(
                 source,
@@ -66,7 +66,7 @@ impl KernelMachine {
     ) -> Eval<()> {
         use crate::machine::registers::{ResumeAt, ResumeValue};
         let mut values = Vec::with_capacity(roles.len());
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         for (reg, site, value) in roles {
             let owner = roots.operand(&site)?;
             let holding = store
@@ -135,7 +135,7 @@ impl KernelMachine {
         .unwrap()
         .bank();
         let running = Running::new(TaskId::MAIN, exe, statement);
-        let store = self.logical.ledger();
+        let store = self.logical.clone();
         let stamp = store.borrow().stamp();
         let before = store.borrow().balance().unwrap();
         self.restore_original_bank(&running, replay.next, invocation.id(), roots, replay.roles)

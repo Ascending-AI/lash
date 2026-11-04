@@ -248,9 +248,13 @@ impl Registers {
     }
     pub(super) fn source_entry_roots(
         &mut self,
-        lifecycle: lash_kernel_state::kernel_internals::logical::Lifecycle,
-    ) {
-        self.source.entry_roots(lifecycle);
+        ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
+        projection: &Projection<'_>,
+    ) -> Result<Vec<(lash_kernel_state::kernel_internals::logical::Owner, Value)>, HeapFault> {
+        self.source.entry_roots(ledger, projection)
+    }
+    pub(super) fn source_owners(&self) -> Vec<lash_kernel_state::kernel_internals::logical::Owner> {
+        self.source.live_owners().collect()
     }
     pub(super) fn take_source_arguments(
         &mut self,
@@ -547,8 +551,9 @@ impl Registers {
     pub(super) fn source_complete_join(
         &mut self,
         join: &crate::compile::SourceJoin,
+        projection: &Projection<'_>,
     ) -> Result<(), HeapFault> {
-        self.source.complete_join(join)
+        self.source.complete_join(join, projection)
     }
 
     pub(super) fn source_complete(
@@ -568,7 +573,7 @@ impl Registers {
         projection: &Projection<'_>,
     ) -> Result<Held, HeapFault> {
         if self.source.active {
-            self.source.take(reg, site)
+            self.source.take(reg, site, projection)
         } else {
             let value =
                 self.values.get(reg.ix()).copied().ok_or_else(|| {
