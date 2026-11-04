@@ -20,6 +20,14 @@ pub struct InvocationRange {
     end: u64,
 }
 impl InvocationRange {
+    pub fn prefix(mut self, count: u64) -> Option<Self> {
+        if count > self.len() {
+            return None;
+        }
+        self.end = self.first.checked_add(count)?;
+        Some(self)
+    }
+
     /// Authenticate a scope's task, ledger and unconsumed reservation once.
     pub fn is_current(&self, ledger: &Ledger, caller: &Invocation) -> bool {
         ledger.is_current(&self.stamp)

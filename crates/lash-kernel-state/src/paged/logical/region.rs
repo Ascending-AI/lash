@@ -1,8 +1,13 @@
 //! Affine authority for one verified region's unpublished state exit.
 mod storage;
-pub use storage::LeaseValue;
+pub use storage::{
+    LeaseAllocation, LeaseCallable, LeaseFacts, LeaseFault, LeaseMeasure, LeaseMember, LeaseObject,
+    LeaseOp, LeaseStep, LeaseValue, ReadyLeaseStep,
+};
+mod exit;
+pub use exit::LeaseGraphExit;
 
-use super::{Invocation, InvocationRange, MemberEdit, Owner, PublicationValue};
+use super::{Dependencies, Invocation, InvocationRange, Owner, PublicationValue};
 use crate::arena::Arena;
 use crate::paged::heap_impl::PagedHeap;
 use lash_kernel_doc::heap::HeapFault;
@@ -18,7 +23,7 @@ pub struct StateLease<'s> {
 pub struct StateExit {
     pub inputs: Box<[Owner]>,
     pub outputs: Box<[(Owner, PublicationValue)]>,
-    pub members: Box<[MemberEdit]>,
+    pub graph: LeaseGraphExit,
     pub invocations: Option<InvocationRange>,
     pub peak: u64,
     pub delta: i128,
@@ -32,6 +37,15 @@ pub struct PreparedStateExit<'s> {
 impl<'s> StateLease<'s> {
     /// Acquire shared-ledger exclusion and bind the complete entry stamp.
     pub fn acquire(_heap: &'s mut PagedHeap, _arena: &'s mut Arena) -> Result<Self, HeapFault> {
+        Err(unavailable())
+    }
+    pub fn acquire_shared(
+        _heap: &'s mut PagedHeap,
+        _arena: &'s std::cell::RefCell<Arena>,
+    ) -> Result<Self, HeapFault> {
+        Err(unavailable())
+    }
+    pub fn bind_dependencies(&mut self, _dependencies: Dependencies) -> Result<(), HeapFault> {
         Err(unavailable())
     }
     pub fn arena(&self) -> &Arena {
@@ -72,7 +86,11 @@ fn unavailable() -> HeapFault {
 #[cfg(any(test, feature = "perf-witness"))]
 pub mod fixtures {
     use super::*;
+    pub fn graph() -> LeaseGraphExit {
+        super::exit::fixture()
+    }
     pub fn exit(
+        graph: LeaseGraphExit,
         inputs: impl Into<Box<[Owner]>>,
         outputs: impl Into<Box<[(Owner, PublicationValue)]>>,
         peak: u64,
@@ -81,7 +99,7 @@ pub mod fixtures {
         StateExit {
             inputs: inputs.into(),
             outputs: outputs.into(),
-            members: Box::new([]),
+            graph,
             invocations: None,
             peak,
             delta,
