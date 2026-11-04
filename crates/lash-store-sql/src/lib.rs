@@ -273,11 +273,9 @@ impl Statement {
         })
     }
 
-    /// This is what [`statements!`] calls. A malformed neutral statement is a
-    /// defect in this repository's own source, not a runtime condition a
-    /// caller could handle, and rendering runs once at startup — so the store
-    /// fails to open, naming the statement, rather than reaching a database
-    /// with text nobody checked.
+    /// Render immediately, naming malformed SQL as a source defect rather
+    /// than handing unchecked text to a database. Statement families use
+    /// [`LazyStatement`] to defer this work until each statement's first use.
     ///
     /// # Panics
     ///
@@ -359,8 +357,9 @@ impl Statement {
 
 /// Every statement is a string literal or compile-time expansion in neutral
 /// form, so the set remains readable as SQL. The generated type has
-/// one [`Rendered`] field per statement, a `NEUTRAL` inventory, and a `render`
-/// constructor a backend calls exactly once.
+/// one [`LazyStatement`] field per statement, a `NEUTRAL` inventory, and a
+/// `render` constructor a backend calls exactly once. Each statement renders
+/// on its first use, so opening a family retains no unused SQL strings.
 ///
 /// ```ignore
 /// lash_store_sql::statements! {
@@ -409,10 +408,10 @@ macro_rules! statements {
 
             /// # Panics
             ///
-            /// Panics when a statement's neutral text is malformed — an
-            /// unknown table, a bad placeholder, an unterminated literal.
-            /// This runs once at startup, so the defect surfaces before the
-            /// store answers anything.
+            /// A statement's first use panics when its neutral text is
+            /// malformed: an unknown table, a bad placeholder, an
+            /// unterminated literal. The defect surfaces before that
+            /// statement reaches the database.
             #[must_use]
             pub fn render(dialect: $crate::Dialect) -> Self {
                 Self {
@@ -428,7 +427,7 @@ macro_rules! statements {
         }
     };
     ($($set:tt)*) => {
-        $crate::statements!(@define $crate::Rendered, render_or_panic; $($set)*);
+        $crate::statements!(@define $crate::LazyStatement, deferred; $($set)*);
     };
 
 }

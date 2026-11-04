@@ -29,7 +29,9 @@
 //!
 //! An id no observation names is opaque and deduplicates exactly.
 
-use std::collections::{BTreeMap, HashMap};
+use std::borrow::Borrow;
+use std::collections::{HashMap, hash_map::Entry};
+use std::hash::{Hash, Hasher};
 use std::ops::RangeInclusive;
 
 use crate::TurnActivityId;
@@ -49,17 +51,67 @@ pub(super) struct DeliveredActivities {
     opaque: HashMap<TurnActivityId, u64>,
     /// Per replay key, the delivered ranges by first ordinal: last ordinal
     /// and position.
-    ranges: HashMap<String, BTreeMap<u32, (u32, u64)>>,
+    ranges: HashMap<ReplayKey, Vec<OrdinalRange>>,
+}
+
+/// Borrow the replay-key prefix from the activity's existing shared string.
+#[derive(Debug)]
+struct ReplayKey {
+    activity: TurnActivityId,
+    len: usize,
+}
+
+impl Borrow<str> for ReplayKey {
+    fn borrow(&self) -> &str {
+        &self.activity.0[..self.len]
+    }
+}
+
+impl PartialEq for ReplayKey {
+    fn eq(&self, other: &Self) -> bool {
+        Borrow::<str>::borrow(self) == Borrow::<str>::borrow(other)
+    }
+}
+
+impl Eq for ReplayKey {}
+
+impl Hash for ReplayKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Borrow::<str>::borrow(self).hash(state);
+    }
+}
+
+#[derive(Debug)]
+struct OrdinalRange {
+    first: u32,
+    last: u32,
+    position: u64,
 }
 
 impl DeliveredActivities {
     pub(super) fn insert(&mut self, id: &TurnActivityId, position: u64) {
         match id.observed_span() {
             Some((key, ordinals)) => {
-                self.ranges
-                    .entry(key.to_owned())
-                    .or_default()
-                    .insert(*ordinals.start(), (*ordinals.end(), position));
+                let range = OrdinalRange {
+                    first: *ordinals.start(),
+                    last: *ordinals.end(),
+                    position,
+                };
+                match self.ranges.entry(ReplayKey {
+                    activity: id.clone(),
+                    len: key.len(),
+                }) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(vec![range]);
+                    }
+                    Entry::Occupied(mut entry) => {
+                        let ranges = entry.get_mut();
+                        match ranges.binary_search_by_key(&range.first, |range| range.first) {
+                            Ok(index) => ranges[index] = range,
+                            Err(index) => ranges.insert(index, range),
+                        }
+                    }
+                }
             }
             None => {
                 self.opaque.insert(id.clone(), position);
@@ -74,8 +126,12 @@ impl DeliveredActivities {
                 let Some(ranges) = self.ranges.get_mut(key) else {
                     return;
                 };
-                if ranges.get(ordinals.start()) == Some(&(*ordinals.end(), position)) {
-                    ranges.remove(ordinals.start());
+                if let Ok(index) =
+                    ranges.binary_search_by_key(ordinals.start(), |range| range.first)
+                    && ranges[index].last == *ordinals.end()
+                    && ranges[index].position == position
+                {
+                    ranges.remove(index);
                 }
                 if ranges.is_empty() {
                     self.ranges.remove(key);
@@ -92,9 +148,7 @@ impl DeliveredActivities {
     /// The span of ordinals this buffer delivered under `key`.
     fn span(&self, key: &str) -> Option<RangeInclusive<u32>> {
         let ranges = self.ranges.get(key)?;
-        let (first, _) = ranges.first_key_value()?;
-        let (_, (last, _)) = ranges.last_key_value()?;
-        Some(*first..=*last)
+        Some(ranges.first()?.first..=ranges.last()?.last)
     }
 
     /// How `id` meets the delivered identities and the `claimed` ones (in
