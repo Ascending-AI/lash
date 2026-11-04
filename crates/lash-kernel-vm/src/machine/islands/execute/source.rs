@@ -23,6 +23,7 @@ pub(in crate::machine::islands::execute) enum ValuePublication {
     Declined,
     Published(Value),
 }
+mod control;
 mod publication;
 mod read;
 mod resuming;
@@ -46,11 +47,14 @@ pub(in crate::machine::islands) struct Activation {
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(super) fn source_return_frame(&self, frame: &storage::Values<'_, '_>) -> bool {
-        // An uncharged resident library still owes its semantic caller's
-        // completion formula. Its ordinary return owns that final boundary.
-        if (frame.state.resident && !frame.state.callee.plan.charged)
+        !frame.state.callee.compiled.cleanups && self.source_departure_frame(frame)
+    }
+
+    pub(super) fn source_departure_frame(&self, frame: &storage::Values<'_, '_>) -> bool {
+        if (frame.state.resident
+            && !frame.state.callee.plan.charged
+            && frame.state.resident_completion.is_none())
             || (frame.state.callee.plan.charged && frame.state.boundary.is_some())
-            || frame.state.callee.compiled.cleanups
             || !frame.state.control.iter().all(|control| match control {
                 Position::Block(..) => true,
                 Position::Loop {
@@ -66,8 +70,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                             _ => false,
                         }
                 }
-                // A function with cleanup is excluded above; its suffix
-                // authenticates the entered body or catch block.
+                // A departure authenticates the entered body or catch block.
+                // A return from inside cleanup supersedes its pending owner
+                // through the precise source path.
                 Position::Try {
                     phase: Phase::Body | Phase::Catch,
                     ..

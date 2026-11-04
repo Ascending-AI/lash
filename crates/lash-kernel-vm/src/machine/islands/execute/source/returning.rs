@@ -9,8 +9,37 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         value: Value,
         completion: &LibraryCompletion,
     ) -> Result<ValuePublication, HeapFault> {
-        if !self.source_return_frame(frame)
-            || self.projection().is_some()
+        self.publish_departure_suffix(frame, value, completion, false)
+    }
+
+    pub(in crate::machine::islands::execute) fn publish_pending_return(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        value: Value,
+    ) -> Result<ValuePublication, HeapFault> {
+        self.publish_departure_suffix(
+            frame,
+            value,
+            &LibraryCompletion {
+                units: 0,
+                debt: None,
+            },
+            true,
+        )
+    }
+
+    fn publish_departure_suffix(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        value: Value,
+        completion: &LibraryCompletion,
+        suspended: bool,
+    ) -> Result<ValuePublication, HeapFault> {
+        if !(if suspended {
+            self.source_departure_frame(frame)
+        } else {
+            self.source_return_frame(frame)
+        }) || self.projection().is_some()
             || frame
                 .state
                 .source
@@ -35,21 +64,48 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Ok(interval) = source.compile_departure_suffix(&at) else {
             return Ok(ValuePublication::Unavailable);
         };
+        let suspend = interval
+            .events()
+            .last()
+            .filter(|event| event.point.phase == SourcePhase::Suspend)
+            .map(|event| &event.point.site);
+        if suspended != suspend.is_some() {
+            return Ok(ValuePublication::Unavailable);
+        }
+        #[cfg(test)]
+        if suspended && crate::machine::islands::witness::suspended_departure_declined() {
+            return Ok(ValuePublication::Declined);
+        }
+        let target = |control: &Position| {
+            matches!(control,
+            Position::Try { cleanup, phase: Phase::Body | Phase::Catch }
+                if suspend == Some(&self.exe.stmt(cleanup.id).site))
+        };
+        if suspended && !frame.state.control.iter().any(target) {
+            return Err(malformed("packet departure has no entered cleanup"));
+        }
         if !interval
             .events()
             .skip(1)
+            .filter(|event| event.point.phase == SourcePhase::Leave)
             .map(|event| &event.point.site)
-            .eq(frame.state.control.iter().rev().filter_map(|control| {
-                let Position::Block(block, _) = control else {
-                    return None;
-                };
-                Some(
-                    &self
-                        .exe
-                        .block(frame.state.callee.compiled.blocks[*block].id)
-                        .site,
-                )
-            }))
+            .eq(frame
+                .state
+                .control
+                .iter()
+                .rev()
+                .take_while(|control| !target(control))
+                .filter_map(|control| {
+                    let Position::Block(block, _) = control else {
+                        return None;
+                    };
+                    Some(
+                        &self
+                            .exe
+                            .block(frame.state.callee.compiled.blocks[*block].id)
+                            .site,
+                    )
+                }))
         {
             return Err(malformed(
                 "return suffix differs from its entered source blocks",
@@ -125,8 +181,15 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(ValuePublication::Declined);
         }
         let published = self.publish_source_departure(frame.state.callee, activation, recipe)?;
+        #[cfg(test)]
+        if completion.units == 4 {
+            eprintln!(
+                "[DEBUG-r53-fee] return published={published} units={} charged={}",
+                completion.units, self.charged
+            );
+        }
         #[cfg(any(test, feature = "testing"))]
-        if published {
+        if published && !suspended {
             crate::machine::islands::witness::return_published();
             #[cfg(test)]
             if let Some(ordinal) = loop_ordinal {

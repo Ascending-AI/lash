@@ -47,6 +47,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &OperatorSite,
         args: &[Value],
     ) -> Result<ValuePublication, HeapFault> {
+        #[cfg(test)]
+        if self.scratch.chilled {
+            return Ok(ValuePublication::Unavailable);
+        }
         if !self.native_publication_room()
             || site.root.is_some()
             || site.counted.is_some()
@@ -91,6 +95,19 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         kernel: Option<(Value, u64)>,
     ) -> Result<ValuePublication, HeapFault> {
         let function = self.exe.lib(site.lib);
+        #[cfg(test)]
+        if function.header.name.as_str() == "tuple.get" {
+            eprintln!(
+                "[DEBUG-r53-tuple] native entered pc={} charges={} original={}",
+                site.pc,
+                site.charges.is_some(),
+                frame
+                    .state
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| source.original.is_some())
+            );
+        }
         let text = !prepared && function.header.signature.result == lash_kernel_value::Type::Text;
         if !self.native_publication_room()
             || function.limit.is_some()
@@ -135,8 +152,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         arguments.resize(function.arity, Value::Absent);
         // Check the complete source consumer before evaluating a prepared
         // answer. Unsupported expressions retain their original handler.
+        let resident = match (site.direct(self.exe), args.first()) {
+            (Some(Direct::Length(kind, units)), Some(value)) if value.kind() == kind => value
+                .handle()
+                .and_then(|handle| self.arena.len(handle).ok())
+                .and_then(|len| i64::try_from(len).ok())
+                .map(|len| (Value::Int(len), if self.charging { units } else { 0 })),
+            (Some(Direct::Item(_)), _) => self.item_answer(site, args),
+            (Some(Direct::Member(_)), _) => self.membership(site, args),
+            _ => None,
+        };
         let answer =
-            (|| {
+            resident.or_else(|| {
                 let (entry, fast) = function.specialization.prepared.as_ref()?;
                 if !self.depth_fits(site.depth)
                     || !function.header.signature.params.iter().zip(&arguments).all(
@@ -165,8 +192,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     return None;
                 }
                 self.answered(function, fast, &arguments, answer)
-            })();
-        let prepared = answer.is_some();
+            });
+        let prepared = resident.is_none() && answer.is_some();
+        #[cfg(test)]
+        if function.header.name.as_str() == "tuple.get" {
+            eprintln!("[DEBUG-r53-tuple] resident={}", resident.is_some());
+        }
         let LibRun::Native { native, .. } = &function.run else {
             return Ok(ValuePublication::Unavailable);
         };
@@ -193,16 +224,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Ok(ValuePublication::Unavailable);
         };
-        let answer = answer.or_else(|| match (site.direct(self.exe), args.first()) {
-            (Some(Direct::Length(kind, units)), Some(value)) if value.kind() == kind => value
-                .handle()
-                .and_then(|handle| self.arena.len(handle).ok())
-                .and_then(|len| i64::try_from(len).ok())
-                .map(|len| (Value::Int(len), if self.charging { units } else { 0 })),
-            (Some(Direct::Item(_)), _) => self.item_answer(site, args),
-            (Some(Direct::Member(_)), _) => self.membership(site, args),
-            _ => None,
-        });
         let scratch = contract
             .peak_scratch_bytes()
             .ok_or_else(|| malformed("native scratch contract is invalid"))?;
@@ -406,6 +427,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         )?;
         #[cfg(test)]
         if published {
+            if resident.is_some() && matches!(site.direct(self.exe), Some(Direct::Item(_))) {
+                super::super::super::DIRECT_ITEMS.with(|n| n.set(n.get() + 1));
+            }
             native_storage::published(true, &contract, args.len() < function.arity);
         }
         #[cfg(any(test, feature = "testing"))]

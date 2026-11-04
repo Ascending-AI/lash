@@ -1034,6 +1034,10 @@ impl KernelMachine {
             .tasks
             .get_mut(task.0 as usize)?
             .ok_or_else(|| fault("no task"))?;
+        let charge_completion = task_state
+            .frames
+            .caller_charging()?
+            .unwrap_or(gate.charging);
         let frame = task_state
             .frames
             .last_mut()?
@@ -1093,7 +1097,8 @@ impl KernelMachine {
             // A resident frame's slots hold its captured cells.
             captured: super::RESIDENT,
         };
-        let Some(mut active) = executor.resume(callee, frame, suffix.as_ref()) else {
+        let Some(mut active) = executor.resume(callee, frame, suffix.as_ref(), charge_completion)
+        else {
             return Ok(None);
         };
         let defer = suffix.as_ref().is_some_and(|suffix| suffix.defer);

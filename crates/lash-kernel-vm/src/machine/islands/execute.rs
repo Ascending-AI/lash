@@ -47,6 +47,11 @@ struct LibraryCompletion {
     debt: Option<crate::compile::room::charges::ReturnDebt>,
 }
 
+struct ResidentCompletion {
+    call: LibraryCall,
+    charging: bool,
+}
+
 impl LibraryCompletion {
     fn record(self, tape: Option<&ChargeTape>) {
         if self.units != 0
@@ -199,6 +204,7 @@ pub(super) struct Frame<'e> {
     handoff_live: &'e [u32],
     recovery: bool,
     boundary: Option<crate::compile::LibId>,
+    resident_completion: Option<ResidentCompletion>,
 }
 
 impl<'e> Frame<'e> {
@@ -231,6 +237,7 @@ impl<'e> Frame<'e> {
             handoff_live: &[],
             recovery: false,
             boundary: None,
+            resident_completion: None,
         }
     }
 }
@@ -621,7 +628,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             return self.slow_exit(active, &mut callers, slab, recovery, stop);
                         }
                     };
-                    if active.resident && callers.is_empty() && !active.callee.plan.charged {
+                    if active.resident
+                        && callers.is_empty()
+                        && !active.callee.plan.charged
+                        && active.resident_completion.is_none()
+                    {
                         // Its source frame still owns the bindings through
                         // completion charging. Transfer them before recycling.
                         self.charged += completion.units;
@@ -661,8 +672,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             return self.slow_exit(active, &mut callers, slab, recovery, stop);
                         }
                         source::ValuePublication::Unavailable => {
-                            self.charged += completion.units;
-                            completion.record(self.recorder);
+                            if !active.resident {
+                                self.charged += completion.units;
+                                completion.record(self.recorder);
+                            }
                         }
                     }
                     if active.resident && callers.is_empty() {
@@ -996,6 +1009,29 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     #[inline(always)]
     fn returning(&mut self, frame: &mut Values<'_, 'e>, value: Value) -> Result<Next, Stop> {
+        if frame.state.may_clean && frame.state.callee.compiled.cleanups {
+            match self
+                .publish_pending_return(frame, value)
+                .map_err(|error| self.halt(error.into()))?
+            {
+                source::ValuePublication::Published(_) => {
+                    return self.departure(
+                        frame,
+                        Departing {
+                            how: Departure::Return,
+                            value,
+                        },
+                    );
+                }
+                source::ValuePublication::Declined => {
+                    let Some(returned) = frame.state.returned else {
+                        return Err(self.halt(fault("a pending return lost its source operand")));
+                    };
+                    return Err(self.at_held(returned.pc, returned.reg, value));
+                }
+                source::ValuePublication::Unavailable => {}
+            }
+        }
         if frame
             .state
             .source
