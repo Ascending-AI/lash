@@ -115,29 +115,25 @@ impl<'e> OriginalCompiler<'e> {
         &self,
         code: compile::CodeId,
         statement: compile::StmtId,
-        prefix: &expr::ConstructorPrefix,
+        pc: u32,
     ) -> Result<Arc<OriginalPrefix>, Refused> {
         let exe = self.exe;
         let (stream, stmt, _) = exe.statement(statement);
-        let pc = prefix.pc();
         let canonical = match stmt.form {
             compile::Form::While { test, .. } if pc >= test.start && pc < test.end() => test,
             _ => stmt.ops,
         };
+        let prefix =
+            expr::ConstructorPrefix::compile(stream, canonical, pc).ok_or(Refused::Source)?;
         let key = (code, statement, canonical.start, canonical.len);
         {
             let mut checked = self.checked.borrow_mut();
             if !checked.contains(&key) {
-                ChargeProgram::constructor_packet(exe, code, statement, prefix)?;
+                ChargeProgram::constructor_packet(exe, code, statement, &prefix)?;
                 checked.insert(key);
             }
         }
-        let actual =
-            expr::ConstructorPrefix::compile(stream, canonical, pc).ok_or(Refused::Source)?;
-        if actual != *prefix {
-            return Err(Refused::Exit);
-        }
-        OriginalPrefix::from_constructor(exe, code, statement, prefix)
+        OriginalPrefix::from_constructor(exe, code, statement, &prefix)
     }
 }
 
@@ -147,9 +143,9 @@ impl OriginalPrefix {
         exe: &Executable,
         code: compile::CodeId,
         statement: compile::StmtId,
-        prefix: &expr::ConstructorPrefix,
+        pc: u32,
     ) -> Result<Arc<Self>, Refused> {
-        OriginalCompiler::new(exe).compile(code, statement, prefix)
+        OriginalCompiler::new(exe).compile(code, statement, pc)
     }
 
     fn from_constructor(

@@ -284,19 +284,22 @@ impl VerifiedCall {
                     })?,
                     doc::NativeResourceOrigin::Immutable,
                 );
-                let actual = function
-                    .specialization
-                    .prepared
-                    .as_ref()
-                    .and_then(|(entry, _)| entry.call(arguments));
-                if actual.is_none_or(|answer| !answer.same(&result)) {
+                if function
+                    .validate_known_scalar(arena, arguments, result)
+                    .is_none()
+                {
                     return Ok(false);
                 }
-                match native.resource_contract(doc::Args::new(
+                let query = native.resource_contract(doc::Args::new(
                     arguments,
                     arena.objects(),
                     &arena.semantics(),
-                )) {
+                ));
+                let query = match query {
+                    Ok(None) => function.canonical_scalar_contract(arena, arguments, result),
+                    other => other,
+                };
+                match query {
                     Ok(Some(contract)) if contract == expected => {}
                     Err(doc::NativeError::Host(error)) => return Err(error),
                     Err(doc::NativeError::Malformed(reason)) => {

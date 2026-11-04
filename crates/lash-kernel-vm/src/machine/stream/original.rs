@@ -298,7 +298,8 @@ mod prepared_proof_laws {
                 let exact =
                     ExactEvent::compile(source, Arc::clone(&interval), Successor::Normal).unwrap();
                 let compiled = ConstructorPrefix::compile(stream, stmt.ops, pc).unwrap();
-                let original = OriginalPrefix::compile(&exe, code, statement, &compiled).unwrap();
+                let original =
+                    OriginalPrefix::compile(&exe, code, statement, compiled.pc()).unwrap();
                 let registers = vec![Value::Absent; stmt.regs as usize];
                 let mut charged = 7;
                 let mut counters = crate::machine::tasks::Occurrences::for_source_law(0);

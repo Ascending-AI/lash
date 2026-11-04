@@ -71,6 +71,26 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     return answer;
                 }
             }
+            Opcode::Depart => {
+                let sites::Depart { pc, continuing } = &code.sites.depart[packet.x as usize];
+                if !self
+                    .publish_control_departure(frame, *continuing)
+                    .map_err(|error| self.halt(error.into()))?
+                {
+                    return Err(self.at(*pc));
+                }
+                return self.departure(
+                    frame,
+                    Departing {
+                        how: if *continuing {
+                            Departure::Continue
+                        } else {
+                            Departure::Break
+                        },
+                        value: Value::Null,
+                    },
+                );
+            }
             Opcode::Try => {
                 let sites::Try { id, finally, after } = &code.sites.try_[packet.x as usize];
 

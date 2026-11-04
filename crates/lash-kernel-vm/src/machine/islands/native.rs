@@ -32,8 +32,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         } else {
             0
         };
-        #[cfg(test)]
-        super::DIRECT_ITEMS.with(|n| n.set(n.get() + 1));
         Some((value, units))
     }
 

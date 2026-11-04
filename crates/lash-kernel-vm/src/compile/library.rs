@@ -1,5 +1,6 @@
 //! One admitted library function and the implementation that runs it.
 use super::*;
+mod scalar;
 use lash_kernel_doc::NativeFunction;
 
 pub(crate) struct Lib {

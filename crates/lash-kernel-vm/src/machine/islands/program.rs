@@ -326,15 +326,8 @@ impl<'e> Build<'e> {
         &self,
         pc: u32,
     ) -> Option<std::sync::Arc<crate::compile::room::charges::OriginalPrefix>> {
-        let statement = self.statement?;
-        let stmt = self.exe.stmt(statement);
-        let range = match stmt.form {
-            crate::compile::Form::While { test, .. } if pc >= test.start && pc < test.end() => test,
-            _ => stmt.ops,
-        };
-        let prefix = crate::compile::expr::ConstructorPrefix::compile(self.stream, range, pc)?;
         self.originals
-            .compile(self.placement.as_ref()?.code(), statement, &prefix)
+            .compile(self.placement.as_ref()?.code(), self.statement?, pc)
             .ok()
     }
 
@@ -686,11 +679,12 @@ impl<'e> Build<'e> {
                     after,
                 };
             }
-            StatementKind::Depart { close, .. } => {
+            StatementKind::Depart { close, continuing } => {
                 self.close(*close, 0);
-                self.emit(Op::Cold(Deferred::Source(
-                    self.exe.stmt(statement.id).ops.end() - 1,
-                )));
+                self.emit(Op::Depart {
+                    pc: self.exe.stmt(statement.id).ops.end() - 1,
+                    continuing: *continuing,
+                });
             }
             StatementKind::Return { value, close, reg } => {
                 self.expr(value)?;
@@ -925,28 +919,39 @@ impl<'e> Build<'e> {
     }
 
     fn native_expression(&mut self, expr: &Expr, can_publish: bool) -> Option<()> {
-        let (Kind::Native { lib, args, closes }
-        | Kind::Operator {
-            lib, args, closes, ..
-        }) = &expr.kind
-        else {
-            return None;
+        let (lib, args, closes) = match &expr.kind {
+            Kind::Native { lib, args, closes }
+            | Kind::Operator {
+                lib, args, closes, ..
+            } => (*lib, args, closes),
+            Kind::Call {
+                invoke,
+                args,
+                closes,
+                ..
+            } => (
+                self.stream.nested[invoke.act?.ix()].kind.operator_lib()?,
+                args,
+                closes,
+            ),
+            _ => return None,
         };
         let (pc, reg) = (expr.pc, expr.reg);
-        let extra = self
-            .exe
-            .lib(*lib)
+        let function = self.exe.lib(lib);
+        let extra = function
             .specialization
             .prepared
             .as_ref()
             .map_or(0, |(entry, _)| entry.depth());
         let mut site = NativeSite {
-            lib: *lib,
+            lib,
             close: closes.first().copied(),
             charges: None,
             pc,
             reg,
-            depth: if extra > 0 {
+            depth: if function.operation() {
+                Depth::Operation(extra)
+            } else if extra > 0 {
                 Depth::Template(extra)
             } else {
                 Depth::None
@@ -1093,9 +1098,16 @@ impl<'e> Build<'e> {
                 invoke,
             } => {
                 let Some(mut site) = operator_site(expr, self.exe) else {
-                    if matches!(self.exe.lib(*lib).run, LibRun::Native { .. }) {
-                        return self
-                            .native_expression(expr, self.root.is_none() && invoke.is_none());
+                    let function = self.exe.lib(*lib);
+                    let text_body = self.root.is_none()
+                        && invoke.is_none_or(|invoke| !invoke.call)
+                        && function.kernels(self.exe).text_body.is_some()
+                        && function.kernels(self.exe).concat.is_some();
+                    if matches!(function.run, LibRun::Native { .. }) || text_body {
+                        return self.native_expression(
+                            expr,
+                            self.root.is_none() && invoke.is_none_or(|invoke| !invoke.call),
+                        );
                     }
                     let args = self.args(args)?;
                     let close = self.ordered_closes(closes, reg);
@@ -1197,6 +1209,15 @@ impl<'e> Build<'e> {
                 closes,
                 site,
             } => {
+                if self.root.is_none()
+                    && !invoke.call
+                    && let Some(act) = invoke.act
+                    && let crate::compile::NestedKind::Body(lib) = self.stream.nested[act.ix()].kind
+                    && self.exe.lib(lib).kernels(self.exe).text_body.is_some()
+                    && self.exe.lib(lib).kernels(self.exe).concat.is_some()
+                {
+                    return self.native_expression(expr, true);
+                }
                 let inputs = self.call_reads(callee, args, reg);
                 let (read, declared) = match callee {
                     Callee::Read(read) => {

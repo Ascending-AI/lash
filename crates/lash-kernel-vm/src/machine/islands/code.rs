@@ -303,6 +303,10 @@ operations! {
     }
     structs {
         [] {
+            Depart depart {
+                pc: u32,
+                continuing: bool,
+            }
             Try try_ {
                 id: StmtId,
                 finally: Option<usize>,

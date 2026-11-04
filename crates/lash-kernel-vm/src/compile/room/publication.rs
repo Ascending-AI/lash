@@ -181,6 +181,7 @@ pub(super) struct EventRoles {
     slots: Arc<OwnerSlots>,
     inputs: Box<[Option<logical::Owner>]>,
     output: Option<logical::Owner>,
+    atoms: Box<[logical::Owner]>,
     reads: Box<[logical::Owner]>,
     groups: Box<[Box<[logical::Owner]>]>,
     sessions: Box<[logical::Owner]>,
@@ -236,6 +237,18 @@ impl EventRoles {
             slots: Arc::clone(&slots),
             inputs,
             output: event.output.as_ref().and_then(root),
+            atoms: event
+                .peak
+                .measures()
+                .filter_map(|measure| match measure {
+                    Measure::Local(owner @ Owner::Atom { at, .. })
+                        if event.point.phase == Phase::Enter && at == &event.point.site =>
+                    {
+                        root(owner)
+                    }
+                    _ => None,
+                })
+                .collect(),
             reads: reads.into_iter().collect(),
             groups: groups.into(),
             sessions: sessions.into_iter().collect(),
@@ -531,6 +544,7 @@ impl EventContext<'_> {
         if let Some(owner) = roles.output {
             writes.insert(stamp(owner, occurrence));
         }
+        writes.extend(roles.atoms.iter().map(|owner| stamp(*owner, occurrence)));
         if !roles.groups.is_empty() {
             let candidates = self.group_candidates()?;
             for group in &roles.groups {

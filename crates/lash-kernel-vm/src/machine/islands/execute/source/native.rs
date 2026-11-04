@@ -47,10 +47,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &OperatorSite,
         args: &[Value],
     ) -> Result<ValuePublication, HeapFault> {
+        #[cfg(test)]
+        if self.scratch.chilled {
+            return Ok(ValuePublication::Unavailable);
+        }
         if !self.native_publication_room()
-            || site.root.is_some()
-            || site.counted.is_some()
-            || site.act.is_some()
+            || (site.root.is_none() && site.counted.is_some())
             || !self.admits(site)
             || !matches!(self.exe.lib(site.lib).run, LibRun::Native { .. })
         {
@@ -79,6 +81,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 .and_then(|(value, units)| Some((value, units?))),
             _ => None,
         };
+        let root_ready = self.publish_root_arguments(frame, site, args)?;
+        if !root_ready {
+            return Ok(ValuePublication::Unavailable);
+        }
         self.publish_native_answer(frame, &native, args, true, kernel)
     }
 
@@ -91,6 +97,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         kernel: Option<(Value, u64)>,
     ) -> Result<ValuePublication, HeapFault> {
         let function = self.exe.lib(site.lib);
+
         let text = !prepared && function.header.signature.result == lash_kernel_value::Type::Text;
         if !self.native_publication_room()
             || function.limit.is_some()
@@ -117,26 +124,38 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Ok(unpaid) = source.next_after_commit(at) else {
             return Ok(ValuePublication::Unavailable);
         };
-        let Some(roles) = statement.source_roles_at(stream, site.pc) else {
-            return Ok(ValuePublication::Unavailable);
-        };
         let Some(op) = stream.ops.get(site.pc as usize) else {
             return Ok(ValuePublication::Unavailable);
         };
+        let root = matches!(op, lash_kernel_exec::Op::Act);
         let registers = op.reads();
-        if registers.len() != args.len() {
+        if !root && registers.len() != args.len() {
             return Ok(ValuePublication::Unavailable);
         }
-        let operands = registers
-            .iter()
-            .map(|reg| frame.regs[reg.0 as usize])
-            .collect();
+        let operands = if root {
+            args.to_vec()
+        } else {
+            registers
+                .iter()
+                .map(|reg| frame.regs[reg.0 as usize])
+                .collect()
+        };
         let mut arguments = args.to_vec();
         arguments.resize(function.arity, Value::Absent);
         // Check the complete source consumer before evaluating a prepared
         // answer. Unsupported expressions retain their original handler.
+        let resident = match (site.direct(self.exe), args.first()) {
+            (Some(Direct::Length(kind, units)), Some(value)) if value.kind() == kind => value
+                .handle()
+                .and_then(|handle| self.arena.len(handle).ok())
+                .and_then(|len| i64::try_from(len).ok())
+                .map(|len| (Value::Int(len), if self.charging { units } else { 0 })),
+            (Some(Direct::Item(_)), _) => self.item_answer(site, args),
+            (Some(Direct::Member(_)), _) => self.membership(site, args),
+            _ => None,
+        };
         let answer =
-            (|| {
+            resident.or_else(|| {
                 let (entry, fast) = function.specialization.prepared.as_ref()?;
                 if !self.depth_fits(site.depth)
                     || !function.header.signature.params.iter().zip(&arguments).all(
@@ -165,8 +184,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     return None;
                 }
                 self.answered(function, fast, &arguments, answer)
-            })();
-        let prepared = answer.is_some();
+            });
+        let prepared = resident.is_none() && answer.is_some();
+
         let LibRun::Native { native, .. } = &function.run else {
             return Ok(ValuePublication::Unavailable);
         };
@@ -179,6 +199,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             &self.arena.semantics(),
         )) {
             Ok(Some(contract)) if native_storage::supports(&contract) => contract,
+            Ok(None) => {
+                let Some((value, _)) = answer else {
+                    return Ok(ValuePublication::Unavailable);
+                };
+                doc::NativeResourceContract::returned(
+                    doc::Args::new(&arguments, self.arena.objects(), &self.arena.semantics()),
+                    &value,
+                )
+                .map_err(publication::native_fault)?
+            }
             Err(doc::NativeError::Host(error)) => return Err(error),
             Err(doc::NativeError::Malformed(reason)) => return Err(malformed(reason)),
             _ => {
@@ -193,16 +223,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Ok(ValuePublication::Unavailable);
         };
-        let answer = answer.or_else(|| match (site.direct(self.exe), args.first()) {
-            (Some(Direct::Length(kind, units)), Some(value)) if value.kind() == kind => value
-                .handle()
-                .and_then(|handle| self.arena.len(handle).ok())
-                .and_then(|len| i64::try_from(len).ok())
-                .map(|len| (Value::Int(len), if self.charging { units } else { 0 })),
-            (Some(Direct::Item(_)), _) => self.item_answer(site, args),
-            (Some(Direct::Member(_)), _) => self.membership(site, args),
-            _ => None,
-        });
         let scratch = contract
             .peak_scratch_bytes()
             .ok_or_else(|| malformed("native scratch contract is invalid"))?;
@@ -213,17 +233,49 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(ValuePublication::Unavailable);
         };
-        let Some(input_sites) = registers
-            .iter()
-            .map(|register| {
-                roles
-                    .iter()
-                    .find(|(reg, _)| reg == register)
-                    .map(|(_, at)| (**at).clone())
-            })
-            .collect::<Option<Vec<_>>>()
-        else {
-            return Ok(ValuePublication::Unavailable);
+        let input_selectors = if root {
+            source
+                .native_inputs(&at)
+                .map_err(|_| malformed("root native inputs failed verification"))?
+        } else {
+            let Some(roles) = statement.source_roles_at(stream, site.pc) else {
+                return Ok(ValuePublication::Unavailable);
+            };
+            let Some(inputs) = registers
+                .iter()
+                .map(|register| {
+                    roles
+                        .iter()
+                        .find(|(reg, _)| reg == register)
+                        .map(|(_, at)| room::Owner::Operand((**at).clone()))
+                })
+                .collect::<Option<Box<[_]>>>()
+            else {
+                return Ok(ValuePublication::Unavailable);
+            };
+            inputs
+        };
+        let mut occurrences = vec![];
+        let root_occurrence = if root {
+            let crate::compile::Form::Action(action) = &statement.form else {
+                return Ok(ValuePublication::Unavailable);
+            };
+            if action.guest {
+                occurrences.push(action.occurrence);
+                Some((
+                    Point {
+                        site: at.site.clone(),
+                        phase: SourcePhase::Enter,
+                    },
+                    self.counters
+                        .current(action.occurrence)
+                        .ok_or_else(|| malformed("root native has no occurrence"))?,
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
         };
         let activation = frame
             .state
@@ -233,20 +285,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let slots = source
             .owner_slots()
             .map_err(|_| malformed("native read owners failed verification"))?;
-        let root = |at| {
+        let owner = |selector: &room::Owner| {
             slots
-                .root(
-                    &room::Owner::Operand(at),
-                    self.task,
-                    activation.invocation.id(),
-                )
+                .root(selector, self.task, activation.invocation.id())
                 .ok_or_else(|| malformed("native read operand has no source owner"))
         };
         let mut inputs = Vec::new();
-        for at in input_sites {
-            inputs.push(root(at)?);
+        for selector in &input_selectors {
+            inputs.push(owner(selector)?);
         }
-        let output = root(at.site.clone())?;
+        let output = owner(&room::Owner::Operand(at.site.clone()))?;
         self.logical
             .borrow_mut()
             .transfer_source(self.arena, self.heap, &[], &[])?;
@@ -270,12 +318,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         } else {
             ledger.release_cost(&inputs, self.heap.pages())?
         };
-        let event = interval
-            .events()
-            .next()
-            .ok_or_else(|| malformed("native read event disappeared"))?;
-        let release = event.inputs.clone();
-        let facts = LeafExecution(
+        let release = input_selectors;
+        let mut facts = LeafExecution(
             [(
                 at.clone(),
                 LeafFacts {
@@ -286,7 +330,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         .filter_map(|value| value.handle())
                         .collect(),
                     values: [
-                        (Measure::Release(event.inputs.clone()), i128::from(released)),
+                        (Measure::Release(release.clone()), i128::from(released)),
                         (
                             Measure::NativeScratch {
                                 at: at.site.clone(),
@@ -301,6 +345,25 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             )]
             .into(),
         );
+        if root {
+            let Some((value, _)) = answer else {
+                return Ok(ValuePublication::Unavailable);
+            };
+            let holding = lash_kernel_state::kernel_internals::logical::Holding::from_native(
+                self.arena,
+                self.heap.pages(),
+                &value,
+            )?;
+            facts
+                .0
+                .get_mut(&at)
+                .ok_or_else(|| malformed("root native facts disappeared"))?
+                .values
+                .insert(
+                    Measure::Local(room::Owner::Operand(at.site.clone())),
+                    i128::from(holding.bytes()),
+                );
+        }
         let mut encoding = TokenWriter::new();
         encoding.seq(4);
         encoding.text("lash.source.native");
@@ -325,7 +388,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         _ => None,
                     })
                     .collect(),
-                action: None,
+                action: root_occurrence,
             },
         };
         let next = SourcePosition {
@@ -334,7 +397,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             ..start.clone()
         };
         let allowance = Allowance {
-            occurrences: vec![],
+            occurrences,
             before: 0,
             units: if self.accounting {
                 answer.map_or(0, |(_, units)| units)
@@ -406,6 +469,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         )?;
         #[cfg(test)]
         if published {
+            if resident.is_some() && matches!(site.direct(self.exe), Some(Direct::Item(_))) {
+                super::super::super::DIRECT_ITEMS.with(|n| n.set(n.get() + 1));
+            }
             native_storage::published(true, &contract, args.len() < function.arity);
         }
         #[cfg(any(test, feature = "testing"))]

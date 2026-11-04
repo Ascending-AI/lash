@@ -34,11 +34,8 @@ impl Proof {
             })
             || !crate::compile::import_result_fits(&function.header.signature.result, result)
             || function
-                .specialization
-                .prepared
-                .as_ref()
-                .and_then(|(entry, _)| entry.call(&arguments))
-                .is_none_or(|answer| !answer.same(&result))
+                .validate_known_scalar(arena, &arguments, result)
+                .is_none()
         {
             return Ok(None);
         }
@@ -49,11 +46,16 @@ impl Proof {
         else {
             return Ok(None);
         };
-        let contract = match implementation.resource_contract(lash_kernel_doc::Args::new(
+        let query = implementation.resource_contract(lash_kernel_doc::Args::new(
             &arguments,
             arena.objects(),
             &arena.semantics(),
-        )) {
+        ));
+        let query = match query {
+            Ok(None) => function.canonical_scalar_contract(arena, &arguments, result),
+            other => other,
+        };
+        let contract = match query {
             Ok(Some(contract)) => contract,
             _ => return Ok(None),
         };
@@ -164,19 +166,23 @@ impl Proof {
                         let result = candidate.result();
                         if exe
                             .lib(lib)
-                            .specialization
-                            .prepared
-                            .as_ref()
-                            .and_then(|(entry, _)| entry.call(&arguments))
-                            .is_none_or(|answer| !answer.same(&result))
+                            .validate_known_scalar(arena, &arguments, result)
+                            .is_none()
                         {
                             return Ok(None);
                         }
-                        let contract = match native.resource_contract(lash_kernel_doc::Args::new(
+                        let query = native.resource_contract(lash_kernel_doc::Args::new(
                             &arguments,
                             arena.objects(),
                             &arena.semantics(),
-                        )) {
+                        ));
+                        let query = match query {
+                            Ok(None) => exe
+                                .lib(lib)
+                                .canonical_scalar_contract(arena, &arguments, result),
+                            other => other,
+                        };
+                        let contract = match query {
                             Ok(Some(contract)) => contract,
                             _ => return Ok(None),
                         };

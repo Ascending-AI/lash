@@ -37,6 +37,7 @@ mod refine;
 pub(crate) mod region_isa;
 pub(crate) mod registers;
 mod session;
+pub(crate) use session::SourceSessionReads;
 pub(crate) mod sites;
 mod source_publication;
 mod steps;

@@ -849,6 +849,10 @@ pub(crate) fn decline_suspended_departure() {
     DECLINE_SUSPENDED_DEPARTURE.set(true);
 }
 #[cfg(test)]
+pub(in crate::machine) fn suspended_departure_declined() -> bool {
+    DECLINE_SUSPENDED_DEPARTURE.get()
+}
+#[cfg(test)]
 pub(in crate::machine) fn take_suspended_departure_decline() -> bool {
     DECLINE_SUSPENDED_DEPARTURE.replace(false)
 }
@@ -870,6 +874,10 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn decline_caught_departure() {
     DECLINE_CAUGHT_DEPARTURE.set(true);
+}
+#[cfg(test)]
+pub(in crate::machine) fn caught_departure_declined() -> bool {
+    DECLINE_CAUGHT_DEPARTURE.get()
 }
 #[cfg(test)]
 pub(in crate::machine) fn take_caught_departure_decline() -> bool {

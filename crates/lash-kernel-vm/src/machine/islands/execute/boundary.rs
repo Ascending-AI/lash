@@ -13,6 +13,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         callee: Callee<'e>,
         state: &mut crate::machine::Frame,
         suffix: Option<&super::SourceSuffix>,
+        charge_completion: bool,
     ) -> Option<Frame<'e>> {
         let mut window = self.scratch.windows.pop().unwrap_or_default();
         let control = &mut window.control;
@@ -121,6 +122,18 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame.recovery = recovery;
         frame.pc = pc;
         frame.resident = true;
+        if !callee.plan.charged
+            && let Some(call) = &state.library
+        {
+            frame.boundary = state.public_result.as_ref().map(|_| call.lib);
+            frame.resident_completion = Some(ResidentCompletion {
+                call: LibraryCall {
+                    lib: call.lib,
+                    args: call.args.clone(),
+                },
+                charging: charge_completion,
+            });
+        }
         frame.source = Some(super::super::source::Activation {
             invocation: self
                 .logical
@@ -190,6 +203,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 // the actual return into Incoming. Physical unwind must not
                 // rebuild roots or perform another ledger Leave.
                 state.logical = None;
+                if values.state.resident_completion.is_some() {
+                    state.library = None;
+                }
             }
             state.source_frontier = activation.frontier;
         }
@@ -428,6 +444,21 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 debt: None,
             });
         }
+        if let Some(completion) = &frame.state.resident_completion {
+            if !completion.charging {
+                return Ok(LibraryCompletion {
+                    units: 0,
+                    debt: None,
+                });
+            }
+            return self.library_completion(
+                frame,
+                completion.call.lib,
+                &completion.call.args,
+                value,
+                false,
+            );
+        }
         let Some(caller) =
             caller.filter(|caller| caller.state.callee.plan.charged && self.exe.charging())
         else {
@@ -454,8 +485,20 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .chain(std::iter::repeat(Value::Absent))
             .take(self.exe.lib(lib).arity)
             .collect();
-        let units = measured_formula(self.arena, &self.exe.lib(lib).charge, &args, Some(&value));
-        if let Some(units) = units.filter(|units| self.root_fits(0, *units, site.root.is_some())) {
+        self.library_completion(frame, lib, &args, value, site.root.is_some())
+    }
+
+    fn library_completion(
+        &mut self,
+        frame: &Values<'_, 'e>,
+        lib: crate::compile::LibId,
+        args: &[Value],
+        value: Value,
+        root: bool,
+    ) -> Result<LibraryCompletion, Stop> {
+        let units = measured_formula(self.arena, &self.exe.lib(lib).charge, args, Some(&value));
+
+        if let Some(units) = units.filter(|units| self.root_fits(0, *units, root)) {
             if units != 0
                 && let Some(tape) = self.recorder
             {
@@ -472,7 +515,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         phase: crate::compile::room::Phase::Commit,
                     },
                     lib,
-                    &args,
+                    args,
                     value,
                     self.arena,
                 )

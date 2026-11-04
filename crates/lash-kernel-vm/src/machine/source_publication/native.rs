@@ -78,14 +78,49 @@ impl KernelMachine {
         };
         let mut values = operands.clone();
         values.resize(function.arity, doc::Value::Absent);
+        let active = self
+            .tasks
+            .get_mut(running.task.0 as usize)?
+            .ok_or_else(|| fault("no task"))?
+            .frames
+            .len()
+            - usize::from(running.task == doc::TaskId::MAIN && self.session_cell);
+        let known = function
+            .specialization
+            .prepared
+            .as_ref()
+            .and_then(|(entry, _)| {
+                if active as u64 + u64::from(entry.depth()) > u64::from(self.bounds.call_depth)
+                    || !function.header.signature.params.iter().zip(&values).all(
+                        |(param, value)| {
+                            (param.optional && matches!(value, doc::Value::Absent))
+                                || crate::compile::import_result_fits(&param.ty, *value)
+                        },
+                    )
+                {
+                    return None;
+                }
+                let value = match function.scalar_kernel(&self.arena.borrow(), &values) {
+                    Some(answer) => answer?,
+                    None => entry.answer(&values, self.charging)?.value,
+                };
+                (crate::compile::scalar(&value)
+                    && crate::compile::import_result_fits(&function.header.signature.result, value))
+                .then_some((value, entry.depth()))
+            });
         let contract = loop {
             let query = {
                 let arena = self.arena.borrow();
-                native.resource_contract(doc::Args::new(
-                    &values,
-                    arena.objects(),
-                    &arena.semantics(),
-                ))
+                let semantics = arena.semantics();
+                let args = doc::Args::new(&values, arena.objects(), &semantics);
+                match (native.resource_contract(args), known) {
+                    (Ok(None), Some((value, _))) => doc::NativeResourceContract::returned(
+                        doc::Args::new(&values, arena.objects(), &semantics),
+                        &value,
+                    )
+                    .map(Some),
+                    (query, _) => query,
+                }
             };
             match query {
                 Ok(Some(contract)) if native_storage::supports(&contract) => break contract,
@@ -132,36 +167,6 @@ impl KernelMachine {
             .clone()
             .borrow()
             .release_cost(&inputs, self.heap.pages())?;
-        let active = self
-            .tasks
-            .get_mut(running.task.0 as usize)?
-            .ok_or_else(|| fault("no task"))?
-            .frames
-            .len()
-            - usize::from(running.task == doc::TaskId::MAIN && self.session_cell);
-        let known = function
-            .specialization
-            .prepared
-            .as_ref()
-            .and_then(|(entry, _)| {
-                if active as u64 + u64::from(entry.depth()) > u64::from(self.bounds.call_depth)
-                    || !function.header.signature.params.iter().zip(&values).all(
-                        |(param, value)| {
-                            (param.optional && matches!(value, doc::Value::Absent))
-                                || crate::compile::import_result_fits(&param.ty, *value)
-                        },
-                    )
-                {
-                    return None;
-                }
-                let answer = entry.answer(&values, self.charging)?;
-                (crate::compile::scalar(&answer.value)
-                    && crate::compile::import_result_fits(
-                        &function.header.signature.result,
-                        answer.value,
-                    ))
-                .then_some((answer.value, entry.depth()))
-            });
         let recipe = native_storage::NativeStorage {
             contract: contract.clone(),
             function,

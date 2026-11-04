@@ -28,12 +28,13 @@ pub(super) fn derive(
         .ops
         .get(range.start as usize)
         .ok_or(Refused::Source)?;
-    let (lib, args) = match op {
-        Op::Call { lib, args } | Op::Operator { lib, args } => (LibId(lib.0), args),
+    let (lib, arguments) = match op {
+        Op::Call { lib, args } | Op::Operator { lib, args } => (LibId(lib.0), args.len as usize),
         Op::Nested { act, args } => match stream.nested.get(act.ix()).map(|nested| &nested.kind) {
-            Some(compile::NestedKind::Body(lib)) => (*lib, args),
+            Some(compile::NestedKind::Body(lib)) => (*lib, args.len as usize),
             _ => return Err(Refused::Source),
         },
+        Op::Act => root_call(exe, statement, range.start)?,
         _ => return Err(Refused::Source),
     };
     let function = exe.lib(lib);
@@ -54,9 +55,14 @@ pub(super) fn derive(
         .get(range.start as usize)
         .and_then(Option::as_deref)
         .ok_or(Refused::Source)?;
-    let at = source_point(stream, site, op);
-    if at.phase != super::super::Phase::Commit {
+    let mut at = source_point(stream, site, op);
+    if at.phase != super::super::Phase::Commit
+        && !(matches!(op, Op::Act) && at.phase == super::super::Phase::Enter)
+    {
         return Err(Refused::Source);
+    }
+    if matches!(op, Op::Act) {
+        at.phase = super::super::Phase::Commit;
     }
     let mut formulas = Vec::new();
     let mut tape = Vec::new();
@@ -76,10 +82,17 @@ pub(super) fn derive(
             }
         }
     }
+    if pending.is_some() && matches!(op, Op::Act) && exe.code(code).charged {
+        tape.extend((0..arguments).map(|_| {
+            TapeEvent::Fixed(Weight::Atomic(
+                doc::plan::FormCharge::Argument.measurement().0,
+            ))
+        }));
+    }
     completion(
         exe,
         lib,
-        args.len as usize,
+        arguments,
         at.clone(),
         &mut formulas,
         &mut tape,
@@ -124,6 +137,35 @@ pub(super) fn after_closes(
     Ok((closes, formulas, at))
 }
 
+/// Authenticate the rooted action ABI against its original source call.
+fn root_call(
+    exe: &Executable,
+    statement: compile::StmtId,
+    pc: u32,
+) -> Result<(LibId, usize), Refused> {
+    let (stream, stmt, _) = exe.statement(statement);
+    let compile::Form::Action(action) = &stmt.form else {
+        return Err(Refused::Source);
+    };
+    let compile::ActionKind::Call { callee, args } = &action.kind else {
+        return Err(Refused::Source);
+    };
+    if pc != stmt.ops.start
+        || stream
+            .source_sites
+            .get(pc as usize)
+            .and_then(Option::as_deref)
+            != Some(&action.site)
+    {
+        return Err(Refused::Source);
+    }
+    let lib = match callee {
+        compile::Callee::Library(lib) | compile::Callee::CheckedHelper(lib) => *lib,
+        _ => return Err(Refused::Source),
+    };
+    Ok((lib, args.len()))
+}
+
 pub(super) fn depth(
     exe: &Executable,
     statement: compile::StmtId,
@@ -139,6 +181,7 @@ pub(super) fn depth(
                 _ => return Err(Refused::Source),
             }
         }
+        Some(Op::Act) => root_call(exe, statement, pc)?.0,
         _ => return Err(Refused::Source),
     };
     let function = exe.lib(lib);
@@ -170,6 +213,7 @@ impl ChargeProgram {
         let program = Self {
             source: Arc::clone(&exe.code(code).source_room),
             coverage: Coverage::NativeCompletion,
+            native_occurrence: None,
             native_depth: Some(depth(exe, statement, pc, false)?),
             statement,
             range,
@@ -195,6 +239,7 @@ impl ChargeProgram {
         let program = Self {
             source: Arc::clone(&exe.code(code).source_room),
             coverage: Coverage::NativeAfterCloses,
+            native_occurrence: None,
             native_depth: Some(depth(exe, statement, pc, true)?),
             statement,
             range,
@@ -232,6 +277,7 @@ impl ChargeProgram {
         let program = Self {
             source: Arc::clone(&exe.code(code).source_room),
             coverage: Coverage::NativePacket(pending),
+            native_occurrence: root_occurrence(exe, statement, pc)?,
             native_depth: Some(depth(exe, statement, pc, true)?),
             statement,
             range,
@@ -245,4 +291,53 @@ impl ChargeProgram {
         program.verify(exe, code)?;
         Ok(program)
     }
+}
+
+pub(super) fn root_occurrence(
+    exe: &Executable,
+    statement: compile::StmtId,
+    pc: u32,
+) -> Result<Option<usize>, Refused> {
+    let (stream, stmt, _) = exe.statement(statement);
+    if !matches!(stream.ops.get(pc as usize), Some(Op::Act)) {
+        return Ok(None);
+    }
+    root_call(exe, statement, pc)?;
+    let compile::Form::Action(action) = &stmt.form else {
+        return Err(Refused::Source);
+    };
+    Ok(action.guest.then_some(action.occurrence))
+}
+
+pub(super) fn canonical_root_native(
+    exe: &Executable,
+    code: compile::CodeId,
+    statement: compile::StmtId,
+    target: Option<compile::CodeId>,
+) -> bool {
+    if target.is_some() {
+        return false;
+    }
+    let (_, stmt, _) = exe.statement(statement);
+    let Ok((lib, count)) = root_call(exe, statement, stmt.ops.start) else {
+        return false;
+    };
+    let function = exe.lib(lib);
+    if !matches!(function.run, compile::LibRun::Native { .. }) {
+        return false;
+    }
+    let compile::Form::Action(action) = &stmt.form else {
+        return false;
+    };
+    let Ok(doc::Action::Call {
+        callee: doc::Callee::Local(identity),
+        args,
+    }) = exe.code(code).source_room.root_action(&Point {
+        site: action.site.clone(),
+        phase: super::super::Phase::Enter,
+    })
+    else {
+        return false;
+    };
+    *identity == function.specialization.function && args.len() == count
 }

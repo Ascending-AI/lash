@@ -92,7 +92,7 @@ fn publish(
     let source = &exe.code(code).source_room;
     let (stream, stmt, _) = exe.statement(statement);
     let compiled = ConstructorPrefix::compile(stream, stmt.ops, pc).unwrap();
-    let original = OriginalPrefix::compile(exe, code, statement, &compiled).unwrap();
+    let original = OriginalPrefix::compile(exe, code, statement, pc).unwrap();
     let at = Point {
         site: (**stream.source_sites[pc as usize].as_ref().unwrap()).clone(),
         phase: Phase::Commit,

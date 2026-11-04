@@ -348,12 +348,7 @@ pub(super) fn evaluate_native_room(
     {
         return Ok(None);
     }
-    let Some(answer) = function
-        .specialization
-        .prepared
-        .as_ref()
-        .and_then(|(entry, _)| entry.call(&input))
-    else {
+    let Some(answer) = function.prepared_scalar(arena, &input) else {
         return Ok(None);
     };
     if !super::scope::scalar(answer)
@@ -368,11 +363,16 @@ pub(super) fn evaluate_native_room(
     else {
         return Ok(None);
     };
-    let contract = match implementation.resource_contract(doc::Args::new(
+    let query = implementation.resource_contract(doc::Args::new(
         &input,
         arena.objects(),
         &arena.semantics(),
-    )) {
+    ));
+    let query = match query {
+        Ok(None) => function.canonical_scalar_contract(arena, &input, answer),
+        other => other,
+    };
+    let contract = match query {
         Ok(Some(contract)) => contract,
         Err(doc::NativeError::Host(error)) => return Err(error),
         Err(doc::NativeError::Malformed(reason)) => {

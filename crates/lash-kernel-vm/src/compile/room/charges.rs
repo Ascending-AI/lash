@@ -57,6 +57,7 @@ pub(crate) struct ChargeProgram {
     source: Arc<Source>,
     coverage: Coverage,
     native_depth: Option<u64>,
+    native_occurrence: Option<usize>,
     statement: compile::StmtId,
     range: OpRange,
     closes: Box<[Close]>,
@@ -99,7 +100,7 @@ impl ChargeDebt<'_> {
             }
         };
         Some(crate::admission::Allowance {
-            occurrences: vec![],
+            occurrences: self.program.native_occurrence.into_iter().collect(),
             before: 0,
             units: self.units,
             close: None,
@@ -179,6 +180,7 @@ impl ChargeProgram {
             source,
             coverage: target.map_or(Coverage::Span, Coverage::Callback),
             native_depth: None,
+            native_occurrence: None,
             statement,
             range,
             closes: closes.into(),
@@ -257,7 +259,12 @@ impl ChargeProgram {
                 native_completion::depth(exe, self.statement, self.range.start, true)?,
             ),
         };
-        if self.native_depth != native_depth {
+        let native_occurrence = if matches!(self.coverage, Coverage::NativePacket(_)) {
+            native_completion::root_occurrence(exe, self.statement, self.range.start)?
+        } else {
+            None
+        };
+        if self.native_occurrence != native_occurrence || self.native_depth != native_depth {
             return Err(Refused::Source);
         }
         if first != self.first
@@ -446,15 +453,21 @@ fn canonical_span_target(
             // The action writes register zero through the semantic ABI, not
             // Op::writes. Verify its actual source call and finite rooted
             // continuation, instead of inventing a nested-op location.
-            super::region::calls::target::resolve(exe, code, statement, stmt.ops.start, target)
+            (super::region::calls::target::resolve(exe, code, statement, stmt.ops.start, target)
                 .is_ok()
+                || native_completion::canonical_root_native(exe, code, statement, target))
                 && matches!(
                     stream
                         .ops
                         .get(stmt.ops.start as usize..stmt.ops.end() as usize),
                     Some([
                         Op::Act,
-                        Op::Bind { .. } | Op::WriteLocal { .. } | Op::End | Op::Return { .. }
+                        Op::Bind { .. }
+                            | Op::WriteLocal { .. }
+                            | Op::BindSession { .. }
+                            | Op::WriteSession { .. }
+                            | Op::End
+                            | Op::Return { .. }
                     ])
                 )
                 && compile::expr::statement(stream, stmt.ops, true).is_some()
