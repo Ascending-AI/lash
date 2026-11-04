@@ -46,6 +46,15 @@ pub(crate) struct Pc(u32);
 pub(crate) struct PrefixId(u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CallId(u32);
+impl CallId {
+    pub(crate) fn index(self) -> u32 {
+        self.0
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture(index: u32) -> Self {
+        Self(index)
+    }
+}
 
 impl CallId {
     pub(crate) fn index(self) -> u32 {
