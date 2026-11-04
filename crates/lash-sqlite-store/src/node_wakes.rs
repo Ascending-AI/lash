@@ -78,6 +78,8 @@ CREATE INDEX IF NOT EXISTS idx_node_wakes_published_at ON node_wakes(published_a
 const INSERT: &str =
     "INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (?1, ?2, ?3)";
 
+const EXPIRED: &str = "SELECT EXISTS (SELECT 1 FROM node_wakes WHERE published_at_ms < ?1)";
+
 /// Inspect and delete at most 4,096 hints per maintenance pass. The default
 /// two-second cadence can retire 2,048 hints/s, above the measured plain
 /// fixture's three hints/send at 146 sends/s. Recheck expiry on each row:
@@ -568,23 +570,35 @@ impl NodeWakes for SqliteNodeWakes {
             i64::try_from(self.store.conn.operational.wake_retention.as_millis())
                 .unwrap_or(i64::MAX),
         );
-        self.store
-            .observer
-            .observe_sql("node_wakes.prune", "sqlite", async {
-                self.store
-                    .conn
-                    .write_flow(move |tx| {
-                        let expired = cached_execute(tx, PRUNE, [oldest])?;
-                        Ok(if expired == 0 {
-                            crate::conn::TxOutcome::Rollback(())
-                        } else {
-                            crate::conn::TxOutcome::Commit(())
-                        })
-                    })
-                    .await
-                    .map_err(store_failure)
+        let expired = self
+            .store
+            .query(move |conn| {
+                Ok(Ok(conn
+                    .statement(EXPIRED)?
+                    .query_row([oldest], |row| row.get::<_, bool>(0))?))
             })
             .await?;
+        // A hint arriving after this read is found by the next poll. A
+        // pruning write still rechecks every candidate under the writer fence.
+        if expired {
+            self.store
+                .observer
+                .observe_sql("node_wakes.prune", "sqlite", async {
+                    self.store
+                        .conn
+                        .write_flow(move |tx| {
+                            let expired = cached_execute(tx, PRUNE, [oldest])?;
+                            Ok(if expired == 0 {
+                                crate::conn::TxOutcome::Rollback(())
+                            } else {
+                                crate::conn::TxOutcome::Commit(())
+                            })
+                        })
+                        .await
+                        .map_err(store_failure)
+                })
+                .await?;
+        }
         self.store.liveness(self.locks.clone()).await
     }
 

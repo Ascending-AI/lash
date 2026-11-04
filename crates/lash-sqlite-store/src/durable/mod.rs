@@ -409,7 +409,7 @@ impl SqliteDurableStore {
         &self,
         locks: LivenessLocks,
     ) -> Result<Vec<lash_durable::BootLiveness>, DurableError> {
-        self.read(move |tx| {
+        self.query(move |tx| {
             let boots = registered_boots(tx)?;
             let mut liveness = Vec::with_capacity(boots.len());
             for boot in boots {
