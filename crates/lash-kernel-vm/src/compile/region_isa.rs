@@ -6,7 +6,7 @@
 
 use super::room::region::calls::region_isa::CallPlan;
 use super::room::{Refused, Source};
-use super::{CodeId, Executable};
+use super::{CodeId, Executable, StmtId};
 use lash_kernel_doc::Value;
 use std::{convert::Infallible, marker::PhantomData, sync::Arc};
 
@@ -18,6 +18,7 @@ pub(crate) struct RegionDraft {
     source: Arc<Source>,
     ops: Box<[RegionOp]>,
     recovery: Box<[RecoveryMap]>,
+    call_sources: Box<[(StmtId, u32)]>,
 }
 
 pub(crate) struct RegionCode {
@@ -44,6 +45,12 @@ pub(crate) struct Pc(u32);
 pub(crate) struct PrefixId(u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CallId(u32);
+
+impl CallId {
+    pub(crate) fn index(self) -> u32 {
+        self.0
+    }
+}
 
 pub(crate) struct IntKernel {
     sealed: Infallible,
@@ -122,6 +129,20 @@ pub(crate) fn verify_region(
 }
 
 impl RegionDraft {
+    pub(crate) fn code(&self) -> CodeId {
+        self.code
+    }
+    pub(crate) fn source(&self) -> &Arc<Source> {
+        &self.source
+    }
+    /// Untrusted source coordinates indexed by CallId. Call compilation
+    /// authenticates each coordinate against the original executable.
+    pub(crate) fn call_sources(&self) -> &[(StmtId, u32)] {
+        &self.call_sources
+    }
+    pub(crate) fn ops(&self) -> &[RegionOp] {
+        &self.ops
+    }
     pub(crate) fn has_calls(&self) -> bool {
         self.ops
             .iter()
@@ -162,6 +183,30 @@ pub(crate) mod fixtures {
                 pending: None,
                 continuation,
             }]),
+            call_sources: Box::new([]),
         }
+    }
+    /// Source coordinates remain untrusted; this builds no verified code.
+    pub(crate) fn calls(
+        exe: &Executable,
+        code: CodeId,
+        sites: &[(StmtId, u32)],
+    ) -> Result<RegionDraft, Refused> {
+        if code.0 as usize >= exe.code_count() {
+            return Err(Refused::Source);
+        }
+        let end = u32::try_from(sites.len()).map_err(|_| Refused::Path)?;
+        Ok(RegionDraft {
+            code,
+            source: Arc::clone(&exe.code(code).source_room),
+            ops: (0..end)
+                .map(|index| RegionOp::Call {
+                    site: CallId(index),
+                    next: Pc(index + 1),
+                })
+                .collect(),
+            recovery: Box::new([]),
+            call_sources: sites.into(),
+        })
     }
 }
