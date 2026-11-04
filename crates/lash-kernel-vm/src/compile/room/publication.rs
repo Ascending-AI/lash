@@ -709,6 +709,17 @@ fn check_native(
     heap: &PagedHeap,
     arena: &Arena,
 ) -> Result<(), Refused> {
+    let prepared = match actual.outputs {
+        [(_, logical::PublicationValue::Prepared(value))] => {
+            if !value.graph().is_current(arena)
+                || !std::ptr::eq(actual.entities, value.graph().entities())
+            {
+                return Err(Refused::Facts);
+            }
+            Some(value)
+        }
+        _ => None,
+    };
     if actual.native.is_some_and(|bound| bound != contract)
         || actual.outputs.len() != 1
         || actual.member.is_some()
@@ -740,21 +751,33 @@ fn check_native(
     if owners.len() != actual.entities.len() {
         return Err(Refused::Facts);
     }
-    for (entity, (_, kind, members)) in actual.entities.iter().zip(declarations) {
-        let (actual_kind, actual_members) = entity
-            .body
-            .native_members(heap, arena, &owners)
-            .map_err(|_| Refused::Facts)?;
+    for (index, (entity, (_, kind, members))) in
+        actual.entities.iter().zip(declarations).enumerate()
+    {
+        let (actual_kind, actual_members) = if let Some(value) = prepared {
+            value
+                .graph()
+                .native_members(index, &owners)
+                .map_err(|_| Refused::Facts)?
+        } else {
+            entity
+                .body
+                .native_members(heap, arena, &owners)
+                .map_err(|_| Refused::Facts)?
+        };
         if actual_kind != kind || actual_members != *members {
             return Err(Refused::Facts);
         }
     }
-    if actual.outputs[0]
-        .1
-        .native_holding(heap, arena, &owners)
-        .map_err(|_| Refused::Facts)?
-        != contract.output
-    {
+    let output = if let Some(value) = prepared {
+        value.native_holding(&owners)
+    } else {
+        actual.outputs[0]
+            .1
+            .native_holding(heap, arena, &owners)
+            .map_err(|_| Refused::Facts)?
+    };
+    if output != contract.output {
         return Err(Refused::Facts);
     }
     // Scratch ordering is part of the declaration, including leases ending

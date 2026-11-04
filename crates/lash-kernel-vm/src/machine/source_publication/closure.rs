@@ -6,7 +6,6 @@ use crate::compile::{
 };
 use crate::machine::{Halt, KernelMachine, SlotState, fault, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::{VirtualBody, VirtualEntity};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
 impl KernelMachine {
@@ -265,7 +264,6 @@ fn prepare_closure_body(
     (
         ArenaHandle,
         lash_kernel_state::arena::PreparedInstallation<'_>,
-        VirtualEntity,
     ),
     HeapFault,
 > {
@@ -274,32 +272,17 @@ fn prepare_closure_body(
             "closure capture names disagree with actual cells",
         ));
     }
-    let entity = arena.next_provisional();
-    let entities = captures
-        .iter()
-        .map(|handle| {
-            arena.cell(*handle).map_err(native_fault)?;
-            arena
-                .facts(*handle)
-                .map_err(native_fault)?
-                .ledger_entity()
-                .ok_or_else(|| malformed("closure capture has no source identity"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let (handle, mut installation) = arena
+    for handle in &captures {
+        arena.cell(*handle).map_err(native_fault)?;
+        arena
+            .facts(*handle)
+            .map_err(native_fault)?
+            .ledger_entity()
+            .ok_or_else(|| malformed("closure capture has no source identity"))?;
+    }
+    arena
         .prepare_closure(identity, captures, code)
-        .map_err(native_fault)?;
-    installation
-        .bind_entity(handle, entity)
-        .map_err(native_fault)?;
-    Ok((
-        handle,
-        installation,
-        VirtualEntity {
-            entity,
-            body: VirtualBody::Closure(entities),
-        },
-    ))
+        .map_err(native_fault)
 }
 
 pub(in crate::machine) fn prepare_closure<'a>(
@@ -310,11 +293,12 @@ pub(in crate::machine) fn prepare_closure<'a>(
     code: doc::arena::LocalCode,
     output: lash_kernel_state::kernel_internals::logical::Owner,
 ) -> Result<super::construction::boundary::PreparedGraph<'a>, HeapFault> {
-    let (handle, installation, entity) = prepare_closure_body(arena, identity, captures, code)?;
+    let (handle, installation) = prepare_closure_body(arena, identity, captures, code)?;
     super::construction::boundary::finish(
         installation,
         heap,
         &[(output, doc::Value::Closure(handle))],
-        vec![entity],
+        usize::MAX,
+        false,
     )
 }

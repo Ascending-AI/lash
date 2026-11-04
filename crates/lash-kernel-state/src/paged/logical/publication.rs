@@ -439,6 +439,7 @@ fn projection_dependencies(
     for (_, value) in outputs {
         match value {
             RootValue::Value(value) => handles.extend(value.handle()),
+            RootValue::Prepared(value) => handles.extend_from_slice(value.graph().dependencies()),
             RootValue::Capture(handle) => handles.push(*handle),
             RootValue::Existing(_)
             | RootValue::Frame

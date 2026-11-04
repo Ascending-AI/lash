@@ -170,6 +170,11 @@ impl Ledger {
             }
             let value = match value {
                 RootValue::Value(value) => RootValue::Value(value),
+                RootValue::Prepared(_) => {
+                    return Err(invalid(
+                        "a detached value requires its construction boundary",
+                    ));
+                }
                 RootValue::Page(value) => RootValue::Page(value),
                 RootValue::Frozen(_) => {
                     return Err(invalid("a frame cannot borrow an incoming frozen value"));

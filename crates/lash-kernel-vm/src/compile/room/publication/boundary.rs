@@ -400,6 +400,7 @@ impl<D: BoundaryCharges> SourceAccepted<'_, PreparedPublication<'_, D>> {
 fn root(value: &PublicationValue) -> RootValue<'_> {
     match value {
         PublicationValue::Native(value) => RootValue::Value(value),
+        PublicationValue::Prepared(value) => RootValue::Prepared(value),
         PublicationValue::Page(value) => RootValue::Page(value),
         PublicationValue::Frozen(value) => RootValue::Frozen(value),
         PublicationValue::Capture(value) => RootValue::Capture(*value),

@@ -1,22 +1,21 @@
 //! Detached source-ordered storage and its single canonical ledger boundary.
 use super::super::{malformed, native_fault};
-use crate::machine::project::project_prepared;
 use lash_kernel_doc::{self as doc, Value, arena::ArenaHandle, heap::HeapFault};
 use lash_kernel_state::{
-    arena::{Arena, PreparedBatch, PreparedInstallation, Registration},
+    arena::{
+        Arena, PreparedBatch, PreparedGraphProof, PreparedInstallation, PreparedValueProof,
+        Registration,
+    },
     kernel_internals::{
         PagedHeap,
-        logical::{
-            BoundaryTransaction, Dependencies, Holding, Ledger, Owner, RootValue, VirtualBody,
-            VirtualEntity,
-        },
+        logical::{BoundaryTransaction, Dependencies, Holding, Ledger, Owner, RootValue},
     },
 };
 
 pub(in crate::machine) struct Output {
     pub(in crate::machine) owner: Owner,
     pub(in crate::machine) value: Value,
-    pub(in crate::machine) page: doc::heap::PageValue,
+    pub(in crate::machine) proof: PreparedValueProof,
     pub(in crate::machine) holding: Holding,
 }
 /// The registration owns every reserved slot, including allocations which do
@@ -25,7 +24,7 @@ pub(in crate::machine) struct PreparedGraph<'a> {
     pub(in crate::machine) registration: Registration<'a>,
     pub(in crate::machine) batch: PreparedBatch,
     pub(in crate::machine) outputs: Vec<Output>,
-    pub(in crate::machine) entities: Vec<VirtualEntity>,
+    pub(in crate::machine) proof: PreparedGraphProof,
 }
 
 impl<'a> PreparedGraph<'a> {
@@ -33,23 +32,29 @@ impl<'a> PreparedGraph<'a> {
     /// source owner must authenticate the selected exit and interior peak with
     /// this transaction before it can publish either storage or resources.
     pub(in crate::machine) fn into_boundary(
-        self,
+        mut self,
         ledger: &Ledger,
         heap: &PagedHeap,
         inputs: &[Owner],
         dependencies: Dependencies,
     ) -> Result<(BoundaryTransaction<'a>, PreparedGraphStorage), HeapFault> {
+        if !self
+            .batch
+            .matches_proof(&self.proof, self.registration.arena())
+        {
+            return Err(malformed("construction substituted its prepared batch"));
+        }
         let roots: Vec<_> = self
             .outputs
             .iter()
-            .map(|output| (output.owner, RootValue::Page(&output.page)))
+            .map(|output| (output.owner, RootValue::Prepared(&output.proof)))
             .collect();
         let (transaction, members) = ledger.prepare_construction_boundary(
             self.registration,
             heap,
             inputs,
             &roots,
-            &self.entities,
+            self.proof.entities(),
         )?;
         Ok((
             transaction.bind_dependencies(dependencies)?,
@@ -90,9 +95,11 @@ pub(in crate::machine) fn prepare_collection<'a>(
     }
     if matches!(&object, doc::NewObject::Tuple(values) if values.is_empty()) {
         let (value, installation) = arena.prepare_empty_tuple().map_err(native_fault)?;
-        let graph = finish(installation, heap, &[(output, value)], Vec::new())?;
-        if matches!(&graph.outputs[0].page, doc::heap::PageValue::Tuple(tuple) if tuple.summary.depth as usize > depth_limit)
-        {
+        if !installation.values_fit_depth(&[value], depth_limit) {
+            return Ok(None);
+        }
+        let graph = finish(installation, heap, &[(output, value)], depth_limit, false)?;
+        if graph.outputs[0].proof.depth() as usize > depth_limit {
             return Ok(None);
         }
         return Ok(Some(graph));
@@ -124,114 +131,42 @@ pub(in crate::machine) fn prepare_collections<'a>(
     outputs: &[(Owner, Value)],
     depth_limit: usize,
 ) -> Result<Option<PreparedGraph<'a>>, HeapFault> {
-    let first = arena.next_provisional().ordinal;
-    let handles: Vec<_> = new
-        .iter()
-        .filter_map(|(handle, object)| {
-            matches!(
-                object,
-                doc::NewObject::List(_)
-                    | doc::NewObject::Map(_)
-                    | doc::NewObject::Set(_)
-                    | doc::NewObject::Record(_)
-            )
-            .then_some(*handle)
-        })
-        .collect();
-    let allocations: Vec<_> = new
-        .iter()
-        .map(|(handle, object)| object.naming()(*handle))
-        .collect();
-    let mut installation = arena.prepare_install(new).map_err(native_fault)?;
-    let mut identities = Vec::new();
-    for (index, handle) in handles.iter().enumerate() {
-        let entity = doc::heap::EntityId {
-            family: doc::heap::FamilyId::PROVISIONAL,
-            ordinal: first
-                .checked_add(index as u64)
-                .ok_or_else(|| malformed("construction identity overflow"))?,
-        };
-        installation
-            .bind_entity(*handle, entity)
-            .map_err(native_fault)?;
-        identities.push(entity);
+    let installation = arena.prepare_install(new).map_err(native_fault)?;
+    if !installation.values_fit_depth(
+        &outputs.iter().map(|(_, value)| *value).collect::<Vec<_>>(),
+        depth_limit,
+    ) {
+        return Ok(None);
     }
-    // Validate immutable interiors even when no output retains them.
-    for value in allocations {
-        if let doc::heap::PageValue::Tuple(tuple) =
-            project_prepared(&mut installation, heap.pages(), &value)?
-            && tuple.summary.depth as usize > depth_limit
-        {
-            return Ok(None);
-        }
-    }
-    let mut entities = Vec::new();
-    for (handle, entity) in handles.into_iter().zip(identities) {
-        let object = installation.collection(handle).map_err(native_fault)?;
-        let body = project_body(&mut installation, heap, object)?;
-        entities.push(VirtualEntity { entity, body });
-    }
-    finish(installation, heap, outputs, entities).map(Some)
+    finish(installation, heap, outputs, depth_limit, false).map(Some)
 }
 
 pub(in crate::machine) fn finish<'a>(
     mut installation: PreparedInstallation<'a>,
     heap: &PagedHeap,
     values: &[(Owner, Value)],
-    entities: Vec<VirtualEntity>,
+    depth_limit: usize,
+    literals: bool,
 ) -> Result<PreparedGraph<'a>, HeapFault> {
+    let owners: Vec<_> = values.iter().map(|(owner, _)| *owner).collect();
+    let values: Vec<_> = values.iter().map(|(_, value)| *value).collect();
+    let proof = installation.prove_values(heap.pages(), &values, depth_limit, literals)?;
+    let (mut registration, batch) = installation.into_parts();
     let mut outputs = Vec::new();
-    for (owner, value) in values {
-        let page = project_prepared(&mut installation, heap.pages(), value)?;
-        let holding = Holding::from_page(heap.pages(), &page)?;
+    for (index, value) in values.into_iter().enumerate() {
+        let value_proof = proof.value(index);
         outputs.push(Output {
-            owner: *owner,
-            value: *value,
-            page,
-            holding,
+            owner: owners[index],
+            value,
+            holding: value_proof.holding(registration.arena())?,
+            proof: value_proof,
         });
     }
-    let (registration, batch) = installation.into_parts();
     Ok(PreparedGraph {
         registration,
         batch,
         outputs,
-        entities,
-    })
-}
-
-fn project_body(
-    installation: &mut PreparedInstallation<'_>,
-    heap: &PagedHeap,
-    object: doc::NewObject,
-) -> Result<VirtualBody, HeapFault> {
-    let mut project = |value| project_prepared(installation, heap.pages(), &value);
-    Ok(match object {
-        doc::NewObject::List(values) => VirtualBody::List(
-            values
-                .into_iter()
-                .map(&mut project)
-                .collect::<Result<_, _>>()?,
-        ),
-        doc::NewObject::Set(values) => VirtualBody::Set(
-            values
-                .into_iter()
-                .map(&mut project)
-                .collect::<Result<_, _>>()?,
-        ),
-        doc::NewObject::Map(entries) => VirtualBody::Map(
-            entries
-                .into_iter()
-                .map(|(key, value)| Ok((project(key)?, project(value)?)))
-                .collect::<Result<_, HeapFault>>()?,
-        ),
-        doc::NewObject::Record(entries) => VirtualBody::Record(
-            entries
-                .into_iter()
-                .map(|(key, value)| Ok((project(key)?, project(value)?)))
-                .collect::<Result<_, HeapFault>>()?,
-        ),
-        _ => return Err(malformed("construction body is not mutable")),
+        proof,
     })
 }
 
@@ -265,19 +200,13 @@ pub(in crate::machine) fn prepare_cell<'a>(
     value: Value,
     output: Owner,
 ) -> Result<PreparedGraph<'a>, HeapFault> {
-    let entity = arena.next_provisional();
-    let (cell, mut installation) = arena.prepare_cell(value).map_err(native_fault)?;
-    installation
-        .bind_entity(cell, entity)
-        .map_err(native_fault)?;
+    let (cell, installation) = arena.prepare_cell(value).map_err(native_fault)?;
     finish(
         installation,
         heap,
         &[(output, Value::ObjectRef(cell))],
-        vec![VirtualEntity {
-            entity,
-            body: VirtualBody::NativeVariable(value),
-        }],
+        usize::MAX,
+        false,
     )
 }
 

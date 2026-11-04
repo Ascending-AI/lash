@@ -1,7 +1,219 @@
 //! Detached nursery storage. The registration owns the uninstalled slots until
 //! the accepted journal installs exactly this batch or abandons it.
 use super::*;
+use crate::paged::logical::{Holding, RootValue, VirtualBody, VirtualEntity};
+use crate::paged::tree::Access;
+use lash_kernel_doc::heap::Identity;
 use lash_kernel_doc::heap::{HeapFault, HostResource};
+use lash_kernel_doc::{LogicalHeldV1 as Cost, NativeResourceHolding, NativeResourceOrigin};
+
+/// Immutable observations of one detached installation. Only the storage
+/// owner can build these facts; clones retain the same batch authority.
+#[derive(Clone)]
+pub struct PreparedGraphProof(std::rc::Rc<GraphFacts>);
+struct InstalledFact {
+    handle: ArenaHandle,
+    token: u64,
+    revision: u64,
+}
+struct GraphFacts {
+    published: std::cell::Cell<bool>,
+    installed: Vec<InstalledFact>,
+    arena: std::rc::Rc<()>,
+    epoch: u64,
+    tokens: u64,
+    freed: u64,
+    dependencies: Vec<ContentVersion>,
+    aliases: Vec<(ArenaHandle, EntityId)>,
+    entities: Vec<VirtualEntity>,
+    bodies: Vec<Holding>,
+    members: Vec<Option<NativeMembers>>,
+    handles: Vec<ArenaHandle>,
+    values: Vec<ValueFacts>,
+}
+type NativeMembers = (lash_kernel_doc::NativeResourceEntity, Vec<Occurrence>);
+#[derive(Clone, Copy)]
+struct Occurrence {
+    bytes: u64,
+    entity: Option<EntityId>,
+    alias: bool,
+}
+impl Occurrence {
+    fn native(
+        &self,
+        owners: &std::collections::BTreeMap<EntityId, lash_kernel_doc::NativeResourceOwner>,
+    ) -> NativeResourceHolding {
+        NativeResourceHolding {
+            bytes: self.bytes,
+            origin: if self.alias {
+                self.entity
+                    .and_then(|id| owners.get(&id).copied())
+                    .map_or(NativeResourceOrigin::Alias, NativeResourceOrigin::Fresh)
+            } else {
+                NativeResourceOrigin::Immutable
+            },
+        }
+    }
+}
+struct ValueFacts {
+    value: Value,
+    holding: Holding,
+    native: Occurrence,
+    depth: u32,
+    collection: Option<NewObject>,
+    literal: Option<lash_kernel_doc::Literal>,
+    callable: Option<lash_kernel_value::names::CallableId>,
+    closure: Option<(
+        std::sync::Arc<lash_kernel_doc::arena::ClosureIdentity>,
+        Vec<ArenaHandle>,
+    )>,
+}
+/// An exact output occurrence of a storage-owned detached graph.
+#[derive(Clone)]
+pub struct PreparedValueProof {
+    graph: PreparedGraphProof,
+    index: usize,
+}
+impl PreparedGraphProof {
+    /// Existing alias registration may consume the index capacity reserved
+    /// while binding fresh bodies. Finish that reservation before commit.
+    pub fn reserve_for_publication(&self, arena: &mut Arena) -> Result<(), HeapFault> {
+        if !self.is_current(arena) {
+            return Err(proof_fault("stale prepared graph capacity reservation"));
+        }
+        arena
+            .entities
+            .try_reserve(self.0.entities.len())
+            .map_err(|_| exhausted())
+    }
+    pub fn is_current(&self, arena: &Arena) -> bool {
+        arena.registration_active()
+            && std::rc::Rc::ptr_eq(&self.0.arena, &arena.identity)
+            && self.0.epoch == arena.registration_epoch
+            && self.0.tokens == arena.tokens
+            && self.0.freed == arena.freed
+            && self
+                .0
+                .dependencies
+                .iter()
+                .all(|version| arena.content_is(version))
+            && self.0.aliases.iter().all(|(handle, entity)| {
+                arena
+                    .facts(*handle)
+                    .is_ok_and(|facts| facts.ledger_entity() == Some(*entity))
+            })
+    }
+    pub fn same(&self, other: &Self) -> bool {
+        std::rc::Rc::ptr_eq(&self.0, &other.0)
+    }
+    pub fn entities(&self) -> &[VirtualEntity] {
+        &self.0.entities
+    }
+    pub fn body(&self, index: usize) -> &Holding {
+        &self.0.bodies[index]
+    }
+    pub fn native_members(
+        &self,
+        index: usize,
+        owners: &std::collections::BTreeMap<EntityId, lash_kernel_doc::NativeResourceOwner>,
+    ) -> Result<
+        (
+            lash_kernel_doc::NativeResourceEntity,
+            Vec<NativeResourceHolding>,
+        ),
+        HeapFault,
+    > {
+        let (kind, members) = self.0.members[index]
+            .as_ref()
+            .ok_or_else(|| proof_fault("prepared body has no native resource declaration"))?;
+        Ok((
+            *kind,
+            members.iter().map(|member| member.native(owners)).collect(),
+        ))
+    }
+    pub fn dependencies(&self) -> &[ArenaHandle] {
+        &self.0.handles
+    }
+    pub fn value(&self, index: usize) -> PreparedValueProof {
+        assert!(index < self.0.values.len());
+        PreparedValueProof {
+            graph: self.clone(),
+            index,
+        }
+    }
+    pub fn len(&self) -> usize {
+        self.0.values.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.values.is_empty()
+    }
+}
+impl PreparedValueProof {
+    /// A paid source receipt may restore a native value only after this exact
+    /// batch installed it. Representation cooling preserves content versions.
+    pub fn restore_value(&self, arena: &Arena) -> Result<Value, HeapFault> {
+        let graph = &self.graph.0;
+        if !graph.published.get()
+            || !std::rc::Rc::ptr_eq(&graph.arena, &arena.identity)
+            || !graph
+                .dependencies
+                .iter()
+                .all(|version| arena.content_is(version))
+            || !graph.installed.iter().all(|version| {
+                arena.facts(version.handle).is_ok_and(|facts| {
+                    facts.token == version.token && facts.content_revision == version.revision
+                })
+            })
+        {
+            return Err(proof_fault("unpublished or stale prepared recovery value"));
+        }
+        Ok(self.value())
+    }
+    pub fn graph(&self) -> &PreparedGraphProof {
+        &self.graph
+    }
+    pub fn value(&self) -> Value {
+        self.graph.0.values[self.index].value
+    }
+    pub fn same(&self, other: &Self) -> bool {
+        self.index == other.index && self.graph.same(&other.graph)
+    }
+    pub fn holding(&self, arena: &Arena) -> Result<Holding, HeapFault> {
+        if !self.graph.is_current(arena) {
+            return Err(HeapFault::Malformed(
+                "stale or foreign prepared value proof".into(),
+            ));
+        }
+        Ok(self.graph.0.values[self.index].holding.clone())
+    }
+    pub fn native_holding(
+        &self,
+        owners: &std::collections::BTreeMap<EntityId, lash_kernel_doc::NativeResourceOwner>,
+    ) -> NativeResourceHolding {
+        self.graph.0.values[self.index].native.native(owners)
+    }
+    pub fn entity(&self) -> Option<EntityId> {
+        self.graph.0.values[self.index].native.entity
+    }
+    pub fn depth(&self) -> u32 {
+        self.graph.0.values[self.index].depth
+    }
+    pub fn collection(&self) -> Option<&NewObject> {
+        self.graph.0.values[self.index].collection.as_ref()
+    }
+    pub fn callable(&self) -> Option<lash_kernel_value::names::CallableId> {
+        self.graph.0.values[self.index].callable
+    }
+    pub fn literal(&self) -> Option<&lash_kernel_doc::Literal> {
+        self.graph.0.values[self.index].literal.as_ref()
+    }
+    pub fn closure(&self) -> Option<(&lash_kernel_doc::arena::ClosureIdentity, &[ArenaHandle])> {
+        self.graph.0.values[self.index]
+            .closure
+            .as_ref()
+            .map(|(identity, captures)| (identity.as_ref(), captures.as_slice()))
+    }
+}
 
 struct Entry {
     handle: ArenaHandle,
@@ -41,6 +253,7 @@ fn exhausted() -> HeapFault {
 /// Prepared bodies and indexes, with every installation buffer already reserved.
 /// The matching registration must remain live until publication or abandonment.
 pub struct PreparedBatch {
+    proof: Option<PreparedGraphProof>,
     identity: std::rc::Rc<()>,
     tokens: u64,
     freed: u64,
@@ -54,6 +267,8 @@ pub struct PreparedBatch {
 /// An exclusive preparation guard. Splitting it transfers the registration to
 /// the canonical journal and the storage recipe to its infallible closure.
 pub struct PreparedInstallation<'a> {
+    holdings: HashMap<u32, Holding>,
+    observed: Vec<ArenaHandle>,
     registration: Registration<'a>,
     batch: PreparedBatch,
 }
@@ -264,6 +479,9 @@ impl<'a> PreparedInstallation<'a> {
         handle: ArenaHandle,
         entity: EntityId,
     ) -> Result<(), NativeError> {
+        if self.batch.proof.is_some() {
+            return Err(malformed("a sealed batch cannot change identities"));
+        }
         let arena = self.registration.arena();
         if entity.family != lash_kernel_doc::heap::FamilyId::PROVISIONAL
             || entity.ordinal < self.batch.next_provisional
@@ -540,6 +758,7 @@ impl Arena {
         reserve(&mut arena.facts, additional)?;
         reserve(&mut arena.zero, entries.len())?;
         let batch = PreparedBatch {
+            proof: None,
             identity: std::rc::Rc::clone(&arena.identity),
             tokens: arena.tokens,
             freed: arena.freed,
@@ -551,16 +770,624 @@ impl Arena {
             empty_tuple: None,
         };
         Ok(PreparedInstallation {
+            holdings: HashMap::default(),
+            observed: Vec::new(),
             registration,
             batch,
         })
     }
 }
+fn proof_fault(reason: &str) -> HeapFault {
+    HeapFault::Malformed(reason.into())
+}
+
+impl PreparedInstallation<'_> {
+    pub fn values_fit_depth(&self, values: &[Value], limit: usize) -> bool {
+        self.batch
+            .entries
+            .iter()
+            .map(|entry| naming(&entry.body, entry.handle))
+            .chain(values.iter().copied())
+            .all(|value| value_summary(self, &value).depth as usize <= limit)
+    }
+    /// Seal the exact detached view. Every allocation is validated, including
+    /// bodies that no output reaches. Mutable ordinals follow reservation order.
+    pub fn prove_values(
+        &mut self,
+        pages: &Access<'_>,
+        values: &[Value],
+        depth_limit: usize,
+        literals: bool,
+    ) -> Result<PreparedGraphProof, HeapFault> {
+        if self.batch.proof.is_some() {
+            return Err(proof_fault("a batch proof is already sealed"));
+        }
+        let mutable: Vec<_> = self
+            .batch
+            .entries
+            .iter()
+            .filter(|entry| is_mutable(&entry.body))
+            .map(|entry| entry.handle)
+            .collect();
+        for (index, handle) in mutable.iter().enumerate() {
+            let entity = EntityId {
+                family: lash_kernel_doc::heap::FamilyId::PROVISIONAL,
+                ordinal: self
+                    .batch
+                    .next_provisional
+                    .checked_add(index as u64)
+                    .ok_or_else(|| proof_fault("batch identity overflow"))?,
+            };
+            if self
+                .registration
+                .reserve_entity()
+                .map_err(|error| proof_fault(&error.to_string()))?
+                != entity
+            {
+                return Err(proof_fault("prepared allocation ordinals changed"));
+            }
+            self.bind_entity(*handle, entity)
+                .map_err(|error| proof_fault(&error.to_string()))?;
+        }
+        let allocations: Vec<_> = self
+            .batch
+            .entries
+            .iter()
+            .map(|entry| naming(&entry.body, entry.handle))
+            .collect();
+        for value in &allocations {
+            if value_summary(self, value).depth as usize > depth_limit {
+                return Err(proof_fault("prepared value exceeds the depth limit"));
+            }
+            self.proof_holding(pages, value)?;
+        }
+        let mut entities = Vec::new();
+        let mut bodies = Vec::new();
+        let mut members = Vec::new();
+        for handle in mutable {
+            let entity = self
+                .ledger_key(handle)
+                .map_err(|error| proof_fault(&error.to_string()))?;
+            let body = match self
+                .body(handle)
+                .map_err(|error| proof_fault(&error.to_string()))?
+            {
+                Body::List(_) => match self
+                    .collection(handle)
+                    .map_err(|error| proof_fault(&error.to_string()))?
+                {
+                    NewObject::List(values) => VirtualBody::NativeList(values),
+                    _ => unreachable!(),
+                },
+                Body::Map(_) => match self
+                    .collection(handle)
+                    .map_err(|error| proof_fault(&error.to_string()))?
+                {
+                    NewObject::Map(values) => VirtualBody::NativeMap(values),
+                    _ => unreachable!(),
+                },
+                Body::Set(_) => match self
+                    .collection(handle)
+                    .map_err(|error| proof_fault(&error.to_string()))?
+                {
+                    NewObject::Set(values) => VirtualBody::NativeSet(values),
+                    _ => unreachable!(),
+                },
+                Body::Record(_) => match self
+                    .collection(handle)
+                    .map_err(|error| proof_fault(&error.to_string()))?
+                {
+                    NewObject::Record(values) => VirtualBody::NativeRecord(values),
+                    _ => unreachable!(),
+                },
+                Body::Cell(value) => VirtualBody::NativeVariable(*value),
+                Body::Closure { captures, .. } => {
+                    let captures = captures.to_vec();
+                    VirtualBody::Closure(
+                        captures
+                            .into_iter()
+                            .map(|handle| {
+                                self.ledger_key(handle)
+                                    .map_err(|error| proof_fault(&error.to_string()))
+                            })
+                            .collect::<Result<_, _>>()?,
+                    )
+                }
+                _ => return Err(proof_fault("a mutable batch body changed kind")),
+            };
+            let (holding, native) = self.proof_body(pages, &body)?;
+            entities.push(VirtualEntity { entity, body });
+            bodies.push(holding);
+            members.push(native);
+        }
+        let mut outputs = Vec::new();
+        for value in values {
+            if value_summary(self, value).depth as usize > depth_limit {
+                return Err(proof_fault("prepared output exceeds the depth limit"));
+            }
+            let holding = self.proof_holding(pages, value)?;
+            let native = self.proof_occurrence(value, holding.bytes())?;
+            let collection = match value {
+                Value::Tuple(handle) => {
+                    if self
+                        .len(*handle)
+                        .map_err(|error| proof_fault(&error.to_string()))?
+                        == 0
+                    {
+                        Some(NewObject::Tuple(Vec::new()))
+                    } else {
+                        self.sequence(*handle)
+                            .ok()
+                            .map(|values| NewObject::Tuple(values.to_vec()))
+                    }
+                }
+                Value::List(handle)
+                | Value::Map(handle)
+                | Value::Set(handle)
+                | Value::Record(handle)
+                    if self
+                        .batch
+                        .entries
+                        .iter()
+                        .any(|entry| entry.handle == *handle) =>
+                {
+                    Some(
+                        self.collection(*handle)
+                            .map_err(|error| proof_fault(&error.to_string()))?,
+                    )
+                }
+                _ => None,
+            };
+            let closure = if let Value::Closure(handle) = value {
+                if let Body::Closure {
+                    identity, captures, ..
+                } = self
+                    .body(*handle)
+                    .map_err(|error| proof_fault(&error.to_string()))?
+                {
+                    Some((identity.clone(), captures.to_vec()))
+                } else {
+                    return Err(proof_fault("a closure proof names another body"));
+                }
+            } else {
+                None
+            };
+            outputs.push(ValueFacts {
+                value: *value,
+                holding,
+                native,
+                depth: value_summary(self, value).depth,
+                collection,
+                literal: if literals {
+                    self.proof_literal(value)?
+                } else {
+                    None
+                },
+                callable: if let Value::Function(handle) = value {
+                    match self
+                        .body(*handle)
+                        .map_err(|error| proof_fault(&error.to_string()))?
+                    {
+                        Body::Function(callable) => Some(**callable),
+                        _ => None,
+                    }
+                } else {
+                    None
+                },
+                closure,
+            });
+        }
+        let mut handles = Vec::new();
+        for entry in &self.batch.entries {
+            each_handle(&entry.body, &mut |handle| {
+                if !self
+                    .batch
+                    .entries
+                    .iter()
+                    .any(|entry| entry.handle == handle)
+                {
+                    handles.push(handle);
+                }
+            });
+        }
+        handles.extend_from_slice(&self.observed);
+        handles.extend(values.iter().filter_map(Value::handle).filter(|handle| {
+            !self
+                .batch
+                .entries
+                .iter()
+                .any(|entry| entry.handle == *handle)
+        }));
+        let mut dependencies = self.batch.dependencies.clone();
+        let mut aliases = Vec::new();
+        for handle in &handles {
+            let arena = self.registration.read_arena();
+            dependencies.push(
+                arena
+                    .content_version(*handle)
+                    .ok_or_else(|| proof_fault("prepared dependency is stale"))?,
+            );
+            if let Some(entity) = arena.facts(*handle).ok().and_then(Facts::ledger_entity) {
+                aliases.push((*handle, entity));
+            }
+        }
+        let arena = self.registration.read_arena();
+        let installed = self
+            .batch
+            .entries
+            .iter()
+            .map(|entry| InstalledFact {
+                handle: entry.handle,
+                token: entry.facts.token,
+                revision: entry.facts.content_revision,
+            })
+            .collect();
+        let graph = PreparedGraphProof(std::rc::Rc::new(GraphFacts {
+            published: std::cell::Cell::new(false),
+            installed,
+            arena: std::rc::Rc::clone(&arena.identity),
+            epoch: arena.registration_epoch,
+            tokens: arena.tokens,
+            freed: arena.freed,
+            dependencies,
+            aliases,
+            entities,
+            bodies,
+            members,
+            values: outputs,
+            handles,
+        }));
+        graph.reserve_for_publication(self.registration.arena())?;
+        self.batch.proof = Some(graph.clone());
+        Ok(graph)
+    }
+    fn observe_value(&mut self, value: &Value) -> Result<(), HeapFault> {
+        let mut pending = vec![*value];
+        while let Some(value) = pending.pop() {
+            let Some(handle) = value.handle() else {
+                continue;
+            };
+            if self.observed.contains(&handle) {
+                continue;
+            }
+            self.observed.push(handle);
+            let arena = self.registration.read_arena();
+            let body = arena
+                .body(handle)
+                .map_err(|error| proof_fault(&error.to_string()))?;
+            if matches!(value, Value::Tuple(_) | Value::Error(_))
+                && arena
+                    .facts(handle)
+                    .map_err(|error| proof_fault(&error.to_string()))?
+                    .page
+                    .get()
+                    .is_none()
+            {
+                each_member(body, &mut |value| pending.push(*value));
+            }
+        }
+        Ok(())
+    }
+    fn proof_occurrence(&mut self, value: &Value, bytes: u64) -> Result<Occurrence, HeapFault> {
+        let alias = matches!(
+            value,
+            Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) | Value::Closure(_)
+        );
+        let entity = if alias || matches!(value, Value::ObjectRef(_)) {
+            Some(
+                self.ledger_key(
+                    value
+                        .handle()
+                        .ok_or_else(|| proof_fault("prepared entity has no handle"))?,
+                )
+                .map_err(|error| proof_fault(&error.to_string()))?,
+            )
+        } else {
+            None
+        };
+        Ok(Occurrence {
+            bytes,
+            entity,
+            alias,
+        })
+    }
+    fn proof_holding(&mut self, pages: &Access<'_>, value: &Value) -> Result<Holding, HeapFault> {
+        let Some(handle) = value.handle() else {
+            return match value {
+                Value::Task(task) | Value::TaskRef(task) => {
+                    Holding::with_edges(Cost::REFERENCE, [Identity::Task(*task)], pages)
+                }
+                _ => Ok(Holding::scalar(
+                    self.registration.read_arena().logical_local(value)?,
+                )),
+            };
+        };
+        if matches!(value, Value::Tuple(_) | Value::Error(_))
+            && let Some(holding) = self.holdings.get(&handle.index())
+        {
+            return Ok(holding.clone());
+        }
+        let detached = self
+            .batch
+            .entries
+            .iter()
+            .any(|entry| entry.handle == handle);
+        let body = self
+            .body(handle)
+            .map_err(|error| proof_fault(&error.to_string()))?;
+        let valid = matches!(
+            (value, body),
+            (Value::List(_), Body::List(_))
+                | (Value::Map(_), Body::Map(_))
+                | (Value::Set(_), Body::Set(_))
+                | (Value::Record(_), Body::Record(_))
+                | (Value::Closure(_), Body::Closure { .. })
+                | (
+                    Value::ObjectRef(_),
+                    Body::Cell(_)
+                        | Body::List(_)
+                        | Body::Map(_)
+                        | Body::Set(_)
+                        | Body::Record(_)
+                        | Body::Closure { .. }
+                )
+                | (Value::Tuple(_), Body::Tuple(_))
+                | (Value::Error(_), Body::Error(_))
+                | (Value::BigInt(_), Body::BigInt(_))
+                | (Value::BigTimestamp(_), Body::Timestamp(_))
+                | (Value::LongText(_), Body::LongText(_))
+                | (Value::Bytes(_), Body::Bytes(_))
+                | (Value::Function(_), Body::Function(_))
+                | (Value::Handle(_), Body::Handle(_))
+        );
+        if !valid {
+            return Err(proof_fault("prepared value has another body kind"));
+        }
+        if !detached {
+            self.observe_value(value)?;
+            return Holding::from_native(self.registration.arena(), pages, value);
+        }
+        if is_mutable(body) {
+            let entity = self
+                .ledger_key(handle)
+                .map_err(|error| proof_fault(&error.to_string()))?;
+            return Holding::with_edges(Cost::REFERENCE, [Identity::Object(entity)], pages);
+        }
+        let mut children = Vec::new();
+        let base = match body {
+            Body::BigInt(integer) | Body::Timestamp(integer) => {
+                Cost::REFERENCE.checked_add(integer.bits().div_ceil(8))
+            }
+            Body::LongText(text) => Cost::REFERENCE.checked_add(text.summary.utf8_bytes),
+            Body::Bytes(bytes) => Cost::REFERENCE.checked_add(bytes.len),
+            Body::Function(_) => Cost::REFERENCE.checked_add(64),
+            Body::Handle(handle) => Cost::REFERENCE
+                .checked_add(handle.kind.len() as u64)
+                .and_then(|bytes| bytes.checked_add(handle.id.len() as u64)),
+            Body::Tuple(sequence) => {
+                children.extend_from_slice(
+                    ops::values(handle, &sequence.chunks)
+                        .map_err(|error| proof_fault(&error.to_string()))?,
+                );
+                Some(Cost::REFERENCE)
+            }
+            Body::Error(error) => {
+                if !matches!(error.kind, Value::Text(_) | Value::LongText(_))
+                    || !matches!(error.message, Value::Text(_) | Value::LongText(_))
+                {
+                    return Err(proof_fault("prepared error text is malformed"));
+                }
+                children.extend([error.kind, error.message, error.data]);
+                Some(Cost::REFERENCE)
+            }
+            _ => return Err(proof_fault("prepared immutable has another body kind")),
+        }
+        .ok_or_else(|| proof_fault("prepared occurrence cost overflow"))?;
+        let error = matches!(value, Value::Error(_));
+        let mut bytes = base;
+        let mut edges = Vec::new();
+        for (index, child) in children.iter().enumerate() {
+            let holding = self.proof_holding(pages, child)?;
+            bytes = bytes
+                .checked_add(
+                    holding
+                        .bytes()
+                        .checked_sub(if error && index < 2 {
+                            Cost::REFERENCE
+                        } else {
+                            0
+                        })
+                        .ok_or_else(|| proof_fault("prepared error cost underflow"))?,
+                )
+                .ok_or_else(|| proof_fault("prepared occurrence cost overflow"))?;
+            holding.visit_edges(pages, &mut |identity, count| {
+                edges.push((identity, count));
+                Ok(())
+            })?;
+        }
+        let holding = RootValue::prepared_holding(bytes, edges)?;
+        if matches!(value, Value::Tuple(_) | Value::Error(_)) {
+            self.holdings.insert(handle.index(), holding.clone());
+        }
+        Ok(holding)
+    }
+    fn proof_body(
+        &mut self,
+        pages: &Access<'_>,
+        body: &VirtualBody,
+    ) -> Result<(Holding, Option<NativeMembers>), HeapFault> {
+        use lash_kernel_doc::NativeResourceEntity as Kind;
+        let mut values = Vec::new();
+        let (kind, fields) = match body {
+            VirtualBody::NativeList(members) => {
+                values.extend_from_slice(members);
+                (Kind::List, 0)
+            }
+            VirtualBody::NativeMap(entries) => {
+                values.extend(entries.iter().flat_map(|(key, value)| [*key, *value]));
+                (Kind::Map, 0)
+            }
+            VirtualBody::NativeSet(members) => {
+                values.extend(members.iter().flat_map(|key| [*key, Value::Absent]));
+                (Kind::Set, 0)
+            }
+            VirtualBody::NativeRecord(entries) => {
+                let mut names = 0u64;
+                for (key, value) in entries {
+                    names = names
+                        .checked_add(
+                            keys::text(self, key)
+                                .map_err(|error| proof_fault(&error.to_string()))?
+                                .len() as u64,
+                        )
+                        .ok_or_else(|| proof_fault("record name overflow"))?;
+                    values.extend([*key, *value]);
+                }
+                (
+                    Kind::Record {
+                        field_name_bytes: names,
+                    },
+                    entries.len() as u64,
+                )
+            }
+            VirtualBody::NativeVariable(value) => {
+                values.push(*value);
+                (Kind::List, 0)
+            }
+            VirtualBody::Closure(captures) => {
+                return Ok((
+                    Holding::with_edges(
+                        Cost::OBJECT
+                            .checked_add(
+                                (captures.len() as u64)
+                                    .checked_mul(Cost::ENTITY_EDGE)
+                                    .ok_or_else(|| proof_fault("capture cost overflow"))?,
+                            )
+                            .ok_or_else(|| proof_fault("closure cost overflow"))?,
+                        captures.iter().copied().map(Identity::Object),
+                        pages,
+                    )?,
+                    None,
+                ));
+            }
+            _ => return Err(proof_fault("prepared body lost native provenance")),
+        };
+        let mut bytes = Cost::OBJECT;
+        let mut edges = Vec::new();
+        let mut members = Vec::new();
+        for (index, value) in values.iter().enumerate() {
+            let holding = self.proof_holding(pages, value)?;
+            bytes = bytes
+                .checked_add(holding.bytes())
+                .ok_or_else(|| proof_fault("prepared body cost overflow"))?;
+            holding.visit_edges(pages, &mut |identity, count| {
+                edges.push((identity, count));
+                Ok(())
+            })?;
+            if fields == 0 || index % 2 != 0 {
+                members.push(self.proof_occurrence(value, holding.bytes())?);
+            }
+        }
+        bytes = bytes
+            .checked_sub(
+                fields
+                    .checked_mul(Cost::REFERENCE)
+                    .ok_or_else(|| proof_fault("record cost overflow"))?,
+            )
+            .ok_or_else(|| proof_fault("record cost underflow"))?;
+        Ok((
+            RootValue::prepared_holding(bytes, edges)?,
+            if matches!(body, VirtualBody::NativeVariable(_)) {
+                None
+            } else {
+                Some((kind, members))
+            },
+        ))
+    }
+    fn proof_literal(&self, value: &Value) -> Result<Option<lash_kernel_doc::Literal>, HeapFault> {
+        use lash_kernel_doc::Literal as L;
+        Ok(Some(match value {
+            Value::Null => L::Null,
+            Value::Absent => L::Absent,
+            Value::Bool(value) => L::Bool(*value),
+            Value::Float(value) => L::Float(*value),
+            Value::Int(value) => L::Int((*value).into()),
+            Value::Text(value) => L::Text(value.as_str().into()),
+            Value::BigInt(handle) => match self
+                .body(*handle)
+                .map_err(|error| proof_fault(&error.to_string()))?
+            {
+                Body::BigInt(value) => L::Int(value.clone()),
+                _ => return Err(proof_fault("literal integer has another body")),
+            },
+            Value::LongText(handle) => match self
+                .body(*handle)
+                .map_err(|error| proof_fault(&error.to_string()))?
+            {
+                Body::LongText(text) => match &*text.chunks {
+                    [Chunk::Resident(text)] => L::Text(text.to_string()),
+                    _ => return Err(proof_fault("literal text is cold")),
+                },
+                _ => return Err(proof_fault("literal text has another body")),
+            },
+            Value::Bytes(handle) => match self
+                .body(*handle)
+                .map_err(|error| proof_fault(&error.to_string()))?
+            {
+                Body::Bytes(bytes) => match &*bytes.chunks {
+                    [Chunk::Resident(bytes)] => {
+                        L::Bytes(lash_kernel_doc::Bytes::new(bytes.to_vec()))
+                    }
+                    [] => L::Bytes(lash_kernel_doc::Bytes::new(Vec::new())),
+                    _ => return Err(proof_fault("literal bytes are cold")),
+                },
+                _ => return Err(proof_fault("literal bytes have another body")),
+            },
+            Value::Function(handle) => match self
+                .body(*handle)
+                .map_err(|error| proof_fault(&error.to_string()))?
+            {
+                Body::Function(callable) => L::Function(callable.function),
+                _ => return Err(proof_fault("literal function has another body")),
+            },
+            _ => return Ok(None),
+        }))
+    }
+}
+fn naming(body: &Body, handle: ArenaHandle) -> Value {
+    match body {
+        Body::List(_) => Value::List(handle),
+        Body::Map(_) => Value::Map(handle),
+        Body::Set(_) => Value::Set(handle),
+        Body::Record(_) => Value::Record(handle),
+        Body::Closure { .. } => Value::Closure(handle),
+        Body::Cell(_) => Value::ObjectRef(handle),
+        Body::Tuple(_) => Value::Tuple(handle),
+        Body::Error(_) => Value::Error(handle),
+        Body::BigInt(_) => Value::BigInt(handle),
+        Body::Timestamp(_) => Value::BigTimestamp(handle),
+        Body::LongText(_) => Value::LongText(handle),
+        Body::Bytes(_) => Value::Bytes(handle),
+        Body::Function(_) => Value::Function(handle),
+        Body::Handle(_) => Value::Handle(handle),
+        Body::Free => unreachable!("a detached batch contains a free body"),
+    }
+}
 impl PreparedBatch {
+    pub fn graph_proof(&self) -> Option<&PreparedGraphProof> {
+        self.proof.as_ref()
+    }
+    pub fn matches_proof(&self, proof: &PreparedGraphProof, arena: &Arena) -> bool {
+        self.proof.as_ref().is_some_and(|actual| actual.same(proof)) && self.is_current(arena)
+    }
     /// Journal preparation may grant identities, but may not change a body,
     /// release a generation, or install another allocation before this batch.
     pub fn is_current(&self, arena: &Arena) -> bool {
         arena.registration_active()
+            && self
+                .proof
+                .as_ref()
+                .is_none_or(|proof| proof.is_current(arena))
             && self.registration_epoch == arena.registration_epoch
             && std::rc::Rc::ptr_eq(&self.identity, &arena.identity)
             && self.tokens == arena.tokens
@@ -615,6 +1442,9 @@ impl PreparedBatch {
                 let facts = &mut arena.facts[handle.index() as usize];
                 facts.count = facts.count.saturating_add(1);
             });
+        }
+        if let Some(proof) = self.proof {
+            proof.0.published.set(true);
         }
     }
 }

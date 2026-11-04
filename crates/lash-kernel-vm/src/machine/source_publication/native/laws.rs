@@ -477,7 +477,7 @@ impl KernelMachine {
                 let arguments = if guard == 0 { &wrong[..] } else { storage.arguments() };
                 let wrong_owner = invocation.owner(Slot::Operand(u32::MAX));
                 let bound = event.bind_external(&frontier, &ledger.borrow(), arena, &self.heap, &mut prefix.facts,
-                    ExactRoots { inputs: vec![], outputs: vec![(if guard == 1 { wrong_owner } else { output }, lash_kernel_state::kernel_internals::logical::PublicationValue::Page(page.clone()))], ..Default::default() },
+                    ExactRoots { inputs: vec![], outputs: vec![(if guard == 1 { wrong_owner } else { output }, lash_kernel_state::kernel_internals::logical::PublicationValue::Prepared(page.clone()))], ..Default::default() },
                     prefix.next, prefix.allowance, facts,
                     ExternalFacts { operands: &[], arguments, member: None, entities, scratch: &scratch, native: Some(storage.contract()) }, &debt);
                 assert!(bound.is_err(), "external guard {guard} must reject the changed same-price fact");

@@ -7,6 +7,7 @@ use lash_kernel_value::tokens::encode_body;
 #[derive(Clone)]
 pub enum PublicationValue {
     Native(Value),
+    Prepared(crate::arena::PreparedValueProof),
     Page(PageValue),
     Frozen(FrozenRef),
     Capture(ArenaHandle),
@@ -19,6 +20,7 @@ impl PublicationValue {
     pub(in crate::paged::logical) fn root(&self) -> RootValue<'_> {
         match self {
             Self::Native(value) => RootValue::Value(value),
+            Self::Prepared(value) => RootValue::Prepared(value),
             Self::Page(value) => RootValue::Page(value),
             Self::Frozen(value) => RootValue::Frozen(value),
             Self::Capture(handle) => RootValue::Capture(*handle),
@@ -30,6 +32,7 @@ impl PublicationValue {
     pub(in crate::paged::logical) fn same(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Native(a), Self::Native(b)) => a.same(b),
+            (Self::Prepared(a), Self::Prepared(b)) => a.same(b),
             (Self::Page(a), Self::Page(b)) => encode_body(a) == encode_body(b),
             (Self::Frozen(a), Self::Frozen(b)) => a.root.id == b.root.id && a.summary == b.summary,
             (Self::Capture(a), Self::Capture(b)) => a == b,
@@ -41,6 +44,7 @@ impl PublicationValue {
     pub(in crate::paged::logical) fn handles(&self, out: &mut Vec<ArenaHandle>) {
         match self {
             Self::Native(value) => out.extend(value.handle()),
+            Self::Prepared(value) => out.extend_from_slice(value.graph().dependencies()),
             Self::Capture(handle) => out.push(*handle),
             _ => {}
         }
@@ -51,6 +55,7 @@ impl From<RootValue<'_>> for PublicationValue {
     fn from(value: RootValue<'_>) -> Self {
         match value {
             RootValue::Value(value) => Self::Native(*value),
+            RootValue::Prepared(value) => Self::Prepared((*value).clone()),
             RootValue::Page(value) => Self::Page(value.clone()),
             RootValue::Frozen(value) => Self::Frozen(*value),
             RootValue::Existing(owner) => Self::Existing(owner),

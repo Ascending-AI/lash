@@ -2,10 +2,10 @@
 use super::*;
 use crate::compile::LibRun;
 use doc::Value;
-use lash_kernel_state::arena::{PreparedBatch, Registration};
+use lash_kernel_state::arena::{PreparedBatch, PreparedValueProof, Registration};
 use lash_kernel_state::kernel_internals::logical::Ledger;
 use lash_kernel_state::kernel_internals::logical::{
-    BoundaryTransaction, Dependencies, Owner, PublicationValue as PV, VirtualBody, VirtualEntity,
+    BoundaryTransaction, Dependencies, Owner, PublicationValue as PV, VirtualEntity,
 };
 use room::{Measure, Point};
 
@@ -45,8 +45,7 @@ pub(in crate::machine) struct PreparedNative {
 struct DetachedNative<'a> {
     registration: Registration<'a>,
     storage: PreparedNative,
-    page: doc::heap::PageValue,
-    entities: Vec<VirtualEntity>,
+    proof: PreparedValueProof,
 }
 
 /// Detached storage remains unpublished until exact source acceptance.
@@ -135,7 +134,7 @@ impl<'program> SourceNative<'program> {
         )) = self.recipe.prepare_boundary(
             arena,
             &self.inputs,
-            |arena, storage, page, entities| {
+            |arena, storage, proof, entities| {
                 storage.bind_facts(&mut prefix.facts)?;
                 let formulas: Vec<_> = self.charges.formulas().collect();
                 let values = if formulas.is_empty() {
@@ -169,7 +168,7 @@ impl<'program> SourceNative<'program> {
                     &mut prefix.facts,
                     ExactRoots {
                         inputs: self.inputs.clone(),
-                        outputs: vec![(storage.output, PV::Page(page.clone()))],
+                        outputs: vec![(storage.output, PV::Prepared(proof.clone()))],
                         ..Default::default()
                     },
                     prefix.next,
@@ -196,10 +195,7 @@ impl<'program> SourceNative<'program> {
                 } else {
                     NativeBinding::Ordinary(bound)
                 };
-                let holding = lash_kernel_state::kernel_internals::logical::Holding::from_page(
-                    heap.pages(),
-                    page,
-                )?;
+                let holding = proof.holding(arena)?;
                 Ok(Some((bound, holding, debt)))
             },
         )?
@@ -240,7 +236,7 @@ impl NativeStorage<'_> {
         bind: impl FnOnce(
             &Arena,
             &PreparedNative,
-            &doc::heap::PageValue,
+            &PreparedValueProof,
             &[VirtualEntity],
         ) -> Result<Option<C>, HeapFault>,
     ) -> Result<Option<(NativeBoundary<'a>, C)>, HeapFault> {
@@ -254,13 +250,24 @@ impl NativeStorage<'_> {
         let Some(DetachedNative {
             mut registration,
             storage,
-            page,
-            entities,
+            proof,
         }) = self.prepare_storage(arena, inputs)?
         else {
             return Ok(None);
         };
-        let Some(bound) = bind(registration.arena(), &storage, &page, &entities)? else {
+        if !storage
+            .batch
+            .matches_proof(proof.graph(), registration.arena())
+        {
+            return Ok(None);
+        }
+        let Some(bound) = bind(
+            registration.arena(),
+            &storage,
+            &proof,
+            proof.graph().entities(),
+        )?
+        else {
             return Ok(None);
         };
         let Some(transaction) = ledger.borrow().prepare_native_boundary(
@@ -268,8 +275,7 @@ impl NativeStorage<'_> {
             heap,
             inputs,
             storage.output,
-            &page,
-            &entities,
+            &proof,
             &storage.contract,
             dependencies,
         )?
@@ -403,34 +409,7 @@ impl NativeStorage<'_> {
             (value, counter.spent(), 0, nursery.into_new())
         };
         let allocated = !new.is_empty();
-        let first = arena.next_provisional().ordinal;
-        let handles: Vec<_> = new
-            .iter()
-            .filter_map(|(handle, object)| {
-                matches!(
-                    object,
-                    doc::NewObject::List(_)
-                        | doc::NewObject::Map(_)
-                        | doc::NewObject::Set(_)
-                        | doc::NewObject::Record(_)
-                )
-                .then_some(*handle)
-            })
-            .collect();
         let mut installation = arena.prepare_install(new).map_err(native_fault)?;
-        let mut identities = Vec::new();
-        for (index, handle) in handles.iter().enumerate() {
-            let entity = doc::heap::EntityId {
-                family: doc::heap::FamilyId::PROVISIONAL,
-                ordinal: first
-                    .checked_add(index as u64)
-                    .ok_or_else(|| malformed("native identity overflow"))?,
-            };
-            installation
-                .bind_entity(*handle, entity)
-                .map_err(native_fault)?;
-            identities.push(entity);
-        }
         // Retain the canonical changing formula inputs while the detached
         // graph is readable. A region must bind these facts to its compiled
         // plan; it cannot accept the legacy allowance's fee as authority.
@@ -467,29 +446,26 @@ impl NativeStorage<'_> {
             };
             measurements.push((source, measure, measured));
         }
-        let mut entities = Vec::new();
-        for (handle, entity) in handles.into_iter().zip(identities) {
-            let body = installation.collection(handle).map_err(native_fault)?;
-            let body = project_body(&mut installation, self.heap, body)?;
-            entities.push(VirtualEntity { entity, body });
+        if !installation.values_fit_depth(&[value], self.limits.value_depth()) {
+            return Ok(None);
         }
-        let page = crate::machine::project::project_prepared(
-            &mut installation,
+        let graph = installation.prove_values(
             self.heap.pages(),
-            &value,
+            &[value],
+            self.limits.value_depth(),
+            false,
         )?;
+        let proof = graph.value(0);
+        let graph_entities = graph.entities().len();
         let (mut registration, batch) = installation.into_parts();
         let released = self.ledger.borrow().release_cost_preserving_graph(
             registration.arena(),
             self.heap,
             inputs,
-            &entities,
-            &page,
+            &proof,
         )?;
-        // Authenticate the result against its input-evaluated contract before
-        // exact source acceptance can publish the detached storage.
-        let actual = PV::Page(page.clone());
-        let owners = entities
+        let owners = graph
+            .entities()
             .iter()
             .zip(self.contract.events.iter().filter_map(|event| match event {
                 doc::NativeResourceEvent::Entity { owner, .. } => Some(*owner),
@@ -497,8 +473,7 @@ impl NativeStorage<'_> {
             }))
             .map(|(entity, owner)| (entity.entity, owner))
             .collect();
-        if actual.native_holding(self.heap, registration.arena(), &owners)? != self.contract.output
-        {
+        if proof.native_holding(&owners) != self.contract.output {
             return Ok(None);
         }
         Ok(Some(DetachedNative {
@@ -507,7 +482,7 @@ impl NativeStorage<'_> {
                 value,
                 batch,
                 allocated,
-                graph_entities: entities.len(),
+                graph_entities,
                 output: self.output,
                 contract: self.contract,
                 function: self.function.specialization.function,
@@ -521,8 +496,7 @@ impl NativeStorage<'_> {
                 release: self.release,
                 released,
             },
-            page,
-            entities,
+            proof,
         }))
     }
 }
@@ -667,47 +641,6 @@ pub(in crate::machine) fn supports(contract: &doc::NativeResourceContract) -> bo
                 } | doc::NativeResourceEvent::Scratch { .. }
             )
         })
-}
-
-fn project_body(
-    installation: &mut lash_kernel_state::arena::PreparedInstallation<'_>,
-    heap: &PagedHeap,
-    body: doc::NewObject,
-) -> Result<VirtualBody, HeapFault> {
-    let project = |installation: &mut lash_kernel_state::arena::PreparedInstallation<'_>, value| {
-        crate::machine::project::project_prepared(installation, heap.pages(), &value)
-    };
-    Ok(match body {
-        doc::NewObject::List(values) => VirtualBody::List(
-            values
-                .into_iter()
-                .map(|value| project(installation, value))
-                .collect::<Result<_, _>>()?,
-        ),
-        doc::NewObject::Set(values) => VirtualBody::Set(
-            values
-                .into_iter()
-                .map(|value| project(installation, value))
-                .collect::<Result<_, _>>()?,
-        ),
-        doc::NewObject::Map(values) => VirtualBody::Map(
-            values
-                .into_iter()
-                .map(|(key, value)| {
-                    Ok((project(installation, key)?, project(installation, value)?))
-                })
-                .collect::<Result<_, HeapFault>>()?,
-        ),
-        doc::NewObject::Record(values) => VirtualBody::Record(
-            values
-                .into_iter()
-                .map(|(key, value)| {
-                    Ok((project(installation, key)?, project(installation, value)?))
-                })
-                .collect::<Result<_, HeapFault>>()?,
-        ),
-        _ => return Err(malformed("native mutable recipe has another body kind")),
-    })
 }
 
 /// Retain the canonical lease boundaries, including a release before an entity

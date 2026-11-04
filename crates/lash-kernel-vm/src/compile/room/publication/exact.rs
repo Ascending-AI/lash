@@ -354,6 +354,14 @@ impl ExactEvent {
         {
             return Err(Refused::Source);
         }
+        for (_, value) in &roots.outputs {
+            if let ExactValue::Prepared(value) = value
+                && (!value.graph().is_current(arena)
+                    || !std::ptr::eq(external.entities, value.graph().entities()))
+            {
+                return Err(Refused::Facts);
+            }
+        }
         let slots = self.source.owner_slots()?;
         let view = EventView {
             inputs: &roots.inputs,
@@ -466,6 +474,9 @@ impl ExactEvent {
         for (_, value) in &roots.outputs {
             match value {
                 ExactValue::Native(value) => handles.extend(value.handle()),
+                ExactValue::Prepared(value) => {
+                    handles.extend_from_slice(value.graph().dependencies())
+                }
                 ExactValue::Capture(handle) => handles.push(*handle),
                 _ => {}
             }
@@ -798,6 +809,7 @@ impl Source {
 fn root_value(value: &ExactValue) -> RootValue<'_> {
     match value {
         ExactValue::Native(value) => RootValue::Value(value),
+        ExactValue::Prepared(value) => RootValue::Prepared(value),
         ExactValue::Existing(owner) => RootValue::Existing(*owner),
         ExactValue::Capture(handle) => RootValue::Capture(*handle),
         ExactValue::Page(value) => RootValue::Page(value),

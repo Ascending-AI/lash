@@ -18,6 +18,15 @@ impl Ledger {
         outputs: &[(Owner, RootValue<'_>)],
         entities: &[VirtualEntity],
     ) -> Result<(BoundaryTransaction<'a>, Vec<u64>), HeapFault> {
+        let graph = outputs.iter().find_map(|(_, value)| match value {
+            RootValue::Prepared(value) => Some(value.graph()),
+            _ => None,
+        });
+        if let Some(graph) = graph
+            && (!graph.is_current(registration.arena())
+                || !std::ptr::eq(entities, graph.entities())
+                || outputs.iter().any(|(_, value)| !matches!(value, RootValue::Prepared(value) if graph.same(value.graph()))))
+        { return Err(invalid("construction substituted its detached graph proof")); }
         let access = heap.pages();
         let mut fresh = BTreeSet::new();
         let mut headers = Vec::new();
@@ -25,19 +34,24 @@ impl Ledger {
         let mut members = Vec::new();
         let mut pending = Vec::new();
         let mut handles = Vec::new();
-        for entity in entities {
+        for (index, entity) in entities.iter().enumerate() {
             if !fresh.insert(entity.entity)
-                || registration.reserve_entity().map_err(|error| match error {
-                    lash_kernel_doc::NativeError::Host(error) => error,
-                    error => invalid(&error.to_string()),
-                })? != entity.entity
+                || (graph.is_none()
+                    && registration.reserve_entity().map_err(|error| match error {
+                        lash_kernel_doc::NativeError::Host(error) => error,
+                        error => invalid(&error.to_string()),
+                    })? != entity.entity)
                 || self.entity_holding(entity.entity, access)?.is_some()
             {
                 return Err(invalid(
                     "construction identities are not fresh source ordinals",
                 ));
             }
-            let body = entity.body.holding(heap, registration.arena())?;
+            let body = if let Some(graph) = graph {
+                graph.body(index).clone()
+            } else {
+                entity.body.holding(heap, registration.arena())?
+            };
             members.push(
                 body.bytes()
                     .checked_sub(Cost::OBJECT)
@@ -49,20 +63,22 @@ impl Ledger {
                 }
                 Ok(())
             })?;
-            match &entity.body {
-                VirtualBody::NativeList(values) | VirtualBody::NativeSet(values) => {
-                    handles.extend(values.iter().filter_map(Value::handle));
+            if graph.is_none() {
+                match &entity.body {
+                    VirtualBody::NativeList(values) | VirtualBody::NativeSet(values) => {
+                        handles.extend(values.iter().filter_map(Value::handle));
+                    }
+                    VirtualBody::NativeMap(entries) | VirtualBody::NativeRecord(entries) => {
+                        handles.extend(
+                            entries
+                                .iter()
+                                .flat_map(|(key, value)| [key.handle(), value.handle()])
+                                .flatten(),
+                        );
+                    }
+                    VirtualBody::NativeVariable(value) => handles.extend(value.handle()),
+                    _ => {}
                 }
-                VirtualBody::NativeMap(entries) | VirtualBody::NativeRecord(entries) => {
-                    handles.extend(
-                        entries
-                            .iter()
-                            .flat_map(|(key, value)| [key.handle(), value.handle()])
-                            .flatten(),
-                    );
-                }
-                VirtualBody::NativeVariable(value) => handles.extend(value.handle()),
-                _ => {}
             }
             headers.push(Change::Allocate {
                 entity: entity.entity,
@@ -99,8 +115,14 @@ impl Ledger {
                 );
             }
         }
+        if let Some(graph) = graph {
+            handles.extend_from_slice(graph.dependencies());
+        }
         let dependencies = Dependencies::capture(self, registration.arena(), &handles)
             .ok_or_else(|| invalid("construction facts disappeared"))?;
+        if let Some(graph) = graph {
+            graph.reserve_for_publication(registration.arena())?;
+        }
         Ok((
             BoundaryTransaction::from_program(
                 registration,

@@ -71,7 +71,7 @@ impl<const N: usize> FactTable for [Facts; N] {
 }
 
 mod batch;
-pub use batch::{PreparedBatch, PreparedInstallation};
+pub use batch::{PreparedBatch, PreparedGraphProof, PreparedInstallation, PreparedValueProof};
 
 mod bench;
 mod chunks;

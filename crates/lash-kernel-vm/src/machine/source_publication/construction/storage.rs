@@ -7,7 +7,7 @@ use lash_kernel_doc::{self as doc, Value, heap::HeapFault};
 use lash_kernel_state::{
     arena::{Arena, PreparedBatch},
     kernel_internals::logical::{
-        Dependencies, Holding, Owner, PublicationValue as ExactValue, RootValue, VirtualBody,
+        Dependencies, Holding, Owner, PublicationValue as ExactValue, VirtualBody,
     },
 };
 pub(in crate::machine) enum ConstructionValue<'a> {
@@ -167,35 +167,30 @@ impl Construction<'_> {
         let [output] = graph.outputs.as_slice() else {
             return Err(malformed("construction lost its output"));
         };
-        let (obligation, released) = if let [entity] = graph.entities.as_slice() {
-            let members = entity.body.member_bytes(heap, graph.registration.arena())?;
-            let released = ledger.release_cost_preserving_body(
-                graph.registration.arena(),
-                heap,
-                &self.inputs,
-                &entity.body,
-            )?;
-            let obligation = match &entity.body {
+        let released = ledger.release_cost_preserving_graph(
+            graph.registration.arena(),
+            heap,
+            &self.inputs,
+            &output.proof,
+        )?;
+        let obligation = if let [entity] = graph.proof.entities() {
+            let members = graph
+                .proof
+                .body(0)
+                .bytes()
+                .checked_sub(doc::LogicalHeldV1::OBJECT)
+                .ok_or_else(|| malformed("construction body lost its header"))?;
+            match &entity.body {
                 VirtualBody::Closure(captures) => (
                     Measure::CaptureEdges(self.at.site.clone()),
                     captures.len() as u64,
                 ),
                 _ => (Measure::Members(self.at.site.clone()), members),
-            };
-            (obligation, released)
+            }
         } else {
-            let released = ledger.release_cost_preserving(
-                graph.registration.arena(),
-                heap,
-                &self.inputs,
-                &[(self.output, RootValue::Page(&output.page))],
-            )?;
             (
-                (
-                    Measure::Local(room::Owner::Operand(self.at.site.clone())),
-                    output.holding.bytes(),
-                ),
-                released,
+                Measure::Local(room::Owner::Operand(self.at.site.clone())),
+                output.holding.bytes(),
             )
         };
         let facts = prefix
@@ -209,12 +204,12 @@ impl Construction<'_> {
             .insert(Measure::Release(self.release), i128::from(released));
         let roots = ExactRoots {
             inputs: self.inputs.clone(),
-            outputs: vec![(self.output, ExactValue::Page(output.page.clone()))],
+            outputs: vec![(self.output, ExactValue::Prepared(output.proof.clone()))],
             ..Default::default()
         };
         let external = ExternalFacts {
             operands: &self.operands,
-            entities: &graph.entities,
+            entities: graph.proof.entities(),
             ..Default::default()
         };
         let debt = self.charges.and_then(|charges| charges.bind(&[]));

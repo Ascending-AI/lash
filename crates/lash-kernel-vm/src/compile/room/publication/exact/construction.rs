@@ -166,6 +166,25 @@ impl ConstructionEvent {
         if claims != 1 {
             return Err(Refused::Facts);
         }
+        if let PV::Prepared(proof) = &actual.outputs[0].1 {
+            if !proof.graph().is_current(arena)
+                || !std::ptr::eq(external.entities, proof.graph().entities())
+            {
+                return Err(Refused::Facts);
+            }
+            return check_prepared_constructor(
+                self,
+                arena,
+                event,
+                external,
+                construction,
+                proof,
+                link,
+                slots,
+                occurrence,
+                check_cell,
+            );
+        }
         let body = match external.entities {
             [entity] if matches!(&actual.outputs[0].1, PV::Page(page) if page.object() == Some(entity.entity) || matches!(page, doc::heap::PageValue::Ref(doc::heap::Identity::Object(id)) if *id == entity.entity)) => {
                 Some(&entity.body)
@@ -278,6 +297,179 @@ impl ConstructionEvent {
         }
     }
 }
+#[expect(
+    clippy::too_many_arguments,
+    reason = "source constructor and its detached storage proof"
+)]
+fn check_prepared_constructor(
+    kind: &ConstructionEvent,
+    arena: &Arena,
+    event: &Event,
+    external: &ExternalFacts<'_>,
+    construction: &ConstructorFacts<'_>,
+    proof: &lash_kernel_state::arena::PreparedValueProof,
+    link: lash_kernel_value::content_ids::LinkId,
+    slots: &OwnerSlots,
+    occurrence: &Occurrence,
+    check_cell: impl Fn(logical::Owner, doc::arena::ArenaHandle) -> Result<(), Refused>,
+) -> Result<(), Refused> {
+    match kind {
+        ConstructionEvent::List
+        | ConstructionEvent::Tuple
+        | ConstructionEvent::Map
+        | ConstructionEvent::Set
+        | ConstructionEvent::Record(_) => {
+            let object = construction.construction.ok_or(Refused::Facts)?;
+            let values = external.operands;
+            match (kind, object) {
+                (ConstructionEvent::List, doc::NewObject::List(actual))
+                | (ConstructionEvent::Tuple, doc::NewObject::Tuple(actual))
+                | (ConstructionEvent::Set, doc::NewObject::Set(actual))
+                    if same_values(actual, values) => {}
+                (ConstructionEvent::Map, doc::NewObject::Map(entries))
+                    if entries.len() * 2 == values.len()
+                        && entries
+                            .iter()
+                            .flat_map(|(key, value)| [key, value])
+                            .zip(values)
+                            .all(|(a, b)| a.same(b)) => {}
+                (ConstructionEvent::Record(names), doc::NewObject::Record(entries))
+                    if entries.len() == names.len()
+                        && entries.len() == values.len()
+                        && entries.iter().zip(names.iter()).zip(values).all(
+                            |(((key, value), name), expected)| {
+                                arena.semantics().text(key).is_ok_and(|text| text == name)
+                                    && value.same(expected)
+                            },
+                        ) => {}
+                _ => return Err(Refused::Facts),
+            }
+            if !same_prepared_collection(arena, object, proof.collection().ok_or(Refused::Facts)?)?
+            {
+                return Err(Refused::Facts);
+            }
+        }
+        ConstructionEvent::Literal(expected) => {
+            let (literal, actual_link) = construction.literal.ok_or(Refused::Facts)?;
+            if literal != expected
+                || actual_link != link
+                || !external.entities.is_empty()
+                || !event.inputs.is_empty()
+                || proof.literal() != Some(expected)
+                || proof
+                    .callable()
+                    .is_some_and(|callable| callable.link != link)
+            {
+                return Err(Refused::Facts);
+            }
+        }
+        ConstructionEvent::Closure { function, captures } => {
+            let (identity, cells, names) = construction.closure.ok_or(Refused::Facts)?;
+            let (stored, stored_cells) = proof.closure().ok_or(Refused::Facts)?;
+            if identity.callable.link != link
+                || identity.callable.function != *function
+                || identity.site.link != link
+                || identity.site.site != event.point.site
+                || identity.capture_names.len() != captures.len()
+                || cells.len() != captures.len()
+                || names.len() != captures.len()
+                || !identity
+                    .capture_names
+                    .iter()
+                    .eq(captures.iter().map(|(name, _)| name))
+                || stored.callable != identity.callable
+                || stored.site != identity.site
+                || stored.capture_names != identity.capture_names
+                || stored_cells != cells
+                || external.entities.len() != 1
+                || proof.entity() != external.entities.first().map(|entity| entity.entity)
+            {
+                return Err(Refused::Facts);
+            }
+            let mut entities = Vec::new();
+            let mut seen = std::collections::BTreeSet::new();
+            for (name, cell) in names.iter().zip(cells) {
+                if !seen.insert(name) {
+                    return Err(Refused::Facts);
+                }
+                let (_, owner) = captures
+                    .iter()
+                    .find(|(expected, _)| expected == name)
+                    .ok_or(Refused::Facts)?;
+                check_cell(
+                    slots
+                        .root(owner, occurrence.task, occurrence.invocation)
+                        .ok_or(Refused::Source)?,
+                    *cell,
+                )?;
+                entities.push(
+                    arena
+                        .facts(*cell)
+                        .map_err(|_| Refused::Facts)?
+                        .ledger_entity()
+                        .ok_or(Refused::Facts)?,
+                );
+            }
+            if !matches!(&external.entities[0].body, logical::VirtualBody::Closure(actual) if *actual == entities)
+            {
+                return Err(Refused::Facts);
+            }
+        }
+        ConstructionEvent::Cell => {
+            let value = construction.cell.ok_or(Refused::Facts)?;
+            if proof.entity() != external.entities.first().map(|entity| entity.entity)
+                || !matches!(proof.value(), doc::Value::ObjectRef(_))
+                || !matches!(external.operands, [rhs] if rhs.same(&value))
+                || !matches!(external.entities, [logical::VirtualEntity { body: logical::VirtualBody::NativeVariable(actual), .. }] if actual.same(&value))
+            {
+                return Err(Refused::Facts);
+            }
+        }
+    }
+    Ok(())
+}
+fn same_prepared_collection(
+    arena: &Arena,
+    expected: &doc::NewObject,
+    actual: &doc::NewObject,
+) -> Result<bool, Refused> {
+    Ok(match (expected, actual) {
+        (doc::NewObject::List(a), doc::NewObject::List(b))
+        | (doc::NewObject::Tuple(a), doc::NewObject::Tuple(b)) => same_values(a, b),
+        (doc::NewObject::Set(a), doc::NewObject::Set(b)) => {
+            let mut seen = std::collections::HashSet::new();
+            let mut normalized = Vec::new();
+            for value in a {
+                if seen.insert(arena.key(value).map_err(|_| Refused::Facts)?) {
+                    normalized.push(*value);
+                }
+            }
+            same_values(&normalized, b)
+        }
+        (doc::NewObject::Map(a), doc::NewObject::Map(b))
+        | (doc::NewObject::Record(a), doc::NewObject::Record(b)) => {
+            let mut normalized: Vec<(doc::Value, doc::Value)> = Vec::new();
+            let mut indices =
+                std::collections::HashMap::<lash_kernel_state::arena::Key, usize>::new();
+            for (key, value) in a {
+                let key_value = arena.key(key).map_err(|_| Refused::Facts)?;
+                if let Some(index) = indices.get(&key_value).copied() {
+                    normalized[index].1 = *value;
+                } else {
+                    indices.insert(key_value, normalized.len());
+                    normalized.push((*key, *value));
+                }
+            }
+            normalized.len() == b.len()
+                && normalized
+                    .iter()
+                    .zip(b)
+                    .all(|((ak, av), (bk, bv))| ak.same(bk) && av.same(bv))
+        }
+        _ => false,
+    })
+}
+
 fn same_values(actual: &[doc::Value], expected: &[doc::Value]) -> bool {
     actual.len() == expected.len() && actual.iter().zip(expected).all(|(a, b)| a.same(b))
 }

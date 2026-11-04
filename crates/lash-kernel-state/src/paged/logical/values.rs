@@ -277,12 +277,22 @@ impl Ledger {
         heap: &super::super::heap_impl::PagedHeap,
         inputs: &[Owner],
         output: Owner,
-        value: &PageValue,
-        entities: &[VirtualEntity],
+        value: &crate::arena::PreparedValueProof,
         contract: &lash_kernel_doc::NativeResourceContract,
-        dependencies: Dependencies,
+        mut dependencies: Dependencies,
     ) -> Result<Option<BoundaryTransaction<'a>>, HeapFault> {
         use lash_kernel_doc::{NativeResourceEvent, NativeResourceExit};
+        let graph = value.graph();
+        if !graph.is_current(registration.arena()) {
+            return Ok(None);
+        }
+        let Some(graph_dependencies) =
+            Dependencies::capture(self, registration.arena(), graph.dependencies())
+        else {
+            return Ok(None);
+        };
+        dependencies.extend(graph_dependencies)?;
+        let entities = graph.entities();
         if contract.exit != NativeResourceExit::Returned
             || !dependencies.is_current(self, registration.arena())
         {
@@ -316,21 +326,15 @@ impl Ledger {
         if owners.len() != entities.len() {
             return Ok(None);
         }
-        for (entity, (_, kind, members)) in entities.iter().zip(&declarations) {
-            let (actual_kind, actual_members) =
-                entity
-                    .body
-                    .native_members(heap, registration.arena(), &owners)?;
+        for (index, (_, kind, members)) in declarations.iter().enumerate() {
+            let Ok((actual_kind, actual_members)) = graph.native_members(index, &owners) else {
+                return Ok(None);
+            };
             if actual_kind != *kind || actual_members != **members {
                 return Ok(None);
             }
         }
-        if PublicationValue::Page(value.clone()).native_holding(
-            heap,
-            registration.arena(),
-            &owners,
-        )? != contract.output
-        {
+        if value.native_holding(&owners) != contract.output {
             return Ok(None);
         }
         if entities.is_empty() {
@@ -339,7 +343,7 @@ impl Ledger {
                     registration,
                     heap,
                     inputs,
-                    &[(output, RootValue::Page(value))],
+                    &[(output, RootValue::Prepared(value))],
                 )?
                 .bind_dependencies(dependencies)?
                 .require_source_room(construction)
@@ -350,17 +354,15 @@ impl Ledger {
         let mut pending = Vec::new();
         let mut headers = Vec::with_capacity(entities.len());
         let mut bodies = Vec::with_capacity(entities.len());
-        for entity in entities {
-            if registration.reserve_entity().map_err(arena_fault)? != entity.entity
-                || self.entity_holding(entity.entity, access)?.is_some()
-            {
+        for (index, entity) in entities.iter().enumerate() {
+            if self.entity_holding(entity.entity, access)?.is_some() {
                 return Ok(None);
             }
             headers.push(Change::Allocate {
                 entity: entity.entity,
                 body: Holding::scalar(Cost::OBJECT),
             });
-            let body = entity.body.holding(heap, registration.arena())?;
+            let body = graph.body(index).clone();
             body.each_edge(access, &mut |edge| {
                 if let Identity::Object(child) = edge.target {
                     pending.push(child);
@@ -376,7 +378,7 @@ impl Ledger {
             registration.arena(),
             access,
             inputs,
-            &[(output, RootValue::Page(value))],
+            &[(output, RootValue::Prepared(value))],
             &mut pending,
         )?;
         pending.retain(|entity| !owners.contains_key(entity));
@@ -389,12 +391,13 @@ impl Ledger {
             .prepare_event(changes, access)?
             .require_source_room(construction)
             .ok_or_else(|| invalid("native construction peak overflow"))?;
+        graph.reserve_for_publication(registration.arena())?;
         Ok(Some(BoundaryTransaction::from_program(
             registration,
             dependencies,
             prepared,
             Vec::new(),
-            publication::RootProof::new(inputs, &[(output, RootValue::Page(value))]),
+            publication::RootProof::new(inputs, &[(output, RootValue::Prepared(value))]),
         )))
     }
 }

@@ -12,6 +12,7 @@ pub use value::PublicationValue;
 #[derive(Clone, Copy)]
 pub enum RootValue<'a> {
     Value(&'a Value),
+    Prepared(&'a crate::arena::PreparedValueProof),
     Page(&'a lash_kernel_doc::heap::PageValue),
     Frozen(&'a crate::paged::FrozenRef),
     Existing(Owner),
@@ -19,6 +20,22 @@ pub enum RootValue<'a> {
     Capture(ArenaHandle),
     /// A value-less departure record: zero bytes in a departure slot.
     Departure,
+}
+
+impl RootValue<'_> {
+    pub(crate) fn prepared_holding(
+        bytes: u64,
+        edges: impl IntoIterator<Item = (Identity, u64)>,
+    ) -> Result<Holding, HeapFault> {
+        let mut batch = links::EdgeBatch::default();
+        for (identity, count) in edges {
+            batch.push(identity, count)?;
+        }
+        Ok(Holding {
+            bytes,
+            links: batch.finish()?,
+        })
+    }
 }
 
 impl Ledger {
@@ -204,26 +221,27 @@ impl Ledger {
         arena: &mut Arena,
         heap: &PagedHeap,
         inputs: &[Owner],
-        entities: &[VirtualEntity],
-        output: &lash_kernel_doc::heap::PageValue,
+        output: &crate::arena::PreparedValueProof,
     ) -> Result<u64, HeapFault> {
-        let fresh: BTreeSet<_> = entities.iter().map(|entity| entity.entity).collect();
+        let graph = output.graph();
+        let fresh: BTreeSet<_> = graph
+            .entities()
+            .iter()
+            .map(|entity| entity.entity)
+            .collect();
         let access = heap.pages();
         let mut pending = Vec::new();
-        let mut preserve = |edge: &Edge| {
-            if let Identity::Object(entity) = edge.target
+        let mut preserve = |identity: Identity, _count| {
+            if let Identity::Object(entity) = identity
                 && !fresh.contains(&entity)
             {
                 pending.push(entity);
             }
             Ok(())
         };
-        Holding::from_page(access, output)?.each_edge(access, &mut preserve)?;
-        for entity in entities {
-            entity
-                .body
-                .holding(heap, arena)?
-                .each_edge(access, &mut preserve)?;
+        output.holding(arena)?.visit_edges(access, &mut preserve)?;
+        for index in 0..graph.entities().len() {
+            graph.body(index).visit_edges(access, &mut preserve)?;
         }
         self.release_cost_protecting(arena, heap, inputs, pending)
     }
@@ -280,6 +298,9 @@ impl Ledger {
         value: &RootValue<'_>,
     ) -> Result<Holding, HeapFault> {
         Ok(match value {
+            RootValue::Prepared(proof) if !matches!(owner, Owner::Frame { .. }) => {
+                proof.holding(arena)?
+            }
             RootValue::Frame if matches!(owner, Owner::Frame { .. }) => Holding::frame(),
             RootValue::Departure
                 if matches!(
