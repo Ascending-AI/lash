@@ -6,10 +6,67 @@ use lash_kernel_doc::{Expr, Node, Stmt};
 use lash_kernel_exec::Op;
 use lash_kernel_value::sites::Site;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 pub(crate) type SourceRoleList = Arc<[(lash_kernel_exec::Reg, Arc<Site>)]>;
-pub(crate) type SourceRoles = BTreeMap<u32, SourceRoleList>;
+#[derive(Default)]
+pub(crate) struct SourceRoles {
+    roles: BTreeMap<u32, SourceRoleList>,
+    verified: Vec<VerifiedHolding>,
+}
+
+struct VerifiedHolding {
+    body: Weak<lash_kernel_doc::Block>,
+    site: Site,
+    range: OpRange,
+    regs: u32,
+    ops: Box<[Op]>,
+    sites: Box<[Option<Arc<Site>>]>,
+    joins: BTreeMap<u32, Vec<super::SourceJoin>>,
+}
+impl VerifiedHolding {
+    fn matches(
+        &mut self,
+        stream: &Stream,
+        source: &room::Source,
+        range: OpRange,
+        regs: u32,
+    ) -> bool {
+        let matches = self.range == range
+            && self.regs == regs
+            && self.site == source.site
+            && (self.body.as_ptr() == Arc::as_ptr(&source.body)
+                || self.body.upgrade().is_some_and(|body| body == source.body))
+            && self.ops.as_ref()
+                == stream
+                    .ops
+                    .get(range.start as usize..range.end() as usize)
+                    .unwrap_or(&[])
+            && self.sites.as_ref()
+                == stream
+                    .source_sites
+                    .get(range.start as usize..range.end() as usize)
+                    .unwrap_or(&[])
+            && stream.source_sites.len() == stream.ops.len()
+            && self.joins.len() == stream.source_joins.range(range.start..range.end()).count()
+            && self
+                .joins
+                .iter()
+                .zip(stream.source_joins.range(range.start..range.end()))
+                .all(|((pc, joins), (other_pc, other))| {
+                    pc == other_pc
+                        && joins.len() == other.len()
+                        && joins
+                            .iter()
+                            .zip(other)
+                            .all(|(a, b)| a.from == b.from && a.to == b.to && a.value == b.value)
+                });
+        if matches && self.body.as_ptr() != Arc::as_ptr(&source.body) {
+            self.body = Arc::downgrade(&source.body);
+        }
+        matches
+    }
+}
 
 /// Child lists belong to this verification only, so altered streams still
 /// resolve every site against the independent source tree.
@@ -37,11 +94,51 @@ impl<'a> SourceNodes<'a> {
 }
 
 impl CompiledStmt {
+    /// A verdict uses the exact live source tree and immutable span inputs.
+    /// Expired bodies and altered spans require independent verification.
+    pub(crate) fn verify_holding_sites(
+        &self,
+        stream: &Stream,
+        source: &room::Source,
+        range: OpRange,
+    ) -> bool {
+        let Ok(mut cache) = self.source_roles.lock() else {
+            return false;
+        };
+        if cache
+            .verified
+            .iter_mut()
+            .any(|entry| entry.matches(stream, source, range, self.regs))
+        {
+            return true;
+        }
+        if !stream.verify_holding_sites(source, range, self.regs) {
+            return false;
+        }
+        // A statement has only its canonical span and, for a while, its test.
+        // Fresh executions replace an old verdict instead of retaining bodies.
+        cache.verified.retain(|entry| entry.range != range);
+        cache.verified.push(VerifiedHolding {
+            body: Arc::downgrade(&source.body),
+            site: source.site.clone(),
+            range,
+            regs: self.regs,
+            ops: stream.ops[range.start as usize..range.end() as usize].into(),
+            sites: stream.source_sites[range.start as usize..range.end() as usize].into(),
+            joins: stream
+                .source_joins
+                .range(range.start..range.end())
+                .map(|(pc, joins)| (*pc, joins.clone()))
+                .collect(),
+        });
+        true
+    }
+
     /// Cache only requested resume points. A representative forward path
     /// suffices because source joins give both arms identical exit owners.
     pub(crate) fn source_roles_at(&self, stream: &Stream, pc: u32) -> Option<SourceRoleList> {
         let mut cache = self.source_roles.lock().ok()?;
-        if let Some(roles) = cache.get(&pc) {
+        if let Some(roles) = cache.roles.get(&pc) {
             return Some(Arc::clone(roles));
         }
         let range = match self.form {
@@ -49,7 +146,7 @@ impl CompiledStmt {
             _ => self.ops,
         };
         let roles = stream.form_source_roles(range, self.regs, pc)?;
-        cache.insert(pc, Arc::clone(&roles));
+        cache.roles.insert(pc, Arc::clone(&roles));
         Some(roles)
     }
 }

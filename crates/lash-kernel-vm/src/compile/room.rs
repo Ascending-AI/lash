@@ -181,7 +181,7 @@ impl Amount {
             Measure::NativeScratch { at, function } => {
                 let call = facts.call(at, CallSource::Native(*function))?;
                 call.for_call(CallSource::Native(*function), None)?;
-                i128::from(call.native_contract.as_ref()?.peak_scratch_bytes()?)
+                i128::from(call.native_contract.as_ref()?.scratch_peak)
             }
             Measure::NativeRelease { at, callee, owners } => {
                 let called = facts.call(at, *callee)?;
@@ -417,9 +417,13 @@ pub(crate) struct CheckedRoom {
     owner: doc::constant_pool::PoolOwner,
     native: bool,
     whole: bool,
-    native_contract: Option<doc::NativeResourceContract>,
+    native_contract: Option<CheckedNative>,
     balance: Balance,
     exit: ExitKind,
+}
+struct CheckedNative {
+    contract: doc::NativeResourceContract,
+    scratch_peak: u64,
 }
 /// A body envelope remains tied to the actual evaluated call and both
 /// logical invocations. It cannot be rebound by supplying byte totals.
@@ -473,13 +477,15 @@ impl CheckedRoom {
         function: FunctionId,
         contract: &doc::NativeResourceContract,
     ) -> Option<Self> {
-        let retained = contract.retained_bytes()?;
-        let peak = contract.peak_extra_bytes()?;
+        let (retained, peak, scratch_peak) = contract.balances()?;
         Some(Self {
             owner: doc::constant_pool::PoolOwner::Function(function),
             native: true,
             whole: true,
-            native_contract: Some(contract.clone()),
+            native_contract: Some(CheckedNative {
+                contract: contract.clone(),
+                scratch_peak,
+            }),
             balance: Balance {
                 peak_extra: peak,
                 retained_delta: retained.into(),

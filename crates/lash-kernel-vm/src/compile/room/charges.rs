@@ -464,7 +464,7 @@ fn canonical_span_target(
                     .and_then(Option::as_deref)
                     == Some(&stmt.site)
         } else {
-            stream.verify_holding_sites(&body.source_room, canonical, stmt.regs)
+            stmt.verify_holding_sites(stream, &body.source_room, canonical)
         })
     {
         return Err(Refused::Source);

@@ -54,6 +54,7 @@ impl Linear {
     }
 }
 pub(super) struct PublicationSite {
+    pub(super) roles: OnceLock<Result<publication::EventRoles, Refused>>,
     pub(super) construction: Option<construction::ConstructionEvent>,
     pub(super) borrowed_inputs: bool,
     pub(super) restored_roles: Option<Box<[Site]>>,
@@ -121,20 +122,22 @@ impl Step {
         } else {
             None
         };
+        let assignment = match node {
+            doc::Node::Stmt(doc::Stmt::Assign {
+                place: doc::Place::Variable(name),
+                ..
+            }) => Some(name.clone()),
+            _ => None,
+        };
         let publication = PublicationSite {
+            roles: OnceLock::new(),
             construction: construction::ConstructionEvent::compile(source, &event.point)?,
             uncounted_resumption: event.point.phase == Phase::Restore
                 && matches!(node, doc::Node::Expr(doc::Expr::Call { .. })),
             restored_roles,
             borrowed_inputs: event.point.phase == Phase::Enter
                 && matches!(node, doc::Node::Expr(doc::Expr::Act(_))),
-            assignment: match node {
-                doc::Node::Stmt(doc::Stmt::Assign {
-                    place: doc::Place::Variable(name),
-                    ..
-                }) => Some(name.clone()),
-                _ => None,
-            },
+            assignment,
             field: match node {
                 doc::Node::Stmt(
                     doc::Stmt::Assign {

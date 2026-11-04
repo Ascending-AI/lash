@@ -185,7 +185,8 @@ impl NativeResourceContract {
         self.balances().map(|(_, _, scratch)| scratch)
     }
 
-    fn balances(&self) -> Option<(u64, u64, u64)> {
+    /// Retained bytes, peak extra bytes and scratch peak bytes, validated together.
+    pub fn balances(&self) -> Option<(u64, u64, u64)> {
         if self.output.bytes < LogicalHeldV1::REFERENCE {
             return None;
         }

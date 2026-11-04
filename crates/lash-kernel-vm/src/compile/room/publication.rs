@@ -174,6 +174,96 @@ impl Frontier {
 fn fault(text: &str) -> HeapFault {
     HeapFault::Malformed(text.into())
 }
+/// Invocation-free roots derived from a verified event. Dynamic publications
+/// still supply their actual task, invocation, values and ledger presence.
+pub(super) struct EventRoles {
+    slots: Arc<OwnerSlots>,
+    inputs: Box<[Option<logical::Owner>]>,
+    output: Option<logical::Owner>,
+    reads: Box<[logical::Owner]>,
+    groups: Box<[Box<[logical::Owner]>]>,
+    sessions: Box<[logical::Owner]>,
+    assignment: Option<logical::Owner>,
+    cell_assignment: bool,
+    field: Option<logical::Owner>,
+    calls: Box<[(Site, CallSource)]>,
+    scratch: Box<[Amount]>,
+}
+fn stamp(owner: logical::Owner, occurrence: &Occurrence) -> logical::Owner {
+    match owner {
+        logical::Owner::Value { slot, .. } => logical::Owner::Value {
+            task: occurrence.task,
+            invocation: occurrence.invocation,
+            slot,
+        },
+        logical::Owner::Frame { .. } => logical::Owner::Frame {
+            task: occurrence.task,
+            invocation: occurrence.invocation,
+        },
+        logical::Owner::Incoming(_) => logical::Owner::Incoming(occurrence.task),
+        other => other,
+    }
+}
+impl EventRoles {
+    pub(super) fn compile(
+        source: &Source,
+        event: &Event,
+        assignment: Option<&Name>,
+    ) -> Result<Self, Refused> {
+        let slots = source.owner_slots()?;
+        let root = |owner: &Owner| slots.root(owner, TaskId::MAIN, 0);
+        let inputs: Box<[_]> = event.inputs.iter().map(root).collect();
+        let mut reads: BTreeSet<_> = inputs.iter().flatten().copied().collect();
+        let mut groups = Vec::new();
+        let mut sessions = BTreeSet::new();
+        for measure in event.peak.measures().chain(event.delta.measures()) {
+            if let Measure::Release(owners) | Measure::NativeRelease { owners, .. } = measure {
+                for owner in owners {
+                    if let Some(owner) = root(owner) {
+                        reads.insert(owner);
+                    } else if let Some(group) = slots.group(owner, TaskId::MAIN, 0) {
+                        if matches!(owner, Owner::Sessions(_)) {
+                            sessions.extend(group);
+                        } else if !groups.contains(&group) {
+                            groups.push(group);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(Self {
+            slots: Arc::clone(&slots),
+            inputs,
+            output: event.output.as_ref().and_then(root),
+            reads: reads.into_iter().collect(),
+            groups: groups.into(),
+            sessions: sessions.into_iter().collect(),
+            assignment: assignment.and_then(|name| {
+                root(&Owner::Visible {
+                    at: event.point.site.clone(),
+                    name: name.clone(),
+                })
+            }),
+            cell_assignment: source.assigns_cell(&event.point.site),
+            field: root(&Owner::Operand(event.point.site.child(0))),
+            calls: event
+                .peak
+                .measures()
+                .filter_map(|measure| match measure {
+                    Measure::CallPeak { at, callee } => Some((at.clone(), *callee)),
+                    _ => None,
+                })
+                .collect(),
+            scratch: source
+                .room
+                .scratch
+                .iter()
+                .filter(|lease| lease.at == event.point)
+                .map(|lease| lease.amount.clone())
+                .collect(),
+        })
+    }
+}
 struct EventView<'a> {
     inputs: &'a [logical::Owner],
     outputs: &'a [(logical::Owner, logical::PublicationValue)],
@@ -390,7 +480,6 @@ impl EventContext<'_> {
             arena,
             earlier: _,
         } = *self;
-        let root = |owner: &Owner| slots.root(owner, occurrence.task, occurrence.invocation);
         let mut reads = BTreeSet::new();
         let mut writes = BTreeSet::new();
         if let Some(roles) = &site.restored_roles {
@@ -399,11 +488,23 @@ impl EventContext<'_> {
             }
             return self.check_resumption(event, roles, actual);
         }
+        let roles = site
+            .roles
+            .get_or_init(|| EventRoles::compile(source, event, site.assignment.as_ref()))
+            .as_ref()
+            .map_err(|error| *error)?;
+        if !std::ptr::eq(slots, roles.slots.as_ref()) && slots != roles.slots.as_ref() {
+            return Err(Refused::Source);
+        }
         if site.borrowed_inputs {
-            let expected: BTreeSet<_> = event
+            let expected: BTreeSet<_> = roles
                 .inputs
                 .iter()
-                .map(|owner| root(owner).ok_or(Refused::Source))
+                .map(|owner| {
+                    owner
+                        .map(|owner| stamp(owner, occurrence))
+                        .ok_or(Refused::Source)
+                })
                 .collect::<Result<_, _>>()?;
             let borrowed: BTreeSet<_> = actual.borrowed.iter().copied().collect();
             return if borrowed == expected
@@ -424,50 +525,41 @@ impl EventContext<'_> {
         if !actual.borrowed.is_empty() {
             return Err(Refused::Retained);
         }
-        for owner in &event.inputs {
-            if let Some(owner) = root(owner) {
-                reads.insert(owner);
-            }
+        reads.extend(roles.reads.iter().map(|owner| stamp(*owner, occurrence)));
+        reads.extend(roles.sessions.iter().copied());
+        if let Some(owner) = roles.output {
+            writes.insert(stamp(owner, occurrence));
         }
-        if let Some(owner) = &event.output
-            && let Some(owner) = root(owner)
-        {
-            writes.insert(owner);
-        }
-        let candidates = std::cell::OnceCell::new();
-        for measure in event.peak.measures().chain(event.delta.measures()) {
-            match measure {
-                Measure::Release(owners) | Measure::NativeRelease { owners, .. } => {
-                    for owner in owners {
-                        if let Some(owner) = root(owner) {
-                            reads.insert(owner);
-                        } else {
-                            let candidates = candidates
-                                .get_or_init(|| self.group_candidates())
-                                .as_ref()
-                                .map_err(|error| *error)?;
-                            if let Some(group) = slots.select_group(
-                                owner,
-                                occurrence.task,
-                                occurrence.invocation,
-                                candidates,
-                            ) {
-                                reads.extend(group.iter().copied());
-                            }
+        if !roles.groups.is_empty() {
+            let candidates = self.group_candidates()?;
+            for group in &roles.groups {
+                reads.extend(candidates.iter().copied().filter(|owner| {
+                    match *owner {
+                        logical::Owner::Value {
+                            task,
+                            invocation,
+                            slot,
+                        } if task == occurrence.task && invocation == occurrence.invocation => {
+                            group
+                                .binary_search(&logical::Owner::Value {
+                                    task: TaskId::MAIN,
+                                    invocation: 0,
+                                    slot,
+                                })
+                                .is_ok()
                         }
+                        _ => false,
                     }
-                }
-                _ => {}
+                }));
             }
         }
         // The source classification is compiled once with the verified route.
-        if let Some(name) = &site.assignment {
-            let owner = root(&Owner::Visible {
-                at: event.point.site.clone(),
-                name: name.clone(),
-            })
-            .ok_or(Refused::Source)?;
-            if source.assigns_cell(&event.point.site) {
+        if site.assignment.is_some() {
+            let owner = roles
+                .assignment
+                .map(|owner| stamp(owner, occurrence))
+                .ok_or(Refused::Source)?;
+            if roles.cell_assignment {
                 let edit = actual
                     .member
                     .as_ref()
@@ -493,27 +585,24 @@ impl EventContext<'_> {
             });
             writes.insert(logical::Owner::Incoming(occurrence.task));
         }
-        if event
+        if roles
             .inputs
             .iter()
-            .filter_map(root)
+            .filter_map(|owner| owner.map(|owner| stamp(owner, occurrence)))
             .any(|owner| !actual.inputs.contains(&owner))
         {
             return Err(Refused::Retained);
         }
-        let native = event
-            .peak
-            .measures()
-            .find_map(|measure| match measure {
-                Measure::CallPeak { at, callee } => facts.call(at, *callee),
-                _ => None,
-            })
+        let native = roles
+            .calls
+            .iter()
+            .find_map(|(at, callee)| facts.call(at, *callee))
             .and_then(|room| room.native_contract.as_ref());
         if actual.native.is_some() && native.is_none() {
             return Err(Refused::Facts);
         }
         if let Some(contract) = native {
-            check_native(actual, contract, heap, arena)?;
+            check_native(actual, &contract.contract, heap, arena)?;
         }
         if actual.inputs.iter().any(|owner| !reads.contains(owner))
             || actual
@@ -528,7 +617,9 @@ impl EventContext<'_> {
         if let Some(edit) = &actual.member {
             match (&edit.member, &site.field) {
                 (logical::Member::Field(actual), Some(expected)) if actual == expected => {
-                    let target = root(&Owner::Operand(event.point.site.child(0)))
+                    let target = roles
+                        .field
+                        .map(|owner| stamp(owner, occurrence))
                         .ok_or(Refused::Retained)?;
                     self.check_reference(target, edit.handle)?;
                     if !matches!(arena.body(edit.handle), Ok(doc::arena::Body::Record(_))) {
@@ -537,10 +628,12 @@ impl EventContext<'_> {
                 }
                 (logical::Member::Field(_), _) | (_, Some(_)) => return Err(Refused::Retained),
                 (logical::Member::List(_) | logical::Member::Table(_), None) => {
-                    let target = event
+                    let target = roles
                         .inputs
                         .first()
-                        .and_then(root)
+                        .copied()
+                        .flatten()
+                        .map(|owner| stamp(owner, occurrence))
                         .ok_or(Refused::Retained)?;
                     self.check_reference(target, edit.handle)?;
                 }
@@ -548,15 +641,10 @@ impl EventContext<'_> {
             }
         }
         let mut scratch = 0_u64;
-        for lease in source
-            .room
-            .scratch
-            .iter()
-            .filter(|lease| lease.at == event.point)
-        {
+        for amount in &roles.scratch {
             scratch = scratch
                 .checked_add(
-                    u64::try_from(lease.amount.evaluate(facts).ok_or(Refused::Facts)?)
+                    u64::try_from(amount.evaluate(facts).ok_or(Refused::Facts)?)
                         .map_err(|_| Refused::Scratch)?,
                 )
                 .ok_or(Refused::Scratch)?;
@@ -572,7 +660,7 @@ impl EventContext<'_> {
             }
         }
         if let Some(contract) = native {
-            scratch = scratch.max(contract.peak_scratch_bytes().ok_or(Refused::Scratch)?);
+            scratch = scratch.max(contract.scratch_peak);
         }
         let supplied = actual.scratch_peak().ok_or(Refused::Scratch)?;
         if supplied != scratch {
