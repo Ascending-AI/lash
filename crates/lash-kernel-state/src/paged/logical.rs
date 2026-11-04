@@ -34,10 +34,14 @@ pub use program::{
 };
 pub use program::{FrameEvent, ScratchEvent, VirtualBody, VirtualEntity};
 mod publication;
+mod region;
 use members::PreparedMember;
 pub use members::{Member, MemberFault};
 pub use ownership::{PublicationValue, RootValue};
 pub use publication::{AcceptedBoundary, BoundaryTransaction, MemberEdit};
+#[cfg(any(test, feature = "perf-witness"))]
+pub use region::fixtures as region_fixtures;
+pub use region::{PreparedStateExit, StateExit, StateLease};
 mod warming;
 pub use warming::WarmFact;
 mod values;
