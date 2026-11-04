@@ -32,6 +32,7 @@ pub(crate) struct SettledCall<'plan> {
     pub(in crate::compile::room) roles: Vec<(Slot, Value)>,
     captures: Vec<(Slot, doc::arena::ArenaHandle)>,
     evaluated: EvaluatedArguments,
+    completions: Vec<ScopedCompletion>,
 }
 
 impl VerifiedCall {
@@ -109,6 +110,7 @@ impl CallScope<'_> {
                 invocation,
                 caller_values,
                 evaluated,
+                completions,
                 dependencies: next,
                 target,
                 ..
@@ -131,6 +133,7 @@ impl CallScope<'_> {
                 roles,
                 captures,
                 evaluated,
+                completions,
             });
         }
         let Some(mut dependencies) = dependencies else {
@@ -189,6 +192,9 @@ impl<'plan> ScopedPrefix<'plan> {
 }
 
 impl SettledCall<'_> {
+    pub(crate) fn completions(&self) -> &[ScopedCompletion] {
+        &self.completions
+    }
     pub(crate) fn result(&self) -> Value {
         self.evaluated.result
     }
@@ -212,6 +218,7 @@ impl SettledCall<'_> {
                 values: &self.evaluated.values,
                 path: self.evaluated.path,
                 captures: &self.captures,
+                recovery: Some(&self.evaluated.recovery),
             },
             at,
             occurrence,

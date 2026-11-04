@@ -232,31 +232,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 // Only the loop statement's own initial step takes its
                 // statement edge. A backedge completes its header step.
                 if started == 0 {
-                    for _ in 0..*leaves {
-                        Self::pop_block(frame);
-                    }
+                    return self.finish_statement(frame, *leaves, None);
                 }
                 if self.spent() {
                     return Err(Stop);
                 }
-            }
-            Opcode::Depart => {
-                let sites::Depart { continuing } = &code.sites.depart[packet.x as usize];
-
-                return self.departure(
-                    frame,
-                    if *continuing {
-                        Departing {
-                            how: Departure::Continue,
-                            value: Value::Null,
-                        }
-                    } else {
-                        Departing {
-                            how: Departure::Break,
-                            value: Value::Null,
-                        }
-                    },
-                );
             }
             Opcode::Open => {
                 let block = &(packet.x as usize);
@@ -273,8 +253,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     index,
                     ahead,
                     value,
-                    close,
-                    covered,
+                    close: _,
+                    source,
+                    literal_prefix,
                     reg,
                     entry,
                 } = &code.sites.return_literal[packet.x as usize];
@@ -289,10 +270,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                 }
                 self.begin(frame, *id, *index, *ahead)?;
-                if let Some(close) = close
-                    && !self.close_in(close, *covered)
-                {
-                    return Err(self.at_held(close.head, *reg, *value));
+                if !self.source_constant(frame, *source, *reg, *value, Some(literal_prefix))? {
+                    return Err(self.at(source.unpaid()));
                 }
                 if frame.state.recovery
                     || (self.public_return && self.depth == 1 && frame.state.may_clean)
@@ -593,26 +572,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 let sites::Call { site, read, args } = &code.sites.call[packet.x as usize];
 
                 return self.call(frame, site, (*read, args, &recovery.live), slots);
-            }
-
-            Opcode::Cond => {
-                let sites::Cond {
-                    reg,
-                    close,
-                    pc,
-                    otherwise,
-                } = &code.sites.cond[packet.x as usize];
-
-                if let Some(close) = close
-                    && !self.close(close)
-                {
-                    return Err(self.at(close.head));
-                }
-                match regs[*reg as usize] {
-                    Value::Bool(true) => {}
-                    Value::Bool(false) => frame.state.pc = *otherwise,
-                    _ => return Err(self.at(*pc)),
-                }
             }
 
             Opcode::Close => {

@@ -430,31 +430,12 @@ impl VerifiedCall {
         source.verify()?;
         let body = exe.code(target.code);
         let captures = target.dynamic && !body.captures.is_empty();
-        let slots = source.owner_slots()?;
         if target.code == caller
             || !body.free.is_empty()
             || (!captures && (!body.captures.is_empty() || !body.capture_names.is_empty()))
-            || body.slots.iter().any(|entry| {
-                entry.shared
-                    && !matches!(
-                        slots.root(
-                            &Owner::Binding {
-                                declared: entry.declared.clone(),
-                                name: entry.name.clone()
-                            },
-                            TaskId::MAIN,
-                            0
-                        ),
-                        Some(logical::Owner::Value {
-                            slot: Slot::Capture(_),
-                            ..
-                        })
-                    )
-            })
             || source.bindings.iter().any(|binding| {
-                (binding.shared || binding.borrowed)
+                binding.borrowed
                     && !(captures
-                        && binding.borrowed
                         && binding.declared == source.site
                         && body.capture_names.contains(&binding.name))
             })

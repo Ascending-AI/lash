@@ -501,6 +501,7 @@ impl KernelMachine {
         };
         self.islands.open();
         let values = self.regs[first..first + given].to_vec();
+        let callee = matches!(target, Target::Closure(_)).then(|| first - 1);
         let ran = enter::<OBSERVING>(
             entry,
             &mut self.islands,
@@ -509,7 +510,15 @@ impl KernelMachine {
             (target, &values),
             occurrence,
             &[],
-            || self.regs.take_source_arguments(first, given),
+            || {
+                let mut inputs = self.regs.take_source_arguments(first, given);
+                // The dynamic callable precedes its arguments and is owned
+                // at the call site. Consume it before a return reuses that owner.
+                if let Some(reg) = callee {
+                    inputs.extend(self.regs.take_source_arguments(reg, 1));
+                }
+                inputs
+            },
         );
         drop(watching);
         Ok(ran?)

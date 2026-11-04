@@ -234,9 +234,7 @@ impl Op {
                 visit(otherwise);
                 visit(after);
             }
-            Self::LoopBranch { otherwise, .. }
-            | Self::Cond { otherwise, .. }
-            | Self::Branch { otherwise, .. } => visit(otherwise),
+            Self::LoopBranch { otherwise, .. } | Self::Branch { otherwise, .. } => visit(otherwise),
             Self::Jump(to) => visit(to),
             _ => {}
         }

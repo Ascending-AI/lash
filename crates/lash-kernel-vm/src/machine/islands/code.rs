@@ -24,6 +24,20 @@ mod verify;
 use verify::Closes;
 
 macro_rules! check_field {
+    ($record:ident, $stream:ident, literal_prefix) => {
+        if !$record.source.verify($stream, $record.reg)
+            || !$record.literal_prefix.matches_constructor(
+                $stream,
+                $record.source.pc(),
+                $record.source.unpaid(),
+                $record.source.quote(),
+            )
+        {
+            return Err(crate::compile::islands::Refused::Region {
+                region: $record.source.pc(),
+            });
+        }
+    };
     ($record:ident, $stream:ident, original) => {
         if !$record
             .original
@@ -323,9 +337,6 @@ operations! {
                 pc: u32,
                 otherwise: usize,
             }
-            Depart depart {
-                continuing: bool,
-            }
             ReturnLiteral return_literal {
                 entry: Option<usize>,
                 id: StmtId,
@@ -333,7 +344,8 @@ operations! {
                 ahead: u64,
                 value: Value,
                 close: Option<crate::compile::expr::Close>,
-                covered: bool,
+                source: crate::compile::expr::SourceRead,
+                literal_prefix: std::sync::Arc<crate::compile::room::charges::OriginalPrefix>,
                 reg: u32,
             }
         }
@@ -412,12 +424,6 @@ operations! {
                 site: CallSite,
                 read: bool,
                 args: Box<[u32]>,
-            }
-            Cond cond {
-                reg: u32,
-                close: Option<crate::compile::expr::Close>,
-                pc: u32,
-                otherwise: usize,
             }
             Close close {
                 close: crate::compile::expr::Close,
@@ -785,9 +791,7 @@ impl Code {
                     Op::Native { .. } | Op::TextWrite { .. } => Reason::Native,
                     Op::Call { .. } => Reason::Call,
                     Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => Reason::Binding,
-                    Op::Cond { .. } | Op::Branch { .. } | Op::LoopBranch { .. } => {
-                        Reason::Condition
-                    }
+                    Op::Branch { .. } | Op::LoopBranch { .. } => Reason::Condition,
                     Op::Cold(Deferred::Source(_)) => Reason::ColdBranch,
                     Op::Cold(Deferred::Text { .. }) => Reason::Native,
                     _ => Reason::SourceContinuation,

@@ -430,8 +430,6 @@ pub(crate) enum Callee {
 /// A conditional expression's arm.
 #[derive(Clone)]
 pub(crate) struct Arm {
-    /// Its first op: where taking it exits when it is not run.
-    pub(crate) start: u32,
     /// Its value, computed into the conditional's register; `None` where
     /// its ops are no expression of the tree, or one a plan does not run.
     pub(crate) value: Option<Box<Expr>>,
@@ -926,10 +924,6 @@ impl<'s> Reader<'s> {
             Some(_) => reader.open.into(),
             None => Closes::default(),
         };
-        Arm {
-            start,
-            value,
-            closes,
-        }
+        Arm { value, closes }
     }
 }

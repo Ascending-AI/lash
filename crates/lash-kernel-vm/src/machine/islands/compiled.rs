@@ -19,8 +19,8 @@ pub(super) mod resource;
 pub(crate) use super::code::Op;
 use program::Build;
 pub(super) use program::{
-    CallInputs, CollectionAppend, CollectionPacket, CollectionStep, Destination, Format, Merge, Operand, Placement,
-    ReadSlot, Reduction, Visit, WriteSite,
+    CallInputs, CollectionAppend, CollectionPacket, CollectionStep, Destination, Format, Merge,
+    Operand, Placement, ReadSlot, Reduction, Visit, WriteSite,
 };
 pub(crate) use program::{Instruction, Read, StatementEntry, StoreInputs};
 

@@ -14,7 +14,7 @@ mod numeric;
 pub(crate) use numeric::{CallInputs, Destination, Operand};
 #[path = "program/merge.rs"]
 mod merge;
-use crate::compile::expr::{Arm, Callee, Make};
+use crate::compile::expr::{Callee, Make};
 use crate::compile::islands::{Block as SourceBlock, Kind as StatementKind, Statement, unit_test};
 pub(crate) use merge::{
     Append as CollectionAppend, CollectionStep, Merge, Placement, ReadSlot, Reduction, Visit,
@@ -405,13 +405,14 @@ impl<'e> Build<'e> {
                 value:
                     Expr {
                         kind: Kind::Const(value),
+                        read,
+                        pc,
                         ..
                     },
                 close,
                 reg,
             } = &statement.kind
         {
-            let covered = close.is_some_and(|close| self.cover(u64::from(close.total)));
             self.emit(Op::ReturnLiteral {
                 entry: None,
                 id: statement.id,
@@ -419,7 +420,8 @@ impl<'e> Build<'e> {
                 ahead,
                 value: *value,
                 close: *close,
-                covered,
+                source: (*read)?,
+                literal_prefix: self.constructor_original(*pc)?,
                 reg: *reg,
             });
             self.open = None;
@@ -683,11 +685,11 @@ impl<'e> Build<'e> {
                     after,
                 };
             }
-            StatementKind::Depart { close, continuing } => {
+            StatementKind::Depart { close, .. } => {
                 self.close(*close, 0);
-                self.emit(Op::Depart {
-                    continuing: *continuing,
-                });
+                self.emit(Op::Cold(Deferred::Source(
+                    self.exe.stmt(statement.id).ops.end() - 1,
+                )));
             }
             StatementKind::Return { value, close, reg } => {
                 self.expr(value)?;
@@ -1255,37 +1257,14 @@ impl<'e> Build<'e> {
                 }
                 self.result(reg, &args);
             }
-            Kind::Cond {
-                cond,
-                closes,
-                then,
-                otherwise,
-            } => {
+            Kind::Cond { cond, closes, .. } => {
                 self.expr(cond)?;
                 self.open = None;
-                let branch = self.emit(Op::Cond {
-                    reg,
-                    close: closes.first().copied(),
-                    pc,
-                    otherwise: 0,
-                });
-                self.live.retain(|at| *at != cond.reg);
-                let outer = self.live.clone();
-                self.arm(then, reg)?;
-                let jump = self.emit(Op::Jump(0));
-                self.live = outer.clone();
-                self.open = None;
-                let target = self.ops.len();
-                self.ops[branch].op = Op::Cond {
-                    reg,
-                    close: closes.first().copied(),
-                    pc,
-                    otherwise: target,
-                };
-                self.arm(otherwise, reg)?;
-                self.ops[jump].op = Op::Jump(self.ops.len());
-                self.open = None;
-                self.live = outer;
+                // Source selects the arm and publishes its canonical join.
+                // The condition and its original unpaid close survive intact.
+                self.emit(Op::Cold(Deferred::Source(
+                    closes.first().map_or(pc, |close| close.head),
+                )));
                 self.result(reg, &[]);
             }
             Kind::Let {
@@ -1449,16 +1428,6 @@ impl<'e> Build<'e> {
                 })
             )
         })
-    }
-
-    fn arm(&mut self, arm: &Arm, reg: u32) -> Option<()> {
-        if let Some(value) = &arm.value {
-            self.expr(value)?;
-            self.close(arm.closes.first().copied(), reg);
-        } else {
-            self.emit(Op::Cold(Deferred::Source(arm.start)));
-        }
-        Some(())
     }
 }
 

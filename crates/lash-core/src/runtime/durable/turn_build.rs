@@ -119,7 +119,14 @@ pub(in crate::runtime) fn read_journal(rows: Vec<String>) -> Result<ReadJournal,
             Ok(JournalEntry::Build { .. }) => {
                 return Err("the turn's build inputs are not its journal's first row".to_owned());
             }
-            Err(error) => return Err(format!("a journal row does not decode: {error}")),
+            Err(error) => {
+                // Untagged decoding discards the machine-input error. Preserve
+                // its reason when refusing a malformed journal input row.
+                let error = serde_json::from_str::<lash_sansio::JournalRow<HostIntent>>(&row)
+                    .err()
+                    .map_or_else(|| error.to_string(), |input_error| input_error.to_string());
+                return Err(format!("a journal row does not decode: {error}"));
+            }
         }
     }
     let inputs =
