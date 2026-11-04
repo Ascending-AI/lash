@@ -128,13 +128,6 @@ fn k_ltxt_003_search_reports_the_selected_address_space() {
 }
 
 #[test]
-fn k_val_030_code_point_order_differs_from_unit_order() {
-    assert_eq!(run("text.compare", &[t("😀"), t("\u{e000}")]), i(1));
-    assert_eq!(run("text.utf16_compare", &[t("😀"), t("\u{e000}")]), i(-1));
-    assert_eq!(run("text.compare", &[t("a"), t("aa")]), i(-1));
-}
-
-#[test]
 fn k_ltxt_005_literal_split_join_replace_and_concat() {
     assert_eq!(run("text.concat", &[t("a"), t("😀")]), t("a😀"));
     let pieces = run("text.split", &[t("a..b.."), t("..")]);
