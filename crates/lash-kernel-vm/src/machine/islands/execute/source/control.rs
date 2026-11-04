@@ -1,6 +1,11 @@
 //! Break and continue publish their real entered suffix before physical unwind.
 use super::*;
-use room::{ExitKind, Phase as SourcePhase, Point};
+use crate::admission::Allowance;
+use crate::machine::source_publication::Prefix;
+use room::{
+    ExitKind, Measure, Phase as SourcePhase, Point,
+    publication::{ExactRoots, Successor},
+};
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(in crate::machine::islands::execute) fn publish_control_departure(
@@ -63,6 +68,19 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Err(malformed("packet control departure has no entered target"));
         };
+        // Iterator-helper loops retain a distinct source iterable operand.
+        // Their precise path must perform that Commit; a cursor alone cannot
+        // stand in for the original operand at packet completion.
+        if caught
+            && !continuing
+            && let Position::Loop { id, .. } = entered
+            && matches!(
+                self.exe.stmt(*id).form,
+                crate::compile::Form::For { via: Some(_), .. }
+            )
+        {
+            return Ok(false);
+        }
         if !interval
             .events()
             .skip(1)
@@ -138,6 +156,148 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(false);
         };
         drop(ledger);
-        self.publish_source_departure(frame.state.callee, activation, recipe)
+        if !self.publish_source_departure(frame.state.callee, activation, recipe)? {
+            return Ok(false);
+        }
+        if caught && !continuing {
+            // Catch consumes the departure, but leaves the loop's Commit
+            // unpaid. Publish its source release before physical unwind drops
+            // the cursor that still owns the iterable.
+            self.publish_broken_loop_commit(frame, &last.point.site)?;
+        }
+        Ok(true)
+    }
+
+    fn publish_broken_loop_commit(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        site: &lash_kernel_value::sites::Site,
+    ) -> Result<(), HeapFault> {
+        let source = &self.exe.code(frame.state.callee.plan.code).source_room;
+        let at = Point {
+            site: site.clone(),
+            phase: SourcePhase::Commit,
+        };
+        let mut parents = frame.state.control.iter().rev().skip_while(|control| {
+            !matches!(control, Position::Loop { id, .. } if self.exe.stmt(*id).site == *site)
+        });
+        let Some(Position::Loop { id, .. }) = parents.next() else {
+            return Err(malformed("caught break lost its loop"));
+        };
+        let is_for = matches!(self.exe.stmt(*id).form, crate::compile::Form::For { .. });
+        let Some(Position::Block(block, next)) = parents.next() else {
+            return Err(malformed("caught loop has no parent block"));
+        };
+        let parent = self
+            .exe
+            .block(frame.state.callee.compiled.blocks[*block].id);
+        let unpaid = if let Some(id) = parent.stmts.get(*next) {
+            source
+                .first_event(&self.exe.stmt(*id).site)
+                .map_err(|_| malformed("caught loop successor failed verification"))?
+        } else {
+            Point {
+                site: parent.site.clone(),
+                phase: if parent.site == source.site {
+                    SourcePhase::Fallthrough
+                } else {
+                    SourcePhase::Leave
+                },
+            }
+        };
+        let activation = frame
+            .state
+            .source
+            .as_mut()
+            .ok_or_else(|| malformed("caught break lost its source activation"))?;
+        let before = activation
+            .frontier
+            .as_ref()
+            .ok_or_else(|| malformed("caught break lost its source frontier"))?
+            .position();
+        if before.at
+            != (Point {
+                site: site.clone(),
+                phase: SourcePhase::Catch,
+            })
+            || before.unpaid.as_ref() != Some(&at)
+        {
+            return Err(malformed("caught break has another unpaid source event"));
+        }
+        let start = room::publication::Position {
+            at: at.clone(),
+            ..before.clone()
+        };
+        let next = room::publication::Position {
+            unpaid: Some(unpaid),
+            ..start.clone()
+        };
+        let interval = source
+            .compile_event(&at, ExitKind::Normal)
+            .map_err(|_| malformed("caught loop Commit failed verification"))?;
+        let groups = vec![room::Owner::Operands(site.clone())];
+        let store = self.logical.clone();
+        let ledger = store.borrow();
+        let slots = source
+            .owner_slots()
+            .map_err(|_| malformed("caught loop owners failed verification"))?;
+        let inputs = if is_for {
+            slots
+                .group(&groups[0], self.task, activation.invocation.id())
+                .ok_or_else(|| malformed("caught loop has no operand group"))?
+                .into_iter()
+                .map(|owner| Ok(ledger.holding(owner, self.heap.pages())?.map(|_| owner)))
+                .collect::<Result<Vec<_>, HeapFault>>()?
+                .into_iter()
+                .flatten()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let released = ledger.release_cost(&inputs, self.heap.pages())?;
+        drop(ledger);
+        let values = if is_for {
+            [(Measure::Release(groups.into()), i128::from(released))].into()
+        } else {
+            Default::default()
+        };
+        if !self.publish_source_event(
+            frame.state.callee,
+            activation,
+            Prefix {
+                interval,
+                start,
+                next,
+                facts: LeafExecution(
+                    [(
+                        at,
+                        LeafFacts {
+                            values,
+                            ..Default::default()
+                        },
+                    )]
+                    .into(),
+                ),
+                allowance: Allowance {
+                    occurrences: vec![],
+                    before: 0,
+                    units: 0,
+                    close: None,
+                    strict: false,
+                    depth: 0,
+                    safe_point: self.charged,
+                },
+            },
+            ExactRoots {
+                inputs,
+                ..Default::default()
+            },
+            Successor::Normal,
+            (),
+            |_, _, edits, ()| assert!(edits.is_empty()),
+        )? {
+            return Err(malformed("caught loop Commit publication refused"));
+        }
+        Ok(())
     }
 }
