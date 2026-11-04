@@ -330,7 +330,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         }
         let incoming = Owner::Incoming(self.task);
         inputs.push(incoming);
-        if site.act.is_some()
+        if stream
+            .ops
+            .get(site.pc as usize)
+            .and_then(|op| op.writes())
+            .is_some()
             && let Some(Some(at)) = stream.source_sites.get(site.pc as usize)
         {
             let owner = owners

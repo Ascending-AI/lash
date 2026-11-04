@@ -129,6 +129,9 @@ impl KernelMachine {
         self.regs.take_source_role(reg, site, &projection)
     }
     pub(super) fn source_entry(&mut self, values: &[Value]) -> Result<(), HeapFault> {
+        // Decoding and ABI packing extend the same entry prefix. Transfer its
+        // previous accepted receipts together with the new argument roots.
+        let inputs = self.regs.source_owners();
         let projection = Projection {
             arena: &self.arena,
             heap: &self.heap,
@@ -136,7 +139,9 @@ impl KernelMachine {
         self.regs.source_entry(values, &projection)?;
         self.publish_logical_meter()?;
         let store = self.logical.clone();
-        let outputs = self.regs.source_entry_roots(&store.borrow(), &projection)?;
+        let outputs = self
+            .regs
+            .source_entry_roots(&store.borrow(), &projection, &inputs)?;
         let roots = outputs
             .iter()
             .map(|(owner, value)| {
@@ -149,7 +154,7 @@ impl KernelMachine {
         store.borrow_mut().transfer_source(
             &mut self.arena.borrow_mut(),
             &self.heap,
-            &[],
+            &inputs,
             &roots,
         )?;
         self.publish_logical_meter()

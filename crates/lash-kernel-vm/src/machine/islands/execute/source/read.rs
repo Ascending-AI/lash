@@ -152,8 +152,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         read: SourceRead,
         reg: u32,
         value: Value,
-    ) -> Result<bool, Stop> {
-        self.source_input(frame, read, reg, Input::Native(value), None)
+    ) -> Result<(), Stop> {
+        if self.source_input(frame, read, reg, Input::Native(value), None)? {
+            Ok(())
+        } else {
+            Err(self.at(read.unpaid()))
+        }
     }
 
     pub(in crate::machine::islands::execute) fn source_constant(

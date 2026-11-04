@@ -499,17 +499,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         if let Some(read) = recovery.source {
                             match self.source_read(&mut slab.view(active), read, packet.dst, value)
                             {
-                                Ok(true) => continue,
-                                Ok(false) => {
-                                    let stop = self.at(read.unpaid());
-                                    return self.slow_exit(
-                                        active,
-                                        &mut callers,
-                                        slab,
-                                        recovery,
-                                        stop,
-                                    );
-                                }
+                                Ok(()) => continue,
                                 Err(stop) => {
                                     return self.slow_exit(
                                         active,
@@ -532,17 +522,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         if let Some(read) = recovery.source {
                             match self.source_read(&mut slab.view(active), read, packet.dst, value)
                             {
-                                Ok(true) => continue,
-                                Ok(false) => {
-                                    let stop = self.at(read.unpaid());
-                                    return self.slow_exit(
-                                        active,
-                                        &mut callers,
-                                        slab,
-                                        recovery,
-                                        stop,
-                                    );
-                                }
+                                Ok(()) => continue,
                                 Err(stop) => {
                                     return self.slow_exit(
                                         active,

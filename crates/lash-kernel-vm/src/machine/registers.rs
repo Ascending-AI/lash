@@ -250,8 +250,9 @@ impl Registers {
         &mut self,
         ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
         projection: &Projection<'_>,
+        inputs: &[lash_kernel_state::kernel_internals::logical::Owner],
     ) -> Result<Vec<(lash_kernel_state::kernel_internals::logical::Owner, Value)>, HeapFault> {
-        self.source.entry_roots(ledger, projection)
+        self.source.entry_roots(ledger, projection, inputs)
     }
     pub(super) fn source_owners(&self) -> Vec<lash_kernel_state::kernel_internals::logical::Owner> {
         self.source.live_owners().collect()

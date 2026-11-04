@@ -382,6 +382,7 @@ impl Operands {
         &mut self,
         ledger: &Ledger,
         projection: &Projection<'_>,
+        inputs: &[Owner],
     ) -> Result<Vec<(Owner, Value)>, HeapFault> {
         let mut outputs = Vec::with_capacity(self.entry.len());
         for (index, held) in self.entry.iter_mut().enumerate() {
@@ -390,7 +391,8 @@ impl Operands {
                 invocation: 0,
                 slot: Slot::Argument(index as u32),
             };
-            if ledger.holding(owner, projection.heap.pages())?.is_some() {
+            if !inputs.contains(&owner) && ledger.holding(owner, projection.heap.pages())?.is_some()
+            {
                 return Err(invalid("entry argument destination is already owned"));
             }
             held.owner = Some(owner);

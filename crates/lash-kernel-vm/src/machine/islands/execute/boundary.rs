@@ -3,6 +3,8 @@
 //! into source frames at their semantic coordinates.
 
 use super::*;
+use crate::compile::room;
+use lash_kernel_doc::heap::HeapFault;
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
@@ -540,6 +542,54 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         );
         if let Some((statement, pc)) = source {
             self.restore_expression_scopes(frame.slots, statement, pc);
+        }
+        // A conservative miss can replay before pure packet reads. Their
+        // accepted roots are not survivors at that source cursor. Consume
+        // those actual receipts before the precise evaluator repeats them.
+        let retired = (|| {
+            let malformed = |message: &str| HeapFault::Malformed(message.into());
+            let activation = frame
+                .state
+                .source
+                .as_ref()
+                .ok_or_else(|| malformed("packet handoff has no source activation"))?;
+            let owners = self
+                .exe
+                .code(frame.state.callee.plan.code)
+                .source_room
+                .owner_slots()
+                .map_err(|_| malformed("packet handoff owners failed verification"))?;
+            let mut retained = Vec::new();
+            if let Some((id, pc)) = source {
+                let (stream, statement, _) = self.exe.statement(id);
+                let roles = statement
+                    .source_roles_at(stream, pc)
+                    .ok_or_else(|| malformed("packet handoff has no source role map"))?;
+                for (_, site) in roles.iter() {
+                    retained.push(
+                        owners
+                            .root(
+                                &room::Owner::Operand((**site).clone()),
+                                self.task,
+                                activation.invocation.id(),
+                            )
+                            .ok_or_else(|| {
+                                malformed("packet handoff role has no canonical owner")
+                            })?,
+                    );
+                }
+            }
+            let mut ledger = self.logical.borrow_mut();
+            let inputs = ledger
+                .invocation_operands(&activation.invocation, self.heap.pages())?
+                .into_iter()
+                .filter(|owner| !retained.contains(owner))
+                .collect::<Vec<_>>();
+            ledger.transfer_source(self.arena, self.heap, &inputs, &[])
+        })();
+        if let Err(error) = retired {
+            self.halt(error.into());
+            return;
         }
         // Every packet binding and scope change already owns its accepted
         // source roots. Recovery retains that publication; only the physical
