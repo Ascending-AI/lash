@@ -14,12 +14,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let code = &frame.state.callee.compiled.code;
         let regs = &mut frame.regs;
         match packet.opcode {
-            Opcode::ScopePrefix => {
-                let site = &code.sites.scope_prefix[packet.x as usize];
-                if !self.fits(site.ahead) {
-                    return Err(self.at(site.miss));
-                }
-            }
             Opcode::SourcePublication => {
                 if let Some(answer) = self.generic_source_publication(
                     frame,
@@ -781,8 +775,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             | Opcode::Constant
             | Opcode::Local
             | Opcode::Session
-            | Opcode::Bind
-            | Opcode::Unbind
             | Opcode::Jump => {
                 unreachable!("inline packets stay in the execution loop");
             }

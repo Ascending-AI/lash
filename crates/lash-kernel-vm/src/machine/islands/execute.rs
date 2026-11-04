@@ -460,7 +460,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                                 code.constant_original(packet),
                             ) {
                                 Ok(true) => continue,
-                                Ok(false) => {}
+                                Ok(false) => {
+                                    let stop = self.at(read.unpaid());
+                                    return self.slow_exit(
+                                        active,
+                                        &mut callers,
+                                        slab,
+                                        recovery,
+                                        stop,
+                                    );
+                                }
                                 Err(stop) => {
                                     return self.slow_exit(
                                         active,
@@ -489,7 +498,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             match self.source_read(&mut slab.view(active), read, packet.dst, value)
                             {
                                 Ok(true) => continue,
-                                Ok(false) => {}
+                                Ok(false) => {
+                                    let stop = self.at(read.unpaid());
+                                    return self.slow_exit(
+                                        active,
+                                        &mut callers,
+                                        slab,
+                                        recovery,
+                                        stop,
+                                    );
+                                }
                                 Err(stop) => {
                                     return self.slow_exit(
                                         active,
@@ -513,7 +531,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             match self.source_read(&mut slab.view(active), read, packet.dst, value)
                             {
                                 Ok(true) => continue,
-                                Ok(false) => {}
+                                Ok(false) => {
+                                    let stop = self.at(read.unpaid());
+                                    return self.slow_exit(
+                                        active,
+                                        &mut callers,
+                                        slab,
+                                        recovery,
+                                        stop,
+                                    );
+                                }
                                 Err(stop) => {
                                     return self.slow_exit(
                                         active,
@@ -526,16 +553,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             }
                         }
                         slab.view(active).regs[packet.dst as usize] = value;
-                        continue;
-                    }
-                    Opcode::Bind => {
-                        let values = slab.view(active);
-                        values.slots[packet.dst as usize] =
-                            SlotState::Value(values.regs[packet.x as usize]);
-                        continue;
-                    }
-                    Opcode::Unbind => {
-                        slab.view(active).slots[packet.dst as usize] = SlotState::Empty;
                         continue;
                     }
                     Opcode::Jump => {

@@ -271,10 +271,6 @@ operations! {
             miss: u32,
             source: Option<crate::compile::expr::SourceRead>,
         }
-        Bind {
-            at: usize,
-            src: u32,
-        }
         Return {
             reg: u32,
             pc: u32,
@@ -283,7 +279,6 @@ operations! {
     hot_tuples {
         LoopDone (u32)
         Open (usize)
-        Unbind (usize)
         Jump (usize)
         Effect (u32)
         Spawn (u32)
@@ -347,10 +342,6 @@ operations! {
                 site: NativeSite,
                 text_inputs: NativeInputs,
                 write: Box<WriteSite>,
-            }
-            ScopePrefix scope_prefix {
-                ahead: u64,
-                miss: u32,
             }
             Reserve reserve {
                 kind: lash_kernel_doc::ValueKind,
@@ -793,9 +784,7 @@ impl Code {
                     Op::Operator { .. } | Op::Unit { .. } => Reason::Operator,
                     Op::Native { .. } | Op::TextWrite { .. } => Reason::Native,
                     Op::Call { .. } => Reason::Call,
-                    Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => {
-                        Reason::Binding
-                    }
+                    Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => Reason::Binding,
                     Op::Cond { .. } | Op::Branch { .. } | Op::LoopBranch { .. } => {
                         Reason::Condition
                     }
@@ -849,10 +838,6 @@ impl Code {
             Op::Session {
                 dst, name, miss, ..
             } => packet(Opcode::Session, 0, dst, name, miss),
-            Op::Bind { at: index, src } => {
-                at(index).and_then(|dst| packet(Opcode::Bind, 0, dst, src, 0))
-            }
-            Op::Unbind(index) => at(index).and_then(|dst| packet(Opcode::Unbind, 0, dst, 0, 0)),
             Op::Jump(to) => at(to).and_then(|x| packet(Opcode::Jump, 0, 0, x, 0)),
             Op::Open(block) => at(block).and_then(|x| packet(Opcode::Open, 0, 0, x, 0)),
             Op::LoopDone(leaves) => packet(Opcode::LoopDone, 0, 0, leaves, 0),

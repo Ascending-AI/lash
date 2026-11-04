@@ -518,7 +518,7 @@ impl Compiled {
             cx.numeric();
             cx.formats();
         }
-        if fused && placement.is_some() {
+        if placement.is_some() {
             cx.merges(&plan.body);
         }
         if cx.registers as u64 * super::SLOT_BYTES > super::ISLAND_HOLD {

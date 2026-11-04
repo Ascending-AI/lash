@@ -1289,30 +1289,13 @@ impl<'e> Build<'e> {
                 self.result(reg, &[]);
             }
             Kind::Let {
-                local,
-                value,
-                body,
-                bind_ahead,
-                bind_miss,
-                ahead,
-                miss,
+                value, bind_miss, ..
             } => {
                 self.expr(value)?;
-                self.emit(Op::ScopePrefix {
-                    ahead: *bind_ahead,
-                    miss: *bind_miss,
-                });
-                self.emit(Op::Bind {
-                    at: local.at as usize,
-                    src: value.reg,
-                });
-                self.live.retain(|at| *at != value.reg);
-                self.expr(body)?;
-                self.emit(Op::ScopePrefix {
-                    ahead: *ahead,
-                    miss: *miss,
-                });
-                self.emit(Op::Unbind(local.at as usize));
+                // Source owns the binding and its matching lexical Leave.
+                // A physical slot edit cannot grant either source lifetime.
+                self.emit(Op::Cold(Deferred::Source(*bind_miss)));
+                self.result(reg, &[value.reg]);
             }
             Kind::Make {
                 make,
