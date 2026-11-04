@@ -345,13 +345,10 @@ impl NativeStorage<'_> {
                 {
                     return Ok(None);
                 }
-                let Some(value) = self
-                    .function
-                    .validate_known_scalar(arena, &self.args, value)
-                else {
-                    return Ok(None);
-                };
-                Some(value)
+                match self.function.check_known_scalar(arena, &self.args, value) {
+                    Ok(value) => value,
+                    Err(()) => return Ok(None),
+                }
             }
             None => None,
         };

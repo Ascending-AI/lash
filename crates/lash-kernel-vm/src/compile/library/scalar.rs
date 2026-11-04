@@ -35,15 +35,42 @@ impl Lib {
             .unwrap_or_else(|| entry.call(args))
     }
 
+    /// An unavailable arena-dependent entry may use an explicit native contract.
+    /// A kernel refusal or an actual disagreement must never do so.
+    pub(crate) fn check_known_scalar(
+        &self,
+        arena: &Arena,
+        args: &[Value],
+        expected: Value,
+    ) -> Result<Option<Value>, ()> {
+        let actual = match self.scalar_kernel(arena, args) {
+            Some(Some(value)) => value,
+            Some(None) => return Err(()),
+            None => {
+                let Some((entry, _)) = self.specialization.prepared.as_ref() else {
+                    return Ok(None);
+                };
+                let Some(value) = entry.call(args) else {
+                    return Ok(None);
+                };
+                value
+            }
+        };
+        if !actual.same(&expected) {
+            return Err(());
+        }
+        Ok(Some(expected))
+    }
+
     pub(crate) fn validate_known_scalar(
         &self,
         arena: &Arena,
         args: &[Value],
         expected: Value,
     ) -> Option<Value> {
-        self.prepared_scalar(arena, args)?
-            .same(&expected)
-            .then_some(expected)
+        self.check_known_scalar(arena, args, expected)
+            .ok()
+            .flatten()
     }
 
     pub(crate) fn canonical_scalar_contract(
