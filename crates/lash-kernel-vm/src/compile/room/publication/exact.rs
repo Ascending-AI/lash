@@ -463,8 +463,13 @@ impl ExactEvent {
                         }
                     };
                     if roots.outputs.len() != 1
-                        || !matches!(roots.outputs[0].1,
-                        ExactValue::Native(value) if value.same(&expected))
+                        || !match &roots.outputs[0].1 {
+                            ExactValue::Native(value) => value.same(&expected),
+                            ExactValue::Prepared(proof) => {
+                                proof.graph().is_current(arena) && proof.value().same(&expected)
+                            }
+                            _ => false,
+                        }
                     {
                         return Err(Refused::Facts);
                     }
