@@ -41,7 +41,7 @@ pub use ownership::{PublicationValue, RootValue};
 pub use publication::{AcceptedBoundary, BoundaryTransaction, MemberEdit};
 #[cfg(any(test, feature = "perf-witness"))]
 pub use region::fixtures as region_fixtures;
-pub use region::{PreparedStateExit, StateExit, StateLease};
+pub use region::{LeaseValue, PreparedStateExit, StateExit, StateLease};
 mod warming;
 pub use warming::WarmFact;
 mod values;

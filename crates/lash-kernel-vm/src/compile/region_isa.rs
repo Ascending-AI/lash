@@ -8,10 +8,11 @@ use super::room::region::calls::region_isa::CallPlan;
 use super::room::{Refused, Source};
 use super::{CodeId, Executable, StmtId};
 use lash_kernel_doc::Value;
+use lash_kernel_state::kernel_internals::logical::LeaseValue;
 use std::{convert::Infallible, marker::PhantomData, sync::Arc};
 
 mod recovery;
-pub(crate) use recovery::RecoveryMap;
+pub(crate) use recovery::{GraphRecovery, RecoveryMap};
 
 pub(crate) struct RegionDraft {
     code: CodeId,
@@ -58,6 +59,22 @@ pub(crate) struct IntKernel {
 pub(crate) struct CheckedKernel {
     sealed: Infallible,
 }
+pub(crate) struct HeapKernel {
+    source: crate::compile::room::Point,
+    phases: Box<[HeapPhase]>,
+}
+struct HeapPhase {
+    source: crate::compile::room::Point,
+    kind: HeapPhaseKind,
+}
+enum HeapPhaseKind {
+    Allocate,
+    Member,
+    Grow,
+    Hold,
+    Release,
+}
+
 pub(crate) struct ReadSpec {
     sealed: Infallible,
 }
@@ -67,13 +84,13 @@ pub(crate) struct BoundarySpec {
 
 pub(crate) enum RegionOp {
     Constant {
-        dst: Reg<Value>,
+        dst: Reg<LeaseValue>,
         value: Value,
         next: Pc,
     },
     Move {
-        dst: Reg<Value>,
-        src: Reg<Value>,
+        dst: Reg<LeaseValue>,
+        src: Reg<LeaseValue>,
         next: Pc,
     },
     IntBinary {
@@ -85,14 +102,20 @@ pub(crate) enum RegionOp {
     },
     Read {
         spec: ReadSpec,
-        base: Reg<Value>,
-        dst: Reg<Value>,
+        base: Reg<LeaseValue>,
+        dst: Reg<LeaseValue>,
         next: Pc,
     },
     Checked {
         kernel: CheckedKernel,
-        args: Box<[Reg<Value>]>,
-        dst: Reg<Value>,
+        args: Box<[Reg<LeaseValue>]>,
+        dst: Reg<LeaseValue>,
+        next: Pc,
+    },
+    Heap {
+        kernel: HeapKernel,
+        args: Box<[Reg<LeaseValue>]>,
+        dst: Option<Reg<LeaseValue>>,
         next: Pc,
     },
     Branch {
@@ -105,7 +128,7 @@ pub(crate) enum RegionOp {
         next: Pc,
     },
     Return {
-        value: Reg<Value>,
+        value: Reg<LeaseValue>,
     },
     Boundary {
         spec: BoundarySpec,
@@ -181,6 +204,7 @@ pub(crate) mod fixtures {
                 roles: Box::new([]),
                 operands: Box::new([]),
                 pending: None,
+                graph: GraphRecovery::fixture(&continuation),
                 continuation,
             }]),
             call_sources: Box::new([]),
@@ -208,5 +232,18 @@ pub(crate) mod fixtures {
             recovery: Box::new([]),
             call_sources: sites.into(),
         })
+    }
+    pub(crate) fn heap(exe: &Executable, code: CodeId, continuation: Point) -> RegionDraft {
+        let mut draft = exit(exe, code, continuation.clone());
+        draft.ops = Box::new([RegionOp::Heap {
+            kernel: HeapKernel {
+                source: continuation,
+                phases: Box::new([]),
+            },
+            args: Box::new([]),
+            dst: None,
+            next: Pc(0),
+        }]);
+        draft
     }
 }

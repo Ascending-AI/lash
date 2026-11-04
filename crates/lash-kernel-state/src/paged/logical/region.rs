@@ -1,4 +1,7 @@
 //! Affine authority for one verified region's unpublished state exit.
+mod storage;
+pub use storage::LeaseValue;
+
 use super::{Invocation, InvocationRange, MemberEdit, Owner, PublicationValue};
 use crate::arena::Arena;
 use crate::paged::heap_impl::PagedHeap;
