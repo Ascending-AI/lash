@@ -1,7 +1,7 @@
 use super::callee::Substitution;
 use super::*;
 use crate::compile::region_isa::fixtures as drafts;
-use crate::laws::embedder::Embedder;
+use crate::laws::embedder::{Embedder, Setup};
 use lash_kernel_state::kernel_internals::logical::{LeaseAllocation, LeaseMember, LeaseOp};
 
 fn executable(run: &Embedder) -> Arc<Executable> {
@@ -78,13 +78,43 @@ fn values(plan: &CalleePlan, inputs: &[(Slot, Value)]) -> Vec<(String, Value)> {
 #[test]
 fn substitutions_preserve_source_arguments_and_saved_operands() {
     let definition = "definition \"function pick(a: Any, b: Any, c?: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { if num.lt(a, b) { return a } return b }\"";
-    for nested in [false, true] {
+    fn native_pick(
+        registry: &mut doc::FunctionRegistry,
+        _: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+    ) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
+        struct Pick;
+        impl doc::NativeFunction for Pick {
+            fn call(&self, call: doc::NativeCall<'_, '_>) -> Result<Value, doc::NativeError> {
+                Ok(call.args.values()[1])
+            }
+        }
+        let definition = doc::parse_definition(
+            "function probe.pick(a: Any, b: Any, c?: Any) -> Any\nkernel 1\ncharge 1\nnative\nbody { return b }",
+        )
+        .unwrap();
+        vec![(
+            "probe.pick",
+            registry.register(definition, Some(Arc::new(Pick))).unwrap(),
+        )]
+    }
+    for (native, nested) in [(false, false), (false, true), (true, false), (true, true)] {
+        let call = if native { "probe.pick" } else { "invoke pick" };
         let body = if nested {
-            "return num.add(9, invoke pick(x, 5))"
+            format!("return num.add(9, {call}(x, 5))")
         } else {
-            "let answer = invoke pick(x, 5) return answer"
+            format!("let answer = {call}(x, 5) return answer")
         };
-        let run = Embedder::new(&format!("{definition}\nmain {{ let x = 3 {body} }}"));
+        let run = if native {
+            Embedder::with(
+                &format!("main {{ let x = 3 {body} }}"),
+                Setup {
+                    probes: Some(native_pick),
+                    ..Setup::default()
+                },
+            )
+        } else {
+            Embedder::new(&format!("{definition}\nmain {{ let x = 3 {body} }}"))
+        };
         let exe = executable(&run);
         let caller = exe.main.unwrap();
         let site = call_site(&exe, caller);
@@ -97,8 +127,14 @@ fn substitutions_preserve_source_arguments_and_saved_operands() {
         };
         plan.clone().verify_region(&exe, &draft, id).unwrap();
         let target = plan.static_target().unwrap();
+        if native {
+            assert!(matches!(
+                exe.lib(target.library().unwrap()).run,
+                LibRun::Native { body: Some(code), .. } if code == target.code()
+            ));
+        }
         let source = &exe.code(caller).source_room;
-        let inputs = if nested {
+        let inputs = if nested || native {
             [3, 5]
                 .into_iter()
                 .enumerate()

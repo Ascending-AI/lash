@@ -52,12 +52,15 @@ impl CalleePlan {
         caller: CodeId,
         target: &Resolved,
     ) -> Result<Self, Refused> {
-        // A native-backed body needs A/C's sealed kernel correspondence.
-        // Re-running its native entry to check a body answer is forbidden.
-        if target
-            .library
-            .is_some_and(|lib| !matches!(exe.lib(lib).run, LibRun::Body(_)))
-        {
+        // The source-verified body is the call authority for body-backed
+        // libraries, including natives. Compilation never invokes the native.
+        if target.library.is_some_and(|lib| {
+            !matches!(
+                exe.lib(lib).run,
+                LibRun::Body(code) | LibRun::Native { body: Some(code), .. }
+                    if code == target.code
+            )
+        }) {
             return Err(Refused::Source);
         }
         let body = exe.code(target.code);
