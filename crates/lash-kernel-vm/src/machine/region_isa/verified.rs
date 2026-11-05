@@ -1,6 +1,7 @@
 //! Bound source-verified tables used by production region execution.
 mod acquire;
 mod bind;
+mod call_bind;
 mod charge;
 mod control;
 mod flow;

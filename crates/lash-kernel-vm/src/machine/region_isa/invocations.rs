@@ -15,6 +15,20 @@ pub(super) struct NextInvocation {
     issued: u64,
 }
 impl Invocations {
+    pub(super) fn next_identity(
+        &self,
+        next: NextInvocation,
+    ) -> Result<lash_kernel_state::kernel_internals::logical::Invocation, RegionError> {
+        let expected = self.prepare()?;
+        if next.id != expected.id || next.issued != expected.issued {
+            return Err(invalid(Refused::Facts));
+        }
+        self.range
+            .as_ref()
+            .and_then(|range| range.invocation(self.issued))
+            .filter(|identity| identity.id() == next.id)
+            .ok_or_else(|| invalid(Refused::Facts))
+    }
     pub(super) fn bind(range: InvocationRange) -> Result<Self, RegionError> {
         let first = range.invocation(0).map(|invocation| invocation.id());
         let capacity = range.len();

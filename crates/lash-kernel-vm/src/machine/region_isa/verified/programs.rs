@@ -6,11 +6,13 @@ use crate::compile::room::region::calls::region_isa::compile_calls;
 
 pub(super) struct Programs {
     codes: Box<[Option<Arc<Code>>]>,
+    calls: Box<[Option<super::call_bind::Calls>]>,
     pub(super) registers: usize,
     pub(super) arguments: usize,
     pub(super) transfer_width: usize,
     pub(super) quotes: usize,
     pub(super) loops: usize,
+    pub(super) parameters: usize,
 }
 
 impl Programs {
@@ -32,11 +34,13 @@ impl Programs {
         pending.push(Arc::clone(entry));
         let mut result = Self {
             codes: Box::new([]),
+            calls: Box::new([]),
             registers: 0,
             arguments: 0,
             transfer_width: 0,
             quotes: 0,
             loops: 0,
+            parameters: 0,
         };
         while let Some(code) = pending.pop() {
             result.registers = result.registers.max(code.program.registers().len());
@@ -68,6 +72,21 @@ impl Programs {
                 }
             }
         }
+        result.calls = codes
+            .iter()
+            .map(|code| {
+                code.as_ref()
+                    .map(|code| super::call_bind::Calls::bind(code, &codes))
+                    .transpose()
+            })
+            .collect::<Result<_, RegionError>>()?;
+        result.parameters = result
+            .calls
+            .iter()
+            .flatten()
+            .map(super::call_bind::Calls::width)
+            .max()
+            .unwrap_or(0);
         result.codes = codes.into();
         Ok(Arc::new(result))
     }
@@ -77,5 +96,18 @@ impl Programs {
             .get(id.0 as usize)
             .and_then(Option::as_ref)
             .ok_or_else(|| invalid(Refused::Source))
+    }
+
+    pub(super) fn target(
+        &self,
+        caller: CodeId,
+        site: u32,
+        target: CodeId,
+    ) -> Result<&super::call_bind::Target, RegionError> {
+        self.calls
+            .get(caller.0 as usize)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| invalid(Refused::Source))?
+            .target(site, target)
     }
 }

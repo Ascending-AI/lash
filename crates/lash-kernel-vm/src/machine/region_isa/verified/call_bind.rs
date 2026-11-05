@@ -1,0 +1,143 @@
+//! Verified parameter/capture substitutions become physical indexes once.
+use super::super::{code::Register, *};
+use super::Code;
+use crate::compile::room::region::calls::region_isa::callee::Substitution;
+use lash_kernel_state::kernel_internals::logical::Slot;
+use lash_kernel_state::kernel_internals::logical::{LeaseValue, StateLease};
+
+pub(super) struct Parameter {
+    pub(super) input: Option<Register>,
+    pub(super) output: Register,
+    pub(super) shared: bool,
+}
+
+pub(super) struct Target {
+    pub(super) code: CodeId,
+    pub(super) parameters: Box<[Parameter]>,
+    pub(super) captures: Box<[(u32, Register)]>,
+}
+
+pub(super) struct Calls {
+    sites: Box<[Box<[Target]>]>,
+}
+
+impl Target {
+    /// Borrow actual caller values before creating a callee holding. Missing
+    /// formals receive Absent; shared formals still need their typed cell phase.
+    pub(super) fn inputs(
+        &self,
+        registers: &registers::Registers<LeaseValue>,
+        frame: usize,
+        invocation: u64,
+        lease: &mut StateLease<'_>,
+        values: &mut Vec<LeaseValue>,
+    ) -> Result<(), RegionError> {
+        if values.capacity() < self.parameters.len() {
+            return Err(invalid(Refused::Scratch));
+        }
+        values.clear();
+        for parameter in &self.parameters {
+            let value = match parameter.input {
+                Some(input) => registers
+                    .read(frame, invocation, input)?
+                    .bind(lease)
+                    .map_err(RegionError::Heap)?,
+                None => lease.import(&Value::Absent).map_err(RegionError::Heap)?,
+            };
+            values.push(value);
+        }
+        Ok(())
+    }
+}
+
+fn role(code: &RegionCode, slot: Slot) -> Result<Register, RegionError> {
+    let reg = code
+        .roles()
+        .iter()
+        .find_map(|(actual, reg)| (*actual == slot).then_some(*reg))
+        .ok_or_else(|| invalid(Refused::Facts))?;
+    super::bind::physical(code, reg)
+}
+
+impl Calls {
+    pub(super) fn width(&self) -> usize {
+        self.sites
+            .iter()
+            .flat_map(|targets| targets.iter())
+            .map(|target| target.parameters.len())
+            .max()
+            .unwrap_or(0)
+    }
+    pub(super) fn bind(caller: &Code, codes: &[Option<Arc<Code>>]) -> Result<Self, RegionError> {
+        let sites = caller
+            .calls
+            .iter()
+            .map(|call| {
+                let Some(call) = call else {
+                    return Ok(Box::new([]) as Box<[Target]>);
+                };
+                let mut targets = call
+                    .plan
+                    .targets()
+                    .iter()
+                    .map(|plan| {
+                        let callee = codes
+                            .get(plan.code().0 as usize)
+                            .and_then(Option::as_ref)
+                            .ok_or_else(|| invalid(Refused::Source))?;
+                        if !Arc::ptr_eq(plan.source(), callee.program.source()) {
+                            return Err(invalid(Refused::Source));
+                        }
+                        let parameters = plan
+                            .substitutions()
+                            .iter()
+                            .map(|substitution| {
+                                let binding = substitution.parameter();
+                                let input = match substitution {
+                                    Substitution::Role { argument, .. } => {
+                                        Some(role(&caller.program, argument.slot())?)
+                                    }
+                                    Substitution::Absent { .. } => None,
+                                };
+                                Ok(Parameter {
+                                    input,
+                                    output: role(&callee.program, binding.role.slot())?,
+                                    shared: binding.shared,
+                                })
+                            })
+                            .collect::<Result<_, RegionError>>()?;
+                        let captures = plan
+                            .captures()
+                            .iter()
+                            .map(|capture| {
+                                Ok((capture.index, role(&callee.program, capture.role.slot())?))
+                            })
+                            .collect::<Result<_, RegionError>>()?;
+                        Ok(Target {
+                            code: plan.code(),
+                            parameters,
+                            captures,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, RegionError>>()?;
+                targets.sort_unstable_by_key(|target| target.code);
+                if targets.windows(2).any(|pair| pair[0].code == pair[1].code) {
+                    return Err(invalid(Refused::Source));
+                }
+                Ok(targets.into_boxed_slice())
+            })
+            .collect::<Result<_, RegionError>>()?;
+        Ok(Self { sites })
+    }
+
+    pub(super) fn target(&self, site: u32, code: CodeId) -> Result<&Target, RegionError> {
+        let targets = self
+            .sites
+            .get(site as usize)
+            .ok_or_else(|| invalid(Refused::Source))?;
+        let index = targets
+            .binary_search_by_key(&code, |target| target.code)
+            .map_err(|_| invalid(Refused::Source))?;
+        Ok(&targets[index])
+    }
+}
