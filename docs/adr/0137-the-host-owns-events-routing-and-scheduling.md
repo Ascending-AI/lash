@@ -17,10 +17,13 @@ need crash-safe delivery without making the runtime interpret product events.
 
 ### 1. Hosts compose durable primitives
 
-A host tool that can defer obtains its key from
-`AttemptContext::completion_key()`, records it in host storage and returns
-`Pending`. Admission creates the wait before the body
-runs, so a completion arriving before the call parks still finds its row.
+Admission pins a completion wait before a deferring tool's body runs. That
+availability is sufficient to return `Pending`; the body need not obtain
+the key. A body can read it through `AttemptContext::completion_key()` and
+record it in host storage for an external worker, or the host can read it
+through `Completions::parked` after the call parks. Runtime-owned resolvers
+use the admitted wait directly. A completion arriving before the call parks
+still finds its row.
 `Completions::resolve` uses first-writer settlement: an equal repeat answers
 `AlreadyResolved`, a different result answers `Conflict`, and a revoked or
 expired wait answers `Revoked`. Keys are bearer capabilities; the host

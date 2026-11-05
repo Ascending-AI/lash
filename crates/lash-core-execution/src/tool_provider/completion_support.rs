@@ -1,4 +1,4 @@
-/// Why a recorded attempt body can — or cannot — take a durable completion key.
+/// The completion wait available to a recorded attempt body, or why it is absent.
 ///
 /// The round pins the key's wait when it admits the call, before the body
 /// runs, so the leaf context can only report a decision already made. Keeping

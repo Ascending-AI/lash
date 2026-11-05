@@ -246,9 +246,6 @@ impl ToolProvider for Services {
         let Some(milliseconds) = call.args.as_u64() else {
             return failure("sleep takes a nonnegative integer number of milliseconds");
         };
-        if let Err(error) = call.context.completion_key() {
-            return failure(&error.to_string());
-        }
         let now = call.context.admission_now();
         let deadline = lash_durable::DurableInstant(
             now.0

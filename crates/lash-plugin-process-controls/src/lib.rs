@@ -279,7 +279,7 @@ struct SessionProcessAdminTools {
 impl StaticToolExecute for SessionProcessAdminTools {
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         if call.name() == "processes.await" {
-            return execute_process_await_tool_call(call.context, call.args);
+            return execute_process_await_tool_call(call.args);
         }
         if call.name() == "processes.start" {
             return execute_process_start_tool_call(
@@ -439,7 +439,7 @@ fn process_await_tool_definition() -> ToolDefinition {
     .with_execution(std::time::Duration::from_secs(30))
 
     // `await_process` parks, so admission records that it may defer and the
-    // runtime pre-derives the completion key its recorded attempt reads.
+    // runtime pins its completion wait before the body runs.
     // An await has no deadline of its own: it parks until the awaited
     // process ends or the awaiting scope does.
     .with_declaration(lash_vocabulary::tool_declaration::ToolDeclaration::deferring(), Some(lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd))
@@ -491,20 +491,16 @@ fn process_cancel_tool_definition() -> ToolDefinition {
 
 /// Parks the call on the terminal of the handle's process.
 ///
-/// It takes the completion key first and names the process terminal as the
-/// resolver, so the runtime — not this tool — is responsible for arming the
-/// wait, both now and on every redrive of the parked turn. That is what makes
-/// the wait durable: nothing here holds a future, a task, or a watcher that a
-/// crash could lose.
+/// Admission-pinned wait availability is sufficient; the body need not
+/// obtain its key. It names the process terminal as the resolver, so the
+/// runtime arms the wait, both now and on every redrive of the parked turn.
+/// Nothing here holds a future, a task, or a watcher that a crash could lose.
 ///
 /// Deliberately intent-free. A parking attempt cannot carry tool intents by
 /// construction, and it needs none: the durable act is the journaled arming the
 /// runtime performs from the declaration below, not a side effect this body
 /// requests.
-pub fn execute_process_await_tool_call(
-    context: &lash_core::AttemptContext<'_>,
-    args: &Value,
-) -> lash_core::ToolAttemptOutcome {
+pub fn execute_process_await_tool_call(args: &Value) -> lash_core::ToolAttemptOutcome {
     let Some(handle) = args.get("handle") else {
         return done_without_intents(ToolOutcome::err_fmt("await_process requires `handle`"));
     };
@@ -512,9 +508,6 @@ pub fn execute_process_await_tool_call(
         Ok(process_id) => process_id,
         Err(err) => return done_without_intents(ToolOutcome::err_fmt(err)),
     };
-    if let Err(err) = context.completion_key() {
-        return done_without_intents(ToolOutcome::err_fmt(err));
-    }
     let mut pending = lash_core::PendingCompletion::new().resolved_by_process_terminal(process_id);
     pending.on_cancel = lash_core::CancelHint::Ignore;
     lash_core::ToolAttemptOutcome::pending(pending)

@@ -794,6 +794,13 @@ the operating system's CSPRNG, spelled as 32 lowercase hex digits
 no completion secret: there is nothing to provision, rotate or share between
 nodes.
 
+For a deferring tool, admission pins the completion wait before its body
+runs. That availability is sufficient to return `Pending`; calling
+`AttemptContext::completion_key()` is optional. A body can read the key
+for an external worker, or the host can obtain it through
+`Completions::parked` after parking. Runtime-owned resolvers use the admitted
+wait directly.
+
 The key is a bearer capability: whoever holds it can resolve its wait. Who may
 finish a pending wait is authorization, and the host owns it. Authenticate and
 authorize the caller (your API authentication, your webhook signatures) before

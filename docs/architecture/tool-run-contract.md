@@ -209,9 +209,11 @@ process.
 **Pending calls.** A turn's round admission pins a `tool_completion` wait
 (L5's `waits::pin`) for every member whose declaration may defer, with the
 member's one limit as its deadline, and records the wait in the member's
-admission. The body re-derives the wait's `wk1` key with `waits::host_key`,
-so a rerun is handed the same key; the tool hands it to whoever completes
-the call. A body that returns Pending records an `x_wait` carrying its
+admission. That availability is sufficient to return Pending; the body need
+not obtain the key. `AttemptContext::completion_key()` reads the admitted
+wait's key for an external worker; a host can instead read it through
+`Completions::parked` after parking. A rerun sees the same key.
+A body that returns Pending records an `x_wait` carrying its
 `CompletionSource`: the wait, the process terminal of its declared start,
 if it launched one, and the parked call's material. The round runner
 races the parked members' waits (`waits::race`): the host's

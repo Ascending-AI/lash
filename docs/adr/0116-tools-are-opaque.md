@@ -40,8 +40,9 @@ A body returns `Done` with output and ordered `ToolIntents`, or `Pending`.
 The Run records Pending as a Deferred X: no rank, final decision, presentation
 or `ToolCompletion` occurs until its source supplies a terminal. A Pending
 result carries no general intents. It may name `PendingResolver::ProcessTerminal`
-or one sealed `DeclaredStart`; a plain Pending call reserves a key for an
-external completion. Hosts keep progress metadata in their own records under ADR 0137.
+or one sealed `DeclaredStart`; a plain Pending call uses the wait admission
+pinned for an external completion. That availability is sufficient; the body
+need not obtain its key. Hosts keep progress metadata in their own records under ADR 0137.
 
 #### 1.3 Declaration and admission
 
@@ -189,7 +190,8 @@ fail the same law (§7.1).
 
 `DeclaredStart` privately seals one `StartProcessIntent` and its index-0
 `ToolIntentIdentity`. Construction requires the start's owner to equal the
-attempt's runtime owner and requires a completion key; it refuses
+attempt's runtime owner and requires an admission-pinned completion wait;
+the body need not read its key. Construction refuses
 `ForeignOwner` or `CompletionUnavailable`. The owner can be a session or a
 process. Decoded starts are checked against the admitted identity again before
 registration: an owner mismatch is `OwnerMismatch`, any other identity mismatch
@@ -198,8 +200,9 @@ receipt with no registration.
 
 #### 3.2 The launch rule
 
-A provider that can defer has its completion key reserved before body
-execution. The Run records the start obligation under a stable `StartKey`, bound
+A provider that can defer has its completion wait pinned by admission before
+body execution; key acquisition by the body is optional.
+The Run records the start obligation under a stable `StartKey`, bound
 process implementation, captured environment and consumer hold. The start's own
 recorded admission is protected by the call's cancel fence: cancellation before
 admission prevents launch, and an admitted start stays recoverable after

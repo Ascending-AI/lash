@@ -127,12 +127,14 @@ fn call_id(&self) -> &ToolCallId;
 fn attempt_number(&self) -> u32;
 fn max_attempts(&self) -> u32;
 fn intent_identity(&self, index: u32) -> ToolIntentIdentity;
-fn completion_key(&self) -> Result<AwaitEventKey, RuntimeError>;
+fn completion_key(&self) -> Result<PinnedKey, RuntimeError>;
 ```
 
 Its call id is mandatory. `completion_key` can refuse when the tool or host
 lacks deferred-completion capability. The admitted internal `ToolContext`
 stores the id and retry information and builds the attempt context.
+Admission-pinned wait availability is sufficient to return `Pending`;
+calling `completion_key` is optional and only reads that wait's key.
 Provider correlation belongs to protocol, transcript and display records,
 rather than an accessor on the attempt context.
 

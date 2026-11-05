@@ -287,28 +287,6 @@ pub struct AttemptContext<'run> {
 
 mod attempt;
 
-#[derive(Clone, Default)]
-pub(crate) struct ToolCompletionState {
-    key: Arc<Mutex<Option<lash_execution_contracts::waits::PinnedKey>>>,
-}
-
-impl ToolCompletionState {
-    pub(crate) fn store(&self, key: lash_execution_contracts::waits::PinnedKey) {
-        let mut guard = self.key.lock_recover();
-        if guard.is_none() {
-            *guard = Some(key);
-        }
-    }
-
-    pub(crate) fn take(&self) -> Option<lash_execution_contracts::waits::PinnedKey> {
-        self.key.lock_recover().take()
-    }
-
-    pub(crate) fn load(&self) -> Option<lash_execution_contracts::waits::PinnedKey> {
-        self.key.lock_recover().clone()
-    }
-}
-
 /// The runtime's per-call dispatch state for one tool call. It is
 /// crate-private: a provider body receives only the [`AttemptContext`]
 /// projected from it, which reaches no dispatch, process administration or
@@ -335,7 +313,7 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) call_id: lash_protocol_types::ToolCallId,
     pub(crate) attempt_number: u32,
     pub(crate) max_attempts: u32,
-    pub(crate) completion: ToolCompletionState,
+    pub(crate) completion: Option<lash_execution_contracts::waits::PinnedKey>,
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) facts: crate::plugin::ExecutionFacts,
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
@@ -394,7 +372,7 @@ pub(crate) struct ToolContextBuilder<'run> {
     tool_execution_binding: Option<lash_vocabulary::providers::ExecutionBinding>,
     tool_execution_route: ToolExecutionRoute,
     call_id: lash_protocol_types::ToolCallId,
-    completion: ToolCompletionState,
+    completion: Option<lash_execution_contracts::waits::PinnedKey>,
     parent_invocation: Option<crate::RuntimeInvocation>,
     facts: crate::plugin::ExecutionFacts,
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
@@ -422,7 +400,7 @@ impl<'run> ToolContextBuilder<'run> {
             tool_execution_binding: None,
             tool_execution_route: ToolExecutionRoute::Catalog,
             call_id: call.call_id.clone(),
-            completion: ToolCompletionState::default(),
+            completion: None,
             parent_invocation: dispatch.parent_invocation.clone(),
             facts: dispatch.facts.clone(),
             child_execution_trace_hook: None,
@@ -520,15 +498,6 @@ impl<'run> ToolContext<'run> {
             })
     }
 
-    /// Hands the call the key of the completion wait its round pinned.
-    pub(crate) fn install_completion_key(
-        &self,
-        key: Option<lash_execution_contracts::waits::PinnedKey>,
-    ) {
-        if let Some(key) = key {
-            self.completion.store(key);
-        }
-    }
     pub(crate) fn replay_validation_trace(&self) -> Option<crate::RuntimeEffectReplayTrace> {
         self.runtime_execution_context
             .as_ref()
@@ -609,7 +578,7 @@ impl<'run> ToolContext<'run> {
             tool_execution_binding: None,
             tool_execution_route: ToolExecutionRoute::Catalog,
             call_id: lash_protocol_types::ToolCallId::fixture("tool-context"),
-            completion: ToolCompletionState::default(),
+            completion: None,
             parent_invocation: None,
             facts: crate::plugin::ExecutionFacts::of_policy(&policy, None),
             child_execution_trace_hook: None,
@@ -653,10 +622,6 @@ impl<'run> ToolContext<'run> {
     pub(crate) fn with_step_stop(mut self, stop: tokio_util::sync::CancellationToken) -> Self {
         self.cancellation_token = Some(stop);
         self
-    }
-
-    pub(crate) fn take_completion_key(&self) -> Option<lash_execution_contracts::waits::PinnedKey> {
-        self.completion.take()
     }
 
     pub(crate) fn with_attempt(mut self, attempt_number: u32, max_attempts: u32) -> Self {

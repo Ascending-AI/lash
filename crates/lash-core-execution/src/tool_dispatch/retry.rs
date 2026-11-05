@@ -289,7 +289,7 @@ async fn build_attempt_context<'run>(
     // loss. Report which of the two is missing rather than blaming the
     // controller for a tool whose admitted declaration never claimed the
     // capability.
-    let completion = match tool_context.completion.load() {
+    let completion = match tool_context.completion.clone() {
         Some(key) => crate::tool_provider::AttemptCompletionSupport::Available(key),
         None if !admitted.declaration().may_defer => {
             crate::tool_provider::AttemptCompletionSupport::NotDeclared

@@ -125,8 +125,7 @@ fn parked_output(
             .parked(pinned.id.to_hex()),
         )
     });
-    // A call whose round pinned no wait never had a key to take, so it
-    // cannot park; nor can one whose park does not encode.
+    // Parking requires an admission-pinned wait and encodable material.
     let Some(source) = encoded else {
         return member_output(
             owner,
@@ -135,7 +134,7 @@ fn parked_output(
                 ToolCallOutput::failure(crate::ToolFailure::runtime(
                     crate::ToolFailureClass::Internal,
                     "pending_tool_missing_completion_key",
-                    "tool returned Pending without a completion wait to park on",
+                    "tool returned Pending without an admission-pinned completion wait or encodable parked material; calling completion_key() is not required",
                 )),
             )),
         )

@@ -50,9 +50,12 @@ a crash or takeover changes neither the deadline nor the call identity.
 An `UntilScopeEnd` wait has no deadline and is revoked when its scope ends.
 Lash supplies no default for either tool bound.
 
-The tool obtains its completion key from `AttemptContext::completion_key()`
-and records it with `call_id` and caller context before returning `Pending`.
-The wait exists before the body runs. Hosts list pending calls through
+Admission pins the completion wait before the body runs. That availability
+is sufficient to return `Pending`; the body need not obtain the key.
+The tool can read it through `AttemptContext::completion_key()` and record
+it with `call_id` and caller context for an external worker, or the host can
+read it after parking. Runtime-owned resolvers use the admitted wait directly.
+Hosts list pending calls through
 `Completions::parked(CallOwner::Session(..))` or
 `Completions::parked(CallOwner::Process(..))`. Each record carries its key,
 owner, call id, tool id and deadline; lifecycle waiting facts expose the call

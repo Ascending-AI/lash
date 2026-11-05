@@ -12,9 +12,10 @@ pub enum CancelHint {
 
 /// Who delivers the outcome of a parked call.
 ///
-/// A plain [`ToolOutcome::Pending`] names nobody: an out-of-band actor holds
-/// the completion key and resolves it whenever it likes (the human-approval
-/// shape). A call that parks on a *runtime-owned* fact names that fact here
+/// A plain [`ToolOutcome::Pending`] names nobody: a host resolves the
+/// admission-pinned wait using a key from [`crate::AttemptContext::completion_key`]
+/// or `Completions::parked` after parking, as in human approvals.
+/// A call that parks on a *runtime-owned* fact names that fact here
 /// instead, and the runtime arms the resolver itself — at the park and again on
 /// every redrive of the parked turn, because a recorded attempt body does not
 /// re-run when the turn is redriven and an armed watcher does not survive a
@@ -71,8 +72,9 @@ pub struct PendingCompletion {
     pub on_cancel: CancelHint,
     /// Runtime-owned fact that resolves this wait, if the call named one.
     ///
-    /// `None` is the out-of-band shape: something outside the runtime holds the
-    /// completion key. `Some` makes the runtime responsible for arming the
+    /// `None` is the out-of-band shape: a host resolves the admission-pinned
+    /// wait, using a key obtained by the body or read after parking.
+    /// `Some` makes the runtime responsible for arming the
     /// resolver on the park and on every redrive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_by: Option<PendingResolver>,
@@ -95,8 +97,8 @@ impl PendingCompletion {
 
     /// Use it when the outcome is a fact the runtime can already observe
     /// durably (a process terminal), rather than one an external actor
-    /// delivers. The tool still takes its completion key first: the key is what
-    /// the armed resolver resolves.
+    /// delivers. Admission-pinned wait availability is sufficient; the tool
+    /// does not need to call [`crate::AttemptContext::completion_key`].
     pub fn resolved_by(mut self, resolver: PendingResolver) -> Self {
         self.resolved_by = Some(resolver);
         self
@@ -139,17 +141,19 @@ impl PendingCompletion {
 ///
 /// A tool that returns [`ToolOutcome::Pending`] declares `may_defer` on its
 /// manifest's [`ToolDeclaration`](lash_vocabulary::tool_declaration::ToolDeclaration); an undeclared tool
-/// that parks fails the call with `tool_outcome_not_declared`. Before
-/// returning `Pending`, it **must** first obtain a completion key by calling
+/// that parks fails the call with `tool_outcome_not_declared`. Admission must
+/// pin a completion wait before the body runs. That availability is sufficient
+/// to return `Pending`; calling
 /// [`AttemptContext::completion_key`](crate::AttemptContext::completion_key)
-/// (reachable through `call.context`). That key names the durable wait the runtime parks
-/// the call on, and is what an external resolver uses to deliver the outcome. Returning
-/// `Pending` *without* having taken a completion key fails the call with the internal
-/// error `pending_tool_missing_completion_key`.
+/// is optional. It returns the already pinned wait's key for an external
+/// resolver. A host can instead read that key from `Completions::parked`
+/// after the call parks, and runtime-owned resolvers need no key from the body.
+/// Returning `Pending` where admission pinned no completion wait fails with
+/// `pending_tool_missing_completion_key`.
 ///
 /// ```ignore
 /// async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-///     // Take the key first, then hand it to whatever completes the work out-of-band.
+///     // This host passes the admitted wait's key to an external worker.
 ///     let key = match call.context.completion_key() {
 ///         Ok(key) => key,
 ///         Err(err) => return ToolOutcome::err_fmt(err),
@@ -162,9 +166,9 @@ impl PendingCompletion {
 pub enum ToolOutcome {
     /// Active await: the tool finished inline; this is its final output.
     Done(Box<crate::ToolCallOutput>),
-    /// Deferred completion: the tool parked on a durable wait keyed by the
-    /// [`AttemptContext::completion_key`](crate::AttemptContext::completion_key) it took
-    /// before returning. The outcome arrives later through the resolve seam and is
+    /// Deferred completion: the tool parked on the durable wait admission
+    /// pinned for it. The body need not obtain its key before returning.
+    /// The outcome arrives later through the resolve seam and is
     /// shaped by the carried [`PendingCompletion`].
     ///
     /// Boxed so that the outcome every tool attempt returns — and that several

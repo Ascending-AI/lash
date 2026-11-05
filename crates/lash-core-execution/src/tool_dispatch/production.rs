@@ -729,8 +729,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         context = context
             .with_prepared_payload(prepared.call.prepared_payload.clone())
             .with_executable(prepared.input.binding.executable.clone());
-        context.install_completion_key(self.completion_key.clone());
-        let completion_context = context.clone();
+        context.completion = self.completion_key.clone();
         let payload = dispatch
             .routes
             .entry(&prepared.input.definition.manifest.id)
@@ -931,14 +930,14 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         suggested_delay_ms: None,
                         repeatable: true,
                     })
-                } else if completion_context.take_completion_key().is_none() {
+                } else if self.completion_key.is_none() {
                     let capture = self
                         .capture_output(
                             prepared,
                             ToolCallOutput::failure(crate::ToolFailure::runtime(
                                 crate::ToolFailureClass::Internal,
                                 "pending_tool_missing_completion_key",
-                                "tool returned Pending without obtaining its completion key",
+                                "tool returned Pending without an admission-pinned completion wait; calling completion_key() is not required",
                             )),
                             crate::plugin::ToolHookOccurrence::Attempt {
                                 attempt: attempt.attempt,

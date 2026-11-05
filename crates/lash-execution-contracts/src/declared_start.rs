@@ -67,7 +67,9 @@ impl DeclaredStart {
 pub enum DeclaredStartRefused {
     #[error("a declared start must name the declaring owner")]
     ForeignOwner,
-    #[error("a declared start needs a completion key")]
+    #[error(
+        "a declared start needs an admission-pinned completion wait; calling completion_key() is not required"
+    )]
     CompletionUnavailable,
 }
 

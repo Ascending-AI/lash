@@ -39,7 +39,7 @@ impl<'run> AtomicToolAttempt<'run> {
         let dispatch = Arc::new(dispatch);
         let mut tool_context =
             tool_context.with_attempt_dispatch(Arc::clone(&dispatch), invocation);
-        tool_context.completion = crate::tool_provider::ToolCompletionState::default();
+        tool_context.completion = None;
         Self {
             dispatch,
             tool_context,
@@ -383,8 +383,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
                 ));
             }
             // A call that runs outside a turn's tool round has no completion
-            // wait pinned for it, so it never parks: it took no key, and its
-            // Pending is refused as the missing key it is.
+            // wait pinned by admission, so it cannot park.
             return Ok(attempt_done(
                 normalized_outcome(
                     context,
@@ -394,7 +393,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
                     runtime_failure(
                         ToolFailureClass::Internal,
                         "pending_tool_missing_completion_key",
-                        "tool returned Pending without first obtaining a completion key",
+                        "tool returned Pending without an admission-pinned completion wait; calling completion_key() is not required",
                     ),
                 )
                 .await,

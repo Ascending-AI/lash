@@ -225,7 +225,7 @@ impl<'run> AttemptContext<'run> {
             },
             processes: AttemptProcesses {
                 start_identity,
-                can_start: completion.key().is_ok(),
+                can_start: matches!(&completion, AttemptCompletionSupport::Available(_)),
                 owner: context.owner.runtime_owner(),
                 processes: Arc::clone(&context.processes),
             },
@@ -643,6 +643,8 @@ impl<'run> AttemptContext<'run> {
     /// its round pinned when it admitted the call, which a host resolves
     /// through [`resolve_host`](crate::runtime::actor::waits::resolve_host).
     /// A rerun of the call is handed the same key.
+    /// Admission pins the wait before the body runs. Its availability is
+    /// sufficient to return Pending; this accessor only reads its key.
     ///
     /// # Errors
     ///
