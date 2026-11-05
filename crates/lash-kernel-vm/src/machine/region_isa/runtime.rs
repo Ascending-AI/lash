@@ -19,6 +19,10 @@ impl KernelMachine {
         &mut self,
         task: TaskId,
     ) -> Result<bool, Halt> {
+        #[cfg(any(test, feature = "testing"))]
+        if self.islands.source_only {
+            return Ok(false);
+        }
         if self.task(task)?.frames.is_empty() {
             self.refresh_charging(task)?;
             let Some(Incoming::Value(value)) = self.task(task)?.take_incoming() else {
@@ -29,9 +33,6 @@ impl KernelMachine {
             return Ok(true);
         }
         let frame = self.frame(task)?;
-        if frame.pending.source.is_none() {
-            return Ok(false);
-        }
         let id = frame.code;
         self.active_link = frame.link;
         self.refresh_charging(task)?;
@@ -39,8 +40,24 @@ impl KernelMachine {
         let calls = compile_calls(&self.exe, &draft).map_err(|error| halt(invalid(error)))?;
         let code =
             verify_region(&self.exe, id, draft, &calls).map_err(|error| halt(invalid(error)))?;
-        let mut lease = RegionLease::acquire(self, code).map_err(halt)?;
-        let outcome = lease.run(StopAt::NextBoundary);
+        #[cfg(any(test, feature = "testing"))]
+        let code = if self.islands.generic_only {
+            code.as_generic()
+        } else {
+            code
+        };
+        // The driver performs one semantic step even for a zero-size slice.
+        // Direct lease callers retain their exact, possibly exhausted cutoff.
+        let tables = verified::Code::bind(self, &code).map_err(halt)?;
+        let mut limits = Limits::machine(self).map_err(halt)?;
+        let request = if limits.slice <= limits.entry_progress {
+            limits.slice = u64::MAX;
+            StopAt::NextLegalPrefix
+        } else {
+            StopAt::NextBoundary
+        };
+        let mut lease = RegionLease::acquire_verified(self, tables, limits).map_err(halt)?;
+        let outcome = lease.run(request);
         let stop = outcome.map_err(|error| {
             let at = match &lease.execution {
                 Executing::Machine(execution) => execution

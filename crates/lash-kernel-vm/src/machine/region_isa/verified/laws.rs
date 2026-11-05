@@ -1056,6 +1056,32 @@ fn completed_root() {
             machine.task(TaskId::MAIN).unwrap().record.state,
             lash_kernel_state::paged::TaskStateRecord::Resuming { .. }
         ));
+        // K-MACH-005: even a zero-size driver slice advances one source phase.
+        // Bound the sweep so a non-advancing continuation fails immediately.
+        for slice in [0, 1, u64::MAX] {
+            let mut fresh = call_expression(body);
+            let mut completed = false;
+            for _ in 0..128 {
+                match crate::Machine::run(&mut fresh.machine, &mut fresh.world, slice).unwrap() {
+                    crate::Step::Ended(end) => {
+                        assert_eq!(
+                            crate::laws::embedder::result(end),
+                            fresh.machine.copy_datum(&expected).unwrap(),
+                            "fresh driver {body}, slice {slice}"
+                        );
+                        completed = true;
+                        break;
+                    }
+                    crate::Step::Slice => {}
+                    other => panic!("unexpected driver stop: {other:?}"),
+                }
+                fresh.reopen(crate::Layout::default(), false);
+            }
+            assert!(
+                completed,
+                "fresh driver must advance: {body}, slice {slice}"
+            );
+        }
     }
 }
 
