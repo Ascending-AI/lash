@@ -157,7 +157,14 @@ impl Code {
                     }
                     pending.push(*next);
                 }
-                RegionOp::Boundary { .. } | RegionOp::Return { .. } | RegionOp::Exit { .. } => {}
+                RegionOp::Return { .. } => {
+                    pending.push(
+                        program
+                            .return_successor(pc)
+                            .ok_or_else(|| invalid(Refused::Path))?,
+                    );
+                }
+                RegionOp::Boundary { .. } | RegionOp::Exit { .. } => {}
             }
         }
         let count = calls.last_key_value().map_or(Ok(0), |(&index, _)| {

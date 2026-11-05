@@ -52,6 +52,31 @@ impl Running<'_> {
                     formula,
                 }));
             }
+            RegionOp::Return { value } => {
+                let destination = self
+                    .code
+                    .flows
+                    .get(self.pc.index())
+                    .and_then(Option::as_ref)
+                    .and_then(|flow| flow.destination)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
+                return Ok(Some(ScalarAnswer {
+                    write: Some((destination, self.read(*value)?)),
+                    next: self
+                        .code
+                        .program
+                        .return_successor(self.pc)
+                        .ok_or_else(|| invalid(Refused::Path))?,
+                    formula: None,
+                }));
+            }
+            RegionOp::Exit { .. } => {
+                return Ok(Some(ScalarAnswer {
+                    write: None,
+                    next: self.pc,
+                    formula: None,
+                }));
+            }
             RegionOp::Branch { test, yes, no } => {
                 let Some(Value::Bool(value)) = self.inline(*test)? else {
                     return Ok(None);

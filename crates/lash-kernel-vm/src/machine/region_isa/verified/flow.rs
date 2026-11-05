@@ -20,6 +20,7 @@ pub(super) struct Amount {
     pub(super) terms: Box<[(Fact, i128)]>,
 }
 pub(super) struct Flow {
+    pub(super) frame_delta: i128,
     pub(super) loop_branch: Option<u32>,
     pub(super) holds: Box<[Root]>,
     pub(super) releases: Box<[Root]>,
@@ -52,6 +53,10 @@ impl Flow {
                 Some(dst.index())
             }
             RegionOp::Heap { dst: Some(dst), .. } => Some(dst.index()),
+            RegionOp::Return { .. } => after
+                .roles
+                .iter()
+                .find_map(|(slot, reg)| matches!(slot, Slot::Departure(_)).then_some(reg.index())),
             _ => None,
         };
         let root = |slot: Slot, reg| {
@@ -146,6 +151,14 @@ impl Flow {
             })
             .transpose()?;
         Ok(Self {
+            frame_delta: if matches!(code.op(pc), Some(RegionOp::Exit { .. }))
+                && step.at.site == code.source().site
+                && step.at.phase == crate::compile::room::Phase::Leave
+            {
+                -i128::from(lash_kernel_doc::LogicalHeldV1::FRAME)
+            } else {
+                0
+            },
             loop_branch: super::control::branch(code, pc),
             holds,
             releases,

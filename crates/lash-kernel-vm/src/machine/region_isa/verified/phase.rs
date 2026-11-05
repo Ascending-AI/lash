@@ -212,7 +212,7 @@ impl<'s> Running<'s> {
                 .view
                 .stage(LeaseOp::Transfer { holds, releases })
                 .map_err(storage_fault)?;
-            if phase.facts().delta() != delta {
+            if phase.facts().delta().checked_add(flow.frame_delta) != Some(delta) {
                 return Err(invalid(Refused::Facts));
             }
             Some(phase)

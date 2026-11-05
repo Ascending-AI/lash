@@ -11,6 +11,9 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) arguments: Vec<Value>,
     pub(super) loops: Vec<super::control::LoopState>,
     pub(super) parked: Vec<super::calls::Parked>,
+    pub(super) departing: Option<super::returns::Departure>,
+    pub(super) returning: Option<super::returns::Incoming>,
+    pub(super) complete: bool,
     pub(super) activation: Option<CallActivation>,
     pub(super) identity: Rc<()>,
     pub(super) scratch: super::phase::Scratch,
@@ -105,7 +108,7 @@ impl<'m> Running<'m> {
         )?;
         let mut call_values = Vec::new();
         call_values
-            .try_reserve_exact(programs.parameters)
+            .try_reserve_exact(programs.parameters.max(programs.arguments))
             .map_err(|_| invalid(Refused::Scratch))?;
         let mut call_captures = Vec::new();
         call_captures
@@ -114,6 +117,9 @@ impl<'m> Running<'m> {
         Ok(Self {
             call_captures,
             parked: Vec::new(),
+            departing: None,
+            returning: None,
+            complete: false,
             activation: None,
             identity: Rc::new(()),
             call_values,
@@ -152,11 +158,5 @@ impl<'m> Running<'m> {
         stop: StopAt,
     ) -> Result<RegionStop, RegionError> {
         self.execute(stop)
-    }
-    pub(in crate::machine::region_isa) fn leave_call(
-        &mut self,
-        _activation: CallActivation,
-    ) -> Result<(), RegionError> {
-        Err(invalid(Refused::Facts))
     }
 }

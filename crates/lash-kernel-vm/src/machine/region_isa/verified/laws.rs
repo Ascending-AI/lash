@@ -708,3 +708,50 @@ fn a_scalar_prefix_obeys_the_exact_source_memory_cutoff() {
         }
     }
 }
+
+/// K-FN-004/K-EVAL-008: a real body call must transfer its actual result,
+/// release the callee's formals and frame, and restore its caller exactly once.
+#[test]
+fn a_body_return_leaves_its_frame_and_restores_the_actual_result() {
+    let mut run = call_machine();
+    let machine = &mut run.machine;
+    machine.current = Some(TaskId::MAIN);
+    let entry_depth = machine.tasks.get_mut(0).unwrap().unwrap().frames.len() as u32
+        + u32::from(!machine.session_cell);
+    let id = machine.frame(TaskId::MAIN).unwrap().code;
+    let draft = compile_region(&machine.exe, id).unwrap();
+    let calls = compile_calls(&machine.exe, &draft).unwrap();
+    let program = verify_region(&machine.exe, id, draft, &calls).unwrap();
+    let mut lease = RegionLease::acquire(machine, program).unwrap();
+    for _ in 0..4 {
+        assert_eq!(
+            lease.run(StopAt::NextLegalPrefix).unwrap(),
+            RegionStop::Handoff
+        );
+    }
+    let Executing::Machine(execution) = &mut lease.execution else {
+        unreachable!()
+    };
+    assert!(matches!(
+        execution.code.program.op(execution.pc),
+        Some(crate::compile::region_isa::RegionOp::Return { .. })
+    ));
+    let activation = execution.activation.take().unwrap();
+    execution.leave_call(activation).unwrap();
+    assert!(execution.parked.is_empty());
+    assert_eq!(execution.counters.depth, entry_depth);
+    // The source retains one caller frame and one Int(9) occurrence.
+    assert_eq!(
+        execution.counters.balance,
+        lash_kernel_doc::LogicalHeldV1::FRAME + 17
+    );
+    let call = execution.code.calls.iter().flatten().next().unwrap();
+    assert_eq!(execution.pc, call.next);
+    let result = execution
+        .registers
+        .read(0, execution.reached.invocation, call.result)
+        .unwrap()
+        .bind(&mut execution.view)
+        .unwrap();
+    assert!(execution.view.scalar(result).unwrap().same(&Value::Int(9)));
+}

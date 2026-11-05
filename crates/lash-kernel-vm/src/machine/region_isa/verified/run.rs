@@ -44,6 +44,18 @@ impl Running<'_> {
             if self.counters.progress >= self.limits.slice {
                 return self.halt(RegionStop::Slice);
             }
+            if self.returning.is_some() {
+                if self.complete {
+                    return self.halt(RegionStop::Complete);
+                }
+                if !self.restore_call()? {
+                    return self.halt(RegionStop::Refusal);
+                }
+                if let Some(stop) = self.prefix_stop(request) {
+                    return Ok(stop);
+                }
+                continue;
+            }
             let code = Arc::clone(&self.code);
             let step = code
                 .program
@@ -113,6 +125,17 @@ impl Running<'_> {
                 _ => self
                     .scalar_answer(op)?
                     .ok_or_else(|| invalid(Refused::Facts))?,
+            };
+            let departure = if matches!(op, RegionOp::Return { .. }) {
+                let value = answer
+                    .write
+                    .ok_or_else(|| invalid(Refused::Facts))?
+                    .1
+                    .bind(&mut self.view)
+                    .map_err(RegionError::Heap)?;
+                Some(self.quote_return(value)?)
+            } else {
+                None
             };
             let after = charge::bill(
                 self.counters,
@@ -185,7 +208,17 @@ impl Running<'_> {
             self.prefix = step.after;
             self.reached.prefix = step.after.index() as u32;
             self.reached.debt = counters.debt;
-            self.pc = answer.next;
+            if let Some(departure) = departure {
+                self.departing = Some(departure);
+            }
+            if matches!(op, RegionOp::Exit { .. }) {
+                self.finish_frame()?;
+                if self.complete {
+                    return self.halt(RegionStop::Complete);
+                }
+            } else {
+                self.pc = answer.next;
+            }
             if let Some(stop) = self.prefix_stop(request) {
                 return Ok(stop);
             }

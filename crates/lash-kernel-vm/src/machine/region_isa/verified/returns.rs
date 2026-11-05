@@ -1,0 +1,220 @@
+//! Return, entered-scope Leaves, frame Leave and caller Restore stay ordered.
+use super::super::{operands::Operand, *};
+use super::{Running, charge};
+use crate::compile::region_isa::RegionOp;
+use lash_kernel_state::kernel_internals::logical::{LeaseOp, LeaseValue};
+
+pub(super) struct Departure {
+    pub(super) origin: Point,
+    pub(super) value: LeaseValue,
+    completion: u64,
+}
+pub(super) struct Incoming {
+    pub(super) value: LeaseValue,
+    pub(super) completion: u64,
+    pub(super) paid: bool,
+    pub(super) site: u32,
+}
+impl Running<'_> {
+    pub(super) fn quote_return(&mut self, value: LeaseValue) -> Result<Departure, RegionError> {
+        let completion = if let Some(parked) = self.parked.last() {
+            let call = parked
+                .code
+                .calls
+                .get(parked.site as usize)
+                .and_then(Option::as_ref)
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            let plan = call
+                .plan
+                .targets()
+                .iter()
+                .find(|plan| plan.code() == parked.target)
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            self.call_values.clear();
+            for register in &call.arguments {
+                self.call_values.push(
+                    self.registers
+                        .read(self.parked.len() - 1, parked.reached.invocation, *register)?
+                        .bind(&mut self.view)
+                        .map_err(RegionError::Heap)?,
+                );
+            }
+            plan.debt()
+                .completion(&mut self.view, &self.call_values, value)
+                .map_err(storage_fault)?
+                .ok_or_else(|| invalid(Refused::Facts))?
+        } else {
+            0
+        };
+        Ok(Departure {
+            origin: self
+                .code
+                .program
+                .step(self.pc)
+                .ok_or_else(|| invalid(Refused::Path))?
+                .at
+                .clone(),
+            value,
+            completion,
+        })
+    }
+    pub(super) fn finish_frame(&mut self) -> Result<(), RegionError> {
+        let departing = self
+            .departing
+            .take()
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        let step = self
+            .code
+            .program
+            .step(self.pc)
+            .ok_or_else(|| invalid(Refused::Path))?;
+        if step.at.site != self.code.program.source().site {
+            return Err(invalid(Refused::Path));
+        }
+        self.registers.clear(self.frame_index())?;
+        self.counters.depth = self
+            .counters
+            .depth
+            .checked_sub(1)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        let Some(parked) = self.parked.pop() else {
+            self.returning = Some(Incoming {
+                value: departing.value,
+                completion: 0,
+                paid: true,
+                site: 0,
+            });
+            self.complete = true;
+            self.stop = Some(RegionStop::Complete);
+            return Ok(());
+        };
+        self.returning = Some(Incoming {
+            value: departing.value,
+            completion: departing.completion,
+            paid: false,
+            site: parked.site,
+        });
+        self.code = parked.code;
+        self.pc = parked.pc;
+        self.prefix = parked.prefix;
+        self.reached = ReachedPrefix {
+            ordinal: self.reached.ordinal,
+            debt: self.counters.debt,
+            ..parked.reached
+        };
+        self.activation = parked.activation;
+        Ok(())
+    }
+    pub(super) fn restore_call(&mut self) -> Result<bool, RegionError> {
+        let incoming = self
+            .returning
+            .as_ref()
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        let code = Arc::clone(&self.code);
+        let call = code
+            .calls
+            .get(incoming.site as usize)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        if !incoming.paid {
+            let step = code
+                .program
+                .step(self.pc)
+                .ok_or_else(|| invalid(Refused::Path))?;
+            let payment = charge::bill(
+                self.counters,
+                self.limits,
+                &step.charges,
+                crate::compile::room::charges::region_isa::ChargeMoment::After,
+                Some(incoming.completion),
+            )?;
+            self.counters = payment.counters;
+            if let Some(crossing) = payment.crossing {
+                self.refusal = Some(crate::Bound::Charge);
+                self.crossing = Some(crossing);
+                self.attempted = Some(call.plan.resume().clone());
+                self.stop = Some(RegionStop::Refusal);
+                return Ok(false);
+            }
+            self.returning
+                .as_mut()
+                .ok_or_else(|| invalid(Refused::Facts))?
+                .paid = true;
+        }
+        let value = self
+            .returning
+            .as_ref()
+            .ok_or_else(|| invalid(Refused::Facts))?
+            .value;
+        let write = self.registers.prepare_write(
+            &mut self.view,
+            self.parked.len(),
+            self.reached.invocation,
+            call.result,
+            Operand::Dynamic(value),
+        )?;
+        // Restore transfers the existing incoming occurrence, with no extra holding.
+        let pairs = [(value, false)];
+        self.view
+            .stage(LeaseOp::Transfer {
+                holds: &pairs,
+                releases: &pairs,
+            })
+            .map_err(storage_fault)?
+            .reserve()
+            .map_err(RegionError::Heap)?
+            .accept();
+        self.registers.publish_write(write);
+        let step = code
+            .program
+            .step(self.pc)
+            .ok_or_else(|| invalid(Refused::Path))?;
+        self.prefix = step.after;
+        self.pc = call.next;
+        self.reached.ordinal = self
+            .reached
+            .ordinal
+            .checked_add(1)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        self.counters.debt = self
+            .counters
+            .debt
+            .checked_add(1)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        self.reached.prefix = self.prefix.index() as u32;
+        self.reached.debt = self.counters.debt;
+        self.returning = None;
+        Ok(true)
+    }
+    pub(in crate::machine::region_isa) fn leave_call(
+        &mut self,
+        activation: CallActivation,
+    ) -> Result<(), RegionError> {
+        let parked = self.parked.last().ok_or_else(|| invalid(Refused::Facts))?;
+        if self.faulted
+            || self.departing.is_some()
+            || self.returning.is_some()
+            || !Rc::ptr_eq(&activation.lease, &self.identity)
+            || activation.depth != self.parked.len()
+            || activation.invocation != self.reached.invocation
+            || activation.caller_program != parked.code.program.code()
+            || activation.plan != parked.site
+            || self.code.program.code() != parked.target
+            || !matches!(self.code.program.op(self.pc), Some(RegionOp::Return { .. }))
+        {
+            self.faulted = true;
+            return Err(invalid(Refused::Facts));
+        }
+        let depth = self.parked.len();
+        self.activation = Some(activation);
+        loop {
+            let stop = self.execute(StopAt::NextLegalPrefix)?;
+            if self.parked.len() < depth && self.returning.is_none() {
+                return Ok(());
+            }
+            if stop != RegionStop::Handoff {
+                return Ok(());
+            }
+        }
+    }
+}

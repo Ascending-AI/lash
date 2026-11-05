@@ -7,7 +7,9 @@ impl<'m> Running<'m> {
     pub(in crate::machine::region_isa) fn reconstruct(
         mut self,
     ) -> Result<reconstruct::Finished<StateLease<'m>>, RegionError> {
-        if self.faulted {
+        // These new execution phases still need their canonical incoming/debt
+        // reconstruction. Refuse before freezing or publishing a partial image.
+        if self.faulted || self.departing.is_some() || self.returning.is_some() || self.complete {
             return Err(invalid(Refused::Facts));
         }
         let stop = self.stop.ok_or_else(|| invalid(Refused::Exit))?;
