@@ -157,6 +157,13 @@ impl PagedHeap {
         self.limits = limits;
     }
     /// One ledger belongs to this heap across frame/cache and source adapters.
+    pub(crate) fn region_ledger(
+        &self,
+    ) -> Result<std::cell::RefMut<'_, super::logical::Ledger>, HeapFault> {
+        self.logical
+            .try_borrow_mut()
+            .map_err(|_| HeapFault::Malformed("logical ledger is already borrowed".into()))
+    }
     pub fn logical_ledger(&self) -> Rc<RefCell<super::logical::Ledger>> {
         Rc::clone(&self.logical)
     }

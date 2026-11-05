@@ -6,7 +6,7 @@ use crate::arena::Arena;
 pub struct Invocation {
     task: TaskId,
     id: u64,
-    ledger: Rc<()>,
+    ledger: Rc<Lineage>,
 }
 
 /// Prospective identities for a compiled prefix's synchronous activations.
@@ -18,16 +18,9 @@ pub struct InvocationRange {
     task: TaskId,
     first: u64,
     end: u64,
+    region: Option<Rc<()>>,
 }
 impl InvocationRange {
-    pub fn prefix(mut self, count: u64) -> Option<Self> {
-        if count > self.len() {
-            return None;
-        }
-        self.end = self.first.checked_add(count)?;
-        Some(self)
-    }
-
     /// Authenticate a scope's task, ledger and unconsumed reservation once.
     pub fn is_current(&self, ledger: &Ledger, caller: &Invocation) -> bool {
         ledger.is_current(&self.stamp)
@@ -113,11 +106,13 @@ impl Invocation {
 }
 impl Ledger {
     pub fn reserve_invocations(&self, task: TaskId, count: u64) -> Option<InvocationRange> {
+        self.require_unleased().ok()?;
         Some(InvocationRange {
             stamp: self.stamp(),
             task,
             first: self.state.next_invocation,
             end: self.state.next_invocation.checked_add(count)?,
+            region: None,
         })
     }
     /// A pure prospective activation. Accepted entry or a compiled call exit
@@ -300,5 +295,101 @@ impl Ledger {
             return Err(invalid("leaving frame retains its own source owner"));
         }
         self.prepare_ownership(arena, access, &inputs, outputs)
+    }
+}
+
+impl InvocationRange {
+    pub(super) fn matches_region(
+        &self,
+        entry: &Stamp,
+        token: &Rc<()>,
+        reserved: Option<(TaskId, u64)>,
+    ) -> bool {
+        Rc::ptr_eq(&self.stamp.identity, &entry.identity)
+            && self.stamp.revision == entry.revision
+            && self
+                .region
+                .as_ref()
+                .is_some_and(|actual| Rc::ptr_eq(actual, token))
+            && reserved.is_some_and(|(task, bound)| task == self.task && self.len() <= bound)
+    }
+}
+impl Ledger {
+    pub(super) fn reserve_region_invocations(
+        &self,
+        caller: &Invocation,
+        count: u64,
+        token: Rc<()>,
+        access: &Access<'_>,
+    ) -> Result<InvocationRange, HeapFault> {
+        if !Rc::ptr_eq(&self.identity, &caller.ledger)
+            || self.invocation(caller.task, caller.id, access)? != *caller
+        {
+            return Err(invalid(
+                "region caller belongs to another activation or ledger",
+            ));
+        }
+        Ok(InvocationRange {
+            stamp: self.stamp(),
+            task: caller.task,
+            first: self.state.next_invocation,
+            end: self
+                .state
+                .next_invocation
+                .checked_add(count)
+                .ok_or_else(|| invalid("logical invocation overflow"))?,
+            region: Some(token),
+        })
+    }
+}
+
+impl InvocationRange {
+    pub(super) fn install_region(
+        self,
+        mut prepared: Prepared,
+        outputs: &[(Owner, PublicationValue)],
+        access: &Access<'_>,
+    ) -> Result<Prepared, HeapFault> {
+        if !Rc::ptr_eq(&prepared.identity, &self.stamp.identity)
+            || prepared.revision != self.stamp.revision
+            || prepared.next.next_invocation != self.first
+        {
+            return Err(invalid("region activation range changed"));
+        }
+        for (owner, _) in outputs {
+            if let Owner::Frame { task, invocation }
+            | Owner::Value {
+                task, invocation, ..
+            } = *owner
+                && invocation >= self.first
+            {
+                if task != self.task || invocation >= self.end {
+                    return Err(invalid("region retained an unreserved activation"));
+                }
+                let frame = Owner::Frame { task, invocation };
+                if prepared
+                    .next
+                    .execution
+                    .get(&owner_key(frame), access)?
+                    .is_none()
+                {
+                    return Err(invalid("region retained a binding without its frame"));
+                }
+            }
+        }
+        prepared.next.next_invocation = self.end;
+        Ok(prepared)
+    }
+}
+
+impl InvocationRange {
+    /// Consume only the reached prefix of a prospective reservation. Unused
+    /// identities remain unallocated; lineage and lease qualification survive.
+    pub fn prefix(mut self, count: u64) -> Option<Self> {
+        if count > self.len() {
+            return None;
+        }
+        self.end = self.first.checked_add(count)?;
+        Some(self)
     }
 }

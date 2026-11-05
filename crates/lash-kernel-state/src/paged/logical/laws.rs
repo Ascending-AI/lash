@@ -2,8 +2,12 @@
 mod invocation_ranges;
 #[path = "native_construction_tests.rs"]
 mod native_construction;
+#[path = "region_tests.rs"]
+mod region_laws;
 #[path = "roots_tests.rs"]
 mod root_authority;
+#[path = "table_patch_tests.rs"]
+mod table_patch_laws;
 use super::heap::{Source, fresh};
 use crate::paged::SealBudget;
 use crate::paged::census_impl::TraceLimits;

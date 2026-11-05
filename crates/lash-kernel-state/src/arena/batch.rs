@@ -215,10 +215,10 @@ impl PreparedValueProof {
     }
 }
 
-struct Entry {
-    handle: ArenaHandle,
+pub(super) struct Entry {
+    pub(super) handle: ArenaHandle,
     body: Body,
-    facts: Facts,
+    pub(super) facts: Facts,
 }
 struct View<'a> {
     arena: &'a Arena,
@@ -260,7 +260,7 @@ pub struct PreparedBatch {
     allocations: u64,
     next_provisional: u64,
     registration_epoch: u64,
-    entries: Vec<Entry>,
+    pub(super) entries: Vec<Entry>,
     dependencies: Vec<ContentVersion>,
     empty_tuple: Option<(Option<ArenaHandle>, ArenaHandle)>,
 }
@@ -269,8 +269,8 @@ pub struct PreparedBatch {
 pub struct PreparedInstallation<'a> {
     holdings: HashMap<u32, Holding>,
     observed: Vec<ArenaHandle>,
-    registration: Registration<'a>,
-    batch: PreparedBatch,
+    pub(super) registration: Registration<'a>,
+    pub(super) batch: PreparedBatch,
 }
 impl Bodies for PreparedInstallation<'_> {
     fn get(&self, handle: ArenaHandle) -> Option<&Body> {
@@ -300,32 +300,42 @@ impl Arena {
         name: std::sync::Arc<str>,
         next: Option<Value>,
     ) -> Result<Option<(PreparedInstallation<'_>, PreparedTableMember)>, HeapFault> {
-        let Some(snapshot) = self.table_snapshot(handle, &Key::of_text(&name))? else {
+        let Some(mut patch) = self.prepare_table_patch(
+            handle,
+            crate::paged::logical::Member::Field(name.clone()),
+            None,
+            next,
+            Key::of_text(&name),
+        )?
+        else {
             return Ok(None);
         };
-        if !snapshot.is_record() {
+        if !patch.is_record() {
             return Ok(None);
         }
-        let old = snapshot.old_key();
+        let flat = self
+            .facts(handle)
+            .map_err(|error| proof_fault(&error.to_string()))?
+            .flat;
+        let old = patch.old_key();
         let mut nursery = lash_kernel_doc::Nursery::unaccounted(self.objects());
-        let key = old.or_else(|| next.map(|_| nursery.text(&name)));
+        let key = old.or_else(|| {
+            next.map(|_| match ShortText::new(&name) {
+                Some(short) => Value::Text(short),
+                None => nursery.allocate(NewObject::LongText(name)),
+            })
+        });
         let mut installation =
             self.prepare_install(nursery.into_new())
                 .map_err(|error| match error {
                     NativeError::Host(error) => error,
-                    error => HeapFault::Malformed(error.to_string()),
+                    error => proof_fault(&error.to_string()),
                 })?;
-        let table = snapshot.build(
-            &installation,
-            &installation,
-            &installation.registration.read_arena().layouts,
-            crate::paged::logical::Member::Field(name),
-            key,
-            next,
-        )?;
+        patch.bind_field_key(key);
+        patch.seal_flat(&installation, flat);
         let count = installation.batch.entries.len();
-        table.reserve(installation.registration.arena(), count)?;
-        Ok(Some((installation, table)))
+        patch.reserve(installation.registration.arena(), count)?;
+        Ok(Some((installation, patch)))
     }
 }
 impl<'a> PreparedInstallation<'a> {
@@ -604,7 +614,7 @@ impl Arena {
         Ok((handle, Self::prepare_registered(registration)?))
     }
 
-    fn prepare_registered(
+    pub(super) fn prepare_registered(
         mut registration: Registration<'_>,
     ) -> Result<PreparedInstallation<'_>, NativeError> {
         let len = registration.batch_len();
@@ -799,8 +809,29 @@ impl PreparedInstallation<'_> {
         depth_limit: usize,
         literals: bool,
     ) -> Result<PreparedGraphProof, HeapFault> {
+        self.prove_region_values(pages, values, depth_limit, literals, None)
+    }
+    pub(crate) fn prove_region_values(
+        &mut self,
+        pages: &Access<'_>,
+        values: &[Value],
+        depth_limit: usize,
+        literals: bool,
+        region: Option<(&[(ArenaHandle, u64)], u64)>,
+    ) -> Result<PreparedGraphProof, HeapFault> {
         if self.batch.proof.is_some() {
             return Err(proof_fault("a batch proof is already sealed"));
+        }
+        if let Some((_, count)) = region {
+            self.registration
+                .reserve_region_identities(count)
+                .map_err(|error| proof_fault(&error.to_string()))?;
+            self.registration
+                .read_arena()
+                .allocations
+                .checked_add(count)
+                .ok_or_else(|| proof_fault("region allocation counter overflow"))?;
+            self.batch.allocations = count;
         }
         let mutable: Vec<_> = self
             .batch
@@ -815,14 +846,23 @@ impl PreparedInstallation<'_> {
                 ordinal: self
                     .batch
                     .next_provisional
-                    .checked_add(index as u64)
+                    .checked_add(if let Some((ordinals, _)) = region {
+                        ordinals
+                            .iter()
+                            .find(|(target, _)| target == handle)
+                            .ok_or_else(|| proof_fault("region omitted a fresh identity"))?
+                            .1
+                    } else {
+                        index as u64
+                    })
                     .ok_or_else(|| proof_fault("batch identity overflow"))?,
             };
-            if self
-                .registration
-                .reserve_entity()
-                .map_err(|error| proof_fault(&error.to_string()))?
-                != entity
+            if region.is_none()
+                && self
+                    .registration
+                    .reserve_entity()
+                    .map_err(|error| proof_fault(&error.to_string()))?
+                    != entity
             {
                 return Err(proof_fault("prepared allocation ordinals changed"));
             }
@@ -1421,6 +1461,9 @@ impl PreparedBatch {
     /// rebuild, host allocation or recoverable failure remains after this check.
     pub fn publish(self, arena: &mut Arena) {
         assert!(arena.registration_active() && self.is_current(arena));
+        self.publish_region(arena);
+    }
+    pub(crate) fn publish_region(self, arena: &mut Arena) {
         arena.allocations += self.allocations;
         for entry in &self.entries {
             arena.resident = arena.resident.saturating_add(body_values(&entry.body));
@@ -1571,3 +1614,5 @@ impl Arena {
         );
     }
 }
+
+mod region;

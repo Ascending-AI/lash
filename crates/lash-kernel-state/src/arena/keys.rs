@@ -312,7 +312,7 @@ pub fn text_key(text: &str) -> NormalKey {
     }
 }
 
-fn tokens(
+pub(super) fn tokens(
     objects: &(impl super::Bodies + ?Sized),
     facts: &(impl super::FactTable + ?Sized),
     value: &Value,

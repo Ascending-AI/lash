@@ -39,6 +39,7 @@ use members::PreparedMember;
 pub use members::{Member, MemberFault};
 pub use ownership::{PublicationValue, RootValue};
 pub use publication::{AcceptedBoundary, BoundaryTransaction, MemberEdit};
+use region::Lineage;
 #[cfg(any(test, feature = "perf-witness"))]
 pub use region::fixtures as region_fixtures;
 pub use region::{
@@ -460,7 +461,7 @@ pub enum Change {
 
 pub struct Ledger {
     state: State,
-    identity: Rc<()>,
+    identity: Rc<Lineage>,
     revision: u64,
     facts: std::cell::RefCell<facts::Facts>,
 }
@@ -469,13 +470,13 @@ pub struct Ledger {
 /// or survive opening a sealed root. Arena facts carry their own content stamps.
 #[derive(Clone)]
 pub struct Stamp {
-    identity: Rc<()>,
+    identity: Rc<Lineage>,
     revision: u64,
 }
 
 /// A complete staged operation. No semantic tree has changed yet.
 pub struct Prepared {
-    identity: Rc<()>,
+    identity: Rc<Lineage>,
     revision: u64,
     next: State,
     peak: u64,
@@ -516,7 +517,7 @@ impl Prepared {
     ) -> Result<Self, HeapFault> {
         let mut swept = Ledger {
             state: before.state.clone(),
-            identity: Rc::new(()),
+            identity: Rc::new(Lineage::default()),
             revision: before.revision,
             facts: Default::default(),
         };
@@ -571,7 +572,7 @@ impl Ledger {
                 refinements: 0,
                 next_invocation: 1,
             },
-            identity: Rc::new(()),
+            identity: Rc::new(Lineage::default()),
             revision: 0,
             facts: Default::default(),
         }
@@ -586,7 +587,7 @@ impl Ledger {
                 refinements: root.refinements,
                 next_invocation: root.next_invocation,
             },
-            identity: Rc::new(()),
+            identity: Rc::new(Lineage::default()),
             revision: 0,
             facts: Default::default(),
         };
@@ -649,6 +650,7 @@ impl Ledger {
     /// A callback, cold load or safe-point handoff expires outstanding
     /// capabilities even when no logical holding changes. Price stays constant.
     pub fn handoff(&mut self) -> Result<(), HeapFault> {
+        self.require_unleased()?;
         self.revision = self
             .revision
             .checked_add(1)
@@ -860,6 +862,7 @@ impl Ledger {
         accepted: Accepted,
         semantic: impl FnOnce(),
     ) -> Result<(), HeapFault> {
+        self.require_unleased()?;
         let Prepared {
             identity,
             revision,
@@ -1251,4 +1254,12 @@ fn owner_key(owner: Owner) -> codec::Key {
 }
 fn keyed<T: Cell>(tree: &Tree<T>) -> Result<KeyedRoot, HeapFault> {
     tree.keyed_root()
+}
+
+/// Independent itemized state oracle for qualification and witness builds.
+#[cfg(any(test, feature = "perf-witness"))]
+pub mod testing {
+    pub use super::{
+        AcceptedProgram, EvaluatedProgram, JournalEvent, Materializations, PreparedProgram, Program,
+    };
 }
