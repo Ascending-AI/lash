@@ -148,45 +148,80 @@ impl<V: Copy> Registers<V> {
         reg: Register,
         value: Operand<V>,
     ) -> Result<(), RegionError> {
-        fn write<T>(
-            cell: Option<&mut Cell<T>>,
-            invocation: u64,
-            value: T,
-        ) -> Result<(), RegionError> {
-            let cell = cell.ok_or_else(|| invalid(Refused::Facts))?;
-            *cell = Cell {
-                value,
-                invocation,
-                valid: true,
-            };
-            Ok(())
-        }
-        match reg {
+        let write = self.prepare_write(view, frame, invocation, reg, value)?;
+        self.publish_write(write);
+        Ok(())
+    }
+
+    /// Resolve imports, packing and the exact initialized destination before
+    /// a source phase accepts. Preparation does not change any register.
+    pub(super) fn prepare_write<S: View<Value = V>>(
+        &self,
+        view: &mut S,
+        frame: usize,
+        invocation: u64,
+        reg: Register,
+        value: Operand<V>,
+    ) -> Result<PreparedWrite<V>, RegionError> {
+        let (at, value) = match reg {
             Register::Int(index) => {
                 let Value::Int(value) = value.scalar(view)? else {
                     return Err(invalid(Refused::Facts));
                 };
                 let at = self.at(frame, index)?;
-                write(self.ints.get_mut(at), invocation, value)
+                self.ints.get(at).ok_or_else(|| invalid(Refused::Facts))?;
+                (at, PreparedValue::Int(value))
             }
             Register::Float(index) => {
                 let Value::Float(value) = value.scalar(view)? else {
                     return Err(invalid(Refused::Facts));
                 };
                 let at = self.at(frame, index)?;
-                write(self.floats.get_mut(at), invocation, value.get())
+                self.floats.get(at).ok_or_else(|| invalid(Refused::Facts))?;
+                (at, PreparedValue::Float(value.get()))
             }
             Register::Bool(index) => {
                 let Value::Bool(value) = value.scalar(view)? else {
                     return Err(invalid(Refused::Facts));
                 };
                 let at = self.at(frame, index)?;
-                write(self.bools.get_mut(at), invocation, value)
+                self.bools.get(at).ok_or_else(|| invalid(Refused::Facts))?;
+                (at, PreparedValue::Bool(value))
             }
             Register::Value(index) => {
                 let value = value.bind(view).map_err(RegionError::Heap)?;
                 let at = self.at(frame, index)?;
-                write(self.values.get_mut(at), invocation, Some(value))
+                self.values.get(at).ok_or_else(|| invalid(Refused::Facts))?;
+                (at, PreparedValue::Dynamic(value))
+            }
+        };
+        Ok(PreparedWrite {
+            at,
+            invocation,
+            value,
+        })
+    }
+
+    /// The destination was checked against this bank before phase acceptance.
+    /// Publishing performs no import, conversion, allocation or validation.
+    pub(super) fn publish_write(&mut self, write: PreparedWrite<V>) {
+        fn publish<T>(cell: &mut Cell<T>, invocation: u64, value: T) {
+            *cell = Cell {
+                value,
+                invocation,
+                valid: true,
+            };
+        }
+        match write.value {
+            PreparedValue::Int(value) => publish(&mut self.ints[write.at], write.invocation, value),
+            PreparedValue::Float(value) => {
+                publish(&mut self.floats[write.at], write.invocation, value)
+            }
+            PreparedValue::Bool(value) => {
+                publish(&mut self.bools[write.at], write.invocation, value)
+            }
+            PreparedValue::Dynamic(value) => {
+                publish(&mut self.values[write.at], write.invocation, Some(value))
             }
         }
     }
@@ -229,6 +264,18 @@ impl<V: Copy> Registers<V> {
         }
         Ok(())
     }
+}
+
+enum PreparedValue<V: Copy> {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Dynamic(V),
+}
+pub(super) struct PreparedWrite<V: Copy> {
+    at: usize,
+    invocation: u64,
+    value: PreparedValue<V>,
 }
 
 pub(super) struct DynamicWrite<'a, V: Copy> {

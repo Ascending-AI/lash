@@ -558,3 +558,71 @@ fn a_nested_call_reconstructs_the_saved_expression_operand() {
         }
     }
 }
+
+/// K-MACH-005: an exhausted slice retains the reached operands and must stop
+/// before entering a callee, in both charge and source-pace modes.
+#[test]
+fn an_exhausted_production_slice_preserves_the_exact_caller_prefix() {
+    for charging in [false, true] {
+        for request in [StopAt::NextLegalPrefix, StopAt::NextBoundary] {
+            let mut run = call_machine();
+            let machine = &mut run.machine;
+            machine.current = Some(TaskId::MAIN);
+            if !charging {
+                machine.bounds.charge = crate::Charge::Off;
+            }
+            let root = machine.frame(TaskId::MAIN).unwrap().code;
+            let draft = compile_region(&machine.exe, root).unwrap();
+            let calls = compile_calls(&machine.exe, &draft).unwrap();
+            let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
+            let stamp = machine.logical.borrow().stamp();
+            let before = (machine.charged, machine.logical_memory.get());
+            let mut lease = RegionLease::acquire(machine, program).unwrap();
+            for _ in 0..2 {
+                assert_eq!(
+                    lease.run(StopAt::NextLegalPrefix).unwrap(),
+                    RegionStop::Handoff
+                );
+            }
+            let reached = *lease.prefix();
+            let Executing::Machine(execution) = &mut lease.execution else {
+                unreachable!()
+            };
+            execution.limits.slice = execution.counters.progress;
+            let counters = execution.counters;
+            assert_eq!(lease.run(request).unwrap(), RegionStop::Slice);
+            assert_eq!(*lease.prefix(), reached);
+            assert_eq!(lease.run(request).unwrap(), RegionStop::Slice);
+            let prefix = lease.materialize().unwrap();
+            let image = prefix.reconstruction();
+            assert_eq!(image.issued_invocations, 0);
+            assert_eq!(image.frames.len(), 1);
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.progress,
+                    image.counters.balance,
+                    image.counters.depth
+                ),
+                (
+                    counters.charge,
+                    counters.progress,
+                    counters.balance,
+                    counters.depth
+                )
+            );
+            let values: Vec<_> = image.frames[0]
+                .roles
+                .iter()
+                .map(|(_, value)| *value)
+                .collect();
+            assert_eq!(values.len(), 2);
+            for (actual, expected) in values.iter().zip([7, 9]) {
+                assert!(actual.same(&Value::Int(expected)));
+            }
+            drop(prefix.prepare_exit().unwrap());
+            assert!(machine.logical.borrow().is_current(&stamp));
+            assert_eq!((machine.charged, machine.logical_memory.get()), before);
+        }
+    }
+}

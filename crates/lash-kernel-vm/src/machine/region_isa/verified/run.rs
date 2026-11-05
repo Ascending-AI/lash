@@ -1,7 +1,7 @@
 //! Indexed dispatch advances only after its actual answer and local phase agree.
 use super::super::*;
 use super::{Running, charge};
-use crate::compile::region_isa::{PrefixId, RegionOp};
+use crate::compile::region_isa::RegionOp;
 use crate::compile::room::charges::region_isa::ChargeMoment;
 
 impl Running<'_> {
@@ -27,20 +27,23 @@ impl Running<'_> {
         Ok(reason)
     }
 
-    fn reach(&mut self, prefix: PrefixId) -> Result<(), RegionError> {
-        self.reached.ordinal = self
-            .reached
-            .ordinal
-            .checked_add(1)
-            .ok_or_else(|| invalid(Refused::Facts))?;
-        self.prefix = prefix;
-        self.reached.prefix = prefix.index() as u32;
-        self.reached.debt = self.counters.debt;
-        Ok(())
+    fn prefix_stop(&mut self, request: StopAt) -> Option<RegionStop> {
+        let stop = if self.counters.progress >= self.limits.slice {
+            RegionStop::Slice
+        } else if matches!(request, StopAt::NextLegalPrefix) {
+            RegionStop::Handoff
+        } else {
+            return None;
+        };
+        self.stop = Some(stop);
+        Some(stop)
     }
 
     fn dispatch(&mut self, request: StopAt) -> Result<RegionStop, RegionError> {
         loop {
+            if self.counters.progress >= self.limits.slice {
+                return self.halt(RegionStop::Slice);
+            }
             let code = Arc::clone(&self.code);
             let step = code
                 .program
@@ -55,8 +58,8 @@ impl Running<'_> {
                     return self.halt(RegionStop::Refusal);
                 };
                 self.activation = Some(activation);
-                if matches!(request, StopAt::NextLegalPrefix) {
-                    return self.halt(RegionStop::Handoff);
+                if let Some(stop) = self.prefix_stop(request) {
+                    return Ok(stop);
                 }
                 continue;
             }
@@ -131,7 +134,14 @@ impl Running<'_> {
                         answer.write.ok_or_else(|| invalid(Refused::Facts))?.1,
                     )?;
                 }
-                self.reach(step.pending)?;
+                self.reached.ordinal = self
+                    .reached
+                    .ordinal
+                    .checked_add(1)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
+                self.prefix = step.pending;
+                self.reached.prefix = step.pending.index() as u32;
+                self.reached.debt = self.counters.debt;
                 return self.halt(RegionStop::Refusal);
             }
             let flow = code
@@ -140,26 +150,40 @@ impl Running<'_> {
                 .and_then(Option::as_ref)
                 .ok_or_else(|| invalid(Refused::Facts))?;
             let control = self.prepare_control(op, &answer, flow.loop_branch)?;
+            let ordinal = self
+                .reached
+                .ordinal
+                .checked_add(1)
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            let write = answer
+                .write
+                .map(|(destination, value)| {
+                    self.registers.prepare_write(
+                        &mut self.view,
+                        self.parked.len(),
+                        self.reached.invocation,
+                        destination,
+                        value,
+                    )
+                })
+                .transpose()?;
             let Some(resources) = self.resources(flow, &answer)? else {
                 self.attempted = Some(step.at.clone());
                 return self.halt(RegionStop::Refusal);
             };
             let counters = resources.accept()?;
             self.accept_control(control);
-            if let Some((destination, value)) = answer.write {
-                self.registers.write(
-                    &mut self.view,
-                    self.parked.len(),
-                    self.reached.invocation,
-                    destination,
-                    value,
-                )?;
+            if let Some(write) = write {
+                self.registers.publish_write(write);
             }
             self.counters = counters;
-            self.reach(step.after)?;
+            self.reached.ordinal = ordinal;
+            self.prefix = step.after;
+            self.reached.prefix = step.after.index() as u32;
+            self.reached.debt = counters.debt;
             self.pc = answer.next;
-            if matches!(request, StopAt::NextLegalPrefix) {
-                return self.halt(RegionStop::Handoff);
+            if let Some(stop) = self.prefix_stop(request) {
+                return Ok(stop);
             }
         }
     }
