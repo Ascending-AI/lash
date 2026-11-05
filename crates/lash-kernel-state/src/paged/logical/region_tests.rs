@@ -380,6 +380,7 @@ fn cold_placeholder_requires_boundary() {
 /// identity progression. Each exit reaches its prefix through real phases.
 #[test]
 fn region_graph_projection_commutes_with_itemized_source() {
+    normalized_table_allocations();
     lease_read_presence_and_inline_values();
     atomic_source_root_transfer();
     linear_chain_release_and_binding();
@@ -617,6 +618,247 @@ fn region_graph_projection_commutes_with_itemized_source() {
             .unwrap();
         assert_eq!(shared.borrow().balance().unwrap(), Balance::default());
     }
+}
+
+/// K-KEY-003: constructor normalization retains the first key spelling and
+/// position and the final value, and quotes only those actual retained members.
+fn normalized_table_allocations() {
+    normalized_table_operand_releases();
+    use lash_kernel_doc::Float;
+    let text = |name| Value::Text(lash_kernel_doc::arena::ShortText::new(name).unwrap());
+    for kind in 0..3 {
+        let keys = if kind == 1 {
+            [text("a"), text("b"), text("a"), text("b")]
+        } else {
+            [
+                Value::Int(1),
+                Value::Int(2),
+                Value::Float(Float::new(1.0)),
+                Value::Int(2),
+            ]
+        };
+        let entries: Vec<_> = keys
+            .into_iter()
+            .zip([7, 8, 9, 10].map(Value::Int))
+            .collect();
+        let (oracle_heap, _) = fresh();
+        let mut oracle_arena = Arena::new();
+        let canonical = oracle_arena
+            .create(match kind {
+                0 => NewObject::Map(entries.clone()),
+                1 => NewObject::Record(entries.clone()),
+                _ => NewObject::Set(keys.to_vec()),
+            })
+            .unwrap();
+        let mut oracle = Ledger::fresh();
+        oracle
+            .transfer_source(
+                &mut oracle_arena,
+                &oracle_heap,
+                &[],
+                &[(owner(0), RootValue::Value(&canonical))],
+            )
+            .unwrap();
+        let expected = oracle.balance().unwrap().total().unwrap();
+        let expected_entries = oracle_arena
+            .entries(canonical.handle().unwrap())
+            .unwrap()
+            .to_vec();
+        for attempt in 0..3 {
+            let (mut heap, _) = fresh();
+            let mut arena = Arena::new();
+            let ledger = heap.logical_ledger();
+            let before = arena.next_provisional();
+            let mut lease = StateLease::acquire(&mut heap, &mut arena).unwrap();
+            let local: Vec<_> = entries
+                .iter()
+                .map(|(key, value)| (lease.import(key).unwrap(), lease.import(value).unwrap()))
+                .collect();
+            let local_keys: Vec<_> = local.iter().map(|(key, _)| *key).collect();
+            let descriptor = || match kind {
+                0 => LeaseAllocation::map(&local),
+                1 => LeaseAllocation::record(&local),
+                _ => LeaseAllocation::set(&local_keys),
+            };
+            let step = lease.stage(LeaseOp::Allocate(descriptor())).unwrap();
+            assert_eq!(
+                step.facts().delta(),
+                i128::from(expected),
+                "normalization must precede the retained quote"
+            );
+            assert_eq!(step.facts().peak(), expected);
+            assert_eq!(step.facts().measure(&LeaseMeasure::MEMBERS), Some(2));
+            drop(step);
+            let ready = lease
+                .stage(LeaseOp::Allocate(descriptor()))
+                .unwrap()
+                .reserve()
+                .unwrap();
+            drop(ready);
+            let value = allocate(&mut lease, descriptor());
+            let object = lease.object(value).unwrap();
+            assert_eq!(lease.member_count(object).unwrap(), 2);
+            for &[key, expected_value] in expected_entries.as_chunks::<2>().0 {
+                let key = lease.import(&key).unwrap();
+                let observed = lease.read(object, &LeaseMember::Table(key)).unwrap();
+                assert!(lease.scalar(observed).unwrap().same(&expected_value));
+            }
+            assert_eq!(lease.arena().next_provisional(), before);
+            let graph = lease.materialize_graph().unwrap();
+            let native = graph.value(value).unwrap();
+            let output = graph.publication(value).unwrap();
+            let exit = region_fixtures::exit(
+                graph,
+                [],
+                [(owner(0), output)],
+                expected,
+                i128::from(expected),
+            );
+            assert_eq!(ledger.borrow().balance().unwrap().total().unwrap(), 0);
+            if attempt == 0 {
+                drop(exit);
+                drop(lease);
+            } else if attempt == 1 {
+                assert!(lease.prepare(exit, expected - 1).is_err());
+            } else {
+                lease
+                    .prepare(exit, expected)
+                    .unwrap()
+                    .commit(|| {})
+                    .unwrap();
+            }
+            if attempt < 2 {
+                assert_eq!(arena.next_provisional(), before);
+                assert_eq!(arena.allocations(), 0);
+                assert_eq!(ledger.borrow().balance().unwrap().total().unwrap(), 0);
+            } else {
+                let observed = arena.entries(native.handle().unwrap()).unwrap();
+                assert_eq!(observed.len(), expected_entries.len());
+                for (value, expected_value) in observed.iter().zip(&expected_entries) {
+                    assert_eq!(
+                        std::mem::discriminant(value),
+                        std::mem::discriminant(expected_value)
+                    );
+                    assert!(value.same(expected_value));
+                }
+                assert_eq!(
+                    ledger.borrow().balance().unwrap().total().unwrap(),
+                    expected
+                );
+            }
+        }
+    }
+}
+
+fn normalized_table_operand_releases() {
+    use lash_kernel_doc::Float;
+    let (oracle_heap, _) = fresh();
+    let mut oracle_arena = Arena::new();
+    let mut oracle = Ledger::fresh();
+    let old = oracle_arena
+        .create(NewObject::List(vec![Value::Int(7)]))
+        .unwrap();
+    let kept = oracle_arena
+        .create(NewObject::List(vec![Value::Int(9)]))
+        .unwrap();
+    oracle
+        .transfer_source(
+            &mut oracle_arena,
+            &oracle_heap,
+            &[],
+            &[
+                (owner(1), RootValue::Value(&old)),
+                (owner(2), RootValue::Value(&kept)),
+            ],
+        )
+        .unwrap();
+    let before_map = oracle.balance().unwrap().total().unwrap();
+    let raw = oracle_arena
+        .create(NewObject::Map(vec![
+            (Value::Int(1), old),
+            (Value::Float(Float::new(1.0)), kept),
+        ]))
+        .unwrap();
+    oracle
+        .transfer_source(
+            &mut oracle_arena,
+            &oracle_heap,
+            &[],
+            &[(owner(0), RootValue::Value(&raw))],
+        )
+        .unwrap();
+    let peak = oracle.balance().unwrap().total().unwrap();
+    oracle
+        .transfer_source(&mut oracle_arena, &oracle_heap, &[owner(1), owner(2)], &[])
+        .unwrap();
+    let expected = oracle.balance().unwrap().total().unwrap();
+
+    let (mut heap, _) = fresh();
+    let mut arena = Arena::new();
+    let ledger = heap.logical_ledger();
+    let mut lease = StateLease::acquire(&mut heap, &mut arena).unwrap();
+    let seven = lease.import(&Value::Int(7)).unwrap();
+    let nine = lease.import(&Value::Int(9)).unwrap();
+    let old = allocate(&mut lease, LeaseAllocation::list(&[seven]));
+    let kept = allocate(&mut lease, LeaseAllocation::list(&[nine]));
+    let key = lease.import(&Value::Int(1)).unwrap();
+    let alias = lease.import(&Value::Float(Float::new(1.0))).unwrap();
+    let inputs = [(key, old), (alias, kept)];
+    let step = lease
+        .stage(LeaseOp::Allocate(LeaseAllocation::map(&inputs)))
+        .unwrap();
+    assert_eq!(step.facts().delta(), i128::from(peak - before_map));
+    let map = step.reserve().unwrap().accept().unwrap();
+    let releases = [(old, false), (kept, false)];
+    let step = lease
+        .stage(LeaseOp::Transfer {
+            holds: &[],
+            releases: &releases,
+        })
+        .unwrap();
+    assert_eq!(
+        step.facts().delta(),
+        i128::from(expected) - i128::from(peak)
+    );
+    assert_eq!(step.facts().peak(), 0);
+    drop(step.reserve().unwrap());
+    assert!(lease.object(old).is_ok());
+    assert!(lease.object(kept).is_ok());
+    accept(
+        &mut lease,
+        LeaseOp::Transfer {
+            holds: &[],
+            releases: &releases,
+        },
+    );
+    assert!(
+        lease.object(old).is_err(),
+        "the overwritten operand has no member edge"
+    );
+    let graph = lease.materialize_graph().unwrap();
+    assert!(graph.value(old).is_err());
+    let native_map = graph.value(map).unwrap();
+    let native_kept = graph.value(kept).unwrap();
+    let output = graph.publication(map).unwrap();
+    let exit = region_fixtures::exit(graph, [], [(owner(0), output)], peak, i128::from(expected));
+    lease.prepare(exit, peak).unwrap().commit(|| {}).unwrap();
+    assert_eq!(
+        ledger.borrow().balance().unwrap().total().unwrap(),
+        expected
+    );
+    assert_eq!(ledger.borrow().balance().unwrap().entities, 2);
+    assert!(
+        arena
+            .table_get(native_map.handle().unwrap(), &Value::Int(1))
+            .unwrap()
+            .unwrap()
+            .same(&native_kept)
+    );
+    assert_eq!(
+        arena.next_provisional().ordinal,
+        3,
+        "dead source allocations still advance identity"
+    );
 }
 
 // An imported tuple and a fresh tuple must use the same indexed read rules.

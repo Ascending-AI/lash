@@ -330,59 +330,41 @@ impl<'s> StateLease<'s> {
         }
     }
     pub(super) fn allocation_facts(
-        &self,
+        &mut self,
         body: &Allocation<'_>,
     ) -> Result<(Kind, u64, u64, u64), LeaseFault> {
         let mut bytes = 0;
         let mut members = 0;
         let mut payload = 0;
         let kind = match body {
-            Allocation::List(values) | Allocation::Tuple(values) | Allocation::Set(values) => {
+            Allocation::List(values) | Allocation::Tuple(values) => {
                 members = count(values.len())?;
                 for value in *values {
                     bytes = plus(bytes, self.price(*value)?)?;
                 }
-                match body {
-                    Allocation::List(_) => Kind::List,
-                    Allocation::Tuple(_) => Kind::Tuple,
-                    _ => {
-                        for value in *values {
-                            self.key(*value)?;
-                        }
-                        bytes = plus(
-                            bytes,
-                            members
-                                .checked_mul(Cost::REFERENCE)
-                                .ok_or_else(|| invalid("set cost overflow"))?,
-                        )?;
-                        Kind::Set
-                    }
+                if matches!(body, Allocation::List(_)) {
+                    Kind::List
+                } else {
+                    Kind::Tuple
                 }
             }
-            Allocation::Map(entries) | Allocation::Record(entries) => {
+            Allocation::Map(_) | Allocation::Record(_) | Allocation::Set(_) => {
                 let record = matches!(body, Allocation::Record(_));
-                members = count(entries.len())?;
-                // Descriptors are source operands, not a prevalidated final body.
-                // Duplicate keys require their own ordered member phases.
-                for (at, (key, value)) in entries.iter().enumerate() {
-                    let normalized = self.key(*key)?;
-                    if record && !self.is_text(*key)? {
-                        return Err(NativeError::Decline.into());
-                    }
-                    let _ = normalized;
+                self.normalize_table_inputs(body)?;
+                members = count(self.local.table_inputs.rows.len())?;
+                for row in 0..self.local.table_inputs.rows.len() {
                     bytes = plus(
                         bytes,
-                        self.entry_price(
-                            &Entry {
-                                key: Spelling::Value(*key),
-                                value: *value,
-                                sequence: at as u64,
-                            },
-                            record,
-                        )?,
+                        self.entry_price(&self.normalized_entry(body, row), record)?,
                     )?;
                 }
-                if record { Kind::Record } else { Kind::Map }
+                if record {
+                    Kind::Record
+                } else if matches!(body, Allocation::Set(_)) {
+                    Kind::Set
+                } else {
+                    Kind::Map
+                }
             }
             Allocation::Closure { identity, captures } => {
                 if identity.capture_names.len() != captures.len() {
@@ -430,15 +412,14 @@ impl<'s> StateLease<'s> {
     }
     pub(super) fn allocation_edges(&mut self, body: &Allocation<'_>) -> Result<(), HeapFault> {
         match body {
-            Allocation::List(values) | Allocation::Tuple(values) | Allocation::Set(values) => {
+            Allocation::List(values) | Allocation::Tuple(values) => {
                 for value in *values {
                     self.value_edges(*value, 1)?;
                 }
             }
-            Allocation::Map(entries) | Allocation::Record(entries) => {
-                for (key, value) in *entries {
-                    self.value_edges(*key, 1)?;
-                    self.value_edges(*value, 1)?;
+            Allocation::Map(_) | Allocation::Record(_) | Allocation::Set(_) => {
+                for row in 0..self.local.table_inputs.rows.len() {
+                    self.entry_edges(&self.normalized_entry(body, row), true, 1)?;
                 }
             }
             Allocation::Cell(value) => self.value_edges(**value, 1)?,

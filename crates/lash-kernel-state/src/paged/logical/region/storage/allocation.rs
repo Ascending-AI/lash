@@ -1,6 +1,63 @@
 use super::*;
 
 impl StateLease<'_> {
+    /// Derive the canonical constructor rows without copying operand values or
+    /// reserving their target body. Scratch grows only with distinct keys and
+    /// is reused by subsequent phases, including abandoned candidates.
+    pub(super) fn normalize_table_inputs(
+        &mut self,
+        body: &Allocation<'_>,
+    ) -> Result<(), LeaseFault> {
+        let len = match body {
+            Allocation::Map(entries) | Allocation::Record(entries) => entries.len(),
+            Allocation::Set(values) => values.len(),
+            _ => unreachable!("table allocation descriptor"),
+        };
+        for at in 0..len {
+            let key = match body {
+                Allocation::Map(entries) | Allocation::Record(entries) => {
+                    self.local.value_index(entries[at].1)?;
+                    entries[at].0
+                }
+                Allocation::Set(values) => values[at],
+                _ => unreachable!("table allocation descriptor"),
+            };
+            let normalized = self.key(key)?;
+            if matches!(body, Allocation::Record(_)) && !self.is_text(key)? {
+                return Err(NativeError::Decline.into());
+            }
+            let inputs = &mut self.local.table_inputs;
+            if let Some(row) = inputs.index.get(&normalized).copied() {
+                inputs.rows[row].1 = at;
+            } else {
+                capacity(&mut inputs.rows, 1)?;
+                inputs.index.try_reserve(1).map_err(|_| exhausted())?;
+                inputs.index.insert(normalized, inputs.rows.len());
+                inputs.rows.push((at, at));
+            }
+        }
+        Ok(())
+    }
+    pub(super) fn normalized_entry(&self, body: &Allocation<'_>, row: usize) -> Entry {
+        let (first, last) = self.local.table_inputs.rows[row];
+        let (key, value) = match body {
+            Allocation::Map(entries) | Allocation::Record(entries) => {
+                (entries[first].0, entries[last].1)
+            }
+            Allocation::Set(values) => (
+                values[first],
+                LeaseValue {
+                    repr: Repr::Scalar(Value::Absent),
+                },
+            ),
+            _ => unreachable!("table allocation descriptor"),
+        };
+        Entry {
+            key: Spelling::Value(key),
+            value,
+            sequence: row as u64,
+        }
+    }
     pub(super) fn reserve_allocation(
         &self,
         body: &Allocation<'_>,
@@ -57,64 +114,28 @@ impl StateLease<'_> {
                 value.extend_from_slice(source);
                 LocalBody::Bytes(value)
             }
-            Allocation::Map(source) | Allocation::Record(source) => {
+            Allocation::Map(_) | Allocation::Record(_) | Allocation::Set(_) => {
                 let (mut entries, mut index) = match reusable.take() {
                     Some(LocalBody::Table(table)) => (table.entries, table.index),
                     _ => (Vec::new(), std::collections::HashMap::default()),
                 };
                 entries.clear();
                 index.clear();
-                capacity(&mut entries, source.len())?;
-                index.try_reserve(source.len()).map_err(|_| exhausted())?;
-                for (at, (key, value)) in source.iter().enumerate() {
-                    let normalized = self
-                        .key(*key)
-                        .map_err(|error| invalid(&error.to_string()))?;
-                    if index.insert(normalized, at).is_some() {
-                        return Err(invalid(
-                            "map allocation repeats a member; lower its ordered member phases",
-                        ));
-                    }
-                    entries.push(Entry {
-                        key: Spelling::Value(*key),
-                        value: *value,
-                        sequence: at as u64,
-                    });
+                let inputs = &self.local.table_inputs;
+                capacity(&mut entries, inputs.rows.len())?;
+                index
+                    .try_reserve(inputs.rows.len())
+                    .map_err(|_| exhausted())?;
+                for row in 0..inputs.rows.len() {
+                    entries.push(self.normalized_entry(body, row));
+                }
+                for (key, row) in &inputs.index {
+                    index.insert(key.clone(), *row);
                 }
                 LocalBody::Table(LocalTable {
                     entries,
                     index,
-                    next: source.len() as u64,
-                })
-            }
-            Allocation::Set(source) => {
-                let (mut entries, mut index) = match reusable.take() {
-                    Some(LocalBody::Table(table)) => (table.entries, table.index),
-                    _ => (Vec::new(), std::collections::HashMap::default()),
-                };
-                entries.clear();
-                index.clear();
-                capacity(&mut entries, source.len())?;
-                index.try_reserve(source.len()).map_err(|_| exhausted())?;
-                for (at, key) in source.iter().enumerate() {
-                    let normalized = self
-                        .key(*key)
-                        .map_err(|error| invalid(&error.to_string()))?;
-                    if index.insert(normalized, at).is_some() {
-                        return Err(invalid("set allocation repeats a member"));
-                    }
-                    entries.push(Entry {
-                        key: Spelling::Value(*key),
-                        value: LeaseValue {
-                            repr: Repr::Scalar(Value::Absent),
-                        },
-                        sequence: at as u64,
-                    });
-                }
-                LocalBody::Table(LocalTable {
-                    entries,
-                    index,
-                    next: source.len() as u64,
+                    next: inputs.rows.len() as u64,
                 })
             }
         })

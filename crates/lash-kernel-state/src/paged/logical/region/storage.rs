@@ -297,6 +297,13 @@ pub(super) struct LocalTable {
     index: std::collections::HashMap<LeaseKey, usize, foldhash::fast::RandomState>,
     pub(super) next: u64,
 }
+#[derive(Default)]
+struct TableInputs {
+    index: std::collections::HashMap<LeaseKey, usize, foldhash::fast::RandomState>,
+    // Source positions only: first spelling and last value. No target body or
+    // logical holding is allocated while deriving the candidate facts.
+    rows: Vec<(usize, usize)>,
+}
 pub(super) struct LocalClosure {
     pub(super) identity: Arc<lash_kernel_doc::arena::ClosureIdentity>,
     pub(super) captures: Vec<LeaseValue>,
@@ -361,6 +368,7 @@ pub(super) struct LocalStore {
     existing: BTreeMap<(u32, u32), u32>,
     entities: BTreeMap<EntityId, u32>,
     bindings: Vec<Binding>,
+    table_inputs: TableInputs,
     touched: Vec<u32>,
     zero: Vec<u32>,
     #[cfg(any(test, feature = "perf-witness"))]
@@ -408,6 +416,7 @@ impl LocalStore {
             existing: BTreeMap::new(),
             entities: BTreeMap::new(),
             bindings: Vec::new(),
+            table_inputs: TableInputs::default(),
             touched: Vec::new(),
             zero: Vec::new(),
             #[cfg(any(test, feature = "perf-witness"))]
@@ -460,6 +469,8 @@ impl LocalStore {
             .ok_or_else(|| invalid("lease phase overflow"))?;
         self.touched.clear();
         self.zero.clear();
+        self.table_inputs.index.clear();
+        self.table_inputs.rows.clear();
         #[cfg(any(test, feature = "perf-witness"))]
         {
             self.release_visits = 0;
