@@ -87,7 +87,7 @@ impl Running<'_> {
                             formula,
                         }));
                     }
-                    CheckedKind::Local { .. } => {
+                    CheckedKind::Local { slot } => {
                         let register = self
                             .code
                             .flows
@@ -95,11 +95,23 @@ impl Running<'_> {
                             .and_then(Option::as_ref)
                             .and_then(|flow| flow.local)
                             .ok_or_else(|| invalid(Refused::Facts))?;
-                        self.registers.read(
+                        let value = self.registers.read(
                             self.frame_index(),
                             self.reached.invocation,
                             register,
-                        )?
+                        )?;
+                        if matches!(
+                            slot,
+                            lash_kernel_state::kernel_internals::logical::Slot::Capture(_)
+                        ) {
+                            let value = value.bind(&mut self.view).map_err(RegionError::Heap)?;
+                            let cell = self.view.object(value).map_err(RegionError::Heap)?;
+                            Operand::Dynamic(self.view.read(cell,
+                                &lash_kernel_state::kernel_internals::logical::LeaseMember::Variable)
+                                .map_err(storage_fault)?)
+                        } else {
+                            value
+                        }
                     }
                     CheckedKind::IntTruth {
                         operation,

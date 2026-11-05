@@ -55,7 +55,7 @@ impl Running<'_> {
                 .ok_or_else(|| invalid(Refused::Path))?;
             if let RegionOp::Call { site, .. } = op {
                 let Some(activation) = self.prepare_call(site.index())? else {
-                    return self.halt(RegionStop::Refusal);
+                    return self.halt(self.stop.unwrap_or(RegionStop::Refusal));
                 };
                 self.activation = Some(activation);
                 if let Some(stop) = self.prefix_stop(request) {

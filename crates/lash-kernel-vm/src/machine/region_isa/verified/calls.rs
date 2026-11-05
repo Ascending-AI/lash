@@ -3,7 +3,7 @@ use super::super::{operands::Operand, *};
 use super::{Code, Running, charge};
 use crate::compile::region_isa::{CheckedKind, Pc, PrefixId, RegionOp};
 use crate::compile::room::charges::region_isa::ChargeMoment;
-use lash_kernel_state::kernel_internals::logical::LeaseOp;
+use lash_kernel_state::kernel_internals::logical::{LeaseMember, LeaseOp};
 
 pub(super) struct Parked {
     pub(super) callee: lash_kernel_state::kernel_internals::logical::Invocation,
@@ -13,6 +13,7 @@ pub(super) struct Parked {
     pub(super) reached: ReachedPrefix,
     pub(super) activation: Option<CallActivation>,
     pub(super) site: u32,
+    pub(super) target: CodeId,
 }
 
 impl Running<'_> {
@@ -46,17 +47,66 @@ impl Running<'_> {
             return Err(invalid(Refused::Path));
         }
         let call = caller.call(*actual)?;
-        let plan = call
-            .plan
-            .static_target()
-            .ok_or_else(|| invalid(Refused::Facts))?;
+        self.call_captures.clear();
+        let callable = call
+            .callable
+            .map(|register| {
+                self.registers
+                    .read(self.frame_index(), self.reached.invocation, register)?
+                    .bind(&mut self.view)
+                    .map_err(RegionError::Heap)
+            })
+            .transpose()?;
+        let plan = if let Some(callable) = callable {
+            let origin = call
+                .callable_origin
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            let mut origin = self
+                .registers
+                .read(self.frame_index(), self.reached.invocation, origin)?
+                .bind(&mut self.view)
+                .map_err(RegionError::Heap)?;
+            if self.view.kind(origin).map_err(RegionError::Heap)? == lash_kernel_doc::ValueKind::Ref
+            {
+                let object = self.view.object(origin).map_err(RegionError::Heap)?;
+                origin = self
+                    .view
+                    .read(object, &LeaseMember::Variable)
+                    .map_err(storage_fault)?;
+            }
+            let same = match (self.view.inline(origin), self.view.inline(callable)) {
+                (Ok(Some(a)), Ok(Some(b))) => a.same(&b),
+                (Ok(None), Ok(None)) => {
+                    self.view.object(origin).map_err(RegionError::Heap)?
+                        == self.view.object(callable).map_err(RegionError::Heap)?
+                }
+                (Err(error), _) | (_, Err(error)) => return Err(RegionError::Heap(error)),
+                _ => false,
+            };
+            if !same {
+                return Err(invalid(Refused::Facts));
+            }
+            let Some(binding) = call
+                .plan
+                .bind_callable(&caller.exe, &mut self.view, callable)
+                .map_err(storage_fault)?
+            else {
+                self.stop = Some(RegionStop::Boundary);
+                return Ok(None);
+            };
+            self.call_captures
+                .extend(binding.capture_roles().map(|(_, value)| value));
+            binding.plan()
+        } else {
+            call.plan
+                .static_target()
+                .ok_or_else(|| invalid(Refused::Facts))?
+        };
         let target = self
             .programs
             .target(caller.program.code(), site, plan.code())?;
-        // Shared parameters require A's distinct cell phases. Captures and
-        // callable dispatch use the same bank after their binding is installed.
         if target.parameters.iter().any(|parameter| parameter.shared)
-            || !target.captures.is_empty()
+            || target.captures.len() != self.call_captures.len()
             || plan.debt().before_entry() != 0
         {
             return Err(invalid(Refused::Facts));
@@ -150,11 +200,24 @@ impl Running<'_> {
                 Operand::Dynamic(*value),
             )?;
         }
+        for ((_, output), value) in target.captures.iter().zip(&self.call_captures) {
+            self.registers.write(
+                &mut self.view,
+                frame,
+                reserved.id,
+                *output,
+                Operand::Dynamic(*value),
+            )?;
+        }
         let holds = &mut self.scratch.holds;
         let releases = &mut self.scratch.releases;
         holds.clear();
         holds.extend(self.call_values.iter().map(|value| (*value, false)));
+        holds.extend(self.call_captures.iter().map(|value| (*value, true)));
         releases.clear();
+        if let Some(callable) = callable {
+            releases.push((callable, false));
+        }
         for &argument in &call.arguments {
             let value = self
                 .registers
@@ -216,6 +279,7 @@ impl Running<'_> {
             reached: self.reached,
             activation: self.activation.take(),
             site,
+            target: plan.code(),
         };
         // All bank writes, allocation and checks precede this affine accept.
         phase.reserve().map_err(RegionError::Heap)?.accept();

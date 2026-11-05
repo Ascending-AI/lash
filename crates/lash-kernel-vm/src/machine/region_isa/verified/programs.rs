@@ -13,6 +13,7 @@ pub(super) struct Programs {
     pub(super) quotes: usize,
     pub(super) loops: usize,
     pub(super) parameters: usize,
+    pub(super) captures: usize,
 }
 
 impl Programs {
@@ -41,6 +42,7 @@ impl Programs {
             quotes: 0,
             loops: 0,
             parameters: 0,
+            captures: 0,
         };
         while let Some(code) = pending.pop() {
             result.registers = result.registers.max(code.program.registers().len());
@@ -85,6 +87,13 @@ impl Programs {
             .iter()
             .flatten()
             .map(super::call_bind::Calls::width)
+            .max()
+            .unwrap_or(0);
+        result.captures = result
+            .calls
+            .iter()
+            .flatten()
+            .map(super::call_bind::Calls::captures)
             .max()
             .unwrap_or(0);
         result.codes = codes.into();

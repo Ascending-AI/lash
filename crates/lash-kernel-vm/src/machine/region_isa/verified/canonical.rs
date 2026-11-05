@@ -73,7 +73,9 @@ impl Running<'_> {
                 .ok_or_else(|| invalid(Refused::Facts))?;
             let plan = call
                 .plan
-                .static_target()
+                .targets()
+                .iter()
+                .find(|plan| plan.code() == parked.target)
                 .ok_or_else(|| invalid(Refused::Facts))?;
             let library = plan
                 .library()

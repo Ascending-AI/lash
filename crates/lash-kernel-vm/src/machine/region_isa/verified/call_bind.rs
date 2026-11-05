@@ -60,6 +60,14 @@ fn role(code: &RegionCode, slot: Slot) -> Result<Register, RegionError> {
 }
 
 impl Calls {
+    pub(super) fn captures(&self) -> usize {
+        self.sites
+            .iter()
+            .flat_map(|targets| targets.iter())
+            .map(|target| target.captures.len())
+            .max()
+            .unwrap_or(0)
+    }
     pub(super) fn width(&self) -> usize {
         self.sites
             .iter()

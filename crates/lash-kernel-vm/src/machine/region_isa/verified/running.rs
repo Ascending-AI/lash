@@ -7,6 +7,7 @@ use lash_kernel_state::kernel_internals::logical::{LeaseValue, StateLease};
 pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) programs: Arc<super::programs::Programs>,
     pub(super) call_values: Vec<LeaseValue>,
+    pub(super) call_captures: Vec<LeaseValue>,
     pub(super) arguments: Vec<Value>,
     pub(super) loops: Vec<super::control::LoopState>,
     pub(super) parked: Vec<super::calls::Parked>,
@@ -98,15 +99,20 @@ impl<'m> Running<'m> {
         let scratch = super::phase::Scratch::new(
             programs
                 .transfer_width
-                .max(programs.arguments)
-                .max(programs.parameters),
+                .max(programs.arguments + 1)
+                .max(programs.parameters + programs.captures + 1),
             programs.quotes,
         )?;
         let mut call_values = Vec::new();
         call_values
             .try_reserve_exact(programs.parameters)
             .map_err(|_| invalid(Refused::Scratch))?;
+        let mut call_captures = Vec::new();
+        call_captures
+            .try_reserve_exact(programs.captures)
+            .map_err(|_| invalid(Refused::Scratch))?;
         Ok(Self {
+            call_captures,
             parked: Vec::new(),
             activation: None,
             identity: Rc::new(()),

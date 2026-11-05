@@ -47,6 +47,14 @@ impl<'m> Running<'m> {
                     super::bind::physical(program, reg)?,
                 )
             };
+            let parked_callable = if depth < self.parked.len() {
+                code.calls[self.parked[depth].site as usize]
+                    .as_ref()
+                    .ok_or_else(|| invalid(Refused::Facts))?
+                    .callable
+            } else {
+                None
+            };
             let moved = if depth < self.parked.len() {
                 code.calls
                     .get(self.parked[depth].site as usize)
@@ -60,12 +68,15 @@ impl<'m> Running<'m> {
             let moved = |reg: crate::compile::region_isa::Reg<
                 lash_kernel_state::kernel_internals::logical::LeaseValue,
             >| {
-                moved.iter().any(|physical| match physical {
-                    code::Register::Value(index)
-                    | code::Register::Int(index)
-                    | code::Register::Float(index)
-                    | code::Register::Bool(index) => *index == reg.index(),
-                })
+                moved
+                    .iter()
+                    .chain(parked_callable.iter())
+                    .any(|physical| match physical {
+                        code::Register::Value(index)
+                        | code::Register::Int(index)
+                        | code::Register::Float(index)
+                        | code::Register::Bool(index) => *index == reg.index(),
+                    })
             };
             frames.push(reconstruct::FrameImage {
                 program: program.code(),
