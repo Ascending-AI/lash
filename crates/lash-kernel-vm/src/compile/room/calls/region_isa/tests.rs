@@ -198,6 +198,13 @@ fn substitutions_preserve_source_arguments_and_saved_operands() {
         let mut forged = fixtures::plan(&exe, caller, site.0, site.1).unwrap();
         forged.targets[0].corrupt_substitution_for_law();
         assert!(forged.verify(&exe).is_err());
+        if native {
+            // A zero-cost completion formula in place of the declared charge
+            // must fail validation instead of undercharging the call.
+            let mut forged = fixtures::plan(&exe, caller, site.0, site.1).unwrap();
+            forged.targets[0].corrupt_completion_for_law(&exe);
+            assert!(forged.verify(&exe).is_err());
+        }
     }
     for shared in [false, true] {
         let capture = if shared {

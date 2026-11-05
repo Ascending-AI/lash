@@ -58,6 +58,17 @@ impl StateLease<'_> {
         if cold {
             return Err(LeaseFault::BoundaryRequired);
         }
+        // The cold proxy carried a placeholder body; the decoded one is the
+        // authenticated length every bounds check and measurement reads.
+        let len = match self.arena().body(handle).map_err(storage::local_native)? {
+            lash_kernel_doc::arena::Body::List(seq) | lash_kernel_doc::arena::Body::Tuple(seq) => {
+                seq.len
+            }
+            lash_kernel_doc::arena::Body::Map(table)
+            | lash_kernel_doc::arena::Body::Set(table)
+            | lash_kernel_doc::arena::Body::Record(table) => table.len,
+            _ => 0,
+        };
         let next = if matches!(
             self.local.slots[index].kind,
             storage::Kind::Map | storage::Kind::Set | storage::Kind::Record
@@ -70,6 +81,7 @@ impl StateLease<'_> {
         };
         let existing = self.local.slots[index].existing_mut();
         existing.cold = false;
+        existing.len = len;
         existing.next = next;
         self.bind_callable(index as u32, handle)?;
         Ok(())

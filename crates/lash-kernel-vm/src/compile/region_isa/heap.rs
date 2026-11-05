@@ -82,13 +82,14 @@ pub(super) fn source_kind(
             place: doc::Place::Variable(name),
             ..
         }) if source.assigns_cell(&at.site) => HeapKind::Variable {
-            slot: resources::slot(
+            slot: resources::role(
                 source,
                 &Owner::Visible {
                     at: at.site.clone(),
                     name: name.clone(),
                 },
             )
+            .and_then(Role::slot)
             .ok_or(Refused::Facts)?,
         },
         doc::Node::Stmt(doc::Stmt::Assign {
@@ -127,7 +128,7 @@ impl HeapKernel {
     }
     pub(super) fn compile(
         source: &Source,
-        roles: &[(Slot, Reg<LeaseValue>)],
+        roles: &[(Role, Reg<LeaseValue>)],
         event: &Event,
         index: usize,
         kind: HeapKind,

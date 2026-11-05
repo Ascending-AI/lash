@@ -11,7 +11,7 @@ use lash_core::{
 };
 use lash_http_transport::{
     ReqwestHttpTransport,
-    observation::{BodyEnd, HttpContinuationPhase, HttpPhaseLedger, ObservedHttpTransport},
+    observation::{BodyEnd, HttpPhaseLedger, HttpPhaseRecord, ObservedHttpTransport},
 };
 use serde::Serialize;
 use std::{
@@ -97,7 +97,7 @@ fn nanos(epoch: Instant) -> u64 {
 }
 
 fn join_attempt(
-    http: HttpContinuationPhase,
+    http: HttpPhaseRecord,
     sealed: lash_core::llm::types::AttemptRecord,
     origin_ns: u64,
 ) -> Result<Attempt> {

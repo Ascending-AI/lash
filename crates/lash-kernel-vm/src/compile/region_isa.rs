@@ -24,7 +24,7 @@ mod stages;
 mod verify;
 use super::room::charges::region_isa::CanonicalClose;
 pub(crate) use super::room::charges::region_isa::LoopInfo;
-pub(crate) use recovery::{GraphRecovery, RecoveryMap};
+pub(crate) use recovery::{GraphRecovery, RecoveryMap, Role};
 pub(crate) use resources::{IndexedAmount, ResourceInput};
 
 fn resource_pair(lib: &super::Lib, charged: bool) -> Option<doc::scalar::Pair> {
@@ -46,7 +46,7 @@ pub(crate) struct RegionDraft {
     steps: Box<[Step]>,
     generic_steps: Box<[Step]>,
     recovery: Box<[RecoveryMap]>,
-    roles: Box<[(Slot, Reg<LeaseValue>)]>,
+    roles: Box<[(Role, Reg<LeaseValue>)]>,
     registers: Box<[RegisterKind]>,
     generic_registers: Box<[RegisterKind]>,
     packing: Box<[Option<CheckedKernel>]>,
@@ -183,7 +183,7 @@ pub(crate) enum CheckedKind {
         iterable: Option<Reg<LeaseValue>>,
     },
     Local {
-        slot: Slot,
+        slot: Role,
     },
     Native {
         function: FunctionId,
@@ -599,7 +599,7 @@ impl RegionCode {
             .and_then(|index| u32::try_from(index).ok())
             .map(Pc)
     }
-    pub(crate) fn roles(&self) -> &[(Slot, Reg<LeaseValue>)] {
+    pub(crate) fn roles(&self) -> &[(Role, Reg<LeaseValue>)] {
         &self.draft.roles
     }
     /// Rebuild a recovery entry from its semantic phase and acceptance state.

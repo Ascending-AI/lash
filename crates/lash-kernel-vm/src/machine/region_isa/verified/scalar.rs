@@ -125,10 +125,7 @@ impl Running<'_> {
                             self.reached.invocation,
                             register,
                         )?;
-                        if matches!(
-                            slot,
-                            lash_kernel_state::kernel_internals::logical::Slot::Capture(_)
-                        ) {
+                        if slot.capture() {
                             let value = value.bind(&mut self.view).map_err(RegionError::Heap)?;
                             let cell = self.view.object(value).map_err(RegionError::Heap)?;
                             Operand::Dynamic(self.view.read(cell,

@@ -1,6 +1,7 @@
 //! Admit semantic continuation coordinates against the current source program.
 use super::super::*;
 use super::{Code, control};
+use crate::compile::region_isa::Role;
 use crate::compile::region_isa::{
     LoopPhase, LoopStage, Pc, PrefixId, compile_region, verify_region,
 };
@@ -328,7 +329,7 @@ pub(super) fn values(
                     .program
                     .roles()
                     .iter()
-                    .find(|(actual, _)| actual == slot)
+                    .find(|(actual, _)| *actual == Role::Slot(*slot))
                 {
                     values.push((*reg, *value));
                 }

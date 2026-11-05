@@ -16,13 +16,16 @@ fn register(draft: &RegionDraft, owner: &Owner) -> Result<Reg<LeaseValue>, Refus
     ) {
         return Reg::new(draft.roles.len());
     }
-    let Some(Root::Value { slot, .. }) = slots.root(owner, doc::TaskId::MAIN, 0) else {
+    let Some(role) = slots
+        .root(owner, doc::TaskId::MAIN, 0)
+        .and_then(resources::root_role)
+    else {
         return Err(Refused::Facts);
     };
     draft
         .roles
         .iter()
-        .find(|(actual, _)| *actual == slot)
+        .find(|(actual, _)| *actual == role)
         .map(|(_, reg)| *reg)
         .ok_or(Refused::Facts)
 }
@@ -477,7 +480,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                     _ => return Err(Refused::Source),
                 };
                 if Some(*slot)
-                    != resources::slot(
+                    != resources::role(
                         source,
                         &Owner::Visible {
                             at: step.at.site.clone(),
@@ -863,7 +866,7 @@ fn verify_layout(
                 .zip(site.arguments.iter())
                 .any(|(slot, reg)| {
                     !draft.roles.iter().any(|(actual_slot, actual_reg)| {
-                        *actual_slot == slot.slot() && actual_reg == reg
+                        *actual_slot == Role::Slot(slot.slot()) && actual_reg == reg
                     })
                 })
         {
@@ -914,13 +917,15 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
     let source = &draft.source;
     let mut initial = BTreeSet::new();
     for name in &source.params {
-        if let Some(slot) = resources::slot(
+        if let Some(slot) = resources::role(
             source,
             &Owner::Binding {
                 declared: source.site.clone(),
                 name: name.clone(),
             },
-        ) {
+        )
+        .and_then(Role::slot)
+        {
             initial.insert(slot);
         }
     }
@@ -928,7 +933,7 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
         draft
             .roles
             .iter()
-            .filter_map(|(slot, _)| matches!(slot, Slot::Capture(_)).then_some(*slot)),
+            .filter_map(|(role, _)| role.slot().filter(|slot| matches!(slot, Slot::Capture(_)))),
     );
     let mut incoming = BTreeMap::from([(draft.entry.offset(), initial)]);
     let mut queue = VecDeque::from([draft.entry.offset()]);
@@ -943,7 +948,7 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
         };
         let mut after = before.clone();
         for owner in &event.inputs {
-            if let Some(slot) = resources::slot(source, owner) {
+            if let Some(slot) = resources::role(source, owner).and_then(Role::slot) {
                 after.remove(&slot);
             }
         }
@@ -962,7 +967,8 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
             && let Some(slot) = event
                 .output
                 .as_ref()
-                .and_then(|owner| resources::slot(source, owner))
+                .and_then(|owner| resources::role(source, owner))
+                .and_then(Role::slot)
         {
             after.insert(slot);
         }
@@ -972,13 +978,14 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 place: doc::Place::Variable(name),
                 ..
             }) = resources::node(source, &step.at.site)?
-            && let Some(slot) = resources::slot(
+            && let Some(slot) = resources::role(
                 source,
                 &Owner::Visible {
                     at: step.at.site.clone(),
                     name: name.clone(),
                 },
             )
+            .and_then(Role::slot)
         {
             after.insert(slot);
         }
@@ -1004,7 +1011,11 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                     .as_ref()
                     .map(|owner| {
                         let reg = register(draft, owner)?;
-                        pending_roles.insert(resources::slot(source, owner).ok_or(Refused::Facts)?);
+                        if let Role::Slot(slot) =
+                            resources::role(source, owner).ok_or(Refused::Facts)?
+                        {
+                            pending_roles.insert(slot);
+                        }
                         Ok::<_, Refused>(reg)
                     })
                     .transpose()?,
@@ -1031,8 +1042,11 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
             let expected_roles: Vec<_> = draft
                 .roles
                 .iter()
-                .filter(|(slot, _)| expected.contains(slot))
-                .copied()
+                .filter_map(|(role, reg)| {
+                    role.slot()
+                        .filter(|slot| expected.contains(slot))
+                        .map(|slot| (slot, *reg))
+                })
                 .collect();
             if !map.graph.check(
                 &step.at,

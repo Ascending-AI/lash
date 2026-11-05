@@ -28,7 +28,8 @@ const STACK: usize = 16;
 /// saturating sum, product, maximum or minimum, which no grouping or order
 /// of its terms changes, so nested sums and products are flattened and
 /// their constants folded. Each distinct operand and measure is measured
-/// once per evaluation.
+/// once per evaluation. Equal plans charge equally for every operand.
+#[derive(PartialEq, Eq)]
 pub(crate) struct Plan {
     ops: Vec<Op>,
     measurements: Vec<(Source, doc::Measure)>,
@@ -50,6 +51,7 @@ pub(crate) struct TextCharge {
 /// An instruction of a plan's program. Each combining one takes the two
 /// amounts on the top of the stack: a sum of more terms is its terms
 /// combined pairwise from the left, as the saturating fold computes it.
+#[derive(PartialEq, Eq)]
 enum Linear {
     Sum(u64),
     /// A sum with one minimum of two adjacent measurements. Their
@@ -60,7 +62,7 @@ enum Linear {
     },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Op {
     Constant(u64),
     /// The measurement of that index.

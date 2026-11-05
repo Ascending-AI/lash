@@ -592,7 +592,7 @@ fn run_fixture(exe: &Executable, code: &RegionCode) -> (Value, u64) {
                     .is_some_and(|origin| matches!(origin.op, Op::Return { .. })) =>
             {
                 let owner = &step.event.inputs[0];
-                let role = resources::slot(code.source(), owner).unwrap();
+                let role = resources::role(code.source(), owner).unwrap();
                 let (_, value) = code.roles().iter().find(|(slot, _)| *slot == role).unwrap();
                 return (values[value.offset()].unwrap(), charged);
             }
@@ -788,7 +788,9 @@ fn allocated_pending_values_have_their_source_output_role() {
             .unwrap();
         let step = &draft.steps[index];
         let output = step.event.output.as_ref().unwrap();
-        let slot = resources::slot(&draft.source, output).unwrap();
+        let slot = resources::role(&draft.source, output)
+            .and_then(Role::slot)
+            .unwrap();
         let pending = &draft.recovery[step.pending.offset()];
         assert_eq!(pending.pending, Some(dst));
         assert!(pending.roles.contains(&(slot, dst)));
@@ -840,7 +842,6 @@ fn a_guest_call_restores_its_incoming_value_before_continuing() {
             };
             let output = draft.steps[next.offset()].event.output.as_ref().unwrap();
             assert_eq!(lower::reg(&draft.roles, &draft.source, output), Ok(dst));
-            assert_eq!(src.offset(), draft.roles.len());
             assert_eq!(
                 draft.recovery[draft.steps[index].after.offset()].pending,
                 Some(src)

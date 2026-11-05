@@ -77,6 +77,8 @@ pub(crate) struct Reconstruction {
     source_counts: Box<[u64]>,
     entering: Option<u32>,
     canonical: Option<publication::Canonical>,
+    /// Main session cells this lease wrote, for the VM session table.
+    sessions: Box<[(crate::compile::BindingName, Value)]>,
 }
 pub(crate) struct MaterializedPrefix<'m> {
     graph: FrozenGraph<'m>,

@@ -230,6 +230,12 @@ impl CalleePlan {
         };
         std::mem::swap(a, b);
     }
+    #[cfg(test)]
+    pub(super) fn corrupt_completion_for_law(&mut self, exe: &Executable) {
+        let lib = self.library.expect("law needs a library target");
+        self.debt
+            .corrupt_completion_for_law(&exe.lib(lib).header.signature.params);
+    }
     pub(crate) fn code(&self) -> CodeId {
         self.code
     }

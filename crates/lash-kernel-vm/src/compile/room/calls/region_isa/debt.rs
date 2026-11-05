@@ -45,11 +45,24 @@ impl CallDebt {
             completion,
         })
     }
+    /// The whole completion program must equal the one the canonical
+    /// declaration compiles to: a substituted formula would bill differently.
     pub(super) fn same(&self, other: &Self) -> bool {
         self.before == other.before
             && self.arguments == other.arguments
             && self.library == other.library
-            && self.completion.is_some() == other.completion.is_some()
+            && self.completion.as_deref() == other.completion.as_deref()
+    }
+    #[cfg(test)]
+    pub(super) fn corrupt_completion_for_law(
+        &mut self,
+        params: &[lash_kernel_value::types::Param],
+    ) {
+        assert!(self.completion.is_some(), "law needs a charged completion");
+        self.completion = Some(Arc::new(compile::Plan::new(
+            &doc::Formula::Constant(0),
+            params,
+        )));
     }
     pub(crate) fn before_entry(&self) -> u64 {
         self.before

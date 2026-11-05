@@ -91,6 +91,7 @@ impl<V: View> Execution<V> {
             frames: live_frames,
             payload: self.payload,
             returning: self.returning.as_ref().map(|returning| returning.image()),
+            sessions: Box::new([]),
         };
         let frames = live
             .frames
@@ -116,6 +117,7 @@ impl<V: View> Execution<V> {
             .transpose()?;
         let (issued_invocations, invocations) = self.invocations.finish()?;
         let reconstruction = Reconstruction {
+            sessions: Box::new([]),
             issued_invocations,
             prefix: self.reached,
             frames,

@@ -15,7 +15,7 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
         }
     }
     for (slot, reg) in &draft.roles {
-        if matches!(slot, Slot::Capture(_)) {
+        if slot.capture() {
             initial[reg.offset()] = Some(RegisterKind::Value);
         }
     }
@@ -163,7 +163,9 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                         let reg = draft
                             .roles
                             .iter()
-                            .find_map(|(actual, reg)| (actual == slot).then_some(*reg))
+                            .find_map(|(actual, reg)| {
+                                (*actual == Role::Slot(*slot)).then_some(*reg)
+                            })
                             .ok_or(Refused::Facts)?;
                         read(&state, reg.offset())?;
                     }

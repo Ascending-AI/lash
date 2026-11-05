@@ -373,6 +373,54 @@ fn cold_placeholder_requires_boundary() {
     assert!(arena.is_cold(handle).unwrap());
     assert!(shared.borrow().is_current(&stamp));
     assert_eq!(shared.borrow().balance().unwrap().total().unwrap(), 48);
+
+    // A small list imported cold has a placeholder length until it is
+    // decoded; its first in-lease read and size must see the decoded body.
+    struct Decode;
+    impl LeaseLoader for Decode {
+        fn load(
+            &self,
+            arena: &mut Arena,
+            _: &crate::paged::heap_impl::PagedHeap,
+            handle: lash_kernel_doc::arena::ArenaHandle,
+        ) -> Result<(), HeapFault> {
+            use lash_kernel_doc::arena::{Body, Sequence};
+            let body = Body::List(Sequence::whole(vec![Value::Int(4), Value::Int(5)]));
+            arena
+                .materialized(handle, body)
+                .map_err(|error| HeapFault::Malformed(error.to_string()))
+        }
+    }
+    let (mut heap, _) = fresh();
+    let mut arena = Arena::new();
+    let shared = heap.logical_ledger();
+    let access = heap.pages().clone();
+    admit(
+        &mut shared.borrow_mut(),
+        vec![
+            Change::Allocate {
+                entity: id(7),
+                body: Holding::scalar(32),
+            },
+            Change::Roots(vec![(owner(0), Some(value(16, &[7], &access)))]),
+        ],
+        48,
+        &access,
+    );
+    arena.watch_logical_members();
+    let list = arena.proxy(id(7), crate::arena::ProxyKind::List);
+    let mut lease = StateLease::acquire(&mut heap, &mut arena).unwrap();
+    lease.bind_loader(Box::new(Decode)).unwrap();
+    let imported = lease.import(&Value::List(list)).unwrap();
+    let object = lease.object(imported).unwrap();
+    let observed = lease.read(object, &LeaseMember::List(1)).unwrap();
+    assert!(lease.scalar(observed).unwrap().same(&Value::Int(5)));
+    assert_eq!(
+        lease
+            .measure(imported, lash_kernel_doc::Measure::Size)
+            .unwrap(),
+        3
+    );
 }
 
 /// ISA-D: the lease graph and the independent itemized source program agree

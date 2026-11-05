@@ -30,15 +30,15 @@ impl IndexedAmount {
     }
     pub(super) fn compile(
         source: &Source,
-        roles: &[(Slot, Reg<LeaseValue>)],
+        roles: &[(Role, Reg<LeaseValue>)],
         amount: &Amount,
         output: Option<&Owner>,
     ) -> Result<Self, Refused> {
         let slots = source.owner_slots()?;
-        let register = |slot| {
+        let register = |role: Role| {
             roles
                 .iter()
-                .find(|(candidate, _)| *candidate == slot)
+                .find(|(candidate, _)| *candidate == role)
                 .map(|(_, reg)| *reg)
                 .ok_or(Refused::Facts)
         };
@@ -47,20 +47,22 @@ impl IndexedAmount {
             .map(|(measure, coefficient)| {
                 let input = match measure {
                     Measure::Local(owner) if Some(owner) == output => ResourceInput::Result,
-                    Measure::Local(owner) => match slots.root(owner, doc::TaskId::MAIN, 0) {
-                        Some(Root::Value { slot, .. }) => ResourceInput::Local(register(slot)?),
-                        _ => ResourceInput::SourceFact(measure.clone()),
-                    },
+                    Measure::Local(owner) => {
+                        match slots.root(owner, doc::TaskId::MAIN, 0).and_then(root_role) {
+                            Some(role) => ResourceInput::Local(register(role)?),
+                            None => ResourceInput::SourceFact(measure.clone()),
+                        }
+                    }
                     Measure::Release(owners) => {
                         let mut released = std::collections::BTreeSet::new();
                         let mut external = false;
                         for owner in owners {
                             for root in owner_roots(source, owner)? {
-                                match root {
-                                    Root::Value { slot, .. } => {
-                                        released.insert(slot);
+                                match root_role(root) {
+                                    Some(role) => {
+                                        released.insert(role);
                                     }
-                                    _ => external = true,
+                                    None => external = true,
                                 }
                             }
                         }
@@ -87,17 +89,27 @@ impl IndexedAmount {
     }
 }
 
-pub(super) fn slot(source: &Source, owner: &Owner) -> Option<Slot> {
+pub(super) fn role(source: &Source, owner: &Owner) -> Option<Role> {
     let slots = source.owner_slots().ok()?;
     let root = slots.root(owner, doc::TaskId::MAIN, 0).or_else(|| {
         let Owner::Visible { at, name } = owner else {
             return None;
         };
-        let binding = crate::compile::room::root_owners::visible(&slots.scopes, at, name)?;
-        slots.root(binding, doc::TaskId::MAIN, 0)
+        match crate::compile::room::root_owners::visible(&slots.scopes, at, name) {
+            Some(binding) => slots.root(binding, doc::TaskId::MAIN, 0),
+            // Main resolves a name without a lexical binding to its session cell.
+            None => (source.site.unit == lash_kernel_value::sites::Unit::Main)
+                .then(|| Root::session(name)),
+        }
     })?;
+    root_role(root)
+}
+
+/// The verified register role of an actual source root, if it has one.
+pub(super) fn root_role(root: Root) -> Option<Role> {
     match root {
-        Root::Value { slot, .. } => Some(slot),
+        Root::Value { slot, .. } => Some(Role::Slot(slot)),
+        Root::Session(digest) => Some(Role::Session(digest)),
         _ => None,
     }
 }
@@ -115,8 +127,8 @@ pub(super) fn retained_read(source: &Source, at: &Site) -> Option<Slot> {
     if source.shared.get(&(declared.clone(), name.clone())) == Some(&true) {
         return None;
     }
-    match slot(source, binding)? {
-        slot @ Slot::Binding(_) => Some(slot),
+    match role(source, binding)? {
+        Role::Slot(slot @ Slot::Binding(_)) => Some(slot),
         _ => None,
     }
 }
@@ -132,23 +144,21 @@ pub(super) fn node<'a>(source: &'a Source, at: &Site) -> Result<doc::Node<'a>, R
     Ok(node)
 }
 
-pub(super) type RoleRegisters = Box<[(Slot, Reg<LeaseValue>)]>;
+pub(super) type RoleRegisters = Box<[(Role, Reg<LeaseValue>)]>;
 
 pub(super) fn roles(source: &Source) -> Result<RoleRegisters, Refused> {
     let mut roles = std::collections::BTreeSet::new();
     for exit in &source.room.exits {
         for owner in &exit.owners {
             for root in owner_roots(source, owner)? {
-                if let Root::Value { slot, .. } = root {
-                    roles.insert(slot);
-                }
+                roles.extend(root_role(root));
             }
         }
     }
     roles
         .into_iter()
         .enumerate()
-        .map(|(index, slot)| Ok((slot, Reg::new(index)?)))
+        .map(|(index, role)| Ok((role, Reg::new(index)?)))
         .collect()
 }
 

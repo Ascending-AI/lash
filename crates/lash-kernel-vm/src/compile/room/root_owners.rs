@@ -180,6 +180,20 @@ pub(super) fn cell_assignments(source: &Description) -> Result<BTreeMap<Site, Na
         .collect())
 }
 impl OwnerSlots {
+    /// The source name of the durable main session cell with this owner digest.
+    pub(crate) fn session_name(&self, digest: &[u8; 32]) -> Option<&Name> {
+        self.slots
+            .keys()
+            .chain(self.aliases.values())
+            .find_map(|owner| match owner {
+                Owner::SessionCell { name, .. }
+                    if Root::session(name) == Root::Session(*digest) =>
+                {
+                    Some(name)
+                }
+                _ => None,
+            })
+    }
     pub(crate) fn continuation(&self, site: &Site, task: TaskId, invocation: u64) -> Option<Root> {
         let index = self.get(&Owner::Operand(site.clone()))?;
         Some(Root::Value {

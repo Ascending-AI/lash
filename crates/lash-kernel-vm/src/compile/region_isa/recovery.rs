@@ -4,6 +4,25 @@ use crate::compile::room::Point;
 use lash_kernel_state::kernel_internals::logical::LeaseValue;
 use lash_kernel_state::kernel_internals::logical::Slot;
 
+/// A verified root role: a frame slot, or a durable main session cell. A
+/// session role is a ledger root of its own and never a persisted frame slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum Role {
+    Slot(Slot),
+    Session([u8; 32]),
+}
+impl Role {
+    pub(crate) fn slot(self) -> Option<Slot> {
+        match self {
+            Self::Slot(slot) => Some(slot),
+            Self::Session(_) => None,
+        }
+    }
+    pub(crate) fn capture(self) -> bool {
+        matches!(self, Self::Slot(Slot::Capture(_)))
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct RecoveryMap {
     pub(crate) roles: Box<[(Slot, Reg<LeaseValue>)]>,
@@ -125,9 +144,11 @@ impl GraphRecovery {
 use super::{Refused, RegionDraft, RegionOp, resources};
 use crate::compile::room::{Measure, Owner, Phase};
 use lash_kernel_doc as doc;
-use lash_kernel_state::kernel_internals::logical::Owner as Root;
 use std::collections::BTreeSet;
 
+/// Static frame-slot liveness. A session role is a durable ledger root whose
+/// holding is dynamic (an earlier run may have bound it), so it never enters
+/// a recovery map; the machine tracks and publishes it.
 pub(super) fn transfer(
     draft: &RegionDraft,
     pc: usize,
@@ -141,7 +162,7 @@ pub(super) fn transfer(
     let source = &draft.source;
     let mut next = live.clone();
     for input in &event.inputs {
-        if let Some(slot) = resources::slot(source, input) {
+        if let Some(slot) = resources::role(source, input).and_then(Role::slot) {
             next.remove(&slot);
         }
     }
@@ -151,7 +172,7 @@ pub(super) fn transfer(
         {
             for owner in owners {
                 for root in resources::owner_roots(source, owner)? {
-                    if let Root::Value { slot, .. } = root {
+                    if let Some(slot) = resources::root_role(root).and_then(Role::slot) {
                         next.remove(&slot);
                     }
                 }
@@ -162,7 +183,8 @@ pub(super) fn transfer(
         && let Some(output) = event
             .output
             .as_ref()
-            .and_then(|owner| resources::slot(source, owner))
+            .and_then(|owner| resources::role(source, owner))
+            .and_then(Role::slot)
     {
         next.insert(output);
     }
@@ -171,13 +193,14 @@ pub(super) fn transfer(
             place: doc::Place::Variable(name),
             ..
         }) = resources::node(source, &event.point.site)?
-        && let Some(slot) = resources::slot(
+        && let Some(slot) = resources::role(
             source,
             &Owner::Visible {
                 at: event.point.site.clone(),
                 name: name.clone(),
             },
         )
+        .and_then(Role::slot)
     {
         next.insert(slot);
     }
@@ -212,13 +235,15 @@ pub(super) fn liveness(draft: &RegionDraft) -> Result<Vec<Option<BTreeSet<Slot>>
     let mut states = vec![None; draft.ops.len()];
     let mut initial = BTreeSet::new();
     for name in &draft.source.params {
-        if let Some(slot) = resources::slot(
+        if let Some(slot) = resources::role(
             &draft.source,
             &Owner::Binding {
                 declared: draft.source.site.clone(),
                 name: name.clone(),
             },
-        ) {
+        )
+        .and_then(Role::slot)
+        {
             initial.insert(slot);
         }
     }
@@ -226,7 +251,7 @@ pub(super) fn liveness(draft: &RegionDraft) -> Result<Vec<Option<BTreeSet<Slot>>
         draft
             .roles
             .iter()
-            .filter_map(|(slot, _)| matches!(slot, Slot::Capture(_)).then_some(*slot)),
+            .filter_map(|(role, _)| role.slot().filter(|slot| matches!(slot, Slot::Capture(_)))),
     );
     states
         .get_mut(draft.entry.offset())

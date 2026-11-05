@@ -40,7 +40,7 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
         }
     }
     for (slot, reg) in &draft.roles {
-        if matches!(slot, Slot::Capture(_)) {
+        if slot.capture() {
             known[reg.offset()] = Some(RegisterKind::Value);
         }
     }

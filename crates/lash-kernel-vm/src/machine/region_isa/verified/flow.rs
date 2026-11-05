@@ -1,6 +1,6 @@
 //! Bind source root lifetimes and amount inputs to compact physical indexes.
 use super::super::{code::Register, *};
-use crate::compile::region_isa::{CheckedKind, IndexedAmount, Pc, RegionOp, ResourceInput};
+use crate::compile::region_isa::{CheckedKind, IndexedAmount, Pc, RegionOp, ResourceInput, Role};
 use crate::compile::room::Measure;
 use lash_kernel_state::kernel_internals::logical::Slot;
 
@@ -8,6 +8,8 @@ use lash_kernel_state::kernel_internals::logical::Slot;
 pub(super) struct Root {
     pub(super) register: Register,
     pub(super) capture: bool,
+    /// A session cell root counts only while the lease holds that cell.
+    pub(super) session: Option<usize>,
 }
 pub(super) enum Fact {
     Local(Register),
@@ -30,6 +32,9 @@ pub(super) struct Flow {
     pub(super) delta: Amount,
     pub(super) local: Option<Register>,
     pub(super) destination: Option<Register>,
+    /// The session cell this step writes: it releases the cell's held value
+    /// and holds the written one.
+    pub(super) session: Option<usize>,
 }
 impl Flow {
     pub(super) fn bind(code: &RegionCode, pc: Pc) -> Result<Self, RegionError> {
@@ -64,6 +69,7 @@ impl Flow {
             Ok(Root {
                 register: super::bind::physical(code, reg)?,
                 capture: matches!(slot, Slot::Capture(_)),
+                session: None,
             })
         };
         let mut releases: Vec<Root> = before
@@ -89,12 +95,14 @@ impl Flow {
                 releases.push(Root {
                     register: super::bind::physical(code, reg)?,
                     capture: false,
+                    session: None,
                 });
             }
             if let Some(reg) = after.graph.incoming() {
                 holds.push(Root {
                     register: super::bind::physical(code, reg)?,
                     capture: false,
+                    session: None,
                 });
             }
         }
@@ -127,11 +135,23 @@ impl Flow {
                                     let quote = regs
                                         .iter()
                                         .filter_map(|reg| {
+                                            if let Some(index) =
+                                                super::bind::session_index(code, reg.index())
+                                            {
+                                                return Some(
+                                                    super::bind::physical(code, *reg).map(
+                                                        |register| Root {
+                                                            register,
+                                                            capture: false,
+                                                            session: Some(index),
+                                                        },
+                                                    ),
+                                                );
+                                            }
                                             before.roles.iter().find_map(|(slot, actual)| {
-                                                (actual == reg).then_some((*slot, *reg))
+                                                (actual == reg).then(|| root(*slot, *reg))
                                             })
                                         })
-                                        .map(|(slot, reg)| root(slot, reg))
                                         .collect::<Result<_, RegionError>>()?;
                                     let index = groups.len();
                                     groups.push(regs.clone());
@@ -195,6 +215,7 @@ impl Flow {
             },
             _ => None,
         };
+        let session = destination.and_then(|index| super::bind::session_index(code, index));
         let destination = destination
             .map(|index| match code.registers().get(index as usize) {
                 Some(crate::compile::region_isa::RegisterKind::Value) => Ok(Register::Value(index)),
@@ -221,16 +242,20 @@ impl Flow {
             delta,
             local,
             destination,
+            session,
         })
     }
     pub(super) fn width(&self) -> usize {
-        self.holds.len().max(self.releases.len()).max(
-            self.quotes
-                .iter()
-                .map(|quote| quote.len())
-                .max()
-                .unwrap_or(0),
-        )
+        let session = usize::from(self.session.is_some());
+        (self.holds.len() + session)
+            .max(self.releases.len() + session)
+            .max(
+                self.quotes
+                    .iter()
+                    .map(|quote| quote.len())
+                    .max()
+                    .unwrap_or(0),
+            )
     }
 }
 
@@ -258,7 +283,7 @@ fn release_roots(
     let mut headers = 0_u64;
     let mut quote = Vec::new();
     for owner in roots {
-        let (register, capture) = match owner {
+        let (register, capture, session) = match owner {
             Owner::Frame { .. } => {
                 headers = headers
                     .checked_add(lash_kernel_doc::LogicalHeldV1::FRAME)
@@ -271,18 +296,35 @@ fn release_roots(
                     .incoming()
                     .ok_or_else(|| invalid(Refused::Facts))?,
                 false,
+                None,
             ),
             Owner::Value { slot, .. } => {
                 let Some((_, reg)) = before.roles.iter().find(|(actual, _)| *actual == slot) else {
                     continue;
                 };
-                (*reg, matches!(slot, Slot::Capture(_)))
+                (*reg, matches!(slot, Slot::Capture(_)), None)
+            }
+            Owner::Session(digest) => {
+                let reg = code
+                    .roles()
+                    .iter()
+                    .find_map(|(role, reg)| (*role == Role::Session(digest)).then_some(*reg))
+                    .ok_or_else(|| invalid(Refused::Facts))?;
+                (
+                    reg,
+                    false,
+                    Some(
+                        super::bind::session_index(code, reg.index())
+                            .ok_or_else(|| invalid(Refused::Facts))?,
+                    ),
+                )
             }
             _ => return Err(invalid(Refused::Facts)),
         };
         quote.push(Root {
             register: super::bind::physical(code, register)?,
             capture,
+            session,
         });
     }
     Ok((quote.into(), headers))

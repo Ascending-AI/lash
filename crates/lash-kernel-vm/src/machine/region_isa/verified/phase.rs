@@ -47,11 +47,18 @@ fn read(
 pub(super) struct PreparedResources<'a, 's> {
     step: Option<LeaseStep<'a, 's>>,
     counters: execute::Counters,
+    session: Option<&'a mut super::running::SessionState>,
 }
 impl PreparedResources<'_, '_> {
     pub(super) fn accept(self) -> Result<execute::Counters, RegionError> {
         if let Some(step) = self.step {
             step.reserve().map_err(RegionError::Heap)?.accept();
+        }
+        if let Some(session) = self.session {
+            *session = super::running::SessionState {
+                held: true,
+                written: true,
+            };
         }
         Ok(self.counters)
     }
@@ -97,11 +104,52 @@ impl<'s> Running<'s> {
             )?;
             releases.push((value, root.capture));
         }
+        if let Some(index) = flow.session {
+            let register = flow.destination.ok_or_else(|| invalid(Refused::Facts))?;
+            let root = Root {
+                register,
+                capture: false,
+                session: None,
+            };
+            if self
+                .sessions
+                .get(index)
+                .ok_or_else(|| invalid(Refused::Facts))?
+                .held
+            {
+                let value = read(
+                    &self.registers,
+                    frame,
+                    invocation,
+                    root,
+                    &mut self.view,
+                    None,
+                    None,
+                )?;
+                releases.push((value, false));
+            }
+            let value = read(
+                &self.registers,
+                frame,
+                invocation,
+                root,
+                &mut self.view,
+                Some(answer),
+                flow.destination,
+            )?;
+            holds.push((value, false));
+        }
         for group in &flow.quotes {
             quote.clear();
             let mut price = 0_u64;
             let mut cascade = false;
             for &root in group {
+                if root
+                    .session
+                    .is_some_and(|index| self.sessions.get(index).is_none_or(|cell| !cell.held))
+                {
+                    continue;
+                }
                 let value = read(
                     &self.registers,
                     frame,
@@ -218,7 +266,16 @@ impl<'s> Running<'s> {
             .debt
             .checked_add(1)
             .ok_or_else(|| invalid(Refused::Facts))?;
+        let session = match flow.session {
+            Some(index) => Some(
+                self.sessions
+                    .get_mut(index)
+                    .ok_or_else(|| invalid(Refused::Facts))?,
+            ),
+            None => None,
+        };
         Ok(Some(PreparedResources {
+            session,
             step: Some(step),
             counters: execute::Counters {
                 balance,

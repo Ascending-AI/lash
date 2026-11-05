@@ -1,6 +1,7 @@
 //! Verified storage descriptors execute once inside the exclusive lease.
 use super::super::*;
 use super::{Running, charge};
+use crate::compile::region_isa::Role;
 use crate::compile::region_isa::{HeapKernel, HeapKind, Pc, Reg};
 use crate::compile::room::charges::region_isa::ChargeMoment;
 use lash_kernel_state::kernel_internals::logical::{
@@ -89,7 +90,7 @@ impl Running<'_> {
                     .program
                     .roles()
                     .iter()
-                    .find_map(|(actual, reg)| (actual == slot).then_some(*reg))
+                    .find_map(|(actual, reg)| (*actual == Role::Slot(*slot)).then_some(*reg))
                     .ok_or_else(|| invalid(Refused::Facts))?;
                 let value = self.value(reg)?;
                 self.call_captures.push(value);
@@ -188,7 +189,7 @@ impl Running<'_> {
                     .program
                     .roles()
                     .iter()
-                    .find_map(|(actual, reg)| (actual == slot).then_some(*reg))
+                    .find_map(|(actual, reg)| (*actual == Role::Slot(*slot)).then_some(*reg))
                     .ok_or_else(|| invalid(Refused::Facts))?;
                 let base = self.value(register)?;
                 let object = self.view.object(base).map_err(RegionError::Heap)?;

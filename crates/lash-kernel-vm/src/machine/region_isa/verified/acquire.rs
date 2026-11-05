@@ -133,6 +133,30 @@ impl<'m> RegionLease<'m> {
         {
             inputs.push(Owner::Incoming(task_id));
         }
+        // Main session cells held before entry enter as root registers.
+        let mut sessions = Vec::new();
+        for (index, cell) in root_code.sessions.iter().enumerate() {
+            let owner = Owner::Session(cell.digest);
+            if machine
+                .logical
+                .borrow()
+                .holding(owner, machine.heap.pages())
+                .map_err(RegionError::Heap)?
+                .is_none()
+            {
+                continue;
+            }
+            let value = machine
+                .session_get(&cell.name)
+                .map_err(|halt| match halt {
+                    crate::machine::Halt::Heap(fault) => RegionError::Heap(*fault),
+                    _ => invalid(Refused::Facts),
+                })?
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            inputs.push(owner);
+            dependencies.push(value);
+            sessions.push((index, cell.register, value));
+        }
         dependencies.extend(machine.regs.region_values().map(|(_, value)| value));
         let top = stack.last().ok_or_else(|| invalid(Refused::Facts))?;
         let top_code = programs.code(top.code)?;
@@ -214,6 +238,16 @@ impl<'m> RegionLease<'m> {
             root,
         )?;
         execution.reached = super::resume::reached(&execution.canonical, positions[0].1)?;
+        for (index, register, value) in sessions {
+            execution.registers.write(
+                &mut execution.view,
+                0,
+                entry_invocation,
+                register,
+                operands::Operand::Immediate(value),
+            )?;
+            execution.sessions[index].held = true;
+        }
         let mut activation = None;
         for (offset, frame) in stack.into_iter().enumerate() {
             let depth = offset + 1;
@@ -301,6 +335,7 @@ impl<'m> RegionLease<'m> {
                 registers: &mut machine.regs,
                 charged: &mut machine.charged,
                 logical_memory: &machine.logical_memory,
+                session: &mut machine.session,
                 task: task_id,
                 exe,
                 entry_code,

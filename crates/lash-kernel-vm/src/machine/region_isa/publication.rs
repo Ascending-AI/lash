@@ -18,6 +18,7 @@ pub(super) struct Authority<'m> {
     pub(super) registers: &'m mut Registers,
     pub(super) charged: &'m mut u64,
     pub(super) logical_memory: &'m std::cell::Cell<u64>,
+    pub(super) session: &'m mut crate::machine::session::Session,
     pub(super) task: TaskId,
     pub(super) exe: Arc<crate::compile::Executable>,
     pub(super) entry_code: CodeId,
@@ -39,6 +40,8 @@ pub(super) struct Prepared<'m> {
     counters: PreparedCounterExit<'m>,
     registers: &'m mut Registers,
     next_registers: Option<Registers>,
+    session: &'m mut crate::machine::session::Session,
+    session_writes: Vec<crate::machine::session::PreparedSessionWrite>,
     charged: &'m mut u64,
     logical_memory: &'m std::cell::Cell<u64>,
     task_state: &'m mut lash_kernel_state::paged::TaskStateRecord,
@@ -139,6 +142,13 @@ impl<'m> Authority<'m> {
             }
             outputs.push((Owner::Incoming(self.task), value));
         }
+        for (digest, value) in publications.sessions {
+            outputs.push((Owner::Session(digest), value));
+        }
+        let session_writes = self
+            .session
+            .prepare_writes(&image.sessions)
+            .map_err(RegionError::Heap)?;
         let counters = self
             .counters
             .prepare(&image.source_counts)
@@ -172,6 +182,8 @@ impl<'m> Authority<'m> {
             counters,
             registers: self.registers,
             next_registers: canonical.registers,
+            session: self.session,
+            session_writes,
             charged: self.charged,
             logical_memory: self.logical_memory,
             task_state: self.task_state,
@@ -187,6 +199,8 @@ impl Prepared<'_> {
             counters,
             registers,
             next_registers,
+            session,
+            session_writes,
             charged,
             logical_memory,
             task_state,
@@ -198,6 +212,9 @@ impl Prepared<'_> {
             .commit(|| {
                 retired = Some(frames.publish_stack());
                 counters.publish();
+                for write in session_writes {
+                    write.publish(session);
+                }
                 if let Some(next) = next_registers {
                     old_registers = Some(std::mem::replace(registers, next));
                 }

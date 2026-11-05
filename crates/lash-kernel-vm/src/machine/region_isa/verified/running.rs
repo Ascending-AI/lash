@@ -18,6 +18,10 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) departing: Option<super::returns::Departure>,
     /// The origin of a Break/Continue whose scope Leaves are running.
     pub(super) looping: Option<Point>,
+    /// Which root session cells the lease holds, and which it wrote.
+    pub(super) sessions: Box<[SessionState]>,
+    /// The held session values captured when the root frame left.
+    pub(super) closed_sessions: Option<SessionValues>,
     pub(super) returning: Option<super::returns::Incoming>,
     pub(super) complete: bool,
     pub(super) activation: Option<CallActivation>,
@@ -40,7 +44,43 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(in crate::machine::region_isa) faulted: bool,
     pub(in crate::machine::region_isa) canonical: Box<crate::machine::Frame>,
 }
+/// Held root session cells by index, with their current values.
+pub(super) type SessionValues = Box<[(usize, operands::Operand<LeaseValue>)]>;
+#[derive(Clone, Copy, Default)]
+pub(super) struct SessionState {
+    pub(super) held: bool,
+    pub(super) written: bool,
+}
 impl<'m> Running<'m> {
+    /// The root frame's code, which alone may own main session cells.
+    pub(super) fn root_code(&self) -> &Arc<Code> {
+        self.parked
+            .first()
+            .map_or(&self.code, |parked| &parked.code)
+    }
+    /// The root frame's current invocation.
+    pub(super) fn root_invocation(&self) -> u64 {
+        self.parked
+            .first()
+            .map_or(self.reached.invocation, |parked| parked.reached.invocation)
+    }
+    /// The held root session cells and their current values.
+    pub(super) fn session_values(&self) -> Result<SessionValues, RegionError> {
+        if let Some(closed) = &self.closed_sessions {
+            return Ok(closed.clone());
+        }
+        let invocation = self.root_invocation();
+        self.root_code()
+            .sessions
+            .iter()
+            .zip(&self.sessions)
+            .enumerate()
+            .filter(|(_, (_, state))| state.held)
+            .map(|(index, (cell, _))| {
+                Ok((index, self.registers.read(0, invocation, cell.register)?))
+            })
+            .collect()
+    }
     pub(super) fn frame_index(&self) -> usize {
         self.parked.len()
     }
@@ -138,6 +178,8 @@ impl<'m> Running<'m> {
             canonical_callees: Vec::new(),
             departing: None,
             looping: None,
+            sessions: vec![SessionState::default(); code.sessions.len()].into(),
+            closed_sessions: None,
             returning: None,
             complete: false,
             activation: None,

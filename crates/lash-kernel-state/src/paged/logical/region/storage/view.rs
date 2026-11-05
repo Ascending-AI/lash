@@ -112,7 +112,13 @@ impl StateLease<'_> {
             return Err(invalid("lease graph is frozen").into());
         }
         match selector {
-            Measure::Size => return self.shallow_measure(value),
+            Measure::Size => {
+                if let Repr::Object(object, _) = value.repr {
+                    let index = self.local.index(object)?;
+                    self.load_head(index)?;
+                }
+                return self.shallow_measure(value);
+            }
             Measure::Magnitude => return self.magnitude_measure(value),
             _ => {}
         }

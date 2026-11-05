@@ -172,10 +172,12 @@ impl<'m> Running<'m> {
         )
         .map_err(RegionError::Heap)?;
         let pending = current.pending;
+        let (sessions, written) = self.session_images(&graph)?;
         let live = live::Live {
             frames: frames.into_boxed_slice(),
             payload: None,
             returning: None,
+            sessions,
         };
         let (issued_invocations, invocations) = self.invocations.finish()?;
         let image = Reconstruction {
@@ -190,6 +192,7 @@ impl<'m> Running<'m> {
             returning: None,
             source_counts: self.source.freeze(),
             entering: None,
+            sessions: written,
             canonical: Some(publication::Canonical {
                 frames: canonical,
                 registers: Some(registers),
@@ -204,6 +207,45 @@ impl<'m> Running<'m> {
             graph,
             invocations,
         })
+    }
+
+    /// Held session cells for publication, and the written ones for the VM table.
+    #[expect(
+        clippy::type_complexity,
+        reason = "two parallel exit views of one table"
+    )]
+    fn session_images(
+        &self,
+        graph: &lash_kernel_state::kernel_internals::logical::LeaseGraphExit,
+    ) -> Result<
+        (
+            Box<
+                [(
+                    [u8; 32],
+                    operands::Operand<lash_kernel_state::kernel_internals::logical::LeaseValue>,
+                )],
+            >,
+            Box<[(crate::compile::BindingName, Value)]>,
+        ),
+        RegionError,
+    > {
+        let code = self.root_code();
+        let mut held = Vec::new();
+        let mut written = Vec::new();
+        for (index, value) in self.session_values()? {
+            let cell = code
+                .sessions
+                .get(index)
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            held.push((cell.digest, value));
+            if self.sessions[index].written {
+                written.push((
+                    cell.name.clone(),
+                    value.materialize(graph).map_err(RegionError::Heap)?,
+                ));
+            }
+        }
+        Ok((held.into(), written.into()))
     }
 
     fn reconstruct_complete(
@@ -222,6 +264,7 @@ impl<'m> Running<'m> {
         }
         let graph = self.view.materialize_graph().map_err(RegionError::Heap)?;
         let value = graph.value(incoming.value).map_err(RegionError::Heap)?;
+        let (sessions, written) = self.session_images(&graph)?;
         let page = crate::machine::project::project_region(
             &mut self
                 .view
@@ -245,6 +288,7 @@ impl<'m> Running<'m> {
                 returning: None,
                 source_counts: self.source.freeze(),
                 entering: None,
+                sessions: written,
                 canonical: Some(publication::Canonical {
                     frames: Vec::new(),
                     registers: Some(crate::machine::registers::Registers::default()),
@@ -256,6 +300,7 @@ impl<'m> Running<'m> {
                 frames: Box::new([]),
                 payload: Some(incoming.value),
                 returning: None,
+                sessions,
             },
             view: self.view,
             graph,

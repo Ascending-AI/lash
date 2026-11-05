@@ -1,5 +1,6 @@
 //! Bind immutable source-verified roles once, before acquiring state authority.
 use super::super::{code::Register, *};
+use crate::compile::region_isa::Role;
 use crate::compile::region_isa::{Pc, Reg, RegionOp, RegisterKind};
 use crate::compile::room::region::calls::region_isa::CallPlan;
 use lash_kernel_state::kernel_internals::logical::Slot;
@@ -15,6 +16,23 @@ pub(in crate::machine::region_isa) struct Code {
     pub(in crate::machine::region_isa) program: Arc<RegionCode>,
     pub(in crate::machine::region_isa) bindings: Arc<[u32]>,
     pub(in crate::machine::region_isa) calls: Box<[Option<Call>]>,
+    /// Durable main session cells, in the order of their verified roles.
+    pub(super) sessions: Box<[SessionCell]>,
+}
+
+/// A durable main session cell: its logical owner digest, its name and its register.
+pub(super) struct SessionCell {
+    pub(super) digest: [u8; 32],
+    pub(super) name: crate::compile::BindingName,
+    pub(super) register: Register,
+}
+
+/// The position of a session register among the verified session roles.
+pub(super) fn session_index(code: &RegionCode, register: u32) -> Option<usize> {
+    code.roles()
+        .iter()
+        .filter(|(role, _)| matches!(role, Role::Session(_)))
+        .position(|(_, reg)| reg.index() == register)
 }
 
 pub(super) struct SavedRole {
@@ -139,7 +157,7 @@ impl Code {
                         let reg = program
                             .roles()
                             .iter()
-                            .find_map(|(actual, reg)| (*actual == slot).then_some(*reg))
+                            .find_map(|(actual, reg)| (*actual == Role::Slot(slot)).then_some(*reg))
                             .ok_or_else(|| invalid(Refused::Facts))?;
                         physical(program, reg)
                     };
@@ -223,7 +241,29 @@ impl Code {
         for (index, flow) in flows {
             flow_table[index] = Some(flow);
         }
+        let slots = program.source().owner_slots().map_err(invalid)?;
+        let sessions = program
+            .roles()
+            .iter()
+            .filter_map(|(role, reg)| match role {
+                Role::Session(digest) => Some((*digest, *reg)),
+                Role::Slot(_) => None,
+            })
+            .map(|(digest, reg)| {
+                Ok(SessionCell {
+                    digest,
+                    name: crate::compile::BindingName::new(
+                        slots
+                            .session_name(&digest)
+                            .ok_or_else(|| invalid(Refused::Facts))?
+                            .clone(),
+                    ),
+                    register: physical(program, reg)?,
+                })
+            })
+            .collect::<Result<_, RegionError>>()?;
         Ok(Arc::new(Self {
+            sessions,
             exe: Arc::clone(exe),
             arguments,
             captures,
@@ -299,7 +339,7 @@ fn saved_roles(
             let reg = program
                 .roles()
                 .iter()
-                .find_map(|(slot, reg)| (*slot == source).then_some(*reg))
+                .find_map(|(slot, reg)| (*slot == Role::Slot(source)).then_some(*reg))
                 .ok_or_else(|| invalid(Refused::Facts))?;
             Ok(SavedRole {
                 source,

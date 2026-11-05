@@ -11,6 +11,8 @@ pub(super) struct Live<V: Copy> {
     pub(super) frames: Box<[FrameImage<Operand<V>>]>,
     pub(super) payload: Option<V>,
     pub(super) returning: Option<returns::ReturnImage<V>>,
+    /// Held main session cells by logical owner digest.
+    pub(super) sessions: Box<[([u8; 32], Operand<V>)]>,
 }
 
 pub(super) struct PublishedFrame {
@@ -26,6 +28,7 @@ pub(super) struct Published {
     pub(super) frames: Box<[PublishedFrame]>,
     pub(super) payload: Option<PublicationValue>,
     pub(super) returning: Option<PublicationValue>,
+    pub(super) sessions: Box<[([u8; 32], PublicationValue)]>,
 }
 
 impl<V: Copy> FrameImage<Operand<V>> {
@@ -122,6 +125,11 @@ impl Live<LeaseValue> {
                 .as_ref()
                 .map(|image| publication(graph, Operand::Dynamic(image.value), false))
                 .transpose()?,
+            sessions: self
+                .sessions
+                .iter()
+                .map(|(digest, value)| Ok((*digest, publication(graph, *value, false)?)))
+                .collect::<Result<_, RegionError>>()?,
         })
     }
 }

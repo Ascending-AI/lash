@@ -685,6 +685,40 @@ impl PreparedSessionWrite {
 }
 
 impl Session {
+    /// Reserve storage for several distinct writes published in this order.
+    pub(super) fn prepare_writes(
+        &mut self,
+        writes: &[(BindingName, Value)],
+    ) -> Result<Vec<PreparedSessionWrite>, lash_kernel_doc::heap::HeapFault> {
+        use lash_kernel_doc::heap::{HeapFault, HostResource};
+        let exhausted = || HeapFault::Exhausted {
+            resource: HostResource::StagingBytes,
+        };
+        let fresh = writes
+            .iter()
+            .filter(|(name, _)| !self.bindings.contains_key(&name.key))
+            .count();
+        self.bindings.try_reserve(fresh).map_err(|_| exhausted())?;
+        let mut prepared = Vec::new();
+        prepared
+            .try_reserve_exact(writes.len())
+            .map_err(|_| exhausted())?;
+        let mut revision = self.writes;
+        for (name, value) in writes {
+            let next = revision
+                .checked_add(1)
+                .ok_or_else(|| HeapFault::Malformed("session write ordinal overflow".into()))?;
+            prepared.push(PreparedSessionWrite {
+                name: name.clone(),
+                value: *value,
+                revision,
+                next,
+                present: self.bindings.contains_key(&name.key),
+            });
+            revision = next;
+        }
+        Ok(prepared)
+    }
     /// Reserve implementation storage without changing any binding or owner.
     pub(super) fn prepare_write(
         &mut self,

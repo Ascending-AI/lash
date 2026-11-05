@@ -1,6 +1,7 @@
 //! Verified parameter/capture substitutions become physical indexes once.
 use super::super::{code::Register, *};
 use super::Code;
+use crate::compile::region_isa::Role;
 use crate::compile::room::region::calls::region_isa::callee::Substitution;
 use lash_kernel_state::kernel_internals::logical::Slot;
 use lash_kernel_state::kernel_internals::logical::{LeaseValue, StateLease};
@@ -54,7 +55,7 @@ fn role(code: &RegionCode, slot: Slot) -> Result<Register, RegionError> {
     let reg = code
         .roles()
         .iter()
-        .find_map(|(actual, reg)| (*actual == slot).then_some(*reg))
+        .find_map(|(actual, reg)| (*actual == Role::Slot(slot)).then_some(*reg))
         .ok_or_else(|| invalid(Refused::Facts))?;
     super::bind::physical(code, reg)
 }

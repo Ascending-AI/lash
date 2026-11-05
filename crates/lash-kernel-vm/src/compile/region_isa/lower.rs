@@ -327,7 +327,7 @@ pub(super) fn value_literal(source: &Source, at: &Point) -> Option<Value> {
     }
 }
 pub(super) fn reg(
-    roles: &[(Slot, Reg<LeaseValue>)],
+    roles: &[(Role, Reg<LeaseValue>)],
     source: &Source,
     owner: &Owner,
 ) -> Result<Reg<LeaseValue>, Refused> {
@@ -339,7 +339,7 @@ pub(super) fn reg(
     {
         return Reg::new(roles.len());
     }
-    let slot = resources::slot(source, owner).ok_or(Refused::Facts)?;
+    let slot = resources::role(source, owner).ok_or(Refused::Facts)?;
     roles
         .iter()
         .find(|(candidate, _)| *candidate == slot)
@@ -533,7 +533,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     RegionOp::Checked {
                         kernel: CheckedKernel {
                             kind: CheckedKind::Local {
-                                slot: resources::slot(
+                                slot: resources::role(
                                     &source,
                                     &Owner::Visible {
                                         at: at.site.clone(),
@@ -577,7 +577,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     Some(dst),
                     _,
                 ) => {
-                    if let Some(slot) = resources::slot(
+                    if let Some(slot) = resources::role(
                         &source,
                         &Owner::Visible {
                             at: at.site.clone(),
@@ -942,8 +942,11 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                 .as_ref()
                 .map(|owner| {
                     let reg = reg(&draft.roles, &draft.source, owner)?;
-                    pending_live
-                        .insert(resources::slot(&draft.source, owner).ok_or(Refused::Facts)?);
+                    if let Role::Slot(slot) =
+                        resources::role(&draft.source, owner).ok_or(Refused::Facts)?
+                    {
+                        pending_live.insert(slot);
+                    }
                     Ok::<_, Refused>(reg)
                 })
                 .transpose()?,
@@ -960,8 +963,11 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
             let roles: Box<[_]> = draft
                 .roles
                 .iter()
-                .filter(|(slot, _)| live.contains(slot))
-                .copied()
+                .filter_map(|(role, reg)| {
+                    role.slot()
+                        .filter(|slot| live.contains(slot))
+                        .map(|slot| (slot, *reg))
+                })
                 .collect();
             let operands = roles
                 .iter()
