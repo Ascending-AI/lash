@@ -493,7 +493,7 @@ impl Frame {
 
     /// Visits every arena value the frame holds: what an arena collection
     /// keeps. A shared variable's cell is visited as a ref.
-    fn each_value(&self, visit: &mut dyn FnMut(&Value)) {
+    pub(in crate::machine) fn each_value(&self, visit: &mut dyn FnMut(&Value)) {
         for slot in &self.slots.values {
             match slot {
                 SlotState::Value(value) => visit(value),

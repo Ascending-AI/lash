@@ -19,7 +19,7 @@ use lash_kernel_state::paged::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-mod region;
+pub(in crate::machine) mod region;
 
 const CACHED_TASKS: usize = 64;
 const WAYS: usize = 2;

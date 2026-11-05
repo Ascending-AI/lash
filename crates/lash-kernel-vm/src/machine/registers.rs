@@ -254,6 +254,12 @@ impl Registers {
     ) -> Result<Vec<(lash_kernel_state::kernel_internals::logical::Owner, Value)>, HeapFault> {
         self.source.entry_roots(ledger, projection, inputs)
     }
+    pub(in crate::machine) fn region_values(
+        &self,
+    ) -> impl Iterator<Item = (lash_kernel_state::kernel_internals::logical::Owner, Value)> + '_
+    {
+        self.source.live_values()
+    }
     pub(super) fn source_owners(&self) -> Vec<lash_kernel_state::kernel_internals::logical::Owner> {
         self.source.live_owners().collect()
     }

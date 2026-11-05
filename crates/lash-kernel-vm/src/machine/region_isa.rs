@@ -21,6 +21,7 @@ mod invocations;
 mod live;
 mod operands;
 mod programs;
+mod publication;
 mod reconstruct;
 mod registers;
 mod returns;
@@ -48,10 +49,7 @@ pub(crate) struct RegionLease<'m> {
     execution: Executing<'m>,
 }
 enum Authority<'m> {
-    Machine {
-        machine: &'m mut KernelMachine,
-        code: Arc<RegionCode>,
-    },
+    Machine(publication::Authority<'m>),
     #[cfg(test)]
     Fixture(fixtures::StateLease<'m>),
 }
@@ -120,9 +118,9 @@ impl<'m> RegionLease<'m> {
         machine: &'m mut KernelMachine,
         code: Arc<RegionCode>,
     ) -> Result<Self, RegionError> {
-        let _tables = Code::bind(machine, &code)?;
-        let _limits = Limits::machine(machine)?;
-        Err(invalid(Refused::Facts))
+        let tables = Code::bind(machine, &code)?;
+        let limits = Limits::machine(machine)?;
+        Self::acquire_verified(machine, tables, limits)
     }
 
     pub(crate) fn run(&mut self, stop: StopAt) -> Result<RegionStop, RegionError> {
@@ -167,7 +165,7 @@ impl<'m> Authority<'m> {
     ) -> Result<PreparedAuthority<'m>, RegionError> {
         let _ = (&reconstruction, &graph);
         match self {
-            Self::Machine { .. } => Err(invalid(Refused::Facts)),
+            Self::Machine(_) => Err(invalid(Refused::Facts)),
             #[cfg(test)]
             Self::Fixture(authority) => {
                 let FrozenGraph::Fixture(graph) = graph else {
@@ -224,7 +222,7 @@ fn storage_fault(fault: lash_kernel_state::kernel_internals::logical::LeaseFault
     )
 )]
 enum Executing<'m> {
-    Machine(Execution<lash_kernel_state::kernel_internals::logical::StateLease<'m>>),
+    Machine(verified::Running<'m>),
     #[cfg(test)]
     Fixture(Execution<storage_fixture::FixtureView>),
 }

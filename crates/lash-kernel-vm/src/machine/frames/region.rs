@@ -16,6 +16,78 @@ pub(in crate::machine) struct PreparedRegionFrames<'a> {
     len: u64,
 }
 
+impl Frame {
+    /// Copy only the entered resident frame into private exit storage. Cold
+    /// callers remain in their canonical rows and no source value is evaluated.
+    pub(in crate::machine) fn region_image(
+        &self,
+        logical: std::rc::Rc<
+            std::cell::RefCell<lash_kernel_state::kernel_internals::logical::Ledger>,
+        >,
+        task: lash_kernel_doc::TaskId,
+        exe: &crate::compile::Executable,
+    ) -> Result<Box<Self>, HeapFault> {
+        let roots = self
+            .logical
+            .as_ref()
+            .ok_or_else(|| malformed("region entry has no invocation"))?;
+        let mut slots = Slots::default();
+        slots.prepare_fresh(self.slot_states().len())?;
+        slots.fresh(self.slot_states().len());
+        let mut control = crate::machine::controls::Controls::default();
+        for value in self.control.iter() {
+            control.push(value.clone());
+        }
+        let mut pending = Continuation::default();
+        if let Some(value) = self.pending.peek() {
+            pending.set(value.clone());
+        }
+        let mut image = Box::new(Self {
+            source_action: self.source_action,
+            texts: Vec::new(),
+            source_frontier: self
+                .source_frontier
+                .as_ref()
+                .map(|frontier| frontier.region_successor(frontier.position().clone()))
+                .transpose()?,
+            invocation: self.invocation,
+            logical: Some(crate::machine::logical_held::FrameRoots::prepared(
+                logical,
+                task,
+                roots.invocation().clone(),
+                Arc::clone(&exe.code(self.code).source_room),
+                Arc::clone(&exe.code(self.code).slots_by_at),
+            )?),
+            convention: self.convention.clone(),
+            public_result: self.public_result.clone(),
+            link: self.link,
+            code: self.code,
+            charging: self.charging,
+            paced: self.paced,
+            slots,
+            statement: self.statement.clone(),
+            pending,
+            control,
+            awaiting: self.awaiting,
+            nested: self.nested,
+            library: self
+                .library
+                .as_ref()
+                .map(|call| crate::machine::LibraryCall {
+                    lib: call.lib,
+                    args: call.args.clone(),
+                }),
+            cleaning: self.cleaning,
+            held: self.held.clone(),
+            owned: false,
+        });
+        for (at, state) in self.slot_states().iter().enumerate() {
+            image.restore_slot(at as u32, *state);
+        }
+        Ok(image)
+    }
+}
+
 impl Frames {
     /// The entry frame must already be resident. Preparing an exit never
     /// restores a cold frame or borrows the arena held by the state lease.

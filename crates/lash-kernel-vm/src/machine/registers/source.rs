@@ -400,6 +400,14 @@ impl Operands {
         }
         Ok(outputs)
     }
+    pub(super) fn live_values(&self) -> impl Iterator<Item = (Owner, Value)> + '_ {
+        self.values
+            .iter()
+            .map(|operand| &operand.held)
+            .chain(&self.atoms)
+            .chain(&self.entry)
+            .filter_map(|held| held.owner.map(|owner| (owner, held.value)))
+    }
     pub(super) fn live_owners(&self) -> impl Iterator<Item = Owner> + '_ {
         self.values
             .iter()

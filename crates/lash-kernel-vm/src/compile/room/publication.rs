@@ -129,6 +129,51 @@ impl Source {
     }
 }
 impl Frontier {
+    /// Read-only binding check before C acquires the exclusive state lease.
+    pub(crate) fn region_binding_matches(
+        &self,
+        source: &Arc<Source>,
+        link: lash_kernel_value::content_ids::LinkId,
+        kernel: doc::KernelVersion,
+        invocation: &Invocation,
+    ) -> bool {
+        Arc::ptr_eq(&self.source, source)
+            && self.link == link
+            && self.kernel == kernel
+            && !self.proven
+            && invocation.id() == self.position.occurrence.invocation
+            && invocation.frame()
+                == (logical::Owner::Frame {
+                    task: self.position.occurrence.task,
+                    invocation: self.position.occurrence.invocation,
+                })
+            && self.position.unpaid.is_some()
+    }
+
+    /// Prepare an authenticated successor without publishing a ledger handoff.
+    /// C installs it only inside the state lease's atomic commit.
+    pub(crate) fn region_successor(&self, position: Position) -> Result<Self, HeapFault> {
+        if self.position.unpaid.is_none()
+            || !self.source.valid_position(&position)
+            || position.occurrence.task != self.position.occurrence.task
+            || position.occurrence.invocation != self.position.occurrence.invocation
+        {
+            return Err(fault("region successor left its entered source invocation"));
+        }
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| fault("source frontier overflow"))?;
+        Ok(Self {
+            source: Arc::clone(&self.source),
+            link: self.link,
+            kernel: self.kernel,
+            position,
+            proven: false,
+            revision,
+            identity: std::rc::Rc::new(()),
+        })
+    }
     pub(crate) fn position(&self) -> &Position {
         &self.position
     }
