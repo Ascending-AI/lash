@@ -41,7 +41,7 @@ use crate::EngineStateFormat;
 /// )
 /// version_surface = "drain"
 /// format_manifest = "RunRecord"
-pub const RUN_RECORD_FORMAT_VERSION: u32 = 18;
+pub const RUN_RECORD_FORMAT_VERSION: u32 = 19;
 
 /// The turn journal's format id.
 pub const TURN_JOURNAL_FORMAT_ID: &str = "turn-journal";
