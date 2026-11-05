@@ -148,6 +148,8 @@ fn failed(process: &ProcessId, fault: &RunFault) -> SettledOutput {
 /// not kept. At `observe: counts` it records what its reads answered: the
 /// segment's tape (FIG-6370).
 struct StepHost {
+    json_model: lash_vm_broker::kernel::JsonModel,
+    operation_names: std::collections::BTreeMap<lash_kernel_value::OperationUse, String>,
     trace: Option<super::trace::ProcessTrace>,
     observe: lash_kernel_value::observation::RunObservation,
     reads: std::sync::Mutex<HostReads>,
@@ -227,9 +229,16 @@ impl RunHost for StepHost {
         let input = crate::tool_input(
             args,
             |input| {
-                datum_to_json(input)
-                    .map_err(|error| error.to_string())
-                    .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
+                datum_to_json(
+                    input,
+                    self.json_model,
+                    self.operation_names
+                        .get(effect)
+                        .map(String::as_str)
+                        .unwrap_or("read"),
+                )
+                .map_err(|error| error.to_string())
+                .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
             },
             |count| {
                 format!(
@@ -520,6 +529,11 @@ async fn kernel_run(
         })
         .collect();
     let host = Arc::new(StepHost {
+        json_model: lash_vm_broker::kernel::JsonModel::for_dialect(&settings.dialect),
+        operation_names: program
+            .operation_imports()
+            .map(|(use_, import)| (use_, import.name.to_string()))
+            .collect(),
         trace: trace.clone(),
         observe: settings.observe,
         reads: std::sync::Mutex::new(HostReads {
@@ -663,7 +677,11 @@ async fn kernel_run(
     let start = start.map(Box::new);
     match step {
         MachineStep::Ended(end) => {
-            let outcome = outcome_of_end(end, meters);
+            let outcome = outcome_of_end(
+                end,
+                meters,
+                lash_vm_broker::kernel::JsonModel::for_dialect(&settings.dialect),
+            );
             if let Some(trace) = &trace {
                 trace.finished(&outcome);
             }
@@ -701,7 +719,18 @@ async fn kernel_run(
                     if let (Some(trace), Request::Effect(effect)) = (&trace, &request) {
                         trace.origin(&effect.identity, &effect.origin);
                     }
-                    issue(&run.environment, request)
+                    let Request::Effect(effect) = &request;
+                    let context = host
+                        .operation_names
+                        .get(&effect.use_)
+                        .map(String::as_str)
+                        .unwrap_or("tool");
+                    issue(
+                        &run.environment,
+                        request,
+                        lash_vm_broker::kernel::JsonModel::for_dialect(&settings.dialect),
+                        context,
+                    )
                 })
                 .collect::<Vec<_>>();
             if let Some(trace) = &trace {
@@ -1235,6 +1264,8 @@ pub(super) fn admission_of(request: &Request) -> (lash_kernel_value::sites::Wait
 fn issue(
     environment: &lash_core_store::tool_surface::ExecutionEnvironment,
     request: Request,
+    json_model: lash_vm_broker::kernel::JsonModel,
+    context: &str,
 ) -> Issued {
     let (wait, admission) = admission_of(&request);
     let Request::Effect(request) = request;
@@ -1255,7 +1286,8 @@ fn issue(
         crate::tool_input(
             args,
             |input| {
-                let text = datum_to_json(input).map_err(|error| error.to_string())?;
+                let text =
+                    datum_to_json(input, json_model, context).map_err(|error| error.to_string())?;
                 serde_json::from_str(&text).map_err(|error| error.to_string())
             },
             |count| {
@@ -1287,28 +1319,28 @@ fn issue(
 pub(super) fn outcome_of_end(
     end: End,
     meters: Option<lash_kernel_vm::Meters>,
+    json_model: lash_vm_broker::kernel::JsonModel,
 ) -> lash_execution_contracts::process::ProcessOutcome {
-    let json = |value: &Datum| -> Option<serde_json::Value> {
-        datum_to_json(value)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
+    let json = |value: &Datum| -> Result<serde_json::Value, String> {
+        datum_to_json(value, json_model, "process.output")
+            .map_err(|error| error.to_string())
+            .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
     };
     match end {
         End::Finished(finished) => match json(&finished.result) {
-            Some(value) => lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            Ok(value) => lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
                 lash_core::ToolCallOutput::success(value),
             ),
-            None => failure(
-                KernelProcessFailureCode::ResultNotData,
-                "the process finished with a value that is not effect data",
-                None,
-            ),
+            Err(message) => failure(KernelProcessFailureCode::ResultNotData, message, None),
         },
-        End::Failed(value) => failure(
-            KernelProcessFailureCode::Failed,
-            "the process failed",
-            json(&value),
-        ),
+        End::Failed(value) => match json(&value) {
+            Ok(value) => failure(
+                KernelProcessFailureCode::Failed,
+                "the process failed",
+                Some(value),
+            ),
+            Err(message) => failure(KernelProcessFailureCode::ResultNotData, message, None),
+        },
         End::Error(RunError::Bound(exceeded)) => caused_failure(
             KernelProcessFailureCode::BoundExceeded,
             exceeded.to_string(),
@@ -1330,7 +1362,7 @@ pub(super) fn outcome_of_end(
             ),
             Some(serde_json::json!({ "unfinished": unfinished, "unobserved": unobserved })),
         ),
-        End::Error(RunError::Uncaught { error, site }) => uncaught(error, site),
+        End::Error(RunError::Uncaught { error, site }) => uncaught(error, site, json_model),
         End::Error(error) => failure(
             KernelProcessFailureCode::RuntimeError,
             error.to_string(),
@@ -1350,25 +1382,29 @@ pub(super) fn outcome_of_end(
 fn uncaught(
     error: Datum,
     site: Option<lash_kernel_value::sites::Site>,
+    json_model: lash_vm_broker::kernel::JsonModel,
 ) -> lash_execution_contracts::process::ProcessOutcome {
-    let json = |value: &Datum| -> Option<serde_json::Value> {
-        datum_to_json(value)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
+    let json = |value: &Datum| -> Result<serde_json::Value, String> {
+        datum_to_json(value, json_model, "process.error")
+            .map_err(|error| error.to_string())
+            .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
     };
     let (error_kind, message, raw) = match error {
-        Datum::Error(error) => {
-            let raw = match &error.data {
-                Datum::Null => None,
-                data => json(data),
-            };
-            (Some(error.kind), error.message, raw)
-        }
-        value => (
-            None,
-            "the process ended with a raised value that is not an error".to_owned(),
-            json(&value),
-        ),
+        Datum::Error(error) => match &error.data {
+            Datum::Null => (Some(error.kind), error.message, None),
+            data => match json(data) {
+                Ok(raw) => (Some(error.kind), error.message, Some(raw)),
+                Err(message) => (Some(error.kind), message, None),
+            },
+        },
+        value => match json(&value) {
+            Ok(raw) => (
+                None,
+                "the process ended with a raised value that is not an error".to_owned(),
+                Some(raw),
+            ),
+            Err(message) => (None, message, None),
+        },
     };
     let cause = match (error_kind.as_deref(), raw.as_ref()) {
         (Some("entry_type_mismatch" | "function_argument"), Some(raw)) => {
@@ -1444,6 +1480,7 @@ mod tests {
                 data: lash_kernel_doc::diagnostic_datum(&source).expect("diagnostic data"),
             })),
             None,
+            lash_vm_broker::kernel::JsonModel::Kernel,
         );
         let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = outcome
         else {

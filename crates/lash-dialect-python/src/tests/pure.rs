@@ -236,11 +236,26 @@ loads = json.loads
 print(loads('{"n":123456789012345678901234567890,"a":[true,null]}'))
 print(json.dumps({'é': [1, True, None]}, ensure_ascii=True))
 print(json.dumps({'b': 2, 'a': 1}, sort_keys=True, separators=(',', ':')))
+print(json.dumps([(), None, (1,)]))
+print(json.dumps({'a': b'x'}, default=lambda value: None))
+print(json.dumps({'1': 'text', 1: 'number'}))
+print(json.dumps([float('nan'), float('inf')]))
+print(json.dumps({'a': [None]}, indent=2))
+try:
+    json.dumps({'a': b'x'})
+except TypeError as error:
+    print(str(error))
 "#,
         &[
             "{'n': 123456789012345678901234567890, 'a': [True, None]}",
             r#"{"\u00e9": [1, true, null]}"#,
             r#"{"a":1,"b":2}"#,
+            "[[], null, [1]]",
+            r#"{"a": null}"#,
+            r#"{"1": "text", "1": "number"}"#,
+            "[NaN, Infinity]",
+            "{\n  \"a\": [\n    null\n  ]\n}",
+            "json.dumps $.a: bytes has no JSON representation",
         ],
     );
 }

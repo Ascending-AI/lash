@@ -347,9 +347,31 @@ pub(crate) fn cases() -> Vec<Case> {
                     i(2),
                     Datum::Bool(true),
                     Datum::Tuple(vec![t("reserved"), t("other"), t("private")]),
+                    Datum::Absent,
+                    Datum::Bool(false),
+                    Datum::Bool(false),
                 ]),
             ],
             Ok(t(r#"["\u00e9\ud83d\ude00\u007f", -0.0, 1e-05, 123]"#)),
+        ),
+        (
+            "K-LJSON-011",
+            "json.boundary".to_owned(),
+            vec![
+                Datum::Record(vec![
+                    ("missing".into(), Datum::Absent),
+                    ("keep".into(), Datum::Null),
+                    (
+                        "items".into(),
+                        Datum::List(vec![Datum::Absent, Datum::Tuple(vec![])]),
+                    ),
+                ]),
+                t("text"),
+                t("console.log"),
+                t("$[0]"),
+                t(""),
+            ],
+            Ok(t(r#"{"keep":null,"items":[null,null]}"#)),
         ),
         (
             "K-LJSON-010",

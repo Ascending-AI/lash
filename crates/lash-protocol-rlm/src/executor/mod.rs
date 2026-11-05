@@ -200,6 +200,7 @@ pub(crate) async fn execute_cell(
             prepare_cell_outputs(
                 &seal_ctx,
                 cell,
+                lash_kernel_lib::JsonModel::for_dialect(state.dialect()),
                 &services.code_renderer,
                 values,
                 &mut response,
@@ -619,6 +620,7 @@ async fn run_linked_cell(
         }
     }
     let cell_reads = Arc::new(reads::CellReads {
+        json_model: lash_kernel_lib::JsonModel::for_dialect(&envelope.dialect),
         clock: Arc::clone(lash_core::facade_support::execution_actor(&ctx).clock()),
         routes,
         history: ctx.read_history(),
@@ -981,7 +983,10 @@ async fn run_linked_cell(
     };
     // The rest answers the cell from what the run left; the execution's
     // terminal fact follows its answer.
-    let printed = host.ledgers().printed_images(&prints.lock_recover());
+    let printed = host.ledgers().printed_images(
+        &prints.lock_recover(),
+        lash_kernel_lib::JsonModel::for_dialect(&host.envelope.dialect),
+    );
     let library_bound = match &run {
         Ok(KernelEnd::Ended {
             end: End::Error(lash_kernel_vm::RunError::Bound(exceeded)),
@@ -1121,7 +1126,10 @@ async fn run_linked_cell(
                 lash_core::CellFailureKind::Program,
                 format!(
                     "the program failed: {}",
-                    crate::feedback::datum_text(&reason)
+                    crate::feedback::datum_text(
+                        &reason,
+                        lash_kernel_lib::JsonModel::for_dialect(&host.envelope.dialect)
+                    )
                 ),
             ),
             End::Error(error) => {

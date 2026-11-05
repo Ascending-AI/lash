@@ -29,12 +29,12 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_HASOWNPROPERTY_PLAN,
     &TS_STRING_MATCH_PLAN,
     &TS_EXOTIC_TO_PRIMITIVE_PLAN,
+    &TS_BOUNDARY_PLAN,
     &TS_ARRAY_GENERIC_JOIN_PLAN,
     &TS_MATH_ASIN_PLAN,
     &TS_SET_PLAN,
     &TS_OBJECT_SETPROTOTYPEOF_PLAN,
     &TS_ASSIGN_PLAN,
-    &TS_CONSOLE_JSON_PLAN,
     &TS_NUMBER_LAYOUT_PLAN,
     &TS_NUMBER_ISSAFEINTEGER_PLAN,
     &TS_MEMBER_SETSECONDS_PLAN,
@@ -47,7 +47,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MAP_VALUE_PLAN,
     &TS_MEMBER_GETPROTOTYPEOF_PLAN,
     &TS_MATH_LOG10E_PLAN,
-    &TS_MEMBER_INFO_PLAN,
     &TS_STRING_SPLIT_PLAN,
     &TS_STRING_APPLY_ARGUMENTS_PLAN,
     &TS_MEMBER_ISFINITE_PLAN,
@@ -56,11 +55,10 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_DELETE_PLAN,
     &TS_DATE_GETSECONDS_PLAN,
     &TS_MEMBER_ABORTCONTROLLER_PLAN,
+    &TS_GET_COMPUTED_PLAN,
     &TS_STRICT_EQUALS_PLAN,
-    &TS_BUILTIN_CALL_PLAN,
     &TS_MEMBER_FINDLAST_PLAN,
     &TS_DATE_TOSTRING_PLAN,
-    &TS_JSON_STRINGIFY_GENERIC_PLAN,
     &TS_MEMBER_EPSILON_PLAN,
     &TS_NUMBER_CONVERT_VALUE_PLAN,
     &TS_ARRAY_VALUES_PLAN,
@@ -74,14 +72,12 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_SEARCH_PLAN,
     &TS_URI_DECODEURI_PLAN,
     &TS_PROMISE_IS_PLAN,
-    &TS_MEMBER_WARN_PLAN,
     &TS_MEMBER_IGNORECASE_PLAN,
     &TS_MEMBER_TOPRECISION_PLAN,
     &TS_MEMBER_ENCODEURICOMPONENT_PLAN,
     &TS_MEMBER_TOSPLICED_PLAN,
     &TS_MEMBER_IS_PLAN,
     &TS_MEMBER_REVERSE_PLAN,
-    &TS_BOUNDARY_PLAN,
     &TS_MEMBER_ANY_PLAN,
     &TS_SET_VALUES_PLAN,
     &TS_SHL_PLAN,
@@ -90,6 +86,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_EVALERROR_PLAN,
     &TS_DATE_GETMILLISECONDS_PLAN,
     &TS_DATE_SETUTCMONTH_PLAN,
+    &TS_CONSOLE_DEBUG_PLAN,
     &TS_URI_ENCODE_PLAN,
     &TS_MEMBER_GETTIMEZONEOFFSET_PLAN,
     &TS_MEMBER_NOW_PLAN,
@@ -113,6 +110,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_SPLIT_PLAN,
     &TS_PROPERTY_LENGTH_PLAN,
     &TS_MATH_SINH_PLAN,
+    &TS_REFLECT_GETOWNPROPERTYSYMBOLS_PLAN,
     &TS_MEMBER_FILTER_PLAN,
     &TS_SET_CLOSE_KEYS_PLAN,
     &TS_MEMBER_FLATMAP_PLAN,
@@ -131,6 +129,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_SET_ISSUPERSETOF_PLAN,
     &TS_MEMBER_TODATESTRING_PLAN,
     &TS_OBJECT_ISEXTENSIBLE_PLAN,
+    &TS_REFLECT_GETOWNPROPERTYNAMES_PLAN,
     &TS_MEMBER_NEGATIVE_INFINITY_PLAN,
     &TS_STRING_LASTINDEXOF_PLAN,
     &TS_MEMBER_PROPERTYISENUMERABLE_PLAN,
@@ -140,6 +139,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_CBRT_PLAN,
     &TS_OBJECT_GETOWNPROPERTYDESCRIPTOR_PLAN,
     &TS_MEMBER_MATCH_PLAN,
+    &TS_COPY_BOUNDARY_PLAN,
     &TS_MEMBER_ABORTED_PLAN,
     &TS_GE_PLAN,
     &TS_RECEIVER_PLAN,
@@ -158,6 +158,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_TOLOCALEDATESTRING_PLAN,
     &TS_ERROR_IS_AGGREGATEERROR_PLAN,
     &TS_MEMBER_SETHOURS_PLAN,
+    &TS_MEMBER_DEBUG_PLAN,
     &TS_SET_CONTAINS_OTHER_PLAN,
     &TS_MEMBER_CONSOLE_PLAN,
     &TS_STRING_CONCAT_PLAN,
@@ -199,6 +200,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_NUMBER_PLAN,
     &TS_MEMBER_TOJSON_PLAN,
     &TS_MEMBER_SETUTCHOURS_PLAN,
+    &TS_MEMBER_GET_PLAN,
     &TS_NUMBER_TOLOCALESTRING_PLAN,
     &TS_DATE_TOTIMESTRING_PLAN,
     &TS_STRING_NORMALIZE_PLAN,
@@ -215,6 +217,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_PADSTART_PLAN,
     &TS_OBJECT_TOSTRING_PLAN,
     &TS_NUMBER_MAX_VALUE_PLAN,
+    &TS_MEMBER_GETOWNPROPERTYDESCRIPTORS_PLAN,
     &TS_URL_SEARCH_PARAMS_APPEND_PLAN,
     &TS_MEMBER_TOFIXED_PLAN,
     &TS_DATE_GETFULLYEAR_PLAN,
@@ -230,11 +233,12 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_IMUL_PLAN,
     &TS_MEMBER_CEIL_PLAN,
     &TS_FOR_OF_OPEN_PLAN,
+    &TS_MEMBER_GETOWNPROPERTYNAMES_PLAN,
     &TS_URL_SEARCH_PARAMS_SET_PLAN,
     &TS_MATH_CBRT_PLAN,
     &TS_STRICT_NOT_EQUALS_PLAN,
     &TS_MEMBER_ERROR_PLAN,
-    &TS_METADATA_READER_PLAN,
+    &TS_MEMBER_LOG_PLAN,
     &TS_MEMBER_ARRAY_PLAN,
     &TS_ABORT_ABORTED_PLAN,
     &TS_URL_SEARCH_PARAMS_FOREACH_PLAN,
@@ -258,7 +262,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_JSON_PLAIN_PLAN,
     &TS_MEMBER_GETDAY_PLAN,
     &TS_MEMBER_TRUNC_PLAN,
-    &TS_MEMBER_STRINGIFY_PLAN,
+    &TS_MEMBER_GETOWNPROPERTYSYMBOLS_PLAN,
     &TS_STRING_RELATIVE_PLAN,
     &TS_MEMBER_AGGREGATEERROR_PLAN,
     &TS_NUMBER_NEGATIVE_INFINITY_PLAN,
@@ -279,6 +283,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_TRUNC_PLAN,
     &TS_DELETE_PLAN,
     &TS_MEMBER_SORT_PLAN,
+    &TS_CONSOLE_ERROR_PLAN,
     &TS_OBJECT_DEFINEPROPERTY_PLAN,
     &TS_MEMBER_SUBSTRING_PLAN,
     &TS_MEMBER_JOIN_PLAN,
@@ -296,6 +301,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_GETUTCMINUTES_PLAN,
     &TS_STRING_AT_PLAN,
     &TS_MEMBER_COSH_PLAN,
+    &TS_METADATA_READER_PLAN,
     &TS_DATE_GETUTCMINUTES_PLAN,
     &TS_ERROR_IS_ERROR_PLAN,
     &TS_STRING_TRIM_VALUE_PLAN,
@@ -307,7 +313,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_ATANH_PLAN,
     &TS_DATE_SETTIME_PLAN,
     &TS_DATE_UTC_PLAN,
-    &TS_MEMBER_GETOWNPROPERTYDESCRIPTORS_PLAN,
     &TS_URL_SEARCH_PARAMS_ENTRIES_PLAN,
     &TS_MEMBER_SETMILLISECONDS_PLAN,
     &TS_MEMBER_TOTIMESTRING_PLAN,
@@ -327,15 +332,18 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_NUMBER_GLOBAL_ISNAN_PLAN,
     &TS_ARRAY_INCLUDES_PLAN,
     &TS_MEMBER_ABORT_PLAN,
-    &TS_JSON_STRINGIFY_PLAN,
     &TS_MAP_CALL_PLAN,
+    &TS_MEMBER_GETOWNPROPERTYDESCRIPTOR_PLAN,
     &TS_STRING_LENGTH_VALUE_PLAN,
     &TS_MATH_ATAN_PLAN,
     &TS_URL_SEARCH_PARAMS_GET_PLAN,
     &TS_MEMBER_STICKY_PLAN,
+    &TS_BUILTIN_CALL_PLAN,
     &TS_STRING_TOLOCALEUPPERCASE_PLAN,
+    &TS_REFLECT_GET_PLAN,
     &TS_ARRAY_SLICE_GENERIC_PLAN,
     &TS_NUMBER_TOPRECISION_PLAN,
+    &TS_REFLECT_OWNKEYS_PLAN,
     &TS_ARRAY_SPLICE_PLAN,
     &TS_ARRAY_ITERATOR_PLAN,
     &TS_ARRAY_LENGTH_PLAN,
@@ -356,7 +364,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_MIN_PLAN,
     &TS_BIGINT_VALUEOF_PLAN,
     &TS_STRING_SUBSTRING_GENERIC_PLAN,
-    &TS_TEXT_INDEX_PLAN,
     &TS_DATE_SETMINUTES_PLAN,
     &TS_DATE_SETMONTH_PLAN,
     &TS_ABORT_IS_CONTROLLER_PLAN,
@@ -383,7 +390,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_OBJECT_CREATE_PLAN,
     &TS_MEMBER_GETALL_PLAN,
     &TS_MEMBER_SIZE_PLAN,
-    &TS_GET_COMPUTED_PLAN,
     &TS_REGEXP_ESCAPED_SOURCE_PLAN,
     &TS_MEMBER_BOOLEAN_PLAN,
     &TS_ARRAY_TOSTRING_PLAN,
@@ -400,7 +406,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_KEYS_PLAN,
     &TS_MEMBER_SETFULLYEAR_PLAN,
     &TS_BIT_XOR_PLAN,
-    &TS_MEMBER_GETOWNPROPERTYSYMBOLS_PLAN,
     &TS_MEMBER_CHARCODEAT_PLAN,
     &TS_URL_SEARCH_PARAMS_HAS_PLAN,
     &TS_MEMBER_MAP_2_PLAN,
@@ -412,7 +417,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_SUBSTRING_PLAN,
     &TS_ARRAY_SEARCH_PLAN,
     &TS_MEMBER_LASTINDEXOF_PLAN,
-    &TS_REFLECT_GETOWNPROPERTYDESCRIPTOR_PLAN,
     &TS_GET_PLAN,
     &TS_ABORT_RUN_PLAN,
     &TS_SET_DELETE_PLAN,
@@ -423,6 +427,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_SOURCE_PLAN,
     &TS_NOTHING_PLAN,
     &TS_MEMBER_FINDLASTINDEX_PLAN,
+    &TS_CONSOLE_JSON_PLAN,
     &TS_MEMBER_DOTALL_PLAN,
     &TS_JSON_PARSE_PLAN,
     &TS_MEMBER_DECODEURI_PLAN,
@@ -438,7 +443,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_ENCODEURI_PLAN,
     &TS_MEMBER_SETDATE_PLAN,
     &TS_MEMBER_SETTIME_PLAN,
-    &TS_REFLECT_GETOWNPROPERTYNAMES_PLAN,
     &TS_MEMBER_GLOBALTHIS_PLAN,
     &TS_BIT_AND_PLAN,
     &TS_DATE_SETUTCMILLISECONDS_PLAN,
@@ -453,8 +457,10 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_MAX_VALUE_PLAN,
     &TS_STRING_TOLOWERCASE_PLAN,
     &TS_MATH_EXP_PLAN,
+    &TS_REFLECT_GETOWNPROPERTYDESCRIPTOR_PLAN,
     &TS_REGEXP_TEST_PLAN,
     &TS_REGEXP_NATIVE_REPLACE_PLAN,
+    &TS_REFLECT_HAS_PLAN,
     &TS_MEMBER_SETUTCMILLISECONDS_PLAN,
     &TS_MEMBER_TOEXPONENTIAL_PLAN,
     &TS_STRING_CREATE_PLAN,
@@ -475,12 +481,12 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_MAP_PLAN,
     &TS_NUMBER_ISINTEGER_PLAN,
     &TS_MEMBER_DECODEURICOMPONENT_PLAN,
-    &TS_MEMBER_OWNKEYS_PLAN,
     &TS_MATH_HYPOT_PLAN,
     &TS_MEMBER_GETUTCHOURS_PLAN,
     &TS_PROPERTY_SIZE_PLAN,
     &TS_BIT_OR_PLAN,
     &TS_STRING_REPLACE_VALUE_PLAN,
+    &TS_MEMBER_ERROR_2_PLAN,
     &TS_MEMBER_NAME_PLAN,
     &TS_DATE_GETUTCMILLISECONDS_PLAN,
     &TS_USHR_PLAN,
@@ -512,7 +518,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MAP_HAS_PLAN,
     &TS_MEMBER_SOME_PLAN,
     &TS_REGEXP_CALL_PLAN,
-    &TS_MEMBER_GETOWNPROPERTYDESCRIPTOR_PLAN,
     &TS_DATE_GETTIME_PLAN,
     &TS_MEMBER_HYPOT_PLAN,
     &TS_PROPERTY_SOURCE_PLAN,
@@ -521,15 +526,15 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_CONSTRUCT_PLAN,
     &TS_MEMBER_LOCALECOMPARE_PLAN,
     &TS_URI_DECODE_PLAN,
-    &TS_REFLECT_HAS_PLAN,
+    &TS_MEMBER_INFO_PLAN,
     &TS_DATE_SETFULLYEAR_PLAN,
+    &TS_MEMBER_STRINGIFY_PLAN,
     &TS_MEMBER_ENDSWITH_PLAN,
     &TS_ABORT_NORMALIZE_PLAN,
     &TS_MAP_VALUES_PLAN,
     &TS_MEMBER_ATAN2_PLAN,
     &TS_REGEXP_NATIVE_MATCH_ALL_PLAN,
     &TS_MEMBER_ADD_PLAN,
-    &TS_MEMBER_HAS_PLAN,
     &TS_MEMBER_E_PLAN,
     &TS_REGEXP_FLAGS_PLAN,
     &TS_DATE_REQUIRE_PLAN,
@@ -555,12 +560,11 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ABORT_SIGNAL_PLAN,
     &TS_MEMBER_ISEXTENSIBLE_PLAN,
     &TS_MEMBER_DATE_PLAN,
+    &TS_JSON_STRINGIFY_PLAN,
     &TS_MEMBER_TOISOSTRING_PLAN,
-    &TS_MEMBER_GETOWNPROPERTYNAMES_PLAN,
     &TS_ARRAY_MATCH_LENGTH_PLAN,
     &TS_MEMBER_REDUCE_PLAN,
     &TS_MEMBER_SETUTCSECONDS_PLAN,
-    &TS_ENTRY_RESULT_PLAN,
     &TS_OBJECT_ISSEALED_PLAN,
     &TS_BIGINT_PARSE_PLAN,
     &TS_MEMBER_AT_PLAN,
@@ -579,21 +583,19 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_SUBSTITUTE_PLAN,
     &TS_MAP_CLEAR_PLAN,
     &TS_ARRAY_FILL_PLAN,
-    &TS_REFLECT_GET_PLAN,
     &TS_MEMBER_GETMILLISECONDS_PLAN,
     &TS_ERROR_NEW_AGGREGATEERROR_PLAN,
     &TS_FUNCTION_TOSTRING_PLAN,
     &TS_ARRAY_IS_PLAN,
     &TS_MAP_DELETE_PLAN,
+    &TS_MEMBER_HAS_PLAN,
     &TS_PROMISE_RUN_PLAN,
-    &TS_MEMBER_LOG_PLAN,
     &TS_LT_PLAN,
     &TS_ARRAY_IS_ARRAY_PLAN,
     &TS_REGEXP_REQUIRE_PLAN,
     &TS_SET_CLEAR_PLAN,
     &TS_MEMBER_POP_PLAN,
     &TS_BIGINT_INPUT_PLAN,
-    &TS_COPY_BOUNDARY_PLAN,
     &TS_IS_NULLISH_PLAN,
     &TS_NUMBER_RECEIVER_PLAN,
     &TS_FUNCTION_APPLY_PLAN,
@@ -625,7 +627,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_GETTIME_PLAN,
     &TS_ARRAY_KEYS_PLAN,
     &TS_STRING_REPLACE_PLAN,
-    &TS_REFLECT_GETOWNPROPERTYSYMBOLS_PLAN,
     &TS_NUMBER_CHECKED_PLAN,
     &TS_HAS_PLAN,
     &TS_MEMBER_ACOS_PLAN,
@@ -639,14 +640,17 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_UNSHIFT_PLAN,
     &TS_DATE_GETUTCHOURS_PLAN,
     &TS_MEMBER_FILL_PLAN,
+    &TS_CONSOLE_INFO_PLAN,
     &TS_MATH_EXPM1_PLAN,
     &TS_MEMBER_TAN_PLAN,
     &TS_MEMBER_CHARAT_PLAN,
     &TS_MEMBER_INDEXOF_PLAN,
     &TS_TYPEOF_PLAN,
+    &TS_JSON_STRINGIFY_GENERIC_PLAN,
     &TS_MEMBER_URIERROR_PLAN,
     &TS_MEMBER_UNICODE_PLAN,
     &TS_BIGINT_BITS_PLAN,
+    &TS_TEXT_INDEX_PLAN,
     &TS_MEMBER_PREVENTEXTENSIONS_PLAN,
     &TS_SHIFT_COUNT_PLAN,
     &TS_REGEXP_MULTILINE_PLAN,
@@ -665,7 +669,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_TEST_PLAN,
     &TS_DATE_SETMILLISECONDS_PLAN,
     &TS_DATE_TOLOCALETIMESTRING_PLAN,
-    &TS_REFLECT_OWNKEYS_PLAN,
     &TS_REGEXP_NATIVE_EXEC_PLAN,
     &TS_PRIMITIVE_TO_STRING_PLAN,
     &TS_BIT_NOT_PLAN,
@@ -678,11 +681,11 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_COPYWITHIN_PLAN,
     &TS_BUILTIN_NAME_PLAN,
     &TS_REGEXP_MATCH_RECORD_PLAN,
+    &TS_REFLECT_GETOWNPROPERTYDESCRIPTORS_PLAN,
     &TS_MEMBER_FROMCODEPOINT_PLAN,
     &TS_MEMBER_NAN_PLAN,
     &TS_ARRAY_INDEXOF_PLAN,
     &TS_MEMBER_FINDINDEX_PLAN,
-    &TS_REFLECT_GETOWNPROPERTYDESCRIPTORS_PLAN,
     &TS_ITERATE_PLAN,
     &TS_MEMBER_REJECT_PLAN,
     &TS_MEMBER_TOSORTED_PLAN,
@@ -693,7 +696,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_PROMISE_CALLABLE_PLAN,
     &TS_MEMBER_ALLSETTLED_PLAN,
     &TS_EXOTIC_ERROR_NAME_PLAN,
-    &TS_MEMBER_DEBUG_PLAN,
     &TS_MEMBER_TOLOCALETIMESTRING_PLAN,
     &TS_SET_SYMMETRICDIFFERENCE_PLAN,
     &TS_STRING_PADSTART_PLAN,
@@ -717,6 +719,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_HOLE_VALUE_PLAN,
     &TS_PROMISE_CATCH_PLAN,
     &TS_MEMBER_PROMISE_PLAN,
+    &TS_MEMBER_WARN_PLAN,
     &TS_ARRAY_SHIFT_PLAN,
     &TS_MEMBER_RESOLVE_PLAN,
     &TS_NUMBER_MIN_SAFE_INTEGER_PLAN,
@@ -725,7 +728,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_PROPERTY_MULTILINE_PLAN,
     &TS_MEMBER_CLZ32_PLAN,
     &TS_MEMBER_TRIM_PLAN,
-    &TS_MEMBER_GET_PLAN,
     &TS_PROPERTY_ABORTED_PLAN,
     &TS_STRING_TOSTRING_PLAN,
     &TS_REGEXP_DOTALL_PLAN,
@@ -746,8 +748,10 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_FUNCTION_FROM_TEXT_PLAN,
     &TS_ARRAY_SEARCHABLE_PLAN,
     &TS_OBJECT_PREVENTEXTENSIONS_PLAN,
+    &TS_CONSOLE_LOG_PLAN,
     &TS_BOOLEAN_CONVERT_PLAN,
     &TS_DATE_PARTS_PLAN,
+    &TS_REFLECT_DESCRIPTOR_PLAN,
     &TS_ARRAY_FLATTEN_PLAN,
     &TS_MATH_ACOS_PLAN,
     &TS_MATH_COS_PLAN,
@@ -757,7 +761,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_GET_NUMERIC_PLAN,
     &TS_MEMBER_FROMENTRIES_PLAN,
     &TS_MEMBER_ASSIGN_PLAN,
-    &TS_MEMBER_ERROR_2_PLAN,
     &TS_STRING_TRIM_PLAN,
     &TS_PROPERTY_SIGNAL_PLAN,
     &TS_STRING_INDEXOF_GENERIC_PLAN,
@@ -769,6 +772,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_ASINH_PLAN,
     &TS_STRING_CODEPOINTAT_PLAN,
     &TS_ARRAY_GENERIC_INDEXOF_PLAN,
+    &TS_CONSOLE_WARN_PLAN,
     &TS_STRING_ENDSWITH_GENERIC_PLAN,
     &TS_ARRAY_TOSPLICED_PLAN,
     &TS_NUMBER_PARSE_PLAN,
@@ -786,7 +790,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MATH_ASINH_PLAN,
     &TS_MEMBER_PADEND_PLAN,
     &TS_MEMBER_CANPARSE_PLAN,
-    &TS_REFLECT_DESCRIPTOR_PLAN,
     &TS_POW_PLAN,
     &TS_DATE_FROM_PARTS_PLAN,
     &TS_STRING_UINT32_PLAN,
@@ -824,6 +827,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_LOOSE_EQUALS_PLAN,
     &TS_MEMBER_GETHOURS_PLAN,
     &TS_OBJECT_IS_INSTANCE_PLAN,
+    &TS_ENTRY_RESULT_PLAN,
     &TS_MATH_SIGN_PLAN,
     &TS_ERROR_CONSTRUCT_PLAN,
     &TS_DATE_SETUTCDATE_PLAN,
@@ -833,6 +837,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_DATE_GETMONTH_PLAN,
     &TS_MEMBER_GETFULLYEAR_PLAN,
     &TS_DATE_GETDAY_PLAN,
+    &TS_MEMBER_OWNKEYS_PLAN,
     &TS_NUMBER_NAN_PLAN,
     &TS_TO_BOOLEAN_PLAN,
     &TS_MAP_GROUPBY_PLAN,
@@ -14906,7 +14911,7 @@ fn ts_object_rest(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_COPY_BOUNDARY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.copy_boundary",
-    function: p::function("a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586"),
+    function: p::function("1d89552a2680712dac8731025fad78f474c9f08a3e2ca915fc8ef4557e31dabc"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -14925,53 +14930,45 @@ const TS_COPY_BOUNDARY_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("694bd4bf8994d12f0a599c280a59e08a3ade8bdbc5d60f3f647155bafd75c926"),
     ],
     literals: &[
-        p::PlanLiteral::Text("record"),
-        p::PlanLiteral::Text("typescript"),
-        p::PlanLiteral::Text("template"),
         p::PlanLiteral::Text("tuple"),
-        p::PlanLiteral::Text("integer"),
         p::PlanLiteral::Text("set"),
-        p::PlanLiteral::Text("absent"),
         p::PlanLiteral::Text("list"),
+        p::PlanLiteral::Text("record"),
         p::PlanLiteral::Text("map"),
         p::PlanLiteral::Int("0"),
         p::PlanLiteral::Int("1"),
         p::PlanLiteral::Bool(true),
-        p::PlanLiteral::Null,
-        p::PlanLiteral::Absent,
     ],
-    fields: &["__lash_brand", "items", ],
+    fields: &[],
     records: &[],
-    registers: 4,
+    registers: 3,
     slots: &[
         p::PlanLocal { name: "value", path: &[] },
         p::PlanLocal { name: "forward", path: &[] },
-        p::PlanLocal { name: "convert", path: &[1] },
-        p::PlanLocal { name: "k", path: &[2] },
-        p::PlanLocal { name: "converted", path: &[3, 1, 0] },
-        p::PlanLocal { name: "converted", path: &[4, 1, 0] },
-        p::PlanLocal { name: "copied", path: &[7] },
-        p::PlanLocal { name: "pending", path: &[9] },
-        p::PlanLocal { name: "visited", path: &[10] },
-        p::PlanLocal { name: "last", path: &[11, 1, 0] },
-        p::PlanLocal { name: "item", path: &[11, 1, 1] },
-        p::PlanLocal { name: "identity", path: &[11, 1, 3] },
-        p::PlanLocal { name: "keys", path: &[11, 1, 6] },
-        p::PlanLocal { name: "index", path: &[11, 1, 7, 1, 0] },
+        p::PlanLocal { name: "convert", path: &[0] },
+        p::PlanLocal { name: "k", path: &[1] },
+        p::PlanLocal { name: "copied", path: &[5] },
+        p::PlanLocal { name: "pending", path: &[7] },
+        p::PlanLocal { name: "visited", path: &[8] },
+        p::PlanLocal { name: "last", path: &[9, 1, 0] },
+        p::PlanLocal { name: "item", path: &[9, 1, 1] },
+        p::PlanLocal { name: "identity", path: &[9, 1, 3] },
+        p::PlanLocal { name: "keys", path: &[9, 1, 6] },
+        p::PlanLocal { name: "index", path: &[9, 1, 7, 1, 0] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "key", path: &[11, 1, 8, 1] },
-        p::PlanLocal { name: "child", path: &[11, 1, 8, 1, 0] },
-        p::PlanLocal { name: "converted", path: &[11, 1, 8, 1, 2] },
-        p::PlanLocal { name: "ck", path: &[11, 1, 8, 1, 4] },
+        p::PlanLocal { name: "key", path: &[9, 1, 8, 1] },
+        p::PlanLocal { name: "child", path: &[9, 1, 8, 1, 0] },
+        p::PlanLocal { name: "converted", path: &[9, 1, 8, 1, 1] },
+        p::PlanLocal { name: "ck", path: &[9, 1, 8, 1, 3] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "container", path: &[11, 1, 8, 1, 5, 1] },
+        p::PlanLocal { name: "container", path: &[9, 1, 8, 1, 4, 1] },
     ],
     closures: &[
-        &[1, 0],
+        &[0, 0],
     ],
     sites: &[
         p::PlanSite {
-            path: &[3, 1, 0, 0],
+            path: &[2, 1, 0, 0],
             call: p::SiteCall::Apply,
             dst: 0,
             roles: &[],
@@ -14979,20 +14976,12 @@ const TS_COPY_BOUNDARY_PLAN: p::HelperPlan = p::HelperPlan {
             loops: &[],
         },
         p::PlanSite {
-            path: &[4, 1, 0, 0],
+            path: &[9, 1, 8, 1, 1, 0],
             call: p::SiteCall::Apply,
             dst: 0,
             roles: &[],
-            bound: &[0, 1, 2, 3],
-            loops: &[],
-        },
-        p::PlanSite {
-            path: &[11, 1, 8, 1, 2, 0],
-            call: p::SiteCall::Apply,
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 15, 16],
-            loops: &[p::PlanLoop::While, p::PlanLoop::For { walked: 14 }],
+            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14],
+            loops: &[p::PlanLoop::While, p::PlanLoop::For { walked: 12 }],
         },
     ],
     run: ts_copy_boundary,
@@ -15004,28 +14993,6 @@ fn ts_copy_boundary(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     let mut r = entry;
     if r == 0 { ctx.adopt(0, 0)?; }
     if r == 0 { ctx.adopt(1, 1)?; }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(0, 0, 1)?;
-        ctx.literal(0, 1)?;
-        ctx.call(1, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(0, 0)?;
-            ctx.field(0, 0)?;
-            ctx.literal(1, 1)?;
-            ctx.literal(2, 2)?;
-            ctx.tuple(1, 2)?;
-            ctx.call(1, 0, 2)?;
-            if ctx.test(0, p::Test::If)? {
-                ctx.begin()?;
-                ctx.local(0, 0)?;
-                ctx.field(0, 1)?;
-                ctx.assign(0, 0)?;
-            }
-        }
-    }
     if r == 0 {
         ctx.begin()?;
         ctx.closure(0, 0)?;
@@ -15041,7 +15008,7 @@ fn ts_copy_boundary(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
         if r == 0 { ctx.begin()?; }
         if r == 0 {
             ctx.local(3, 0)?;
-            ctx.literal(3, 1)?;
+            ctx.literal(0, 1)?;
             ctx.call(1, 0, 2)?;
         }
         let t0 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 1) };
@@ -15049,44 +15016,18 @@ fn ts_copy_boundary(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
             if r == 0 || matches!(r, 1) {
                 if r == 0 { ctx.begin()?; }
                 if r == 0 { ctx.local(2, 0)?; }
-                if r == 0 { ctx.local(0, 1)?; }
+                if r == 0 {
+                    ctx.local(0, 1)?;
+                }
                 if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 1)?; }
-                if r == 0 { ctx.bind(4, 0)?; }
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(4, 0)?;
-                return Ok(ctx.take(0));
-            }
-        }
-    }
-    if r == 0 || matches!(r, 2) {
-        if r == 0 { ctx.begin()?; }
-        if r == 0 {
-            ctx.local(3, 0)?;
-            ctx.literal(4, 1)?;
-            ctx.call(1, 0, 2)?;
-        }
-        let t1 = if r == 0 { ctx.test(0, p::Test::If)? } else { matches!(r, 2) };
-        if t1 {
-            if r == 0 || matches!(r, 2) {
-                if r == 0 { ctx.begin()?; }
-                if r == 0 { ctx.local(2, 0)?; }
-                if r == 0 { ctx.local(0, 1)?; }
-                if r == 2 { r = 0; } else if r == 0 { ctx.apply(1, 0, 1)?; }
-                if r == 0 { ctx.bind(5, 0)?; }
-            }
-            if r == 0 {
-                ctx.begin()?;
-                ctx.local(5, 0)?;
-                return Ok(ctx.take(0));
+                if r == 0 { return Ok(ctx.take(0)); }
             }
         }
     }
     if r == 0 {
         ctx.begin()?;
         ctx.local(3, 0)?;
-        ctx.literal(5, 1)?;
+        ctx.literal(1, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
@@ -15098,10 +15039,8 @@ fn ts_copy_boundary(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(6, 1)?;
-        ctx.literal(3, 2)?;
-        ctx.literal(4, 3)?;
-        ctx.set(1, 3)?;
+        ctx.literal(0, 1)?;
+        ctx.set(1, 1)?;
         ctx.call(3, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
@@ -15112,38 +15051,38 @@ fn ts_copy_boundary(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     if r == 0 {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.bind(6, 0)?;
+        ctx.bind(4, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
         ctx.local(3, 0)?;
-        ctx.literal(7, 1)?;
+        ctx.literal(2, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
             ctx.call(4, 0, 1)?;
-            ctx.assign(6, 0)?;
+            ctx.assign(4, 0)?;
         } else {
             ctx.begin()?;
             ctx.local(3, 0)?;
-            ctx.literal(0, 1)?;
+            ctx.literal(3, 1)?;
             ctx.call(1, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 ctx.local(0, 0)?;
                 ctx.call(5, 0, 1)?;
-                ctx.assign(6, 0)?;
+                ctx.assign(4, 0)?;
             } else {
                 ctx.begin()?;
                 ctx.local(3, 0)?;
-                ctx.literal(8, 1)?;
+                ctx.literal(4, 1)?;
                 ctx.call(1, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.local(0, 0)?;
                     ctx.call(6, 0, 1)?;
-                    ctx.assign(6, 0)?;
+                    ctx.assign(4, 0)?;
                 } else {
                     ctx.begin()?;
                     ctx.local(0, 0)?;
@@ -15154,259 +15093,225 @@ fn ts_copy_boundary(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(6, 0)?;
+        ctx.local(4, 0)?;
         ctx.list(0, 1)?;
-        ctx.bind(7, 0)?;
+        ctx.bind(5, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
         ctx.set(0, 0)?;
-        ctx.bind(8, 0)?;
+        ctx.bind(6, 0)?;
     }
-    if r == 0 || matches!(r, 3) {
+    if r == 0 || matches!(r, 2) {
         if r == 0 { ctx.begin()?; }
         if r == 0 { ctx.enter_while(); }
         'l0: loop {
-            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 3) { break 'l0; }
+            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 2) { break 'l0; }
             if r == 0 {
-                ctx.literal(9, 0)?;
-                ctx.local(7, 1)?;
+                ctx.literal(5, 0)?;
+                ctx.local(5, 1)?;
                 ctx.call(7, 1, 1)?;
                 ctx.call(8, 0, 2)?;
             }
             if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
             if r == 0 {
                 ctx.begin()?;
-                ctx.local(7, 0)?;
+                ctx.local(5, 0)?;
                 ctx.call(7, 0, 1)?;
-                ctx.literal(10, 1)?;
+                ctx.literal(6, 1)?;
                 ctx.call(9, 0, 2)?;
-                ctx.bind(9, 0)?;
+                ctx.bind(7, 0)?;
             }
             if r == 0 {
                 ctx.begin()?;
-                ctx.local(7, 0)?;
-                ctx.local(9, 1)?;
+                ctx.local(5, 0)?;
+                ctx.local(7, 1)?;
                 ctx.index(0)?;
-                ctx.bind(10, 0)?;
+                ctx.bind(8, 0)?;
             }
             if r == 0 {
                 ctx.begin()?;
-                ctx.local(7, 0)?;
-                ctx.local(9, 1)?;
+                ctx.local(5, 0)?;
+                ctx.local(7, 1)?;
                 ctx.remove_index(0)?;
             }
             if r == 0 {
                 ctx.begin()?;
-                ctx.local(10, 0)?;
+                ctx.local(8, 0)?;
                 ctx.call(10, 0, 1)?;
-                ctx.bind(11, 0)?;
+                ctx.bind(9, 0)?;
             }
             if r == 0 {
                 ctx.begin()?;
-                ctx.local(8, 0)?;
-                ctx.local(11, 1)?;
+                ctx.local(6, 0)?;
+                ctx.local(9, 1)?;
                 ctx.call(11, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
-                    ctx.unbind(11);
-                    ctx.unbind(10);
                     ctx.unbind(9);
+                    ctx.unbind(8);
+                    ctx.unbind(7);
                     continue 'l0;
                 }
             }
             if r == 0 {
                 ctx.begin()?;
-                ctx.literal(11, 0)?;
+                ctx.literal(7, 0)?;
                 ctx.pin(0)?;
-                ctx.local(8, 1)?;
-                ctx.local(11, 2)?;
+                ctx.local(6, 1)?;
+                ctx.local(9, 2)?;
                 ctx.set_index(1, 0)?;
             }
             if r == 0 {
                 ctx.begin()?;
                 ctx.list(0, 0)?;
-                ctx.bind(12, 0)?;
+                ctx.bind(10, 0)?;
             }
             if r == 0 {
                 ctx.begin()?;
-                ctx.local(10, 0)?;
+                ctx.local(8, 0)?;
                 ctx.call(0, 0, 1)?;
-                ctx.literal(7, 1)?;
+                ctx.literal(2, 1)?;
                 ctx.call(1, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
-                    ctx.literal(9, 0)?;
-                    ctx.bind(13, 0)?;
+                    ctx.literal(5, 0)?;
+                    ctx.bind(11, 0)?;
                     ctx.begin()?;
                     'l1: loop {
-                        ctx.local(13, 0)?;
-                        ctx.local(10, 1)?;
+                        ctx.local(11, 0)?;
+                        ctx.local(8, 1)?;
                         ctx.call(7, 1, 1)?;
                         ctx.call(8, 0, 2)?;
                         if !ctx.test(0, p::Test::While)? {
                             break 'l1;
                         }
                         ctx.begin()?;
-                        ctx.local(13, 0)?;
+                        ctx.local(11, 0)?;
                         ctx.pin(0)?;
-                        ctx.local(12, 1)?;
-                        ctx.local(12, 2)?;
+                        ctx.local(10, 1)?;
+                        ctx.local(10, 2)?;
                         ctx.call(7, 2, 1)?;
                         ctx.set_index(1, 0)?;
                         ctx.begin()?;
-                        ctx.local(13, 0)?;
-                        ctx.literal(10, 1)?;
+                        ctx.local(11, 0)?;
+                        ctx.literal(6, 1)?;
                         ctx.call(12, 0, 2)?;
-                        ctx.assign(13, 0)?;
+                        ctx.assign(11, 0)?;
                         ctx.begin()?;
                     }
-                    ctx.unbind(13);
+                    ctx.unbind(11);
                 } else {
                     ctx.begin()?;
-                    ctx.local(10, 0)?;
+                    ctx.local(8, 0)?;
                     ctx.call(0, 0, 1)?;
-                    ctx.literal(0, 1)?;
+                    ctx.literal(3, 1)?;
                     ctx.call(1, 0, 2)?;
                     if ctx.test(0, p::Test::If)? {
                         ctx.begin()?;
-                        ctx.local(10, 0)?;
+                        ctx.local(8, 0)?;
                         ctx.call(13, 0, 1)?;
-                        ctx.assign(12, 0)?;
+                        ctx.assign(10, 0)?;
                     } else {
                         ctx.begin()?;
-                        ctx.local(10, 0)?;
+                        ctx.local(8, 0)?;
                         ctx.call(14, 0, 1)?;
-                        ctx.assign(12, 0)?;
+                        ctx.assign(10, 0)?;
                     }
                 }
             }
-            if r == 0 || matches!(r, 3) {
+            if r == 0 || matches!(r, 2) {
                 if r == 0 { ctx.begin()?; }
                 if r == 0 {
-                    ctx.local(12, 0)?;
+                    ctx.local(10, 0)?;
                 }
-                let c1 = if r == 0 { ctx.open(0, 14)? } else { p::Cursor(0) };
+                let c1 = if r == 0 { ctx.open(0, 12)? } else { p::Cursor(0) };
                 'l1: loop {
-                    if r == 0 { if !ctx.next(c1, 0)? { break 'l1; } ctx.bind(15, 0)?; } else if !matches!(r, 3) { break 'l1; }
+                    if r == 0 { if !ctx.next(c1, 0)? { break 'l1; } ctx.bind(13, 0)?; } else if !matches!(r, 2) { break 'l1; }
                     if r == 0 {
                         ctx.begin()?;
-                        ctx.local(10, 0)?;
-                        ctx.local(15, 1)?;
+                        ctx.local(8, 0)?;
+                        ctx.local(13, 1)?;
                         ctx.index(0)?;
+                        ctx.bind(14, 0)?;
+                    }
+                    if r == 0 || matches!(r, 2) {
+                        if r == 0 { ctx.begin()?; }
+                        if r == 0 { ctx.local(2, 0)?; }
+                        if r == 0 { ctx.local(14, 1)?; }
+                        if r == 2 { r = 0; } else if r == 0 { ctx.apply(1, 0, 1)?; }
+                        if r == 0 { ctx.bind(15, 0)?; }
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(14, 0)?;
+                        ctx.tuple(1, 0)?;
+                        ctx.call(1, 0, 2)?;
+                        if ctx.test(0, p::Test::If)? {
+                        } else {
+                            ctx.begin()?;
+                            ctx.local(15, 0)?;
+                            ctx.pin(0)?;
+                            ctx.local(8, 1)?;
+                            ctx.local(13, 2)?;
+                            ctx.set_index(1, 0)?;
+                        }
+                    }
+                    if r == 0 {
+                        ctx.begin()?;
+                        ctx.local(15, 0)?;
+                        ctx.call(0, 0, 1)?;
                         ctx.bind(16, 0)?;
                     }
                     if r == 0 {
                         ctx.begin()?;
-                        ctx.local(10, 0)?;
-                        ctx.call(0, 0, 1)?;
-                        ctx.literal(7, 1)?;
-                        ctx.call(1, 0, 2)?;
-                        if ctx.test(0, p::Test::If)? {
-                            ctx.begin()?;
-                            ctx.local(16, 0)?;
-                            ctx.tuple(1, 0)?;
-                            ctx.call(1, 0, 2)?;
-                            if ctx.test(0, p::Test::If)? {
-                                ctx.begin()?;
-                                ctx.literal(12, 0)?;
-                                ctx.pin(0)?;
-                                ctx.local(10, 1)?;
-                                ctx.local(15, 2)?;
-                                ctx.set_index(1, 0)?;
-                                ctx.begin()?;
-                                ctx.unbind(16);
-                                ctx.unbind(15);
-                                continue 'l1;
-                            }
-                            ctx.begin()?;
-                            ctx.local(16, 0)?;
-                            ctx.literal(13, 1)?;
-                            ctx.call(1, 0, 2)?;
-                            if ctx.test(0, p::Test::If)? {
-                                ctx.begin()?;
-                                ctx.literal(12, 0)?;
-                                ctx.pin(0)?;
-                                ctx.local(10, 1)?;
-                                ctx.local(15, 2)?;
-                                ctx.set_index(1, 0)?;
-                                ctx.begin()?;
-                                ctx.unbind(16);
-                                ctx.unbind(15);
-                                continue 'l1;
-                            }
-                        }
-                    }
-                    if r == 0 || matches!(r, 3) {
-                        if r == 0 { ctx.begin()?; }
-                        if r == 0 { ctx.local(2, 0)?; }
-                        if r == 0 { ctx.local(16, 1)?; }
-                        if r == 3 { r = 0; } else if r == 0 { ctx.apply(2, 0, 1)?; }
-                        if r == 0 { ctx.bind(17, 0)?; }
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(17, 0)?;
-                        ctx.pin(0)?;
-                        ctx.local(10, 1)?;
-                        ctx.local(15, 2)?;
-                        ctx.set_index(1, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.local(17, 0)?;
-                        ctx.call(0, 0, 1)?;
-                        ctx.bind(18, 0)?;
-                    }
-                    if r == 0 {
-                        ctx.begin()?;
-                        ctx.literal(7, 0)?;
-                        ctx.literal(0, 1)?;
-                        ctx.literal(8, 2)?;
+                        ctx.literal(2, 0)?;
+                        ctx.literal(3, 1)?;
+                        ctx.literal(4, 2)?;
                         ctx.list(0, 3)?;
-                        let c2 = ctx.open(0, 19)?;
+                        let c2 = ctx.open(0, 17)?;
                         'l2: loop {
                             if !ctx.next(c2, 0)? {
                                 break 'l2;
                             }
-                            ctx.bind(20, 0)?;
+                            ctx.bind(18, 0)?;
                             ctx.begin()?;
-                            ctx.local(18, 0)?;
-                            ctx.local(20, 1)?;
+                            ctx.local(16, 0)?;
+                            ctx.local(18, 1)?;
                             ctx.call(1, 0, 2)?;
                             if ctx.test(0, p::Test::If)? {
                                 ctx.begin()?;
-                                ctx.local(17, 0)?;
+                                ctx.local(15, 0)?;
                                 ctx.pin(0)?;
-                                ctx.local(7, 1)?;
-                                ctx.local(7, 2)?;
+                                ctx.local(5, 1)?;
+                                ctx.local(5, 2)?;
                                 ctx.call(7, 2, 1)?;
                                 ctx.set_index(1, 0)?;
                             }
-                            ctx.unbind(20);
+                            ctx.unbind(18);
                             ctx.begin()?;
                         }
                         ctx.close(c2);
                     }
-                    if r == 0 { ctx.unbind(18); }
-                    if r == 0 { ctx.unbind(17); }
                     if r == 0 { ctx.unbind(16); }
                     if r == 0 { ctx.unbind(15); }
+                    if r == 0 { ctx.unbind(14); }
+                    if r == 0 { ctx.unbind(13); }
                     if r == 0 { ctx.begin()?; }
                 }
                 ctx.close(c1);
             }
-            if r == 0 { ctx.unbind(12); }
-            if r == 0 { ctx.unbind(11); }
             if r == 0 { ctx.unbind(10); }
             if r == 0 { ctx.unbind(9); }
+            if r == 0 { ctx.unbind(8); }
+            if r == 0 { ctx.unbind(7); }
             if r == 0 { ctx.begin()?; }
         }
         ctx.leave_while(0);
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.local(6, 0)?;
+        ctx.local(4, 0)?;
         return Ok(ctx.take(0));
     }
     if r != 0 {
@@ -15418,9 +15323,9 @@ fn ts_copy_boundary(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const TS_BOUNDARY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.boundary",
-    function: p::function("0e7a2aed4403bac7c56d76692a78523cdaca5fc2faec503f1cb123485eb3bbd3"),
+    function: p::function("0388a995c807732bf426b7026cd66a52e5d038680427bfd4d834ed7ce631d1dd"),
     callees: &[
-        p::function("a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586"),
+        p::function("1d89552a2680712dac8731025fad78f474c9f08a3e2ca915fc8ef4557e31dabc"),
     ],
     literals: &[
         p::PlanLiteral::Absent,
@@ -15430,7 +15335,6 @@ const TS_BOUNDARY_PLAN: p::HelperPlan = p::HelperPlan {
     registers: 2,
     slots: &[
         p::PlanLocal { name: "value", path: &[] },
-        p::PlanLocal { name: "copied", path: &[0] },
     ],
     closures: &[
     ],
@@ -15445,7 +15349,7 @@ const TS_BOUNDARY_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_boundary,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1d89552a2680712dac8731025fad78f474c9f08a3e2ca915fc8ef4557e31dabc"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `ts.boundary`.
@@ -15454,15 +15358,14 @@ fn ts_boundary(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     if r == 0 { ctx.adopt(0, 0)?; }
     if r == 0 || matches!(r, 1) {
         if r == 0 { ctx.begin()?; }
-        if r == 0 { ctx.local(0, 0)?; }
-        if r == 0 { ctx.literal(0, 1)?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
+        }
+        if r == 0 {
+            ctx.literal(0, 1)?;
+        }
         if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 2)?; }
-        if r == 0 { ctx.bind(1, 0)?; }
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(1, 0)?;
-        return Ok(ctx.take(0));
+        if r == 0 { return Ok(ctx.take(0)); }
     }
     if r != 0 {
         return Err(ctx.lost(r));
@@ -41003,52 +40906,315 @@ fn ts_url_search_params_foreach(ctx: &mut dyn p::PlanContext, entry: u32) -> Res
 
 const TS_CONSOLE_JSON_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.console.json",
-    function: p::function("04a98b4f71bd626710e6e895968a23d8943c9b07cdc349159ea64ae757162a47"),
+    function: p::function("76425cf223ddc56e3b74ff4b4a076a321cc660a23acc2e80d2496bb79663088d"),
     callees: &[
-        p::function("43bc8af86d656401ea403eaf7dd3267d09058ef56b52822085957a3eef755e8a"),
+        p::function("b838e976ab236fba1789df629b718a9f490b3c0ea7241f868f570d6cfcf5ec20"),
     ],
     literals: &[
-        p::PlanLiteral::Text("map"),
-        p::PlanLiteral::Text("tuple"),
-        p::PlanLiteral::Absent,
-        p::PlanLiteral::Int("-5"),
-        p::PlanLiteral::Int("21"),
-        p::PlanLiteral::Bool(true),
-        p::PlanLiteral::Bool(false),
+        p::PlanLiteral::Text("text"),
+        p::PlanLiteral::Text("JSON.stringify"),
+        p::PlanLiteral::Text("$"),
+        p::PlanLiteral::Text(""),
     ],
     fields: &[],
     records: &[],
-    registers: 7,
+    registers: 5,
     slots: &[
         p::PlanLocal { name: "value", path: &[] },
-        p::PlanLocal { name: "verbatim", path: &[0] },
     ],
     closures: &[
     ],
     sites: &[],
     run: ts_console_json,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("b838e976ab236fba1789df629b718a9f490b3c0ea7241f868f570d6cfcf5ec20"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `ts.console.json`.
 fn ts_console_json(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
     ctx.adopt(0, 0)?;
     ctx.begin()?;
-    ctx.literal(0, 0)?;
-    ctx.literal(1, 1)?;
-    ctx.set(0, 2)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.local(1, 1)?;
-    ctx.literal(2, 2)?;
-    ctx.literal(3, 3)?;
-    ctx.literal(4, 4)?;
-    ctx.literal(5, 5)?;
-    ctx.literal(6, 6)?;
-    ctx.tuple(3, 4)?;
-    ctx.call(0, 0, 4)?;
+    ctx.literal(0, 1)?;
+    ctx.literal(1, 2)?;
+    ctx.literal(2, 3)?;
+    ctx.literal(3, 4)?;
+    ctx.call(0, 0, 5)?;
     Ok(ctx.take(0))
+}
+
+const TS_CONSOLE_LOG_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.console.log",
+    function: p::function("d8375f963eb279fc989ca89e0dad99e63b3284ced79708f93b00431b80885b27"),
+    callees: &[
+        p::function("f7521db3b8c31d0f0d831e26200ecdb59035453c601c7a8815dc72e72245c6ce"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("console.log"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: ts_console_log,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f7521db3b8c31d0f0d831e26200ecdb59035453c601c7a8815dc72e72245c6ce"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+};
+
+/// `ts.console.log`.
+fn ts_console_log(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        if r == 0 {
+            ctx.literal(0, 1)?;
+        }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 2)?; }
+        if r == 0 { return Ok(ctx.take(0)); }
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const TS_CONSOLE_WARN_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.console.warn",
+    function: p::function("dfc9f4807a69e2c02c067eb229edbf04b7b69cf305d4039a5b088c19ff170182"),
+    callees: &[
+        p::function("f7521db3b8c31d0f0d831e26200ecdb59035453c601c7a8815dc72e72245c6ce"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("console.warn"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: ts_console_warn,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f7521db3b8c31d0f0d831e26200ecdb59035453c601c7a8815dc72e72245c6ce"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+};
+
+/// `ts.console.warn`.
+fn ts_console_warn(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        if r == 0 {
+            ctx.literal(0, 1)?;
+        }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 2)?; }
+        if r == 0 { return Ok(ctx.take(0)); }
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const TS_CONSOLE_ERROR_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.console.error",
+    function: p::function("47ac23df51743b3202aa8ab85d5abdffa70477572bd03b0897e585cb7e0c35eb"),
+    callees: &[
+        p::function("f7521db3b8c31d0f0d831e26200ecdb59035453c601c7a8815dc72e72245c6ce"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("console.error"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: ts_console_error,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f7521db3b8c31d0f0d831e26200ecdb59035453c601c7a8815dc72e72245c6ce"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+};
+
+/// `ts.console.error`.
+fn ts_console_error(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        if r == 0 {
+            ctx.literal(0, 1)?;
+        }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 2)?; }
+        if r == 0 { return Ok(ctx.take(0)); }
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const TS_CONSOLE_INFO_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.console.info",
+    function: p::function("baed052a0577950637eef2684216a27453cef793fd2c018ff89b9a74a626681c"),
+    callees: &[
+        p::function("f7521db3b8c31d0f0d831e26200ecdb59035453c601c7a8815dc72e72245c6ce"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("console.info"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: ts_console_info,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f7521db3b8c31d0f0d831e26200ecdb59035453c601c7a8815dc72e72245c6ce"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+};
+
+/// `ts.console.info`.
+fn ts_console_info(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        if r == 0 {
+            ctx.literal(0, 1)?;
+        }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 2)?; }
+        if r == 0 { return Ok(ctx.take(0)); }
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const TS_CONSOLE_DEBUG_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.console.debug",
+    function: p::function("10ea431ecc252872f324a11b90898dbdbbe5eb3fd358fe8ab058249a4bc3ae7f"),
+    callees: &[
+        p::function("f7521db3b8c31d0f0d831e26200ecdb59035453c601c7a8815dc72e72245c6ce"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("console.debug"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "this", path: &[] },
+        p::PlanLocal { name: "args", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[0, 0],
+            call: p::SiteCall::Invoke(0),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: ts_console_debug,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f7521db3b8c31d0f0d831e26200ecdb59035453c601c7a8815dc72e72245c6ce"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+};
+
+/// `ts.console.debug`.
+fn ts_console_debug(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(1, 0)?;
+        }
+        if r == 0 {
+            ctx.literal(0, 1)?;
+        }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 0, 0, 2)?; }
+        if r == 0 { return Ok(ctx.take(0)); }
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
 }
 
 const TS_JSON_PARSE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -41269,7 +41435,7 @@ fn ts_json_parse(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
 
 const TS_JSON_STRINGIFY_GENERIC_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.json.stringify_generic",
-    function: p::function("09b0b080582b3cc391c9e71b4a67ed58fe855314ee0f4587c4d7274b6b1d99a6"),
+    function: p::function("bc0c8c71459c12f8c50331feb5b8debde146950854ffb74190688043d0e4f73a"),
     callees: &[
         p::function("e75ddd242f0401b6fc0b7b277a97321ada9698966ae57716c7a988ccc6e3c64f"),
         p::function("36e87764a41f11156cf878871d97539c457a8adb4405dd001d307b7dcd1a4a5c"),
@@ -41287,7 +41453,7 @@ const TS_JSON_STRINGIFY_GENERIC_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("2149fa8b75e04a6fadce0ff523c499c582c66975b9f3a433f7372e4b4b682a49"),
         p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"),
         p::function("edd082afe9d9be04a15e6f2d7e5d60090c68d5817cfa95337f8961dc0ecd697b"),
-        p::function("5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4"),
+        p::function("b838e976ab236fba1789df629b718a9f490b3c0ea7241f868f570d6cfcf5ec20"),
     ],
     literals: &[
         p::PlanLiteral::Int("3"),
@@ -41303,36 +41469,37 @@ const TS_JSON_STRINGIFY_GENERIC_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text(" "),
         p::PlanLiteral::Int("0"),
         p::PlanLiteral::Int("10"),
+        p::PlanLiteral::Text("JSON.stringify"),
+        p::PlanLiteral::Text("$"),
     ],
     fields: &["", ],
     records: &[&[0], ],
-    registers: 4,
+    registers: 5,
     slots: &[
         p::PlanLocal { name: "this", path: &[] },
         p::PlanLocal { name: "args", path: &[] },
         p::PlanLocal { name: "args", path: &[0] },
         p::PlanLocal { name: "replacer", path: &[1] },
-        p::PlanLocal { name: "allowed", path: &[3] },
+        p::PlanLocal { name: "allowed", path: &[2] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "item", path: &[4, 1, 1, 1] },
-        p::PlanLocal { name: "k", path: &[4, 1, 1, 1, 0] },
-        p::PlanLocal { name: "item", path: &[4, 1, 1, 1, 2, 1, 0] },
-        p::PlanLocal { name: "gap", path: &[5] },
-        p::PlanLocal { name: "space", path: &[6] },
-        p::PlanLocal { name: "k", path: &[7] },
-        p::PlanLocal { name: "count", path: &[8, 1, 0] },
-        p::PlanLocal { name: "out", path: &[10] },
-        p::PlanLocal { name: "stack", path: &[11] },
-        p::PlanLocal { name: "serialize", path: &[12] },
-        p::PlanLocal { name: "holder", path: &[14] },
-        p::PlanLocal { name: "wrote", path: &[15] },
+        p::PlanLocal { name: "item", path: &[3, 1, 1, 1] },
+        p::PlanLocal { name: "k", path: &[3, 1, 1, 1, 0] },
+        p::PlanLocal { name: "item", path: &[3, 1, 1, 1, 2, 1, 0] },
+        p::PlanLocal { name: "gap", path: &[4] },
+        p::PlanLocal { name: "space", path: &[5] },
+        p::PlanLocal { name: "k", path: &[6] },
+        p::PlanLocal { name: "count", path: &[7, 1, 0] },
+        p::PlanLocal { name: "active", path: &[9] },
+        p::PlanLocal { name: "copies", path: &[10] },
+        p::PlanLocal { name: "prepare", path: &[11] },
+        p::PlanLocal { name: "prepared", path: &[13] },
     ],
     closures: &[
-        &[13, 0],
+        &[12, 0],
     ],
     sites: &[
         p::PlanSite {
-            path: &[4, 1, 1, 1, 2, 1, 0, 0],
+            path: &[3, 1, 1, 1, 2, 1, 0, 0],
             call: p::SiteCall::Invoke(7),
             dst: 0,
             roles: &[],
@@ -41340,11 +41507,11 @@ const TS_JSON_STRINGIFY_GENERIC_PLAN: p::HelperPlan = p::HelperPlan {
             loops: &[p::PlanLoop::For { walked: 5 }],
         },
         p::PlanSite {
-            path: &[15, 0],
+            path: &[13, 0],
             call: p::SiteCall::Apply,
             dst: 0,
             roles: &[],
-            bound: &[0, 1, 2, 3, 4, 9, 10, 11, 13, 14, 15, 16],
+            bound: &[0, 1, 2, 3, 4, 9, 10, 11, 13, 14, 15],
             loops: &[],
         },
     ],
@@ -41369,13 +41536,8 @@ fn ts_json_stringify_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
         ctx.local(2, 0)?;
         ctx.literal(1, 1)?;
         ctx.index(0)?;
-        ctx.bind(3, 0)?;
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(3, 0)?;
         ctx.call(1, 0, 1)?;
-        ctx.assign(3, 0)?;
+        ctx.bind(3, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
@@ -41548,7 +41710,7 @@ fn ts_json_stringify_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.set(0, 0)?;
+        ctx.list(0, 0)?;
         ctx.bind(14, 0)?;
     }
     if r == 0 {
@@ -41561,37 +41723,29 @@ fn ts_json_stringify_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
         ctx.closure(0, 0)?;
         ctx.assign(15, 0)?;
     }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        ctx.literal(11, 1)?;
-        ctx.index(0)?;
-        ctx.record(0, 0)?;
-        ctx.bind(16, 0)?;
-    }
     if r == 0 || matches!(r, 2) {
         if r == 0 { ctx.begin()?; }
         if r == 0 { ctx.local(15, 0)?; }
-        if r == 0 { ctx.local(16, 1)?; }
-        if r == 0 { ctx.literal(6, 2)?; }
-        if r == 0 { ctx.literal(6, 3)?; }
-        if r == 2 { r = 0; } else if r == 0 { ctx.apply(1, 0, 3)?; }
-        if r == 0 { ctx.bind(17, 0)?; }
-    }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(17, 0)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(13, 0)?;
-            ctx.literal(6, 1)?;
-            ctx.call(16, 0, 2)?;
-            return Ok(ctx.take(0));
+        if r == 0 {
+            ctx.local(2, 1)?;
+            ctx.literal(11, 2)?;
+            ctx.index(1)?;
+            ctx.record(0, 1)?;
         }
+        if r == 0 {
+            ctx.literal(6, 2)?;
+        }
+        if r == 2 { r = 0; } else if r == 0 { ctx.apply(1, 0, 2)?; }
+        if r == 0 { ctx.bind(16, 0)?; }
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.literal(2, 0)?;
+        ctx.local(16, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.literal(13, 2)?;
+        ctx.literal(14, 3)?;
+        ctx.local(9, 4)?;
+        ctx.call(16, 0, 5)?;
         return Ok(ctx.take(0));
     }
     if r != 0 {
@@ -41675,14 +41829,14 @@ fn ts_json_plain(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
 
 const TS_JSON_STRINGIFY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.json.stringify",
-    function: p::function("575a1edd3b7b174f05f549aeae2de896edd5a3160084db5b19cd7270d586d6e7"),
+    function: p::function("9f582cc1a5a0283863bf3e4fd21a68190cdf31812cffa886c56ff8061e3ebd23"),
     callees: &[
         p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
         p::function("e75ddd242f0401b6fc0b7b277a97321ada9698966ae57716c7a988ccc6e3c64f"),
         p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"),
-        p::function("04a98b4f71bd626710e6e895968a23d8943c9b07cdc349159ea64ae757162a47"),
-        p::function("09b0b080582b3cc391c9e71b4a67ed58fe855314ee0f4587c4d7274b6b1d99a6"),
+        p::function("76425cf223ddc56e3b74ff4b4a076a321cc660a23acc2e80d2496bb79663088d"),
+        p::function("bc0c8c71459c12f8c50331feb5b8debde146950854ffb74190688043d0e4f73a"),
     ],
     literals: &[
         p::PlanLiteral::Absent,
@@ -52844,10 +52998,10 @@ fn ts_promise_any(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_ENTRY_RESULT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.entry_result",
-    function: p::function("a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260"),
+    function: p::function("f35180d95b053d456c5465557ffbd1e97ddf0e92773608d11407b380bafb7da3"),
     callees: &[
         p::function("d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e"),
-        p::function("0e7a2aed4403bac7c56d76692a78523cdaca5fc2faec503f1cb123485eb3bbd3"),
+        p::function("0388a995c807732bf426b7026cd66a52e5d038680427bfd4d834ed7ce631d1dd"),
     ],
     literals: &[],
     fields: &[],
@@ -52879,7 +53033,7 @@ const TS_ENTRY_RESULT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_entry_result,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e"), p::function("0e7a2aed4403bac7c56d76692a78523cdaca5fc2faec503f1cb123485eb3bbd3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e"), p::function("0388a995c807732bf426b7026cd66a52e5d038680427bfd4d834ed7ce631d1dd"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `ts.entry_result`.
@@ -67531,7 +67685,7 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
 
 const TS_METADATA_READER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.metadata.reader",
-    function: p::function("3af21e2ec7b77be6d71520a5bfbef0b1c8310af309ff2cb881ea063fcbfbb993"),
+    function: p::function("4d233c50cee6176fea943999ee836d8f5baac7b8161afe6c120a9d7b3aefadc4"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Absent,
@@ -67606,7 +67760,7 @@ fn ts_metadata_reader(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
 
 const TS_REFLECT_DESCRIPTOR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.descriptor",
-    function: p::function("e4ddbbae0b54c0068867f6dfb200030ff833518c37ebc08f903ba2d768c87e27"),
+    function: p::function("d8e225b732cb70ad5683cb79285897de3fc308d091e7679436eefbd663e7623e"),
     callees: &[
         p::function("ef65a5dda43578440f88684ffade96d8cbc8e6fc8a38c73a8a8ebec2cc01b476"),
     ],
@@ -67668,7 +67822,7 @@ fn ts_reflect_descriptor(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
 
 const TS_REFLECT_GET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.get",
-    function: p::function("a6cc0e5bd151b449969ff8c513b1737e78e9feefea507f7a6fd18be4822cf0fd"),
+    function: p::function("5a7153ecc1ac16dff047898289252017f4ad7b5e91a5dffe48029d13e789deaf"),
     callees: &[
         p::function("679522ae951a0e49725fcff7ced1b2aba2323bbf74388ca794edd91f5898635c"),
     ],
@@ -67730,7 +67884,7 @@ fn ts_reflect_get(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_REFLECT_GETOWNPROPERTYDESCRIPTOR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.getOwnPropertyDescriptor",
-    function: p::function("71a35c12985a9624c1a60f49a3b70bd47d294ebe475b4483461022251782fd8b"),
+    function: p::function("80e9e45672f83328779cb8767017a1a1d9a9ff151bc368fc6238aecbdcf2c26b"),
     callees: &[
         p::function("1d1f46386a700a5cd304feb619dc3f486a0baba74aac7b7ed0c75b9b3250b0ee"),
     ],
@@ -67792,7 +67946,7 @@ fn ts_reflect_getownpropertydescriptor(ctx: &mut dyn p::PlanContext, entry: u32)
 
 const TS_REFLECT_GETOWNPROPERTYDESCRIPTORS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.getOwnPropertyDescriptors",
-    function: p::function("c5aa90bbe818a53cdfdd7931a0af8054b8a91c03dd928ac4a973c9fa2fd80bd9"),
+    function: p::function("c4d84e7aa36513235650389546c4c408dd6b68a9ab3c369395ddb14ba994a417"),
     callees: &[
         p::function("2d5fb363c9480fb9e7ad78133d900b1fce6f7a80d44cd6568d75660a4289b902"),
     ],
@@ -67854,7 +68008,7 @@ fn ts_reflect_getownpropertydescriptors(ctx: &mut dyn p::PlanContext, entry: u32
 
 const TS_REFLECT_GETOWNPROPERTYNAMES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.getOwnPropertyNames",
-    function: p::function("7c193f5a835a3bb35c5ed08dc8b02af382dcd7eeb9047b2879db14b2f9298921"),
+    function: p::function("1bb155b3d889a6709a242b47c7caeb27496ae06f02c14f0db3386f199074670a"),
     callees: &[
         p::function("14550dc6ee933d7559f36a2a1a1e56fd62d07a66591b15ffc78eab2101cb4980"),
     ],
@@ -67916,7 +68070,7 @@ fn ts_reflect_getownpropertynames(ctx: &mut dyn p::PlanContext, entry: u32) -> R
 
 const TS_REFLECT_GETOWNPROPERTYSYMBOLS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.getOwnPropertySymbols",
-    function: p::function("b4e832625ec4972ff3b6ea58a5d623f79c50efadedd0654e908a165b10235a98"),
+    function: p::function("17078d6a2d23617fa5c2d2a9e934fbdf929ccea0ffc59caa1956e5ca33ac7610"),
     callees: &[
         p::function("9b8ddc9d4cacc7fa23f490465997a130c8db518991c2c2050abaa3d7e0af758c"),
     ],
@@ -67957,7 +68111,7 @@ fn ts_reflect_getownpropertysymbols(ctx: &mut dyn p::PlanContext, _entry: u32) -
 
 const TS_REFLECT_HAS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.has",
-    function: p::function("975f0938f6b9521711177e0250da1a9f08b89f77a79372427a1b8cece1d5a5ec"),
+    function: p::function("819ec8c5688245f87158fbd89b2585ac3b36678c683f2e001c77e4fdfd4e5747"),
     callees: &[
         p::function("308b0cc03b63f0c6ca58ca0e067a3379770ca9c307618e997cb1d5c77388d675"),
     ],
@@ -68019,7 +68173,7 @@ fn ts_reflect_has(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_REFLECT_OWNKEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect.ownKeys",
-    function: p::function("c228aca3dd701c6ade86163212e16ab07c52405c5f3be726c31abff45af2c471"),
+    function: p::function("5afa20179f4ce5876e1f995bda3699bb9023537e5b45d1059c3ec79629cc3153"),
     callees: &[
         p::function("9c142cdadf7b40c1d4159cf9820747c15bd472d8763dc485f06326d2909f949e"),
     ],
@@ -68203,7 +68357,7 @@ fn ts_instanceof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
 
 const TS_BUILTIN_CALL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.builtin_call",
-    function: p::function("0992fca9ed419d1032baa7fe4ce2e660c1278191fa212db20830d8d0c5052e8e"),
+    function: p::function("59575ff800bf12ee43d5775a8011422dccd40cbaae5d394ae2c8af18d0599807"),
     callees: &[],
     literals: &[],
     fields: &[],
@@ -87631,7 +87785,7 @@ fn ts_member_create(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const TS_MEMBER_DEBUG_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.debug",
-    function: p::function("c891d1b30ff0f0032e1cee152ca55bdc6502718340a809fb0bce9a85000e5521"),
+    function: p::function("23b25dfba2b5f0dd905a340852b17c9ab891c640a92f7a074e1f779ef139e372"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -90552,7 +90706,7 @@ fn ts_member_entries(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
 
 const TS_MEMBER_ERROR_2_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.error",
-    function: p::function("db503cbb67c2c77c60982a7881c9fbd93a84eebf207b4f05d22d09fd4537fdd3"),
+    function: p::function("8ab019e209c2352165964369076e1ef31630bac2908919e89bc72325f3956402"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -96607,7 +96761,7 @@ fn ts_member_fround(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const TS_MEMBER_GET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.get",
-    function: p::function("d1cd0d05f751258fcc682712f9ed896d2ab00d6d83b93a9872f40a5d4bfd5425"),
+    function: p::function("2f404198c493a54eba57000863989ac0374e86ef48bcb1a82a36bccd78d2304b"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -98905,7 +99059,7 @@ fn ts_member_getmonth(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
 
 const TS_MEMBER_GETOWNPROPERTYDESCRIPTOR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertyDescriptor",
-    function: p::function("9338d834d22445f88b3fea4be6144ce9a309e18a9efbc9daba4c4c59ed1a7122"),
+    function: p::function("578c0c3b419120c05c2fae716a3a0f9fae20421250de543df89e7da05d19be5e"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -99141,7 +99295,7 @@ fn ts_member_getownpropertydescriptor(ctx: &mut dyn p::PlanContext, entry: u32) 
 
 const TS_MEMBER_GETOWNPROPERTYDESCRIPTORS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertyDescriptors",
-    function: p::function("4f7a3102e736ad22cee2e3a0531f7138b8cfcdeba29990f7ca241773ea81e0d9"),
+    function: p::function("3403526d8b5bf49bcdf96e531d526485368626fa8e323cdd5c5d438fc4e71dbc"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -99358,7 +99512,7 @@ fn ts_member_getownpropertydescriptors(ctx: &mut dyn p::PlanContext, entry: u32)
 
 const TS_MEMBER_GETOWNPROPERTYNAMES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertyNames",
-    function: p::function("a0307298c6c94bf1ea67710158c8bf075a280f24a70082b2c502a4148aa3bf07"),
+    function: p::function("394758d672dda7b321eba3ebe340843b05414df8115f34edb3e0daa11459fffb"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -99575,7 +99729,7 @@ fn ts_member_getownpropertynames(ctx: &mut dyn p::PlanContext, entry: u32) -> Re
 
 const TS_MEMBER_GETOWNPROPERTYSYMBOLS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertySymbols",
-    function: p::function("6ead1e042687628fbf37bab5dc77084e2c42bfeb2129a5885720265ee1f45d9d"),
+    function: p::function("40f0aff0683c7e04c427d63d9ff36ddc8f2c219d328bcbe1bfd2f716093a33c9"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -103443,7 +103597,7 @@ fn ts_member_groupby(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
 
 const TS_MEMBER_HAS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.has",
-    function: p::function("99cfabd6ed6dacd25280af5ff01f120e5f6a2d9f5f5ef5a290f7bdd1b1c1bc9d"),
+    function: p::function("a820fa077304ea6a1f410d32bca90f09afc16875984b6576cdf3aafcf9f1ce5f"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -105965,7 +106119,7 @@ fn ts_member_indexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
 
 const TS_MEMBER_INFO_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.info",
-    function: p::function("0764b7e15fcac4e365574764d3738c3265f241d42a16a2e7e1554c33147704a2"),
+    function: p::function("971f0d19f8f73cad41e385ab4632778303c976c04921ed688e45cefa0b153861"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -111076,7 +111230,7 @@ fn ts_member_localecompare(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
 
 const TS_MEMBER_LOG_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.log",
-    function: p::function("a89d48da4e14f001468f57535b6da298216d37bf0cbd40e8bb4c60061baa53d6"),
+    function: p::function("3aea49030904a706ffc1f4e3abef0ad96adef100148edf22b6ac59b23b0c0f85"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -114625,7 +114779,7 @@ fn ts_member_of(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
 
 const TS_MEMBER_OWNKEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.ownKeys",
-    function: p::function("886a6714555c786465e797f8c29cec1b7489046861d40fbc26c7b0acbddb5f94"),
+    function: p::function("f69d013520349eb8defadfcf5573cafe8eedb0c49b0fcaf971b932627a6be736"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -129644,7 +129798,7 @@ fn ts_member_sticky(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const TS_MEMBER_STRINGIFY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.stringify",
-    function: p::function("4122151bfe9359491f370fb7589ab29737fbc383d3af08b8fc561b3b980b9d44"),
+    function: p::function("9793c26ecc5ae114ba21c4b7271bd7a25781edb69068b61a3672c486e830e0e7"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -139818,7 +139972,7 @@ fn ts_member_values(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const TS_MEMBER_WARN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.warn",
-    function: p::function("0d90d40113b5e42f41e314d2260b43efabd848b7c56b62c0340c88f6162a6704"),
+    function: p::function("cef474fa27ea440b5f954568c0057f6416085cdbf4748688981e453718f3fcc6"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -146977,7 +147131,7 @@ fn ts_builtin_name(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.get_computed",
-    function: p::function("6be409c0543a88163320797e951f062bff36aac741ed81bada2fc005000f109a"),
+    function: p::function("09647735ecd95eba4e631b7f6abf85b1908e65f063a92d70b88afb1b461d9f8a"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -147078,7 +147232,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("1a5476d68f4ee09cf1849e8de8698a667df30d2b63af33229906325c74b2e261"),
         p::function("4cfdce09342a9e0f20288fd690fe8e6646683d3c85cc2752e3bb76a4441373c2"),
         p::function("f021184e6e5f394b66912883b11871962b7aa0c62b29cc402c0d6e423ad11975"),
-        p::function("c891d1b30ff0f0032e1cee152ca55bdc6502718340a809fb0bce9a85000e5521"),
+        p::function("23b25dfba2b5f0dd905a340852b17c9ab891c640a92f7a074e1f779ef139e372"),
         p::function("765e54826ad8f0217c69a9aa646e0a54663df315ae906bd7329c73d3836bfb0a"),
         p::function("8807288efbdd178c591d4c86978ea4a736b17ba3b2eab08fed1652f044ef64b5"),
         p::function("48d2aae30ef5c1b00031a1b6f8d7ece0435113665615a2515ae0f070b2f802f3"),
@@ -147090,7 +147244,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("0ddc292e03d932bd99ba7bf68a814e3f71ee84f29e2c08f6d60eced4e1e46c72"),
         p::function("97a4b2f634e857c9ee301e1c432713274ca8967cf190770eb3f8e8a85da56b9e"),
         p::function("182882f739b2d60369767a3d3bd789d33c205c1cab22f1f13d855d8d1e0d5ec4"),
-        p::function("db503cbb67c2c77c60982a7881c9fbd93a84eebf207b4f05d22d09fd4537fdd3"),
+        p::function("8ab019e209c2352165964369076e1ef31630bac2908919e89bc72325f3956402"),
         p::function("b0f5e2a136e17a4bc88a7a62af6fecda471de15d5c51049d4679664705707393"),
         p::function("21153534204e4811a1faefab0b1aab8a2dc162b12a6ab9242c9a2fa20b127a17"),
         p::function("af7284593b4d5f1e9dbec0da9db4e049a97f528f18cf0dd4199e03932c470a44"),
@@ -147114,7 +147268,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("c53657c239dbaf21ee1457beb2316b9fade3f8f96e7c8b3fb84255ce6463c887"),
         p::function("d9ea0a8ed03cd5ead2749b98af0cf6b636aa6800bf77ad1efe61f07ec2fe78b5"),
         p::function("8e6a30c36187b8bd937d669644dfff9dfbd12a6e057cc078691dfafe65ccc3d7"),
-        p::function("d1cd0d05f751258fcc682712f9ed896d2ab00d6d83b93a9872f40a5d4bfd5425"),
+        p::function("2f404198c493a54eba57000863989ac0374e86ef48bcb1a82a36bccd78d2304b"),
         p::function("69a922d24f0c4b4ade68bdbb0f886c74029723dc817f800d3bb05dd608ff9a4b"),
         p::function("186bf687d06312fd7dc21488fecf0ea0469e0e89ffe51b82dad816eda22d4436"),
         p::function("40c9cefc92539dd49b7f5f753e425e9819f81fae520eb0d81ec423a8bd67a491"),
@@ -147123,10 +147277,10 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("a6ea52ea5d9ec44cc8c097231592d38b40c3fb76171324108d15ab30c2465cb5"),
         p::function("2bc79c2f24adeb9032cc6acc93e45a42692f9dcb3d00f19e39f8a64ae086a06b"),
         p::function("a338d33b9305c4b9b587431bf8fe676f495e8776d013fac80933782e8bf4dc71"),
-        p::function("9338d834d22445f88b3fea4be6144ce9a309e18a9efbc9daba4c4c59ed1a7122"),
-        p::function("4f7a3102e736ad22cee2e3a0531f7138b8cfcdeba29990f7ca241773ea81e0d9"),
-        p::function("a0307298c6c94bf1ea67710158c8bf075a280f24a70082b2c502a4148aa3bf07"),
-        p::function("6ead1e042687628fbf37bab5dc77084e2c42bfeb2129a5885720265ee1f45d9d"),
+        p::function("578c0c3b419120c05c2fae716a3a0f9fae20421250de543df89e7da05d19be5e"),
+        p::function("3403526d8b5bf49bcdf96e531d526485368626fa8e323cdd5c5d438fc4e71dbc"),
+        p::function("394758d672dda7b321eba3ebe340843b05414df8115f34edb3e0daa11459fffb"),
+        p::function("40f0aff0683c7e04c427d63d9ff36ddc8f2c219d328bcbe1bfd2f716093a33c9"),
         p::function("06efb4a84f9bcb4cc2403db72c95a2bfec827ab8236a9338c8d32b821c719e53"),
         p::function("9c3813dacf2d0114b29120132db486f0a7acd87ca603aeae6c15285b29803055"),
         p::function("b3ee504f6027259a5077f3ad14b361dc2ccd1e1f67ed7fced06c866177012e4a"),
@@ -147142,7 +147296,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("9e8ecbcdb7ea46ad0a74af409a1d61aa1d72be3f17b2c2f7d705cdc00129cdb9"),
         p::function("7cf9ca63f6346fe614a6201476b1295e995f7a2c328dea2957003bd14509f6e1"),
         p::function("8c9ad9251abda6281b22fd9d2a43950490f6f0b2705b536af92adcddff8835e0"),
-        p::function("99cfabd6ed6dacd25280af5ff01f120e5f6a2d9f5f5ef5a290f7bdd1b1c1bc9d"),
+        p::function("a820fa077304ea6a1f410d32bca90f09afc16875984b6576cdf3aafcf9f1ce5f"),
         p::function("68314caa7e31022e679ecb68a67d0e3abd20e5fa9ed6c1b18b4703ac021f86de"),
         p::function("e7c572b7d8449b939e7cdd427688564715489631145c8578f14f831b1b09bf37"),
         p::function("01ff5d3b97046574f180220dcd8a170a31080f2c44958de2bedbbd50e09be3ef"),
@@ -147151,7 +147305,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("3774c730fbc0e4a225c84ef423c6e6ba475a45672ac5af20403b7be455ee2c6b"),
         p::function("230872055661d929e057eb250612bfae66556b61ea3561adb70b1a041013edd4"),
         p::function("bb628593581463cd6350b7ae4e16478cce4e33d1082907476b5a2007127263ac"),
-        p::function("0764b7e15fcac4e365574764d3738c3265f241d42a16a2e7e1554c33147704a2"),
+        p::function("971f0d19f8f73cad41e385ab4632778303c976c04921ed688e45cefa0b153861"),
         p::function("cabedc37726e1f2077b7fe2aa46b4f7e856e4e039de0a4976770f0cef86a705b"),
         p::function("0e5a805664989f48eb95c64c5b3c4cae52a8d45255854c27a7fdfb14925101fe"),
         p::function("13768d4fa01ae72150c9d5eeee689e82905aa7374693f3aff24ad9e6104bc161"),
@@ -147171,7 +147325,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("719ed5b1a6644a8fb2de4e5283988d5410cd07e75d62138ffd5588679afea942"),
         p::function("15911418ee83d39b780f78dd5b6df47a19a39ff928aaa03c9fe2084365d55df0"),
         p::function("961903084f5881db1c6056f7e63990de3b57d57b35c6194d288ed063218fcdb3"),
-        p::function("a89d48da4e14f001468f57535b6da298216d37bf0cbd40e8bb4c60061baa53d6"),
+        p::function("3aea49030904a706ffc1f4e3abef0ad96adef100148edf22b6ac59b23b0c0f85"),
         p::function("b759486d10e499b37a0f23c7f6bd6c045e944e1eda712df9e531d4df9fc90aee"),
         p::function("8d2efd1c73f776864c5c25caa504edf292649c561ef1bd93f3b434fdea80f6f0"),
         p::function("2d55d32b8073fa8acdb2f409b18319bf646456cd21962cbf569c1969940ed103"),
@@ -147186,7 +147340,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("7fc7fc698d7cd71056fafc2ccf98653dc91731a7febfedb2f56b02ac1418ae66"),
         p::function("11b3287b07dd7a6faa48ffecab90dd225ad5d8ce0efca3bec604c030a418f9b2"),
         p::function("9194fdbc693367f4acaf7a48cc2965d8728a0bed12e60d0409665268ac0a2381"),
-        p::function("886a6714555c786465e797f8c29cec1b7489046861d40fbc26c7b0acbddb5f94"),
+        p::function("f69d013520349eb8defadfcf5573cafe8eedb0c49b0fcaf971b932627a6be736"),
         p::function("e44cae599857bf732bcfec257dc5a862d0fa5955781ab6294c823de4543f83a0"),
         p::function("335a09d913763246e7bcf4a2e9f6fa151b7dccfa1dde2862637da8a96c50644b"),
         p::function("05d8d3c07c0042fb88194fdda8bcdffb6fc96791ad1da3ea8ecce537f8da029e"),
@@ -147245,7 +147399,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("ff0bd04ec58007442961bc5cb44a8c58d64618767ebf28be30f30aa5cbc540c5"),
         p::function("fc8bb26a467fc73e15330a253c719bd8860fdde64600c9df26cf2f342ca54b16"),
         p::function("b1f0796c4d0a12ce382dd86e73dbf83db2fa98d04eaeec92e7d9508176545782"),
-        p::function("4122151bfe9359491f370fb7589ab29737fbc383d3af08b8fc561b3b980b9d44"),
+        p::function("9793c26ecc5ae114ba21c4b7271bd7a25781edb69068b61a3672c486e830e0e7"),
         p::function("48241acd2543a403b812c28563fecef55641c1728b9b4fe76a7c7b18a21c0228"),
         p::function("f77c5135c25c69de89ac2c44c577b716ca5d1bdb9b42f4b77fa2804ca745477f"),
         p::function("bb1722ad5577af094eedd032bfa35358c94c50b1c611747d864ad8cad704bc93"),
@@ -147281,7 +147435,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("18e6a5fc21d0df28e2e8c9dcc2abaedeb1de5100fa45122b0981aae9fce0aec6"),
         p::function("5353089cfe51fb5ff014b90348bf65af98051576a877cac7f5a4b7aa7a3e8ded"),
         p::function("e98b31f9ac5d25531a402f80c0628d686bbcffd9b872c71db5435c173aa22a44"),
-        p::function("0d90d40113b5e42f41e314d2260b43efabd848b7c56b62c0340c88f6162a6704"),
+        p::function("cef474fa27ea440b5f954568c0057f6416085cdbf4748688981e453718f3fcc6"),
         p::function("fc7fef19203657b336565c4884bb7b00515727c81b6b272f55e4a77b2e367a09"),
         p::function("6facb1b96fee365b6015d9138a1cc1d9e98075844f2c4332137420000fa7b31f"),
     ],
@@ -158521,7 +158675,7 @@ fn ts_get_numeric(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_TEXT_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.text_index",
-    function: p::function("614ff89095d3e42f28afc7e6d7f1d46b198d465c658bc03f09e447573031a46d"),
+    function: p::function("bd967a3ab44af3f02f4716a9fa8a86da847ebb0723ce50b8f858c399926a43b2"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),

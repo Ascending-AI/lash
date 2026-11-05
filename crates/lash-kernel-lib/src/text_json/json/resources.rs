@@ -184,8 +184,9 @@ fn workspace(
     value: &Value,
     active: &mut Vec<ArenaHandle>,
     depth: usize,
+    limit: usize,
 ) -> Result<u64, NativeError> {
-    if depth > args.limits().document_depth().min(64) {
+    if depth > limit {
         return Ok(0);
     }
     let mut bytes = Cost::native_local(args, value)?
@@ -201,7 +202,7 @@ fn workspace(
         for chunk in args.sequence(value)?.ok_or_else(overflow)?.chunks() {
             for value in chunk? {
                 bytes = bytes
-                    .checked_add(workspace(args, value, active, depth + 1)?)
+                    .checked_add(workspace(args, value, active, depth + 1, limit)?)
                     .ok_or_else(overflow)?;
             }
         }
@@ -215,7 +216,7 @@ fn workspace(
         for chunk in args.table(value)?.ok_or_else(overflow)?.chunks() {
             for value in chunk? {
                 bytes = bytes
-                    .checked_add(workspace(args, value, active, depth + 1)?)
+                    .checked_add(workspace(args, value, active, depth + 1, limit)?)
                     .ok_or_else(overflow)?;
             }
         }
@@ -226,11 +227,12 @@ fn workspace(
 fn writer(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
     let mut out = Out {
         output: output::Count::default(),
-        args: &args,
+        args: Some(&args),
         layout: None,
         verbatim_kinds: 0,
         verbatim_field: None,
         encoding: None,
+        indentation: None,
     };
     let answer = (|| {
         if op == "render" {
@@ -260,74 +262,68 @@ fn writer(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
             };
             out.layout = Some(DecimalLayout::read(arg(args.values(), 3)?, &args)?);
         } else if op == "encode" {
-            out.layout = Some(DecimalLayout::read(arg(args.values(), 1)?, &args)?);
-            let value = arg(args.values(), 2)?;
-            let (Value::Tuple(_), Some(style)) = (value, args.sequence(value)?) else {
-                return Err(raise("type_error", "expected JSON style tuple"));
-            };
-            if style.len() != 6 {
-                return Err(raise("type_error", "expected six JSON style fields"));
-            }
-            let values = (0..6)
-                .map(|at| style.get(at))
-                .collect::<Result<Vec<_>, _>>()?;
-            let [
-                Some(Value::Bool(ascii)),
-                Some(item),
-                Some(key),
-                Some(Value::Int(width)),
-                Some(Value::Bool(fractional)),
-                Some(excluded),
-            ] = values.as_slice()
-            else {
-                return Err(raise("type_error", "invalid JSON style fields"));
-            };
-            if !(0..=20).contains(width) {
-                return Err(raise("number_range", "exponent width must be in 0..20"));
-            }
-            let (Value::Tuple(_), Some(excluded)) = (excluded, args.sequence(excluded)?) else {
-                return Err(raise("type_error", "expected excluded record fields"));
-            };
-            if excluded.len() != 3 {
-                return Err(raise("type_error", "expected three excluded record fields"));
-            }
-            let excluded = (0..3)
-                .map(|at| {
-                    let field = excluded
-                        .get(at)?
-                        .ok_or_else(|| raise("type_error", "missing excluded field"))?;
-                    Ok(text_copy(&args, field)?.into_owned())
-                })
-                .collect::<Result<Vec<_>, NativeError>>()?;
-            out.encoding = Some(Encoding {
-                ascii: *ascii,
-                item_separator: text_copy(&args, item)?.into_owned(),
-                key_separator: text_copy(&args, key)?.into_owned(),
-                exponent_digits: *width as usize,
-                fractional: *fractional,
-                excluded,
-            });
+            encoding(&args, &mut out)?;
         }
-        write(
-            arg(args.values(), 0)?,
-            &mut vec![],
-            0,
-            op != "stringify",
-            &mut out,
-        )
+        if op == "boundary" {
+            let (target, context, path) = boundary_policy(&args)?;
+            let gap = out.text_held(&args, arg(args.values(), 4)?)?.into_owned();
+            if !gap.is_empty() {
+                out.indentation = Some(gap);
+            }
+            out.layout = Some(DecimalLayout {
+                fixed_from: -5,
+                fixed_until: 21,
+                exponent_plus: true,
+                negative_zero: false,
+            });
+            encode_value(
+                &Live(args),
+                *arg(args.values(), 0)?,
+                0,
+                true,
+                &mut out,
+                Policy {
+                    target: Some(target),
+                    context: &context,
+                    path: &path,
+                    limit: args.limits().document_depth(),
+                },
+            )
+        } else if op == "encode" {
+            encode_value(
+                &Live(args),
+                *arg(args.values(), 0)?,
+                0,
+                true,
+                &mut out,
+                Policy {
+                    target: None,
+                    context: "json.dumps",
+                    path: "$",
+                    limit: args.limits().document_depth(),
+                },
+            )
+        } else {
+            write(arg(args.values(), 0)?, op != "stringify", &mut out).map(|()| true)
+        }
     })();
     let mut contract = match answer {
-        Ok(()) => Contract::value(
+        Ok(written) => Contract::value(
             Exit::Returned,
-            Cost::REFERENCE + out.output.bytes as u64,
+            Cost::REFERENCE + if written { out.output.bytes as u64 } else { 0 },
             Origin::Immutable,
         ),
         Err(error) => refused(error)?,
     };
     let mut bytes = out.output.bytes as u64;
+    let limit = if matches!(op, "boundary" | "encode") {
+        args.limits().document_depth()
+    } else {
+        args.limits().document_depth().min(64)
+    };
     for value in args.values() {
         bytes = bytes
-            .checked_add(workspace(args, value, &mut vec![], 0)?)
+            .checked_add(workspace(args, value, &mut vec![], 0, limit)?)
             .ok_or_else(overflow)?;
     }
     crate::text_json::resources::scratch(&mut contract, bytes)?;

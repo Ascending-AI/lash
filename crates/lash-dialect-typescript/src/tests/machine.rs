@@ -382,6 +382,15 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
 /// next batch of `deliveries` is delivered, in the order it lists; once the
 /// script is used up, the oldest pending request.
 pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
+    run_with_answer(source, deliveries, answer)
+}
+
+/// The boundary law supplies the production JSON projection at delivery.
+pub(crate) fn run_with_answer(
+    source: &str,
+    deliveries: &[Vec<String>],
+    mut answer: impl FnMut(&Request) -> (WaitId, Outcome),
+) -> Recorded {
     let (mut machine, text) = start(source);
     let mut console = Console::default();
     let mut pending: Vec<Request> = Vec::new();

@@ -710,3 +710,114 @@ fn smith_values() -> (Vec<Datum>, lash_kernel_package::LinkedContent) {
     );
     (values, retained)
 }
+
+/// FIG-7637: one hand-derived JSON.stringify oracle covers the live console
+/// and copied-out host boundary, with faithful copy and explicit function targets.
+#[test]
+fn absent_values_share_the_host_and_console_json_boundary() {
+    use lash_kernel_lib::{JsonTarget, encode_datum};
+    use lash_kernel_vm::{Outcome, Request};
+    let mut host = Vec::new();
+    let recorded = machine::run_with_answer(
+        r#"
+const value = {missing: undefined, keep: null, nested: {missing: undefined, keep: null}, items: [undefined, null, , {missing: undefined, keep: null}]};
+const echoed = await host.echo(value);
+console.log(echoed);
+console.log(value);
+console.log("missing" in value, "missing" in value.nested, "missing" in value.items[3], 0 in value.items, value.items[0] === undefined, 2 in value.items);
+try { console.log({title: 1n}); } catch (error) { console.log(error.message); }
+try { await host.echo({after: 1n}); } catch (error) { console.log(error.message); }
+const f = (x: number): number => x + 1;
+console.log({f, items: [f, undefined]});
+console.log(JSON.stringify({f, items: [f, undefined]}));
+await host.echo({f, items: [f, undefined]});
+console.log(JSON.stringify({a: 1, b: 2}, (key, value) => key === "a" ? undefined : value, 2));
+console.log(JSON.stringify({2: "two", 1: "one"}, ["2", "1"]));
+try { console.warn({title: 1n}); } catch (error) { console.log(error.message); }
+"#,
+        &[],
+        |request| {
+            let Request::Effect(effect) = request;
+            let value = &effect.args[0];
+            let json = encode_datum(
+                value,
+                lash_kernel_lib::JsonModel::JavaScript,
+                JsonTarget::Host,
+                "host.echo",
+                128,
+            );
+            let outcome = match json {
+                Ok(json) => {
+                    if host.is_empty() {
+                        let Datum::Record(fields) = value else {
+                            panic!("request object")
+                        };
+                        assert!(
+                            fields
+                                .iter()
+                                .any(|(key, value)| key == "missing" && *value == Datum::Absent)
+                        );
+                        let Datum::List(items) =
+                            &fields.iter().find(|(key, _)| key == "items").unwrap().1
+                        else {
+                            panic!("array")
+                        };
+                        assert_eq!(items[0], Datum::Absent);
+                        assert_eq!(items[2], Datum::Tuple(vec![]));
+                    } else {
+                        let Datum::Record(fields) = value else {
+                            panic!("function request")
+                        };
+                        let Datum::FunctionValue(function) =
+                            &fields.iter().find(|(key, _)| key == "f").unwrap().1
+                        else {
+                            panic!("durable function")
+                        };
+                        let tag =
+                            String::from_utf8(function.canonical_tagged_bytes().unwrap()).unwrap();
+                        assert_eq!(json, format!("{{\"f\":{tag},\"items\":[{tag},null]}}"));
+                        assert_eq!(
+                            encode_datum(
+                                value,
+                                lash_kernel_lib::JsonModel::JavaScript,
+                                JsonTarget::Text,
+                                "console.log",
+                                128
+                            )
+                            .unwrap(),
+                            r#"{"items":[null,null]}"#
+                        );
+                    }
+                    let returned: serde_json::Value = serde_json::from_str(&json).unwrap();
+                    host.push(json);
+                    Outcome::Completed(lash_kernel_doc::diagnostic_datum(&returned).unwrap())
+                }
+                Err(error) => Outcome::Failed(ErrorDatum {
+                    kind: "not_data".into(),
+                    message: error.to_string(),
+                    data: Datum::Null,
+                }),
+            };
+            (effect.wait, outcome)
+        },
+    );
+    assert_eq!(recorded.end, "ok");
+    let json = r#"{"keep":null,"nested":{"keep":null},"items":[null,null,null,{"keep":null}]}"#;
+    let lines = recorded.lines();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(lines[0]).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    assert_eq!(&lines[1..3], &[json, "true true true true true false"]);
+    assert!(lines[3].contains("console.log $[0].title"), "{lines:?}");
+    assert!(lines[4].contains("host.echo $.after"), "{lines:?}");
+    assert_eq!(
+        &lines[5..7],
+        &[r#"{"items":[null,null]}"#, r#"{"items":[null,null]}"#]
+    );
+    assert_eq!(lines[7], "{\n  \"b\": 2\n}");
+    assert_eq!(lines[8], r#"{"2":"two","1":"one"}"#);
+    assert!(lines[9].contains("console.warn $[0].title"));
+    assert_eq!(host.len(), 2);
+    assert_eq!(host[0], json);
+}

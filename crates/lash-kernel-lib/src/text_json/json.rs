@@ -5,8 +5,8 @@ use std::borrow::Cow;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{
-    Args, Float, Integer, NativeCall, NativeError, NewObject, NumberPolicy, NumberToken, Nursery,
-    Value,
+    Args, Datum, Float, Integer, NativeCall, NativeError, NewObject, NumberPolicy, NumberToken,
+    Nursery, Value,
 };
 
 use lash_kernel_value::Type;
@@ -18,6 +18,10 @@ use super::{Function, arg, definition, materialized_text, raise, room, text_arg}
 mod output;
 pub(super) mod resources;
 use output::{Output, Text as TextOutput};
+
+mod encoder;
+pub use encoder::{JsonModel, JsonTarget, encode_datum};
+use encoder::{Live, Numeric, Policy, encode as encode_value};
 
 /// Whether `error` is a stated-type mismatch a union tries past, rather
 /// than a cause that ends the call.
@@ -354,11 +358,12 @@ pub fn parse_json(
 /// Canonical codec state, independent of its physical output destination.
 struct Out<'a, 'call, S> {
     output: S,
-    args: &'a Args<'call>,
+    args: Option<&'a Args<'call>>,
     layout: Option<DecimalLayout>,
     verbatim_kinds: u8,
     verbatim_field: Option<String>,
     encoding: Option<Encoding>,
+    indentation: Option<String>,
 }
 
 impl<S: Output> Out<'_, '_, S> {
@@ -378,6 +383,16 @@ impl<S: Output> Out<'_, '_, S> {
                 }
             });
         self.output.push(piece)
+    }
+
+    fn newline(&mut self, depth: usize) -> Result<(), NativeError> {
+        if let Some(gap) = self.indentation.clone() {
+            self.push("\n")?;
+            for _ in 0..depth {
+                self.push(&gap)?;
+            }
+        }
+        Ok(())
     }
 
     fn quote(&mut self, text: &str) -> Result<(), NativeError> {
@@ -450,17 +465,14 @@ impl<S: Output> Out<'_, '_, S> {
         self.push("\"")
     }
 
-    fn number(&mut self, value: &Value, selected: bool) -> Result<(), NativeError> {
-        if let Some(layout) = self
-            .layout
-            .filter(|_| selected && (self.encoding.is_none() || matches!(value, Value::Float(_))))
-        {
-            match value {
-                Value::Float(number) => {
+    fn number(&mut self, value: &Numeric, selected: bool) -> Result<(), NativeError> {
+        let layout = self.layout.filter(|_| {
+            selected && (self.encoding.is_none() || matches!(value, Numeric::Float(_)))
+        });
+        match value {
+            Numeric::Float(number) => {
+                if let Some(layout) = layout {
                     let value = number.get();
-                    // Below 2^53 an integral binary64 has exact integer
-                    // digits. Spell these directly instead of invoking the
-                    // shortest floating-point converter for every row index.
                     if value.trunc() == value && value.abs() < 9007199254740992.0 {
                         return layout.small_integer(
                             value.abs() as u64,
@@ -472,27 +484,23 @@ impl<S: Output> Out<'_, '_, S> {
                     let (negative, digits, exponent) = number
                         .decimal_parts(&mut scratch)
                         .ok_or_else(|| raise("json_number", "JSON refuses NaN and infinity"))?;
-                    return layout.write(negative, digits, i64::from(exponent), self);
+                    layout.write(negative, digits, i64::from(exponent), self)
+                } else {
+                    self.push(&number.to_string())
                 }
-                Value::Int(value) => {
-                    return layout.small_integer(value.unsigned_abs(), *value < 0, self);
-                }
-                Value::BigInt(_) => {
-                    let Some(number) = self.args.integer(value)? else {
-                        return Err(NativeError::Malformed("an integer names another body"));
-                    };
-                    // Reserve decimal scratch before converting arbitrary-precision
-                    // integers; three digits per byte bounds their decimal extent.
-                    self.output.reserve(
-                        number
-                            .bits()
-                            .div_ceil(8)
-                            .saturating_mul(3)
-                            .saturating_add(1),
-                    )?;
-                    let text = self.integer_digits(&number)?;
-                    #[cfg(test)]
-                    let _digits = crate::native_contract_laws::scratch(text.len() as u64);
+            }
+            Numeric::Int(number) => {
+                self.output.reserve(
+                    number
+                        .bits()
+                        .div_ceil(8)
+                        .saturating_mul(3)
+                        .saturating_add(1),
+                )?;
+                let text = self.integer_digits(number)?;
+                #[cfg(test)]
+                let _digits = crate::native_contract_laws::scratch(text.len() as u64);
+                if let Some(layout) = layout {
                     let digits = text.strip_prefix('-').unwrap_or(&text);
                     let trimmed = digits.trim_end_matches('0');
                     let (digits, exponent) = if trimmed.is_empty() {
@@ -504,27 +512,12 @@ impl<S: Output> Out<'_, '_, S> {
                                 .map_err(|_| crate::exhausted())?,
                         )
                     };
-                    return layout.write(text.starts_with('-'), digits, exponent, self);
+                    layout.write(text.starts_with('-'), digits, exponent, self)
+                } else {
+                    self.push(&text)
                 }
-                _ => unreachable!("the JSON writer selects only numbers"),
             }
-        }
-        match value {
-            Value::Int(number) => match crate::numbers::short_digits(*number, 10) {
-                Some(digits) => self.push(digits.as_str()),
-                None => self.push(&number.to_string()),
-            },
-            Value::BigInt(_) => {
-                let Some(number) = self.args.integer(value)? else {
-                    return Err(NativeError::Malformed("an integer names another body"));
-                };
-                let text = self.integer_digits(&number)?;
-                #[cfg(test)]
-                let _digits = crate::native_contract_laws::scratch(text.len() as u64);
-                self.push(&text)
-            }
-            Value::Float(number) => self.push(&number.to_string()),
-            _ => unreachable!("the JSON writer selects only numbers"),
+            Numeric::Token(token) => self.push(token.as_str()),
         }
     }
 
@@ -597,131 +590,26 @@ fn kind_bit(kind: &str) -> u8 {
 
 fn write(
     value: &Value,
-    active: &mut Vec<ArenaHandle>,
-    depth: usize,
     raw_numbers: bool,
     out: &mut Out<'_, '_, impl Output>,
 ) -> Result<(), NativeError> {
-    let limit = out.args.limits().document_depth().min(64);
-    if depth > limit {
-        return Err(raise(
-            "json_depth",
-            format!("JSON exceeds the configured {limit}-level kernel nesting limit"),
-        ));
-    }
-    let args = out.args;
-    #[cfg(test)]
-    let _frame = crate::native_contract_laws::scratch(4 * 16);
-    match value {
-        Value::Null => out.push("null")?,
-        Value::Bool(value) => out.push(if *value { "true" } else { "false" })?,
-        Value::Int(_) | Value::BigInt(_) => out.number(value, raw_numbers)?,
-        Value::Float(float) if float.get().is_finite() => {
-            out.number(value, raw_numbers)?;
-        }
-        Value::Text(_) | Value::LongText(_) => {
-            let Some(text) = args.text(value)? else {
-                return Err(NativeError::Malformed("a text names another body"));
-            };
-            out.output.read_whole(text.len())?;
-            out.quote(&text.whole()?)?;
-        }
-        Value::Tuple(_) => {
-            let raw_numbers = out.raw_numbers("tuple", raw_numbers);
-            let items = super::sequence_values(args, value)?;
-            write_array(&items, active, depth, raw_numbers, out)?;
-        }
-        Value::List(id) | Value::Map(id) | Value::Record(id) => {
-            if active.contains(id) {
-                return Err(raise("cycle", "cyclic value cannot be JSON"));
-            }
-            active.push(*id);
-            if matches!(value, Value::List(_)) {
-                let raw_numbers = out.raw_numbers("list", raw_numbers);
-                let items = super::sequence_values(args, value)?;
-                write_array(&items, active, depth, raw_numbers, out)?;
-            } else {
-                let Some(table) = args.table(value)? else {
-                    return Err(NativeError::Malformed("a table names another body"));
-                };
-                let mut fields = Vec::with_capacity(table.len() as usize);
-                for chunk in table.chunks() {
-                    for pair in chunk?.as_chunks::<2>().0.iter() {
-                        if !matches!(pair[0], Value::Text(_) | Value::LongText(_)) {
-                            return Err(raise("json_key", "JSON map keys must be text"));
-                        }
-                        if matches!(value, Value::Record(_)) && out.encoding.is_some() {
-                            let key = out.text_held(args, &pair[0])?;
-                            if out.encoding.as_ref().is_some_and(|policy| {
-                                policy.excluded.iter().any(|field| *key == **field)
-                            }) {
-                                return Err(raise("not_data", "record has an excluded field"));
-                            }
-                        }
-                        fields.push((&pair[0], &pair[1]));
-                    }
-                }
-                let raw_numbers = if matches!(value, Value::Map(_)) {
-                    out.raw_numbers("map", raw_numbers)
-                } else {
-                    let mut verbatim = false;
-                    if let Some(field) = &out.verbatim_field {
-                        for (name, value) in &fields {
-                            if matches!(value, Value::Text(_) | Value::LongText(_))
-                                && *text_copy(args, name)? == **field
-                            {
-                                verbatim = true;
-                                break;
-                            }
-                        }
-                    }
-                    out.raw_numbers("record", raw_numbers) && !verbatim
-                };
-                #[cfg(test)]
-                let _fields = crate::native_contract_laws::scratch_values(
-                    *args,
-                    &fields
-                        .iter()
-                        .flat_map(|(a, b)| [**a, **b])
-                        .collect::<Vec<_>>(),
-                );
-                out.push("{")?;
-                for (index, (name, value)) in fields.iter().enumerate() {
-                    if index != 0 {
-                        out.separator(true)?;
-                    }
-                    let name = out.text_held(args, name)?;
-                    out.quote(&name)?;
-                    out.separator(false)?;
-                    write(value, active, depth + 1, raw_numbers, out)?;
-                }
-                out.push("}")?;
-            }
-            active.pop();
-        }
-        Value::Float(_) => return Err(raise("json_number", "JSON refuses NaN and infinity")),
-        _ => return Err(raise("not_data", "value kind has no JSON representation")),
-    }
-    Ok(())
-}
-
-fn write_array(
-    items: &[Value],
-    active: &mut Vec<ArenaHandle>,
-    depth: usize,
-    raw_numbers: bool,
-    out: &mut Out<'_, '_, impl Output>,
-) -> Result<(), NativeError> {
-    #[cfg(test)]
-    let _items = crate::native_contract_laws::scratch_values(*out.args, items);
-    out.push("[")?;
-    for (index, value) in items.iter().enumerate() {
-        if index != 0 {
-            out.separator(true)?;
-        }
-        write(value, active, depth + 1, raw_numbers, out)?;
-    }
-    out.push("]")
+    let args = *out
+        .args
+        .ok_or(NativeError::Malformed("live JSON writer has no arguments"))?;
+    encode_value(
+        &Live(args),
+        *value,
+        0,
+        raw_numbers,
+        out,
+        Policy {
+            target: None,
+            context: "json",
+            path: "$",
+            limit: args.limits().document_depth().min(64),
+        },
+    )
+    .map(|_| ())
 }
 
 /// Writes compact JSON in insertion order, preserving all integer digits.
@@ -742,13 +630,14 @@ pub fn stringify_json<'call>(
             text: String::new(),
             new,
         },
-        args,
+        args: Some(args),
         layout: None,
         verbatim_kinds: 0,
         verbatim_field: None,
         encoding: None,
+        indentation: None,
     };
-    write(value, &mut Vec::new(), 0, false, &mut out)?;
+    write(value, false, &mut out)?;
     Ok(out.output.text)
 }
 
@@ -807,6 +696,7 @@ pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
             &["json_syntax", "json_depth"],
             decode,
         ),
+        boundary_definition(selection),
         render_definition(selection),
         encode_definition(selection),
     ]
@@ -978,13 +868,14 @@ fn render(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             text: String::new(),
             new: call.new,
         },
-        args: &args,
+        args: Some(&args),
         layout: Some(layout),
         verbatim_kinds,
         verbatim_field,
         encoding: None,
+        indentation: None,
     };
-    write(arg(args.values(), 0)?, &mut Vec::new(), 0, true, &mut out)?;
+    write(arg(args.values(), 0)?, true, &mut out)?;
     let text = out.output.text;
     Ok(call.new.text(&text))
 }
@@ -1160,6 +1051,7 @@ fn render_definition(selection: &Selection<'_>) -> Function {
 }
 
 /// Lexical JSON choices, supplied by the caller independently of its value model.
+#[derive(Clone)]
 struct Encoding {
     ascii: bool,
     item_separator: String,
@@ -1167,10 +1059,12 @@ struct Encoding {
     exponent_digits: usize,
     fractional: bool,
     excluded: Vec<String>,
+    nonfinite: bool,
+    skipkeys: bool,
 }
 
 fn encode_definition(selection: &Selection<'_>) -> Function {
-    definition(
+    let mut function = definition(
         selection,
         "json.encode",
         &[
@@ -1188,6 +1082,9 @@ fn encode_definition(selection: &Selection<'_>) -> Function {
                     Type::Int,
                     Type::Bool,
                     Type::Tuple(vec![Type::Text, Type::Text, Type::Text]),
+                    Type::Union(vec![Type::Text, Type::Absent]),
+                    Type::Bool,
+                    Type::Bool,
                 ]),
             ),
         ],
@@ -1201,20 +1098,22 @@ fn encode_definition(selection: &Selection<'_>) -> Function {
             "cycle",
         ],
         encode,
-    )
+    );
+    if let Some(definition) = &mut function.definition {
+        definition.native_version = 2;
+    }
+    function
 }
-
-fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-    let args = call.args;
-    let layout = DecimalLayout::read(arg(args.values(), 1)?, &args)?;
+fn encoding(args: &Args<'_>, out: &mut Out<'_, '_, impl Output>) -> Result<(), NativeError> {
+    out.layout = Some(DecimalLayout::read(arg(args.values(), 1)?, args)?);
     let style = arg(args.values(), 2)?;
     let (Value::Tuple(_), Some(style)) = (style, args.sequence(style)?) else {
         return Err(raise("type_error", "expected JSON style tuple"));
     };
-    if style.len() != 6 {
-        return Err(raise("type_error", "expected six JSON style fields"));
+    if style.len() != 9 {
+        return Err(raise("type_error", "expected nine JSON style fields"));
     }
-    let values = (0..6)
+    let values = (0..9)
         .map(|index| style.get(index))
         .collect::<Result<Vec<_>, _>>()?;
     let [
@@ -1224,6 +1123,9 @@ fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         Some(Value::Int(width)),
         Some(Value::Bool(fractional)),
         Some(excluded),
+        Some(indent),
+        Some(Value::Bool(nonfinite)),
+        Some(Value::Bool(skipkeys)),
     ] = values.as_slice()
     else {
         return Err(raise("type_error", "invalid JSON style fields"));
@@ -1234,37 +1136,133 @@ fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let (Value::Tuple(_), Some(excluded)) = (excluded, args.sequence(excluded)?) else {
         return Err(raise("type_error", "expected excluded record fields"));
     };
-    if excluded.len() != 3 {
-        return Err(raise("type_error", "expected three excluded record fields"));
-    }
     let excluded = (0..excluded.len())
         .map(|index| {
             let field = excluded
                 .get(index)?
                 .ok_or_else(|| raise("type_error", "missing excluded field"))?;
-            Ok(text_held(&args, call.new, field)?.into_owned())
+            Ok(out.text_held(args, field)?.into_owned())
         })
-        .collect::<Result<Vec<_>, NativeError>>()?;
-    let encoding = Encoding {
+        .collect::<Result<_, NativeError>>()?;
+    out.indentation = if matches!(indent, Value::Absent) {
+        None
+    } else {
+        Some(out.text_held(args, indent)?.into_owned())
+    };
+    out.encoding = Some(Encoding {
         ascii: *ascii,
-        item_separator: text_held(&args, call.new, item)?.into_owned(),
-        key_separator: text_held(&args, call.new, key)?.into_owned(),
+        item_separator: out.text_held(args, item)?.into_owned(),
+        key_separator: out.text_held(args, key)?.into_owned(),
         exponent_digits: *width as usize,
         fractional: *fractional,
         excluded,
-    };
+        nonfinite: *nonfinite,
+        skipkeys: *skipkeys,
+    });
+    Ok(())
+}
+
+fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let args = call.args;
     let mut out = Out {
         output: TextOutput {
             text: String::new(),
             new: call.new,
         },
-        args: &args,
-        layout: Some(layout),
+        args: Some(&args),
+        layout: None,
         verbatim_kinds: 0,
         verbatim_field: None,
-        encoding: Some(encoding),
+        encoding: None,
+        indentation: None,
     };
-    write(arg(args.values(), 0)?, &mut Vec::new(), 0, true, &mut out)?;
+    encoding(&args, &mut out)?;
+    encode_value(
+        &Live(args),
+        *arg(args.values(), 0)?,
+        0,
+        true,
+        &mut out,
+        Policy {
+            target: None,
+            context: "json.dumps",
+            path: "$",
+            limit: args.limits().document_depth(),
+        },
+    )?;
     let text = out.output.text;
     Ok(call.new.text(&text))
+}
+
+fn boundary_definition(selection: &Selection<'_>) -> Function {
+    definition(
+        selection,
+        "json.boundary",
+        &[
+            ("value", Type::Any),
+            ("target", Type::Enum(vec!["host".into(), "text".into()])),
+            ("context", Type::Text),
+            ("path", Type::Text),
+            ("gap", Type::Text),
+        ],
+        Type::Union(vec![Type::Text, Type::Absent]),
+        &["not_data", "json_depth", "cycle", "json_key"],
+        boundary,
+    )
+}
+
+fn boundary(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let args = call.args;
+    let (target, context, path) = boundary_policy(&args)?;
+    let gap = text_held(&args, call.new, arg(args.values(), 4)?)?.into_owned();
+    let mut out = Out {
+        output: TextOutput {
+            text: String::new(),
+            new: call.new,
+        },
+        args: Some(&args),
+        layout: Some(DecimalLayout {
+            fixed_from: -5,
+            fixed_until: 21,
+            exponent_plus: true,
+            negative_zero: false,
+        }),
+        verbatim_kinds: 0,
+        verbatim_field: None,
+        encoding: None,
+        indentation: None,
+    };
+    if !gap.is_empty() {
+        out.indentation = Some(gap);
+    }
+    let written = encode_value(
+        &Live(args),
+        *arg(args.values(), 0)?,
+        0,
+        true,
+        &mut out,
+        Policy {
+            target: Some(target),
+            context: &context,
+            path: &path,
+            limit: args.limits().document_depth(),
+        },
+    )?;
+    let text = out.output.text;
+    Ok(if written {
+        call.new.text(&text)
+    } else {
+        Value::Absent
+    })
+}
+
+fn boundary_policy<'a>(
+    args: &Args<'a>,
+) -> Result<(JsonTarget, Cow<'a, str>, Cow<'a, str>), NativeError> {
+    let target = match text_arg(args, 1)?.as_ref() {
+        "host" => JsonTarget::Host,
+        "text" => JsonTarget::Text,
+        _ => return Err(raise("type_error", "expected JSON host or text target")),
+    };
+    Ok((target, text_arg(args, 2)?, text_arg(args, 3)?))
 }

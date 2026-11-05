@@ -876,6 +876,9 @@ fn k_ljson_009_configured_encoding_preserves_lexical_policy_and_room() {
             i(2),
             b(true),
             Datum::Tuple(vec![t("reserved"), t("other"), t("private")]),
+            Datum::Absent,
+            b(false),
+            b(false),
         ])
     };
     let ascii = lab.value(style(true));

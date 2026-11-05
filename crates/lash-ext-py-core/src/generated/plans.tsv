@@ -269,8 +269,7 @@ py.task.bridge	3a968a4f3d78ec5ae7e3e742ebe569cc3529d1d3ce02e2e648a73d22268b8c9a	
 py.gather	9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167	task	join; cancel; join; join; spawn; invoke py.task.bridge	true	0	true	sum(6, size(tasks), size(result))	reaches task
 py.sleep	1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48	task	yield; perform import 2	true	0	false	512	nests an action that is not a library call
 py.gather.options	b997f5567a697759d5708b4600a6629f1cca66d1cf9a1cf39ba949591340f638	closed	-	false	0	true	sum(4, size(kwargs))	generated
-py.json_quote	8041ef87ddd79600c6ff6c0082c4aff464ed04e9eeef77fc1be6e38143dabd13	closed	-	true	0	false	sum(8, size(value), size(result))	generated
-py.json_dump	77ae49333da5b1e96d35f0b14e5c1f5cf8a43eea9f09d56c7e8a48443e95610e	callback	apply go	false	1	false	sum(16, deep_size(value), deep_size(options), size(result))	segment of 1 sites
+py.json_dump	4ddc9f001d712f54f8f2be96d75df69addc656eeb1165cd9c66cee3677ca16a6	callback	apply prepare	false	1	false	sum(16, deep_size(value), deep_size(options), size(result))	segment of 1 sites
 py.value_attribute	0cddd6740e4cba74c8420278fbfa760182dd3e96c2f8a4934e75c28d7caafe39	closed	-	false	0	false	32	generated
 py.format.attribute	124554e9f4b821d65de9f000e45cd4143fbfb4aaf20715aff996fa01942790d5	closed	-	true	0	false	sum(8, size(name))	generated
 py.method.format	8629523e9553c11e2a586b519956ec62f88ed2c4602ee096211312d6cf06220c	callback	apply render	true	1	false	sum(16, size(self), deep_size(args), deep_size(keywords), size(result))	segment of 1 sites
@@ -323,6 +322,6 @@ py.math.radians	e9016b8a8f7dbad346f83287755dda8682898f0d708b86b017d74b7d3a286971
 py.math.factorial	4e5da8e12810f83c61ca48685d614d01af9ebcb427a72cb4d687db0177fcdf82	closed	-	false	0	true	32	generated
 py.math.gcd	5d6a2b4feb24bcac249f64727ec62460aaf45b3b58d86bb0e4d323cc1a940b42	closed	-	false	0	true	32	generated
 py.json.loads	9fb7cf351caa0dd8f3e6cceb5d92b478fe063a1c48212d44e9dd5360b04c6ec6	closed	-	false	0	false	32	generated
-py.json.dumps	1b40697f27f57524fd5353df27da957b685201ef68911604ea95d0c61c6158f0	callback	invoke py.json_dump	false	0	false	32	segment of 1 sites
+py.json.dumps	1de73fc951ff945a2d49cae4cd592987b4f65587eee40bf2ac3b5aac85e0ab89	callback	invoke py.json_dump	false	0	false	32	segment of 1 sites
 py.module.math	27e7ce63cb039c37b640e27de9cf9d76dad6a67e68db52937dec66f009e8c2ca	closed	-	false	42	false	64	generated
-py.module.json	8157449afbe299ce9d0ce8dc5aed4b19eb8ddb3600c8133f6726f5627c79ee72	closed	-	false	2	false	64	generated
+py.module.json	dc7e6de8d1b5d779cec19d32ef51863dfcdd5dd164a73177308c2fb811cc92c9	closed	-	false	2	false	64	generated

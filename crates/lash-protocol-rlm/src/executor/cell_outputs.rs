@@ -23,6 +23,7 @@ fn encoding_failed(error: &serde_json::Error) -> lash_core::RuntimeEffectControl
 pub(super) async fn prepare_cell_outputs(
     ctx: &RuntimeExecutionContext<'_>,
     cell: &cell_run::CellRun,
+    model: lash_kernel_lib::JsonModel,
     code_renderer: &crate::render::CodeRendererSlot,
     values: Vec<lash_kernel_doc::Datum>,
     response: &mut ExecResponse,
@@ -62,7 +63,7 @@ pub(super) async fn prepare_cell_outputs(
         let mut observations = Vec::new();
         if let Some(params) = &params {
             for value in values {
-                let typed = datum_json(&value);
+                let typed = datum_json(&value, model, "print");
                 let observation = crate::render::rendered_print(renderer, &typed, &params.print);
                 observations.push(observation);
             }

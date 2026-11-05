@@ -60,13 +60,13 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_SLICE_STOP_PLAN,
     &PY_METHOD_CASEFOLD_PLAN,
     &PY_MATH_TANH_PLAN,
-    &PY_JSON_DUMPS_PLAN,
     &PY_OCT_PLAN,
     &PY_METHOD_COUNT_PLAN,
     &PY_METHOD_ISUPPER_PLAN,
     &PY_TEXT_UPPER_PLAN,
     &PY_TEXT_TITLE_PLAN,
     &PY_METHOD_EXPANDTABS_PLAN,
+    &PY_JSON_DUMPS_PLAN,
     &PY_METHOD_TITLE_PLAN,
     &PY_FOR_IN_ITEMS_PLAN,
     &PY_METHOD_EXTEND_PLAN,
@@ -119,6 +119,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_FORMAT_SPEC_PLAN,
     &PY_FOR_IN_ITEM_PLAN,
     &PY_DIVMOD_PLAN,
+    &PY_JSON_DUMP_PLAN,
     &PY_MATH_FACTORIAL_PLAN,
     &PY_FOR_IN_VALUE_PLAN,
     &PY_METHOD_UPPER_PLAN,
@@ -180,7 +181,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TEXT_DECIMAL_PLAN,
     &PY_RAISE_VALUE_PLAN,
     &PY_METHOD_ISIDENTIFIER_PLAN,
-    &PY_JSON_DUMP_PLAN,
     &PY_MATH_EXP2_PLAN,
     &PY_PRINT_TEXT_PLAN,
     &PY_METHOD_ISDECIMAL_PLAN,
@@ -192,10 +192,8 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_LIST_GETITEM_PLAN,
     &PY_METHOD_INTERSECTION_PLAN,
     &PY_TEXT_OF_PLAN,
-    &PY_JSON_QUOTE_PLAN,
     &PY_METHOD_ISSUBSET_PLAN,
     &PY_METHOD_TO_BYTES_PLAN,
-    &PY_MODULE_JSON_PLAN,
     &PY_IS_NUMBER_PLAN,
     &PY_ELLIPSIS_PLAN,
     &PY_MATH_ACOS_PLAN,
@@ -310,6 +308,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &LIST_INSERT_PLAN,
     &PY_RANGE_PLAN,
     &PY_CONTAINS_PLAN,
+    &PY_MODULE_JSON_PLAN,
     &PY_BIND_PLAN,
     &PY_METHOD_POP_PLAN,
     &PY_BYTES_REPR_PLAN,
@@ -42916,182 +42915,9 @@ fn py_gather_options(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-const PY_JSON_QUOTE_PLAN: p::HelperPlan = p::HelperPlan {
-    name: "py.json_quote",
-    function: p::function("8041ef87ddd79600c6ff6c0082c4aff464ed04e9eeef77fc1be6e38143dabd13"),
-    callees: &[
-        p::function("698a62a488c7d83a20891af5f1d0a021c068724c582226395933e10411bde9d3"),
-        p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"),
-        p::function("a12a172f7a664721b2a0c87c4b149aede97c1f09639f10e4ca0ff018ebe92a46"),
-        p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"),
-        p::function("4da82f05b0d8218057fed5368ac897fd42bd09f8ea5d7712d9c7da1ab503f08d"),
-        p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"),
-        p::function("7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e"),
-        p::function("45e6a20f6cf62deb05f9ccfdb92a02be45e952e3b012a006ab527ee8d19833ac"),
-        p::function("d0eb1383f284522c3b53569ea87675c73bca1816115fb1d3d49486a9643ec7af"),
-        p::function("5197ef1323f4881de48293180126c445312ca21cbdf13590ac1878ad82e765b1"),
-        p::function("d3d17259cf801a9129b03a38c97dcfce11a7747e1b2c355c5228569367634869"),
-        p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"),
-        p::function("244ba3de95bbfe0f666391e3f5fda0efcc507d12f62777e35b10a9daa080ae0e"),
-        p::function("2149fa8b75e04a6fadce0ff523c499c582c66975b9f3a433f7372e4b4b682a49"),
-        p::function("5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4"),
-    ],
-    literals: &[
-        p::PlanLiteral::Int("127"),
-        p::PlanLiteral::Int("65536"),
-        p::PlanLiteral::Int("55296"),
-        p::PlanLiteral::Int("1024"),
-        p::PlanLiteral::Int("56320"),
-        p::PlanLiteral::Int("16"),
-        p::PlanLiteral::Text("\\u"),
-        p::PlanLiteral::Text("0"),
-        p::PlanLiteral::Int("4"),
-        p::PlanLiteral::Text(""),
-    ],
-    fields: &[],
-    records: &[],
-    registers: 4,
-    slots: &[
-        p::PlanLocal { name: "value", path: &[] },
-        p::PlanLocal { name: "ascii", path: &[] },
-        p::PlanLocal { name: "shown", path: &[0] },
-        p::PlanLocal { name: "parts", path: &[2] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "point", path: &[3, 1] },
-        p::PlanLocal { name: "points", path: &[3, 1, 0, 2, 0] },
-        p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "scalar", path: &[3, 1, 0, 2, 2, 1] },
-        p::PlanLocal { name: "digits", path: &[3, 1, 0, 2, 2, 1, 0] },
-    ],
-    closures: &[
-    ],
-    sites: &[],
-    run: py_json_quote,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("698a62a488c7d83a20891af5f1d0a021c068724c582226395933e10411bde9d3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
-};
-
-/// `py.json_quote`.
-fn py_json_quote(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(2, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.call(1, 0, 1)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.list(0, 0)?;
-    ctx.bind(3, 0)?;
-    ctx.begin()?;
-    ctx.local(2, 0)?;
-    ctx.call(2, 0, 1)?;
-    let c0 = ctx.open(0, 4)?;
-    'l0: loop {
-        if !ctx.next(c0, 0)? {
-            break 'l0;
-        }
-        ctx.bind(5, 0)?;
-        ctx.begin()?;
-        ctx.local(5, 0)?;
-        ctx.literal(0, 1)?;
-        ctx.call(3, 0, 2)?;
-        if ctx.test(0, p::Test::If)? {
-            ctx.begin()?;
-            ctx.local(5, 0)?;
-            ctx.list(0, 1)?;
-            ctx.call(4, 0, 1)?;
-            ctx.pin(0)?;
-            ctx.local(3, 1)?;
-            ctx.local(3, 2)?;
-            ctx.call(5, 2, 1)?;
-            ctx.set_index(1, 0)?;
-        } else {
-            ctx.begin()?;
-            ctx.local(5, 0)?;
-            ctx.list(0, 1)?;
-            ctx.bind(6, 0)?;
-            ctx.begin()?;
-            ctx.literal(1, 0)?;
-            ctx.local(5, 1)?;
-            ctx.call(6, 0, 2)?;
-            if ctx.test(0, p::Test::If)? {
-                ctx.begin()?;
-                ctx.local(5, 0)?;
-                ctx.literal(1, 1)?;
-                ctx.call(7, 0, 2)?;
-                ctx.assign(5, 0)?;
-                ctx.begin()?;
-                ctx.literal(2, 0)?;
-                ctx.local(5, 1)?;
-                ctx.literal(3, 2)?;
-                ctx.call(8, 1, 2)?;
-                ctx.call(9, 0, 2)?;
-                ctx.literal(4, 1)?;
-                ctx.local(5, 2)?;
-                ctx.literal(3, 3)?;
-                ctx.call(10, 2, 2)?;
-                ctx.call(9, 1, 2)?;
-                ctx.list(0, 2)?;
-                ctx.assign(6, 0)?;
-            }
-            ctx.begin()?;
-            ctx.local(6, 0)?;
-            let c1 = ctx.open(0, 7)?;
-            'l1: loop {
-                if !ctx.next(c1, 0)? {
-                    break 'l1;
-                }
-                ctx.bind(8, 0)?;
-                ctx.begin()?;
-                ctx.local(8, 0)?;
-                ctx.literal(5, 1)?;
-                ctx.call(11, 0, 2)?;
-                ctx.bind(9, 0)?;
-                ctx.begin()?;
-                ctx.literal(6, 0)?;
-                ctx.literal(7, 1)?;
-                ctx.literal(8, 2)?;
-                ctx.local(9, 3)?;
-                ctx.call(12, 3, 1)?;
-                ctx.call(7, 2, 2)?;
-                ctx.call(13, 1, 2)?;
-                ctx.local(9, 2)?;
-                ctx.list(0, 3)?;
-                ctx.literal(9, 1)?;
-                ctx.call(14, 0, 2)?;
-                ctx.pin(0)?;
-                ctx.local(3, 1)?;
-                ctx.local(3, 2)?;
-                ctx.call(5, 2, 1)?;
-                ctx.set_index(1, 0)?;
-                ctx.unbind(9);
-                ctx.unbind(8);
-                ctx.begin()?;
-            }
-            ctx.close(c1);
-            ctx.unbind(6);
-        }
-        ctx.unbind(5);
-        ctx.begin()?;
-    }
-    ctx.close(c0);
-    ctx.begin()?;
-    ctx.local(3, 0)?;
-    ctx.literal(9, 1)?;
-    ctx.call(14, 0, 2)?;
-    Ok(ctx.take(0))
-}
-
 const PY_JSON_DUMP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.json_dump",
-    function: p::function("77ae49333da5b1e96d35f0b14e5c1f5cf8a43eea9f09d56c7e8a48443e95610e"),
+    function: p::function("4ddc9f001d712f54f8f2be96d75df69addc656eeb1165cd9c66cee3677ca16a6"),
     callees: &[
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
         p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"),
@@ -43099,7 +42925,7 @@ const PY_JSON_DUMP_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"),
         p::function("2149fa8b75e04a6fadce0ff523c499c582c66975b9f3a433f7372e4b4b682a49"),
-        p::function("c1480273d7f1817228e949859b4a38f5d8761fb40104b49fc22b319445007293"),
+        p::function("8705547b31eda22fe7f9c7a8afa9912e79a0c97b02ff9e2417cbdefd50b59e84"),
     ],
     literals: &[
         p::PlanLiteral::Int("0"),
@@ -43125,20 +42951,18 @@ const PY_JSON_DUMP_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text(", "),
         p::PlanLiteral::Text(": "),
         p::PlanLiteral::Text(","),
-        p::PlanLiteral::Int("-3"),
-        p::PlanLiteral::Int("16"),
         p::PlanLiteral::Text("__lash_brand"),
         p::PlanLiteral::Text("__py_ellipsis"),
         p::PlanLiteral::Text("__py_module"),
-        p::PlanLiteral::Text("json_key"),
+        p::PlanLiteral::Int("-3"),
+        p::PlanLiteral::Int("16"),
         p::PlanLiteral::Text("json_number"),
-        p::PlanLiteral::Text("json_depth"),
-        p::PlanLiteral::Text("not_data"),
+        p::PlanLiteral::Text("ValueError"),
         p::PlanLiteral::Text("cycle"),
     ],
-    fields: &["kind", ],
+    fields: &["kind", "message", ],
     records: &[],
-    registers: 10,
+    registers: 9,
     slots: &[
         p::PlanLocal { name: "value", path: &[] },
         p::PlanLocal { name: "options", path: &[] },
@@ -43155,21 +42979,29 @@ const PY_JSON_DUMP_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "pretty", path: &[15] },
         p::PlanLocal { name: "item_separator", path: &[17] },
         p::PlanLocal { name: "key_separator", path: &[18] },
+        p::PlanLocal { name: "gap", path: &[21] },
+        p::PlanLocal { name: "style", path: &[23] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "unsupported", path: &[21, 1, 0, 1, 1, 1, 0, 1] },
-        p::PlanLocal { name: "active", path: &[22] },
-        p::PlanLocal { name: "go", path: &[23] },
+        p::PlanLocal { name: "unsupported", path: &[24, 1, 1, 1, 0, 1] },
+        p::PlanLocal { name: "exception", path: &[24, 1, 1, 1, 0, 1, 0] },
+        p::PlanLocal { name: "active", path: &[25] },
+        p::PlanLocal { name: "copies", path: &[26] },
+        p::PlanLocal { name: "prepare", path: &[27] },
+        p::PlanLocal { name: "prepared", path: &[29] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "unsupported", path: &[30, 1] },
+        p::PlanLocal { name: "exception", path: &[30, 1, 0] },
     ],
     closures: &[
-        &[24, 0],
+        &[28, 0],
     ],
     sites: &[
         p::PlanSite {
-            path: &[25, 0],
+            path: &[29, 0],
             call: p::SiteCall::Apply,
             dst: 0,
             roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18],
+            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20, 21, 22],
             loops: &[],
         },
     ],
@@ -43419,139 +43251,143 @@ fn py_json_dump(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     }
     if r == 0 {
         ctx.begin()?;
+        ctx.literal(9, 0)?;
+        ctx.bind(15, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
         ctx.local(12, 0)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(11, 0)?;
+            ctx.assign(15, 0)?;
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.local(13, 1)?;
+        ctx.local(14, 2)?;
+        ctx.literal(2, 3)?;
+        ctx.literal(11, 4)?;
+        ctx.literal(23, 5)?;
+        ctx.literal(24, 6)?;
+        ctx.literal(25, 7)?;
+        ctx.tuple(5, 3)?;
+        ctx.local(15, 6)?;
+        ctx.local(5, 7)?;
+        ctx.local(2, 8)?;
+        ctx.tuple(0, 9)?;
+        ctx.bind(16, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(10, 0)?;
         ctx.call(1, 0, 1)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(10, 0)?;
-            ctx.call(1, 0, 1)?;
+            ctx.local(9, 0)?;
+            ctx.literal(9, 1)?;
+            ctx.call(0, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+            } else {
+                ctx.begin()?;
+                ctx.local(9, 0)?;
+                ctx.literal(12, 1)?;
+                ctx.call(0, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.literal(9, 0)?;
+                    ctx.assign(9, 0)?;
+                }
+            }
+            ctx.begin()?;
+            ctx.local(9, 0)?;
+            ctx.literal(9, 1)?;
+            ctx.call(0, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.local(9, 0)?;
-                ctx.literal(9, 1)?;
-                ctx.call(0, 0, 2)?;
-                if ctx.test(0, p::Test::If)? {
-                } else {
-                    ctx.begin()?;
-                    ctx.local(9, 0)?;
-                    ctx.literal(12, 1)?;
-                    ctx.call(0, 0, 2)?;
-                    if ctx.test(0, p::Test::If)? {
+                {
+                    let cursor_scope = ctx.scope();
+                    let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
                         ctx.begin()?;
-                        ctx.literal(9, 0)?;
-                        ctx.assign(9, 0)?;
-                    }
-                }
-                ctx.begin()?;
-                ctx.local(9, 0)?;
-                ctx.literal(9, 1)?;
-                ctx.call(0, 0, 2)?;
-                if ctx.test(0, p::Test::If)? {
-                    ctx.begin()?;
-                    {
-                        let cursor_scope = ctx.scope();
-                        let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
-                            ctx.begin()?;
-                            ctx.local(0, 0)?;
-                            ctx.literal(23, 1)?;
-                            ctx.literal(24, 2)?;
-                            ctx.literal(11, 3)?;
-                            ctx.literal(11, 4)?;
-                            ctx.tuple(1, 4)?;
-                            ctx.local(3, 2)?;
-                            ctx.local(13, 3)?;
-                            ctx.local(14, 4)?;
-                            ctx.literal(2, 5)?;
-                            ctx.literal(11, 6)?;
-                            ctx.literal(25, 7)?;
-                            ctx.literal(26, 8)?;
-                            ctx.literal(27, 9)?;
-                            ctx.tuple(7, 3)?;
-                            ctx.tuple(2, 6)?;
-                            ctx.call(6, 0, 3)?;
-                            return Ok(Departure::Return(ctx.take(0)));
-                        })(ctx);
-                        outcome = match outcome {
-                            Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 15)?)),
-                            Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 15)?)),
-                            other => other,
-                        };
-                        ctx.unwind(cursor_scope);
-                        if matches!(outcome, Err(p::PlanExit::Raise(_))) {
-                            if let Err(p::PlanExit::Raise(value)) = outcome {
-                                ctx.retain(value, 16)?;
-                            }
-                            outcome = {
-                                let cursor_scope = ctx.scope();
-                                let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                        ctx.local(0, 0)?;
+                        ctx.literal(26, 1)?;
+                        ctx.literal(27, 2)?;
+                        ctx.literal(11, 3)?;
+                        ctx.literal(11, 4)?;
+                        ctx.tuple(1, 4)?;
+                        ctx.local(16, 2)?;
+                        ctx.call(6, 0, 3)?;
+                        return Ok(Departure::Return(ctx.take(0)));
+                    })(ctx);
+                    outcome = match outcome {
+                        Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 17)?)),
+                        Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 17)?)),
+                        other => other,
+                    };
+                    ctx.unwind(cursor_scope);
+                    if matches!(outcome, Err(p::PlanExit::Raise(_))) {
+                        if let Err(p::PlanExit::Raise(value)) = outcome {
+                            ctx.retain(value, 18)?;
+                        }
+                        outcome = {
+                            let cursor_scope = ctx.scope();
+                            let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                                ctx.begin()?;
+                                ctx.literal(13, 0)?;
+                                ctx.bind(19, 0)?;
+                                ctx.begin()?;
+                                ctx.local(18, 0)?;
+                                ctx.field(0, 0)?;
+                                ctx.literal(28, 1)?;
+                                ctx.call(0, 0, 2)?;
+                                if ctx.test(0, p::Test::If)? {
                                     ctx.begin()?;
-                                    ctx.local(16, 0)?;
-                                    ctx.field(0, 0)?;
-                                    ctx.literal(28, 1)?;
-                                    ctx.call(0, 0, 2)?;
-                                    if ctx.test(0, p::Test::If)? {
-                                    } else {
-                                        ctx.begin()?;
-                                        ctx.local(16, 0)?;
-                                        ctx.field(0, 0)?;
-                                        ctx.literal(29, 1)?;
-                                        ctx.call(0, 0, 2)?;
-                                        if ctx.test(0, p::Test::If)? {
-                                        } else {
-                                            ctx.begin()?;
-                                            ctx.local(16, 0)?;
-                                            ctx.field(0, 0)?;
-                                            ctx.literal(30, 1)?;
-                                            ctx.call(0, 0, 2)?;
-                                            if ctx.test(0, p::Test::If)? {
-                                            } else {
-                                                ctx.begin()?;
-                                                ctx.local(16, 0)?;
-                                                ctx.field(0, 0)?;
-                                                ctx.literal(31, 1)?;
-                                                ctx.call(0, 0, 2)?;
-                                                if ctx.test(0, p::Test::If)? {
-                                                } else {
-                                                    ctx.begin()?;
-                                                    ctx.local(16, 0)?;
-                                                    ctx.field(0, 0)?;
-                                                    ctx.literal(32, 1)?;
-                                                    ctx.call(0, 0, 2)?;
-                                                    if ctx.test(0, p::Test::If)? {
-                                                    } else {
-                                                        ctx.begin()?;
-                                                        ctx.local(16, 0)?;
-                                                        return Err(p::PlanExit::Raise(ctx.take(0)));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    ctx.unbind(16);
-                                    Ok(Departure::Next)
-                                })(ctx);
-                                outcome = match outcome {
-                                    Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 15)?)),
-                                    Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 15)?)),
-                                    other => other,
-                                };
-                                ctx.unbind(16);
-                                ctx.unwind(cursor_scope);
-                                outcome
+                                    ctx.literal(29, 0)?;
+                                    ctx.assign(19, 0)?;
+                                }
+                                ctx.begin()?;
+                                ctx.local(18, 0)?;
+                                ctx.field(0, 0)?;
+                                ctx.literal(30, 1)?;
+                                ctx.call(0, 0, 2)?;
+                                if ctx.test(0, p::Test::If)? {
+                                    ctx.begin()?;
+                                    ctx.literal(29, 0)?;
+                                    ctx.assign(19, 0)?;
+                                }
+                                ctx.begin()?;
+                                ctx.local(19, 0)?;
+                                ctx.local(18, 1)?;
+                                ctx.field(1, 1)?;
+                                ctx.call(2, 0, 2)?;
+                                ctx.unbind(19);
+                                ctx.unbind(18);
+                                Ok(Departure::Next)
+                            })(ctx);
+                            outcome = match outcome {
+                                Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 17)?)),
+                                Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 17)?)),
+                                other => other,
                             };
-                        }
-                        ctx.unbind(15);
-                        match outcome {
-                            Ok(Departure::Next) => {},
-                            Err(exit) => return Err(exit),
-                            Ok(Departure::Return(value)) => return Ok(value),
-                            Ok(Departure::Break) => {
-                                unreachable!("a loop departure needs a loop");
-                            },
-                            Ok(Departure::Continue) => {
-                                unreachable!("a loop departure needs a loop");
-                            },
-                        }
+                            ctx.unbind(18);
+                            ctx.unbind(19);
+                            ctx.unwind(cursor_scope);
+                            outcome
+                        };
+                    }
+                    ctx.unbind(17);
+                    match outcome {
+                        Ok(Departure::Next) => {},
+                        Err(exit) => return Err(exit),
+                        Ok(Departure::Return(value)) => return Ok(value),
+                        Ok(Departure::Break) => {
+                            unreachable!("a loop departure needs a loop");
+                        },
+                        Ok(Departure::Continue) => {
+                            unreachable!("a loop departure needs a loop");
+                        },
                     }
                 }
             }
@@ -43560,29 +43396,120 @@ fn py_json_dump(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     if r == 0 {
         ctx.begin()?;
         ctx.list(0, 0)?;
-        ctx.bind(17, 0)?;
+        ctx.bind(20, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(21, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
         ctx.literal(9, 0)?;
-        ctx.bind(18, 0)?;
+        ctx.bind(22, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
         ctx.closure(0, 0)?;
-        ctx.assign(18, 0)?;
+        ctx.assign(22, 0)?;
     }
     if r == 0 || matches!(r, 1) {
         if r == 0 { ctx.begin()?; }
-        if r == 0 { ctx.local(18, 0)?; }
-        if r == 0 {
-            ctx.local(0, 1)?;
+        if r == 0 { ctx.local(22, 0)?; }
+        if r == 0 { ctx.local(0, 1)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 1)?; }
+        if r == 0 { ctx.bind(23, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        {
+            let cursor_scope = ctx.scope();
+            let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                ctx.begin()?;
+                ctx.local(23, 0)?;
+                ctx.literal(26, 1)?;
+                ctx.literal(27, 2)?;
+                ctx.literal(11, 3)?;
+                ctx.literal(11, 4)?;
+                ctx.tuple(1, 4)?;
+                ctx.local(16, 2)?;
+                ctx.call(6, 0, 3)?;
+                return Ok(Departure::Return(ctx.take(0)));
+            })(ctx);
+            outcome = match outcome {
+                Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 24)?)),
+                Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 24)?)),
+                other => other,
+            };
+            ctx.unwind(cursor_scope);
+            if matches!(outcome, Err(p::PlanExit::Raise(_))) {
+                if let Err(p::PlanExit::Raise(value)) = outcome {
+                    ctx.retain(value, 25)?;
+                }
+                outcome = {
+                    let cursor_scope = ctx.scope();
+                    let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                        ctx.begin()?;
+                        ctx.literal(13, 0)?;
+                        ctx.bind(26, 0)?;
+                        ctx.begin()?;
+                        ctx.local(25, 0)?;
+                        ctx.field(0, 0)?;
+                        ctx.literal(28, 1)?;
+                        ctx.call(0, 0, 2)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.literal(29, 0)?;
+                            ctx.assign(26, 0)?;
+                        }
+                        ctx.begin()?;
+                        ctx.local(25, 0)?;
+                        ctx.field(0, 0)?;
+                        ctx.literal(30, 1)?;
+                        ctx.call(0, 0, 2)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.literal(29, 0)?;
+                            ctx.assign(26, 0)?;
+                        }
+                        ctx.begin()?;
+                        ctx.local(26, 0)?;
+                        ctx.local(25, 1)?;
+                        ctx.field(1, 1)?;
+                        ctx.call(2, 0, 2)?;
+                        ctx.unbind(26);
+                        ctx.unbind(25);
+                        Ok(Departure::Next)
+                    })(ctx);
+                    outcome = match outcome {
+                        Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 24)?)),
+                        Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 24)?)),
+                        other => other,
+                    };
+                    ctx.unbind(25);
+                    ctx.unbind(26);
+                    ctx.unwind(cursor_scope);
+                    outcome
+                };
+            }
+            ctx.unbind(24);
+            match outcome {
+                Ok(Departure::Next) => {},
+                Err(exit) => return Err(exit),
+                Ok(Departure::Return(value)) => return Ok(value),
+                Ok(Departure::Break) => {
+                    unreachable!("a loop departure needs a loop");
+                },
+                Ok(Departure::Continue) => {
+                    unreachable!("a loop departure needs a loop");
+                },
+            }
         }
-        if r == 0 {
-            ctx.literal(0, 2)?;
-        }
-        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 2)?; }
-        if r == 0 { return Ok(ctx.take(0)); }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(15, 0)?;
+        return Ok(ctx.take(0));
     }
     if r != 0 {
         return Err(ctx.lost(r));
@@ -51886,9 +51813,9 @@ fn py_json_loads(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
 
 const PY_JSON_DUMPS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.json.dumps",
-    function: p::function("1b40697f27f57524fd5353df27da957b685201ef68911604ea95d0c61c6158f0"),
+    function: p::function("1de73fc951ff945a2d49cae4cd592987b4f65587eee40bf2ac3b5aac85e0ab89"),
     callees: &[
-        p::function("77ae49333da5b1e96d35f0b14e5c1f5cf8a43eea9f09d56c7e8a48443e95610e"),
+        p::function("4ddc9f001d712f54f8f2be96d75df69addc656eeb1165cd9c66cee3677ca16a6"),
     ],
     literals: &[],
     fields: &[],
@@ -52523,7 +52450,7 @@ fn py_module_math(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
 
 const PY_MODULE_JSON_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.module.json",
-    function: p::function("8157449afbe299ce9d0ce8dc5aed4b19eb8ddb3600c8133f6726f5627c79ee72"),
+    function: p::function("dc7e6de8d1b5d779cec19d32ef51863dfcdd5dd164a73177308c2fb811cc92c9"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Text("json"),

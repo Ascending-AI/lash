@@ -68,6 +68,7 @@ pub(super) fn evaluator(name: &str) -> Option<Evaluator> {
         "json.parse" => |args| super::json::resources::evaluate(args, "parse"),
         "json.parse_binary64" => |args| super::json::resources::evaluate(args, "parse_binary64"),
         "json.decode" => |args| super::json::resources::evaluate(args, "decode"),
+        "json.boundary" => |args| super::json::resources::evaluate(args, "boundary"),
         "json.stringify" => |args| super::json::resources::evaluate(args, "stringify"),
         "json.render" => |args| super::json::resources::evaluate(args, "render"),
         "json.encode" => |args| super::json::resources::evaluate(args, "encode"),

@@ -1,62 +1,18 @@
 # JSON policy belongs to the Python module, over the kernel JSON codecs.
 use kind
 use same
-use eq
 use lt
-use le
 use add
-use sub
-use div_floor
-use rem_floor
 use bool.not
-use is_nan
-use is_infinite
-use num.to_text
-use int.to_text
-use text.len
-use text.concat
-use text.join
 use text.repeat
-use text.to_code_points
-use text.from_code_points
-use json.stringify
 use json.encode
 use list.len
-use list.slice
-use list.contains
 use record.keys
-use record.contains
 use map.keys
 use py.fail
 use py.call
 use py.sealed
-use py.str
-use py.float_text
 use py.sorted
-use py.json_quote
-
-function py.json_quote(value: Text, ascii: Bool) -> Text
-kernel 1
-charge sum(8, size(value), size(result))
-body {
-  let shown = json.stringify(value)
-  if bool.not(ascii) { return shown }
-  let parts = []
-  for point in text.to_code_points(shown) {
-    if lt(point, 127) { set parts[list.len(parts)] = text.from_code_points([point]) } else {
-      let points = [point]
-      if le(65536, point) {
-        set point = sub(point, 65536)
-        set points = [add(55296, div_floor(point, 1024)), add(56320, rem_floor(point, 1024))]
-      }
-      for scalar in points {
-        let digits = int.to_text(scalar, 16)
-        set parts[list.len(parts)] = text.join(["\\u", text.repeat("0", sub(4, text.len(digits))), digits], "")
-      }
-    }
-  }
-  return text.join(parts, "")
-}
 
 function py.json_dump(value: Any, options: Tuple(Any, Any, Any, Any, Any, Any, Any, Any, Any)) -> Text
 kernel 1
@@ -94,93 +50,81 @@ body {
   if bool.not(same(separators, absent)) {
     if bool.not(same(separators, null)) { set item_separator = separators[0] set key_separator = separators[1] }
   }
-  if bool.not(pretty) {
-    if bool.not(sort_keys) {
-      if same(default, absent) {} else { if same(default, null) { set default = absent } }
-      if same(default, absent) {
-        try {
-          return json.encode(value, (-3, 16, true, true), (ascii, item_separator, key_separator, 2, true, ("__lash_brand", "__py_ellipsis", "__py_module")))
-        } catch unsupported {
-          # Non-text keys, non-finite floats, callbacks and deeper values keep
-          # the Python walk below, including its errors and circular check.
-          if same(unsupported.kind, "json_key") {} else {
-          if same(unsupported.kind, "json_number") {} else {
-          if same(unsupported.kind, "json_depth") {} else {
-          if same(unsupported.kind, "not_data") {} else {
-          if same(unsupported.kind, "cycle") {} else { throw unsupported }
-          } } } }
-        }
+  let gap = absent
+  if pretty { set gap = indentation }
+  let style = (ascii, item_separator, key_separator, 2, true, ("__lash_brand", "__py_ellipsis", "__py_module"), gap, allow_nan, skipkeys)
+  if bool.not(sort_keys) {
+    if same(default, absent) {} else { if same(default, null) { set default = absent } }
+    if same(default, absent) {
+      try { return json.encode(value, (-3, 16, true, true), style) } catch unsupported {
+        let exception = "TypeError"
+        if same(unsupported.kind, "json_number") { set exception = "ValueError" }
+        if same(unsupported.kind, "cycle") { set exception = "ValueError" }
+        do invoke py.fail(exception, unsupported.message)
       }
     }
   }
+  # Evaluate default callbacks and ordering. Final JSON
+  # emission, circular checks and path diagnostics remain in json.encode.
   let active = []
-  let go = absent
-  set go = fn(item, depth) {
+  let copies = []
+  let prepare = absent
+  set prepare = fn(item) {
     let k = kind(item)
-    if same(k, "null") { return "null" }
-    if same(k, "bool") { if item { return "true" } return "false" }
-    if same(k, "integer") { return num.to_text(item) }
-    if same(k, "float") {
-      if is_nan(item) { if bool.not(allow_nan) { do invoke py.fail("ValueError", "Out of range float values are not JSON compliant") } return "NaN" }
-      if is_infinite(item) {
-        if bool.not(allow_nan) { do invoke py.fail("ValueError", "Out of range float values are not JSON compliant") }
-        if lt(item, 0) { return "-Infinity" }
-        return "Infinity"
-      }
-      return invoke py.float_text(item)
-    }
-    if same(k, "text") { return invoke py.json_quote(item, ascii) }
     let sequence = same(k, "list")
     if same(k, "tuple") { set sequence = true }
     let mapping = same(k, "map")
     if same(k, "record") { if bool.not(invoke py.sealed(item)) { set mapping = true } }
     if bool.not(sequence) {
       if bool.not(mapping) {
+        if same(k, "null") { return item }
+        if same(k, "bool") { return item }
+        if same(k, "integer") { return item }
+        if same(k, "float") { return item }
+        if same(k, "text") { return item }
         if bool.not(same(default, absent)) {
-          if bool.not(same(default, null)) { let converted = invoke py.call(default, [item], map{}) return apply go(converted, depth) }
+          if bool.not(same(default, null)) {
+            let converted = invoke py.call(default, [item], map{})
+            return apply prepare(converted)
+          }
         }
-        do invoke py.fail("TypeError", "Object is not JSON serializable")
+        return item
       }
     }
-    for ancestor in active { if same(ancestor, item) { do invoke py.fail("ValueError", "Circular reference detected") } }
-    let position = list.len(active)
+    let position = 0
+    for ancestor in active {
+      if same(ancestor, item) { return copies[position] }
+      set position = add(position, 1)
+    }
+    let copied = map{}
+    if sequence { set copied = [] }
     set active[position] = item
-    let parts = []
-    let opening = "["
-    let closing = "]"
+    set copies[position] = copied
     if sequence {
-      for member in item { let encoded = apply go(member, add(depth, 1)) set parts[list.len(parts)] = encoded }
+      for member in item { set copied[list.len(copied)] = apply prepare(member) }
     } else {
-      set opening = "{"
-      set closing = "}"
       let keys = []
       if same(k, "map") { set keys = map.keys(item) } else { set keys = record.keys(item) }
       if sort_keys { set keys = invoke py.sorted(keys) }
       for key in keys {
-        let name = key
+        # An invalid key is rejected or skipped by the encoder before it reads
+        # the value, so do not evaluate a default callback for that value.
         let kk = kind(key)
-        let valid = true
-        if same(kk, "text") {} else {
-          if same(kk, "integer") { set name = num.to_text(key) } else {
-          if same(kk, "float") { set name = apply go(key, depth) } else {
-          if same(kk, "bool") { if key { set name = "true" } else { set name = "false" } } else {
-          if same(kk, "null") { set name = "null" } else { set valid = false }
-          } } }
-        }
-        if bool.not(valid) { if skipkeys { continue } do invoke py.fail("TypeError", "keys must be str, int, float, bool or None") }
-        let quoted = invoke py.json_quote(name, ascii)
-        let member = item[key]
-        let encoded = apply go(member, add(depth, 1))
-        set parts[list.len(parts)] = text.join([quoted, key_separator, encoded], "")
+        let scalar = same(kk, "text")
+        for supported in ["integer", "float", "bool", "null"] { if same(kk, supported) { set scalar = true } }
+        if scalar { set copied[key] = apply prepare(item[key]) } else { set copied[key] = item[key] }
       }
     }
-    set active = list.slice(active, 0, position)
-    if eq(list.len(parts), 0) { return text.concat(opening, closing) }
-    if pretty {
-      let prefix = text.concat("\n", text.repeat(indentation, add(depth, 1)))
-      return text.join([opening, prefix, text.join(parts, text.concat(item_separator, prefix)), "\n", text.repeat(indentation, depth), closing], "")
-    }
-    return text.join([opening, text.join(parts, item_separator), closing], "")
+    remove active[position]
+    remove copies[position]
+    return copied
   }
-  return apply go(value, 0)
+  let prepared = apply prepare(value)
+  try { return json.encode(prepared, (-3, 16, true, true), style) } catch unsupported {
+    let exception = "TypeError"
+    if same(unsupported.kind, "json_number") { set exception = "ValueError" }
+    if same(unsupported.kind, "cycle") { set exception = "ValueError" }
+    do invoke py.fail(exception, unsupported.message)
+  }
+  return ""
 }

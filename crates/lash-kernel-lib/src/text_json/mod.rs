@@ -23,7 +23,7 @@ use {
     lash_kernel_value::Signature, lash_kernel_value::Type,
 };
 
-pub use json::{decode_number, parse_json, stringify_json};
+pub use json::{JsonModel, JsonTarget, decode_number, encode_datum, parse_json, stringify_json};
 
 pub(super) enum Selection<'a> {
     Definitions,
@@ -395,7 +395,7 @@ fn sequence_values(args: &Args<'_>, value: &Value) -> Result<Vec<Value>, NativeE
         items.extend_from_slice(chunk?);
     }
     #[cfg(test)]
-    let _snapshot = crate::native_contract_laws::scratch_values(*args, &items);
+    let _snapshot = crate::native_contract_laws::try_scratch_values(*args, &items)?;
     Ok(items)
 }
 

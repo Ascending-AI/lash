@@ -37,6 +37,7 @@ lash-core-execution = { workspace = true }
 lash-core-store = { workspace = true }
 lash-durable = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-lib = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-protocol-types = { workspace = true }

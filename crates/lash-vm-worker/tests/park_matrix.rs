@@ -427,7 +427,12 @@ impl ArgumentProjection for LawArgs {
     }
 
     fn project(&self, args: &[Datum]) -> Result<serde_json::Value, String> {
-        let text = datum_to_json(&Datum::List(args.to_vec())).map_err(|error| error.to_string())?;
+        let text = datum_to_json(
+            &Datum::List(args.to_vec()),
+            lash_vm_broker::kernel::JsonModel::Kernel,
+            "law.tool",
+        )
+        .map_err(|error| error.to_string())?;
         serde_json::from_str(&text).map_err(|error| error.to_string())
     }
 }
@@ -1464,8 +1469,12 @@ impl KernelEffects for LawHost {
             .durable_now()
             .await
             .map_err(|error| ParentFault(error.to_string()))?;
-        let args = datum_to_json(&Datum::List(request.args.clone()))
-            .map_err(|refusal| ParentFault(refusal.to_string()))?;
+        let args = datum_to_json(
+            &Datum::List(request.args.clone()),
+            lash_vm_broker::kernel::JsonModel::Kernel,
+            "law.tool",
+        )
+        .map_err(|refusal| ParentFault(refusal.to_string()))?;
         let effect = self
             .operations
             .get(&request.use_)

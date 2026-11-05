@@ -12,7 +12,13 @@ pub(super) fn object() -> Object {
                 _ => "console.debug",
             },
             length: 0,
-            function: "ts.console.log",
+            function: match method {
+                "log" => "ts.console.log",
+                "warn" => "ts.console.warn",
+                "error" => "ts.console.error",
+                "info" => "ts.console.info",
+                _ => "ts.console.debug",
+            },
         })
         .collect();
     Object {

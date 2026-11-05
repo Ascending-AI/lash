@@ -456,7 +456,17 @@ impl CellObservation {
             ),
             Self::Uncaught(value) => CellFailure::new(
                 CellFailureKind::Program,
-                format!("uncaught {}", datum_text(value)),
+                format!(
+                    "uncaught {}",
+                    datum_text(
+                        value,
+                        match prompts.spelling() {
+                            lash_kernel_dialect::Spelling::TypeScript =>
+                                lash_kernel_lib::JsonModel::JavaScript,
+                            _ => lash_kernel_lib::JsonModel::Kernel,
+                        }
+                    )
+                ),
             ),
             Self::TasksOutstanding {
                 unfinished,
@@ -633,7 +643,7 @@ fn task_place(
 
 /// A value copied out of a run, as the text a failure message carries: an
 /// error as its kind and message, anything else as its JSON reading.
-pub(crate) fn datum_text(value: &Datum) -> String {
+pub(crate) fn datum_text(value: &Datum, model: lash_kernel_lib::JsonModel) -> String {
     match value {
         Datum::Error(error)
             if error.kind == crate::executor::TOOL_FAILED
@@ -652,7 +662,7 @@ pub(crate) fn datum_text(value: &Datum) -> String {
         Datum::Error(error) if error.message.is_empty() => error.kind.clone(),
         Datum::Error(error) => format!("{}: {}", error.kind, error.message),
         Datum::Text(text) => text.clone(),
-        other => crate::cell_value::datum_json(other).to_string(),
+        other => crate::cell_value::datum_json(other, model, "cell.error").to_string(),
     }
 }
 

@@ -381,10 +381,10 @@ fn json_sparse_slots_are_undefined_to_replacers_and_null_through_indirect_calls(
     );
 }
 
-/// K-LJSON-004/005 and the console dialect rule: strict data, insertion
-/// order, guest number spelling, shared subgraphs and atomic printing.
+/// K-LJSON-011: omission, nonfinite nulls, insertion order, guest number
+/// spelling, shared subgraphs and atomic printing on unsupported data.
 #[test]
-fn console_json_is_strict_and_keeps_guest_spelling_and_print_order() {
+fn console_json_keeps_guest_spelling_print_order_and_atomic_errors() {
     let recorded = machine::run(
         r#"
         const shared = {n: -0, fraction: 1.25, small: 1e-7, big: 1e21};
@@ -392,10 +392,11 @@ fn console_json_is_strict_and_keeps_guest_spelling_and_print_order() {
         console.log({z: shared, a: shared, holes: holes, quoted: '"\n'});
         console.log({nested: {brand: "opaque", n: 2}});
         console.log({brand: 2, n: 3});
+        console.log({a: undefined, b: NaN, c: Infinity});
         let first = "";
-        try { console.log("unprinted", {a: undefined, b: NaN}); } catch (error) { first = error.name; }
+        try { console.log("unprinted", {a: undefined, b: 1n}); } catch (error) { first = error.name; }
         let second = "";
-        try { console.log({a: NaN, b: undefined}); } catch (error) { second = error.name; }
+        try { console.log({a: 1n, b: undefined}); } catch (error) { second = error.name; }
         console.log(first, second, !(0 in holes), holes[1] === undefined);
         const numbers = [0, -0, 1e-6, 1e-7, 1e20, 1e21, 5e-324, Number.MAX_VALUE,
                          1000000000000000100, 1.0000000000000002, 9007199254740992, -1.25];
@@ -407,20 +408,20 @@ fn console_json_is_strict_and_keeps_guest_spelling_and_print_order() {
     assert_eq!(recorded.end, "ok");
     let lines = recorded.lines();
     assert_eq!(
-        &lines[..4],
+        &lines[..5],
         [
             r#"{"z":{"n":0,"fraction":1.25,"small":1e-7,"big":1e+21},"a":{"n":0,"fraction":1.25,"small":1e-7,"big":1e+21},"holes":[null,null,2],"quoted":"\"\n"}"#,
             r#"{"nested":{"brand":"opaque","n":2}}"#,
             r#"{"brand":2,"n":3}"#,
-            "not_data json_number true true",
+            r#"{"b":null,"c":null}"#,
+            "not_data not_data true true",
         ]
     );
-    // The direct console writer and the generic guest JSON walk share the
-    // dialect's spelling even at shortest-conversion and notation edges.
-    assert_eq!(lines.len(), 6);
-    assert_eq!(lines[4], lines[5]);
+    // Both routes use the common encoder at shortest-conversion and notation edges.
+    assert_eq!(lines.len(), 7);
+    assert_eq!(lines[5], lines[6]);
     assert_eq!(
-        lines[4],
+        lines[5],
         "[0,0,0.000001,1e-7,100000000000000000000,1e+21,5e-324,1.7976931348623157e+308,1000000000000000100,1.0000000000000002,9007199254740992,-1.25]"
     );
 }

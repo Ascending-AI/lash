@@ -189,15 +189,32 @@ the baseline needs a new definition identity (`K-VER-002`).
 - **K-LJSON-009.** `json.encode(value, layout, style)` shares the strict writer
   and takes the same four decimal layout fields as `json.render`, applied only
   to floats. Integers retain every digit. Style is `(ascii, item_separator,
-  key_separator, exponent_digits, fractional, excluded_fields)`. ASCII mode
+  key_separator, exponent_digits, fractional, excluded_fields, indentation, nonfinite, skipkeys)`. ASCII mode
   escapes every scalar outside U+0020..U+007E, using surrogate pairs as needed.
   Exponents have at least `exponent_digits` digits, in 0..20; `fractional`
   adds `.0` to integral fixed-notation floats. The three excluded field names
-  reject records with `not_data`; ordinary map keys are data. Unsupported
-  kinds, non-text keys, non-finite floats, cycles and excessive nesting raise
-  the strict writer's errors. Charge is one plus argument and result deep sizes;
+  reject records with `not_data`; ordinary map keys are data. `indentation`
+  is absent for compact output or the gap for each pretty-printed level.
+  `nonfinite` permits Python's NaN/Infinity spellings. Scalar mapping keys use
+  Python's JSON key spellings, and `skipkeys` skips unsupported key kinds.
+  Unsupported values, refused numbers, cycles and excessive nesting name
+  `json.dumps` and the property path in the common encoder's error. Charge is one plus argument and result deep sizes;
   the writer reserves its output and buffer before appending. The caller owns
-  fallbacks, callbacks and language error policy.
+  callbacks and language exception types. There is no fallback JSON writer.
+
+- **K-LJSON-011 (FIG-7637).** `json.boundary(value, target, context, path, gap)` and the
+  Rust `encode_datum` API use the same JSON traversal as the strict codecs.
+  JavaScript undefined members are omitted recursively, null is preserved,
+  and undefined or sparse array slots become null. Source representations
+  are explicit: JavaScript's empty tuple denotes a hole, whereas kernel and
+  Python tuples are arrays. Copying guest arguments preserves keys and slots.
+  The target changes only function transport: `host` retains the existing
+  canonical `$lash_function` wire object and its reserved-key escaping;
+  `text` omits function properties and emits null for function array entries.
+  Callbacks and toJSON evaluation prepare values before this encoder runs.
+  The encoder alone owns omission, escaping, ordering and path diagnostics.
+  A root without a JSON representation returns absent to JSON.stringify;
+  a boundary requiring a document reports its context and root path.
 
 - **K-LJSON-010.** `json.decode(text, numbers, policy, objects)` uses the
   `json.parse` grammar, numeric conversion and depth bounds. `objects` selects

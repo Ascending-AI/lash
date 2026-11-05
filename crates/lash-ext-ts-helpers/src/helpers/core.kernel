@@ -1984,49 +1984,30 @@ body {
   return rest
 }
 
-# Guest arrays cross a host boundary as plain data. A value that holds no
-# hole, no absent and no tuple anywhere a deep copy reads, no cycle and
-# nothing deeper than a copy takes, is what the copy and walk below would
-# give: it crosses as it is, read once by a native pass. Anything else is
-# copied first: replacing absent slots must never fill the guest's holes
-# or change any guest alias. Each container of the copy is then visited
-# once, without recursion: a hole or absent array slot becomes null, a
-# built-in object's token anywhere is refused, and only a container is
-# visited further. The token of a function the program made (its path is
-# empty) is left as it is: the run's copy-out crosses it as a function
-# value, or refuses it as no data (`K-EFF-002`). A built-in function is
-# forwarded only by the supplied source-owned factory; otherwise it is refused.
-# Frozen template records cross as their cooked/raw items, preserving guest state.
+# Copy guest values without making JSON decisions. Undefined object members,
+# absent array slots, numeric tags and package records keep their semantics.
+# A source-owned factory turns builtin callables into equivalent durable
+# closures; the JSON encoder alone decides what can be serialized.
 function ts.copy_boundary(value: Any, forward: Any) -> Any
 kernel 1
 projection argument_copy
 errors "cyclic_value", "too_deep", "type_error", "not_data"
 charge sum(4, deep(value))
 body {
-  if same(kind(value), "record") { if same(value.__lash_brand, ("typescript", "template")) { set value = value.items } }
   let convert = fn(child) {
-    if same(kind(child), "integer") { let number = invoke ts.primitive_to_number(child) return number }
-    if same(kind(child), "record") { if same(child.__lash_brand, ("typescript", "template")) { return child.items } }
     if same(kind(child), "tuple") {
       if same(child, ()) { return child }
-      if same(child[0], "ts.bigint") { return child[1] }
       if same(child[0], "ts.function") {
         if same(child[1], "") { return child }
-        if same(kind(forward), "closure") {
-          let wrapped = apply forward(child)
-          return wrapped
-        }
-        throw error.new("not_data", "A built-in function is not data", null)
+        if same(kind(forward), "closure") { return apply forward(child) }
       }
-      if same(child[0], "ts.object") { throw error.new("not_data", "A built-in object is not data", null) }
     }
     return child
   }
   let k = kind(value)
-  if same(k, "tuple") { let converted = apply convert(value) return converted }
-  if same(k, "integer") { let converted = apply convert(value) return converted }
+  if same(k, "tuple") { return apply convert(value) }
   if same(k, "set") { return set.copy_deep(value) }
-  if collection.holds_none(value, set{"absent", "tuple", "integer"}) { return value }
+  if collection.holds_none(value, set{"tuple"}) { return value }
   let copied = value
   if same(k, "list") { set copied = list.copy_deep(value) } else {
     if same(k, "record") { set copied = record.copy_deep(value) } else {
@@ -2054,12 +2035,9 @@ body {
     }
     for key in keys {
       let child = item[key]
-      if same(kind(item), "list") {
-        if same(child, ()) { set item[key] = null continue }
-        if same(child, absent) { set item[key] = null continue }
-      }
       let converted = apply convert(child)
-      set item[key] = converted
+      # A sparse slot must remain sparse in the copy too.
+      if same(child, ()) {} else { set item[key] = converted }
       let ck = kind(converted)
       for container in ["list", "record", "map"] {
         if same(ck, container) { set pending[list.len(pending)] = converted }
@@ -2069,15 +2047,11 @@ body {
   return copied
 }
 
-# Console conversion has no authored forwarding factory: functions stay refused.
 function ts.boundary(value: Any) -> Any
 kernel 1
 errors "cyclic_value", "too_deep", "type_error", "not_data"
 charge sum(4, deep(value))
-body {
-  let copied = invoke ts.copy_boundary(value, absent)
-  return copied
-}
+body { return invoke ts.copy_boundary(value, absent) }
 
 # The strict arguments object owns its indexed properties and independent length.
 function ts.arguments(items: List(Any)) -> Any

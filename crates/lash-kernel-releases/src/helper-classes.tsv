@@ -86,7 +86,6 @@ py.iterator.step	operation
 py.json.dumps	operation
 py.json.loads	total
 py.json_dump	operation
-py.json_quote	total
 py.kw.extend	total
 py.kw.put	total
 py.length	total
@@ -428,8 +427,13 @@ ts.builtin_call	body
 ts.builtin_name	total
 ts.builtin_own	total
 ts.callable	total
+ts.console.debug	body
+ts.console.error	body
+ts.console.info	body
 ts.console.json	total
 ts.console.log	body
+ts.console.warn	body
+ts.console.write	body
 ts.construct	body
 ts.copy_boundary	operation
 ts.date.UTC	operation

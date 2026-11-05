@@ -700,7 +700,11 @@ impl KernelProcessEngine {
                 let durable = |outcome: &lash_execution_contracts::process::ProcessOutcome| {
                     serde_json::to_value(lash_protocol_types::Durable(outcome)).ok()
                 };
-                durable(&outcome_of_end(end.clone(), driven.meters)) == durable(outcome)
+                durable(&outcome_of_end(
+                    end.clone(),
+                    driven.meters,
+                    lash_vm_broker::kernel::JsonModel::for_dialect(&settings.dialect),
+                )) == durable(outcome)
             }
             _ => false,
         };

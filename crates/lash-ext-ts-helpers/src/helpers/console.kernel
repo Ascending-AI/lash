@@ -1,33 +1,32 @@
-use ts.boundary
 use same
 use text.join
 use list.len
-use json.render
+use json.boundary
+use text.concat
+use num.to_text
+use num.add
 use ts.console.json
+use ts.console.write
 use ts.receiver
 use ts.to_string
 
-# The shared strict writer uses the dialect's decimal-point limits,
-# positive exponent sign and unsigned zero. Maps and kernel tuples retain
-# kernel spelling; no fragments cross back into guest code.
-function ts.console.json(value: Any) -> Text
+# The same encoder owns JSON.stringify, console and host transport.
+function ts.console.json(value: Any) -> Any
 kernel 1
 errors "type_error", "cycle", "json_number", "json_key", "json_depth", "not_data", "number_range"
 charge sum(8, deep(value), size(result))
-body {
-  let verbatim = set{"map", "tuple"}
-  return json.render(value, verbatim, absent, (-5, 21, true, false))
-}
+body { return json.boundary(value, "text", "JSON.stringify", "$", "") }
 
 # `console.log` and its siblings: one print of the arguments joined by a
 # space, a plain object or an array as compact JSON and anything else as its
 # ToString.
-function ts.console.log(this: Any, args: List(Any)) -> Any
+function ts.console.write(args: List(Any), context: Text) -> Any
 kernel 1
 errors "type_error"
 charge sum(4, deep(args))
 body {
   let pieces = []
+  let index = 0
   for item in args metered 2 {
     let k = invoke ts.receiver(item)
     let structured = same(k, "record")
@@ -35,15 +34,46 @@ body {
       set structured = same(k, "list")
     }
     if structured {
-      let copied = invoke ts.boundary(item)
-      let piece = invoke ts.console.json(copied)
+      let path = text.join(["$[", num.to_text(index), "]"], "")
+      let piece = json.boundary(item, "text", context, path, "")
       set pieces[list.len(pieces)] = piece
     } else {
       let piece = invoke ts.to_string(item)
       set pieces[list.len(pieces)] = piece
     }
+    set index = num.add(index, 1)
   }
   let line = text.join(pieces, " ")
   print line
   return absent
 }
+
+function ts.console.log(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge sum(4, deep(args))
+body { return invoke ts.console.write(args, "console.log") }
+
+function ts.console.warn(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge sum(4, deep(args))
+body { return invoke ts.console.write(args, "console.warn") }
+
+function ts.console.error(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge sum(4, deep(args))
+body { return invoke ts.console.write(args, "console.error") }
+
+function ts.console.info(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge sum(4, deep(args))
+body { return invoke ts.console.write(args, "console.info") }
+
+function ts.console.debug(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge sum(4, deep(args))
+body { return invoke ts.console.write(args, "console.debug") }

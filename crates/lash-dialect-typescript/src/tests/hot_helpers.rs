@@ -52,69 +52,19 @@ const USES: [&str; 25] = [
     "ts.number.format_value",
 ];
 
-/// `ts.boundary` as it was before `collection.holds_none` let plain data
-/// cross uncopied, with the program's function tokens left to the run's
-/// copy-out (FIG-6381), with the token-specific refusal text from FIG-7285.
+/// Independent eager copy oracle. Boundary copying preserves every value;
+/// JSON normalization is exclusively the encoder's responsibility (FIG-7637).
 const FORMER_BOUNDARY: &str = r#"
 function former_boundary(value: Any) -> Any
 kernel 1
 metering statements
 body {
   let k = kind(value)
-  if same(k, "text") { return value }
-  if same(k, "float") { return value }
-  if same(k, "tuple") {
-    if same(value, ()) { return value }
-    if same(value[0], "ts.function") {
-      if same(value[1], "") { return value }
-      throw error.new("not_data", "A built-in function is not data", null)
-    }
-    if same(value[0], "ts.object") { throw error.new("not_data", "A built-in object is not data", null) }
-    return value
-  }
   if same(k, "set") { return set.copy_deep(value) }
-  let copied = value
-  if same(k, "list") { set copied = list.copy_deep(value) } else {
-    if same(k, "record") { set copied = record.copy_deep(value) } else {
-      if same(k, "map") { set copied = map.copy_deep(value) } else { return value }
-    }
-  }
-  let pending = [copied]
-  while num.lt(0, list.len(pending)) {
-    let last = num.sub(list.len(pending), 1)
-    let item = pending[last]
-    remove pending[last]
-    let children = item
-    if same(kind(item), "list") {
-      let index = 0
-      while num.lt(index, list.len(item)) {
-        let child = item[index]
-        if same(child, ()) { set item[index] = null }
-        if same(child, absent) { set item[index] = null }
-        set index = num.add(index, 1)
-      }
-    } else {
-      if same(kind(item), "record") { set children = record.values(item) } else { set children = map.values(item) }
-    }
-    for child in children {
-      let ck = kind(child)
-      if same(ck, "float") {} else { if same(ck, "text") {} else {
-        if same(ck, "tuple") {
-          if same(child, ()) {} else {
-            if same(child[0], "ts.function") {
-              if same(child[1], "") {} else { throw error.new("not_data", "A built-in function is not data", null) }
-            }
-            if same(child[0], "ts.object") { throw error.new("not_data", "A built-in object is not data", null) }
-          }
-        } else {
-          if same(ck, "list") { set pending[list.len(pending)] = child }
-          if same(ck, "record") { set pending[list.len(pending)] = child }
-          if same(ck, "map") { set pending[list.len(pending)] = child }
-        }
-      } }
-    }
-  }
-  return copied
+  if same(k, "list") { return list.copy_deep(value) }
+  if same(k, "record") { return record.copy_deep(value) }
+  if same(k, "map") { return map.copy_deep(value) }
+  return value
 }
 "#;
 
@@ -509,13 +459,9 @@ fn values(seed: u64, rounds: u32) -> Vec<Datum> {
     values
 }
 
-/// `ts.boundary` answers what its former body answered, raises what it
-/// raised and prints what it printed, and leaves the guest's value as it
-/// left it: for generated plain values and traps (holes, absent slots,
-/// function and built-in tokens, raw closures, other tuples, errors, maps,
-/// sets, shared values, cycles), and for nesting at and past the deep
-/// copy's 128 levels, also where the order a shared value is first reached
-/// decides its depth. A plain container costs less than before.
+/// FIG-7637: the optimized copy agrees with an independent eager copy on
+/// guest membership and values, including holes, undefined, tokens and aliases.
+/// Plain containers still avoid the eager copy's allocation and charge.
 #[test]
 fn the_boundary_matches_its_former_copy_and_walk() {
     let mut modes: Vec<u16> = (0..12).collect();

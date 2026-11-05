@@ -45,6 +45,6 @@ pub use store::{
     ParkedState, RootRead, Saved, SealedPark, Settled, outcome_of,
 };
 pub use value::{
-    InvalidJson, JsonlessKind, NotJson, datum_from_json, datum_from_json_with_limits,
-    datum_to_json, datum_to_json_with_limits,
+    InvalidJson, JsonModel, datum_from_json, datum_from_json_with_limits, datum_to_json,
+    datum_to_json_with_limits,
 };

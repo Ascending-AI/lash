@@ -32,6 +32,7 @@ use super::host::{CellArgs, CellHostLedgers, TOOL_CALL_LIMIT, refused};
 
 /// The reads one activation of a cell answers.
 pub(super) struct CellReads {
+    pub json_model: lash_kernel_lib::JsonModel,
     /// Each planned effect's route on this node.
     pub routes: BTreeMap<OperationUse, lash_core::ReadRoute>,
     pub history: Arc<lash_core::ReadHistory>,
@@ -109,8 +110,8 @@ impl EffectReads for CellReads {
                 }
             };
         }
-        let input = CellArgs::Direct
-            .args(args)
+        let input = CellArgs::Direct(self.json_model)
+            .args(args, route.definition.id().as_str())
             .map_err(|refusal| ReadFailure::Arguments(refusal.error(effect).message));
         let metadata = lash_core::ToolReadMetadata {
             caller: self.caller.clone(),

@@ -135,7 +135,11 @@ impl CellHostLedgers {
     /// names against the typed results in the call ledger, never against
     /// metadata guessed from the text. An unprinted result is not an image
     /// observation. Keep first-print order and show each image once.
-    pub(super) fn printed_images(&self, prints: &[Datum]) -> Vec<lash_core::AttachmentRef> {
+    pub(super) fn printed_images(
+        &self,
+        prints: &[Datum],
+        model: lash_kernel_lib::JsonModel,
+    ) -> Vec<lash_core::AttachmentRef> {
         let available: Vec<_> = self
             .calls
             .iter()
@@ -147,7 +151,7 @@ impl CellHostLedgers {
         for value in prints {
             let text = match value {
                 Datum::Text(text) => text.clone(),
-                value => crate::cell_value::datum_json(value).to_string(),
+                value => crate::cell_value::datum_json(value, model, "print").to_string(),
             };
             let mut mentioned: Vec<_> = available
                 .iter()
@@ -493,12 +497,16 @@ impl CellHost<'_> {
             self.envelope.environment.uses.get(&request.use_),
             Some(UseBinding::Deferred(_))
         ) {
-            CellArgs::Deferred
+            CellArgs::Deferred(lash_kernel_lib::JsonModel::for_dialect(
+                &self.envelope.dialect,
+            ))
         } else {
-            CellArgs::Direct
+            CellArgs::Direct(lash_kernel_lib::JsonModel::for_dialect(
+                &self.envelope.dialect,
+            ))
         };
         let args = projection
-            .args(&request.args)
+            .args(&request.args, route.tool.as_str())
             .map_err(|refusal| refusal.error(&request.use_))?;
         let invocation = ToolInvocation::new(call, route.tool.clone(), args)
             .with_issuing_language_node_id(request.identity.position().to_string())
@@ -548,41 +556,57 @@ impl ArgsRefusal {
     }
 }
 
-/// How a cell's arguments become a tool call's JSON: the one input record
-/// as it left the cell, its whole numbers below 2^53 integers in either
-/// dialect (`Float::json_number`) and each function value in its transport
-/// form. It reads data only: a frozen request holds the arguments that left
-/// the cell under this projection's identity, never the JSON it makes
-/// (FIG-5887 §3), and reads back the same on any later build.
+/// A frozen argument projection retains the source model and uses the same
+/// host encoder as live admission. It reads data only: a frozen request holds
+/// the arguments that left the cell under this projection's identity, never
+/// the JSON it makes (FIG-5887 §3), and reads back the same on any later build.
 pub(super) enum CellArgs {
-    Direct,
-    Deferred,
+    Direct(lash_kernel_lib::JsonModel),
+    Deferred(lash_kernel_lib::JsonModel),
 }
 
 /// The projection identity of a call's arguments.
-pub(super) const CALL_ARGS: &str = "lash-cell-args/v1";
-const DEFERRED_CALL_ARGS: &str = "lash-cell-deferred-args/v1";
+pub(super) const CALL_ARGS: &str = "lash-cell-args/v2";
+/// version_surface = "coexist"
+/// version_guard(unshaped = "names a frozen argument projection; FrozenRequest owns the stored argument shape")
+const JS_CALL_ARGS: &str = "lash-cell-js-args/v2";
+/// version_surface = "coexist"
+/// version_guard(unshaped = "names a frozen argument projection; FrozenRequest owns the stored argument shape")
+const JS_DEFERRED_CALL_ARGS: &str = "lash-cell-js-deferred-args/v2";
+const DEFERRED_CALL_ARGS: &str = "lash-cell-deferred-args/v2";
 
 impl CellArgs {
     /// The projection named `id`.
     pub(super) fn named(id: &str) -> Result<Self, String> {
         match id {
-            CALL_ARGS => Ok(Self::Direct),
-            DEFERRED_CALL_ARGS => Ok(Self::Deferred),
+            CALL_ARGS => Ok(Self::Direct(lash_kernel_lib::JsonModel::Kernel)),
+            JS_CALL_ARGS => Ok(Self::Direct(lash_kernel_lib::JsonModel::JavaScript)),
+            DEFERRED_CALL_ARGS => Ok(Self::Deferred(lash_kernel_lib::JsonModel::Kernel)),
+            JS_DEFERRED_CALL_ARGS => Ok(Self::Deferred(lash_kernel_lib::JsonModel::JavaScript)),
             other => Err(format!("no argument projection `{other}`")),
         }
     }
 
-    pub(super) fn args(&self, args: &[Datum]) -> Result<serde_json::Value, ArgsRefusal> {
-        let args = lash_vm_runtime::tool_arguments(args, matches!(self, Self::Deferred))
+    pub(super) fn args(
+        &self,
+        args: &[Datum],
+        context: &str,
+    ) -> Result<serde_json::Value, ArgsRefusal> {
+        let args = lash_vm_runtime::tool_arguments(args, matches!(self, Self::Deferred(_)))
             .map_err(ArgsRefusal::NotJson)?;
         lash_vm_runtime::tool_input(
             args,
             |input| {
-                datum_to_json(input)
-                    .map_err(|error| error.to_string())
-                    .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
-                    .map_err(ArgsRefusal::NotJson)
+                datum_to_json(
+                    input,
+                    match self {
+                        Self::Direct(model) | Self::Deferred(model) => *model,
+                    },
+                    context,
+                )
+                .map_err(|error| error.to_string())
+                .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
+                .map_err(ArgsRefusal::NotJson)
             },
             ArgsRefusal::Arity,
         )
@@ -592,13 +616,15 @@ impl CellArgs {
 impl lash_vm_broker::kernel::graph::ArgumentProjection for CellArgs {
     fn id(&self) -> &str {
         match self {
-            Self::Direct => CALL_ARGS,
-            Self::Deferred => DEFERRED_CALL_ARGS,
+            Self::Direct(lash_kernel_lib::JsonModel::Kernel) => CALL_ARGS,
+            Self::Deferred(lash_kernel_lib::JsonModel::Kernel) => DEFERRED_CALL_ARGS,
+            Self::Direct(lash_kernel_lib::JsonModel::JavaScript) => JS_CALL_ARGS,
+            Self::Deferred(lash_kernel_lib::JsonModel::JavaScript) => JS_DEFERRED_CALL_ARGS,
         }
     }
 
     fn project(&self, args: &[Datum]) -> Result<serde_json::Value, String> {
-        self.args(args).map_err(|refusal| match refusal {
+        self.args(args, "tool").map_err(|refusal| match refusal {
             ArgsRefusal::NotJson(problem) => problem,
             ArgsRefusal::Arity(count) => format!("{count} arguments, not one input record"),
         })

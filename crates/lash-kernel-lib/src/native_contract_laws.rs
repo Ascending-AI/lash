@@ -95,49 +95,58 @@ pub(crate) fn scratch(bytes: u64) -> ScratchLease {
     ScratchLease(bytes)
 }
 fn observed_local(args: lash_kernel_doc::Args<'_>, value: &Value) -> u64 {
-    Cost::REFERENCE
+    try_observed_local(args, value).unwrap()
+}
+fn try_observed_local(args: lash_kernel_doc::Args<'_>, value: &Value) -> Result<u64, NativeError> {
+    Ok(Cost::REFERENCE
         + match value {
             Value::Int(n) => n
                 .unsigned_abs()
                 .checked_ilog2()
                 .map_or(0, |b| u64::from(b + 1).div_ceil(8)),
-            Value::BigInt(_) => args.integer(value).unwrap().unwrap().bits().div_ceil(8),
+            Value::BigInt(_) => args.integer(value)?.unwrap().bits().div_ceil(8),
             Value::Timestamp(n) => n
                 .unsigned_abs()
                 .checked_ilog2()
                 .map_or(0, |b| u64::from(b + 1).div_ceil(8)),
-            Value::BigTimestamp(_) => args.timestamp(value).unwrap().unwrap().bits().div_ceil(8),
-            Value::Text(_) | Value::LongText(_) => args.text(value).unwrap().unwrap().len(),
-            Value::Bytes(_) => args.bytes(value).unwrap().unwrap().len(),
-            Value::Tuple(_) => args
-                .sequence(value)
-                .unwrap()
-                .unwrap()
-                .chunks()
-                .map(|c| {
-                    c.unwrap()
-                        .iter()
-                        .map(|v| observed_local(args, v))
-                        .sum::<u64>()
-                })
-                .sum(),
+            Value::BigTimestamp(_) => args.timestamp(value)?.unwrap().bits().div_ceil(8),
+            Value::Text(_) | Value::LongText(_) => args.text(value)?.unwrap().len(),
+            Value::Bytes(_) => args.bytes(value)?.unwrap().len(),
+            Value::Tuple(_) => {
+                args.sequence(value)?
+                    .unwrap()
+                    .chunks()
+                    .try_fold(0, |sum, chunk| {
+                        chunk?.iter().try_fold(sum, |sum, v| {
+                            Ok::<_, NativeError>(sum + try_observed_local(args, v)?)
+                        })
+                    })?
+            }
             Value::Error(_) => {
-                let e = args.error(value).unwrap().unwrap();
-                args.text(&e.kind).unwrap().unwrap().len()
-                    + args.text(&e.message).unwrap().unwrap().len()
-                    + observed_local(args, &e.data)
+                let e = args.error(value)?.unwrap();
+                args.text(&e.kind)?.unwrap().len()
+                    + args.text(&e.message)?.unwrap().len()
+                    + try_observed_local(args, &e.data)?
             }
             Value::Function(_) => 64,
             Value::Handle(_) => {
-                let h = args.host_handle(value).unwrap().unwrap();
+                let h = args.host_handle(value)?.unwrap();
                 (h.kind.len() + h.id.len()) as u64
             }
             _ => 0,
-        }
+        })
 }
 
 pub(crate) fn scratch_values(args: lash_kernel_doc::Args<'_>, values: &[Value]) -> ScratchLease {
     scratch(values.iter().map(|value| observed_local(args, value)).sum())
+}
+pub(crate) fn try_scratch_values(
+    args: lash_kernel_doc::Args<'_>,
+    values: &[Value],
+) -> Result<ScratchLease, NativeError> {
+    Ok(scratch(values.iter().try_fold(0, |sum, value| {
+        Ok::<_, NativeError>(sum + try_observed_local(args, value)?)
+    })?))
 }
 pub(crate) fn new_values_bytes(
     args: lash_kernel_doc::Args<'_>,
@@ -235,7 +244,7 @@ pub(crate) fn observe_power_scratch(
     POWER_SCRATCH.with(|peak| peak.set(peak.get().max(bytes)));
 }
 use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionRegistry, Integer, LogicalHeldV1 as Cost,
+    Datum, ErrorDatum, FunctionRegistry, Integer, LogicalHeldV1 as Cost, NativeError,
     NativeResourceContract as Contract, NativeResourceEntity as Entity,
     NativeResourceEvent as Event, NativeResourceExit as Exit, NativeResourceOrigin as Origin,
     NewObject, Value,
@@ -878,6 +887,9 @@ fn more_shapes(registry: &FunctionRegistry) -> usize {
                 int(width),
                 Datum::Bool(fractional),
                 Datum::Tuple(vec![text("reserved"), text("other"), text("private")]),
+                Datum::Absent,
+                Datum::Bool(false),
+                Datum::Bool(false),
             ]);
             cases.push((
                 "json.encode".to_owned(),

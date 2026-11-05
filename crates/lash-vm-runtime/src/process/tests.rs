@@ -749,6 +749,7 @@ fn a_process_charge_bound_retains_limit_observation_and_consumption() {
         let output = super::run::outcome_of_end(
             lash_kernel_vm::End::Error(lash_kernel_vm::RunError::Bound(exceeded)),
             meters,
+            lash_vm_broker::kernel::JsonModel::Kernel,
         );
         let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output
         else {

@@ -20,6 +20,7 @@ impl CodeModeExecutionState {
         &mut self,
         pages: Option<&SessionPages>,
     ) -> Result<Vec<(String, crate::session_globals::SessionGlobalKind)>, SessionError> {
+        let model = lash_kernel_lib::JsonModel::for_dialect(self.dialect());
         self.note_pages(pages);
         self.load_names().await.map_err(protocol)?;
         self.load_functions().await.map_err(protocol)?;
@@ -45,7 +46,7 @@ impl CodeModeExecutionState {
                     let mut read = Vec::with_capacity(unread.len());
                     for name in &unread {
                         if let Some(value) = editor.preview(name, PREVIEW_BYTES)? {
-                            read.push((name.clone(), kind(&value)));
+                            read.push((name.clone(), kind(&value, model)));
                         }
                     }
                     Ok(read)
@@ -60,7 +61,7 @@ impl CodeModeExecutionState {
                 let kind = match self.view.values.get(&name) {
                     Some(kind) => kind.clone(),
                     None => match self.defaults.get(&name) {
-                        Some(value) => default_kind(&value.datum),
+                        Some(value) => default_kind(&value.datum, model),
                         None => return None,
                     },
                 };
@@ -81,9 +82,9 @@ impl CodeModeExecutionState {
     }
 }
 
-fn kind(value: &SessionValue) -> SessionGlobalKind {
+fn kind(value: &SessionValue, model: lash_kernel_lib::JsonModel) -> SessionGlobalKind {
     match value {
-        SessionValue::Data(datum) => data_kind(datum),
+        SessionValue::Data(datum) => data_kind(datum, model),
         SessionValue::Opaque => SessionGlobalKind::Opaque,
         SessionValue::Unpreviewed { kind, extent } => SessionGlobalKind::Unpreviewed {
             kind: (*kind).into(),
@@ -92,19 +93,23 @@ fn kind(value: &SessionValue) -> SessionGlobalKind {
     }
 }
 
-fn data_kind(datum: &Datum) -> SessionGlobalKind {
+fn data_kind(datum: &Datum, model: lash_kernel_lib::JsonModel) -> SessionGlobalKind {
     match datum {
         Datum::Handle(handle) => SessionGlobalKind::Handle {
             kind: handle.kind.clone(),
             id: handle.id.clone(),
         },
-        datum => SessionGlobalKind::Data(crate::cell_value::datum_json(datum)),
+        datum => SessionGlobalKind::Data(crate::cell_value::datum_json(
+            datum,
+            model,
+            "session.binding",
+        )),
     }
 }
 
-fn default_kind(datum: &Datum) -> SessionGlobalKind {
+fn default_kind(datum: &Datum, model: lash_kernel_lib::JsonModel) -> SessionGlobalKind {
     if datum_fits(datum, &mut { PREVIEW_BYTES }, 0) {
-        return data_kind(datum);
+        return data_kind(datum, model);
     }
     let (kind, extent) = match datum {
         Datum::Text(text) => ("text", text.len()),
