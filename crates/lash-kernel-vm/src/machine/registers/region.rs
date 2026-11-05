@@ -49,3 +49,35 @@ impl Registers {
         Ok(Some((cursor.pc, cursor.prefix)))
     }
 }
+
+impl Registers {
+    pub(in crate::machine) fn region_frames_image(
+        task: lash_kernel_doc::TaskId,
+        frames: &[crate::machine::region_isa::reconstruct::FrameImage],
+        cursor: RegionCursor,
+    ) -> Result<Self, HeapFault> {
+        let mut result = Self {
+            region_cursor: Some(cursor),
+            ..Self::default()
+        };
+        for frame in frames {
+            for (slot, value) in &frame.roles {
+                if !matches!(
+                    slot,
+                    lash_kernel_state::kernel_internals::logical::Slot::Binding(_)
+                        | lash_kernel_state::kernel_internals::logical::Slot::Capture(_)
+                ) {
+                    result.region.push((
+                        lash_kernel_state::kernel_internals::logical::Owner::Value {
+                            task,
+                            invocation: frame.invocation,
+                            slot: *slot,
+                        },
+                        *value,
+                    ));
+                }
+            }
+        }
+        Ok(result)
+    }
+}

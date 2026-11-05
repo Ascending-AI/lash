@@ -398,3 +398,90 @@ fn static_body_entry_uses_its_own_bank_and_exact_frame_limits() {
         assert_eq!((machine.charged, machine.logical_memory.get()), canonical);
     }
 }
+
+/// K-EVAL-008/K-FN-004: stopping inside an entered body publishes both
+/// activations, with arguments moved to their actual callee bindings once.
+#[test]
+fn an_active_static_call_preserves_both_canonical_frames() {
+    for commit in [false, true] {
+        let mut run = call_machine();
+        let machine = &mut run.machine;
+        machine.current = Some(TaskId::MAIN);
+        let root = machine.frame(TaskId::MAIN).unwrap().code;
+        let caller = machine.frame(TaskId::MAIN).unwrap().invocation;
+        let draft = compile_region(&machine.exe, root).unwrap();
+        let calls = compile_calls(&machine.exe, &draft).unwrap();
+        let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
+        let stamp = machine.logical.borrow().stamp();
+        let before = (machine.charged, machine.logical_memory.get());
+        let mut lease = RegionLease::acquire(machine, program).unwrap();
+        for _ in 0..3 {
+            assert_eq!(
+                lease.run(StopAt::NextLegalPrefix).unwrap(),
+                RegionStop::Handoff
+            );
+        }
+        let prefix = lease.materialize().unwrap();
+        let image = prefix.reconstruction();
+        assert_eq!(image.frames.len(), 2);
+        assert_eq!(
+            (image.frames[0].program, image.frames[0].invocation),
+            (root, caller)
+        );
+        assert!(image.frames[0].roles.is_empty());
+        let values: Vec<_> = image.frames[1]
+            .roles
+            .iter()
+            .filter_map(|(slot, value)| {
+                matches!(
+                    slot,
+                    lash_kernel_state::kernel_internals::logical::Slot::Binding(_)
+                )
+                .then_some(*value)
+            })
+            .collect();
+        assert_eq!(values.len(), 3);
+        for (actual, expected) in values
+            .iter()
+            .zip([Value::Int(7), Value::Int(9), Value::Absent])
+        {
+            assert!(actual.same(&expected));
+        }
+        let canonical = image.canonical.as_ref().unwrap();
+        assert_eq!(
+            canonical.frames[0]
+                .source_frontier
+                .as_ref()
+                .unwrap()
+                .position()
+                .at
+                .phase,
+            crate::compile::room::Phase::Commit
+        );
+        let library = canonical.frames[1].library.as_ref().unwrap();
+        assert_eq!(library.args.len(), 3);
+        assert!(library.args[2].same(&Value::Absent));
+        let prepared = prefix.prepare_exit().unwrap();
+        if commit {
+            assert_eq!(prepared.commit().unwrap(), RegionStop::Handoff);
+            let task = machine.tasks.get_mut(0).unwrap().unwrap();
+            assert_eq!(task.frames.len(), 2);
+            let top = task.frames.last_mut().unwrap().unwrap();
+            assert_ne!(top.invocation, caller);
+            for (actual, expected) in
+                top.slot_states()
+                    .iter()
+                    .zip([Value::Int(7), Value::Int(9), Value::Absent])
+            {
+                assert!(
+                    matches!(actual, crate::machine::SlotState::Value(value) if value.same(&expected))
+                );
+            }
+        } else {
+            drop(prepared);
+            assert!(machine.logical.borrow().is_current(&stamp));
+            assert_eq!((machine.charged, machine.logical_memory.get()), before);
+            assert_eq!(machine.tasks.get_mut(0).unwrap().unwrap().frames.len(), 1);
+        }
+    }
+}

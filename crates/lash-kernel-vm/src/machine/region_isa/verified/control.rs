@@ -120,15 +120,25 @@ impl Running<'_> {
     }
 
     pub(super) fn controls(&self) -> Result<Controls, RegionError> {
-        let point = &self
-            .code
+        self.controls_for(&self.code, self.pc, self.frame_index())
+    }
+
+    pub(super) fn controls_for(
+        &self,
+        code: &super::Code,
+        pc: Pc,
+        frame: usize,
+    ) -> Result<Controls, RegionError> {
+        let point = &code
             .program
-            .step(self.pc)
+            .step(pc)
             .ok_or_else(|| invalid(Refused::Path))?
             .at;
         let mut values = Vec::new();
         self.place(
-            self.code.exe.code(self.code.program.code()).body,
+            code,
+            frame,
+            code.exe.code(code.program.code()).body,
             point,
             &mut values,
         )?;
@@ -137,12 +147,13 @@ impl Running<'_> {
 
     fn place(
         &self,
+        code: &super::Code,
+        frame: usize,
         block: BlockId,
         point: &Point,
         values: &mut Vec<Control>,
     ) -> Result<(), RegionError> {
         use crate::compile::room::Phase;
-        let code = &self.code;
         let source = code.exe.block(block);
         if point.site == source.site {
             if point.phase != Phase::Enter {
@@ -168,7 +179,7 @@ impl Running<'_> {
             let site = &code.exe.block(*child).site;
             point.site.unit == site.unit && point.site.path.starts_with(&site.path)
         });
-        let start = self.frame_index() * self.programs.loops;
+        let start = frame * self.programs.loops;
         let active = self.loops[start..start + self.programs.loops]
             .iter()
             .enumerate()
@@ -197,7 +208,7 @@ impl Running<'_> {
             _ => {}
         }
         if let Some(nested) = nested {
-            self.place(nested, point, values)?;
+            self.place(code, frame, nested, point, values)?;
         }
         Ok(())
     }

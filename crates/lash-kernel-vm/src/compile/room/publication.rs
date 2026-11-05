@@ -174,6 +174,40 @@ impl Frontier {
             identity: std::rc::Rc::new(()),
         })
     }
+    /// The sealed executor supplies the actual invocation from its state
+    /// reservation. This view grants no ledger or publication authority.
+    pub(crate) fn region_callee(
+        &self,
+        source: &Arc<Source>,
+        invocation: &Invocation,
+        link: lash_kernel_value::content_ids::LinkId,
+        kernel: doc::KernelVersion,
+        position: Position,
+    ) -> Result<Self, HeapFault> {
+        source
+            .verify()
+            .map_err(|_| fault("region callee source is invalid"))?;
+        if invocation.frame()
+            != (logical::Owner::Frame {
+                task: self.position.occurrence.task,
+                invocation: position.occurrence.invocation,
+            })
+            || invocation.id() != position.occurrence.invocation
+            || position.occurrence.task != self.position.occurrence.task
+            || !source.valid_position(&position)
+        {
+            return Err(fault("region callee left its reserved invocation"));
+        }
+        Ok(Self {
+            source: Arc::clone(source),
+            link,
+            kernel,
+            position,
+            proven: false,
+            revision: 0,
+            identity: std::rc::Rc::new(()),
+        })
+    }
     pub(crate) fn position(&self) -> &Position {
         &self.position
     }

@@ -3,6 +3,7 @@ mod acquire;
 mod bind;
 mod call_bind;
 mod calls;
+mod canonical;
 mod charge;
 mod control;
 mod flow;

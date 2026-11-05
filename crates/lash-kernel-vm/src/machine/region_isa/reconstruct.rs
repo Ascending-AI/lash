@@ -4,14 +4,14 @@ use super::*;
 use lash_kernel_state::kernel_internals::logical::Slot;
 
 #[derive(Clone, Debug)]
-pub(super) struct FrameImage<T = Value> {
-    pub(super) program: CodeId,
-    pub(super) invocation: u64,
-    pub(super) pc: u32,
-    pub(super) continuation: Point,
-    pub(super) roles: Box<[(Slot, T)]>,
-    pub(super) operands: Box<[T]>,
-    pub(super) pending: Option<T>,
+pub(in crate::machine) struct FrameImage<T = Value> {
+    pub(in crate::machine) program: CodeId,
+    pub(in crate::machine) invocation: u64,
+    pub(in crate::machine) pc: u32,
+    pub(in crate::machine) continuation: Point,
+    pub(in crate::machine) roles: Box<[(Slot, T)]>,
+    pub(in crate::machine) operands: Box<[T]>,
+    pub(in crate::machine) pending: Option<T>,
 }
 
 pub(super) struct Finished<V: View> {

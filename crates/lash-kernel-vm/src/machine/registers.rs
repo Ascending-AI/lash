@@ -266,45 +266,6 @@ impl Registers {
     {
         self.source.live_values().chain(self.region.iter().copied())
     }
-    pub(in crate::machine) fn region_image(
-        task: lash_kernel_doc::TaskId,
-        invocation: u64,
-        roles: &[(lash_kernel_state::kernel_internals::logical::Slot, Value)],
-        cursor: RegionCursor,
-    ) -> Result<Self, HeapFault> {
-        let mut region = Vec::new();
-        region
-            .try_reserve_exact(roles.len())
-            .map_err(|_| HeapFault::Exhausted {
-                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
-            })?;
-        region.extend(
-            roles
-                .iter()
-                .filter(|(slot, _)| {
-                    !matches!(
-                        slot,
-                        lash_kernel_state::kernel_internals::logical::Slot::Binding(_)
-                            | lash_kernel_state::kernel_internals::logical::Slot::Capture(_)
-                    )
-                })
-                .map(|(slot, value)| {
-                    (
-                        lash_kernel_state::kernel_internals::logical::Owner::Value {
-                            task,
-                            invocation,
-                            slot: *slot,
-                        },
-                        *value,
-                    )
-                }),
-        );
-        Ok(Self {
-            region_cursor: Some(cursor),
-            region,
-            ..Self::default()
-        })
-    }
     pub(super) fn source_owners(&self) -> Vec<lash_kernel_state::kernel_internals::logical::Owner> {
         self.source
             .live_owners()

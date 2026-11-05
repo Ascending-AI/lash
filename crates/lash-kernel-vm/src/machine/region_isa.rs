@@ -22,7 +22,7 @@ mod live;
 mod operands;
 mod programs;
 mod publication;
-mod reconstruct;
+pub(in crate::machine) mod reconstruct;
 mod registers;
 mod returns;
 mod source_counters;

@@ -6,6 +6,7 @@ use crate::compile::room::charges::region_isa::ChargeMoment;
 use lash_kernel_state::kernel_internals::logical::LeaseOp;
 
 pub(super) struct Parked {
+    pub(super) callee: lash_kernel_state::kernel_internals::logical::Invocation,
     pub(super) code: Arc<Code>,
     pub(super) pc: Pc,
     pub(super) prefix: PrefixId,
@@ -114,7 +115,7 @@ impl Running<'_> {
         )?;
         let reserved = self.invocations.prepare()?;
         // This checks the actual D reservation before reusing a frame bank.
-        self.invocations.next_identity(reserved)?;
+        let identity = self.invocations.next_identity(reserved)?;
         let frame = depth
             .checked_add(1)
             .ok_or_else(|| invalid(Refused::Facts))?;
@@ -205,6 +206,7 @@ impl Running<'_> {
             caller_program: caller.program.code(),
         };
         let parked = Parked {
+            callee: identity,
             code: Arc::clone(&caller),
             pc: self.pc,
             prefix: self.prefix,
