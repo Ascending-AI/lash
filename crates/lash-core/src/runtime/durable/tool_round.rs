@@ -769,10 +769,7 @@ pub(super) fn report_answered_cell(
                 lash_durable::domain::ToolCallWrite::Answer {
                     owner: execution,
                     call: fact.call_id.clone(),
-                    answer: lash_durable::domain::ToolCallAnswer {
-                        outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Read,
-                        body: Some(*body),
-                    },
+                    answer: lash_durable::domain::ToolCallAnswer::Read { body: *body },
                 },
             ));
         }

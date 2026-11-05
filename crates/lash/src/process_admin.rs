@@ -117,7 +117,7 @@ impl Processes {
             call_id,
         )
         .await?;
-        crate::turn::tool_call_read(call_id, read)
+        Ok(crate::turn::tool_call_read(call_id, read))
     }
 
     /// Read selected process calls in input order, preserving duplicates and misses.
@@ -133,11 +133,11 @@ impl Processes {
             calls,
         )
         .await?;
-        calls
+        Ok(calls
             .iter()
             .zip(reads)
             .map(|(call, read)| crate::turn::tool_call_read(call, read))
-            .collect()
+            .collect())
     }
 
     /// Saved reads in durable admission order, independent of live replay state.
@@ -155,10 +155,9 @@ impl Processes {
             let done = page.len() < 128;
             after = page.last().map(|(cursor, _)| cursor.clone());
             records.extend(page.into_iter().filter_map(|(_, read)| match read {
-                lash_core::call_store::CallRead::Settled {
-                    record: Some(record),
-                    ..
-                } => Some(*record),
+                lash_core::call_store::CallRead::Settled(answer) => {
+                    answer.into_body().map(|record| *record)
+                }
                 _ => None,
             }));
             if done {

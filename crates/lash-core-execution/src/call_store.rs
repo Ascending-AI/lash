@@ -3,9 +3,8 @@
 use std::collections::BTreeMap;
 
 use lash_core_store::checkpoint_graph::GraphDecoder;
-use lash_durable::domain::tool_calls::ToolCallSettlement;
 use lash_durable::domain::{
-    CallOwner, ToolCallCursor, ToolCallDecision, ToolCallSelection, ToolCalls,
+    CallOwner, ToolCallAnswer, ToolCallCursor, ToolCallDecision, ToolCallSelection, ToolCalls,
 };
 use lash_durable::{DurableError, DurableReads, StoreFailure, StoreFailureKind};
 
@@ -16,10 +15,8 @@ pub enum CallRead {
     Pending {
         decision: Option<ToolCallDecision>,
     },
-    Settled {
-        record: Option<Box<crate::ToolCallRecord>>,
-        outcome: ToolCallSettlement,
-    },
+    /// The answer with its archival body decoded.
+    Settled(ToolCallAnswer<Box<crate::ToolCallRecord>>),
 }
 
 fn corrupt(message: &str) -> DurableError {
@@ -41,35 +38,23 @@ fn decode(selected: &ToolCalls) -> Result<Vec<CallRead>, DurableError> {
                     decision: row.decision,
                 });
             };
-            if !answer.valid() {
-                return Err(corrupt("a call settlement and its body disagree"));
-            }
-            let record = answer
-                .body
-                .map(|body| {
-                    let record =
-                        crate::runtime::actor::round::graph::CallBody::load(&mut decoder, body)?
-                            .record;
-                    if record.call_id != row.call {
-                        return Err(corrupt("call row and archival body identities differ"));
-                    }
-                    Ok(Box::new(record))
-                })
-                .transpose()?;
-            if answer.outcome == ToolCallSettlement::Read
-                && record.as_ref().is_none_or(|record| {
-                    !matches!(
-                        record.classification,
-                        lash_protocol_types::ToolCallClassification::UnrecordedRead { .. }
-                    )
-                })
+            let answer = answer.clone().try_map_body(|body| {
+                let record =
+                    crate::runtime::actor::round::graph::CallBody::load(&mut decoder, body)?.record;
+                if record.call_id != row.call {
+                    return Err(corrupt("call row and archival body identities differ"));
+                }
+                Ok(Box::new(record))
+            })?;
+            if let ToolCallAnswer::Read { body: record } = &answer
+                && !matches!(
+                    record.classification,
+                    lash_protocol_types::ToolCallClassification::UnrecordedRead { .. }
+                )
             {
                 return Err(corrupt("a saved Read has no attributed archival body"));
             }
-            Ok(CallRead::Settled {
-                record,
-                outcome: answer.outcome.clone(),
-            })
+            Ok(CallRead::Settled(answer))
         })
         .collect()
 }
@@ -195,8 +180,8 @@ pub async fn execution_reads(
             if &row.execution != execution {
                 continue;
             }
-            let Some(body) = row.answer.as_ref().and_then(|answer| answer.body) else {
-                return Err(corrupt("a saved Read has no attributed archival body"));
+            let Some(ToolCallAnswer::Read { body }) = row.answer else {
+                return Err(corrupt("a saved-read row holds no saved Read"));
             };
             let fact = crate::runtime::actor::round::graph::load_read_fact(&mut decoder, body)
                 .map_err(DurableError::from)?;

@@ -913,7 +913,7 @@ const TOOL_TURN_COMMIT_ROUND_TRIPS: u64 = 1;
 async fn a_five_tool_turn_commits_each_boundary_in_one_call() {
     use lash_durable::domain::{
         CallOwner, ModelCallId, ModelCallPinWrite, ModelCallWrite, PromptCallKey, ToolCallAnswer,
-        ToolCallDecision, ToolCallWrite, tool_calls::ToolCallSettlement,
+        ToolCallDecision, ToolCallWrite,
     };
     use lash_protocol_types::llm::types::LlmCallId;
     let Some(owned) = owned("round-trips-five-tools").await else {
@@ -1003,9 +1003,9 @@ async fn a_five_tool_turn_commits_each_boundary_in_one_call() {
             owner: execution.clone(),
             call: call.clone(),
             fact,
-            answer: ToolCallAnswer {
-                outcome: ToolCallSettlement::Materialized(ToolCallDecision::Final),
-                body: Some(fact),
+            answer: ToolCallAnswer::Materialized {
+                decision: ToolCallDecision::Final,
+                body: fact,
             },
         }));
         let outcome = staged(&mut tx, NodeKind::ROUND_FACT, &format!("outcome {round}"));

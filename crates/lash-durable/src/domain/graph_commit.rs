@@ -120,12 +120,13 @@ fn encode_graph_write(out: &mut TokenWriter, write: &DomainWrite) -> Result<(), 
                     answer,
                     ..
                 } => {
-                    let outcome = serde_json::to_string(&answer.outcome).map_err(|error| {
-                        GraphRefusal::InvalidBody {
-                            kind: 0,
-                            reason: error.to_string(),
-                        }
-                    })?;
+                    let outcome =
+                        answer
+                            .stored_outcome()
+                            .map_err(|error| GraphRefusal::InvalidBody {
+                                kind: 0,
+                                reason: error.to_string(),
+                            })?;
                     let complete = matches!(write, ToolCallWrite::Complete { .. });
                     out.sum(if complete { 10 } else { 8 }, if complete { 5 } else { 4 });
                     out.text(&owner.stored());
@@ -134,7 +135,7 @@ fn encode_graph_write(out: &mut TokenWriter, write: &DomainWrite) -> Result<(), 
                         out.bytes(&fact.0);
                     }
                     out.text(&outcome);
-                    encode_node(out, answer.body.as_ref());
+                    encode_node(out, answer.body());
                 }
                 ToolCallWrite::Expire { owner } => {
                     out.sum(9, 1);

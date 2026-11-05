@@ -889,10 +889,7 @@ impl DurableSnapshotStore {
                 lash_durable::domain::ToolCallWrite::Answer {
                     owner: self.exec.owner(),
                     call,
-                    answer: lash_durable::domain::ToolCallAnswer {
-                        outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Read,
-                        body: Some(body),
-                    },
+                    answer: lash_durable::domain::ToolCallAnswer::Read { body },
                 },
             ));
         }
@@ -1183,10 +1180,7 @@ impl DurableSnapshotStore {
                 lash_durable::domain::ToolCallWrite::Answer {
                     owner: self.exec.owner(),
                     call: call.clone(),
-                    answer: lash_durable::domain::ToolCallAnswer {
-                        outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Read,
-                        body: Some(*body),
-                    },
+                    answer: lash_durable::domain::ToolCallAnswer::Read { body: *body },
                 },
             ));
         }

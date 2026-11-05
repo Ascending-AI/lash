@@ -187,10 +187,7 @@ impl PresentRecord {
                 lash_durable::domain::ToolCallWrite::Answer {
                     owner: self.owner.clone(),
                     call: call.clone(),
-                    answer: lash_durable::domain::ToolCallAnswer {
-                        outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Read,
-                        body: Some(*body),
-                    },
+                    answer: lash_durable::domain::ToolCallAnswer::Read { body: *body },
                 },
             ));
         }

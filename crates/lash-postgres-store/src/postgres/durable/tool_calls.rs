@@ -20,7 +20,7 @@ pub(super) static SQL: LazyLock<ToolCallStatements> =
 lash_store_sql::statements! {
     lazy
     struct ToolCallPostgresStatements @ "durable_tool_call_postgres" {
-        selected = "SELECT call_id, execution_owner, run_seq, member, decision, (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref,
+        selected = "SELECT call_id, execution_owner, run_seq, member, decision,
                 answer_outcome, (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref, admission_seq
             FROM tool_calls WHERE owner_key = ?1 AND call_id = ANY(?2)";
     }
@@ -73,11 +73,6 @@ pub(super) static EXPIRE: Entry = Entry::new(|| &SQL.delete_owner, &[Ty::Text], 
 pub(super) fn steps(_epoch: Epoch, write: &ToolCallWrite) -> Result<Vec<Step>, DurableError> {
     let number =
         |value| i64::try_from(value).map_err(|_| corrupt("tool call ordinal", "out of range"));
-    if let ToolCallWrite::Answer { answer, .. } | ToolCallWrite::Complete { answer, .. } = write
-        && !answer.valid()
-    {
-        return Err(corrupt("tool call", "settlement and body disagree"));
-    }
     let (entry, values) = match write {
         ToolCallWrite::Expire { owner } => {
             return Ok(vec![Step::any(&EXPIRE, vec![Value::text(owner.stored())])]);
@@ -146,10 +141,11 @@ pub(super) fn steps(_epoch: Epoch, write: &ToolCallWrite) -> Result<Vec<Step>, D
                 Value::text(call.as_str()),
                 Value::key(fact.to_hex()),
                 Value::text(
-                    serde_json::to_string(&answer.outcome)
+                    answer
+                        .stored_outcome()
                         .map_err(|error| corrupt("tool call outcome", &error.to_string()))?,
                 ),
-                Value::Key(answer.body.map(|node| node.to_hex())),
+                Value::Key(answer.body().map(NodeId::to_hex)),
                 Value::Bool(answer.cancelled()),
             ],
         ),
@@ -163,10 +159,11 @@ pub(super) fn steps(_epoch: Epoch, write: &ToolCallWrite) -> Result<Vec<Step>, D
                 Value::text(owner.stored()),
                 Value::text(call.as_str()),
                 Value::text(
-                    serde_json::to_string(&answer.outcome)
+                    answer
+                        .stored_outcome()
                         .map_err(|error| corrupt("tool call outcome", &error.to_string()))?,
                 ),
-                Value::Key(answer.body.map(|node| node.to_hex())),
+                Value::Key(answer.body().map(NodeId::to_hex)),
                 Value::Bool(answer.cancelled()),
             ],
         ),
@@ -204,7 +201,6 @@ type StoredCall = (
     i64,
     i64,
     Option<String>,
-    Option<crate::keys::Key>,
     Option<String>,
     Option<crate::keys::Key>,
     i64,
@@ -254,17 +250,7 @@ impl super::PostgresDurableStore {
                 let rows = rows
                     .into_iter()
                     .map(
-                        |(
-                            call,
-                            execution,
-                            run,
-                            member,
-                            decision,
-                            decision_ref,
-                            outcome,
-                            body,
-                            sequence,
-                        )| {
+                        |(call, execution, run, member, decision, outcome, body, sequence)| {
                             Ok(ToolCallRow {
                                 sequence: u64::try_from(sequence)
                                     .map_err(|_| corrupt("tool call order", "negative"))?,
@@ -287,21 +273,15 @@ impl super::PostgresDurableStore {
                                         return Err(corrupt("tool call decision", other));
                                     }
                                 },
-                                decision_fact: decision_ref
-                                    .as_ref()
-                                    .map(|node| super::node_ref(&node.0))
-                                    .transpose()?,
                                 answer: outcome
                                     .map(|outcome| {
-                                        Ok::<_, DurableError>(ToolCallAnswer {
-                                            outcome: serde_json::from_str(&outcome).map_err(
-                                                |_| corrupt("tool call outcome", &outcome),
-                                            )?,
-                                            body: body
-                                                .as_ref()
+                                        ToolCallAnswer::from_stored(
+                                            &outcome,
+                                            body.as_ref()
                                                 .map(|node| super::node_ref(&node.0))
                                                 .transpose()?,
-                                        })
+                                        )
+                                        .ok_or_else(|| corrupt("tool call answer", &outcome))
                                     })
                                     .transpose()?,
                             })
@@ -310,7 +290,7 @@ impl super::PostgresDurableStore {
                     .collect::<Result<Vec<_>, DurableError>>()?;
                 let roots: Vec<NodeId> = rows
                     .iter()
-                    .filter_map(|row| row.answer.as_ref().and_then(|answer| answer.body))
+                    .filter_map(|row| row.answer.as_ref().and_then(ToolCallAnswer::body).copied())
                     .collect();
                 let nodes = super::graph::walk_within(snapshot, &roots, &limits, None).await?;
                 Ok(ToolCalls {
@@ -350,7 +330,8 @@ pub(super) fn finish_reads_step(
     session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
 ) -> Result<Step, DurableError> {
-    let outcome = serde_json::to_string(&lash_durable::domain::tool_calls::interrupted_read())
+    let outcome = lash_durable::domain::tool_calls::interrupted_read()
+        .stored_outcome()
         .map_err(|error| corrupt("read terminal", &error.to_string()))?;
     Ok(Step::any(
         &FINISH_READS,

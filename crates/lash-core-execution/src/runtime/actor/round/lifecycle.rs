@@ -1460,7 +1460,7 @@ impl Lifecycle {
         use lash_core_store::checkpoint_graph::{
             EncodeBudget, ExplicitLimit, GraphRefusal, GraphStaging,
         };
-        use lash_durable::domain::{ToolCallWrite, tool_calls::ToolCallSettlement};
+        use lash_durable::domain::{ToolCallAnswer, ToolCallWrite};
         let records = tx
             .domain()
             .iter()
@@ -1481,10 +1481,7 @@ impl Lifecycle {
                 else {
                     return None;
                 };
-                if answer.body.is_some() {
-                    return None;
-                }
-                let ToolCallSettlement::Execution(outcome) = &answer.outcome else {
+                let ToolCallAnswer::Execution(outcome) = answer else {
                     return None;
                 };
                 let output = SettledOutput::new(outcome.as_ref().clone(), None).ok()?;

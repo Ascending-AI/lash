@@ -391,11 +391,10 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
     for (cursor, read) in page {
         match read {
             lash_core::call_store::CallRead::Pending { .. } => pending.push(cursor.call),
-            lash_core::call_store::CallRead::Settled {
-                record: Some(record),
-                ..
-            } => settled.push(*record),
-            _ => {}
+            lash_core::call_store::CallRead::Settled(answer) => {
+                settled.extend(answer.into_body().map(|record| *record));
+            }
+            lash_core::call_store::CallRead::Unknown => {}
         }
     }
     assert!(!pending.is_empty(), "the parked approval is a known call");

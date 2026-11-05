@@ -74,72 +74,148 @@ pub enum ToolCallDecision {
     Cancel,
 }
 
-/// Publication of a completed settlement. A body-free terminal is settled too.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ToolCallAnswer {
-    pub outcome: ToolCallSettlement,
-    pub body: Option<NodeId>,
+impl ToolCallDecision {
+    /// The winner a recorded terminal publishes.
+    #[must_use]
+    pub fn of(outcome: &lash_core_store::tool_run::AttemptOutcome) -> Self {
+        if matches!(
+            outcome,
+            lash_core_store::tool_run::AttemptOutcome::Cancelled { .. }
+        ) {
+            Self::Cancel
+        } else {
+            Self::Final
+        }
+    }
 }
 
-/// A recorded execution terminal or a caller-owned read saved without an attempt.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum ToolCallSettlement {
-    /// The canonical body holds the answer; only its winner is needed here.
-    Materialized(ToolCallDecision),
+/// Publication of a completed settlement, with the canonical body each
+/// settled kind requires. A body-free terminal is settled too. `Body` is the
+/// body's root on a row and its decoded record once a read hydrates it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ToolCallAnswer<Body = NodeId> {
+    /// The canonical body holds the answer; the row keeps only its winner.
+    Materialized {
+        decision: ToolCallDecision,
+        body: Body,
+    },
+    /// A recorded execution terminal with no archival body.
     Execution(Box<lash_core_store::tool_run::AttemptOutcome>),
+    /// A caller-owned read saved without an attempt.
+    Read { body: Body },
+}
+
+/// The stored `answer_outcome` column: the answer without its body.
+#[derive(serde::Serialize, serde::Deserialize)]
+enum StoredOutcome<Execution> {
+    Materialized(ToolCallDecision),
+    Execution(Execution),
     Read,
 }
 
-impl ToolCallSettlement {
-    /// Keep the terminal payload out of each directory row and batch slot.
-    pub fn execution(outcome: lash_core_store::tool_run::AttemptOutcome) -> Self {
-        Self::Execution(Box::new(outcome))
+impl<Body> ToolCallAnswer<Body> {
+    #[must_use]
+    pub fn body(&self) -> Option<&Body> {
+        match self {
+            Self::Materialized { body, .. } | Self::Read { body } => Some(body),
+            Self::Execution(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn into_body(self) -> Option<Body> {
+        match self {
+            Self::Materialized { body, .. } | Self::Read { body } => Some(body),
+            Self::Execution(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn cancelled(&self) -> bool {
+        match self {
+            Self::Materialized { decision, .. } => *decision == ToolCallDecision::Cancel,
+            Self::Execution(outcome) => ToolCallDecision::of(outcome) == ToolCallDecision::Cancel,
+            Self::Read { .. } => false,
+        }
+    }
+
+    /// Replace the body, keeping the settled kind.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `load` refuses.
+    pub fn try_map_body<Loaded, E>(
+        self,
+        load: impl FnOnce(Body) -> Result<Loaded, E>,
+    ) -> Result<ToolCallAnswer<Loaded>, E> {
+        Ok(match self {
+            Self::Materialized { decision, body } => ToolCallAnswer::Materialized {
+                decision,
+                body: load(body)?,
+            },
+            Self::Execution(outcome) => ToolCallAnswer::Execution(outcome),
+            Self::Read { body } => ToolCallAnswer::Read { body: load(body)? },
+        })
     }
 }
 
 impl ToolCallAnswer {
-    /// Body-free terminals retain their typed payload. Materialized answers
-    /// share the canonical body instead of copying its material reference.
-    pub fn execution(
+    /// A recorded terminal. With a canonical body it shares that body
+    /// instead of copying its material reference; without one it retains
+    /// its typed payload.
+    #[must_use]
+    pub fn terminal(
         outcome: lash_core_store::tool_run::AttemptOutcome,
         body: Option<NodeId>,
     ) -> Self {
-        let outcome = if body.is_some() {
-            ToolCallSettlement::Materialized(
-                if matches!(
-                    outcome,
-                    lash_core_store::tool_run::AttemptOutcome::Cancelled { .. }
-                ) {
-                    ToolCallDecision::Cancel
-                } else {
-                    ToolCallDecision::Final
-                },
-            )
-        } else {
-            ToolCallSettlement::execution(outcome)
+        match body {
+            Some(body) => Self::Materialized {
+                decision: ToolCallDecision::of(&outcome),
+                body,
+            },
+            None => Self::Execution(Box::new(outcome)),
+        }
+    }
+
+    /// Attach a canonical body to a body-free terminal. False for an
+    /// answer that already has its body.
+    pub fn archive(&mut self, body: NodeId) -> bool {
+        let Self::Execution(outcome) = self else {
+            return false;
         };
-        Self { outcome, body }
+        *self = Self::Materialized {
+            decision: ToolCallDecision::of(outcome),
+            body,
+        };
+        true
     }
 
-    pub fn valid(&self) -> bool {
-        matches!(
-            (&self.outcome, self.body),
-            (ToolCallSettlement::Execution(_), None)
-                | (
-                    ToolCallSettlement::Materialized(_) | ToolCallSettlement::Read,
-                    Some(_)
-                )
-        )
+    /// The stored `answer_outcome` column; the body is stored beside it.
+    ///
+    /// # Errors
+    ///
+    /// A terminal payload that does not encode.
+    pub fn stored_outcome(&self) -> serde_json::Result<String> {
+        serde_json::to_string(&match self {
+            Self::Materialized { decision, .. } => StoredOutcome::Materialized(*decision),
+            Self::Execution(outcome) => StoredOutcome::Execution(outcome.as_ref()),
+            Self::Read { .. } => StoredOutcome::Read,
+        })
     }
 
-    pub fn cancelled(&self) -> bool {
-        match &self.outcome {
-            ToolCallSettlement::Materialized(decision) => *decision == ToolCallDecision::Cancel,
-            ToolCallSettlement::Execution(outcome) => matches!(
-                outcome.as_ref(),
-                lash_core_store::tool_run::AttemptOutcome::Cancelled { .. }
-            ),
-            ToolCallSettlement::Read => false,
+    /// Decode the stored columns. `None` is corruption: an outcome that does
+    /// not decode, or a body that contradicts the settled kind.
+    #[must_use]
+    pub fn from_stored(outcome: &str, body: Option<NodeId>) -> Option<Self> {
+        let outcome: StoredOutcome<Box<lash_core_store::tool_run::AttemptOutcome>> =
+            serde_json::from_str(outcome).ok()?;
+        match (outcome, body) {
+            (StoredOutcome::Materialized(decision), Some(body)) => {
+                Some(Self::Materialized { decision, body })
+            }
+            (StoredOutcome::Execution(outcome), None) => Some(Self::Execution(outcome)),
+            (StoredOutcome::Read, Some(body)) => Some(Self::Read { body }),
+            _ => None,
         }
     }
 }
@@ -189,7 +265,6 @@ pub struct ToolCallRow {
     pub run: RunSeq,
     pub member: u64,
     pub decision: Option<ToolCallDecision>,
-    pub decision_fact: Option<NodeId>,
     pub answer: Option<ToolCallAnswer>,
 }
 
@@ -229,6 +304,7 @@ pub enum ToolCallSelection {
 }
 
 /// A saved plan whose owner ended before saving any answer never remains Pending.
-pub fn interrupted_read() -> ToolCallSettlement {
-    ToolCallSettlement::execution(lash_core_store::tool_run::AttemptOutcome::Interrupted)
+#[must_use]
+pub fn interrupted_read() -> ToolCallAnswer {
+    ToolCallAnswer::terminal(lash_core_store::tool_run::AttemptOutcome::Interrupted, None)
 }

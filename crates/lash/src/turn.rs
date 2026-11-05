@@ -74,39 +74,27 @@ pub use lash_core::tool_run::AttemptOutcome as RecordedCallOutcome;
 pub(crate) fn tool_call_read(
     call_id: &crate::ToolCallId,
     read: lash_core::call_store::CallRead,
-) -> crate::support::Result<ToolCallRead> {
+) -> ToolCallRead {
     use lash_core::call_store::CallRead;
-    Ok(match read {
+    use lash_core::durable_port::domain::ToolCallAnswer;
+    match read {
         CallRead::Unknown => ToolCallRead::NotFound {
             call_id: call_id.clone(),
         },
         CallRead::Pending { .. } => ToolCallRead::NotYetSettled {
             call_id: call_id.clone(),
         },
-        CallRead::Settled {
-            record: Some(record),
-            ..
-        } => ToolCallRead::Settled { record },
-        CallRead::Settled {
-            record: None,
-            outcome:
-                lash_core::durable_port::domain::tool_calls::ToolCallSettlement::Execution(outcome),
-        } => ToolCallRead::SettledWithoutRecord {
-            call_id: call_id.clone(),
-            outcome,
-        },
-        CallRead::Settled { record: None, .. } => {
-            return Err(crate::EmbedError::Durable(
-                lash_core::durable_port::DurableError::Store(
-                    lash_core::durable_port::StoreFailure {
-                        code: None,
-                        kind: lash_core::durable_port::StoreFailureKind::Corrupt,
-                        message: "a settled read has no record".to_owned(),
-                    },
-                ),
-            ));
+        CallRead::Settled(
+            ToolCallAnswer::Materialized { body: record, .. }
+            | ToolCallAnswer::Read { body: record },
+        ) => ToolCallRead::Settled { record },
+        CallRead::Settled(ToolCallAnswer::Execution(outcome)) => {
+            ToolCallRead::SettledWithoutRecord {
+                call_id: call_id.clone(),
+                outcome,
+            }
         }
-    })
+    }
 }
 
 pub(crate) fn fresh_turn_id() -> TurnId {

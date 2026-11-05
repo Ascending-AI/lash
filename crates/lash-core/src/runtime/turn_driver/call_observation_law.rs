@@ -188,11 +188,10 @@ async fn legal_tool_identities_remain_visible_in_call_ledger_projections() {
             crate::call_store::CallRead::Pending { .. } => {
                 open.insert(cursor.call);
             }
-            crate::call_store::CallRead::Settled {
-                record: Some(record),
-                ..
-            } => records.push(*record),
-            _ => {}
+            crate::call_store::CallRead::Settled(answer) => {
+                records.extend(answer.into_body().map(|record| *record))
+            }
+            crate::call_store::CallRead::Unknown => {}
         }
     }
     assert_eq!(

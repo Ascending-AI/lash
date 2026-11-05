@@ -173,7 +173,7 @@ impl DurableSession {
             for (id, answer) in ids.into_iter().zip(answers) {
                 by_key.insert(
                     (turn.clone(), id.clone()),
-                    crate::turn::tool_call_read(&id, answer)?,
+                    crate::turn::tool_call_read(&id, answer),
                 );
             }
         }
@@ -258,10 +258,9 @@ impl DurableSession {
             let done = page.len() < 128;
             after = page.last().map(|(cursor, _)| cursor.clone());
             records.extend(page.into_iter().filter_map(|(_, read)| match read {
-                lash_core::call_store::CallRead::Settled {
-                    record: Some(record),
-                    ..
-                } => Some(*record),
+                lash_core::call_store::CallRead::Settled(answer) => {
+                    answer.into_body().map(|record| *record)
+                }
                 _ => None,
             }));
             if done {

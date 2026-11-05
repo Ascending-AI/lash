@@ -7,7 +7,6 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
     tier: &dyn GraphTier,
     peer: &dyn DurableStore,
 ) -> LawOutcome {
-    use crate::domain::tool_calls::ToolCallSettlement;
     use crate::domain::{
         CallOwner, ToolCallAnswer, ToolCallDecision, ToolCallSelection, ToolCallWrite,
     };
@@ -44,10 +43,7 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
         answers.push(DomainWrite::ToolCall(ToolCallWrite::Answer {
             owner: execution.clone(),
             call: call.clone(),
-            answer: ToolCallAnswer {
-                outcome: ToolCallSettlement::Read,
-                body: Some(root),
-            },
+            answer: ToolCallAnswer::Read { body: root },
         }));
         calls.push((call, root));
     }
@@ -70,9 +66,9 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
         owner: control_execution.clone(),
         call: control.clone(),
         fact: control_root,
-        answer: ToolCallAnswer {
-            outcome: ToolCallSettlement::Materialized(ToolCallDecision::Final),
-            body: Some(control_root),
+        answer: ToolCallAnswer::Materialized {
+            decision: ToolCallDecision::Final,
+            body: control_root,
         },
     };
     writes.extend([
@@ -97,24 +93,13 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
         vec![DomainWrite::ToolCall(complete.clone())],
     )
     .await?;
-    let mut malformed = complete.clone();
-    if let ToolCallWrite::Complete { answer, .. } = &mut malformed {
-        answer.body = None;
-    }
-    ensure!(
-        owner_commit(
-            tier,
-            &owner,
-            BTreeMap::new(),
-            vec![DomainWrite::ToolCall(malformed)]
-        )
-        .await
-        .is_err(),
-        "a materialized settlement committed without its canonical body"
-    );
     let mut conflicting = complete;
-    if let ToolCallWrite::Complete { answer, .. } = &mut conflicting {
-        answer.body = Some(calls[0].1);
+    if let ToolCallWrite::Complete {
+        answer: ToolCallAnswer::Materialized { body, .. },
+        ..
+    } = &mut conflicting
+    {
+        *body = calls[0].1;
     }
     ensure!(
         owner_commit(
@@ -323,10 +308,7 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
     let late_success = DomainWrite::ToolCall(ToolCallWrite::Answer {
         owner: execution.clone(),
         call: pending.clone(),
-        answer: ToolCallAnswer {
-            outcome: ToolCallSettlement::Read,
-            body: Some(calls[0].1),
-        },
+        answer: ToolCallAnswer::Read { body: calls[0].1 },
     });
     ensure!(
         owner_commit(tier, &owner, BTreeMap::new(), vec![late_success.clone()])
@@ -334,13 +316,13 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
             .is_err(),
         "late success replaced a cancel winner"
     );
-    let cancelled = ToolCallAnswer {
-        outcome: ToolCallSettlement::execution(AttemptOutcome::Cancelled {
+    let cancelled = ToolCallAnswer::terminal(
+        AttemptOutcome::Cancelled {
             cancellation: lash_protocol_types::ToolCancellation::runtime("caller cancelled"),
             evidence: AvailableEvidence::default(),
-        }),
-        body: None,
-    };
+        },
+        None,
+    );
     owner_commit(
         tier,
         &owner,

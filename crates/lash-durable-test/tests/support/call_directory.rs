@@ -2,8 +2,7 @@
 use lash_core_execution::call_store::{self, CallRead};
 use lash_core_execution::runtime::actor::round::{CompletedCall, graph::ArchivalCall};
 use lash_core_store::tool_run::SettledOutput;
-use lash_durable::domain::tool_calls::ToolCallSettlement;
-use lash_durable::domain::{CallOwner, ToolCallDecision};
+use lash_durable::domain::{CallOwner, ToolCallAnswer, ToolCallDecision};
 use lash_protocol_types::{ToolCallId, ToolCallRecord};
 
 /// Whether `record`, read from the directory's canonical body, holds the
@@ -48,10 +47,10 @@ pub async fn check(
         for (id, outcome) in expected {
             let answer = call_store::call(reads, owner, id).await.map_err(|e| e.to_string())?;
             let valid = match (outcome, &answer) {
-                (Some(expected), CallRead::Settled { outcome: ToolCallSettlement::Execution(actual), record: None }) => expected.outcome() == *actual.as_ref(),
+                (Some(expected), CallRead::Settled(ToolCallAnswer::Execution(actual))) => expected.outcome() == *actual.as_ref(),
                 // A materialized answer lives in its canonical body; the row keeps only the winner.
                 // Only an output naming material has a body, so its winner is Final.
-                (Some(expected), CallRead::Settled { outcome: ToolCallSettlement::Materialized(decision), record: Some(record) }) => {
+                (Some(expected), CallRead::Settled(ToolCallAnswer::Materialized { decision, body: record })) => {
                     *decision == ToolCallDecision::Final && holds(expected, record)
                 }
                 (None, CallRead::Pending { .. }) => true,

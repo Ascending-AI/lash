@@ -173,10 +173,9 @@ impl RuntimeTurnServices {
             let done = page.len() < 128;
             after = page.last().map(|(cursor, _)| cursor.clone());
             records.extend(page.into_iter().filter_map(|(_, read)| match read {
-                crate::call_store::CallRead::Settled {
-                    record: Some(record),
-                    ..
-                } => Some(*record),
+                crate::call_store::CallRead::Settled(answer) => {
+                    answer.into_body().map(|record| *record)
+                }
                 _ => None,
             }));
             if done {

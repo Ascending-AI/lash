@@ -555,7 +555,7 @@ impl DomainWrite {
                         owner,
                         call,
                         answer,
-                    } => (owner, call, ToolCallRoot::Answer, answer.body),
+                    } => (owner, call, ToolCallRoot::Answer, answer.body().copied()),
                     ToolCallWrite::Complete {
                         owner,
                         call,
@@ -564,7 +564,7 @@ impl DomainWrite {
                     } => {
                         return [
                             (ToolCallRoot::Decision, Some(*fact)),
-                            (ToolCallRoot::Answer, answer.body),
+                            (ToolCallRoot::Answer, answer.body().copied()),
                         ]
                         .into_iter()
                         .filter_map(|(part, root)| {

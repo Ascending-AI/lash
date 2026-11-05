@@ -65,7 +65,7 @@ lash_store_sql::statements! {
             ON CONFLICT (owner_key, call_id) DO UPDATE SET call_id = excluded.call_id
             WHERE (held.execution_owner, held.run_seq, held.member, held.cancellable, held.counted)
                 = (excluded.execution_owner, excluded.run_seq, excluded.member, excluded.cancellable, excluded.counted)";
-        selected = "SELECT call_id, execution_owner, run_seq, member, decision, (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref,
+        selected = "SELECT call_id, execution_owner, run_seq, member, decision,
                 answer_outcome, (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref, admission_seq
             FROM tool_calls WHERE owner_key = ?1 AND call_id IN (SELECT value FROM json_each(?2))";
     }
@@ -152,11 +152,6 @@ pub(super) fn apply(
     _commit: &Committing<'_>,
     write: &ToolCallWrite,
 ) -> Answer<()> {
-    if let ToolCallWrite::Answer { answer, .. } | ToolCallWrite::Complete { answer, .. } = write
-        && !answer.valid()
-    {
-        return Ok(Err(corrupt("tool call", "settlement and body disagree")));
-    }
     let changed = match write {
         ToolCallWrite::Expire { owner } => {
             for root in delete_owner(tx, owner)? {
@@ -215,7 +210,8 @@ pub(super) fn apply(
             fact,
             answer,
         } => {
-            let outcome = serde_json::to_string(&answer.outcome)
+            let outcome = answer
+                .stored_outcome()
                 .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
             tx.statement(SQL.complete.sql())?
                 .execute(rusqlite::params![
@@ -223,7 +219,7 @@ pub(super) fn apply(
                     call.as_str(),
                     fact.0.as_slice(),
                     outcome,
-                    answer.body.map(|node| node.0.to_vec()),
+                    answer.body().map(|node| node.0.to_vec()),
                     answer.cancelled()
                 ])?
         }
@@ -232,13 +228,14 @@ pub(super) fn apply(
             call,
             answer,
         } => {
-            let outcome = serde_json::to_string(&answer.outcome)
+            let outcome = answer
+                .stored_outcome()
                 .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
             tx.statement(SQL.answer.sql())?.execute(rusqlite::params![
                 owner.stored(),
                 call.as_str(),
                 outcome,
-                answer.body.map(|node| node.0.to_vec()),
+                answer.body().map(|node| node.0.to_vec()),
                 answer.cancelled()
             ])?
         }
@@ -280,7 +277,6 @@ type StoredCall = (
     Option<String>,
     Option<String>,
     Option<String>,
-    Option<String>,
     i64,
 );
 
@@ -297,10 +293,9 @@ pub(super) fn read(
             row.get(2)?,
             row.get(3)?,
             row.get(4)?,
-            crate::codec::optional_hash_column(row, 5)?,
-            row.get(6)?,
-            crate::codec::optional_hash_column(row, 7)?,
-            row.get(8)?,
+            row.get(5)?,
+            crate::codec::optional_hash_column(row, 6)?,
+            row.get(7)?,
         ))
     };
     let key = owner.stored();
@@ -333,7 +328,7 @@ pub(super) fn read(
     let rows = match stored
         .into_iter()
         .map(
-            |(call, execution, run, member, decision, decision_ref, outcome, body, sequence)| {
+            |(call, execution, run, member, decision, outcome, body, sequence)| {
                 Ok(ToolCallRow {
                     sequence: u64::try_from(sequence)
                         .map_err(|_| corrupt("tool call order", "negative"))?,
@@ -353,14 +348,13 @@ pub(super) fn read(
                         Some("cancel") => Some(ToolCallDecision::Cancel),
                         Some(other) => return Err(corrupt("tool call decision", other)),
                     },
-                    decision_fact: decision_ref.as_deref().map(node_ref).transpose()?,
                     answer: outcome
                         .map(|outcome| {
-                            Ok::<_, lash_durable::DurableError>(ToolCallAnswer {
-                                outcome: serde_json::from_str(&outcome)
-                                    .map_err(|_| corrupt("tool call outcome", &outcome))?,
-                                body: body.as_deref().map(node_ref).transpose()?,
-                            })
+                            ToolCallAnswer::from_stored(
+                                &outcome,
+                                body.as_deref().map(node_ref).transpose()?,
+                            )
+                            .ok_or_else(|| corrupt("tool call answer", &outcome))
                         })
                         .transpose()?,
                 })
@@ -373,7 +367,7 @@ pub(super) fn read(
     };
     let roots = rows
         .iter()
-        .filter_map(|row| row.answer.as_ref().and_then(|answer| answer.body))
+        .filter_map(|row| row.answer.as_ref().and_then(ToolCallAnswer::body).copied())
         .collect::<Vec<_>>();
     let nodes = match super::graph::walk_roots(tx, &roots, &limits)? {
         Ok(nodes) => nodes,
@@ -424,7 +418,8 @@ pub(super) fn finish_reads(
     session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
 ) -> rusqlite::Result<()> {
-    let outcome = serde_json::to_string(&lash_durable::domain::tool_calls::interrupted_read())
+    let outcome = lash_durable::domain::tool_calls::interrupted_read()
+        .stored_outcome()
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
     tx.statement(SQL.finish_reads.sql())?
         .execute(rusqlite::params![
@@ -448,13 +443,13 @@ pub(super) fn retain_publications(retired: &super::Retired, writes: &[lash_durab
         match write {
             DomainWrite::ToolCall(ToolCallWrite::Decide { fact, .. }) => retired.retained(fact),
             DomainWrite::ToolCall(ToolCallWrite::Answer { answer, .. }) => {
-                if let Some(body) = &answer.body {
+                if let Some(body) = answer.body() {
                     retired.retained(body);
                 }
             }
             DomainWrite::ToolCall(ToolCallWrite::Complete { fact, answer, .. }) => {
                 retired.retained(fact);
-                if let Some(body) = &answer.body {
+                if let Some(body) = answer.body() {
                     retired.retained(body);
                 }
             }

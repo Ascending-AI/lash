@@ -509,30 +509,14 @@ fn append_held(
                         tx.write(DomainWrite::ToolCall(ToolCallWrite::Answer {
                             owner: owner.clone(),
                             call: fact.call_id,
-                            answer: ToolCallAnswer {
-                                outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Read,
-                                body: Some(body),
-                            },
+                            answer: ToolCallAnswer::Read { body },
                         }));
                     }
                     None
                 }
                 Some(MaterialNode::Value(_)) | None => None,
             };
-            let answer = if let Some(body_node) = body_node {
-                ToolCallAnswer {
-                    outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Materialized(
-                        if matches!(body.output, SettledOutput::Cancelled { .. }) {
-                            ToolCallDecision::Cancel
-                        } else {
-                            ToolCallDecision::Final
-                        },
-                    ),
-                    body: Some(body_node),
-                }
-            } else {
-                ToolCallAnswer::execution(body.output.outcome(), None)
-            };
+            let answer = ToolCallAnswer::terminal(body.output.outcome(), body_node);
             tx.write(DomainWrite::ToolCall(
                 if matches!(record, Record::FinalOutcome(_)) {
                     ToolCallWrite::Complete {

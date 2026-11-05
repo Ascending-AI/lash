@@ -36,12 +36,12 @@ crate::statements! {
                   AND (held.answer_outcome IS NULL OR (held.answer_outcome, held.body_ref) IS NOT DISTINCT FROM (i.outcome, i.body))))";
         decision_root = "SELECT (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref FROM tool_calls WHERE execution_owner = ?1 AND call_id = ?2";
         answer_root = "SELECT (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref FROM tool_calls WHERE execution_owner = ?1 AND call_id = ?2";
-        page = "SELECT call_id, execution_owner, run_seq, member, decision, (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref, answer_outcome,
+        page = "SELECT call_id, execution_owner, run_seq, member, decision, answer_outcome,
                 (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref, admission_seq
             FROM tool_calls WHERE owner_key = ?1
               AND (admission_seq, call_id) > (?2, ?3)
             ORDER BY admission_seq, call_id LIMIT ?4";
-        saved_reads = "SELECT call_id, execution_owner, run_seq, member, decision, (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref, answer_outcome,
+        saved_reads = "SELECT call_id, execution_owner, run_seq, member, decision, answer_outcome,
                 (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref, admission_seq
             FROM tool_calls WHERE owner_key = ?1 AND NOT cancellable AND answer_outcome = '\"Read\"'
               AND (admission_seq, call_id) > (?2, ?3)

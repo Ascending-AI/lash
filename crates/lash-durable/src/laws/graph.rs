@@ -967,11 +967,9 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                     ToolCallWrite::Answer {
                         owner: facts.clone(),
                         call,
-                        answer: ToolCallAnswer {
-                            outcome: crate::domain::tool_calls::ToolCallSettlement::Materialized(
-                                ToolCallDecision::Final,
-                            ),
-                            body: Some(root),
+                        answer: ToolCallAnswer::Materialized {
+                            decision: ToolCallDecision::Final,
+                            body: root,
                         },
                     }
                 };
