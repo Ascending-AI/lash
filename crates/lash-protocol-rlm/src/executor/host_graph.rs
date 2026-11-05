@@ -811,7 +811,7 @@ impl HostState {
             )?;
             if let lash_vm_broker::kernel::graph::FrozenRequest::Tool { call, .. } =
                 admission.request
-                && let Some(read) = call.read
+                && let Some(read) = call.classification.read()
             {
                 ordinals.push(read.ordinal);
             }

@@ -28,6 +28,7 @@ pub use cell::{CellCall, CellMember, CellMembers};
 
 pub(crate) struct ProductionToolHandlers<'run> {
     context: RuntimeExecutionContext<'run>,
+    classification: crate::ToolCallClassification<lash_protocol_types::ToolReadIdentity>,
     calls: Mutex<BTreeMap<crate::ToolCallId, CallInput>>,
     prepared: Mutex<BTreeMap<crate::ToolCallId, Prepared>>,
     inline_stops: Mutex<BTreeMap<crate::ToolCallId, InlineStop>>,
@@ -187,6 +188,7 @@ impl<'run> ProductionToolHandlers<'run> {
     pub(crate) fn new(context: RuntimeExecutionContext<'run>) -> Self {
         Self {
             context,
+            classification: Default::default(),
             calls: Mutex::default(),
             prepared: Mutex::default(),
             inline_stops: Mutex::default(),

@@ -149,6 +149,26 @@ pub struct CompletedProtocolToolCall {
     pub record: ToolCallRecord,
 }
 
+fn live_classification(
+    classification: &crate::ToolCallClassification<lash_protocol_types::ToolReadIdentity>,
+) -> crate::ToolCallClassification<crate::ToolReadMetadata> {
+    classification.read().map_or_else(Default::default, |read| {
+        crate::ToolCallClassification::from_read(
+            classification.execution(),
+            Box::new(crate::ToolReadMetadata {
+                caller: read.caller.clone(),
+                provider: read.provider.clone(),
+                ordinal: read.ordinal,
+                site: read.site.clone(),
+                origin: read.origin.clone(),
+                elapsed_us: 0,
+                args_bytes: 0,
+                answer_bytes: 0,
+            }),
+        )
+    })
+}
+
 pub(crate) fn tool_activity_id(call_id: &crate::ToolCallId) -> TurnActivityId {
     TurnActivityId::new(format!("tool:{call_id}"))
 }
@@ -205,7 +225,7 @@ impl RuntimeExecutionContext<'_> {
         ids: &ToolCallIds,
         name: &str,
         args: serde_json::Value,
-        activity_id: TurnActivityId,
+        classification: &crate::ToolCallClassification<lash_protocol_types::ToolReadIdentity>,
     ) {
         let context = self.with_call_observation_key(self.call_observation_key(call_key));
         let mut cursor = context.observation_cursor(&format!("tool:{}:start", ids.call_id));
@@ -221,9 +241,9 @@ impl RuntimeExecutionContext<'_> {
         cursor.observe(
             context.dispatch.observer.as_ref(),
             crate::engine::ObservedEvent::Activity {
-                correlation_id: Some(activity_id),
+                correlation_id: Some(tool_activity_id(&ids.call_id)),
                 event: TurnEvent::ToolCallStarted {
-                    classification: crate::ToolCallClassification::Recorded { read: None },
+                    classification: live_classification(classification),
                     call_id: ids.call_id.clone(),
                     provider_call_id: ids.provider_call_id.clone(),
                     name: name.to_string(),
@@ -380,7 +400,7 @@ impl RuntimeExecutionContext<'_> {
             self.emit_tool_intent_outcome_activities(call_key, call_id, &outcome.intent_outcomes);
 
             let record = ToolCallRecord {
-                classification: Default::default(),
+                classification: outcome.record.classification.clone(),
                 call_id: ids.call_id.clone(),
                 provider_call_id: ids.provider_call_id.clone(),
                 tool: outcome.record.tool.clone(),
@@ -390,7 +410,7 @@ impl RuntimeExecutionContext<'_> {
             this.emit_tool_call_returned_activity(call_key, &record, Some(duration_ms));
             Ok(CompletedProtocolToolCall {
                 completed: crate::sansio::CompletedToolCall {
-                    read: None,
+                    read: record.classification.clone().into_read(),
                     control_origin: crate::sansio::ToolControlOrigin::OwnCall,
                     call_id: ids.call_id,
                     provider_call_id: ids.provider_call_id,
@@ -464,7 +484,7 @@ impl RuntimeExecutionContext<'_> {
             crate::engine::ObservedEvent::Activity {
                 correlation_id: Some(tool_activity_id(&record.call_id)),
                 event: TurnEvent::ToolCallReturned {
-                    classification: crate::ToolCallClassification::Recorded { read: None },
+                    classification: live_classification(&record.classification),
                     call_id: record.call_id.clone(),
                     provider_call_id: record.provider_call_id.clone(),
                     name: record.tool.clone(),
@@ -531,7 +551,7 @@ impl RuntimeExecutionContext<'_> {
             &ids,
             &outcome.record.tool,
             outcome.record.args.clone(),
-            tool_activity_id(&ids.call_id),
+            &outcome.record.classification,
         );
         self.complete_tool_call(ids, tool_id, replay, outcome, call_key, duration_ms)
             .await
@@ -570,7 +590,7 @@ impl RuntimeExecutionContext<'_> {
             },
             &completed.tool_name,
             completed.args.clone(),
-            tool_activity_id(&completed.call_id),
+            &record.classification,
         );
         // The protocol refused the call before dispatch; no measured window exists.
         self.emit_tool_call_completed(call_key, &record, &[], None)

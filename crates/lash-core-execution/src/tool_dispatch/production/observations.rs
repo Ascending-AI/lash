@@ -35,7 +35,7 @@ impl ProductionToolHandlers<'_> {
             &crate::tool_dispatch::ToolCallIds::of(call),
             &call.tool_name,
             call.args.clone(),
-            crate::session::tool_execution::tool_activity_id(&call.call_id),
+            &self.classification,
         );
         Ok(())
     }
@@ -74,7 +74,7 @@ impl ProductionToolHandlers<'_> {
         }
         output = self.with_expiry_evidence(call_id, output);
         Ok(ToolCallRecord {
-            classification: Default::default(),
+            classification: self.classification.clone(),
             call_id: call_id.clone(),
             provider_call_id: prepared.call.provider_call_id,
             tool: prepared.call.tool_name,

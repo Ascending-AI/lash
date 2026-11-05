@@ -78,11 +78,12 @@ impl ParkedCall {
 }
 
 pub(super) fn answered(
+    classification: &crate::ToolCallClassification<lash_protocol_types::ToolReadIdentity>,
     call: &crate::sansio::PendingToolCall,
     output: ToolCallOutput,
 ) -> CompletedCall {
     CompletedCall {
-        read: None,
+        read: classification.clone().into_read(),
         control_origin: lash_sansio::ToolControlOrigin::OwnCall,
         call_id: call.call_id.clone(),
         provider_call_id: call.provider_call_id.clone(),
@@ -130,6 +131,7 @@ fn parked_output(
         return member_output(
             owner,
             MemberEnd::Final(answered(
+                &Default::default(),
                 call,
                 ToolCallOutput::failure(crate::ToolFailure::runtime(
                     crate::ToolFailureClass::Internal,
@@ -441,20 +443,18 @@ impl ProductionToolHandlers<'_> {
         call: &crate::sansio::PendingToolCall,
         output: ToolCallOutput,
     ) -> CompletedCall {
-        let completed = answered(call, output);
+        let completed = answered(&self.classification, call, output);
         self.context.emit_tool_call_started(
             call.call_id.as_str(),
             &crate::tool_dispatch::ToolCallIds::of_pending(call),
             &call.tool_name,
             call.args.clone(),
-            crate::session::tool_execution::tool_activity_id(&call.call_id),
+            &self.classification,
         );
         self.context.emit_tool_call_returned_activity(
             call.call_id.as_str(),
             &ToolCallRecord {
-                classification: lash_protocol_types::ToolCallClassification::Recorded {
-                    read: completed.read.clone(),
-                },
+                classification: self.classification.clone(),
                 call_id: completed.call_id.clone(),
                 provider_call_id: completed.provider_call_id.clone(),
                 tool: completed.tool_name.clone(),
@@ -486,7 +486,7 @@ fn retry_failure(
             },
             |captured| captured.output,
         );
-    answered(call, output)
+    answered(&Default::default(), call, output)
 }
 
 /// What each attempt of a member carries from its owner, beyond its call.
@@ -502,7 +502,7 @@ pub(super) struct MemberAttempts {
     /// The round owner's accepted stop: an answer an attempt decides after
     /// it is the stop's.
     pub(super) stop: Option<AcceptedStop>,
-    pub(super) read: Option<Box<lash_protocol_types::ToolReadIdentity>>,
+    pub(super) classification: crate::ToolCallClassification<lash_protocol_types::ToolReadIdentity>,
 }
 
 /// The body of `execution`, an attempt of the member `call` invoked as
@@ -524,7 +524,7 @@ pub(super) fn member_body(
         traced_scope,
         closing,
         stop,
-        read,
+        classification,
     } = attempts;
     let context = context.clone();
     let owner = owner.clone();
@@ -572,6 +572,7 @@ pub(super) fn member_body(
                     call: call.call_id.clone(),
                 });
                 handlers.traced_scope = traced_scope.clone();
+                handlers.classification = classification.clone();
                 let handlers = Arc::new(handlers);
                 match handlers
                     .member_attempt(
@@ -620,6 +621,7 @@ pub(super) fn member_body(
                         break (
                             MemberEnd::Settled(
                                 answered(
+                                    &classification,
                                     &call,
                                     ToolCallOutput::failure(crate::ToolFailure::runtime(
                                         crate::ToolFailureClass::Internal,
@@ -636,8 +638,7 @@ pub(super) fn member_body(
             };
             let mut result = match end {
                 MemberEnd::Parked(parked) => parked_output(&call, &owner, &execution, &parked),
-                MemberEnd::Settled(mut completed, settlement) => {
-                    completed.read = read;
+                MemberEnd::Settled(completed, settlement) => {
                     let output = match &settlement {
                         crate::runtime::actor::round::SettlementIntent::Cancelled {
                             cancellation,
@@ -653,8 +654,7 @@ pub(super) fn member_body(
                         ..output.into()
                     }
                 }
-                MemberEnd::Final(mut completed) => {
-                    completed.read = read;
+                MemberEnd::Final(completed) => {
                     member_output(&owner, MemberEnd::Final(completed)).into()
                 }
                 end => member_output(&owner, end).into(),
@@ -687,6 +687,7 @@ pub(super) fn member_body(
 /// answers a typed recovery failure rather than a result no declaration
 /// checked.
 pub(super) fn resolved_member(
+    classification: &crate::ToolCallClassification<lash_protocol_types::ToolReadIdentity>,
     owner: &crate::EffectOpener,
     call: &crate::sansio::PendingToolCall,
     parked: &Material<CompletionSource>,
@@ -696,6 +697,7 @@ pub(super) fn resolved_member(
         return member_output(
             owner,
             MemberEnd::Final(answered(
+                classification,
                 call,
                 ToolCallOutput::failure(crate::ToolFailure::runtime(
                     crate::ToolFailureClass::Internal,
@@ -708,7 +710,7 @@ pub(super) fn resolved_member(
     let output = parked_call_output(parked, resolution)
         .settled(&recorded.declaration, &recorded.output_schema)
         .unwrap_or_else(|refusal| super::declaration_refused(&call.tool_name, refusal));
-    let mut completed = answered(call, output);
+    let mut completed = answered(classification, call, output);
     // The launch receipt is the call's host-facing intent outcome; the
     // model sees the child's value only.
     completed.intent_outcomes = recorded
@@ -776,6 +778,9 @@ pub(super) async fn present_resolved(
         // body's does.
         Err(error) => {
             completed = answered(
+                &lash_protocol_types::ToolCallClassification::Recorded {
+                    read: completed.read,
+                },
                 call,
                 ToolCallOutput::failure(crate::ToolFailure::runtime(
                     crate::ToolFailureClass::Internal,
@@ -844,14 +849,16 @@ pub(super) async fn discharge_member(
 
 /// The answer the member `call` settled with as `output`.
 pub(super) fn completed_answer(
+    classification: &crate::ToolCallClassification<lash_protocol_types::ToolReadIdentity>,
     call: &crate::sansio::PendingToolCall,
     output: &SettledOutput,
 ) -> CompletedCall {
     if let Some(answer) = output.stopped_answer() {
-        return answered(call, answer);
+        return answered(classification, call, answer);
     }
     completed_call(output).cloned().unwrap_or_else(|| {
         answered(
+            classification,
             call,
             ToolCallOutput::failure(crate::ToolFailure::runtime(
                 crate::ToolFailureClass::Internal,
@@ -916,10 +923,11 @@ pub(super) fn catalog_policies(context: &RuntimeExecutionContext<'_>) -> PolicyV
 /// A member's committed answer as the singleton trace helpers read it,
 /// including the call's recorded intent outcomes.
 pub(super) fn member_record(
+    classification: &crate::ToolCallClassification<lash_protocol_types::ToolReadIdentity>,
     call: &crate::sansio::PendingToolCall,
     output: &SettledOutput,
 ) -> ToolCallRecord {
-    let mut completed = completed_answer(call, output);
+    let mut completed = completed_answer(classification, call, output);
     super::super::attempt_coordinator::project_recorded_intent_outcomes(
         &mut completed.output,
         &completed.intent_outcomes,
@@ -1187,6 +1195,7 @@ impl RoundTools for ProductionRoundTools {
                     .iter()
                     .map(|call| {
                         answered(
+                            &Default::default(),
                             call,
                             ToolCallOutput::failure(
                                 crate::session::tool_execution::tool_call_limit_failure(exceeded),
@@ -1248,7 +1257,7 @@ impl RoundTools for ProductionRoundTools {
         parked: &Material<CompletionSource>,
         resolution: Resolution,
     ) -> SettledOutput {
-        resolved_member(&self.owner, call, parked, resolution)
+        resolved_member(&Default::default(), &self.owner, call, parked, resolution)
     }
 
     fn present<'a>(
@@ -1287,7 +1296,7 @@ impl RoundTools for ProductionRoundTools {
         call: &crate::sansio::PendingToolCall,
         output: &SettledOutput,
     ) -> CompletedCall {
-        completed_answer(call, output)
+        completed_answer(&Default::default(), call, output)
     }
 
     fn reserve_state(
@@ -1343,11 +1352,15 @@ impl ProductionRoundTools {
         // the call's span, at the end that commit retained (P1): a successor
         // that folds an outcome another owner committed closes nothing.
         if close && let Some(output) = member.outcome() {
-            let record = member_record(call, output);
+            let record = member_record(&Default::default(), call, output);
             let attempts = member
                 .attempts()
                 .map(|(ordinal, output, delay)| {
-                    crate::trace::trace_tool_attempt(ordinal, &member_record(call, output), delay)
+                    crate::trace::trace_tool_attempt(
+                        ordinal,
+                        &member_record(&Default::default(), call, output),
+                        delay,
+                    )
                 })
                 .collect::<Vec<_>>();
             context.trace_tool_call_completed(&record, &attempts, member.ended_at_ms());

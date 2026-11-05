@@ -498,10 +498,9 @@ impl CellHost<'_> {
         let invocation = ToolInvocation::new(call, route.tool.clone(), args)
             .with_issuing_language_node_id(request.identity.position().to_string())
             .with_execution_grant(grant);
-        let mut cell = CellCall::of(&invocation, contract);
-        if route.policy == lash_core::ExecutionPolicy::Read {
+        let read = (route.policy == lash_core::ExecutionPolicy::Read).then(|| {
             let ordinal = self.ledgers.lock_recover().reads + 1;
-            cell.read = Some(Box::new(lash_protocol_types::ToolReadIdentity {
+            Box::new(lash_protocol_types::ToolReadIdentity {
                 caller: lash_core::ToolReadCaller::CodeBlock {
                     graph_key: self
                         .ctx
@@ -512,8 +511,9 @@ impl CellHost<'_> {
                 ordinal,
                 site: request.identity.position().to_string(),
                 origin: request.origin.to_string(),
-            }));
-        }
+            })
+        });
+        let cell = CellCall::of(&invocation, contract, read);
         let frozen = FrozenRequest::tool(cell.clone(), request.args.clone(), &projection)
             .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
         Ok((invocation, cell, frozen))
@@ -697,7 +697,7 @@ impl KernelEffects for CellHost<'_> {
                 ledgers.tool_call_limit.get_or_insert(exceeded);
                 return Ok(Err(refused(TOOL_CALL_LIMIT, exceeded.to_string())));
             }
-            let read = cell.read.is_some();
+            let read = cell.classification.read().is_some();
             if read {
                 ledgers.reads += 1;
             }
@@ -885,7 +885,7 @@ impl KernelEffects for CellHost<'_> {
         };
         {
             let mut ledgers = self.ledgers.lock_recover();
-            let read = call.read.is_some();
+            let read = call.classification.read().is_some();
             if read {
                 ledgers.reads += 1;
             }

@@ -63,7 +63,7 @@ pub struct CellCall {
     /// The language node that issued it, for traces.
     pub issuing_language_node_id: Option<String>,
     /// Read attribution frozen with admission, projected from the committed outcome.
-    pub read: Option<Box<lash_protocol_types::ToolReadIdentity>>,
+    pub classification: crate::ToolCallClassification<lash_protocol_types::ToolReadIdentity>,
 }
 
 impl CellCall {
@@ -73,6 +73,7 @@ impl CellCall {
     pub fn of(
         invocation: &ToolInvocation,
         contract: lash_kernel_value::operations::ContractId,
+        read: Option<Box<lash_protocol_types::ToolReadIdentity>>,
     ) -> Self {
         Self {
             id: invocation.id.clone(),
@@ -81,7 +82,7 @@ impl CellCall {
             contract,
             execution_grant: invocation.execution_grant.clone(),
             issuing_language_node_id: invocation.issuing_language_node_id.clone(),
-            read: None,
+            classification: crate::ToolCallClassification::Recorded { read },
         }
     }
 
@@ -119,7 +120,7 @@ impl CellCall {
         self.contract.encode(out);
         encode_opt_tree(self.execution_grant.as_deref(), out);
         self.issuing_language_node_id.encode(out);
-        encode_opt_tree(self.read.as_deref(), out);
+        encode_opt_tree(self.classification.read(), out);
     }
 
     /// Reads what [`encode_dispatch`](Self::encode_dispatch) wrote, as the
@@ -141,7 +142,9 @@ impl CellCall {
             contract: lash_kernel_value::operations::ContractId::decode(input)?,
             execution_grant: decode_opt_tree(input)?.map(Box::new),
             issuing_language_node_id: Option::decode(input)?,
-            read: decode_opt_tree(input)?.map(Box::new),
+            classification: crate::ToolCallClassification::Recorded {
+                read: decode_opt_tree(input)?.map(Box::new),
+            },
         })
     }
 }
@@ -219,7 +222,7 @@ impl CellTools {
                 traced_scope: execution.draft().trace().cloned(),
                 closing: Some(self.closing.clone()),
                 stop: None,
-                read: call.read.clone(),
+                classification: call.classification.clone(),
             },
         )
     }
@@ -233,7 +236,13 @@ impl CellTools {
         parked: &Material<CompletionSource>,
         resolution: Resolution,
     ) -> SettledOutput {
-        resolved_member(&self.owner, &call.pending(), parked, resolution)
+        resolved_member(
+            &call.classification,
+            &self.owner,
+            &call.pending(),
+            parked,
+            resolution,
+        )
     }
 
     /// The final answer `output` that `call`'s park resolved to as
@@ -278,14 +287,19 @@ impl CellTools {
 fn cell_answer(
     call: &crate::sansio::PendingToolCall,
     output: &SettledOutput,
+    classification: &crate::ToolCallClassification<lash_protocol_types::ToolReadIdentity>,
 ) -> crate::runtime::actor::round::CompletedCall {
-    completed_answer(call, output)
+    completed_answer(classification, call, output)
 }
 
 /// What `call` is answered with: a pure function of its committed
 /// `output`.
-fn reply(call: &crate::sansio::PendingToolCall, output: &SettledOutput) -> ToolInvocationReply {
-    let completed = cell_answer(call, output);
+fn reply(
+    call: &crate::sansio::PendingToolCall,
+    output: &SettledOutput,
+    classification: &crate::ToolCallClassification<lash_protocol_types::ToolReadIdentity>,
+) -> ToolInvocationReply {
+    let completed = cell_answer(call, output, classification);
     let record = ToolCallRecord {
         classification: lash_protocol_types::ToolCallClassification::Recorded {
             read: completed.read.clone(),
@@ -432,13 +446,7 @@ impl CellMembers {
     #[must_use]
     pub fn reply(&self, member: &CellMember, output: &SettledOutput) -> ToolInvocationReply {
         let CellMember::Tool(call) = member;
-        let mut answer = reply(&call.pending(), output);
-        if let Some(record) = &mut answer.record {
-            record.classification = crate::ToolCallClassification::Recorded {
-                read: call.read.clone(),
-            };
-        }
-        answer
+        reply(&call.pending(), output, &call.classification)
     }
 
     /// What the cell is answered with for the call `call`, from its
@@ -505,16 +513,14 @@ impl MemberBodies for CellMembers {
                 .map(|(ordinal, output, delay)| {
                     crate::trace::trace_tool_attempt(
                         ordinal,
-                        &super::round::member_record(&pending, output),
+                        &super::round::member_record(&call.classification, &pending, output),
                         delay,
                     )
                 })
                 .collect::<Vec<_>>();
-            let completed = cell_answer(&pending, output);
+            let completed = cell_answer(&pending, output, &call.classification);
             let record = ToolCallRecord {
-                classification: lash_protocol_types::ToolCallClassification::Recorded {
-                    read: call.read.clone(),
-                },
+                classification: call.classification.clone(),
                 call_id: completed.call_id,
                 provider_call_id: completed.provider_call_id,
                 tool: completed.tool_name,

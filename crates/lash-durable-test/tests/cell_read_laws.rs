@@ -1461,6 +1461,8 @@ async fn a_cell_that_reads_is_claimed_only_where_its_reader_is_served_on_sqlite_
 
 /// READ-LIVE-ACTUAL: a loop and its taken branch emit the four settled
 /// reads, including the failing third loop read. An untaken branch emits none.
+/// FIG-7654: each live start and return carries the admitted read classification
+/// retained by the committed call, including the failed read.
 #[tokio::test]
 async fn actual_reads_stream_their_caller_arguments_and_outcomes_on_sqlite_memory() {
     let turn = ReadTurn::new(Cell::ReadActivity, Law::Counted);
@@ -1569,7 +1571,9 @@ async fn actual_reads_stream_their_caller_arguments_and_outcomes_on_sqlite_memor
                 .collect::<Vec<_>>();
             assert_eq!(observed.len(), 1, "each admitted Read has one {kind}");
             assert_eq!(observed[0]["graph_key"], caller);
-            assert_eq!(observed[0]["args"]["x"].as_f64(), Some(x as f64));
+            if kind != "tool_call_completed" {
+                assert_eq!(observed[0]["args"]["x"].as_f64(), Some(x as f64));
+            }
         }
         let call = lash::TurnToolCallRef {
             turn_id: turn_id.clone(),
@@ -1580,6 +1584,57 @@ async fn actual_reads_stream_their_caller_arguments_and_outcomes_on_sqlite_memor
             panic!("the admitted Read's saved fact is retained")
         };
         assert_eq!(*record, fact.record());
+        for kind in ["tool_call_started", "tool_call_returned"] {
+            let live = output
+                .activities
+                .iter()
+                .find_map(|activity| match &activity.event {
+                    lash::TurnEvent::ToolCallStarted {
+                        call_id,
+                        classification,
+                        ..
+                    } if kind == "tool_call_started" && call_id == &fact.call_id => {
+                        Some(classification)
+                    }
+                    lash::TurnEvent::ToolCallReturned {
+                        call_id,
+                        classification,
+                        ..
+                    } if kind == "tool_call_returned" && call_id == &fact.call_id => {
+                        Some(classification)
+                    }
+                    _ => None,
+                })
+                .expect("the admitted Read has a live event");
+            assert_eq!(live.execution(), record.classification.execution());
+            let live_read = live.read().unwrap_or_else(|| {
+                panic!(
+                    "FIG-7654: {kind} must carry the committed admission read: {:?}",
+                    record.classification
+                )
+            });
+            let committed_read = record
+                .classification
+                .read()
+                .expect("a committed Read has identity");
+            assert_eq!(
+                (
+                    &live_read.caller,
+                    &live_read.provider,
+                    live_read.ordinal,
+                    &live_read.site,
+                    &live_read.origin
+                ),
+                (
+                    &committed_read.caller,
+                    &committed_read.provider,
+                    committed_read.ordinal,
+                    &committed_read.site,
+                    &committed_read.origin
+                ),
+                "FIG-7654: {kind} must carry the committed admission read",
+            );
+        }
     }
     assert_eq!(cell.read_facts[0].site, cell.read_facts[2].site);
     assert_eq!(cell.read_facts[0].site, cell.read_facts[3].site);
