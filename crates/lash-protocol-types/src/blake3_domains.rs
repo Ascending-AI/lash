@@ -16,6 +16,8 @@ pub(crate) const BLAKE3_DOMAINS: &[&str] = &[
     "lash-attachment/v2",
     "lash-blob/v2",
     "lash-build-generation/v1",
+    "lash-cell-js-args/v2",
+    "lash-cell-js-deferred-args/v2",
     "lash-codemode-cell-projection-namespace/v1",
     "lash-codemode-cell-segment-code/v1",
     "lash-codemode-execution-state-leaf/v2",
