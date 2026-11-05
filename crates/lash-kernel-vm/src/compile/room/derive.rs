@@ -97,7 +97,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
         } else {
             match node {
                 doc::Node::Action(action) => {
-                    let n = atoms(action).iter().enumerate().fold(
+                    let n = action_atoms(action).iter().enumerate().fold(
                         Amount::default(),
                         |amount, (index, _)| {
                             amount.term(
@@ -127,10 +127,16 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                             held,
                         ));
                     }
+                    // A call's Enter moves its arguments into the callee. A
+                    // delivering action's arguments stay live until its Commit.
                     events.push(event(
                         &site,
                         Phase::Enter,
-                        ins.clone(),
+                        if delivers(node) {
+                            Box::new([])
+                        } else {
+                            ins.clone()
+                        },
                         None,
                         Amount::default(),
                         Amount::default(),
@@ -329,11 +335,12 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                     Amount::default().term(release([pending]), -1),
                 ));
             }
-            let (peak, delta) = formula(authority, &site, node, &ins);
+            let commit = commit_inputs(&site, node);
+            let (peak, delta) = formula(authority, &site, node, &commit);
             events.push(event(
                 &site,
                 Phase::Commit,
-                ins.clone(),
+                commit,
                 out.clone(),
                 peak,
                 delta,
@@ -481,7 +488,21 @@ fn formula(
                     -1,
                 ),
             ),
-            doc::Expr::Act(_) => (result(), result().term(consumed(), -1)),
+            doc::Expr::Act(act) if matches!(act.kind, doc::ActKind::Call(_)) => {
+                (result(), result().term(consumed(), -1))
+            }
+            // The delivered Incoming moves into the operand, as at Restore.
+            doc::Expr::Act(_) => (
+                zero.clone(),
+                zero.term(
+                    release(
+                        ins.iter()
+                            .filter(|owner| !matches!(owner, Owner::Incoming(_)))
+                            .cloned(),
+                    ),
+                    -1,
+                ),
+            ),
         },
         doc::Node::Stmt(stmt) => match stmt {
             doc::Stmt::Let { name, .. } => {
@@ -532,13 +553,19 @@ fn formula(
             ),
             _ => (zero.clone(), zero),
         },
+        // The delivered Incoming moves into the operand, as at Restore.
         doc::Node::Action(action) => (
-            result(),
-            result().term(
-                release(atoms(action).iter().enumerate().map(|(i, _)| Owner::Atom {
-                    at: site.clone(),
-                    index: i as u32,
-                })),
+            zero.clone(),
+            zero.term(
+                release(
+                    action_atoms(action)
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| Owner::Atom {
+                            at: site.clone(),
+                            index: i as u32,
+                        }),
+                ),
                 -1,
             ),
         ),

@@ -5,7 +5,6 @@ use super::*;
 
 #[derive(Clone)]
 pub(crate) struct CallDebt {
-    before: u64,
     arguments: usize,
     library: Option<LibId>,
     completion: Option<Arc<compile::Plan>>,
@@ -17,16 +16,6 @@ impl CallDebt {
         target: &Resolved,
     ) -> Result<Self, Refused> {
         let code = exe.code(caller);
-        let before = if target.rooted && code.charged {
-            u64::try_from(target.arguments)
-                .ok()
-                .and_then(|count| {
-                    count.checked_mul(doc::plan::FormCharge::Argument.measurement().0)
-                })
-                .ok_or(Refused::Facts)?
-        } else {
-            0
-        };
         let completion = target.library.and_then(|lib| {
             code.charging
                 .then(|| exe.lib(lib).header.metering.formula())
@@ -39,7 +28,6 @@ impl CallDebt {
                 })
         });
         Ok(Self {
-            before,
             arguments: target.arguments,
             library: target.library,
             completion,
@@ -48,8 +36,7 @@ impl CallDebt {
     /// The whole completion program must equal the one the canonical
     /// declaration compiles to: a substituted formula would bill differently.
     pub(super) fn same(&self, other: &Self) -> bool {
-        self.before == other.before
-            && self.arguments == other.arguments
+        self.arguments == other.arguments
             && self.library == other.library
             && self.completion.as_deref() == other.completion.as_deref()
     }
@@ -63,9 +50,6 @@ impl CallDebt {
             &doc::Formula::Constant(0),
             params,
         )));
-    }
-    pub(crate) fn before_entry(&self) -> u64 {
-        self.before
     }
     pub(crate) fn needs_arguments(&self) -> bool {
         self.completion.is_some()

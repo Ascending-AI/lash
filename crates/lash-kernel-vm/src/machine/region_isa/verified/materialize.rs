@@ -50,37 +50,6 @@ impl<'m> Running<'m> {
                     super::bind::physical(program, reg)?,
                 )
             };
-            let parked_callable = if depth < self.parked.len() {
-                code.calls[self.parked[depth].site as usize]
-                    .as_ref()
-                    .ok_or_else(|| invalid(Refused::Facts))?
-                    .callable
-            } else {
-                None
-            };
-            let moved = if depth < self.parked.len() {
-                code.calls
-                    .get(self.parked[depth].site as usize)
-                    .and_then(Option::as_ref)
-                    .ok_or_else(|| invalid(Refused::Facts))?
-                    .arguments
-                    .as_ref()
-            } else {
-                &[]
-            };
-            let moved = |reg: crate::compile::region_isa::Reg<
-                lash_kernel_state::kernel_internals::logical::LeaseValue,
-            >| {
-                moved
-                    .iter()
-                    .chain(parked_callable.iter())
-                    .any(|physical| match physical {
-                        code::Register::Value(index)
-                        | code::Register::Int(index)
-                        | code::Register::Float(index)
-                        | code::Register::Bool(index) => *index == reg.index(),
-                    })
-            };
             frames.push(reconstruct::FrameImage {
                 program: program.code(),
                 invocation: reached.invocation,
@@ -98,7 +67,6 @@ impl<'m> Running<'m> {
                 roles: map
                     .roles
                     .iter()
-                    .filter(|(_, reg)| !moved(*reg))
                     .map(|(slot, reg)| {
                         let slot = if depth < self.parked.len() {
                             code.calls[self.parked[depth].site as usize]
@@ -117,7 +85,6 @@ impl<'m> Running<'m> {
                 operands: map
                     .operands
                     .iter()
-                    .filter(|reg| !moved(**reg))
                     .map(|reg| read(*reg))
                     .collect::<Result<_, _>>()?,
                 incoming: depth == self.parked.len()
@@ -126,6 +93,9 @@ impl<'m> Running<'m> {
                     self.returning
                         .as_ref()
                         .map(|incoming| operands::Operand::Dynamic(incoming.value))
+                } else if depth < self.parked.len() {
+                    // A suspended caller's result has not arrived.
+                    None
                 } else {
                     map.pending.map(read).transpose()?
                 },
@@ -173,9 +143,29 @@ impl<'m> Running<'m> {
         .map_err(RegionError::Heap)?;
         let pending = current.pending;
         let (sessions, written) = self.session_images(&graph)?;
+        // An accepted effect's value leaves as the task's Incoming.
+        if matches!(stop, RegionStop::Effect(_)) != self.effect.is_some() {
+            return Err(invalid(Refused::Exit));
+        }
+        let effect = self
+            .effect
+            .map(|value| {
+                let materialized = graph.value(value).map_err(RegionError::Heap)?;
+                let page = crate::machine::project::project_region(
+                    &mut self
+                        .view
+                        .recovery_projection(&graph)
+                        .map_err(RegionError::Heap)?,
+                    self.view.heap().pages(),
+                    &materialized,
+                )
+                .map_err(RegionError::Heap)?;
+                Ok((value, materialized, page))
+            })
+            .transpose()?;
         let live = live::Live {
             frames: frames.into_boxed_slice(),
-            payload: None,
+            payload: effect.as_ref().map(|(value, _, _)| *value),
             returning: None,
             sessions,
         };
@@ -188,7 +178,7 @@ impl<'m> Running<'m> {
             attempted: self.attempted,
             counters: self.counters,
             stop,
-            payload: None,
+            payload: effect.as_ref().map(|(_, value, _)| *value),
             returning: None,
             source_counts: self.source.freeze(),
             entering: None,
@@ -197,7 +187,8 @@ impl<'m> Running<'m> {
                 frames: canonical,
                 registers: Some(registers),
                 crossing: self.crossing,
-                incoming: None,
+                incoming: effect
+                    .map(|(_, _, page)| lash_kernel_state::paged::IncomingRecord::Value(page)),
             }),
         };
         Ok(reconstruct::Finished {

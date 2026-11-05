@@ -150,6 +150,12 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                 for owner in &step.event.inputs {
                     read(&state, register(draft, owner)?.offset())?;
                 }
+                for load in &call.atoms {
+                    if let AtomSource::Role(src) = load.src {
+                        read(&state, src.offset())?;
+                    }
+                    state[load.dst.offset()] = Some(RegisterKind::Value);
+                }
                 for reg in &call.arguments {
                     read(&state, reg.offset())?;
                 }
@@ -180,7 +186,21 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                     state[dst.offset()] = Some(RegisterKind::Value);
                 }
             }
-            RegionOp::Boundary { .. } => {
+            RegionOp::Boundary { spec } => {
+                // A delivering action loads its atoms; its result arrives in
+                // the sink before its Commit.
+                if let Some(action) = spec.action() {
+                    for load in &action.atoms {
+                        if let AtomSource::Role(src) = load.src {
+                            read(&state, src.offset())?;
+                        }
+                        state[load.dst.offset()] = Some(RegisterKind::Value);
+                    }
+                    for reg in &action.arguments {
+                        read(&state, reg.offset())?;
+                    }
+                    state[draft.roles.len()] = Some(RegisterKind::Value);
+                }
                 if let Some(output) = step
                     .event
                     .output
@@ -194,6 +214,9 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                 let kind = read(&state, value.offset())?;
                 let output = step.event.output.as_ref().ok_or(Refused::Facts)?;
                 state[register(draft, output)?.offset()] = Some(kind);
+            }
+            RegionOp::Effect { value, .. } => {
+                read(&state, value.offset())?;
             }
             RegionOp::Exit { .. } => {}
         }

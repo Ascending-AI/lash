@@ -23,6 +23,8 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     /// The held session values captured when the root frame left.
     pub(super) closed_sessions: Option<SessionValues>,
     pub(super) returning: Option<super::returns::Incoming>,
+    /// An accepted effect's value, the task's Incoming at the stop.
+    pub(super) effect: Option<LeaseValue>,
     pub(super) complete: bool,
     pub(super) activation: Option<CallActivation>,
     pub(super) identity: Rc<()>,
@@ -181,6 +183,7 @@ impl<'m> Running<'m> {
             sessions: vec![SessionState::default(); code.sessions.len()].into(),
             closed_sessions: None,
             returning: None,
+            effect: None,
             complete: false,
             activation: None,
             identity: Rc::new(()),

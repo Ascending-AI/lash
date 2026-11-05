@@ -47,6 +47,17 @@ impl Running<'_> {
             return Err(invalid(Refused::Path));
         }
         let call = caller.call(*actual)?;
+        // A statement call loads its atoms, which the caller holds until the
+        // call's Commit. A refused entry leaves them outside its prefix.
+        for load in &call.atoms {
+            let operand = match &load.src {
+                crate::compile::region_isa::AtomSource::Role(src) => self.read(*src)?,
+                crate::compile::region_isa::AtomSource::Constant(value) => {
+                    Operand::Immediate(*value)
+                }
+            };
+            self.write(load.dst, operand)?;
+        }
         self.call_captures.clear();
         let callable = call
             .callable
@@ -107,7 +118,6 @@ impl Running<'_> {
             .target(caller.program.code(), site, plan.code())?;
         if target.parameters.iter().any(|parameter| parameter.shared)
             || target.captures.len() != self.call_captures.len()
-            || plan.debt().before_entry() != 0
         {
             return Err(invalid(Refused::Facts));
         }
@@ -150,7 +160,9 @@ impl Running<'_> {
             self.stop = Some(RegionStop::Refusal);
             return Ok(None);
         }
-        let required_depth = self.counters.depth.checked_add(step.depth.max(1));
+        // The caller's depth counts its own frame: a guest call is admitted
+        // while that depth, with any prepared operation depth, is in bound.
+        let required_depth = self.counters.depth.checked_add(step.depth);
         if required_depth.is_none_or(|depth| depth > self.limits.depth) {
             self.refusal = Some(crate::Bound::CallDepth);
             self.attempted = Some(step.at.clone());
@@ -215,7 +227,12 @@ impl Running<'_> {
         holds.extend(self.call_values.iter().map(|value| (*value, false)));
         holds.extend(self.call_captures.iter().map(|value| (*value, true)));
         releases.clear();
-        if let Some(callable) = callable {
+        // A nested call moves its callable and arguments into the callee;
+        // a statement call's caller holds its atoms beside the callee's.
+        let rooted = call.plan.rooted();
+        if let Some(callable) = callable
+            && !rooted
+        {
             releases.push((callable, false));
         }
         for &argument in &call.arguments {
@@ -224,7 +241,11 @@ impl Running<'_> {
                 .read(depth, self.reached.invocation, argument)?
                 .bind(&mut self.view)
                 .map_err(RegionError::Heap)?;
-            releases.push((value, false));
+            if rooted {
+                holds.push((value, false));
+            } else {
+                releases.push((value, false));
+            }
         }
         let phase = self
             .view
@@ -279,11 +300,12 @@ impl Running<'_> {
         // this entry, while the callee starts its own source coordinates.
         let ready = phase.reserve().map_err(RegionError::Heap)?;
         reached.occurrence = counter.accept();
+        reached.prefix = step.after.index() as u32;
         let parked = Parked {
             callee: identity,
             code: Arc::clone(&caller),
             pc: self.pc,
-            prefix: self.prefix,
+            prefix: step.after,
             reached,
             activation: self.activation.take(),
             site,

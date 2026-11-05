@@ -1115,7 +1115,7 @@ impl KernelMachine {
 
     /// Runs one statement of `task`, or resumes the one it waits in.
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
-        if self.resume_source_continuation(task)? {
+        if self.resume_source_continuation(task, host)? {
             return Ok(());
         }
         let (link, program) = {

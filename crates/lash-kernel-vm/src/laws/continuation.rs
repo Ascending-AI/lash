@@ -382,10 +382,7 @@ fn nested_await_resumes_exactly() {
         &["tool", "c"],
         &expected,
         &printed,
-        &[
-            ContinuationPhase::Call { phase: 0 },
-            ContinuationPhase::Waiting,
-        ],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
     let (_, crossed) = drive(NESTED_AWAIT, &["tool", "c"], Drive::new(u64::MAX, true));
     assert!(
@@ -411,13 +408,7 @@ const MUTATED_RECEIVER_HOISTED: &str = "definition \"function writer(o: Any) -> 
 #[test]
 fn parked_role_keeps_the_evaluated_value() {
     let expected = tuple(&[list(&[int(1), text("m")]), int(2)]);
-    case(
-        MUTATED_RECEIVER,
-        &["w", "m"],
-        &expected,
-        &[],
-        &[ContinuationPhase::Waiting],
-    );
+    case(MUTATED_RECEIVER, &["w", "m"], &expected, &[], &[STANDING]);
     case(MUTATED_RECEIVER_HOISTED, &["w", "m"], &expected, &[], &[]);
 }
 
@@ -435,10 +426,7 @@ fn callback_inside_expression_resumes_exactly() {
         &["echo", "echo"],
         &expected,
         &[text("a"), text("b")],
-        &[
-            ContinuationPhase::Call { phase: 0 },
-            ContinuationPhase::Waiting,
-        ],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
     case(
         CALLBACK_HOISTED,
@@ -465,10 +453,7 @@ fn a_spawn_inside_an_expression_resumes_exactly() {
         &["child"],
         &expected,
         &printed,
-        &[
-            ContinuationPhase::Spawned,
-            ContinuationPhase::Call { phase: 0 },
-        ],
+        &[STANDING, ContinuationPhase::Call { phase: 0 }],
     );
     case(SPAWNED_HOISTED, &["child"], &expected, &printed, &[]);
 }
@@ -496,10 +481,7 @@ fn library_bodies_inside_expressions_resume_exactly() {
         &["w"],
         &expected,
         &[int(1)],
-        &[
-            ContinuationPhase::Call { phase: 0 },
-            ContinuationPhase::Waiting,
-        ],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
 }
 
@@ -520,10 +502,7 @@ fn while_condition_actions_resume_exactly() {
         &[],
         &expected,
         &printed,
-        &[
-            ContinuationPhase::Call { phase: 0 },
-            ContinuationPhase::Waiting,
-        ],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
     case(WHILE_CONDITION_HOISTED, &[], &expected, &printed, &[]);
 }
@@ -555,10 +534,7 @@ fn assignment_place_actions_resume_exactly() {
         &[],
         &expected,
         &printed,
-        &[
-            ContinuationPhase::Call { phase: 0 },
-            ContinuationPhase::Waiting,
-        ],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
     case(PLACES_HOISTED, &[], &expected, &printed, &[]);
 }
@@ -601,7 +577,7 @@ fn a_missing_role_at_a_condition_or_a_place_is_refused() {
         "main { let i = 0\nwhile [i, perform 0(false) as Any][1] { set i = 1 }\nreturn i }\n",
         "main { let t = [0]\nset t[0] = [1, perform 0(\"w\") as Any][1] place first\nreturn t }\n",
     ] {
-        let mut embedder = park_where(source, |phases| phases == only(ContinuationPhase::Waiting));
+        let mut embedder = park_where(source, |phases| phases == only(STANDING));
         let mut dropped = None;
         edit_roles(&mut embedder, |roles| {
             assert!(!roles.is_empty(), "{source}");
@@ -640,13 +616,7 @@ fn a_nested_call_reads_its_callee_before_its_arguments() {
 #[test]
 fn cancel_at_a_nested_wait_resumes_exactly() {
     const SOURCE: &str = "definition \"function work(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = [perform 0(x) as Any] return v[0]  }\"\n\nmain { let h = spawn call work(0)\ndo cancel h\nlet r = \"none\"\ntry { let v = join h\nset r = v } catch e { set r = e.kind }\nreturn r }\n";
-    case(
-        SOURCE,
-        &[],
-        &text("cancelled"),
-        &[],
-        &[ContinuationPhase::Waiting],
-    );
+    case(SOURCE, &[], &text("cancelled"), &[], &[STANDING]);
 }
 
 /// SITE-NESTED (`K-EFF-008`, `K-SITE-002`): each wait of a statement that
@@ -840,15 +810,20 @@ fn park_where(
     panic!("the run never stood where it was wanted")
 }
 
+/// A frame standing at an action whose Enter is accepted and whose result
+/// is not yet delivered: a spawn, a wait, a join or a yield.
+const STANDING: ContinuationPhase = ContinuationPhase::Source {
+    phase: crate::compile::room::Phase::Enter as u32,
+    progress: 2,
+};
+
 fn only(phase: ContinuationPhase) -> Vec<(TaskId, usize, ContinuationPhase)> {
     vec![(TaskId::MAIN, 0, phase)]
 }
 
 /// `main` parked at the nested `perform` of [`NESTED_AWAIT`].
 fn waiting() -> Embedder {
-    park_where(NESTED_AWAIT, |phases| {
-        phases == only(ContinuationPhase::Waiting)
-    })
+    park_where(NESTED_AWAIT, |phases| phases == only(STANDING))
 }
 
 /// `main` standing at the nested `call a()`, its callee's frame above.
@@ -1115,7 +1090,7 @@ fn a_continuation_keeps_its_roles_flat_and_spills_a_long_list() {
         let operands: String = (0..count).map(|i| format!("{i}, ")).collect();
         let source =
             format!("main {{ let r = [{operands}perform 0(\"w\") as Any]\nreturn list.len(r) }}\n");
-        let mut embedder = park_where(&source, |phases| phases == only(ContinuationPhase::Waiting));
+        let mut embedder = park_where(&source, |phases| phases == only(STANDING));
         let mut saved = None;
         embedder
             .machine
@@ -1149,13 +1124,7 @@ const NESTED_JOIN_HOISTED: &str = "definition \"function w(x: Any) -> Any\\nkern
 #[test]
 fn nested_join_resumes_exactly() {
     let expected = list(&[int(1), text("a"), list(&[text("a"), text("b")])]);
-    case(
-        NESTED_JOIN,
-        &["b", "a"],
-        &expected,
-        &[],
-        &[ContinuationPhase::Joining],
-    );
+    case(NESTED_JOIN, &["b", "a"], &expected, &[], &[STANDING]);
     case(NESTED_JOIN_HOISTED, &["b", "a"], &expected, &[], &[]);
 }
 
@@ -1182,13 +1151,7 @@ main {
         &["child", "x"],
         &text("done"),
         &[list(&[Datum::Null])],
-        &[
-            ContinuationPhase::Call { phase: 0 },
-            ContinuationPhase::Waiting,
-            ContinuationPhase::Yielded,
-            ContinuationPhase::Spawned,
-            ContinuationPhase::Joining,
-        ],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
 }
 

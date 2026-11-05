@@ -179,6 +179,15 @@ pub(super) fn transfer(
             }
         }
     }
+    // A statement action's Enter holds its atoms until its Commit.
+    for (measure, coefficient) in crate::compile::room::charges::region_isa::terms(&event.delta) {
+        if *coefficient > 0
+            && let Measure::Local(owner @ Owner::Atom { .. }) = measure
+            && let Some(slot) = resources::role(source, owner).and_then(Role::slot)
+        {
+            next.insert(slot);
+        }
+    }
     if !matches!(draft.ops[pc], RegionOp::Call { .. })
         && let Some(output) = event
             .output
@@ -226,7 +235,12 @@ pub(super) fn successors(draft: &RegionDraft, pc: usize) -> Vec<super::Pc> {
             _ => vec![*next],
         },
         RegionOp::Branch { yes, no, .. } => vec![*yes, *no],
-        RegionOp::Boundary { .. } => vec![],
+        // The machine resumes a delivering action at its Commit.
+        RegionOp::Boundary { spec } => match spec.next() {
+            Some(next) if spec.action().is_some() => vec![next],
+            _ => vec![],
+        },
+        RegionOp::Effect { next, .. } => next.iter().copied().collect(),
         RegionOp::Return { .. } | RegionOp::Exit { .. } => vec![],
     }
 }

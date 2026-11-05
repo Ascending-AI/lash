@@ -75,7 +75,9 @@ impl Running<'_> {
                 }
                 continue;
             }
-            if matches!(op, RegionOp::Boundary { .. }) {
+            if let RegionOp::Boundary { spec } = op
+                && spec.action().is_none()
+            {
                 return self.halt(RegionStop::Boundary);
             }
             let before = charge::bill(
@@ -140,6 +142,10 @@ impl Running<'_> {
                 _ => self
                     .scalar_answer(op)?
                     .ok_or_else(|| invalid(Refused::Facts))?,
+            };
+            let effect = match op {
+                RegionOp::Effect { kind, value, .. } => Some((*kind, self.value(*value)?)),
+                _ => None,
             };
             let departure = if matches!(op, RegionOp::Exit { .. }) && self.departing.is_none() {
                 let map = code
@@ -264,6 +270,15 @@ impl Running<'_> {
                 }
             } else {
                 self.pc = answer.next;
+            }
+            // An accepted action Enter stands for the machine to perform it.
+            if matches!(op, RegionOp::Boundary { .. }) {
+                return self.halt(RegionStop::Action);
+            }
+            // An accepted effect hands its value to the machine.
+            if let Some((kind, value)) = effect {
+                self.effect = Some(value);
+                return self.halt(RegionStop::Effect(kind));
             }
             if let Some(stop) = self.prefix_stop(request) {
                 return Ok(stop);

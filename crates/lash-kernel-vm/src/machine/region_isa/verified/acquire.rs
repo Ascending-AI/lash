@@ -55,7 +55,7 @@ impl<'m> RegionLease<'m> {
         let mut positions = Vec::new();
         let mut dependencies = Vec::new();
         let mut inputs = Vec::new();
-        for frame in &mut stack {
+        for (depth, frame) in stack.iter_mut().enumerate() {
             frame
                 .reconstruct_region_frontier(&exe, &machine.heap, &machine.logical, task_id)
                 .map_err(RegionError::Heap)?;
@@ -84,7 +84,10 @@ impl<'m> RegionLease<'m> {
                 return Err(invalid(Refused::Source));
             }
             let position = if let Some(source) = &frame.pending.source {
-                if source.debt.paid != machine.charged {
+                // The top frame resumes at the machine's charge; a parked
+                // caller stands at its call's successor and pays nothing
+                // until the callee returns into it.
+                if depth + 1 == entry_frames && source.debt.paid != machine.charged {
                     return Err(invalid(Refused::Facts));
                 }
                 super::resume::position(code, source)?

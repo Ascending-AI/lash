@@ -1061,6 +1061,7 @@ impl Source {
                         | doc::Stmt::Do { .. }
                         | doc::Stmt::Assign { .. }
                         | doc::Stmt::Remove { .. }
+                        | doc::Stmt::Print { .. }
                 )
         ) || !self.room.events.contains_key(&point(at, Phase::Commit))
         {
@@ -1155,6 +1156,29 @@ fn child(site: &Site, index: usize) -> Site {
 fn operand(site: &Site) -> Owner {
     Owner::Operand(site.clone())
 }
+/// An action whose result the machine delivers as the task's Incoming:
+/// every statement action, and every nested one except a call, whose
+/// callee completion enters a distinct Restore. Its Commit moves that
+/// Incoming into the action's operand, as Restore does.
+pub(crate) fn delivers(node: doc::Node<'_>) -> bool {
+    match node {
+        doc::Node::Action(_) => true,
+        doc::Node::Expr(doc::Expr::Act(act)) => !matches!(act.kind, doc::ActKind::Call(_)),
+        _ => false,
+    }
+}
+/// The inputs of `node`'s Commit: a delivering action's also take its
+/// delivered Incoming.
+fn commit_inputs(site: &Site, node: doc::Node<'_>) -> Box<[Owner]> {
+    let ins = inputs(site, node);
+    if !delivers(node) {
+        return ins;
+    }
+    ins.iter()
+        .cloned()
+        .chain(std::iter::once(Owner::Incoming(site.clone())))
+        .collect()
+}
 fn inputs(site: &Site, node: doc::Node<'_>) -> Box<[Owner]> {
     match node {
         doc::Node::Expr(doc::Expr::Act(act))
@@ -1191,7 +1215,7 @@ fn shared(shared: &BTreeMap<(Site, Name), bool>, site: &Site, name: &Name) -> u6
     }
 }
 
-fn atoms(action: &doc::Action) -> &[doc::Atom] {
+pub(crate) fn action_atoms(action: &doc::Action) -> &[doc::Atom] {
     match action {
         doc::Action::Call { args, .. }
         | doc::Action::Spawn { args, .. }

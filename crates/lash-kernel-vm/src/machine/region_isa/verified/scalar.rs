@@ -1,7 +1,7 @@
 //! Installed scalar kernels execute once; admission installs their answer later.
 use super::super::{code::Register, operands::Operand, *};
 use super::Running;
-use crate::compile::region_isa::{CheckedKind, Pc, RegionOp};
+use crate::compile::region_isa::{AtomSource, CheckedKind, Pc, RegionOp};
 use lash_kernel_state::kernel_internals::logical::LeaseValue;
 
 pub(super) struct ScalarAnswer {
@@ -67,6 +67,31 @@ impl Running<'_> {
                         .program
                         .return_successor(self.pc)
                         .ok_or_else(|| invalid(Refused::Path))?,
+                    formula: None,
+                }));
+            }
+            // A delivering action's Enter loads its atoms; the machine
+            // performs the action once the step is accepted.
+            RegionOp::Boundary { spec } => {
+                let action = spec.action().ok_or_else(|| invalid(Refused::Facts))?;
+                for load in &action.atoms {
+                    let operand = match &load.src {
+                        AtomSource::Role(src) => self.read(*src)?,
+                        AtomSource::Constant(value) => Operand::Immediate(*value),
+                    };
+                    self.write(load.dst, operand)?;
+                }
+                return Ok(Some(ScalarAnswer {
+                    write: None,
+                    next: spec.next().ok_or_else(|| invalid(Refused::Facts))?,
+                    formula: None,
+                }));
+            }
+            // The machine performs an effect once its step is accepted.
+            RegionOp::Effect { next, .. } => {
+                return Ok(Some(ScalarAnswer {
+                    write: None,
+                    next: next.unwrap_or(self.pc),
                     formula: None,
                 }));
             }

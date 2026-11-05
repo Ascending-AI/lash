@@ -216,6 +216,11 @@ impl CallPlan {
     pub(crate) fn resume(&self) -> &Point {
         &self.resume
     }
+    /// A statement call holds its argument atoms until its Commit; a
+    /// nested call moves its operands into the callee.
+    pub(crate) fn rooted(&self) -> bool {
+        self.resume.phase == Phase::Commit
+    }
     pub(crate) fn arguments(&self) -> &[CallRole] {
         &self.arguments
     }

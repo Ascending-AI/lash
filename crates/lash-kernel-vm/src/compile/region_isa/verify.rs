@@ -56,6 +56,15 @@ fn source_next(source: &Source, at: &Point) -> Result<Option<Point>, Refused> {
             phase: Phase::Leave,
         }));
     }
+    // Finishing or failing ends the program: nothing follows its Commit.
+    if at.phase == Phase::Commit
+        && matches!(
+            node,
+            doc::Node::Stmt(doc::Stmt::Finish { .. } | doc::Stmt::Fail { .. })
+        )
+    {
+        return Ok(None);
+    }
     if at.phase == Phase::Commit && matches!(node, doc::Node::Stmt(doc::Stmt::If { .. })) {
         let mut parent = at.site.clone();
         let index = parent.path.pop().ok_or(Refused::Path)? as usize;
@@ -156,9 +165,14 @@ fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refused> {
     match &draft.ops[index] {
         RegionOp::Boundary { .. } => {}
         RegionOp::Call { next, .. } => {
+            // A statement call's completion is taken at its Commit, a
+            // nested call's at its distinct Restore.
             let expected = Point {
                 site: step.at.site.clone(),
-                phase: Phase::Restore,
+                phase: match resources::node(source, &step.at.site)? {
+                    doc::Node::Action(_) => Phase::Commit,
+                    _ => Phase::Restore,
+                },
             };
             if target(*next)? != &expected || !source.room.events.contains_key(&expected) {
                 return Err(Refused::Path);
@@ -305,6 +319,123 @@ fn check_origin(
     Ok(())
 }
 
+/// A delivering action's Enter: the action its origin names is one the
+/// machine performs, its atoms load the action's own atom slots from their
+/// visible names or literals, its arguments are its atoms or its nested
+/// operands, and it resumes at its own Commit.
+fn check_action(
+    exe: &Executable,
+    draft: &RegionDraft,
+    index: usize,
+    node: doc::Node<'_>,
+    spec: &BoundarySpec,
+    action: &ActionBoundary,
+) -> Result<(), Refused> {
+    let step = &draft.steps[index];
+    let origin = spec.origin.ok_or(Refused::Source)?;
+    let (stream, statement, _) = exe.statement(origin.statement);
+    let performs = match (node, origin.op) {
+        (doc::Node::Expr(doc::Expr::Act(_)), Op::Nested { act, .. }) => {
+            stream.nested.get(act.ix()).is_some_and(|entry| {
+                !matches!(
+                    entry.kind,
+                    crate::compile::NestedKind::Call(_) | crate::compile::NestedKind::Body(_)
+                )
+            })
+        }
+        (doc::Node::Action(_), Op::Act) => matches!(
+            &statement.form,
+            crate::compile::Form::Action(action)
+                if !matches!(action.kind, crate::compile::ActionKind::Call { .. })
+        ),
+        _ => false,
+    };
+    let commit = Point {
+        site: step.at.site.clone(),
+        phase: Phase::Commit,
+    };
+    if !performs
+        || step.at.phase != Phase::Enter
+        || !crate::compile::room::delivers(node)
+        || step.event.output.is_some()
+        || spec.next.is_none()
+        || spec.next != super::stages::event_pc(draft, &commit).ok()
+        || !step.event.entities.is_empty()
+    {
+        return Err(Refused::Source);
+    }
+    check_atoms(draft, index, node, &action.atoms)?;
+    let arguments: Vec<_> = match node {
+        doc::Node::Action(_) => action.atoms.iter().map(|load| load.dst).collect(),
+        _ => draft
+            .steps
+            .get(spec.next.ok_or(Refused::Path)?.offset())
+            .ok_or(Refused::Path)?
+            .event
+            .inputs
+            .iter()
+            .filter(|owner| !matches!(owner, Owner::Incoming(_)))
+            .map(|owner| register(draft, owner))
+            .collect::<Result<_, _>>()?,
+    };
+    if *action.arguments != *arguments {
+        return Err(Refused::Facts);
+    }
+    Ok(())
+}
+
+/// A statement action's atom loads: each loads the action's own atom slot,
+/// in order, from its visible name's role or its literal. A nested action
+/// has none.
+fn check_atoms(
+    draft: &RegionDraft,
+    index: usize,
+    node: doc::Node<'_>,
+    loads: &[AtomLoad],
+) -> Result<(), Refused> {
+    let step = &draft.steps[index];
+    let atoms: &[doc::Atom] = match node {
+        doc::Node::Action(action) => crate::compile::room::action_atoms(action),
+        _ => &[],
+    };
+    if loads.len() != atoms.len() {
+        return Err(Refused::Facts);
+    }
+    for (index, (load, atom)) in loads.iter().zip(atoms).enumerate() {
+        let dst = register(
+            draft,
+            &Owner::Atom {
+                at: step.at.site.clone(),
+                index: u32::try_from(index).map_err(|_| Refused::Facts)?,
+            },
+        )?;
+        let loads = match (&load.src, atom) {
+            (AtomSource::Role(src), doc::Atom::Variable(name)) => {
+                let role = resources::role(
+                    &draft.source,
+                    &Owner::Visible {
+                        at: step.at.site.clone(),
+                        name: name.clone(),
+                    },
+                )
+                .ok_or(Refused::Facts)?;
+                draft
+                    .roles
+                    .iter()
+                    .any(|(actual, reg)| *actual == role && reg == src)
+            }
+            (AtomSource::Constant(value), doc::Atom::Literal(literal)) => {
+                super::lower::literal(literal).is_some_and(|expected| expected.same(value))
+            }
+            _ => false,
+        };
+        if load.dst != dst || !loads {
+            return Err(Refused::Facts);
+        }
+    }
+    Ok(())
+}
+
 fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), Refused> {
     let step = &draft.steps[index];
     if step.stage.is_some() {
@@ -359,6 +490,22 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
             if Some(*dst) != expected_output || !value.same(&expected) {
                 return Err(Refused::Source);
             }
+        }
+        // A delivering action's Commit moves its delivered Incoming into its
+        // operand and releases its arguments.
+        RegionOp::Move { dst, src, .. }
+            if step.at.phase == Phase::Commit && crate::compile::room::delivers(node) =>
+        {
+            let sink = Reg::new(draft.roles.len())?;
+            let inputs = expected_inputs?;
+            if *src != sink
+                || inputs.last() != Some(&sink)
+                || expected_output != Some(*dst)
+                || !step.event.entities.is_empty()
+            {
+                return Err(Refused::Facts);
+            }
+            value_reg(*dst)?;
         }
         RegionOp::Move { dst, src, .. } => {
             if step.at.phase == Phase::Restore {
@@ -474,7 +621,8 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 let name = match (node, step.at.phase) {
                     (doc::Node::Expr(doc::Expr::Variable(name)), Phase::Commit) => name,
                     (doc::Node::Expr(doc::Expr::Act(act)), Phase::Open) => match &act.kind {
-                        doc::ActKind::Call(doc::Callee::Value(name)) => name,
+                        doc::ActKind::Call(doc::Callee::Value(name))
+                        | doc::ActKind::Spawn(doc::Callee::Value(name)) => name,
                         _ => return Err(Refused::Source),
                     },
                     _ => return Err(Refused::Source),
@@ -630,12 +778,22 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
         RegionOp::Call { site, .. } => {
             let call = draft.calls.get(site.offset()).ok_or(Refused::Source)?;
             check_origin(exe, draft, &step.at, call.origin)?;
+            check_atoms(draft, index, node, &call.atoms)?;
             let inputs = expected_inputs?;
-            let arguments = if matches!(node, doc::Node::Expr(doc::Expr::Act(act)) if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_))))
-            {
-                inputs.get(1..).ok_or(Refused::Facts)?
-            } else {
-                &inputs
+            // A statement call's arguments are its atoms, which it holds;
+            // a nested call's are its operands, the callable aside.
+            let atoms: Vec<_>;
+            let arguments = match node {
+                doc::Node::Action(_) if inputs.is_empty() => {
+                    atoms = call.atoms.iter().map(|load| load.dst).collect();
+                    &atoms[..]
+                }
+                doc::Node::Expr(doc::Expr::Act(act))
+                    if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_))) =>
+                {
+                    inputs.get(1..).ok_or(Refused::Facts)?
+                }
+                _ => &inputs,
             };
             if call.at != step.at
                 || arguments != call.arguments.as_ref()
@@ -664,6 +822,26 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
             }
             if let Some(origin) = spec.origin {
                 check_origin(exe, draft, &step.at, origin)?;
+            }
+            if let Some(action) = spec.action() {
+                check_action(exe, draft, index, node, spec, action)?;
+            }
+        }
+        RegionOp::Effect { kind, value, .. } => {
+            value_reg(*value)?;
+            let expected = match node {
+                doc::Node::Stmt(doc::Stmt::Print { .. }) => EffectKind::Print,
+                doc::Node::Stmt(doc::Stmt::Finish { .. }) => EffectKind::Finish,
+                doc::Node::Stmt(doc::Stmt::Fail { .. }) => EffectKind::Fail,
+                _ => return Err(Refused::Source),
+            };
+            if *kind != expected
+                || step.at.phase != Phase::Commit
+                || !step.event.entities.is_empty()
+                || expected_output.is_some()
+                || expected_inputs.as_deref() != Ok(&[*value])
+            {
+                return Err(Refused::Facts);
             }
         }
         RegionOp::Exit { prefix } => {
@@ -896,7 +1074,7 @@ fn verify_layout(
                             .inputs
                             .iter()
                             .any(|owner| matches!(owner, Owner::Incoming(_))))
-                        || (phase > 0 && matches!(draft.ops[index], RegionOp::Call { .. }))
+                        || (phase > 0 && super::lower::delivers(&draft.ops[index]))
                     {
                         Some(Reg::new(draft.roles.len())?)
                     } else {
@@ -963,6 +1141,15 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 }
             }
         }
+        // A statement action's Enter holds its atoms until its Commit.
+        for (measure, coefficient) in canonical::terms(&event.delta) {
+            if *coefficient > 0
+                && let Measure::Local(owner @ Owner::Atom { .. }) = measure
+                && let Some(slot) = resources::role(source, owner).and_then(Role::slot)
+            {
+                after.insert(slot);
+            }
+        }
         if !matches!(draft.ops[index], RegionOp::Call { .. })
             && let Some(slot) = event
                 .output
@@ -995,13 +1182,13 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
             .iter()
             .any(|owner| matches!(owner, Owner::Incoming(_)))
             .then_some(sink);
-        let incoming_after = matches!(draft.ops[index], RegionOp::Call { .. }).then_some(sink);
+        let incoming_after = super::lower::delivers(&draft.ops[index]).then_some(sink);
         let mut pending_roles = if incoming_after.is_some() {
             after.clone()
         } else {
             before.clone()
         };
-        let pending = if matches!(draft.ops[index], RegionOp::Call { .. }) {
+        let pending = if super::lower::delivers(&draft.ops[index]) {
             Some(sink)
         } else if matches!(draft.ops[index], RegionOp::Heap { .. }) {
             match &draft.ops[index] {

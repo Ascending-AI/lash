@@ -21,7 +21,7 @@ impl Source {
 
     pub(crate) fn native_inputs(&self, at: &Point) -> Result<Box<[Owner]>, Refused> {
         if let Ok(action) = self.root_action(at) {
-            return Ok((0..super::super::super::atoms(action).len())
+            return Ok((0..super::super::super::action_atoms(action).len())
                 .map(|index| Owner::Atom {
                     at: at.site.clone(),
                     index: index as u32,

@@ -314,9 +314,43 @@ impl ReadSpec {
 #[derive(Clone)]
 pub(crate) struct BoundarySpec {
     at: Point,
+    action: Option<ActionBoundary>,
     origin: Option<KirOrigin>,
     next: Option<Pc>,
 }
+/// A delivering action's Enter. The step evaluates its atoms and stops after
+/// its own acceptance; the machine performs the action its origin names, and
+/// the frame resumes at the successor Commit with the result as the task's
+/// Incoming. Without one, the boundary has no lowering and the machine faults.
+#[derive(Clone)]
+pub(crate) struct ActionBoundary {
+    /// The statement action's atoms, evaluated into their own slots.
+    pub(crate) atoms: Box<[AtomLoad]>,
+    /// The action's arguments, in order: its atoms, or the operands of a
+    /// nested action, live from this step to its Commit.
+    pub(crate) arguments: Box<[Reg<LeaseValue>]>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct AtomLoad {
+    pub(crate) dst: Reg<LeaseValue>,
+    pub(crate) src: AtomSource,
+}
+#[derive(Clone, Debug)]
+pub(crate) enum AtomSource {
+    /// A visible name's role.
+    Role(Reg<LeaseValue>),
+    Constant(Value),
+}
+impl PartialEq for AtomSource {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Role(a), Self::Role(b)) => a == b,
+            (Self::Constant(a), Self::Constant(b)) => a.same(b),
+            _ => false,
+        }
+    }
+}
+impl Eq for AtomSource {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct KirOrigin {
     pub(crate) statement: StmtId,
@@ -326,6 +360,9 @@ pub(crate) struct KirOrigin {
 impl BoundarySpec {
     pub(crate) fn point(&self) -> &Point {
         &self.at
+    }
+    pub(crate) fn action(&self) -> Option<&ActionBoundary> {
+        self.action.as_ref()
     }
     pub(crate) fn origin(&self) -> Option<KirOrigin> {
         self.origin
@@ -387,9 +424,25 @@ pub(crate) enum RegionOp {
     Boundary {
         spec: BoundarySpec,
     },
+    /// A statement that hands its operand to the machine: the step is
+    /// accepted and billed in the region, which then stops with the value
+    /// as the task's Incoming for the machine to print, finish or fail with.
+    Effect {
+        kind: EffectKind,
+        value: Reg<LeaseValue>,
+        next: Option<Pc>,
+    },
     Exit {
         prefix: PrefixId,
     },
+}
+
+/// What the machine does with an [`RegionOp::Effect`]'s value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EffectKind {
+    Print,
+    Finish,
+    Fail,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -432,6 +485,9 @@ pub(crate) struct Step {
 pub(crate) struct CallSite {
     pub(crate) at: Point,
     pub(crate) origin: KirOrigin,
+    /// A statement call's atoms, loaded at its Enter and held by the caller
+    /// until its Commit; a nested call's arguments are its operands.
+    pub(crate) atoms: Box<[AtomLoad]>,
     pub(crate) arguments: Box<[Reg<LeaseValue>]>,
     pub(crate) result: Reg<LeaseValue>,
 }
@@ -499,6 +555,30 @@ impl RegionCode {
         } else {
             self.draft.ops.get(pc.offset())
         }
+    }
+    /// The slots of the delivering action at `pc`'s arguments, in order,
+    /// and its Commit's pc.
+    pub(crate) fn action_arguments(&self, pc: Pc) -> Option<(Box<[Slot]>, Pc)> {
+        let RegionOp::Boundary { spec } = self.op(pc)? else {
+            return None;
+        };
+        let slots = spec
+            .action()?
+            .arguments
+            .iter()
+            .map(|reg| {
+                self.draft
+                    .roles
+                    .iter()
+                    .find_map(|(role, actual)| (actual == reg).then_some(role.slot()))
+                    .flatten()
+            })
+            .collect::<Option<_>>()?;
+        Some((slots, spec.next()?))
+    }
+    /// The atoms a statement call loads at its Enter.
+    pub(crate) fn call_atoms(&self, site: CallId) -> Option<&[AtomLoad]> {
+        Some(&self.draft.calls.get(site.offset())?.atoms)
     }
     /// Register holding the completed callee result until caller Restore.
     pub(crate) fn call_incoming(&self, site: CallId) -> Option<Reg<LeaseValue>> {

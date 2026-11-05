@@ -50,10 +50,12 @@ pub(super) fn position(
             .program
             .step(pc)
             .ok_or_else(|| invalid(Refused::Path))?;
+        // A suspended caller stands after its call's Enter: what the call
+        // moved is gone, what it holds is live.
         return Ok((
             pc,
             if source.progress == 3 {
-                step.before
+                step.after
             } else {
                 step.pending
             },
@@ -78,6 +80,69 @@ pub(super) fn position(
         .or_else(|| code.program.at(&source.unpaid))
         .ok_or_else(|| invalid(Refused::Path))?;
     Ok((pc, prefix))
+}
+
+/// The delivering action a frame stands at, its Enter accepted and its
+/// result not yet delivered: the action its origin names, the Commit it
+/// resumes at, and its arguments' values.
+pub(in crate::machine) struct Standing {
+    pub(in crate::machine) statement: crate::compile::StmtId,
+    /// The nested action, or `None` for the statement's own action.
+    pub(in crate::machine) act: Option<lash_kernel_exec::ActIx>,
+    pub(in crate::machine) resume: crate::compile::room::Point,
+    pub(in crate::machine) arguments: Vec<Value>,
+}
+
+/// A frame stands at an action once its Enter is accepted.
+pub(in crate::machine) fn standing(
+    code: &Code,
+    source: &SourceContinuation,
+) -> Result<Option<Standing>, RegionError> {
+    use crate::compile::region_isa::RegionOp;
+    if source.progress != 2 || source.departure.is_some() {
+        return Ok(None);
+    }
+    let Some(pc) = code.program.at(&source.at) else {
+        return Ok(None);
+    };
+    let Some(RegionOp::Boundary { spec }) = code.program.op(pc) else {
+        return Ok(None);
+    };
+    if spec.action().is_none() {
+        return Ok(None);
+    }
+    position(code, source)?;
+    let origin = spec.origin().ok_or_else(|| invalid(Refused::Facts))?;
+    let act = match origin.op {
+        lash_kernel_exec::Op::Nested { act, .. } => Some(act),
+        lash_kernel_exec::Op::Act => None,
+        _ => return Err(invalid(Refused::Source)),
+    };
+    let (slots, commit) = code
+        .program
+        .action_arguments(pc)
+        .ok_or_else(|| invalid(Refused::Facts))?;
+    let arguments = slots
+        .iter()
+        .map(|slot| {
+            source
+                .roles
+                .iter()
+                .find_map(|(saved, value)| (saved == slot).then_some(*value))
+                .ok_or_else(|| invalid(Refused::Facts))
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(Some(Standing {
+        statement: origin.statement,
+        act,
+        resume: code
+            .program
+            .step(commit)
+            .ok_or_else(|| invalid(Refused::Path))?
+            .at
+            .clone(),
+        arguments,
+    }))
 }
 
 pub(super) fn unpaid_pc(
@@ -117,7 +182,7 @@ pub(in crate::machine) fn restore_source_controls(
     source: &SourceContinuation,
     record: &FrameRecord,
     access: &Access<'_>,
-) -> Result<Controls, HeapFault> {
+) -> Result<(Controls, Option<Standing>), HeapFault> {
     let draft = compile_region(exe, id).map_err(|_| malformed())?;
     let calls = compile_calls(exe, &draft).map_err(|_| malformed())?;
     let program = verify_region(exe, id, draft, &calls).map_err(|_| malformed())?;
@@ -191,7 +256,10 @@ pub(in crate::machine) fn restore_source_controls(
             source.pending.is_some()
         )));
     }
-    control::controls_for(&code, pc, &loops).map_err(|_| malformed())
+    Ok((
+        control::controls_for(&code, pc, &loops).map_err(|_| malformed())?,
+        standing(&code, source).map_err(|_| malformed())?,
+    ))
 }
 
 pub(super) fn active(frame: &Frame, stmt: crate::compile::StmtId) -> bool {
@@ -239,10 +307,6 @@ fn expected(
     let mut values = Vec::new();
     for (slot, reg) in &map.roles {
         if let Some(call) = call {
-            let physical = super::bind::physical(&code.program, *reg)?;
-            if call.arguments.contains(&physical) || call.callable == Some(physical) {
-                continue;
-            }
             values.push((
                 call.saved
                     .iter()

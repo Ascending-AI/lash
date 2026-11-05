@@ -11,6 +11,7 @@ use crate::compile::room::{Point, Refused};
 use lash_kernel_doc::{Value, heap::HeapFault};
 use std::{rc::Rc, sync::Arc};
 
+mod actions;
 mod code;
 mod entry;
 mod execute;
@@ -109,6 +110,10 @@ pub(crate) enum StopAt {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RegionStop {
     Boundary,
+    /// The region stands at a delivering action for the machine to perform.
+    Action,
+    /// The region accepted an effect; its value is the task's Incoming.
+    Effect(crate::compile::region_isa::EffectKind),
     Refusal,
     Throw,
     Slice,

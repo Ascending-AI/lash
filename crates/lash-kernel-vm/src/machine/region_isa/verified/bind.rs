@@ -45,6 +45,8 @@ pub(super) struct SavedRole {
 pub(in crate::machine::region_isa) struct Call {
     pub(in crate::machine::region_isa) plan: CallPlan,
     pub(in crate::machine::region_isa) arguments: Box<[Register]>,
+    /// A statement call's atom loads; its arguments stay held by the caller.
+    pub(super) atoms: Box<[crate::compile::region_isa::AtomLoad]>,
     pub(super) saved: Box<[SavedRole]>,
     pub(super) counter: source_counters::CounterPlan,
     pub(in crate::machine::region_isa) callable: Option<Register>,
@@ -180,6 +182,10 @@ impl Code {
                             .iter()
                             .map(|input| role(input.slot()))
                             .collect::<Result<_, _>>()?,
+                        atoms: program
+                            .call_atoms(*site)
+                            .ok_or_else(|| invalid(Refused::Source))?
+                            .into(),
                         saved: saved_roles(exe, program, plan)?,
                         callable: plan
                             .callable()
@@ -204,7 +210,13 @@ impl Code {
                             .ok_or_else(|| invalid(Refused::Path))?,
                     );
                 }
-                RegionOp::Boundary { .. } | RegionOp::Exit { .. } => {}
+                RegionOp::Boundary { spec } => {
+                    if spec.action().is_some() {
+                        pending.push(spec.next().ok_or_else(|| invalid(Refused::Facts))?);
+                    }
+                }
+                RegionOp::Effect { next, .. } => pending.extend(*next),
+                RegionOp::Exit { .. } => {}
             }
         }
         let count = calls.last_key_value().map_or(Ok(0), |(&index, _)| {

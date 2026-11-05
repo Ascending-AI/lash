@@ -190,6 +190,13 @@ pub(super) fn connect(
             graph.insert(commit.clone(), Edge::Stop);
             commit
         }
+        // A statement action evaluates its atoms at Enter and delivers its
+        // result to its Commit; a call's completion arrives there too.
+        doc::Node::Action(_) => {
+            let enter = point(site, Phase::Enter);
+            graph.insert(enter.clone(), Edge::Next(commit));
+            enter
+        }
         // These require departure/handler or protocol composition. Each is an
         // explicit boundary, with no source interpreter embedded in the ISA.
         doc::Node::Stmt(
@@ -200,8 +207,7 @@ pub(super) fn connect(
             | doc::Stmt::Try(_)
             | doc::Stmt::For { via: Some(_), .. },
         )
-        | doc::Node::Expr(doc::Expr::If { .. } | doc::Expr::Let { .. } | doc::Expr::Act(_))
-        | doc::Node::Action(_) => {
+        | doc::Node::Expr(doc::Expr::If { .. } | doc::Expr::Let { .. }) => {
             let first = source.first_event(site)?;
             graph.insert(first.clone(), Edge::Boundary);
             first
@@ -280,9 +286,11 @@ pub(super) fn origins(
                         | Op::LetBind { .. }
                         | Op::LetBindShared { .. } => Phase::Test,
                         Op::Act => Phase::Enter,
+                        // Every nested action but a library body enters at its
+                        // Enter: a call, or a delivering action's boundary.
                         Op::Nested { act, .. }
                             if stream.nested.get(act.ix()).is_some_and(|entry| {
-                                matches!(entry.kind, super::super::NestedKind::Call(_))
+                                !matches!(entry.kind, super::super::NestedKind::Body(_))
                             }) =>
                         {
                             Phase::Enter
@@ -305,7 +313,7 @@ pub(super) fn origins(
     Ok((origins, canonical::program(exe, code)?))
 }
 
-fn literal(literal: &doc::Literal) -> Option<Value> {
+pub(super) fn literal(literal: &doc::Literal) -> Option<Value> {
     Some(match literal {
         doc::Literal::Null => Value::Null,
         doc::Literal::Absent => Value::Absent,
@@ -400,6 +408,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
         let op = match edge {
             Edge::Boundary => RegionOp::Boundary {
                 spec: BoundarySpec {
+                    action: None,
                     at: at.clone(),
                     origin,
                     next: None,
@@ -525,9 +534,15 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     next,
                 },
                 (doc::Node::Expr(doc::Expr::Act(act)), Phase::Open, Some(next), Some(dst), _)
-                    if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_))) =>
+                    if matches!(
+                        act.kind,
+                        doc::ActKind::Call(doc::Callee::Value(_))
+                            | doc::ActKind::Spawn(doc::Callee::Value(_))
+                    ) =>
                 {
-                    let doc::ActKind::Call(doc::Callee::Value(name)) = &act.kind else {
+                    let (doc::ActKind::Call(doc::Callee::Value(name))
+                    | doc::ActKind::Spawn(doc::Callee::Value(name))) = &act.kind
+                    else {
                         return Err(Refused::Source);
                     };
                     RegionOp::Checked {
@@ -548,6 +563,103 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         next,
                     }
                 }
+                // A delivering action's Enter stops after its acceptance; the
+                // machine performs it and resumes at its Commit, the result
+                // the task's Incoming in the sink.
+                (doc::Node::Expr(doc::Expr::Act(act)), Phase::Enter, Some(next), None, Ok(_))
+                    if !matches!(act.kind, doc::ActKind::Call(_)) =>
+                {
+                    let commit = source
+                        .room
+                        .events
+                        .get(&point(&at.site, Phase::Commit))
+                        .ok_or(Refused::Source)?;
+                    RegionOp::Boundary {
+                        spec: BoundarySpec {
+                            at: at.clone(),
+                            action: Some(ActionBoundary {
+                                atoms: Box::new([]),
+                                arguments: commit
+                                    .inputs
+                                    .iter()
+                                    .filter(|owner| !matches!(owner, Owner::Incoming(_)))
+                                    .map(|owner| reg(&roles, &source, owner))
+                                    .collect::<Result<_, _>>()?,
+                            }),
+                            origin: Some(origin.ok_or(Refused::Source)?),
+                            next: Some(next),
+                        },
+                    }
+                }
+                // A statement call of a guest body loads its atoms, which
+                // the caller holds until the call's Commit takes its result.
+                (
+                    doc::Node::Action(
+                        action @ (doc::Action::Call { .. } | doc::Action::Await { .. }),
+                    ),
+                    Phase::Enter,
+                    Some(next),
+                    None,
+                    Ok(_),
+                ) if origin.is_some_and(|origin| {
+                    CallPlan::compile(exe, code, origin.statement, origin.pc).is_ok()
+                }) =>
+                {
+                    let atoms =
+                        action_atoms(&roles, &source, &at.site, action).ok_or(Refused::Facts)?;
+                    let site = CallId(u32::try_from(calls.len()).map_err(|_| Refused::Facts)?);
+                    calls.push(CallSite {
+                        at: at.clone(),
+                        origin: origin.ok_or(Refused::Source)?,
+                        arguments: atoms.iter().map(|atom| atom.dst).collect(),
+                        atoms,
+                        result: sink,
+                    });
+                    RegionOp::Call { site, next }
+                }
+                (doc::Node::Action(action), Phase::Enter, Some(next), None, Ok(_))
+                    if !matches!(action, doc::Action::Call { .. } | doc::Action::Await { .. }) =>
+                {
+                    match action_atoms(&roles, &source, &at.site, action) {
+                        Some(atoms) => RegionOp::Boundary {
+                            spec: BoundarySpec {
+                                at: at.clone(),
+                                action: Some(ActionBoundary {
+                                    arguments: atoms.iter().map(|atom| atom.dst).collect(),
+                                    atoms,
+                                }),
+                                origin: Some(origin.ok_or(Refused::Source)?),
+                                next: Some(next),
+                            },
+                        },
+                        None => RegionOp::Boundary {
+                            spec: BoundarySpec {
+                                at: at.clone(),
+                                action: None,
+                                origin,
+                                next: None,
+                            },
+                        },
+                    }
+                }
+                (
+                    doc::Node::Expr(doc::Expr::Act(act)),
+                    Phase::Commit,
+                    Some(next),
+                    Some(dst),
+                    Ok(_),
+                ) if !matches!(act.kind, doc::ActKind::Call(_)) => RegionOp::Move {
+                    dst,
+                    src: sink,
+                    next,
+                },
+                (doc::Node::Action(_), Phase::Commit, Some(next), Some(dst), Ok(_)) => {
+                    RegionOp::Move {
+                        dst,
+                        src: sink,
+                        next,
+                    }
+                }
                 (
                     doc::Node::Expr(doc::Expr::Act(act)),
                     Phase::Enter,
@@ -560,6 +672,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     calls.push(CallSite {
                         at: at.clone(),
                         origin,
+                        atoms: Box::new([]),
                         arguments: if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_)))
                         {
                             args.get(1..).ok_or(Refused::Facts)?.into()
@@ -595,6 +708,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     } else {
                         RegionOp::Boundary {
                             spec: BoundarySpec {
+                                action: None,
                                 at: at.clone(),
                                 origin,
                                 next: Some(next),
@@ -650,6 +764,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                             calls.push(CallSite {
                                 at: at.clone(),
                                 origin,
+                                atoms: Box::new([]),
                                 arguments: args,
                                 result: dst,
                             });
@@ -657,6 +772,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         } else {
                             RegionOp::Boundary {
                                 spec: BoundarySpec {
+                                    action: None,
                                     at: at.clone(),
                                     origin,
                                     next: Some(next),
@@ -717,6 +833,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     } else {
                         RegionOp::Boundary {
                             spec: BoundarySpec {
+                                action: None,
                                 at: at.clone(),
                                 origin,
                                 next: Some(next),
@@ -724,6 +841,24 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         }
                     }
                 }
+                (
+                    doc::Node::Stmt(
+                        doc::Stmt::Print { .. } | doc::Stmt::Finish { .. } | doc::Stmt::Fail { .. },
+                    ),
+                    Phase::Commit,
+                    next,
+                    None,
+                    Ok(args),
+                ) if args.len() == 1 && event.entities.is_empty() => RegionOp::Effect {
+                    kind: match node {
+                        doc::Node::Stmt(doc::Stmt::Print { .. }) => EffectKind::Print,
+                        doc::Node::Stmt(doc::Stmt::Finish { .. }) => EffectKind::Finish,
+                        _ => EffectKind::Fail,
+                    },
+                    value: args[0],
+                    // Finishing or failing halts the program.
+                    next: next.filter(|_| matches!(node, doc::Node::Stmt(doc::Stmt::Print { .. }))),
+                },
                 (doc::Node::Block(_), Phase::Leave, None, _, _) if at.site == source.site => {
                     RegionOp::Exit {
                         prefix: PrefixId(
@@ -797,6 +932,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                 }
                 _ => RegionOp::Boundary {
                     spec: BoundarySpec {
+                        action: None,
                         at: at.clone(),
                         origin,
                         next,
@@ -926,7 +1062,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
             .iter()
             .any(|owner| matches!(owner, Owner::Incoming(_)))
             .then_some(sink);
-        let incoming_after = matches!(draft.ops[index], RegionOp::Call { .. }).then_some(sink);
+        let incoming_after = delivers(&draft.ops[index]).then_some(sink);
         let incoming_pending = incoming_after.or(incoming_before);
         let mut pending_live = if incoming_after.is_some() {
             after.clone()
@@ -934,7 +1070,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
             before.clone()
         };
         let pending = match &draft.ops[index] {
-            RegionOp::Call { .. } => Some(sink),
+            op if delivers(op) => Some(sink),
             RegionOp::Heap { kernel, .. } if kernel.atomic_move() => None,
             RegionOp::Heap { .. } => draft.steps[index]
                 .event
@@ -996,4 +1132,50 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
     }
     draft.recovery = maps.into();
     Ok(draft)
+}
+
+/// Whether the step's completion is delivered into the sink as the task's
+/// Incoming: a call's return.
+pub(super) fn delivers(op: &RegionOp) -> bool {
+    matches!(op, RegionOp::Call { .. })
+}
+
+/// A statement action's atoms, each loaded into its own slot from a visible
+/// name's role or a constant; `None` when one has no such source.
+pub(super) fn action_atoms(
+    roles: &[(Role, Reg<LeaseValue>)],
+    source: &Source,
+    site: &Site,
+    action: &doc::Action,
+) -> Option<Box<[AtomLoad]>> {
+    crate::compile::room::action_atoms(action)
+        .iter()
+        .enumerate()
+        .map(|(index, atom)| {
+            let dst = reg(
+                roles,
+                source,
+                &Owner::Atom {
+                    at: site.clone(),
+                    index: u32::try_from(index).ok()?,
+                },
+            )
+            .ok()?;
+            let src = match atom {
+                doc::Atom::Variable(name) => AtomSource::Role(
+                    reg(
+                        roles,
+                        source,
+                        &Owner::Visible {
+                            at: site.clone(),
+                            name: name.clone(),
+                        },
+                    )
+                    .ok()?,
+                ),
+                doc::Atom::Literal(value) => AtomSource::Constant(literal(value)?),
+            };
+            Some(AtomLoad { dst, src })
+        })
+        .collect()
 }

@@ -16,7 +16,7 @@ mod programs;
 mod read;
 mod resume;
 mod returns;
-pub(in crate::machine) use resume::restore_source_controls;
+pub(in crate::machine) use resume::{Standing, restore_source_controls, standing};
 mod run;
 mod running;
 mod scalar;

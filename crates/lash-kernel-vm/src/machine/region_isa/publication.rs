@@ -80,7 +80,8 @@ impl<'m> Authority<'m> {
             return Err(invalid(Refused::Facts));
         }
         if canonical.incoming.is_some() != image.payload.is_some()
-            || image.payload.is_some() != (image.stop == RegionStop::Complete)
+            || image.payload.is_some()
+                != matches!(image.stop, RegionStop::Complete | RegionStop::Effect(_))
             || (image.stop == RegionStop::Complete && !image.frames.is_empty())
         {
             return Err(invalid(Refused::Exit));

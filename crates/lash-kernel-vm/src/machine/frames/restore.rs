@@ -105,12 +105,15 @@ pub(super) fn frame(
         None
     };
     if let Some(source) = &source {
-        control = crate::machine::region_isa::restore_source_controls(
+        let (controls, standing) = crate::machine::region_isa::restore_source_controls(
             exe, code_id, source, record, access,
-        )?
-        .iter()
-        .cloned()
-        .collect();
+        )?;
+        control = controls.iter().cloned().collect();
+        // A frame standing at a delivering action waits in it.
+        if let Some(standing) = standing {
+            awaiting = Some(standing.statement);
+            nested = standing.act;
+        }
         loops = record.loops.len();
         iterated = record.iterated.len();
         finally = record.finally.len();

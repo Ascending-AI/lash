@@ -91,7 +91,11 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
             if peak.point != at {
                 return Err(Refused::Source);
             }
-            let mut expected_inputs = inputs(&site, node);
+            let mut expected_inputs = if phase == Phase::Commit {
+                commit_inputs(&site, node)
+            } else {
+                inputs(&site, node)
+            };
             let mut output = match node {
                 doc::Node::Expr(_) | doc::Node::Action(_) => Some(operand(&site)),
                 doc::Node::Stmt(doc::Stmt::Let { name, .. }) => {
@@ -133,7 +137,12 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 (doc::Node::Expr(doc::Expr::Act(_)), Phase::Open) => {
                     expected_inputs = Box::new([]);
                 }
-                (doc::Node::Expr(doc::Expr::Act(_)), Phase::Enter) => output = None,
+                (doc::Node::Expr(doc::Expr::Act(_)), Phase::Enter) => {
+                    if delivers(node) {
+                        expected_inputs = Box::new([]);
+                    }
+                    output = None;
+                }
                 (doc::Node::Expr(doc::Expr::Act(_) | doc::Expr::Call { .. }), Phase::Restore) => {
                     expected_inputs = vec![Owner::Incoming(site.clone())].into();
                 }
@@ -469,7 +478,7 @@ fn obligations(
             }
         }
         (doc::Node::Action(action), Phase::Enter) => {
-            for (index, _) in atoms(action).iter().enumerate() {
+            for (index, _) in action_atoms(action).iter().enumerate() {
                 peak.push((
                     Measure::Local(Owner::Atom {
                         at: site.clone(),
@@ -492,6 +501,9 @@ fn obligations(
                 let value = Measure::Local(operand(site));
                 peak.push((value.clone(), 1));
                 delta.push((value, 1));
+            }
+            doc::Expr::Act(act) if !matches!(act.kind, doc::ActKind::Call(_)) => {
+                delta.push((consumed(), -1));
             }
             doc::Expr::Variable(_) | doc::Expr::Member(_) | doc::Expr::Act(_) => {
                 let value = Measure::Local(operand(site));
@@ -588,14 +600,16 @@ fn obligations(
             _ => {}
         },
         (doc::Node::Action(action), Phase::Commit) => {
-            let value = Measure::Local(operand(site));
-            peak.push((value.clone(), 1));
-            delta.push((value, 1));
             delta.push((
-                release(atoms(action).iter().enumerate().map(|(i, _)| Owner::Atom {
-                    at: site.clone(),
-                    index: i as u32,
-                })),
+                release(
+                    action_atoms(action)
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| Owner::Atom {
+                            at: site.clone(),
+                            index: i as u32,
+                        }),
+                ),
                 -1,
             ));
         }

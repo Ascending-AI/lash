@@ -31,10 +31,13 @@ fn redirect(op: &mut RegionOp, old: Pc, new: Pc) {
                 replace(next);
             }
         }
+        RegionOp::Effect {
+            next: Some(next), ..
+        } => replace(next),
         _ => {}
     }
 }
-fn event_pc(draft: &RegionDraft, point: &Point) -> Result<Pc, Refused> {
+pub(super) fn event_pc(draft: &RegionDraft, point: &Point) -> Result<Pc, Refused> {
     draft
         .steps
         .iter()

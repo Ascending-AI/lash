@@ -1223,13 +1223,23 @@ impl Frames {
                     if !self.exe.code(frame.code).charged {
                         continue;
                     }
-                    match frame.block_statement(&self.exe, true)? {
+                    // A canonical frame stands in the statement its
+                    // continuation lies in.
+                    let within = frame.pending.source.as_ref().map(|source| {
+                        self.exe
+                            .stmt_within(frame.code, &source.at.site)
+                            .ok_or_else(|| malformed("a continuation lies in no statement"))
+                    });
+                    match within.transpose()? {
                         Some(statement) => statement,
-                        None if frame.owned && !frame.control.is_empty() => {
-                            let row = row(&self.rows, index, &self.access)?;
-                            row.statement.resolve(&self.access)?.as_ref().clone()
-                        }
-                        None => frame.statement.resolve(&self.access)?.as_ref().clone(),
+                        None => match frame.block_statement(&self.exe, true)? {
+                            Some(statement) => statement,
+                            None if frame.owned && !frame.control.is_empty() => {
+                                let row = row(&self.rows, index, &self.access)?;
+                                row.statement.resolve(&self.access)?.as_ref().clone()
+                            }
+                            None => frame.statement.resolve(&self.access)?.as_ref().clone(),
+                        },
                     }
                 }
                 None => row(&self.rows, index, &self.access)?

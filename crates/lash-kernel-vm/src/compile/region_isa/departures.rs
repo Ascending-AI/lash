@@ -95,6 +95,7 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
             // Cleanup needs its own verified continuation before it can execute.
             ops[index] = RegionOp::Boundary {
                 spec: BoundarySpec {
+                    action: None,
                     at: steps[index].at.clone(),
                     origin: None,
                     next: None,

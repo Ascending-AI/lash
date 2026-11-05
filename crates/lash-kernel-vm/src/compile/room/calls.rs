@@ -194,6 +194,11 @@ fn resolved_static(
             callee: doc::Callee::Local(function),
             args,
         }) => (*function, args.len()),
+        // An await calls its policy with the awaited value (`K-TASK-026`).
+        doc::Node::Action(doc::Action::Await {
+            policy: doc::FunctionTarget::Local(function),
+            ..
+        }) => (*function, 1),
         _ => return Err(Refused::Source),
     };
     let expected = exe.declared.get(&function).copied().or_else(|| {

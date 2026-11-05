@@ -611,6 +611,43 @@ impl Executable {
         self.library.0.lib(id)
     }
 
+    /// The site of the innermost statement of code body `code` that
+    /// `site` lies in: the statement itself, or one of its expressions.
+    pub(crate) fn stmt_within(&self, code: CodeId, site: &Site) -> Option<Site> {
+        let code = self.code(code);
+        if code.site.unit != site.unit || !site.path.starts_with(&code.site.path) {
+            return None;
+        }
+        let mut depth = code.site.path.len();
+        let mut block = code.body;
+        loop {
+            let stmt = *self
+                .block(block)
+                .stmts
+                .get(*site.path.get(depth)? as usize)?;
+            let within = |end: usize| Site {
+                unit: site.unit.clone(),
+                path: site.path[..end].to_vec(),
+            };
+            let Some(inner) = site.path.get(..depth + 2) else {
+                return Some(within(depth + 1));
+            };
+            match self
+                .stmt(stmt)
+                .form
+                .blocks()
+                .into_iter()
+                .find(|block| self.block(*block).site.path == inner)
+            {
+                Some(inner) => {
+                    block = inner;
+                    depth += 2;
+                }
+                None => return Some(within(depth + 1)),
+            }
+        }
+    }
+
     /// Resolves a source statement inside one admitted code body.
     pub(crate) fn stmt_at(&self, code: CodeId, site: &Site) -> Option<StmtId> {
         let code = self.code(code);

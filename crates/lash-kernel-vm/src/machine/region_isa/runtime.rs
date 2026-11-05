@@ -18,6 +18,7 @@ impl KernelMachine {
     pub(in crate::machine) fn resume_source_continuation(
         &mut self,
         task: TaskId,
+        host: &mut dyn crate::interface::Host,
     ) -> Result<bool, Halt> {
         #[cfg(any(test, feature = "testing"))]
         if self.islands.source_only {
@@ -49,6 +50,19 @@ impl KernelMachine {
         // The driver performs one semantic step even for a zero-size slice.
         // Direct lease callers retain their exact, possibly exhausted cutoff.
         let tables = verified::Code::bind(self, &code).map_err(halt)?;
+        let standing = match &self.frame(task)?.pending.source {
+            Some(source) => verified::standing(&tables, source).map_err(halt)?,
+            None => None,
+        };
+        if let Some(standing) = standing {
+            match self.task(task)?.take_incoming() {
+                Some(incoming) => self.deliver_action(task, standing, incoming)?,
+                None => {
+                    self.perform_action(task, host, standing)?;
+                    return Ok(true);
+                }
+            }
+        }
         let mut limits = Limits::machine(self).map_err(halt)?;
         let request = if limits.slice <= limits.entry_progress {
             limits.slice = u64::MAX;
@@ -58,22 +72,20 @@ impl KernelMachine {
         };
         let mut lease = RegionLease::acquire_verified(self, tables, limits).map_err(halt)?;
         let outcome = lease.run(request);
-        let stop = outcome.map_err(|error| {
-            let at = match &lease.execution {
-                Executing::Machine(execution) => execution
-                    .code
-                    .program
-                    .step(execution.pc)
-                    .map(|step| &step.at),
-                #[cfg(test)]
-                Executing::Fixture(_) => None,
-            };
-            match error {
-                RegionError::Heap(error) => error.into(),
-                RegionError::Invalid(reason) => fault(&format!(
-                    "canonical region execution refused at {at:?}: {reason:?}"
-                )),
-            }
+        let at = match &lease.execution {
+            Executing::Machine(execution) => execution
+                .code
+                .program
+                .step(execution.pc)
+                .map(|step| step.at.clone()),
+            #[cfg(test)]
+            Executing::Fixture(_) => None,
+        };
+        let stop = outcome.map_err(|error| match error {
+            RegionError::Heap(error) => error.into(),
+            RegionError::Invalid(reason) => fault(&format!(
+                "canonical region execution refused at {at:?}: {reason:?}"
+            )),
         })?;
         let prefix = lease.materialize().map_err(halt)?;
         let attempted = prefix.reconstruction().attempted.clone();
@@ -99,8 +111,35 @@ impl KernelMachine {
                 return Err(Halt::Bound(exceeded));
             }
             RegionStop::Slice | RegionStop::Handoff | RegionStop::Observer => {}
+            // The frame stands at the action in its source continuation, a
+            // canonical safe point: the physical cursor is discarded, since
+            // performing the action may run another task before it resumes.
+            RegionStop::Action => self.regs.clear(),
+            RegionStop::Effect(kind) => {
+                self.regs.clear();
+                let value = result.ok_or_else(|| fault("an accepted effect has no value"))?;
+                self.spend_effect(task)?;
+                let datum = super::actions::answered(self.copy_out(&value))?;
+                match kind {
+                    crate::compile::region_isa::EffectKind::Print => host.print(&datum),
+                    crate::compile::region_isa::EffectKind::Finish => {
+                        return Err(Halt::Finish(Box::new(datum)));
+                    }
+                    crate::compile::region_isa::EffectKind::Fail => {
+                        return Err(Halt::Fail(Box::new(datum)));
+                    }
+                }
+                // What the copy charged outside the region is paid: the
+                // frame resumes at the machine's charge.
+                let charged = self.charged;
+                if let Some(source) = self.frame(task)?.pending.source.as_mut() {
+                    source.debt.paid = charged;
+                }
+            }
             RegionStop::Boundary | RegionStop::Throw => {
-                return Err(fault("a canonical region reached an unintegrated boundary"));
+                return Err(fault(&format!(
+                    "a canonical region reached an unintegrated boundary at {at:?}"
+                )));
             }
         }
         Ok(true)
