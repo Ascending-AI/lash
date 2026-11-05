@@ -172,7 +172,13 @@ pub(super) fn transfer(
     Ok(next)
 }
 
-pub(super) fn successors(op: &RegionOp) -> Vec<super::Pc> {
+pub(super) fn successors(draft: &RegionDraft, pc: usize) -> Vec<super::Pc> {
+    let op = &draft.ops[pc];
+    if matches!(op, RegionOp::Return { .. }) {
+        return super::departures::successor(draft, super::Pc(pc as u32))
+            .into_iter()
+            .collect();
+    }
     match op {
         RegionOp::Constant { next, .. }
         | RegionOp::Move { next, .. }
@@ -220,7 +226,7 @@ pub(super) fn liveness(draft: &RegionDraft) -> Result<Vec<Option<BTreeSet<Slot>>
             return Err(Refused::Exit);
         };
         let next = transfer(draft, pc, &live)?;
-        for successor in successors(&draft.ops[pc]) {
+        for successor in successors(draft, pc) {
             let state = states.get_mut(successor.offset()).ok_or(Refused::Path)?;
             let next = match &draft.ops[pc] {
                 RegionOp::Checked { kernel, .. } if matches!(kernel.kind(), super::CheckedKind::Cursor { exhausted, .. } if *exhausted == successor) => {

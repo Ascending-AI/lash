@@ -10,6 +10,7 @@ use lash_kernel_state::kernel_internals::logical::{LeaseValue, Slot};
 use lash_kernel_value::{FunctionId, sites::Site};
 use std::{marker::PhantomData, sync::Arc};
 
+mod departures;
 mod heap;
 #[cfg(test)]
 mod laws;
@@ -43,6 +44,7 @@ pub(crate) struct RegionDraft {
     calls: Box<[CallSite]>,
     call_sources: Box<[(StmtId, u32)]>,
     loops: Box<[LoopInfo]>,
+    departures: Box<[departures::Departure]>,
 }
 
 pub(crate) struct RegionCode {
@@ -482,6 +484,23 @@ impl RegionCode {
             self.draft.ops.get(pc.offset())
         }
     }
+    /// Return is followed by its authenticated scope and defining-frame Leaves.
+    pub(crate) fn return_successor(&self, pc: Pc) -> Option<Pc> {
+        departures::successor(&self.draft, pc)
+    }
+    /// Select a departure-specific Leave when reopening a carried return.
+    pub(crate) fn departure_at(&self, origin: &Point, at: &Point) -> Option<Pc> {
+        let route = self
+            .draft
+            .departures
+            .iter()
+            .find(|route| self.draft.steps[route.origin.offset()].at == *origin)?;
+        route
+            .leaves
+            .iter()
+            .copied()
+            .find(|pc| self.draft.steps[pc.offset()].at == *at)
+    }
     pub(crate) fn recovery(&self, prefix: PrefixId) -> Option<&RecoveryMap> {
         self.draft.recovery.get(prefix.offset())
     }
@@ -562,6 +581,7 @@ pub(crate) mod fixtures {
             calls: Box::new([]),
             call_sources: Box::new([]),
             loops: Box::new([]),
+            departures: Box::new([]),
         })
     }
     /// An untrusted source call table; never a verified code constructor.

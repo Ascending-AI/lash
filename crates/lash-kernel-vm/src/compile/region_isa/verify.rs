@@ -110,6 +110,9 @@ fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refused> {
     if step.stage.is_some() {
         return super::stages::check(draft, index);
     }
+    if super::departures::contains(draft, index) {
+        return super::departures::check_edge(draft, index);
+    }
     let source = &draft.source;
     let target = |pc: Pc| {
         draft
@@ -169,9 +172,9 @@ fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refused> {
                 return Err(Refused::Path);
             }
         }
-        op => {
+        _ => {
             let expected = source_next(source, &step.at)?;
-            let successors = recovery::successors(op);
+            let successors = recovery::successors(draft, index);
             match (expected, successors.as_slice()) {
                 (None, []) => {}
                 (Some(expected), [pc])
@@ -618,7 +621,7 @@ fn verify_layout(
     }
     let canonical_program = canonical::program(exe, code)?;
     let source_events = source.room.events.len();
-    let expected_steps = source_events
+    let loop_steps = source_events
         .checked_add(
             canonical_program
                 .loops
@@ -626,6 +629,12 @@ fn verify_layout(
                 .checked_mul(2)
                 .ok_or(Refused::Facts)?,
         )
+        .ok_or(Refused::Facts)?;
+    if draft.steps.len() < loop_steps || draft.ops.len() < loop_steps {
+        return Err(Refused::Exit);
+    }
+    let expected_steps = loop_steps
+        .checked_add(super::departures::verify(draft, &canonical_program.events)?)
         .ok_or(Refused::Facts)?;
     if draft.loops.as_ref() != canonical_program.loops.as_ref() {
         return Err(Refused::Source);
@@ -728,7 +737,7 @@ fn verify_layout(
         {
             return Err(Refused::Exit);
         }
-        for successor in recovery::successors(&draft.ops[index]) {
+        for successor in recovery::successors(draft, index) {
             if successor.offset() >= draft.ops.len() {
                 return Err(Refused::Path);
             }
@@ -738,7 +747,7 @@ fn verify_layout(
         }
         check_op(exe, draft, index)?;
     }
-    for index in source_events..expected_steps {
+    for index in source_events..loop_steps {
         let expected = LoopStage {
             info: u32::try_from((index - source_events) / 2).map_err(|_| Refused::Facts)?,
             phase: if (index - source_events).is_multiple_of(2) {
@@ -758,6 +767,10 @@ fn verify_layout(
             return Err(Refused::Exit);
         }
         super::stages::check(draft, index)?;
+    }
+    for index in loop_steps..expected_steps {
+        check_op(exe, draft, index)?;
+        check_edge(draft, index)?;
     }
     if draft.call_sources.len() != draft.calls.len()
         || draft
@@ -962,7 +975,7 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 return Err(Refused::Retained);
             }
         }
-        for successor in recovery::successors(&draft.ops[index]) {
+        for successor in recovery::successors(draft, index) {
             let live = match &draft.ops[index] {
                 RegionOp::Checked { kernel, .. } if matches!(kernel.kind(), CheckedKind::Cursor { exhausted, .. } if *exhausted == successor) => {
                     before

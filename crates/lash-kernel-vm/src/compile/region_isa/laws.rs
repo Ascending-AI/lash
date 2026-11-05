@@ -638,3 +638,67 @@ fn rejects_a_substituted_call_origin() {
         },
     );
 }
+
+#[test]
+fn return_releases_entered_scopes_before_the_defining_frame() {
+    fixture_body(
+        "function counter() -> Any\nkernel 1\nmetering statements\nbody { let outer = 9 while isa.lt(0, 1) { let inner = 7 if isa.lt(0, 1) { return inner } else { return outer } } return outer }",
+        |exe, code, draft| {
+            let route = draft
+                .departures
+                .iter()
+                .find(|route| route.leaves.len() == 3)
+                .unwrap();
+            let origin = route.origin;
+            let at = draft.steps[origin.offset()].at.clone();
+            let scope = |path| Point {
+                site: Site {
+                    unit: at.site.unit.clone(),
+                    path,
+                },
+                phase: Phase::Leave,
+            };
+            let mut inner = at.site.path.clone();
+            inner.pop();
+            let mut body = inner.clone();
+            body.pop();
+            body.pop();
+            let expected = [
+                scope(inner),
+                scope(body),
+                Point {
+                    site: draft.source.site.clone(),
+                    phase: Phase::Leave,
+                },
+            ];
+            let plans = crate::compile::room::region::calls::region_isa::compile_calls(exe, &draft)
+                .unwrap();
+            let region = verify_region(exe, code, draft.clone(), &plans).unwrap();
+            assert_eq!(
+                region.return_successor(origin),
+                route.leaves.first().copied()
+            );
+            for (pc, expected) in route.leaves.iter().zip(&expected) {
+                assert_eq!(&region.step(*pc).unwrap().at, expected);
+                assert_eq!(region.departure_at(&at, expected), Some(*pc));
+                let map = region.recovery(region.step(*pc).unwrap().after).unwrap();
+                assert!(
+                    map.roles
+                        .iter()
+                        .any(|(slot, _)| matches!(slot, Slot::Departure(_)))
+                );
+            }
+            let last = *route.leaves.last().unwrap();
+            assert!(matches!(region.op(last), Some(RegionOp::Exit { .. })));
+            let mut bad = draft.clone();
+            let RegionOp::Checked { next, .. } = &mut bad.ops[route.leaves[0].offset()] else {
+                panic!("block Leave")
+            };
+            *next = last;
+            assert_eq!(
+                verify_region(exe, code, bad, &plans).err(),
+                Some(Refused::Path)
+            );
+        },
+    );
+}

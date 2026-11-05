@@ -170,7 +170,9 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                 }
             }
             RegionOp::Return { value } => {
-                read(&state, value.offset())?;
+                let kind = read(&state, value.offset())?;
+                let output = step.event.output.as_ref().ok_or(Refused::Facts)?;
+                state[register(draft, output)?.offset()] = Some(kind);
             }
             RegionOp::Exit { .. } => {}
         }
@@ -206,7 +208,7 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                 }
             }
         }
-        for successor in recovery::successors(&draft.ops[index]) {
+        for successor in recovery::successors(draft, index) {
             let next = entries.get_mut(&successor.offset());
             match next {
                 None => {

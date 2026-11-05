@@ -760,8 +760,10 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
             .collect(),
         calls: calls.into(),
         loops: program.loops,
+        departures: Box::new([]),
     };
     super::stages::append(&mut draft, sink)?;
+    super::departures::append(&mut draft, sink)?;
     draft.generic_ops = draft.ops.clone();
     draft.generic_steps = draft.steps.clone();
     super::specialize::specialize(exe, &mut draft)?;
