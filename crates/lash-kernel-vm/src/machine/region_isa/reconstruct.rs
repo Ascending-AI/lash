@@ -132,3 +132,14 @@ impl<V: View> Execution<V> {
         })
     }
 }
+
+impl KernelMachine {
+    /// Rebind ephemeral ISA state from the restored canonical frames only.
+    pub(in crate::machine) fn reconstruct_canonical_region(
+        &mut self,
+    ) -> Result<(), lash_kernel_doc::heap::HeapFault> {
+        Err(lash_kernel_doc::heap::HeapFault::Malformed(
+            "canonical ISA frame reconstruction is not implemented".into(),
+        ))
+    }
+}
