@@ -911,11 +911,11 @@ mod tests {
         assert_eq!(reasoning_deltas, ["réason ", "carefully 😀"]);
         assert!(
             matches!(
-                state.output_parts.as_slice(),
+                state.output_parts().as_slice(),
                 [LlmOutputPart::Reasoning { text, .. }] if text == "réason carefully 😀"
             ),
             "cumulative thought events must coalesce into one reasoning part, got {:?}",
-            state.output_parts
+            state.output_parts()
         );
     }
 
@@ -1172,7 +1172,7 @@ mod tests {
                 Some("gemini-test"),
             )
             .expect("streaming function call parses");
-        let streaming_parts = state.output_parts;
+        let streaming_parts = state.output_parts();
         let batch_parts = GoogleOAuthProvider::for_test().response_parts_from_value(
             &json!({"candidates":[{
                 "content":{"parts":[function_part]},

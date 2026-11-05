@@ -225,8 +225,7 @@ impl ResponsesStreamState {
         self.unrecognized_event_observed
             || self.streamed_item_content_received
             || self
-                .final_response
-                .as_ref()
+                .response_snapshot()
                 .is_some_and(response_value_has_output_evidence)
             || self.block_events.iter().any(|event| match event {
                 LlmStreamEvent::Block(

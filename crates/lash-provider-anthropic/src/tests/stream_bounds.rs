@@ -94,7 +94,6 @@ fn invalid_indices_and_unstarted_references_refuse_for_every_block_event() {
                 "{raw}"
             );
             assert!(state.blocks.is_empty());
-            assert!(state.stopped_blocks.is_empty());
         }
         let mut state = StreamState::default();
         let raw = json!({"type": kind}).to_string();
@@ -117,7 +116,6 @@ fn invalid_indices_and_unstarted_references_refuse_for_every_block_event() {
                 AnthropicProvider::process_sse_event(&raw, &mut state, None, false).is_err(),
                 "{raw}"
             );
-            assert!(state.stopped_blocks.is_empty());
         }
     }
 }
@@ -160,4 +158,32 @@ fn a_nondefault_stream_block_limit_refuses_before_growing_state() {
         AnthropicProvider::process_sse_event(&start(1), &mut state, None, false).unwrap_err();
     assert!(error.to_string().contains("1-block limit"), "{error}");
     assert_eq!(state.blocks.len(), 1);
+}
+
+/// A block's completion is authoritative: later deltas cannot mutate its content.
+#[test]
+fn stopped_blocks_refuse_deltas_and_preserve_completed_content() {
+    let mut state = StreamState::default();
+    for raw in [
+        start(0),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"kept"}})
+            .to_string(),
+        json!({"type":"content_block_stop","index":0}).to_string(),
+        json!({"type":"content_block_stop","index":0}).to_string(),
+    ] {
+        AnthropicProvider::process_sse_event(&raw, &mut state, None, false).unwrap();
+    }
+    let raw = json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"discarded"}}).to_string();
+    let error = AnthropicProvider::process_sse_event(&raw, &mut state, None, false)
+        .expect_err("a completed block cannot accept another delta");
+    assert_eq!(error.kind, ProviderFailureKind::Stream);
+    assert_eq!(error.retry_verdict, TransportRetryVerdict::NotRetryable);
+    let (parts, _, _) = AnthropicProvider::finalize(state, "fixture");
+    assert_eq!(
+        parts,
+        vec![LlmOutputPart::Text {
+            text: "kept".to_string(),
+            response_meta: None
+        }]
+    );
 }

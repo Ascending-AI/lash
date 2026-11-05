@@ -86,6 +86,8 @@ async fn valid_empty_terminal_completions_succeed_across_chat_and_responses() {
 
     const RESPONSES_STREAMED: &str = concat!(
         "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-empty-streamed\",\"model\":\"provider/model\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":12,\"output_tokens\":0,\"total_tokens\":12}}}\n\n",
+        // Trailing lifecycle snapshots cannot revoke an authoritative completion.
+        "data: {\"type\":\"response.in_progress\",\"response\":{\"id\":\"resp-empty-streamed\",\"model\":\"provider/model\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
         "data: [DONE]\n\n"
     );
     let responses_streamed_transport = single_stream_transport(RESPONSES_STREAMED);
@@ -115,6 +117,11 @@ async fn eof_tolerance_does_not_turn_empty_unterminated_streams_into_success() {
             (
                 CompletionEndpoint::Responses,
                 "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-empty-eof\",\"status\":\"in_progress\",\"output\":[],\"usage\":{\"input_tokens\":4}}}\n\n",
+                TurnFailureCode::StreamEndedBeforeTerminalResponse,
+            ),
+            (
+                CompletionEndpoint::Responses,
+                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-snapshot-only\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":4}}}\n\n",
                 TurnFailureCode::StreamEndedBeforeTerminalResponse,
             ),
         ] {

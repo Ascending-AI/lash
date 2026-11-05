@@ -10,7 +10,6 @@ pub(crate) use lash_llm_transport::{
     merge_usage,
     openai_terminal_reason_from_chat_finish_reason as terminal_reason_from_chat_finish_reason,
     openai_terminal_reason_from_chat_value as terminal_reason_from_chat_value,
-    openai_terminal_reason_from_response_value as terminal_reason_from_responses_value,
     openai_usage_from_response_value as usage_from_response_value,
     openai_usage_from_usage_value as usage_from_usage_value, terminal_reason_from_parts,
 };

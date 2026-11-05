@@ -6,8 +6,6 @@
 use crate::support::*;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
-use std::collections::HashSet;
-
 fn invalid_block_index(raw: &str, detail: impl std::fmt::Display) -> LlmTransportError {
     LlmTransportError::new(format!("Invalid Anthropic content block index: {detail}"))
         .with_raw(raw.to_string())
@@ -142,11 +140,137 @@ impl StreamBlock {
     }
 }
 
+/// A stopped block retains content but no longer admits deltas.
+#[derive(Clone, Debug)]
+pub(crate) enum BlockState {
+    Open(StreamBlock),
+    Closed(StreamBlock),
+}
+
+impl BlockState {
+    fn content(&self) -> &StreamBlock {
+        match self {
+            Self::Open(content) | Self::Closed(content) => content,
+        }
+    }
+
+    fn into_content(self) -> StreamBlock {
+        match self {
+            Self::Open(content) | Self::Closed(content) => content,
+        }
+    }
+
+    fn close(&mut self) -> Option<&StreamBlock> {
+        if matches!(self, Self::Closed(_)) {
+            return None;
+        }
+        let content = std::mem::replace(self, Self::Closed(StreamBlock::Unknown)).into_content();
+        *self = Self::Closed(content);
+        Some(self.content())
+    }
+
+    fn delta(
+        &mut self,
+        event: &Value,
+        raw: &str,
+        index: usize,
+        stream_events: Option<&LlmEventSender>,
+        expose_thinking: bool,
+    ) -> Result<(), LlmTransportError> {
+        let delta = event.get("delta").cloned().unwrap_or_default();
+        let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let Self::Open(slot) = self else {
+            return Err(LlmTransportError::new(format!(
+                "Anthropic delta for stopped content block {index}"
+            ))
+            .with_raw(raw.to_string())
+            .with_kind(ProviderFailureKind::Stream)
+            .with_retry_verdict(TransportRetryVerdict::NotRetryable));
+        };
+        match (delta_type, slot) {
+            ("text_delta", StreamBlock::Text { text }) => {
+                let piece = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                if !piece.is_empty() {
+                    text.push_str(piece);
+                    if let Some(tx) = stream_events {
+                        tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::AssistantText,
+                            block: AnthropicProvider::block_identity(
+                                index,
+                                &format!("content_block:{index}"),
+                            ),
+                            text: piece.to_string(),
+                        }));
+                    }
+                }
+            }
+            (
+                "thinking_delta",
+                StreamBlock::Thinking { text, .. } | StreamBlock::RedactedThinking { text, .. },
+            ) => {
+                let piece = delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
+                if !piece.is_empty() {
+                    text.push_str(piece);
+                    if let Some(tx) = stream_events
+                        && expose_thinking
+                    {
+                        tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::Reasoning,
+                            block: AnthropicProvider::block_identity(
+                                index,
+                                &format!("content_block:{index}"),
+                            ),
+                            text: piece.to_string(),
+                        }));
+                    }
+                }
+            }
+            (
+                "signature_delta",
+                StreamBlock::Thinking { signature, .. }
+                | StreamBlock::RedactedThinking { signature, .. },
+            ) => {
+                let piece = delta
+                    .get("signature")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if !piece.is_empty() {
+                    signature.push_str(piece);
+                }
+            }
+            ("input_json_delta", StreamBlock::ToolUse { input_buffer, .. }) => {
+                let piece = delta
+                    .get("partial_json")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if !piece.is_empty() {
+                    input_buffer.push_str(piece);
+                }
+            }
+            (
+                "text_delta" | "thinking_delta" | "signature_delta" | "input_json_delta",
+                StreamBlock::Unknown,
+            ) => {}
+            ("text_delta" | "thinking_delta" | "signature_delta" | "input_json_delta", _) => {
+                return Err(LlmTransportError::new(format!(
+                    "Anthropic stream delta `{delta_type}` does not match content block {index}"
+                ))
+                .with_raw(raw.to_string())
+                .with_kind(ProviderFailureKind::Stream)
+                .with_retry_verdict(TransportRetryVerdict::NotRetryable));
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct StreamState {
     pub(crate) stream_observer: Option<lash_protocol_types::llm::types::ProviderAttemptControl>,
     pub(crate) limits: crate::AnthropicStreamLimits,
-    pub(crate) blocks: Vec<StreamBlock>,
+    pub(crate) blocks: Vec<BlockState>,
     pub(crate) usage: LlmUsage,
     /// Raw provider `usage` JSON sidecar. Anthropic splits it across the wire:
     /// `message_start` carries the full input/cache buckets and `message_delta`
@@ -159,8 +283,6 @@ pub(crate) struct StreamState {
     pub(crate) stop_reason: Option<String>,
     pub(crate) message_started: bool,
     pub(crate) message_stopped: bool,
-    /// A repeated stop for one content block must not emit a second part.
-    pub(crate) stopped_blocks: HashSet<usize>,
     /// Stamped from the request's recorded `expose_thinking` default at state construction
     /// so the assembled `LlmResponse` carries the visibility policy forward
     /// for the runtime's reasoning republication gate.
@@ -351,7 +473,6 @@ impl AnthropicProvider {
                         ),
                     ));
                 }
-                state.blocks.push(StreamBlock::Unknown);
                 // Anthropic's native block identity is the content-block
                 // index; it is both the block id and the item the block's
                 // replay material belongs to.
@@ -361,10 +482,9 @@ impl AnthropicProvider {
                     .get("type")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let slot = &mut state.blocks[index];
-                match block_type {
+                let block = match block_type {
                     "text" => {
-                        *slot = StreamBlock::Text {
+                        let block = StreamBlock::Text {
                             text: String::new(),
                         };
                         if let Some(tx) = stream_events {
@@ -373,9 +493,10 @@ impl AnthropicProvider {
                                 block: Self::block_identity(index, &block_id),
                             }));
                         }
+                        block
                     }
                     "thinking" => {
-                        *slot = StreamBlock::Thinking {
+                        let block = StreamBlock::Thinking {
                             text: String::new(),
                             signature: String::new(),
                         };
@@ -387,9 +508,10 @@ impl AnthropicProvider {
                                 block: Self::block_identity(index, &block_id),
                             }));
                         }
+                        block
                     }
                     "redacted_thinking" => {
-                        *slot = StreamBlock::RedactedThinking {
+                        let block = StreamBlock::RedactedThinking {
                             text: "[Reasoning redacted]".to_string(),
                             signature: block_meta
                                 .get("data")
@@ -405,13 +527,14 @@ impl AnthropicProvider {
                                 block: Self::block_identity(index, &block_id),
                             }));
                         }
+                        block
                     }
                     "tool_use" => {
                         let call_id = block_meta
                             .get("id")
                             .and_then(Value::as_str)
                             .unwrap_or_default();
-                        *slot = StreamBlock::ToolUse {
+                        StreamBlock::ToolUse {
                             input_buffer: String::new(),
                             call_id: call_id.to_string(),
                             name: block_meta
@@ -420,116 +543,35 @@ impl AnthropicProvider {
                                 .unwrap_or("")
                                 .to_string(),
                             initial_input: block_meta.get("input").cloned().unwrap_or(Value::Null),
-                        };
+                        }
                     }
-                    _ => {
-                        *slot = StreamBlock::Unknown;
-                    }
-                }
+                    _ => StreamBlock::Unknown,
+                };
+                state.blocks.push(BlockState::Open(block));
             }
             "content_block_delta" => {
                 let index = started_block_index(&event, raw, state)?;
-                let delta = event.get("delta").cloned().unwrap_or_default();
-                let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                let slot = &mut state.blocks[index];
-                match (delta_type, slot) {
-                    ("text_delta", StreamBlock::Text { text }) => {
-                        let piece = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                        if !piece.is_empty() {
-                            text.push_str(piece);
-                            if let Some(tx) = stream_events {
-                                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                                    kind: StreamBlockKind::AssistantText,
-                                    block: Self::block_identity(
-                                        index,
-                                        &format!("content_block:{index}"),
-                                    ),
-                                    text: piece.to_string(),
-                                }));
-                            }
-                        }
-                    }
-                    (
-                        "thinking_delta",
-                        StreamBlock::Thinking { text, .. }
-                        | StreamBlock::RedactedThinking { text, .. },
-                    ) => {
-                        let piece = delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
-                        if !piece.is_empty() {
-                            text.push_str(piece);
-                            if let Some(tx) = stream_events
-                                && expose_thinking
-                            {
-                                tx.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                                    kind: StreamBlockKind::Reasoning,
-                                    block: Self::block_identity(
-                                        index,
-                                        &format!("content_block:{index}"),
-                                    ),
-                                    text: piece.to_string(),
-                                }));
-                            }
-                        }
-                    }
-                    (
-                        "signature_delta",
-                        StreamBlock::Thinking { signature, .. }
-                        | StreamBlock::RedactedThinking { signature, .. },
-                    ) => {
-                        let piece = delta
-                            .get("signature")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        if !piece.is_empty() {
-                            signature.push_str(piece);
-                        }
-                    }
-                    ("input_json_delta", StreamBlock::ToolUse { input_buffer, .. }) => {
-                        let piece = delta
-                            .get("partial_json")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        if !piece.is_empty() {
-                            input_buffer.push_str(piece);
-                        }
-                    }
-                    (
-                        "text_delta" | "thinking_delta" | "signature_delta" | "input_json_delta",
-                        StreamBlock::Unknown,
-                    ) => {}
-                    (
-                        "text_delta" | "thinking_delta" | "signature_delta" | "input_json_delta",
-                        _,
-                    ) => {
-                        return Err(LlmTransportError::new(format!(
-                            "Anthropic stream delta `{delta_type}` does not match content block {index}"
-                        ))
-                        .with_raw(raw.to_string())
-                        .with_kind(ProviderFailureKind::Stream)
-                        .with_retry_verdict(TransportRetryVerdict::NotRetryable));
-                    }
-                    _ => {}
-                }
+                state.blocks[index].delta(&event, raw, index, stream_events, expose_thinking)?;
             }
             "content_block_stop" => {
                 let index = started_block_index(&event, raw, state)?;
-                if !state.stopped_blocks.insert(index) {
+                let Some(block) = state.blocks[index].close() else {
                     return Ok(());
-                }
+                };
                 let block_id = format!("content_block:{index}");
                 if let Some(tx) = stream_events {
-                    match state.blocks.get(index) {
-                        Some(StreamBlock::Text { text }) => {
+                    match block {
+                        StreamBlock::Text { text } => {
                             tx.send(LlmStreamEvent::Block(StreamBlockEvent::Completed {
                                 kind: StreamBlockKind::AssistantText,
                                 block: Self::block_identity(index, &block_id),
                                 text: text.clone(),
                             }));
                         }
-                        Some(
-                            StreamBlock::Thinking { text, .. }
-                            | StreamBlock::RedactedThinking { text, .. },
-                        ) if expose_thinking => {
+                        StreamBlock::Thinking { text, .. }
+                        | StreamBlock::RedactedThinking { text, .. }
+                            if expose_thinking =>
+                        {
                             tx.send(LlmStreamEvent::Block(StreamBlockEvent::Completed {
                                 kind: StreamBlockKind::Reasoning,
                                 block: Self::block_identity(index, &block_id),
@@ -538,18 +580,16 @@ impl AnthropicProvider {
                         }
                         _ => {}
                     }
-                    if let Some(part) = state.blocks.get(index).and_then(|block| {
-                        block.tool_call_part().or_else(|| {
-                            // A hidden thinking part stays in `state.blocks`
-                            // for the durable response but never enters the
-                            // event stream — the runtime republishes unseen
-                            // reasoning parts to the host on arrival.
-                            if expose_thinking {
-                                block.reasoning_part(index)
-                            } else {
-                                None
-                            }
-                        })
+                    if let Some(part) = block.tool_call_part().or_else(|| {
+                        // A hidden thinking part stays in `state.blocks`
+                        // for the durable response but never enters the
+                        // event stream — the runtime republishes unseen
+                        // reasoning parts to the host on arrival.
+                        if expose_thinking {
+                            block.reasoning_part(index)
+                        } else {
+                            None
+                        }
                     }) {
                         tx.send(LlmStreamEvent::Part(part));
                     }
@@ -628,7 +668,7 @@ impl AnthropicProvider {
         let mut parts: Vec<LlmOutputPart> = Vec::new();
         let stop_reason = state.stop_reason.clone();
         for (index, block) in state.blocks.into_iter().enumerate() {
-            match block {
+            match block.into_content() {
                 StreamBlock::Text { text } => {
                     if !text.is_empty() {
                         parts.push(LlmOutputPart::Text {

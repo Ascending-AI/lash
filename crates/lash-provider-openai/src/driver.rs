@@ -94,7 +94,7 @@ fn responses_stream_failure(
         .as_ref()
         .and_then(|evidence| evidence.provider_response_id.clone());
     provider.responses_resume =
-        if error.is_retryable() && !state.terminal_event_seen && sequence_cursor_valid {
+        if error.is_retryable() && !state.terminal_event_seen() && sequence_cursor_valid {
             response_id
                 .zip(last_sequence_number)
                 .map(|(response_id, starting_after)| ResponsesResumeCheckpoint {
@@ -944,41 +944,24 @@ fn complete_buffered_responses(
             &value,
             &state.tool_argument_decoder,
         );
-        state.completed_status_seen =
-            value.get("status").and_then(Value::as_str) == Some("completed");
-        state.final_response = Some(value);
+        state.observe_buffered_response(value);
     }
-    let terminal_event_seen = state.terminal_event_seen
-        || state
-            .final_response
-            .as_ref()
-            .and_then(|response| response.get("status").and_then(Value::as_str))
-            .is_some_and(|status| matches!(status, "completed" | "incomplete" | "failed"));
-    if !terminal_event_seen
-        && (stream_termination == Some(StreamTermination::RequireTerminalEvidence)
-            || (body_was_sse && !state.has_output()))
-    {
+    let termination = if body_was_sse {
+        Some(stream_termination.unwrap_or(StreamTermination::EofTolerated))
+    } else {
+        stream_termination
+    };
+    if let Err(error) = state.finish(termination) {
         let output_started = state.output_started();
         let mut partial = shared_response_from_state(state, http_summary);
         partial.terminal_reason = LlmTerminalReason::Unknown;
-        return Err(LlmTransportError::new(
-            "OpenAI Responses stream ended before a terminal response event",
-        )
-        .with_kind(ProviderFailureKind::Stream)
-        .with_lash_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
-        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-        .with_output_started(output_started)
-        .with_partial_response(partial));
+        return Err(error
+            .with_output_started(output_started)
+            .with_partial_response(partial));
     }
-    let parts = state.response_parts();
-    let terminal_reason = state
-        .final_response
-        .as_ref()
-        .map(|value| terminal_reason_from_responses_value(value, &parts))
-        .unwrap_or_else(|| terminal_reason_from_parts(&parts));
-    if invalid_empty_response(&parts, terminal_reason, state.completed_status_seen) {
-        return Err(empty_response_error(text, diagnostic_limits));
-    }
+    let (parts, terminal_reason) = state
+        .completed_parts()
+        .map_err(|error| error.with_raw(diagnostic_limits.body_excerpt(&text)))?;
     if let Some(tx) = &stream_events {
         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
             provider_usage: state.provider_usage.clone(),
@@ -1398,12 +1381,7 @@ async fn drive_streaming_responses(
         ));
     }
 
-    // A stream that ended without its terminal event completes when its
-    // route tolerates EOF and it produced output; one that produced none
-    // failed before it began, whatever the route tolerates.
-    if !state.terminal_event_seen
-        && (stream_termination == StreamTermination::RequireTerminalEvidence || !state.has_output())
-    {
+    if let Err(error) = state.finish(Some(stream_termination)) {
         seal_open_blocks(&mut state);
         return Err(responses_stream_failure(
             provider,
@@ -1412,31 +1390,12 @@ async fn drive_streaming_responses(
             last_sequence_number,
             sequence_cursor_valid,
             http_summary,
-            LlmTransportError::new(
-                "OpenAI Responses stream ended before a terminal response event",
-            )
-            .with_kind(ProviderFailureKind::Stream)
-            .with_lash_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
-            .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
+            error,
         ));
     }
     seal_open_blocks(&mut state);
 
-    let parts = state.response_parts();
-    let terminal_reason = state
-        .final_response
-        .as_ref()
-        .map(|value| terminal_reason_from_responses_value(value, &parts))
-        .unwrap_or_else(|| terminal_reason_from_parts(&parts));
-    if invalid_empty_response(&parts, terminal_reason, state.completed_status_seen) {
-        return Err(empty_response_diagnostic(
-            state
-                .final_response
-                .as_ref()
-                .map(|value| diagnostic_limits.json_excerpt(value))
-                .unwrap_or_else(|| diagnostic_limits.body_excerpt("")),
-        ));
-    }
+    let (parts, terminal_reason) = state.completed_parts()?;
     Ok(LlmResponse {
         parts,
         usage: state.usage,

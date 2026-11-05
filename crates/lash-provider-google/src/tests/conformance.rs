@@ -245,7 +245,7 @@ impl ProviderNormalizer for GoogleNormalizer {
                 }
             }
         }
-        let mut parts = state.output_parts;
+        let mut parts = state.output_parts();
         if matches!(
             scenario,
             Scenario::ReasoningReplayRoundTrip | Scenario::ToolCallReplayRoundTrip

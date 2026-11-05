@@ -338,18 +338,15 @@ impl GoogleOAuthProvider {
         if stream_result.is_ok()
             && let Some(tx) = stream_events.as_ref()
         {
-            if expose_thinking {
-                for event in stream_state.flush_open_reasoning_part() {
+            for event in stream_state.finish_run() {
+                if expose_thinking || !is_reasoning_emission(&event) {
                     tx.send(event);
                 }
-            }
-            if let Some(event) = stream_state.seal_text_block() {
-                tx.send(event);
             }
         }
 
         let partial_response = || LlmResponse {
-            parts: response_parts(stream_state.output_parts.clone(), &stream_state.full),
+            parts: response_parts(stream_state.output_parts(), &stream_state.full),
             usage: stream_state.usage.clone(),
             terminal_reason: LlmTerminalReason::Unknown,
             terminal_diagnostic: None,
@@ -377,7 +374,7 @@ impl GoogleOAuthProvider {
             );
         }
 
-        let parts = response_parts(stream_state.output_parts, &stream_state.full);
+        let parts = response_parts(stream_state.output_parts(), &stream_state.full);
 
         // Mirror the non-streaming path: derive the terminal reason from the
         // last `finishReason` observed across the SSE events. When no event

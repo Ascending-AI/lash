@@ -23,7 +23,7 @@ use lash_core::llm::types::{
     LlmStreamEvidence, LlmTerminalReason, LlmUsage, ProviderRouteIdentity, RecordedRequestTemplate,
     ResponseContext, TransientJson,
 };
-use lash_core::provider::{Provider, ProviderOptions, StreamTermination, TokenRequestReason};
+use lash_core::provider::{Provider, ProviderOptions, TokenRequestReason};
 use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response, emit_stream_progress};
 use lash_llm_transport::timeouts::response_start_timeout;
 use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
@@ -462,20 +462,12 @@ impl CodexProvider {
                     tx.send(LlmStreamEvent::Part(part));
                 }
             }
-            if state.terminal_event_seen {
+            if state.terminal_event_seen() {
                 break;
             }
         }
 
-        let terminal_response_seen = state.terminal_event_seen;
-        // A socket that closed before its terminal event completes when the
-        // route tolerates EOF and the response produced output; one that
-        // produced none (a dead reused socket) failed, whatever the route
-        // tolerates.
-        if !terminal_response_seen
-            && (stream_termination == StreamTermination::RequireTerminalEvidence
-                || !state.has_output())
-        {
+        if let Err(error) = state.finish(Some(stream_termination)) {
             let mut partial = shared::response_from_stream_state(
                 state.clone(),
                 Some(request_body.clone()),
@@ -484,10 +476,8 @@ impl CodexProvider {
             partial.terminal_reason = LlmTerminalReason::Unknown;
             partial.generation_disposition = Some(*receipt);
             return Err(CodexWebSocketAttemptError::during_stream(
-                LlmTransportError::new("Codex WebSocket ended before response.completed")
+                error
                     .with_request_body(request_body)
-                    .with_kind(ProviderFailureKind::Stream)
-                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                     .with_lash_code(TurnFailureCode::WebsocketClosedBeforeCompleted)
                     .with_partial_response(partial),
                 events_seen,
@@ -495,7 +485,7 @@ impl CodexProvider {
             ));
         }
 
-        let final_response = state.final_response.clone();
+        let final_response = state.response_snapshot().cloned();
         let continuation = final_response.as_ref().and_then(|response| {
             self.websocket_continuation_enabled()
                 .then(|| Self::continuation_from_response(full_body, response))
@@ -981,10 +971,7 @@ impl CodexProvider {
                 .with_partial_response(partial));
         }
 
-        if !state.terminal_event_seen
-            && (stream_termination == StreamTermination::RequireTerminalEvidence
-                || !state.has_output())
-        {
+        if let Err(error) = state.finish(Some(stream_termination)) {
             seal_open_blocks(&mut state);
             let output_started = state.output_started();
             let mut partial = shared::response_from_stream_state(
@@ -995,17 +982,12 @@ impl CodexProvider {
             partial.terminal_reason = LlmTerminalReason::Unknown;
             partial.generation_disposition = generation_disposition;
             partial.response_metadata = response_metadata.into_metadata();
-            return Err(LlmTransportError::new(
-                "Codex stream ended before a terminal response event",
-            )
-            .with_kind(ProviderFailureKind::Stream)
-            .with_lash_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
-            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-            .with_output_started(output_started)
-            .with_partial_response(partial));
+            return Err(error
+                .with_output_started(output_started)
+                .with_partial_response(partial));
         }
 
-        if state.final_response.is_none()
+        if state.response_snapshot().is_none()
             && state.parts.is_empty()
             && !state.streamed_item_content_received
         {

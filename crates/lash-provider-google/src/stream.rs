@@ -5,9 +5,19 @@
 use crate::support::*;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
-struct ReasoningPieceUpdate {
-    opened_part: Option<usize>,
-    delta: Option<String>,
+#[derive(Default)]
+enum OpenStreamRun {
+    #[default]
+    None,
+    Text {
+        block: StreamBlockIdentity,
+        text: String,
+    },
+    Reasoning {
+        block: StreamBlockIdentity,
+        text: String,
+        replay: ProviderReasoningReplay,
+    },
 }
 
 impl GoogleOAuthProvider {
@@ -153,86 +163,6 @@ impl GoogleOAuthProvider {
         })
     }
 
-    fn push_reasoning_piece(
-        &self,
-        parts: &mut Vec<LlmOutputPart>,
-        reasoning_deltas: &mut Vec<String>,
-        piece: String,
-        signature: Option<String>,
-        reconcile_with_previous_event: bool,
-        origin_model: Option<&str>,
-    ) -> ReasoningPieceUpdate {
-        let replay = self.reasoning_replay(signature, origin_model);
-        if reconcile_with_previous_event
-            && let Some(LlmOutputPart::Reasoning {
-                text,
-                replay: existing_replay,
-            }) = parts.last_mut()
-        {
-            let existing_signature = existing_replay
-                .as_ref()
-                .and_then(|replay| replay.signature.as_deref());
-            let incoming_signature = replay
-                .as_ref()
-                .and_then(|replay| replay.signature.as_deref());
-            let signatures_conflict = matches!(
-                (existing_signature, incoming_signature),
-                (Some(existing), Some(incoming)) if existing != incoming
-            );
-            if signatures_conflict {
-                return self.push_reasoning_piece(
-                    parts,
-                    reasoning_deltas,
-                    piece,
-                    replay.and_then(|replay| replay.signature),
-                    false,
-                    origin_model,
-                );
-            }
-
-            let delta = if piece.starts_with(text.as_str()) {
-                piece[text.len()..].to_string()
-            } else if text.starts_with(&piece) {
-                String::new()
-            } else {
-                piece
-            };
-            if !delta.is_empty() {
-                text.push_str(&delta);
-                reasoning_deltas.push(delta.clone());
-            }
-            match (existing_replay.as_mut(), replay) {
-                (None, incoming) => *existing_replay = incoming,
-                (Some(existing), Some(incoming))
-                    if existing.signature.is_none() && incoming.signature.is_some() =>
-                {
-                    // The streamed block already stamped `item_id`; the
-                    // signature arrives with the continuing piece.
-                    existing.signature = incoming.signature;
-                    if existing.origin.is_none() {
-                        existing.origin = incoming.origin;
-                    }
-                }
-                _ => {}
-            }
-            return ReasoningPieceUpdate {
-                opened_part: None,
-                delta: (!delta.is_empty()).then_some(delta),
-            };
-        }
-
-        let delta = (!piece.is_empty()).then_some(piece.clone());
-        reasoning_deltas.extend(delta.iter().cloned());
-        parts.push(LlmOutputPart::Reasoning {
-            text: piece,
-            replay,
-        });
-        ReasoningPieceUpdate {
-            opened_part: Some(parts.len() - 1),
-            delta,
-        }
-    }
-
     /// The non-empty `finishReason` carried by the first candidate of an event,
     /// honouring the streaming `response.candidates` wrapper as well as the
     /// unwrapped top-level shape.
@@ -344,15 +274,8 @@ impl GoogleOAuthProvider {
     }
 }
 
-/// Owned accumulator for one Cloud Code SSE stream: the running full text,
-/// the assembled output parts in wire order, the usage snapshot (normalized
-/// plus the raw `usageMetadata` sidecar), the merged execution evidence, the
-/// open reasoning part, and the last finish-bearing event.
-///
-/// Replaces the previous nine-borrow sink. Every event folds through
-/// [`GoogleStreamState::push_event`], so cross-event reasoning coalescing and
-/// prefix trimming run unconditionally — there is no absent-sink mode that
-/// would turn the same bytes into different reasoning deltas.
+/// One Cloud Code SSE response and its mutually exclusive open text or reasoning run.
+/// Events, partial responses and final responses use the same ordered parts.
 #[derive(Default)]
 pub(crate) struct GoogleStreamState {
     pub(crate) stream_observer: Option<lash_protocol_types::llm::types::ProviderAttemptControl>,
@@ -362,21 +285,9 @@ pub(crate) struct GoogleStreamState {
     pub execution_evidence: Option<ExecutionEvidence>,
     /// Text, reasoning and tool-call parts in wire order: the one sequence the
     /// completed response, a partial response and the live stream all follow.
-    pub output_parts: Vec<LlmOutputPart>,
+    output_parts: Vec<LlmOutputPart>,
     pub finish_event: Option<Value>,
-    open_reasoning_part: Option<usize>,
-    /// The reasoning block minted for the open output part. Gemini has no
-    /// native block notion, so blocks get deterministic per-response
-    /// ordinals; the block id doubles as the part's reasoning `item_id`.
-    open_reasoning_block: Option<StreamBlockIdentity>,
-    /// The assistant-text block for the current contiguous run, minted lazily
-    /// on the first visible delta of the run and sealed at the next reasoning
-    /// or tool-call boundary. Text on both sides of a boundary never shares
-    /// one identity.
-    pub text_block: Option<StreamBlockIdentity>,
-    /// Text accumulated by the open run only; `full` still holds the whole
-    /// visible response for the completed parts.
-    open_text_run: String,
+    open_run: OpenStreamRun,
     next_block_ordinal: u64,
     /// Stamped from the request's recorded `expose_thinking` default at state construction
     /// so the assembled `LlmResponse` carries the visibility policy forward
@@ -497,8 +408,7 @@ impl GoogleStreamState {
                 );
             }
             if let Some(tool_call) = provider.tool_call_part(part, origin_model) {
-                self.close_reasoning_stream_part(&mut deltas.events);
-                self.close_text_run(&mut deltas.events);
+                self.close_run(&mut deltas.events);
                 deltas.events.push(LlmStreamEvent::Part(tool_call.clone()));
                 self.output_parts.push(tool_call);
             }
@@ -507,7 +417,9 @@ impl GoogleStreamState {
         // streaming finalizer can derive the terminal reason exactly like the
         // non-streaming path instead of hardcoding Stop.
         if GoogleOAuthProvider::finish_reason_str(&event).is_some() {
-            self.close_reasoning_stream_part(&mut deltas.events);
+            if matches!(self.open_run, OpenStreamRun::Reasoning { .. }) {
+                self.close_run(&mut deltas.events);
+            }
             self.finish_event = Some(event);
         }
         Ok(deltas)
@@ -523,59 +435,77 @@ impl GoogleStreamState {
         origin_model: Option<&str>,
     ) {
         if is_thought {
-            self.close_text_run(&mut deltas.events);
-            let update = provider.push_reasoning_piece(
-                &mut self.output_parts,
-                &mut deltas.reasoning_deltas,
-                piece,
-                signature,
-                !*saw_thought_in_event && self.open_reasoning_part.is_some(),
-                origin_model,
-            );
-            if let Some(opened_part) = update.opened_part {
-                self.close_reasoning_stream_part(&mut deltas.events);
-                self.open_reasoning_part = Some(opened_part);
-                // The minted id is also the part's reasoning item_id so
-                // the completed `Part` folds the streamed block back into
-                // item granularity. Google replay rides on the
-                // thoughtSignature; `item_id` is inert on the wire.
+            let incoming = provider.reasoning_replay(signature, origin_model);
+            let continue_run = !*saw_thought_in_event
+                && match &self.open_run {
+                    OpenStreamRun::Reasoning { replay, .. } => !matches!(
+                        (replay.signature.as_deref(), incoming.as_ref().and_then(|r| r.signature.as_deref())),
+                        (Some(existing), Some(next)) if existing != next
+                    ),
+                    _ => false,
+                };
+            if !continue_run {
+                self.close_run(&mut deltas.events);
                 let mut block = self.mint_block("reasoning");
                 block.item_id = Some(block.id.clone());
-                if let Some(LlmOutputPart::Reasoning { replay, .. }) =
-                    self.output_parts.get_mut(opened_part)
-                {
-                    replay
-                        .get_or_insert_with(ProviderReasoningReplay::default)
-                        .item_id = block.item_id.clone();
-                }
+                let mut replay = incoming.clone().unwrap_or_default();
+                replay.item_id = block.item_id.clone();
                 deltas
                     .events
                     .push(LlmStreamEvent::Block(StreamBlockEvent::Started {
                         kind: StreamBlockKind::Reasoning,
                         block: block.clone(),
                     }));
-                self.open_reasoning_block = Some(block);
+                self.open_run = OpenStreamRun::Reasoning {
+                    block,
+                    text: String::new(),
+                    replay,
+                };
             }
-            if let Some(delta) = update.delta
-                && let Some(block) = self.open_reasoning_block.as_ref()
+            if let OpenStreamRun::Reasoning {
+                block,
+                text,
+                replay,
+            } = &mut self.open_run
             {
-                deltas
-                    .events
-                    .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                        kind: StreamBlockKind::Reasoning,
-                        block: block.clone(),
-                        text: delta,
-                    }));
+                let delta = if continue_run && piece.starts_with(text.as_str()) {
+                    piece[text.len()..].to_string()
+                } else if continue_run && text.starts_with(&piece) {
+                    String::new()
+                } else {
+                    piece
+                };
+                if !delta.is_empty() {
+                    text.push_str(&delta);
+                    deltas.reasoning_deltas.push(delta.clone());
+                    deltas
+                        .events
+                        .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::Reasoning,
+                            block: block.clone(),
+                            text: delta,
+                        }));
+                }
+                if let Some(incoming) = incoming {
+                    if replay.signature.is_none() {
+                        replay.signature = incoming.signature;
+                    }
+                    if replay.origin.is_none() {
+                        replay.origin = incoming.origin;
+                    }
+                }
             }
             *saw_thought_in_event = true;
             return;
         }
-        self.close_reasoning_stream_part(&mut deltas.events);
+        if matches!(self.open_run, OpenStreamRun::Reasoning { .. }) {
+            self.close_run(&mut deltas.events);
+        }
         let Some(delta) = Self::apply_stream_piece(&mut self.full, &mut deltas.text_deltas, &piece)
         else {
             return;
         };
-        if self.text_block.is_none() {
+        if matches!(self.open_run, OpenStreamRun::None) {
             let block = self.mint_block("text");
             deltas
                 .events
@@ -583,10 +513,13 @@ impl GoogleStreamState {
                     kind: StreamBlockKind::AssistantText,
                     block: block.clone(),
                 }));
-            self.text_block = Some(block);
+            self.open_run = OpenStreamRun::Text {
+                block,
+                text: String::new(),
+            };
         }
-        if let Some(block) = self.text_block.as_ref() {
-            self.open_text_run.push_str(&delta);
+        if let OpenStreamRun::Text { block, text } = &mut self.open_run {
+            text.push_str(&delta);
             deltas
                 .events
                 .push(LlmStreamEvent::Block(StreamBlockEvent::Delta {
@@ -611,49 +544,51 @@ impl GoogleStreamState {
         StreamBlockIdentity::new(format!("{prefix}:{ordinal}"), ordinal)
     }
 
-    /// Emit the still-open reasoning block's completion and its part
-    /// as a `Part` event, then clear both. Stream finalization calls this
-    /// once more so a block left open by the last event reaches the host.
-    pub(crate) fn flush_open_reasoning_part(&mut self) -> Vec<LlmStreamEvent> {
+    /// Include the open reasoning run in partial responses without giving up its owner.
+    pub(crate) fn output_parts(&self) -> Vec<LlmOutputPart> {
+        let mut parts = self.output_parts.clone();
+        if let OpenStreamRun::Reasoning { text, replay, .. } = &self.open_run {
+            parts.push(LlmOutputPart::Reasoning {
+                text: text.clone(),
+                replay: Some(replay.clone()),
+            });
+        }
+        parts
+    }
+
+    pub(crate) fn finish_run(&mut self) -> Vec<LlmStreamEvent> {
         let mut events = Vec::new();
-        self.close_reasoning_stream_part(&mut events);
+        self.close_run(&mut events);
         events
     }
 
-    /// Seal the open text run, if any, with only that run's text as the
-    /// block's authoritative content.
-    fn close_text_run(&mut self, events: &mut Vec<LlmStreamEvent>) {
-        let Some(block) = self.text_block.take() else {
-            return;
-        };
-        events.push(LlmStreamEvent::Block(StreamBlockEvent::Completed {
-            kind: StreamBlockKind::AssistantText,
-            block,
-            text: std::mem::take(&mut self.open_text_run),
-        }));
-    }
-
-    /// Seal the assistant-text block, if one was minted, with the open run's
-    /// accumulated text as its authoritative content.
-    pub(crate) fn seal_text_block(&mut self) -> Option<LlmStreamEvent> {
-        let mut events = Vec::new();
-        self.close_text_run(&mut events);
-        events.into_iter().next()
-    }
-
-    fn close_reasoning_stream_part(&mut self, events: &mut Vec<LlmStreamEvent>) {
-        let Some(index) = self.open_reasoning_part.take() else {
-            return;
-        };
-        if let Some(part @ LlmOutputPart::Reasoning { text, .. }) = self.output_parts.get(index) {
-            if let Some(block) = self.open_reasoning_block.take() {
+    fn close_run(&mut self, events: &mut Vec<LlmStreamEvent>) {
+        match std::mem::take(&mut self.open_run) {
+            OpenStreamRun::None => {}
+            OpenStreamRun::Text { block, text } => {
+                events.push(LlmStreamEvent::Block(StreamBlockEvent::Completed {
+                    kind: StreamBlockKind::AssistantText,
+                    block,
+                    text,
+                }));
+            }
+            OpenStreamRun::Reasoning {
+                block,
+                text,
+                replay,
+            } => {
                 events.push(LlmStreamEvent::Block(StreamBlockEvent::Completed {
                     kind: StreamBlockKind::Reasoning,
                     block,
                     text: text.clone(),
                 }));
+                let part = LlmOutputPart::Reasoning {
+                    text,
+                    replay: Some(replay),
+                };
+                events.push(LlmStreamEvent::Part(part.clone()));
+                self.output_parts.push(part);
             }
-            events.push(LlmStreamEvent::Part(part.clone()));
         }
     }
 

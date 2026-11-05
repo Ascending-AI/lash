@@ -38,8 +38,9 @@ use lash_core::facade_support::resolve_schema;
 use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{
     ExecutionEvidence, LlmContentBlock, LlmMessage, LlmOutputPart, LlmRequest, LlmResponse,
-    LlmRole, LlmStreamEvent, LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta,
-    ResponsePhase, ResponseTextMeta, StreamBlockIdentity, tool_call_input_replay_string,
+    LlmRole, LlmStreamEvent, LlmTerminalReason, LlmToolChoice, LlmUsage, ProviderReasoningReplay,
+    ProviderReplayMeta, ResponsePhase, ResponseTextMeta, StreamBlockIdentity,
+    tool_call_input_replay_string,
 };
 use lash_llm_transport::tool_result_text;
 use lash_llm_transport::{
@@ -166,10 +167,7 @@ pub fn response_from_stream_state(
     http_summary: String,
 ) -> LlmResponse {
     let parts = state.response_parts();
-    let terminal_reason = match &state.final_response {
-        Some(final_response) => terminal_reason_from_response_value(final_response, &parts),
-        None => terminal_reason_from_parts(&parts),
-    };
+    let terminal_reason = state.terminal_reason(&parts);
     LlmResponse {
         parts,
         usage: state.usage,
@@ -403,6 +401,86 @@ use slots::{
     ResponsesPartSlotKey,
 };
 
+/// Snapshot observation and terminal authority belong to the same response state.
+#[derive(Clone, Debug, Default)]
+pub(crate) enum ResponseProgress {
+    #[default]
+    StreamingWithoutSnapshot,
+    Streaming {
+        snapshot: Value,
+    },
+    Terminal {
+        evidence: TerminalEvidence,
+        snapshot: Option<Value>,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TerminalEvidence {
+    Sse {
+        event: TerminalEvent,
+        status: ResponseStatus,
+    },
+    BufferedJson {
+        status: ResponseStatus,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TerminalEvent {
+    Completed,
+    Incomplete,
+    Failed,
+    Done,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ResponseStatus {
+    Completed,
+    Incomplete,
+    Failed,
+    Other,
+}
+
+impl ResponseStatus {
+    fn from_response(response: Option<&Value>) -> Self {
+        match response
+            .and_then(|response| response.get("status"))
+            .and_then(Value::as_str)
+        {
+            Some("completed") => Self::Completed,
+            Some("incomplete") => Self::Incomplete,
+            Some("failed") => Self::Failed,
+            _ => Self::Other,
+        }
+    }
+}
+
+impl ResponseProgress {
+    fn snapshot(&self) -> Option<&Value> {
+        match self {
+            Self::StreamingWithoutSnapshot => None,
+            Self::Streaming { snapshot } => Some(snapshot),
+            Self::Terminal { snapshot, .. } => snapshot.as_ref(),
+        }
+    }
+
+    fn completed_normally(&self) -> bool {
+        matches!(
+            self,
+            Self::Terminal {
+                evidence: TerminalEvidence::Sse {
+                    event: TerminalEvent::Completed,
+                    status: ResponseStatus::Completed
+                } | TerminalEvidence::BufferedJson {
+                    status: ResponseStatus::Completed
+                },
+                ..
+            }
+        )
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ResponsesStreamState {
     pub(crate) stream_observer: Option<lash_protocol_types::llm::types::ProviderAttemptControl>,
@@ -412,13 +490,7 @@ pub struct ResponsesStreamState {
     pub provider_usage: Option<Value>,
     pub execution_evidence: Option<ExecutionEvidence>,
     pub(crate) tool_argument_decoder: ToolArgumentDecoder,
-    pub final_response: Option<Value>,
-    /// Set only by a terminal Responses event, never merely by an event that
-    /// happens to carry a `response` snapshot.
-    pub terminal_event_seen: bool,
-    /// True only when a terminal Responses payload carries the normal
-    /// successful `completed` status.
-    pub completed_status_seen: bool,
+    pub(crate) progress: ResponseProgress,
     pub(crate) current_text_slot: Option<usize>,
     /// Owner of the reasoning item currently receiving summary-part deltas.
     /// The server groups one reasoning item into multiple summary parts;
@@ -461,6 +533,105 @@ pub struct ResponsesStreamState {
 }
 
 impl ResponsesStreamState {
+    pub(crate) fn response_snapshot(&self) -> Option<&Value> {
+        self.progress.snapshot()
+    }
+
+    pub(crate) fn terminal_event_seen(&self) -> bool {
+        matches!(self.progress, ResponseProgress::Terminal { evidence, .. }
+            if matches!(evidence, TerminalEvidence::Sse { .. }))
+    }
+
+    fn observe_response_event(
+        &mut self,
+        event: super::responses_stream_event::ResponsesStreamEvent,
+        snapshot: Option<&Value>,
+    ) {
+        use super::responses_stream_event::ResponsesStreamEvent as E;
+        let event = match event {
+            E::ResponseCompleted => Some(TerminalEvent::Completed),
+            E::ResponseIncomplete => Some(TerminalEvent::Incomplete),
+            E::ResponseFailed => Some(TerminalEvent::Failed),
+            E::ResponseDone => Some(TerminalEvent::Done),
+            _ => None,
+        };
+        if let Some(event) = event {
+            // A payload-less terminal retains earlier content for assembly,
+            // but its status comes only from the terminal event's own payload.
+            self.progress = ResponseProgress::Terminal {
+                evidence: TerminalEvidence::Sse {
+                    event,
+                    status: ResponseStatus::from_response(snapshot),
+                },
+                snapshot: snapshot
+                    .cloned()
+                    .or_else(|| self.progress.snapshot().cloned()),
+            };
+        } else if let Some(snapshot) = snapshot {
+            self.progress = ResponseProgress::Streaming {
+                snapshot: snapshot.clone(),
+            };
+        }
+    }
+
+    pub(crate) fn observe_buffered_response(&mut self, response: Value) {
+        let status = ResponseStatus::from_response(Some(&response));
+        self.progress = if matches!(
+            status,
+            ResponseStatus::Completed | ResponseStatus::Incomplete | ResponseStatus::Failed
+        ) {
+            ResponseProgress::Terminal {
+                evidence: TerminalEvidence::BufferedJson { status },
+                snapshot: Some(response),
+            }
+        } else {
+            ResponseProgress::Streaming { snapshot: response }
+        };
+    }
+
+    /// One EOF decision for buffered JSON, SSE, resumed SSE and WebSockets.
+    /// `None` permits a buffered JSON body without streaming terminal evidence.
+    pub(crate) fn finish(
+        &self,
+        termination: Option<lash_core::provider::StreamTermination>,
+    ) -> Result<(), LlmTransportError> {
+        use lash_core::provider::StreamTermination;
+        if !matches!(self.progress, ResponseProgress::Terminal { .. })
+            && (termination == Some(StreamTermination::RequireTerminalEvidence)
+                || (termination.is_some() && !self.has_output()))
+        {
+            return Err(LlmTransportError::new(
+                "Responses stream ended before a terminal response event",
+            )
+            .with_kind(ProviderFailureKind::Stream)
+            .with_lash_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient));
+        }
+        Ok(())
+    }
+
+    fn terminal_reason(&self, parts: &[LlmOutputPart]) -> LlmTerminalReason {
+        self.response_snapshot()
+            .map(|response| terminal_reason_from_response_value(response, parts))
+            .unwrap_or_else(|| terminal_reason_from_parts(parts))
+    }
+
+    pub(crate) fn completed_parts(
+        &self,
+    ) -> Result<(Vec<LlmOutputPart>, LlmTerminalReason), LlmTransportError> {
+        let parts = self.response_parts();
+        let reason = self.terminal_reason(&parts);
+        if crate::common::invalid_empty_response(&parts, reason, self.progress.completed_normally())
+        {
+            return Err(crate::common::empty_response_diagnostic(
+                self.response_snapshot()
+                    .map(|snapshot| self.diagnostic_limits.json_excerpt(snapshot))
+                    .unwrap_or_else(|| self.diagnostic_limits.body_excerpt("")),
+            ));
+        }
+        Ok((parts, reason))
+    }
+
     pub fn with_tool_argument_decoder(tool_argument_decoder: ToolArgumentDecoder) -> Self {
         Self {
             tool_argument_decoder,
@@ -1362,7 +1533,7 @@ impl ResponsesStreamState {
         if !parts.is_empty() {
             return parts;
         }
-        if let Some(final_response) = &self.final_response {
+        if let Some(final_response) = self.response_snapshot() {
             let parts =
                 response_parts_from_value_with_decoder(final_response, &self.tool_argument_decoder);
             if !parts.is_empty() {

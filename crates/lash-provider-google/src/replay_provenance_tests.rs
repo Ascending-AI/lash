@@ -204,7 +204,7 @@ fn google_signature_only_thought_part_round_trips_from_streaming_and_batch() {
             deltas.text_deltas.is_empty() && deltas.reasoning_deltas.is_empty(),
             "a text-less thought part must not emit visible deltas"
         );
-        let output_parts = state.output_parts;
+        let output_parts = state.output_parts();
         let batch_parts = GoogleOAuthProvider::for_test().response_parts_from_value(
             &json!({"candidates":[{
                 "content":{"parts":[thought_part.clone()]},
@@ -272,7 +272,7 @@ fn google_signature_on_function_call_thought_part_yields_only_the_tool_call() {
         )
         .expect("streaming functionCall thought part parses");
     // A duplicate empty Reasoning part would show up beside the tool call here.
-    let streaming_parts = state.output_parts;
+    let streaming_parts = state.output_parts();
     let batch_parts = GoogleOAuthProvider::for_test().response_parts_from_value(
         &json!({"candidates":[{
             "content":{"parts":[part]},

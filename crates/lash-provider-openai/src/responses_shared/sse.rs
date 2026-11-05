@@ -19,6 +19,11 @@ pub fn process_sse_event(
             .with_raw(state.diagnostic_limits.body_excerpt(raw))
             .with_retry_verdict(TransportRetryVerdict::NotRetryable)
     })?;
+    // Terminal evidence owns the response from this point onward. Replays and
+    // trailing events cannot replace its snapshot or emit more output.
+    if state.terminal_event_seen() {
+        return Ok(());
+    }
     let event_name = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
     if let Some(observer) = &state.stream_observer {
         use lash_transport_failure::PartialOutputKind as K;
@@ -107,17 +112,16 @@ pub fn process_sse_event(
 
     if let Some(response) = event.get("response") {
         state.capture_execution_evidence(response, event_type.is_terminal())?;
-        state.completed_status_seen |= event_type == ResponsesStreamEvent::ResponseCompleted
-            && response.get("status").and_then(Value::as_str) == Some("completed");
     }
 
     if let Some(resp) = event.get("response") {
-        state.final_response = Some(resp.clone());
         state.provider_usage = resp.get("usage").filter(|usage| !usage.is_null()).cloned();
         merge_usage(&mut state.usage, &usage_from_response_value(resp));
     } else {
         merge_usage(&mut state.usage, &usage_from_response_value(&event));
     }
+
+    state.observe_response_event(event_type, event.get("response"));
 
     match event_type.handling_class() {
         ResponsesStreamEventClass::EvidenceOnly | ResponsesStreamEventClass::Lifecycle => {
@@ -250,7 +254,6 @@ pub fn process_sse_event(
             }
         }
         ResponsesStreamEventClass::Terminal => {
-            state.terminal_event_seen = true;
             if event_type == ResponsesStreamEvent::ResponseFailed {
                 return Err(crate::responses_output_evidence::response_failed_error(
                     provider,
