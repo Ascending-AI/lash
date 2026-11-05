@@ -211,7 +211,8 @@ impl Running<'_> {
                 .get(self.pc.index())
                 .and_then(Option::as_ref)
                 .ok_or_else(|| invalid(Refused::Facts))?;
-            let control = self.prepare_control(op, &answer, flow.loop_branch)?;
+            let looping = code.program.loop_departure(self.pc);
+            let control = self.prepare_control(op, &answer, flow.loop_branch, looping.as_ref())?;
             let ordinal = self
                 .reached
                 .ordinal
@@ -246,6 +247,15 @@ impl Running<'_> {
             self.reached.debt = counters.debt;
             if let Some(departure) = departure {
                 self.departing = Some(departure);
+            }
+            match looping {
+                Some(crate::compile::region_isa::LoopDeparture::Origin(origin)) => {
+                    self.looping = Some(origin);
+                }
+                Some(crate::compile::region_isa::LoopDeparture::End { .. }) => {
+                    self.looping = None;
+                }
+                None => {}
             }
             if matches!(op, RegionOp::Exit { .. }) {
                 self.finish_frame()?;

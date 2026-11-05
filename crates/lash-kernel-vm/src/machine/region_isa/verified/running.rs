@@ -16,6 +16,8 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     #[expect(clippy::vec_box, reason = "reuse admitted canonical frame allocations")]
     pub(super) canonical_callees: Vec<Box<crate::machine::Frame>>,
     pub(super) departing: Option<super::returns::Departure>,
+    /// The origin of a Break/Continue whose scope Leaves are running.
+    pub(super) looping: Option<Point>,
     pub(super) returning: Option<super::returns::Incoming>,
     pub(super) complete: bool,
     pub(super) activation: Option<CallActivation>,
@@ -135,6 +137,7 @@ impl<'m> Running<'m> {
             parked: Vec::new(),
             canonical_callees: Vec::new(),
             departing: None,
+            looping: None,
             returning: None,
             complete: false,
             activation: None,

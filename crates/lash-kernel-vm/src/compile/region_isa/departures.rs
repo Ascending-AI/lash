@@ -1,6 +1,9 @@
-//! A Return transfers its operand before leaving entered scopes. Each departure
-//! owns its Leave rows because normal and departing successors differ.
+//! A Return, Break or Continue transfers its operand (if any) before leaving
+//! entered scopes. Each departure owns its Leave rows because normal and
+//! departing successors differ. A Return ends at the frame Leave; a loop
+//! departure ends at its target loop's Catch and resumes where source does.
 use super::*;
+use crate::compile::room::ExitKind;
 use std::collections::BTreeMap;
 
 #[derive(Clone)]
@@ -24,17 +27,71 @@ pub(super) fn contains(draft: &RegionDraft, index: usize) -> bool {
     })
 }
 
+/// The departing statement a source event row commits, by admitted syntax.
+fn departing(draft: &RegionDraft, index: usize) -> Result<Option<ExitKind>, Refused> {
+    let at = &draft.steps[index].at;
+    if at.phase != Phase::Commit || index >= draft.source.room.events.len() {
+        return Ok(None);
+    }
+    Ok(match resources::node(&draft.source, &at.site)? {
+        doc::Node::Stmt(doc::Stmt::Return { .. }) => {
+            matches!(draft.ops[index], RegionOp::Return { .. }).then_some(ExitKind::Return)
+        }
+        doc::Node::Stmt(doc::Stmt::Break) => Some(ExitKind::Break),
+        doc::Node::Stmt(doc::Stmt::Continue) => Some(ExitKind::Continue),
+        _ => None,
+    })
+}
+
+/// Where a loop departure resumes after its target loop's Catch: the loop's
+/// Commit for a Break, otherwise the loop's repeated test.
+fn resume(
+    draft: &RegionDraft,
+    exit: ExitKind,
+    resumed: Option<&Point>,
+    catch: &Point,
+) -> Result<Pc, Refused> {
+    let expected = match (exit, resumed) {
+        (ExitKind::Break, Some(at)) => {
+            if *at
+                != (Point {
+                    site: catch.site.clone(),
+                    phase: Phase::Commit,
+                })
+            {
+                return Err(Refused::Path);
+            }
+            at.clone()
+        }
+        (ExitKind::Continue, Some(at)) => at.clone(),
+        (ExitKind::Continue, None) => Point {
+            site: catch.site.clone(),
+            phase: Phase::Test,
+        },
+        _ => return Err(Refused::Path),
+    };
+    super::stages::target(draft, catch, &expected)
+}
+
 pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(), Refused> {
     let mut ops = draft.ops.to_vec();
     let mut steps = draft.steps.to_vec();
     let mut routes = Vec::new();
     for index in 0..draft.source.room.events.len() {
-        if !matches!(ops[index], RegionOp::Return { .. }) {
+        let Some(exit) = departing(draft, index)? else {
             continue;
-        }
+        };
         let interval = draft.source.compile_departure_suffix(&steps[index].at)?;
         let events: Vec<_> = interval.events().skip(1).collect();
-        if events.is_empty() || events.iter().any(|event| event.point.phase != Phase::Leave) {
+        let (last, leaves_only) = match events.split_last() {
+            Some((last, rest)) => (last, rest.iter().all(|e| e.point.phase == Phase::Leave)),
+            None => return Err(Refused::Path),
+        };
+        let ends = match exit {
+            ExitKind::Return => last.point.phase == Phase::Leave,
+            _ => last.point.phase == Phase::Catch,
+        };
+        if !leaves_only || !ends {
             // Cleanup needs its own verified continuation before it can execute.
             ops[index] = RegionOp::Boundary {
                 spec: BoundarySpec {
@@ -45,6 +102,10 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
             };
             continue;
         }
+        let first = Pc(u32::try_from(steps.len()).map_err(|_| Refused::Facts)?);
+        let resumed = (exit != ExitKind::Return)
+            .then(|| resume(draft, exit, interval.resume(), &last.point))
+            .transpose()?;
         let mut leaves = Vec::new();
         for (position, event) in events.iter().enumerate() {
             let row = steps.len();
@@ -76,20 +137,30 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
                 event.output.as_ref(),
             )?;
             step.scalar_resources = false;
-            ops.push(if position + 1 == events.len() {
-                RegionOp::Exit { prefix: step.after }
+            step.guard = None;
+            step.depth = 0;
+            step.scratch = Box::new([]);
+            let next = if position + 1 == events.len() {
+                resumed
             } else {
-                RegionOp::Checked {
+                Some(Pc(pc.0.checked_add(1).ok_or(Refused::Facts)?))
+            };
+            ops.push(match next {
+                None => RegionOp::Exit { prefix: step.after },
+                Some(next) => RegionOp::Checked {
                     kernel: CheckedKernel {
                         kind: CheckedKind::Phase,
                     },
                     args: Box::new([]),
                     dst: sink,
-                    next: Pc(pc.0.checked_add(1).ok_or(Refused::Facts)?),
-                }
+                    next,
+                },
             });
             steps.push(step);
             leaves.push(pc);
+        }
+        if let RegionOp::Checked { next, .. } = &mut ops[index] {
+            *next = first;
         }
         routes.push(Departure {
             origin: Pc(u32::try_from(index).map_err(|_| Refused::Facts)?),
@@ -103,7 +174,7 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
 }
 
 /// Check the exact row order against canonical syntax, including unreachable
-/// returns. No supplied successor, price or recovery summary is an oracle.
+/// departures. No supplied successor, price or recovery summary is an oracle.
 pub(super) fn verify(
     draft: &RegionDraft,
     charges: &BTreeMap<Point, Vec<CanonicalClose>>,
@@ -117,13 +188,11 @@ pub(super) fn verify(
         .ok_or(Refused::Facts)?;
     let mut cursor = base;
     let mut routes = draft.departures.iter();
-    for (index, op) in draft
-        .ops
-        .iter()
-        .take(draft.source.room.events.len())
-        .enumerate()
-    {
-        if !matches!(op, RegionOp::Return { .. }) {
+    for index in 0..draft.source.room.events.len() {
+        let Some(exit) = departing(draft, index)? else {
+            continue;
+        };
+        if matches!(draft.ops[index], RegionOp::Boundary { .. }) {
             continue;
         }
         let route = routes.next().ok_or(Refused::Path)?;
@@ -140,12 +209,32 @@ pub(super) fn verify(
         {
             return Err(Refused::Source);
         }
-        for (pc, event) in route.leaves.iter().zip(events) {
+        if exit != ExitKind::Return
+            && !matches!(
+                &draft.ops[index],
+                RegionOp::Checked { kernel, args, dst, .. }
+                    if kernel.kind == CheckedKind::Phase
+                        && args.is_empty()
+                        && dst.offset() == draft.roles.len()
+                        && draft.steps[index].event.entities.is_empty()
+                        && draft.steps[index].event.inputs.is_empty()
+            )
+        {
+            return Err(Refused::Source);
+        }
+        let count = route.leaves.len();
+        for (position, (pc, event)) in route.leaves.iter().zip(events).enumerate() {
             if pc.offset() != cursor {
                 return Err(Refused::Path);
             }
             let step = draft.steps.get(cursor).ok_or(Refused::Exit)?;
-            if event.point.phase != Phase::Leave
+            let last = position + 1 == count;
+            let phase = if last && exit != ExitKind::Return {
+                Phase::Catch
+            } else {
+                Phase::Leave
+            };
+            if event.point.phase != phase
                 || step.at != event.point
                 || step.event != *event
                 || step.stage.is_some()
@@ -184,14 +273,41 @@ pub(super) fn verify(
             if step.charges.as_ref() != charges.get(&step.at).map_or(&[][..], Vec::as_slice) {
                 return Err(Refused::Source);
             }
+            let expected = match (last, exit) {
+                (true, ExitKind::Return) => None,
+                (true, _) => Some(resume(draft, exit, interval.resume(), &step.at)?),
+                (false, _) => Some(Pc(u32::try_from(cursor + 1).map_err(|_| Refused::Facts)?)),
+            };
+            let shaped = match (&draft.ops[cursor], expected) {
+                (RegionOp::Exit { prefix }, None) => *prefix == step.after,
+                (
+                    RegionOp::Checked {
+                        kernel,
+                        args,
+                        dst,
+                        next,
+                    },
+                    Some(expected),
+                ) => {
+                    kernel.kind == CheckedKind::Phase
+                        && args.is_empty()
+                        && dst.offset() == draft.roles.len()
+                        && *next == expected
+                }
+                _ => false,
+            };
+            if !shaped {
+                return Err(Refused::Path);
+            }
             cursor += 1;
         }
         let last = route.leaves.last().ok_or(Refused::Exit)?;
-        if draft.steps[last.offset()].at
-            != (Point {
-                site: draft.source.site.clone(),
-                phase: Phase::Leave,
-            })
+        if exit == ExitKind::Return
+            && draft.steps[last.offset()].at
+                != (Point {
+                    site: draft.source.site.clone(),
+                    phase: Phase::Leave,
+                })
         {
             return Err(Refused::Exit);
         }
@@ -218,7 +334,24 @@ pub(super) fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refuse
             .iter()
             .position(|pc| pc.offset() == index)
             .ok_or(Refused::Path)?;
-        route.leaves.get(position + 1).copied()
+        match route.leaves.get(position + 1) {
+            Some(next) => Some(*next),
+            // A loop route resumes at its loop; a Return route exits.
+            None => match departing(draft, route.origin.offset())?.ok_or(Refused::Path)? {
+                ExitKind::Return => None,
+                exit => {
+                    let interval = draft
+                        .source
+                        .compile_departure_suffix(&draft.steps[route.origin.offset()].at)?;
+                    Some(resume(
+                        draft,
+                        exit,
+                        interval.resume(),
+                        &draft.steps[index].at,
+                    )?)
+                }
+            },
+        }
     };
     if recovery::successors(draft, index).as_slice() != expected.as_slice() {
         return Err(Refused::Path);

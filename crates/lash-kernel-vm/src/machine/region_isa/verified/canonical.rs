@@ -206,7 +206,13 @@ impl Running<'_> {
                 .map(|incoming| graph.value(incoming.value).map_err(RegionError::Heap))
                 .transpose()?
                 .or(image.pending),
-            departure: departure.map(|departure| departure.origin.clone()),
+            departure: departure
+                .map(|departure| departure.origin.clone())
+                .or_else(|| {
+                    (depth == self.parked.len())
+                        .then(|| self.looping.clone())
+                        .flatten()
+                }),
             ordinal: reached.ordinal,
             debt: lash_kernel_state::paged::ChargeDebtRecord {
                 cursor: reached.debt,

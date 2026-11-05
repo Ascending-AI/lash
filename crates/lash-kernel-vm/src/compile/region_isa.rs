@@ -392,6 +392,11 @@ pub(crate) enum RegionOp {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum LoopDeparture {
+    Origin(Point),
+    End { exits: Option<u32> },
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LoopPhase {
     Enter,
@@ -503,6 +508,43 @@ impl RegionCode {
     /// Return is followed by its authenticated scope and defining-frame Leaves.
     pub(crate) fn return_successor(&self, pc: Pc) -> Option<Pc> {
         departures::successor(&self.draft, pc)
+    }
+    /// A Break/Continue route row: its origin, or its final Catch together
+    /// with the loop a Break leaves. Return routes are not loop departures.
+    pub(crate) fn loop_departure(&self, pc: Pc) -> Option<LoopDeparture> {
+        let route = self
+            .draft
+            .departures
+            .iter()
+            .find(|route| route.origin == pc || route.leaves.last() == Some(&pc))?;
+        let origin = &self.draft.steps[route.origin.offset()].at;
+        let breaks = match lower::node_at(&self.draft.source, origin)? {
+            doc::Node::Stmt(doc::Stmt::Break) => true,
+            doc::Node::Stmt(doc::Stmt::Continue) => false,
+            _ => return None,
+        };
+        if route.origin == pc {
+            return Some(LoopDeparture::Origin(origin.clone()));
+        }
+        let at = &self.draft.steps[pc.offset()].at;
+        let index = self
+            .draft
+            .loops
+            .iter()
+            .position(|info| info.site == at.site)?;
+        Some(LoopDeparture::End {
+            exits: breaks.then_some(u32::try_from(index).ok()?),
+        })
+    }
+    /// Whether a carried departure origin is a Break or Continue.
+    pub(crate) fn loop_origin(&self, origin: &Point) -> bool {
+        self.draft.departures.iter().any(|route| {
+            self.draft.steps[route.origin.offset()].at == *origin
+                && !matches!(
+                    self.draft.ops[route.origin.offset()],
+                    RegionOp::Return { .. }
+                )
+        })
     }
     /// Select a departure-specific Leave when reopening a carried return.
     pub(crate) fn departure_at(&self, origin: &Point, at: &Point) -> Option<Pc> {

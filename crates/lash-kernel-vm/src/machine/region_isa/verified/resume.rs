@@ -425,7 +425,14 @@ impl super::Running<'_> {
         self.reached.occurrence = source.occurrence;
         self.reached.debt = source.debt.cursor;
         self.counters.debt = source.debt.cursor;
-        if let Some(origin) = source.departure {
+        if let Some(origin) = source.departure.clone()
+            && self.code.program.loop_origin(&origin)
+        {
+            if source.debt.completion != 0 || source.debt.completion_paid {
+                return Err(invalid(Refused::Facts));
+            }
+            self.looping = Some(origin);
+        } else if let Some(origin) = source.departure {
             let map = self
                 .code
                 .program

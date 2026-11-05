@@ -273,14 +273,15 @@ pub(super) fn check(draft: &RegionDraft, index: usize) -> Result<(), Refused> {
 /// runtime executor selector. The verifier uses canonical loop definitions.
 pub(super) fn target(draft: &RegionDraft, from: &Point, at: &Point) -> Result<Pc, Refused> {
     for (index, info) in draft.loops.iter().enumerate() {
+        // A Continue's Catch at the loop resumes like the body's backedge.
+        let backedge = from.phase == Phase::Leave && from.site == info.site.child(1)
+            || from.phase == Phase::Catch && from.site == info.site;
         let phase = if info.while_loop && *at == info.entry {
-            Some(
-                if from.phase == Phase::Leave && from.site == info.site.child(1) {
-                    LoopPhase::Test
-                } else {
-                    LoopPhase::Enter
-                },
-            )
+            Some(if backedge {
+                LoopPhase::Test
+            } else {
+                LoopPhase::Enter
+            })
         } else if !info.while_loop
             && *at == info.entry
             && from.site.unit == info.site.unit
@@ -289,8 +290,7 @@ pub(super) fn target(draft: &RegionDraft, from: &Point, at: &Point) -> Result<Pc
             Some(LoopPhase::Enter)
         } else if !info.while_loop
             && *at == info.test
-            && (from.site == info.site.child(1) && from.phase == Phase::Leave
-                || from.site == info.site && from.phase == Phase::Open)
+            && (backedge || from.site == info.site && from.phase == Phase::Open)
         {
             Some(LoopPhase::Test)
         } else {

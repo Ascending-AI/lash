@@ -612,8 +612,11 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                                 doc::Stmt::Do { .. }
                                     | doc::Stmt::If { .. }
                                     | doc::Stmt::While { .. }
+                                    | doc::Stmt::Break
+                                    | doc::Stmt::Continue
                             )
-                    )
+                    ) && !(step.at.phase == Phase::Catch
+                        && matches!(node, doc::Node::Stmt(doc::Stmt::For { via: None, .. })))
                 {
                     return Err(Refused::Source);
                 }

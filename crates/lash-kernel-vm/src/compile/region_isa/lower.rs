@@ -184,6 +184,12 @@ pub(super) fn connect(
                 graph,
             )?
         }
+        // A loop departure has no operand; its route is appended with the
+        // departures and ends at the target loop's Catch.
+        doc::Node::Stmt(doc::Stmt::Break | doc::Stmt::Continue) => {
+            graph.insert(commit.clone(), Edge::Stop);
+            commit
+        }
         // These require departure/handler or protocol composition. Each is an
         // explicit boundary, with no source interpreter embedded in the ISA.
         doc::Node::Stmt(
@@ -191,8 +197,6 @@ pub(super) fn connect(
             | doc::Stmt::Throw { .. }
             | doc::Stmt::Finish { .. }
             | doc::Stmt::Fail { .. }
-            | doc::Stmt::Break
-            | doc::Stmt::Continue
             | doc::Stmt::Try(_)
             | doc::Stmt::For { via: Some(_), .. },
         )
@@ -311,6 +315,9 @@ fn literal(literal: &doc::Literal) -> Option<Value> {
         doc::Literal::Text(value) => Value::Text(doc::arena::ShortText::new(value)?),
         _ => return None,
     })
+}
+pub(super) fn node_at<'s>(source: &'s Source, at: &Point) -> Option<doc::Node<'s>> {
+    resources::node(source, &at.site).ok()
 }
 pub(super) fn value_literal(source: &Source, at: &Point) -> Option<Value> {
     match resources::node(source, &at.site).ok()? {
@@ -491,6 +498,21 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                 {
                     RegionOp::Return { value: args[0] }
                 }
+                // The route is appended below; its first Leave replaces `next`.
+                (
+                    doc::Node::Stmt(doc::Stmt::Break | doc::Stmt::Continue),
+                    Phase::Commit,
+                    None,
+                    _,
+                    Ok(args),
+                ) if args.is_empty() && event.entities.is_empty() => RegionOp::Checked {
+                    kernel: CheckedKernel {
+                        kind: CheckedKind::Phase,
+                    },
+                    args: Box::new([]),
+                    dst: sink,
+                    next: pc(at)?,
+                },
                 (
                     doc::Node::Expr(doc::Expr::Call { .. } | doc::Expr::Act(_)),
                     Phase::Restore,

@@ -68,7 +68,21 @@ impl Running<'_> {
         op: &RegionOp,
         answer: &ScalarAnswer,
         branch: Option<u32>,
+        looping: Option<&crate::compile::region_isa::LoopDeparture>,
     ) -> Result<Option<Edit>, RegionError> {
+        // A Break's Catch leaves its loop; a Continue's keeps it active.
+        if let Some(crate::compile::region_isa::LoopDeparture::End { exits: Some(index) }) = looping
+        {
+            let mut next = *self
+                .loops
+                .get(self.loop_index(*index)?)
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            next.active = false;
+            return Ok(Some(Edit {
+                index: self.loop_index(*index)?,
+                next,
+            }));
+        }
         let (index, next) = match op {
             RegionOp::Checked { kernel, .. } => match kernel.kind() {
                 crate::compile::region_isa::CheckedKind::LoopControl { stage, .. } => {
