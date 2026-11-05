@@ -16,10 +16,17 @@ pub(in crate::machine::region_isa) struct Code {
     pub(in crate::machine::region_isa) calls: Box<[Option<Call>]>,
 }
 
+pub(super) struct SavedRole {
+    pub(super) source: Slot,
+    pub(super) parked: Slot,
+    pub(super) suffix: Arc<[u32]>,
+    pub(super) register: Register,
+}
+
 pub(in crate::machine::region_isa) struct Call {
     pub(in crate::machine::region_isa) plan: CallPlan,
     pub(in crate::machine::region_isa) arguments: Box<[Register]>,
-    pub(in crate::machine::region_isa) saved: Box<[(Slot, Register)]>,
+    pub(super) saved: Box<[SavedRole]>,
     pub(in crate::machine::region_isa) callable: Option<Register>,
     pub(in crate::machine::region_isa) callable_origin: Option<Register>,
     pub(in crate::machine::region_isa) result: Register,
@@ -132,11 +139,7 @@ impl Code {
                             .iter()
                             .map(|input| role(input.slot()))
                             .collect::<Result<_, _>>()?,
-                        saved: plan
-                            .saved_roles()
-                            .iter()
-                            .map(|input| Ok((input.slot(), role(input.slot())?)))
-                            .collect::<Result<_, RegionError>>()?,
+                        saved: saved_roles(exe, program, plan)?,
                         callable: plan
                             .callable()
                             .map(|input| role(input.slot()))
@@ -209,4 +212,71 @@ impl Code {
             .and_then(Option::as_ref)
             .ok_or_else(|| invalid(Refused::Source))
     }
+}
+
+fn saved_roles(
+    exe: &crate::compile::Executable,
+    program: &RegionCode,
+    plan: &CallPlan,
+) -> Result<Box<[SavedRole]>, RegionError> {
+    if plan.saved_roles().is_empty() {
+        return Ok(Box::new([]));
+    }
+    let mut statement = plan.point().site.clone();
+    while statement.path.len() > program.source().site.path.len()
+        && exe.stmt_at(program.code(), &statement).is_none()
+    {
+        statement.path.pop();
+    }
+    let stmt = exe
+        .stmt_at(program.code(), &statement)
+        .ok_or_else(|| invalid(Refused::Source))?;
+    let (stream, _, _) = exe.statement(stmt);
+    let act = stream
+        .nested_at
+        .get(&(stmt, plan.point().site.clone()))
+        .ok_or_else(|| invalid(Refused::Source))?;
+    let nested = &stream.nested[act.ix()];
+    if nested.roles.len() != plan.saved_roles().len() {
+        return Err(invalid(Refused::Source));
+    }
+    let slots = program.source().owner_slots().map_err(invalid)?;
+    nested
+        .roles
+        .iter()
+        .zip(plan.saved_roles())
+        .map(|(role, saved)| {
+            use lash_kernel_state::kernel_internals::logical::Owner;
+            let Owner::Value { slot: source, .. } = slots
+                .root(
+                    &crate::compile::room::Owner::Operand(role.site.clone()),
+                    lash_kernel_doc::TaskId::MAIN,
+                    0,
+                )
+                .ok_or_else(|| invalid(Refused::Source))?
+            else {
+                return Err(invalid(Refused::Source));
+            };
+            let Owner::Value { slot: parked, .. } = slots
+                .continuation(&role.site, lash_kernel_doc::TaskId::MAIN, 0)
+                .ok_or_else(|| invalid(Refused::Source))?
+            else {
+                return Err(invalid(Refused::Source));
+            };
+            if saved.slot() != source {
+                return Err(invalid(Refused::Source));
+            }
+            let reg = program
+                .roles()
+                .iter()
+                .find_map(|(slot, reg)| (*slot == source).then_some(*reg))
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            Ok(SavedRole {
+                source,
+                parked,
+                suffix: Arc::clone(&role.suffix),
+                register: physical(program, reg)?,
+            })
+        })
+        .collect()
 }

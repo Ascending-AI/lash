@@ -108,6 +108,25 @@ impl LeaseGraphExit {
     }
 }
 impl StateLease<'_> {
+    /// Translate a recovery role's existing canonical holding through the
+    /// frozen packet. This neither adds a source occurrence nor publishes it.
+    pub fn recovery_holding(
+        &mut self,
+        graph: &LeaseGraphExit,
+        value: LeaseValue,
+    ) -> Result<Holding, HeapFault> {
+        graph.authenticate(&self.local, &self.exclusion)?;
+        match graph.publication(value)? {
+            PublicationValue::Prepared(proof) => proof.holding(self.arena()),
+            PublicationValue::Native(value) => {
+                let LeaseStorage::Installation { registration, .. } = &mut self.storage else {
+                    return Err(invalid("recovery holding has no frozen installation"));
+                };
+                Holding::from_native(registration.arena(), self.heap.pages(), &value)
+            }
+            _ => Err(invalid("lease packet produced an invalid recovery value")),
+        }
+    }
     pub fn materialize_graph(&mut self) -> Result<LeaseGraphExit, HeapFault> {
         if self.local.frozen {
             return Err(invalid("lease graph was already frozen"));

@@ -68,7 +68,20 @@ impl<'m> Running<'m> {
                     .roles
                     .iter()
                     .filter(|(_, reg)| !moved(*reg))
-                    .map(|(slot, reg)| Ok((*slot, read(*reg)?)))
+                    .map(|(slot, reg)| {
+                        let slot = if depth < self.parked.len() {
+                            code.calls[self.parked[depth].site as usize]
+                                .as_ref()
+                                .ok_or_else(|| invalid(Refused::Facts))?
+                                .saved
+                                .iter()
+                                .find(|saved| saved.source == *slot)
+                                .map_or(*slot, |saved| saved.parked)
+                        } else {
+                            *slot
+                        };
+                        Ok((slot, read(*reg)?))
+                    })
                     .collect::<Result<_, RegionError>>()?,
                 operands: map
                     .operands
@@ -88,12 +101,12 @@ impl<'m> Running<'m> {
             .iter()
             .enumerate()
             .map(|(depth, frame)| {
-                let code = if depth == self.parked.len() {
+                let code = Arc::clone(if depth == self.parked.len() {
                     &self.code
                 } else {
                     &self.parked[depth].code
-                };
-                self.canonical_frame(depth, code, frame, &graph)
+                });
+                self.canonical_frame(depth, &code, frame, &graph)
             })
             .collect::<Result<Vec<_>, _>>()?;
         let current = translated.last().ok_or_else(|| invalid(Refused::Exit))?;

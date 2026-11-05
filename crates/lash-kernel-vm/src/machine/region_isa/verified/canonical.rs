@@ -9,7 +9,7 @@ use lash_kernel_state::kernel_internals::logical::{Invocation, LeaseGraphExit, O
 
 impl Running<'_> {
     pub(super) fn canonical_frame(
-        &self,
+        &mut self,
         depth: usize,
         code: &super::Code,
         image: &reconstruct::FrameImage,
@@ -156,9 +156,6 @@ impl Running<'_> {
                 .get(parked.site as usize)
                 .and_then(Option::as_ref)
                 .ok_or_else(|| invalid(Refused::Facts))?;
-            if !call.saved.is_empty() {
-                return Err(invalid(Refused::Facts));
-            }
             let stmt = code
                 .exe
                 .stmt_at(image.program, &statement)
@@ -175,7 +172,14 @@ impl Running<'_> {
                         site: Arc::clone(&entry.suffix),
                         phase: lash_kernel_state::paged::PhaseRecord::Called,
                         occurrence: parked.reached.occurrence,
-                        roles: Vec::new(),
+                        roles: call.saved.iter().map(|saved| {
+                            let value = self.registers.read(depth, image.invocation, saved.register)?;
+                            let holding = match value {
+                                operands::Operand::Dynamic(value) => self.view.recovery_holding(graph, value).map_err(RegionError::Heap)?,
+                                operands::Operand::Immediate(value) => lash_kernel_state::kernel_internals::logical::Holding::scalar(self.view.arena().logical_local(&value).map_err(RegionError::Heap)?),
+                            };
+                            Ok(crate::machine::frames::Role { site: Arc::clone(&saved.suffix), value: value.materialize(graph).map_err(RegionError::Heap)?, holding })
+                        }).collect::<Result<_, RegionError>>()?,
                     },
                 );
             }

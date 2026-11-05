@@ -5,6 +5,10 @@ use crate::laws::embedder::{Embedder, Setup};
 use lash_kernel_doc::TaskId;
 
 fn call_machine() -> Embedder {
+    call_expression("return isa.pick(7, 9)")
+}
+
+fn call_expression(body: &str) -> Embedder {
     fn probes(
         registry: &mut lash_kernel_doc::FunctionRegistry,
         _: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
@@ -20,11 +24,13 @@ fn call_machine() -> Embedder {
         ..Setup::default()
     };
     setup.start.target = crate::Target::Entry("go".into());
-    Embedder::with(
-        r#"definition "function go() -> Any\nkernel 1\nmetering statements\nbody { return isa.pick(7, 9) }"
-main {}"#,
-        setup,
-    )
+    let definition =
+        format!("function go() -> Any\nkernel 1\nmetering statements\nbody {{ {body} }}");
+    let source = format!(
+        "definition {}\nmain {{}}",
+        serde_json::to_string(&definition).unwrap()
+    );
+    Embedder::with(&source, setup)
 }
 
 /// K-FN-004/K-EVAL-008: C reads actual ordered caller slots and pads missing
@@ -482,6 +488,73 @@ fn an_active_static_call_preserves_both_canonical_frames() {
             assert!(machine.logical.borrow().is_current(&stamp));
             assert_eq!((machine.charged, machine.logical_memory.get()), before);
             assert_eq!(machine.tasks.get_mut(0).unwrap().unwrap().frames.len(), 1);
+        }
+    }
+}
+
+/// K-EVAL-008: a callee entry moves a suspended expression operand to its
+/// canonical continuation root, preserving the value and its exact holding.
+#[test]
+fn a_nested_call_reconstructs_the_saved_expression_operand() {
+    for commit in [false, true] {
+        let mut run = call_expression("return isa.pick(7, isa.pick(11, 13))");
+        let machine = &mut run.machine;
+        machine.current = Some(TaskId::MAIN);
+        let root = machine.frame(TaskId::MAIN).unwrap().code;
+        let draft = compile_region(&machine.exe, root).unwrap();
+        let calls = compile_calls(&machine.exe, &draft).unwrap();
+        let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
+        let stamp = machine.logical.borrow().stamp();
+        let before = (machine.charged, machine.logical_memory.get());
+        let mut lease = RegionLease::acquire(machine, program).unwrap();
+        let mut entered = false;
+        for _ in 0..16 {
+            assert_eq!(
+                lease.run(StopAt::NextLegalPrefix).unwrap(),
+                RegionStop::Handoff
+            );
+            let Executing::Machine(execution) = &lease.execution else {
+                unreachable!()
+            };
+            if execution.frame_index() == 1 {
+                entered = true;
+                break;
+            }
+        }
+        assert!(
+            entered,
+            "the inner source call must enter within its fixed source-prefix bound"
+        );
+        let prefix = lease.materialize().unwrap();
+        let image = prefix.reconstruction();
+        assert_eq!(image.frames.len(), 2);
+        let canonical = image.canonical.as_ref().unwrap();
+        let pending = canonical.frames[0].pending.peek().unwrap();
+        assert_eq!(pending.roles.len(), 1);
+        assert!(pending.roles[0].value.same(&Value::Int(7)));
+        assert_eq!(
+            pending.roles[0].holding.bytes(),
+            lash_kernel_doc::LogicalHeldV1::REFERENCE + 1
+        );
+        assert!(image.frames[0].roles.iter().any(|(slot, value)| matches!(
+            slot,
+            lash_kernel_state::kernel_internals::logical::Slot::Continuation(_)
+        ) && value.same(&Value::Int(7))));
+        assert_eq!(
+            image.counters.balance,
+            2 * lash_kernel_doc::LogicalHeldV1::FRAME
+                + 4 * lash_kernel_doc::LogicalHeldV1::REFERENCE
+                + 3
+        );
+        let prepared = prefix.prepare_exit().unwrap();
+        if commit {
+            prepared.commit().unwrap();
+            assert_eq!(machine.tasks.get_mut(0).unwrap().unwrap().frames.len(), 2);
+            assert_eq!(machine.logical_memory.get(), 195);
+        } else {
+            drop(prepared);
+            assert!(machine.logical.borrow().is_current(&stamp));
+            assert_eq!((machine.charged, machine.logical_memory.get()), before);
         }
     }
 }
