@@ -233,16 +233,6 @@ async fn ledger_row(
     }
 }
 
-/// Whether `row` still holds its first payload.
-fn payload_retained(
-    row: &lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord,
-) -> bool {
-    match &row.intent {
-        crate::tools::ToolIntentSubmissionPayload::Retained(_) => true,
-        crate::tools::ToolIntentSubmissionPayload::Expired => false,
-    }
-}
-
 /// The first outcome a submission answered.
 fn first_outcome(
     outcome: &crate::tools::ToolIntentIngressOutcome,
@@ -462,7 +452,7 @@ impl PayloadRetentionLaw {
             .await?;
         if retention == lash_core::Retention::UntilGc {
             assert!(
-                payload_retained(&ledger_row(registry, &start_key).await?),
+                ledger_row(registry, &start_key).await?.intent().is_some(),
                 "until_gc keeps the first turn's payload until the host collects"
             );
             core.store_factory
@@ -494,7 +484,7 @@ impl PayloadRetentionLaw {
         ] {
             let row = ledger_row(registry, key).await?;
             assert!(
-                !payload_retained(&row),
+                row.intent().is_none(),
                 "{name}: {what}'s payload is expired with its turn's revision"
             );
             assert_eq!(
@@ -509,7 +499,7 @@ impl PayloadRetentionLaw {
             (&uncorrelated_key, "an uncorrelated submission"),
         ] {
             assert!(
-                payload_retained(&ledger_row(registry, key).await?),
+                ledger_row(registry, key).await?.intent().is_some(),
                 "{name}: {what} keeps its payload"
             );
         }
@@ -581,14 +571,11 @@ impl PayloadRetentionLaw {
         let after = ledger_row(registry, &refused_key).await?;
         assert_eq!(
             (
-                after.settlement.as_ref().map(|settlement| settlement.at_ms),
+                after.settlement().map(|settlement| settlement.at_ms),
                 after.execution_outcome()
             ),
             (
-                refused_row
-                    .settlement
-                    .as_ref()
-                    .map(|settlement| settlement.at_ms),
+                refused_row.settlement().map(|settlement| settlement.at_ms),
                 refused_row.execution_outcome()
             ),
             "{name}: the first refusal stays the settlement"

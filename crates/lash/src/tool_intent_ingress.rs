@@ -803,7 +803,7 @@ impl ToolIntentIngress {
             lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission::Admitted => false,
             lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission::Existing(
                 existing,
-            ) => existing.settlement.is_some(),
+            ) => existing.settlement().is_some(),
             // The owner was deleted and its ledger reclaimed while this
             // submission realized: its fence already refuses every redelivery,
             // so there is no row left to retain the outcome in.
@@ -844,8 +844,7 @@ impl ToolIntentIngress {
                 &receipt.record.trace,
                 receipt
                     .record
-                    .settlement
-                    .as_ref()
+                    .settlement()
                     .map(|settlement| settlement.at_ms),
             ) {
                 runtime.unreplayed(Some(scope.clone())).transition(

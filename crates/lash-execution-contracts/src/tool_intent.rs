@@ -192,12 +192,13 @@ lash_vocabulary::tool_intent_variants!(define_tool_intent);
 /// before realization, and every submission retains its first outcome here.
 ///
 /// The row is a replay envelope (protocol, identity, command kind, payload
-/// hash, trace) and a first settlement, both kept while the row lives, beside
-/// the first payload, which follows its owning run's revision: once a
+/// hash, trace) beside its lifecycle: pending with its first payload,
+/// settled with that payload and its first settlement, or expired once a
 /// settled submission's run published a revision its session no longer
-/// retains, [`Self::intent`] reads [`ToolIntentSubmissionPayload::Expired`]
-/// (FIG-6612). Replay and changed-content refusal read only the envelope.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// retains, when only the settlement remains (FIG-6612). A pending payload
+/// never expires: it is the only command a redrive realizes. Replay and
+/// changed-content refusal read only the envelope.
+#[derive(Clone, Debug, Deserialize)]
 #[serde(try_from = "ToolIntentSubmissionWire")]
 pub struct ToolIntentSubmissionRecord {
     /// Version selecting the admission and realization contract.
@@ -209,47 +210,95 @@ pub struct ToolIntentSubmissionRecord {
     kind: ToolIntentKind,
     /// Hash of the first serialized payload.
     pub payload_hash: String,
-    /// First payload retained for crash redrive, while its run's revision is
-    /// retained.
-    pub intent: ToolIntentSubmissionPayload,
-    /// First typed realization outcome, absent while admission is pending.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub settlement: Option<ToolIntentSubmissionSettlement>,
+    /// Where the submission is in its lifecycle, with the payload and
+    /// settlement that state holds.
+    state: SubmissionState,
     /// The submission's trace scope: the cause and span its first
     /// submission offered and when it was made. The ledger's first writer
     /// retains it with the row; a later submission of the identity reads it
     /// back. It is beside the intent, never inside it, so the payload hash
     /// does not cover it. `None` for a runtime-minted intent, which runs
     /// under its tool call's scope.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace: Option<lash_trace::DurableTraceScope>,
     /// The logical run of the owner session the submission was made under,
     /// when its execution scope named one: the run whose published revision
     /// retains the payload. `None` keeps the payload while the row lives.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owning_run: Option<lash_vocabulary::identity::TurnId>,
 }
 
-/// A submission's first payload: retained, or expired with the revision of
-/// the run that owned it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "state", content = "intent", rename_all = "snake_case")]
-pub enum ToolIntentSubmissionPayload {
-    Retained(ToolIntent),
-    /// The submission settled and its owning run's revision was released
-    /// under its session's retention: only the envelope and the first
-    /// settlement remain.
-    Expired,
+/// A submission's lifecycle. Only [`ToolIntentSubmissionRecord::complete`]
+/// settles a pending submission, and only decoding a row whose payload its
+/// store expired yields [`Self::Expired`].
+#[derive(Clone, Debug)]
+enum SubmissionState {
+    /// Admitted, not yet realized: the payload is what a redrive realizes.
+    Pending { intent: ToolIntent },
+    /// Realized, its owning run's revision still retained.
+    Settled {
+        intent: ToolIntent,
+        settlement: ToolIntentSubmissionSettlement,
+    },
+    /// Realized, and its owning run's revision released under its
+    /// session's retention: only the envelope and the settlement remain.
+    Expired {
+        settlement: ToolIntentSubmissionSettlement,
+    },
 }
 
-impl ToolIntentSubmissionPayload {
-    /// The payload, while it is retained.
-    pub fn retained(&self) -> Option<&ToolIntent> {
-        match self {
-            Self::Retained(intent) => Some(intent),
-            Self::Expired => None,
+impl SubmissionState {
+    /// The state a stored payload and settlement of a `kind` row describe.
+    fn decode(
+        kind: ToolIntentKind,
+        intent: Option<ToolIntent>,
+        settlement: Option<ToolIntentSubmissionSettlement>,
+    ) -> Result<Self, crate::PluginError> {
+        if intent.as_ref().is_some_and(|intent| intent.kind() != kind) {
+            return Err(crate::durable_identity_conflict(
+                "submission payload differs from its retained command kind",
+            ));
+        }
+        if let Some(ToolIntentSubmissionSettlement {
+            outcome: ToolIntentSubmissionOutcome::Executed(realized),
+            ..
+        }) = &settlement
+            && realized.kind() != kind
+        {
+            return Err(crate::durable_identity_conflict(
+                "submission realization differs from its retained command kind",
+            ));
+        }
+        match (intent, settlement) {
+            (Some(intent), None) => Ok(Self::Pending { intent }),
+            (Some(intent), Some(settlement)) => Ok(Self::Settled { intent, settlement }),
+            (None, Some(settlement)) => Ok(Self::Expired { settlement }),
+            (None, None) => Err(crate::durable_identity_conflict(
+                "a pending submission's payload cannot expire",
+            )),
         }
     }
+
+    fn intent(&self) -> Option<&ToolIntent> {
+        match self {
+            Self::Pending { intent } | Self::Settled { intent, .. } => Some(intent),
+            Self::Expired { .. } => None,
+        }
+    }
+
+    fn settlement(&self) -> Option<&ToolIntentSubmissionSettlement> {
+        match self {
+            Self::Pending { .. } => None,
+            Self::Settled { settlement, .. } | Self::Expired { settlement } => Some(settlement),
+        }
+    }
+}
+
+/// How a row encodes its first payload: retained, or expired with the
+/// revision of the run that owned it.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "state", content = "intent", rename_all = "snake_case")]
+enum SubmissionPayloadWire<T> {
+    Retained(T),
+    Expired,
 }
 
 #[derive(Deserialize)]
@@ -259,7 +308,7 @@ struct ToolIntentSubmissionWire {
     identity: ToolIntentIdentity,
     kind: ToolIntentKind,
     payload_hash: String,
-    intent: ToolIntentSubmissionPayload,
+    intent: SubmissionPayloadWire<ToolIntent>,
     settlement: Option<ToolIntentSubmissionSettlement>,
     trace: Option<lash_trace::DurableTraceScope>,
     owning_run: Option<lash_vocabulary::identity::TurnId>,
@@ -269,18 +318,54 @@ impl TryFrom<ToolIntentSubmissionWire> for ToolIntentSubmissionRecord {
     type Error = crate::PluginError;
 
     fn try_from(row: ToolIntentSubmissionWire) -> Result<Self, Self::Error> {
+        let intent = match row.intent {
+            SubmissionPayloadWire::Retained(intent) => Some(intent),
+            SubmissionPayloadWire::Expired => None,
+        };
         let record = Self {
             protocol_version: row.protocol_version,
             identity: row.identity,
             kind: row.kind,
             payload_hash: row.payload_hash,
-            intent: row.intent,
-            settlement: row.settlement,
+            state: SubmissionState::decode(row.kind, intent, row.settlement)?,
             trace: row.trace,
             owning_run: row.owning_run,
         };
-        record.validate()?;
+        record.validate_owning_run()?;
         Ok(record)
+    }
+}
+
+impl Serialize for ToolIntentSubmissionRecord {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            protocol_version: u16,
+            identity: &'a ToolIntentIdentity,
+            kind: ToolIntentKind,
+            payload_hash: &'a str,
+            intent: SubmissionPayloadWire<&'a ToolIntent>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            settlement: Option<&'a ToolIntentSubmissionSettlement>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            trace: Option<&'a lash_trace::DurableTraceScope>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            owning_run: Option<&'a lash_vocabulary::identity::TurnId>,
+        }
+        Wire {
+            protocol_version: self.protocol_version,
+            identity: &self.identity,
+            kind: self.kind,
+            payload_hash: &self.payload_hash,
+            intent: self.state.intent().map_or(
+                SubmissionPayloadWire::Expired,
+                SubmissionPayloadWire::Retained,
+            ),
+            settlement: self.state.settlement(),
+            trace: self.trace.as_ref(),
+            owning_run: self.owning_run.as_ref(),
+        }
+        .serialize(serializer)
     }
 }
 
@@ -386,8 +471,7 @@ impl ToolIntentSubmissionRecord {
             identity,
             kind: intent.kind(),
             payload_hash,
-            intent: ToolIntentSubmissionPayload::Retained(intent),
-            settlement: None,
+            state: SubmissionState::Pending { intent },
             trace: None,
             owning_run: None,
         })
@@ -407,38 +491,18 @@ impl ToolIntentSubmissionRecord {
         self.kind
     }
 
-    /// Refuse a malformed per-identity settlement at admission and decode.
-    pub fn validate_settlement(&self) -> Result<(), crate::PluginError> {
-        if let Some(ToolIntentSubmissionSettlement {
-            outcome: ToolIntentSubmissionOutcome::Executed(realized),
-            ..
-        }) = &self.settlement
-            && realized.kind() != self.kind
-        {
-            return Err(crate::durable_identity_conflict(
-                "submission realization differs from its retained command kind",
-            ));
-        }
-        Ok(())
+    /// The first payload, until its owning run's revision is released.
+    pub fn intent(&self) -> Option<&ToolIntent> {
+        self.state.intent()
     }
 
-    /// Refuse a row whose parts disagree: a payload of another kind, an
-    /// expired payload that never settled, or a run owned by no session.
-    fn validate(&self) -> Result<(), crate::PluginError> {
-        self.validate_settlement()?;
-        match &self.intent {
-            ToolIntentSubmissionPayload::Retained(intent) if intent.kind() != self.kind => {
-                return Err(crate::durable_identity_conflict(
-                    "submission payload differs from its retained command kind",
-                ));
-            }
-            ToolIntentSubmissionPayload::Expired if self.settlement.is_none() => {
-                return Err(crate::durable_identity_conflict(
-                    "a pending submission's payload cannot expire",
-                ));
-            }
-            _ => {}
-        }
+    /// The first settlement, once the submission realized.
+    pub fn settlement(&self) -> Option<&ToolIntentSubmissionSettlement> {
+        self.state.settlement()
+    }
+
+    /// Refuse an owning run on a submission no session owns.
+    fn validate_owning_run(&self) -> Result<(), crate::PluginError> {
         if self.owning_run.is_some() && !matches!(self.identity.owner, RuntimeOwner::Session(_)) {
             return Err(crate::durable_identity_conflict(
                 "only a session-owned submission names an owning run",
@@ -451,9 +515,10 @@ impl ToolIntentSubmissionRecord {
     ///
     /// # Errors
     ///
-    /// A row whose parts disagree, or that fails to encode.
+    /// An owning run on a submission no session owns, or a row that fails
+    /// to encode.
     pub fn ledger_columns(&self) -> Result<ToolIntentLedgerColumns, crate::PluginError> {
-        self.validate()?;
+        self.validate_owning_run()?;
         let encode = |error: serde_json::Error| {
             crate::PluginError::Runtime(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::RecordEncodingFailed,
@@ -469,14 +534,12 @@ impl ToolIntentSubmissionRecord {
         })
         .map_err(encode)?;
         let intent_json = self
-            .intent
-            .retained()
+            .intent()
             .map(serde_json::to_string)
             .transpose()
             .map_err(encode)?;
         let settlement_json = self
-            .settlement
-            .as_ref()
+            .settlement()
             .map(serde_json::to_string)
             .transpose()
             .map_err(encode)?;
@@ -508,12 +571,11 @@ impl ToolIntentSubmissionRecord {
         };
         let envelope: ToolIntentSubmissionEnvelope =
             serde_json::from_str(&columns.envelope_json).map_err(decode)?;
-        let intent = match columns.intent_json {
-            Some(intent) => ToolIntentSubmissionPayload::Retained(
-                serde_json::from_str(&intent).map_err(decode)?,
-            ),
-            None => ToolIntentSubmissionPayload::Expired,
-        };
+        let intent = columns
+            .intent_json
+            .map(|intent| serde_json::from_str(&intent))
+            .transpose()
+            .map_err(decode)?;
         let settlement = columns
             .settlement_json
             .map(|settlement| serde_json::from_str(&settlement))
@@ -535,20 +597,18 @@ impl ToolIntentSubmissionRecord {
             identity: envelope.identity,
             kind: envelope.kind,
             payload_hash: envelope.payload_hash,
-            intent,
-            settlement,
+            state: SubmissionState::decode(envelope.kind, intent, settlement)?,
             trace: envelope.trace,
             owning_run,
         };
-        record.validate()?;
+        record.validate_owning_run()?;
         Ok(record)
     }
 
     /// Rebuild the external answer using this row's identity and kind.
     pub fn execution_outcome(&self) -> Option<crate::ToolIntentExecutionOutcome> {
         use crate::ToolIntentExecutionOutcome as Answer;
-        self.settlement
-            .as_ref()
+        self.settlement()
             .map(|settlement| match &settlement.outcome {
                 ToolIntentSubmissionOutcome::Executed(realized) => Answer::Executed {
                     identity: self.identity.clone(),
@@ -563,20 +623,31 @@ impl ToolIntentSubmissionRecord {
             })
     }
 
-    /// Validate the answer at the ledger boundary before keeping the first settlement.
+    /// Settle a pending submission with `outcome`, validated at the ledger
+    /// boundary against this row's identity and kind. A settled or expired
+    /// submission keeps its first settlement and answers unchanged.
+    ///
+    /// # Errors
+    ///
+    /// An outcome that names another identity or command kind, or a batch
+    /// refusal.
     pub fn complete(
-        &mut self,
+        self,
         at_ms: u64,
         outcome: crate::ToolIntentExecutionOutcome,
-    ) -> Result<bool, crate::PluginError> {
-        self.validate_settlement()?;
+    ) -> Result<lash_core_store::store::StoreTransition<Self>, crate::PluginError> {
         let outcome =
             ToolIntentSubmissionOutcome::try_from_execution(outcome, &self.identity, self.kind)?;
-        if self.settlement.is_some() {
-            return Ok(false);
-        }
-        self.settlement = Some(ToolIntentSubmissionSettlement { at_ms, outcome });
-        Ok(true)
+        let SubmissionState::Pending { intent } = self.state else {
+            return Ok(lash_core_store::store::StoreTransition::unchanged(self));
+        };
+        Ok(lash_core_store::store::StoreTransition::changed(Self {
+            state: SubmissionState::Settled {
+                intent,
+                settlement: ToolIntentSubmissionSettlement { at_ms, outcome },
+            },
+            ..self
+        }))
     }
 
     /// The scope id of this submission's trace scope: its owning runtime
@@ -942,7 +1013,7 @@ mod tests {
             &crate::ToolCallId::fixture("call"),
             0,
         );
-        let mut record = ToolIntentSubmissionRecord::new(identity.clone(), intent).expect("row");
+        let record = ToolIntentSubmissionRecord::new(identity.clone(), intent).expect("row");
         let refused = |identity, kind, intent_index| crate::ToolIntentExecutionOutcome::Refused {
             identity,
             kind,
@@ -960,9 +1031,11 @@ mod tests {
                 refusal: crate::ToolIntentRefusalReason::IntentIndexOverflow,
             },
         ] {
-            let error = record.complete(7, answer).expect_err("foreign settlement");
+            let error = record
+                .clone()
+                .complete(7, answer)
+                .expect_err("foreign settlement");
             assert!(crate::is_durable_identity_conflict(&error));
-            assert!(record.settlement.is_none());
         }
         let wrong_realization =
             crate::ToolIntentRealized::CancelProcess(crate::ProcessCancelReceipt {
@@ -971,27 +1044,25 @@ mod tests {
                 origin: crate::CancelOrigin::ModelRequested,
             });
         let other_intent = sample_intent(ToolIntentKind::GetDefinition);
-        let mut other =
+        let other =
             ToolIntentSubmissionRecord::new(identity.clone(), other_intent).expect("other row");
-        other.settlement = Some(ToolIntentSubmissionSettlement {
+        let mut other = serde_json::to_value(&other).expect("encode the row");
+        other["settlement"] = serde_json::to_value(ToolIntentSubmissionSettlement {
             at_ms: 7,
             outcome: ToolIntentSubmissionOutcome::Executed(wrong_realization),
-        });
-        assert!(other.validate_settlement().is_err());
-        assert!(
-            serde_json::from_value::<ToolIntentSubmissionRecord>(
-                serde_json::to_value(&other).expect("invalid bytes")
-            )
-            .is_err()
-        );
+        })
+        .expect("encode the settlement");
+        assert!(serde_json::from_value::<ToolIntentSubmissionRecord>(other).is_err());
         let answer = refused(Some(identity), record.kind(), 0);
-        assert!(record.complete(7, answer.clone()).expect("settle"));
-        assert!(
-            !record
-                .complete(9, answer.clone())
-                .expect("first settlement wins")
-        );
-        assert_eq!(record.settlement.as_ref().expect("settled").at_ms, 7);
+        let settled = record.complete(7, answer.clone()).expect("settle");
+        assert!(settled.changed);
+        let again = settled
+            .record
+            .complete(9, answer.clone())
+            .expect("first settlement wins");
+        assert!(!again.changed);
+        let record = again.record;
+        assert_eq!(record.settlement().expect("settled").at_ms, 7);
         assert_eq!(record.execution_outcome(), Some(answer));
         let encoded = serde_json::to_value(&record).expect("encode");
         assert!(encoded.get("completed_at_ms").is_none());

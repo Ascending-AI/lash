@@ -7,7 +7,7 @@ use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use sqlx::{PgConnection, PgPool, Row};
 
-use crate::{plugin_sqlx_error, process_decode_error};
+use crate::plugin_sqlx_error;
 
 /// Claim the submission's identity, answering its first writer. A fenced
 /// owner (FIG-1509) claims nothing new: its reclaimed identities answer
@@ -93,13 +93,12 @@ pub(super) async fn complete(
         .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(plugin_sqlx_error)?;
-    let mut submission = read(&mut tx, replay_key)
+    let transition = read(&mut tx, replay_key)
         .await?
-        .ok_or_else(|| plugin_sqlx_error(sqlx::Error::RowNotFound))?;
-    let changed = submission.complete(at_ms, outcome)?;
-    if changed {
-        let settlement =
-            serde_json::to_string(&submission.settlement).map_err(process_decode_error)?;
+        .ok_or_else(|| plugin_sqlx_error(sqlx::Error::RowNotFound))?
+        .complete(at_ms, outcome)?;
+    if transition.changed {
+        let settlement = transition.record.ledger_columns()?.settlement_json;
         crate::observed_sql::query(sql.tool_intents.settle.sql())
             .bind(replay_key)
             .bind(settlement)
@@ -108,10 +107,7 @@ pub(super) async fn complete(
             .map_err(plugin_sqlx_error)?;
     }
     tx.commit().await.map_err(plugin_sqlx_error)?;
-    Ok(lash_core_store::store::StoreTransition {
-        record: submission,
-        changed,
-    })
+    Ok(transition)
 }
 
 /// The submission recorded under `replay_key`, its payload expired when its

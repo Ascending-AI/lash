@@ -103,7 +103,7 @@ async fn readmit(
         crate::ToolIntentSubmissionAdmission::Admitted => Answer::Admitted,
         crate::ToolIntentSubmissionAdmission::Existing(existing) => Answer::Existing {
             outcome_recorded: existing.execution_outcome().is_some(),
-            payload_retained: existing.intent.retained().is_some(),
+            payload_retained: existing.intent().is_some(),
         },
         crate::ToolIntentSubmissionAdmission::Reclaimed => Answer::Reclaimed,
     }

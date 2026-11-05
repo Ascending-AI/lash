@@ -8,7 +8,7 @@ use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use rusqlite::{OptionalExtension as _, Transaction, params};
 
-use super::{SqliteProcessRegistry, process_decode_error, process_sqlite_error, tx_outcome};
+use super::{SqliteProcessRegistry, process_sqlite_error, tx_outcome};
 
 /// Claim the submission's identity, answering its first writer. A fenced
 /// owner (FIG-1509) claims nothing new: its reclaimed identities answer
@@ -87,23 +87,19 @@ pub(super) async fn complete(
         .conn
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
-                let mut submission = read(tx, &replay_key)?
-                    .ok_or_else(|| process_sqlite_error(rusqlite::Error::QueryReturnedNoRows))?;
-                let changed = submission.complete(at_ms, outcome)?;
-                if changed {
-                    let settlement = serde_json::to_string(&submission.settlement)
-                        .map_err(process_decode_error)?;
+                let transition = read(tx, &replay_key)?
+                    .ok_or_else(|| process_sqlite_error(rusqlite::Error::QueryReturnedNoRows))?
+                    .complete(at_ms, outcome)?;
+                if transition.changed {
+                    let settlement = transition.record.ledger_columns()?.settlement_json;
                     crate::conn::cached_execute(
                         tx,
                         crate::turn_ingress::tool_intent_sql().shared.settle.sql(),
-                        params![submission.identity.replay_key, settlement],
+                        params![transition.record.identity.replay_key, settlement],
                     )
                     .map_err(process_sqlite_error)?;
                 }
-                Ok(lash_core_store::store::StoreTransition {
-                    record: submission,
-                    changed,
-                })
+                Ok(transition)
             })()))
         })
         .await

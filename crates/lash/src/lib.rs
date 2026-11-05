@@ -741,7 +741,6 @@ pub mod tools {
     pub use lash_execution_contracts::tool_intent::ToolIntentLimits;
     pub use lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission;
     pub use lash_execution_contracts::tool_intent::ToolIntentSubmissionOutcome;
-    pub use lash_execution_contracts::tool_intent::ToolIntentSubmissionPayload;
     pub use lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord;
     pub use lash_execution_contracts::tool_intent::ToolIntentSubmissionSettlement;
     pub use lash_execution_contracts::tool_intent::ToolIntents;
