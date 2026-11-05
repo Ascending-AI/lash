@@ -345,7 +345,11 @@ impl<'s> StateLease<'s> {
             _ => Err(invalid("lease scalar is not an object")),
         }
     }
-    pub(super) fn price(&self, value: LeaseValue) -> Result<u64, HeapFault> {
+    /// Canonical logical bytes of one current source occurrence.
+    pub fn price(&self, value: LeaseValue) -> Result<u64, HeapFault> {
+        if self.local.frozen {
+            return Err(invalid("lease graph is frozen"));
+        }
         match value.repr {
             Repr::Scalar(value) => self.arena().logical_local(&value),
             Repr::Object(object, _) => {

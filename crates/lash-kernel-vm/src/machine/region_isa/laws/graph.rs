@@ -1,5 +1,7 @@
 use super::*;
 
+mod state;
+
 pub(super) fn local_edit() -> Arc<Code> {
     use crate::machine::region_isa::code::{HeapAction, HeapKind};
     let mut code = code(
@@ -265,6 +267,7 @@ pub(super) fn fresh_list() -> Arc<Code> {
 
 #[test]
 fn fresh_graph_memory_prefixes_translate_all_aliases_through_one_packet() {
+    state::real_state_exit();
     for memory in [11, 12, 13] {
         for charge in [0, 1, 2, 3, 4] {
             let mut state = State::new();

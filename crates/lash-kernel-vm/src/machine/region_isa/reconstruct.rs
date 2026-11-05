@@ -4,18 +4,19 @@ use super::*;
 use lash_kernel_state::kernel_internals::logical::Slot;
 
 #[derive(Clone, Debug)]
-pub(super) struct FrameImage {
+pub(super) struct FrameImage<T = Value> {
     pub(super) program: CodeId,
     pub(super) invocation: u64,
     pub(super) pc: u32,
     pub(super) continuation: Point,
-    pub(super) roles: Box<[(Slot, Value)]>,
-    pub(super) operands: Box<[Value]>,
-    pub(super) pending: Option<Value>,
+    pub(super) roles: Box<[(Slot, T)]>,
+    pub(super) operands: Box<[T]>,
+    pub(super) pending: Option<T>,
 }
 
 pub(super) struct Finished<V: View> {
     pub(super) image: Reconstruction,
+    pub(super) live: super::live::Live<V::Value>,
     pub(super) view: V,
     pub(super) graph: V::Graph,
     pub(super) invocations: Option<lash_kernel_state::kernel_internals::logical::InvocationRange>,
@@ -36,7 +37,7 @@ impl<V: View> Execution<V> {
             return Err(invalid(Refused::Facts));
         }
         let graph = self.view.freeze_graph().map_err(RegionError::Heap)?;
-        let frames = self
+        let live_frames = self
             .frames
             .iter()
             .enumerate()
@@ -47,12 +48,7 @@ impl<V: View> Execution<V> {
                     .recovery
                     .get(frame.prefix as usize)
                     .ok_or_else(|| invalid(Refused::Exit))?;
-                let read = |reg: Register| {
-                    self.registers
-                        .read(index, frame.invocation, reg)?
-                        .materialize(&graph)
-                        .map_err(RegionError::Heap)
-                };
+                let read = |reg: Register| self.registers.read(index, frame.invocation, reg);
                 let roles = map
                     .roles
                     .iter()
@@ -76,13 +72,12 @@ impl<V: View> Execution<V> {
                         if map.pending.is_some() || index + 1 != self.frames.len() {
                             return Err(invalid(Refused::Exit));
                         }
-                        Some(
+                        Some(super::operands::Operand::Dynamic(
                             self.returning
                                 .as_ref()
                                 .ok_or_else(|| invalid(Refused::Exit))?
-                                .incoming()
-                                .and_then(|value| graph.value(value).map_err(RegionError::Heap))?,
-                        )
+                                .incoming()?,
+                        ))
                     } else {
                         map.pending.map(read).transpose()?
                     },
@@ -90,6 +85,16 @@ impl<V: View> Execution<V> {
             })
             .collect::<Result<Vec<_>, RegionError>>()?
             .into_boxed_slice();
+        let live = super::live::Live {
+            frames: live_frames,
+            payload: self.payload,
+            returning: self.returning.as_ref().map(|returning| returning.image()),
+        };
+        let frames = live
+            .frames
+            .iter()
+            .map(|frame| frame.materialize(&graph))
+            .collect::<Result<Box<[_]>, RegionError>>()?;
         let pending = frames.last().and_then(|frame| frame.pending);
         let returning = self
             .returning
@@ -126,6 +131,7 @@ impl<V: View> Execution<V> {
         };
         Ok(Finished {
             image: reconstruction,
+            live,
             view: self.view,
             graph,
             invocations,

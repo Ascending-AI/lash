@@ -18,6 +18,7 @@ mod execute;
 mod fixture_phases;
 mod heap;
 mod invocations;
+mod live;
 mod operands;
 mod programs;
 mod reconstruct;
@@ -238,6 +239,7 @@ enum FrozenGraph<'m> {
         lease: lash_kernel_state::kernel_internals::logical::StateLease<'m>,
         graph: lash_kernel_state::kernel_internals::logical::LeaseGraphExit,
         invocations: Option<lash_kernel_state::kernel_internals::logical::InvocationRange>,
+        publications: live::Published,
     },
     #[cfg(test)]
     Fixture(storage_fixture::FixtureGraph),
@@ -290,16 +292,19 @@ impl<'m> Executing<'m> {
             Self::Machine(execution) => {
                 let reconstruct::Finished {
                     image,
+                    live,
                     view: lease,
                     graph,
                     invocations,
                 } = execution.reconstruct()?;
+                let publications = live.publish(&graph)?;
                 Ok((
                     image,
                     FrozenGraph::Machine {
                         lease,
                         graph,
                         invocations,
+                        publications,
                     },
                 ))
             }
@@ -307,6 +312,7 @@ impl<'m> Executing<'m> {
             Self::Fixture(execution) => {
                 let reconstruct::Finished {
                     image,
+                    live: _live,
                     view: _view,
                     graph,
                     invocations,
