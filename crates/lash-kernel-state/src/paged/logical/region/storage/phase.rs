@@ -477,23 +477,11 @@ impl<'s> StateLease<'s> {
         candidate: &Candidate<'_>,
         facts: &mut LeaseFacts,
     ) -> Result<(), HeapFault> {
-        let mut cursor = 0;
-        loop {
-            while cursor < self.local.touched.len() {
-                let index = self.local.touched[cursor] as usize;
-                cursor += 1;
-                let slot = &self.local.slots[index];
-                if slot.draft < 0 || slot.draft > i128::from(u64::MAX) {
-                    return Err(invalid("lease source multiplicity underflow or overflow"));
-                }
-                if slot.draft == 0 && !slot.retiring {
-                    capacity(&mut self.local.zero, 1)?;
-                    self.local.zero.push(index as u32);
-                }
+        while let Some(index) = self.local.zero.pop() {
+            #[cfg(any(test, feature = "perf-witness"))]
+            {
+                self.local.release_visits += 1;
             }
-            let Some(index) = self.local.zero.pop() else {
-                break;
-            };
             let index = index as usize;
             if self.local.slots[index].retiring || self.local.slots[index].draft != 0 {
                 continue;
@@ -525,8 +513,16 @@ impl<'s> StateLease<'s> {
                         self.entry_edges(new, table, -1)?;
                     }
                 }
-                // A newly reached target may have appeared earlier in touched.
-                cursor = 0;
+            }
+        }
+        for index in &self.local.touched {
+            #[cfg(any(test, feature = "perf-witness"))]
+            {
+                self.local.release_visits += 1;
+            }
+            let slot = &self.local.slots[*index as usize];
+            if slot.draft < 0 || slot.draft > i128::from(u64::MAX) {
+                return Err(invalid("lease source multiplicity underflow or overflow"));
             }
         }
         Ok(())

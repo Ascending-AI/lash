@@ -2,6 +2,29 @@ use super::*;
 
 impl<'s> StateLease<'s> {
     pub fn import(&mut self, value: &Value) -> Result<LeaseValue, HeapFault> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        {
+            self.local.binding_depth += 1;
+            self.local.binding_peak = self.local.binding_peak.max(self.local.binding_depth);
+        }
+        let result = self.import_one(value).and_then(|value| {
+            while let Some(binding) = self.local.bindings.pop() {
+                match binding {
+                    Binding::Edges(index, entity, value) => {
+                        self.bind_edges(index, entity, value)?
+                    }
+                    Binding::Callable(index, handle) => self.bind_callable(index, handle)?,
+                }
+            }
+            Ok(value)
+        });
+        #[cfg(any(test, feature = "perf-witness"))]
+        {
+            self.local.binding_depth -= 1;
+        }
+        result
+    }
+    pub(super) fn import_one(&mut self, value: &Value) -> Result<LeaseValue, HeapFault> {
         if self.local.frozen {
             return Err(invalid("lease graph is frozen"));
         }
@@ -100,7 +123,8 @@ impl<'s> StateLease<'s> {
             existing.len = len;
             existing.next = next;
             existing.cold = cold;
-            self.bind_callable(index, handle)?;
+            capacity(&mut self.local.bindings, 1)?;
+            self.local.bindings.push(Binding::Callable(index, handle));
             return Ok(LeaseValue {
                 repr: Repr::Object(self.local.object(index), Some(*value)),
             });
@@ -139,8 +163,11 @@ impl<'s> StateLease<'s> {
         if let Some(entity) = entity {
             self.local.entities.insert(entity, index);
         }
-        self.bind_edges(index, entity, *value)?;
-        self.bind_callable(index, handle)?;
+        capacity(&mut self.local.bindings, 2)?;
+        self.local.bindings.push(Binding::Callable(index, handle));
+        self.local
+            .bindings
+            .push(Binding::Edges(index, entity, *value));
         Ok(LeaseValue {
             repr: Repr::Object(self.local.object(index), Some(*value)),
         })
@@ -222,7 +249,7 @@ impl<'s> StateLease<'s> {
         }
         if let Some(handle) = self.arena().logical_handle(entity) {
             return self
-                .import(&Value::ObjectRef(handle))
+                .import_one(&Value::ObjectRef(handle))
                 .and_then(|value| self.object(value));
         }
         let ledger = self.heap.region_ledger()?;
@@ -262,7 +289,10 @@ impl<'s> StateLease<'s> {
             depth: 0,
         });
         self.local.entities.insert(entity, index);
-        self.bind_edges(index, Some(entity), Value::Null)?;
+        capacity(&mut self.local.bindings, 1)?;
+        self.local
+            .bindings
+            .push(Binding::Edges(index, Some(entity), Value::Null));
         Ok(self.local.object(index))
     }
     pub(super) fn bind_edges(

@@ -356,6 +356,8 @@ pub mod fixtures {
         pub changed_members: usize,
         pub accepted_phases: u64,
         pub materialized: bool,
+        pub release_visits: u64,
+        pub binding_peak: u64,
     }
     pub fn storage_work(lease: &StateLease<'_>) -> StorageWork {
         StorageWork {
@@ -370,6 +372,8 @@ pub mod fixtures {
                 .sum(),
             accepted_phases: lease.local.version,
             materialized: lease.local.frozen,
+            release_visits: lease.local.release_visits,
+            binding_peak: lease.local.binding_peak,
         }
     }
 

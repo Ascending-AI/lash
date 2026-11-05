@@ -343,6 +343,10 @@ pub(super) struct ObjectSlot {
     measured: u64,
     pub(super) depth: u32,
 }
+enum Binding {
+    Edges(u32, Option<EntityId>, Value),
+    Callable(u32, ArenaHandle),
+}
 /// The vector is a reusable slab. A free slot always receives a new generation;
 /// its monotonic source ordinal is independent of physical reuse.
 pub(super) struct LocalStore {
@@ -351,8 +355,15 @@ pub(super) struct LocalStore {
     free: Vec<u32>,
     existing: BTreeMap<(u32, u32), u32>,
     entities: BTreeMap<EntityId, u32>,
+    bindings: Vec<Binding>,
     touched: Vec<u32>,
     zero: Vec<u32>,
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub(super) release_visits: u64,
+    #[cfg(any(test, feature = "perf-witness"))]
+    binding_depth: u64,
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub(super) binding_peak: u64,
     epoch: u64,
     measure_epoch: u64,
     measure_pending: Vec<LeaseValue>,
@@ -391,8 +402,15 @@ impl LocalStore {
             free: Vec::new(),
             existing: BTreeMap::new(),
             entities: BTreeMap::new(),
+            bindings: Vec::new(),
             touched: Vec::new(),
             zero: Vec::new(),
+            #[cfg(any(test, feature = "perf-witness"))]
+            release_visits: 0,
+            #[cfg(any(test, feature = "perf-witness"))]
+            binding_depth: 0,
+            #[cfg(any(test, feature = "perf-witness"))]
+            binding_peak: 0,
             epoch: 0,
             measure_epoch: 0,
             measure_pending: Vec::new(),
@@ -437,6 +455,10 @@ impl LocalStore {
             .ok_or_else(|| invalid("lease phase overflow"))?;
         self.touched.clear();
         self.zero.clear();
+        #[cfg(any(test, feature = "perf-witness"))]
+        {
+            self.release_visits = 0;
+        }
         Ok(())
     }
     fn change(&mut self, object: LeaseObject, delta: i128) -> Result<(), HeapFault> {
@@ -453,6 +475,10 @@ impl LocalStore {
             .draft
             .checked_add(delta)
             .ok_or_else(|| invalid("lease multiplicity overflow"))?;
+        if slot.draft == 0 && !slot.retiring {
+            capacity(&mut self.zero, 1)?;
+            self.zero.push(object.slot);
+        }
         Ok(())
     }
     fn empty_slot(&self) -> Result<LeaseObject, HeapFault> {

@@ -380,6 +380,7 @@ fn cold_placeholder_requires_boundary() {
 /// identity progression. Each exit reaches its prefix through real phases.
 #[test]
 fn region_graph_projection_commutes_with_itemized_source() {
+    linear_chain_release_and_binding();
     imported_tuple_reads();
     call_and_measure_views();
     list_and_field_overlays();
@@ -1162,4 +1163,92 @@ fn list_and_field_overlays() {
         ledger.borrow().balance().unwrap().total().unwrap(),
         expected
     );
+}
+
+// ISA-D: last-owner propagation visits the affected component linearly, and
+// importing that same source graph does not grow the Rust call stack.
+fn linear_chain_release_and_binding() {
+    use lash_kernel_doc::LogicalHeldV1 as Cost;
+    const LENGTH: usize = 64;
+    let retained = LENGTH as u64 * (Cost::OBJECT + Cost::REFERENCE);
+    let (mut heap, _) = fresh();
+    let mut arena = Arena::new();
+    let mut lease = StateLease::acquire(&mut heap, &mut arena).unwrap();
+    let mut root = allocate(&mut lease, LeaseAllocation::list(&[]));
+    for _ in 1..LENGTH {
+        let next = allocate(&mut lease, LeaseAllocation::list(&[root]));
+        accept(
+            &mut lease,
+            LeaseOp::Release {
+                value: root,
+                count: 1,
+            },
+        );
+        root = next;
+    }
+    // Dropping preparation must preserve the entire previously accepted graph.
+    for accepted in [false, true] {
+        let step = lease
+            .stage(LeaseOp::Release {
+                value: root,
+                count: 1,
+            })
+            .unwrap();
+        assert_eq!(step.facts().delta(), -i128::from(retained));
+        assert_eq!(step.facts().peak(), 0);
+        if accepted {
+            step.reserve().unwrap().accept();
+        } else {
+            drop(step);
+        }
+        let work = region_fixtures::storage_work(&lease);
+        assert!(
+            work.release_visits <= 3 * LENGTH as u64,
+            "last-owner propagation rescanned its component: {} visits for {LENGTH} bodies",
+            work.release_visits
+        );
+        assert_eq!(work.live_objects, if accepted { 0 } else { LENGTH });
+    }
+    drop(lease);
+    let ledger = heap.logical_ledger();
+    let mut root = arena.create_list(&[]);
+    for _ in 1..LENGTH {
+        root = arena.create_list(&[root]);
+    }
+    ledger
+        .borrow_mut()
+        .transfer_source(
+            &mut arena,
+            &heap,
+            &[],
+            &[(owner(0), RootValue::Value(&root))],
+        )
+        .unwrap();
+    assert_eq!(
+        ledger.borrow().balance().unwrap().total().unwrap(),
+        retained
+    );
+    let mut lease = StateLease::acquire(&mut heap, &mut arena).unwrap();
+    let root = lease.import(&root).unwrap();
+    let work = region_fixtures::storage_work(&lease);
+    assert_eq!(
+        work.binding_peak, 1,
+        "entry binding recursively consumed the Rust stack"
+    );
+    assert_eq!(work.live_objects, LENGTH);
+    let (delta, peak, _) = accept(
+        &mut lease,
+        LeaseOp::Release {
+            value: root,
+            count: 1,
+        },
+    );
+    assert_eq!((delta, peak), (-i128::from(retained), 0));
+    let packet = exit(&mut lease, [owner(0)], [], retained, delta);
+    lease
+        .prepare(packet, retained)
+        .unwrap()
+        .commit(|| {})
+        .unwrap();
+    assert_eq!(ledger.borrow().balance().unwrap(), Balance::default());
 }

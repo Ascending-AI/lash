@@ -27,7 +27,7 @@ impl StateLease<'_> {
                         unreachable!("exclusive closure binding")
                     };
                     let handle = captures[at];
-                    let value = self.import(&Value::ObjectRef(handle))?;
+                    let value = self.import_one(&Value::ObjectRef(handle))?;
                     let cell = self.local.index(self.object(value)?)?;
                     if self.local.slots[cell].kind != Kind::Cell {
                         return Err(invalid("callable capture is not a variable cell"));
