@@ -254,6 +254,7 @@ pub(crate) struct HeapKernel {
     source: crate::compile::room::Point,
     phases: Box<[HeapPhase]>,
     kind: HeapKind,
+    moves: Box<[Reg<LeaseValue>]>,
 }
 #[derive(Clone)]
 pub(crate) struct HeapPhase {
@@ -266,6 +267,7 @@ pub(crate) struct HeapPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum HeapPhaseKind {
     Allocate,
+    AllocateMove,
     Member,
     Grow,
     Hold,
@@ -630,6 +632,7 @@ pub(crate) mod fixtures {
                 source: continuation,
                 phases: Box::new([]),
                 kind: HeapKind::List,
+                moves: Box::new([]),
             },
             args: Box::new([]),
             dst: None,

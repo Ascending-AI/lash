@@ -897,10 +897,32 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
         {
             after.insert(slot);
         }
+        let mut pending_roles = before.clone();
+        let pending = if matches!(draft.ops[index], RegionOp::Heap { .. }) {
+            match super::heap::source_kind(source, &step.at)? {
+                Some(HeapKind::Tuple | HeapKind::Cell) => None,
+                Some(_) => event
+                    .output
+                    .as_ref()
+                    .map(|owner| {
+                        let reg = register(draft, owner)?;
+                        pending_roles.insert(resources::slot(source, owner).ok_or(Refused::Facts)?);
+                        Ok::<_, Refused>(reg)
+                    })
+                    .transpose()?,
+                None => return Err(Refused::Source),
+            }
+        } else {
+            event
+                .output
+                .as_ref()
+                .map(|_| Reg::new(draft.roles.len()))
+                .transpose()?
+        };
         for (prefix, expected, pending) in [
-            (step.before, before, false),
-            (step.pending, before, event.output.is_some()),
-            (step.after, &after, false),
+            (step.before, before, None),
+            (step.pending, &pending_roles, pending),
+            (step.after, &after, None),
         ] {
             let map = draft.recovery.get(prefix.offset()).ok_or(Refused::Exit)?;
             let expected_roles: Vec<_> = draft
@@ -916,7 +938,7 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 (prefix.offset() % 3) as u32,
             ) || map.roles.as_ref() != expected_roles.as_slice()
                 || map.continuation != step.at
-                || map.pending.is_some() != pending
+                || map.pending != pending
             {
                 return Err(Refused::Exit);
             }
@@ -930,11 +952,7 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 })
                 .map(|(_, reg)| *reg)
                 .collect();
-            if map.operands.as_ref() != operands.as_slice()
-                || map
-                    .pending
-                    .is_some_and(|reg| reg.offset() != draft.roles.len())
-            {
+            if map.operands.as_ref() != operands.as_slice() {
                 return Err(Refused::Exit);
             }
         }

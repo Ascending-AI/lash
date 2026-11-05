@@ -82,6 +82,14 @@ impl HeapKernel {
     pub(crate) fn kind(&self) -> &HeapKind {
         &self.kind
     }
+    /// Actual occurrences moved into immutable tuple/cell membership at the
+    /// same accepted phase as allocation. D derives their prices and edges.
+    pub(crate) fn source_moves(&self) -> &[Reg<LeaseValue>] {
+        &self.moves
+    }
+    pub(crate) fn atomic_move(&self) -> bool {
+        matches!(self.kind, HeapKind::Tuple | HeapKind::Cell)
+    }
     pub(crate) fn phases(&self) -> &[HeapPhase] {
         &self.phases
     }
@@ -94,6 +102,33 @@ impl HeapKernel {
     ) -> Result<Self, Refused> {
         let delta = IndexedAmount::compile(source, roles, &event.delta, event.output.as_ref())?;
         let peak = IndexedAmount::compile(source, roles, &event.peak, event.output.as_ref())?;
+        if matches!(kind, HeapKind::Tuple | HeapKind::Cell) {
+            let moves = event
+                .inputs
+                .iter()
+                .map(|owner| lower::reg(roles, source, owner))
+                .collect::<Result<_, _>>()?;
+            return Ok(Self {
+                source: event.point.clone(),
+                kind,
+                moves,
+                phases: Box::new([HeapPhase {
+                    source: event.point.clone(),
+                    kind: HeapPhaseKind::AllocateMove,
+                    peak,
+                    delta,
+                    reached: PrefixId(
+                        u32::try_from(
+                            index
+                                .checked_mul(3)
+                                .and_then(|index| index.checked_add(2))
+                                .ok_or(Refused::Facts)?,
+                        )
+                        .map_err(|_| Refused::Facts)?,
+                    ),
+                }]),
+            });
+        }
         let mut semantic = delta.clone();
         let mut release = IndexedAmount {
             fixed: 0,
@@ -120,6 +155,7 @@ impl HeapKernel {
         Ok(Self {
             source: event.point.clone(),
             kind,
+            moves: Box::new([]),
             phases: Box::new([
                 HeapPhase {
                     source: event.point.clone(),
@@ -149,8 +185,36 @@ impl HeapKernel {
     ) -> Result<(), Refused> {
         if self.source != step.at
             || source_kind(&draft.source, &step.at)?.as_ref() != Some(&self.kind)
-            || self.phases.len() != 2
         {
+            return Err(Refused::Source);
+        }
+        if matches!(self.kind, HeapKind::Tuple | HeapKind::Cell) {
+            let [phase] = self.phases.as_ref() else {
+                return Err(Refused::Source);
+            };
+            let moves = step
+                .event
+                .inputs
+                .iter()
+                .map(|owner| lower::reg(&draft.roles, &draft.source, owner))
+                .collect::<Result<Vec<_>, _>>()?;
+            if self.moves.as_ref() != moves.as_slice()
+                || phase.source != step.at
+                || phase.kind != HeapPhaseKind::AllocateMove
+                || phase.reached != step.after
+                || step.before.offset() != index * 3
+            {
+                return Err(Refused::Source);
+            }
+            if phase.peak != step.peak {
+                return Err(Refused::Peak);
+            }
+            if phase.delta != step.delta {
+                return Err(Refused::Retained);
+            }
+            return Ok(());
+        }
+        if self.phases.len() != 2 || !self.moves.is_empty() {
             return Err(Refused::Source);
         }
         let expected_action = match self.kind {

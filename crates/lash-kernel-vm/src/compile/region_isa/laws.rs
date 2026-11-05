@@ -702,3 +702,103 @@ fn return_releases_entered_scopes_before_the_defining_frame() {
         },
     );
 }
+
+/// FIG-7632: tuple construction transfers operand occurrences; gross result
+/// price must not invent an unaffordable intermediate balance.
+#[test]
+fn tuple_allocation_moves_inputs_at_the_source_peak() {
+    fixture_body(
+        "function counter() -> Any\nkernel 1\nmetering statements\nbody { let tuple = (7, 9) let i = 0 while isa.lt(i, 4) { set i = isa.add(i, 1) } return tuple }",
+        |exe, code, draft| {
+            let (index, kernel) = draft
+                .ops
+                .iter()
+                .enumerate()
+                .find_map(|(index, op)| match op {
+                    RegionOp::Heap { kernel, .. } if kernel.kind == HeapKind::Tuple => {
+                        Some((index, kernel))
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            let phase = &kernel.phases[0];
+            let delta = phase
+                .delta
+                .evaluate(|fact| {
+                    Some(match fact {
+                        ResourceInput::Result => 50,
+                        ResourceInput::Release(_) => 34,
+                        _ => panic!("tuple has only its result and moved operands"),
+                    })
+                })
+                .unwrap();
+            assert_eq!(
+                delta, 16,
+                "the source transfers the two 17-byte operands into the 50-byte tuple"
+            );
+            assert_eq!(phase.peak.fixed, 16);
+            assert!(phase.peak.terms.is_empty());
+            assert_eq!(phase.reached, draft.steps[index].after);
+            let before = 64 + 17 + 17;
+            assert_eq!(before + delta, 114);
+            assert_eq!(before + phase.peak.fixed, 114);
+            let mut bad = draft.clone();
+            let RegionOp::Heap { kernel, .. } = &mut bad.ops[index] else {
+                unreachable!()
+            };
+            kernel.phases[0].delta.terms = kernel.phases[0]
+                .delta
+                .terms
+                .iter()
+                .filter(|(fact, _)| !matches!(fact, ResourceInput::Release(_)))
+                .cloned()
+                .collect();
+            assert_eq!(
+                verify_region(exe, code, bad, &[]).err(),
+                Some(Refused::Retained)
+            );
+        },
+    );
+}
+
+/// FIG-7632: an accepted allocation pending release needs its canonical output
+/// root. A sink-only result disappears from StateExit's mapped roles.
+#[test]
+fn allocated_pending_values_have_their_source_output_role() {
+    heap_fixture(|exe, code, draft| {
+        let (index, dst) = draft
+            .ops
+            .iter()
+            .enumerate()
+            .find_map(|(index, op)| match op {
+                RegionOp::Heap {
+                    kernel,
+                    dst: Some(dst),
+                    ..
+                } if matches!(kernel.kind, HeapKind::Record(_)) => Some((index, *dst)),
+                _ => None,
+            })
+            .unwrap();
+        let step = &draft.steps[index];
+        let output = step.event.output.as_ref().unwrap();
+        let slot = resources::slot(&draft.source, output).unwrap();
+        let pending = &draft.recovery[step.pending.offset()];
+        assert_eq!(pending.pending, Some(dst));
+        assert!(pending.roles.contains(&(slot, dst)));
+        let before = &draft.recovery[step.before.offset()];
+        assert!(before.roles.iter().all(|role| pending.roles.contains(role)));
+        let after = &draft.recovery[step.after.offset()];
+        assert!(after.roles.contains(&(slot, dst)));
+        let mut bad = draft.clone();
+        bad.recovery[step.pending.offset()].roles = bad.recovery[step.pending.offset()]
+            .roles
+            .iter()
+            .filter(|(role, _)| *role != slot)
+            .copied()
+            .collect();
+        assert_eq!(
+            verify_region(exe, code, bad, &[]).err(),
+            Some(Refused::Exit)
+        );
+    });
+}

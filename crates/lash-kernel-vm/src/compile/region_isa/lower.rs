@@ -828,7 +828,23 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
     for (index, state) in states.iter().enumerate() {
         let before = state.clone().unwrap_or_default();
         let after = recovery::transfer(&draft, index, &before)?;
-        for (phase, live) in [&before, &before, &after].into_iter().enumerate() {
+        let mut pending_live = before.clone();
+        let pending = match &draft.ops[index] {
+            RegionOp::Heap { kernel, .. } if kernel.atomic_move() => None,
+            RegionOp::Heap { .. } => draft.steps[index]
+                .event
+                .output
+                .as_ref()
+                .map(|owner| {
+                    let reg = reg(&draft.roles, &draft.source, owner)?;
+                    pending_live
+                        .insert(resources::slot(&draft.source, owner).ok_or(Refused::Facts)?);
+                    Ok::<_, Refused>(reg)
+                })
+                .transpose()?,
+            _ => draft.steps[index].event.output.as_ref().map(|_| sink),
+        };
+        for (phase, live) in [&before, &pending_live, &after].into_iter().enumerate() {
             let roles: Box<[_]> = draft
                 .roles
                 .iter()
@@ -849,12 +865,12 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                 graph: GraphRecovery::from_roles(
                     &draft.steps[index].at,
                     &roles,
-                    (phase == 1 && draft.steps[index].event.output.is_some()).then_some(sink),
+                    (phase == 1).then_some(pending).flatten(),
                     phase as u32,
                 ),
                 roles,
                 operands,
-                pending: (phase == 1 && draft.steps[index].event.output.is_some()).then_some(sink),
+                pending: (phase == 1).then_some(pending).flatten(),
                 continuation: draft.steps[index].at.clone(),
             });
         }
