@@ -324,11 +324,6 @@ fn captures_keep_cell_order_instead_of_sorted_identity_names() {
         .find(|target| exe.code(target.code()).captures.len() == 2)
         .unwrap();
     let body = exe.code(target.code());
-    let actual_names = body
-        .captures
-        .iter()
-        .map(|capture| body.slots[capture.inner as usize].name.clone())
-        .collect::<Vec<_>>();
     let at = body.created.as_ref().unwrap();
     let origin = doc::snapshot::closure_at(
         &program.document,
@@ -338,6 +333,23 @@ fn captures_keep_cell_order_instead_of_sorted_identity_names() {
         exe.selection(),
     )
     .unwrap();
+    // Several compiled layouts may share the source closure placement. The
+    // canonical resolver, independent of B's dispatch table, chooses its body.
+    let canonical = exe
+        .closure_at(&origin.function, program.link, at, &body.capture_names)
+        .unwrap();
+    let target = plan
+        .targets()
+        .iter()
+        .find(|target| target.code() == canonical)
+        .unwrap();
+    let body = exe.code(canonical);
+    let at = body.created.as_ref().unwrap();
+    let actual_names = body
+        .captures
+        .iter()
+        .map(|capture| body.slots[capture.inner as usize].name.clone())
+        .collect::<Vec<_>>();
     let identity = |link| {
         Arc::new(doc::arena::ClosureIdentity {
             capture_names: body.capture_names.clone(),
