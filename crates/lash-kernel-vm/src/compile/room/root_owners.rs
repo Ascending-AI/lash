@@ -85,7 +85,7 @@ fn resolve(source: &Description, owners: &BTreeSet<Owner>) -> Result<(Scopes, Al
     Ok((scopes, aliases))
 }
 
-pub(super) fn visible<'a>(scopes: &'a Scopes, at: &Site, name: &Name) -> Option<&'a Owner> {
+pub(crate) fn visible<'a>(scopes: &'a Scopes, at: &Site, name: &Name) -> Option<&'a Owner> {
     scopes
         .iter()
         .filter(|(candidate, scope)| {

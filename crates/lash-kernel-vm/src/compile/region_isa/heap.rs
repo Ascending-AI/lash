@@ -1,0 +1,229 @@
+//! Typed source storage descriptors and ordered graph/resource phases.
+use super::*;
+use crate::compile::room::{Measure, Owner};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum HeapKind {
+    List,
+    Tuple,
+    Map,
+    Set,
+    Record(Box<[Arc<str>]>),
+    Cell,
+    Text(Arc<str>),
+    Bytes(Arc<[u8]>),
+    Field { name: Arc<str>, removing: bool },
+    Index { removing: bool },
+    Variable { slot: Slot },
+}
+
+pub(super) fn source_kind(source: &Source, at: &Point) -> Result<Option<HeapKind>, Refused> {
+    if at.phase != Phase::Commit {
+        return Ok(None);
+    }
+    let kind = match resources::node(source, &at.site)? {
+        doc::Node::Expr(doc::Expr::Literal(doc::Literal::Text(text)))
+            if doc::arena::ShortText::new(text).is_none() =>
+        {
+            HeapKind::Text(Arc::from(text.as_str()))
+        }
+        doc::Node::Expr(doc::Expr::Literal(doc::Literal::Bytes(bytes))) => {
+            HeapKind::Bytes(Arc::from(bytes.as_slice()))
+        }
+        doc::Node::Expr(doc::Expr::List(_)) => HeapKind::List,
+        doc::Node::Expr(doc::Expr::Tuple(_)) => HeapKind::Tuple,
+        doc::Node::Expr(doc::Expr::Map(_)) => HeapKind::Map,
+        doc::Node::Expr(doc::Expr::Set(_)) => HeapKind::Set,
+        doc::Node::Expr(doc::Expr::Record(entries)) => HeapKind::Record(
+            entries
+                .iter()
+                .map(|entry| Arc::from(entry.field.as_str()))
+                .collect(),
+        ),
+        doc::Node::Stmt(doc::Stmt::Let { name, .. })
+            if source.shared.get(&(at.site.clone(), name.clone())) == Some(&true)
+                && !source.persistent.contains_key(&at.site) =>
+        {
+            HeapKind::Cell
+        }
+        doc::Node::Stmt(doc::Stmt::Assign {
+            place: doc::Place::Variable(name),
+            ..
+        }) if source.assigns_cell(&at.site) => HeapKind::Variable {
+            slot: resources::slot(
+                source,
+                &Owner::Visible {
+                    at: at.site.clone(),
+                    name: name.clone(),
+                },
+            )
+            .ok_or(Refused::Facts)?,
+        },
+        doc::Node::Stmt(doc::Stmt::Assign {
+            place: doc::Place::Member(member),
+            ..
+        }) => member_kind(member, false),
+        doc::Node::Stmt(doc::Stmt::Remove { member }) => member_kind(member, true),
+        _ => return Ok(None),
+    };
+    Ok(Some(kind))
+}
+fn member_kind(member: &doc::Member, removing: bool) -> HeapKind {
+    match member {
+        doc::Member::Field { field, .. } => HeapKind::Field {
+            name: Arc::from(field.as_str()),
+            removing,
+        },
+        doc::Member::Index { .. } => HeapKind::Index { removing },
+    }
+}
+
+impl HeapKernel {
+    pub(crate) fn kind(&self) -> &HeapKind {
+        &self.kind
+    }
+    pub(crate) fn phases(&self) -> &[HeapPhase] {
+        &self.phases
+    }
+    pub(super) fn compile(
+        source: &Source,
+        roles: &[(Slot, Reg<LeaseValue>)],
+        event: &Event,
+        index: usize,
+        kind: HeapKind,
+    ) -> Result<Self, Refused> {
+        let delta = IndexedAmount::compile(source, roles, &event.delta, event.output.as_ref())?;
+        let peak = IndexedAmount::compile(source, roles, &event.peak, event.output.as_ref())?;
+        let mut semantic = delta.clone();
+        let mut release = IndexedAmount {
+            fixed: 0,
+            terms: Box::new([]),
+        };
+        let (releases, rest): (Vec<_>, Vec<_>) =
+            semantic
+                .terms
+                .into_vec()
+                .into_iter()
+                .partition(|(input, coefficient)| {
+                    *coefficient < 0 && matches!(input, ResourceInput::Release(_))
+                });
+        semantic.terms = rest.into();
+        release.terms = releases.into();
+        let prefix = u32::try_from(index.checked_mul(3).ok_or(Refused::Facts)?)
+            .map_err(|_| Refused::Facts)?;
+        let action = match kind {
+            HeapKind::Field { .. } | HeapKind::Index { .. } | HeapKind::Variable { .. } => {
+                HeapPhaseKind::Member
+            }
+            _ => HeapPhaseKind::Allocate,
+        };
+        Ok(Self {
+            source: event.point.clone(),
+            kind,
+            phases: Box::new([
+                HeapPhase {
+                    source: event.point.clone(),
+                    kind: action,
+                    peak,
+                    delta: semantic,
+                    reached: PrefixId(prefix + 1),
+                },
+                HeapPhase {
+                    source: event.point.clone(),
+                    kind: HeapPhaseKind::Release,
+                    peak: IndexedAmount {
+                        fixed: 0,
+                        terms: Box::new([]),
+                    },
+                    delta: release,
+                    reached: PrefixId(prefix + 2),
+                },
+            ]),
+        })
+    }
+    pub(super) fn verify(
+        &self,
+        draft: &RegionDraft,
+        step: &Step,
+        index: usize,
+    ) -> Result<(), Refused> {
+        if self.source != step.at
+            || source_kind(&draft.source, &step.at)?.as_ref() != Some(&self.kind)
+            || self.phases.len() != 2
+        {
+            return Err(Refused::Source);
+        }
+        let expected_action = match self.kind {
+            HeapKind::Field { .. } | HeapKind::Index { .. } | HeapKind::Variable { .. } => {
+                HeapPhaseKind::Member
+            }
+            _ => HeapPhaseKind::Allocate,
+        };
+        let canonical = draft
+            .source
+            .room
+            .events
+            .get(&step.at)
+            .ok_or(Refused::Source)?;
+        let semantic = &self.phases[0];
+        let release = &self.phases[1];
+        if semantic.source != step.at
+            || release.source != step.at
+            || semantic.kind != expected_action
+            || release.kind != HeapPhaseKind::Release
+            || semantic.reached != step.pending
+            || release.reached != step.after
+            || step.before.offset() != index * 3
+            || semantic.peak
+                != IndexedAmount::compile(
+                    &draft.source,
+                    &draft.roles,
+                    &canonical.peak,
+                    canonical.output.as_ref(),
+                )?
+            || release.peak.fixed != 0
+            || !release.peak.terms.is_empty()
+        {
+            return Err(Refused::Peak);
+        }
+        let delta = IndexedAmount::compile(
+            &draft.source,
+            &draft.roles,
+            &canonical.delta,
+            canonical.output.as_ref(),
+        )?;
+        if semantic.delta.fixed != delta.fixed || release.delta.fixed != 0 {
+            return Err(Refused::Retained);
+        }
+        let expected_release: Vec<_> = delta
+            .terms
+            .iter()
+            .filter(|(input, coefficient)| {
+                *coefficient < 0 && matches!(input, ResourceInput::Release(_))
+            })
+            .cloned()
+            .collect();
+        let expected_semantic: Vec<_> = delta
+            .terms
+            .iter()
+            .filter(|(input, coefficient)| {
+                !(*coefficient < 0 && matches!(input, ResourceInput::Release(_)))
+            })
+            .cloned()
+            .collect();
+        if release.delta.terms.as_ref() != expected_release.as_slice()
+            || semantic.delta.terms.as_ref() != expected_semantic.as_slice()
+        {
+            return Err(Refused::Retained);
+        }
+        if matches!(expected_action, HeapPhaseKind::Member)
+            && !canonical
+                .peak
+                .measures()
+                .any(|measure| matches!(measure, Measure::MemberGrowth(_)))
+        {
+            return Err(Refused::Scratch);
+        }
+        Ok(())
+    }
+}

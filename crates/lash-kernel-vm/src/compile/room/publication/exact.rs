@@ -676,7 +676,7 @@ fn current(
 }
 
 impl Source {
-    pub(in crate::compile::room) fn exact_successor(
+    pub(crate) fn exact_successor(
         &self,
         at: &Point,
         successor: Successor,

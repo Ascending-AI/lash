@@ -20,7 +20,7 @@ mod interval;
 pub(crate) mod placement;
 pub(crate) mod publication;
 pub(crate) mod region;
-mod root_owners;
+pub(crate) mod root_owners;
 pub(crate) use interval::CompiledInterval;
 pub(crate) type Selection = interval::Selection;
 mod verify;
@@ -303,7 +303,7 @@ pub(crate) struct OwnerSlots {
     pub(crate) owner: doc::constant_pool::PoolOwner,
     pub(crate) source: Site,
     slots: BTreeMap<Owner, u32>,
-    scopes: BTreeMap<Owner, Site>,
+    pub(crate) scopes: BTreeMap<Owner, Site>,
     aliases: BTreeMap<Owner, Owner>,
     binding_slots: BTreeMap<Owner, (u32, bool)>,
     groups: std::sync::Mutex<

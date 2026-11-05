@@ -1,5 +1,6 @@
 //! Canonical charge closes compiled into a reduced prefix and a cold tape.
 //! Quiet binding evaluates only changing formulas, never the fixed event list.
+pub(crate) mod region_isa;
 use super::{Point, Refused, Source};
 use crate::compile::{self, Executable, LibId, expr};
 use lash_kernel_doc::{self as doc, Value};
