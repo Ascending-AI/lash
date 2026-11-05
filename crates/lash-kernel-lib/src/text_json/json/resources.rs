@@ -107,7 +107,7 @@ impl Graph {
         })
     }
 }
-fn refused(error: NativeError) -> Result<Contract, NativeError> {
+pub(super) fn refused(error: NativeError) -> Result<Contract, NativeError> {
     match error {
         NativeError::Refused { kind, message } => {
             Contract::refused(kind, &message).ok_or_else(overflow)
@@ -175,7 +175,7 @@ fn parse_contract(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
     crate::text_json::resources::scratch(&mut contract, scratch)?;
     Ok(contract)
 }
-fn workspace(
+pub(super) fn workspace(
     args: Args<'_>,
     value: &Value,
     active: &mut Vec<ArenaHandle>,

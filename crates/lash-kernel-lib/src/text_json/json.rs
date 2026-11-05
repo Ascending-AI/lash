@@ -19,6 +19,8 @@ mod output;
 pub(super) mod resources;
 use output::{Output, Text as TextOutput};
 
+mod encode_v1;
+pub(super) use encode_v1::native as encode_v1;
 mod encoder;
 pub use encoder::{JsonModel, JsonTarget, encode_datum};
 use encoder::{Live, Numeric, Policy, encode as encode_value};

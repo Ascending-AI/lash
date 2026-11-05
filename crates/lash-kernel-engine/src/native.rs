@@ -35,7 +35,8 @@ pub(crate) fn implementation(
     let _ = (registry, callees, function);
     // These version cases belong to Rust implementations, never declarations.
     match (package, native_version) {
-        ("kernel", 1) => {
+        ("kernel", 1) if name == "json.encode" => Some(lash_kernel_lib::json_encode_v1()),
+        ("kernel", version) if version == if name == "json.encode" { 2 } else { 1 } => {
             lash_kernel_lib::native(name).or_else(|| lash_kernel_vm::machine_native(name))
         }
         #[cfg(feature = "dialect-typescript")]
@@ -79,5 +80,47 @@ mod tests {
         let function = FunctionId::from_bytes([0; 32]);
         assert!(implementation("kernel", "same", 1, function, &[], &registry).is_some());
         assert!(implementation("kernel", "same", 2, function, &[], &registry).is_none());
+    }
+
+    /// FIG-7639: a superseded version that archived definitions bind keeps
+    /// its own answer. json.encode version 1 reads a six-field style, which
+    /// the current version 2 refuses.
+    #[test]
+    fn a_retained_native_version_answers_with_its_own_implementation() {
+        let archive = lash_kernel_releases::helper_archive().unwrap();
+        let id = archive
+            .releases
+            .iter()
+            .flat_map(|release| &release.natives)
+            .find(|(_, native)| {
+                native.package == "kernel"
+                    && native.name == "json.encode"
+                    && native.native_version == 1
+            })
+            .map(|(id, _)| *id)
+            .unwrap();
+        let engine = crate::Engine::new(crate::Limits::default()).unwrap();
+        let document = lash_kernel_doc::parse_document(&format!(
+            "kernel 1\nnumbers by_spelling\nlibrary @{id}\nmain {{ let v = invoke @{id}([1, \"é\"], (0, 21, false, false), (true, \",\", \":\", 2, false, (\"a\", \"b\", \"c\"))) return v }}"
+        ))
+        .unwrap();
+        let link = lash_kernel_value::Link {
+            helper_fills: Default::default(),
+            document: document.identity(),
+            fills: Default::default(),
+        };
+        let content = lash_kernel_package::LinkedContent {
+            documents: [(document.identity(), std::sync::Arc::new(document))].into(),
+            links: [(link.identity(), link.clone())].into(),
+            packages: Default::default(),
+        };
+        let program = engine
+            .prepare(link.identity(), &content, lash_kernel_vm::Target::Main)
+            .unwrap();
+        let crate::Progress::Complete(Ok(value)) = engine.run(&program, vec![]).unwrap().state
+        else {
+            panic!("json.encode version 1 did not complete");
+        };
+        assert_eq!(value.data(), &crate::Datum::Text("[1,\"\\u00e9\"]".into()));
     }
 }

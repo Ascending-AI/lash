@@ -71,6 +71,11 @@ pub use collections::{
     implement_collections, register_collections,
 };
 
+/// json.encode native version 1, retained while archived definitions bind it.
+pub fn json_encode_v1() -> std::sync::Arc<dyn lash_kernel_doc::NativeFunction> {
+    text_json::json_encode_v1()
+}
+
 /// A pure native constructor selected by a build's identity table. The
 /// definition catalogues remain the sole inventory of implemented functions.
 pub fn native(name: &str) -> Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> {

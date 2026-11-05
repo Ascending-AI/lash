@@ -167,6 +167,12 @@ pub fn text_json() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
         .collect()
 }
 
+/// json.encode native version 1, retained while archived definitions bind it
+/// (ADR 0149). The catalogue authors only the current version 2.
+pub(crate) fn json_encode_v1() -> Arc<dyn NativeFunction> {
+    json::encode_v1()
+}
+
 /// Constructs one native from the same catalogue that authors its definition.
 /// No definition or unrelated native is constructed on this path.
 pub fn native(name: &str) -> Option<Arc<dyn NativeFunction>> {
