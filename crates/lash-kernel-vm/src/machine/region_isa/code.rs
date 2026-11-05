@@ -174,13 +174,10 @@ pub(super) struct Code {
 }
 impl Code {
     pub(super) fn bind(
-        _machine: &KernelMachine,
+        machine: &KernelMachine,
         code: &Arc<RegionCode>,
-    ) -> Result<Arc<Self>, RegionError> {
-        code.op(code.entry())
-            .ok_or_else(|| invalid(Refused::Source))?;
-        // Recovery alone cannot establish canonical fees or provenance.
-        Err(invalid(Refused::Facts))
+    ) -> Result<Arc<super::verified::Code>, RegionError> {
+        super::verified::Code::bind(machine, code)
     }
 }
 #[derive(Clone, Copy)]

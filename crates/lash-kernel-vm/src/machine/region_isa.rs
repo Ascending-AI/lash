@@ -28,6 +28,7 @@ mod source_counters;
 mod storage;
 #[cfg(test)]
 mod storage_fixture;
+mod verified;
 use code::{Code, Limits};
 use execute::Execution;
 #[cfg(test)]
