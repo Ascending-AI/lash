@@ -2,6 +2,7 @@
 mod acquire;
 mod bind;
 mod charge;
+mod control;
 mod flow;
 #[cfg(test)]
 mod laws;

@@ -85,3 +85,108 @@ main {}"#,
             .any(|slot| matches!(slot, crate::machine::SlotState::Value(Value::Int(7))))
     );
 }
+/// K-EVAL-008/K-FORM-013: publication within a loop retains its active pass,
+/// and resumption pays the next loop test once without restarting the loop.
+#[test]
+fn a_while_prefix_reconstructs_its_active_pass_and_unpaid_test() {
+    fn machine() -> (Embedder, Arc<RegionCode>) {
+        let mut setup = Setup::default();
+        setup.start.target = crate::Target::Entry("go".into());
+        let mut run = Embedder::with(
+            r#"definition "function go() -> Any\nkernel 1\nmetering statements\nbody { while true { let x = 7 } return null }"
+main {}"#,
+            setup,
+        );
+        run.machine.current = Some(TaskId::MAIN);
+        let code = run.machine.frame(TaskId::MAIN).unwrap().code;
+        let draft = compile_region(&run.machine.exe, code).unwrap();
+        let calls = compile_calls(&run.machine.exe, &draft).unwrap();
+        let program = verify_region(&run.machine.exe, code, draft, &calls).unwrap();
+        (run, program)
+    }
+    fn binding(lease: &RegionLease<'_>) -> bool {
+        let Executing::Machine(execution) = &lease.execution else {
+            unreachable!()
+        };
+        execution
+            .code
+            .program
+            .recovery(execution.prefix)
+            .unwrap()
+            .roles
+            .iter()
+            .any(|(slot, _)| {
+                matches!(
+                    slot,
+                    lash_kernel_state::kernel_internals::logical::Slot::Binding(_)
+                )
+            })
+    }
+    fn next_binding(lease: &mut RegionLease<'_>) {
+        let mut absent = !binding(lease);
+        for _ in 0..64 {
+            assert_eq!(
+                lease.run(StopAt::NextLegalPrefix).unwrap(),
+                RegionStop::Handoff
+            );
+            if binding(lease) {
+                if absent {
+                    return;
+                }
+            } else {
+                absent = true;
+            }
+        }
+        panic!("the source loop did not reach its next binding");
+    }
+    fn pass(image: &Reconstruction, expected: u64) {
+        let canonical = image.canonical.as_ref().unwrap();
+        assert!(canonical.frames[0].control.iter().any(|control|
+            matches!(control, crate::machine::Control::While { started, .. } if *started == expected)));
+        assert_eq!(
+            canonical.frames[0]
+                .source_frontier
+                .as_ref()
+                .unwrap()
+                .position()
+                .occurrence
+                .loops[0]
+                .1,
+            expected - 1
+        );
+        assert!(image.frames[0].roles.iter().any(|(slot, value)| matches!(
+            slot,
+            lash_kernel_state::kernel_internals::logical::Slot::Binding(_)
+        ) && value.same(&Value::Int(7))));
+    }
+    let (mut split, program) = machine();
+    let mut lease = RegionLease::acquire(&mut split.machine, Arc::clone(&program)).unwrap();
+    next_binding(&mut lease);
+    let prefix = lease.materialize().unwrap();
+    pass(prefix.reconstruction(), 1);
+    prefix.prepare_exit().unwrap().commit().unwrap();
+
+    let (mut uninterrupted, complete_program) = machine();
+    let mut lease = RegionLease::acquire(&mut uninterrupted.machine, complete_program).unwrap();
+    next_binding(&mut lease);
+    next_binding(&mut lease);
+    let complete = lease.materialize().unwrap();
+    pass(complete.reconstruction(), 2);
+    let expected = complete.reconstruction().counters;
+
+    let mut lease = RegionLease::acquire(&mut split.machine, program).unwrap();
+    next_binding(&mut lease);
+    let prefix = lease.materialize().unwrap();
+    pass(prefix.reconstruction(), 2);
+    let actual = prefix.reconstruction().counters;
+    assert_eq!(
+        (actual.charge, actual.balance, actual.peak, actual.depth),
+        (
+            expected.charge,
+            expected.balance,
+            expected.peak,
+            expected.depth
+        )
+    );
+    prefix.prepare_exit().unwrap().commit().unwrap();
+}

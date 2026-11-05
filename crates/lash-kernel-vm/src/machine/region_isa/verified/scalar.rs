@@ -61,6 +61,21 @@ impl Running<'_> {
                 next,
             } => {
                 let value = match kernel.kind() {
+                    CheckedKind::LoopControl { stage, .. } => {
+                        if !self
+                            .code
+                            .program
+                            .loop_info(stage.info)
+                            .is_some_and(|info| info.while_loop)
+                        {
+                            return Ok(None);
+                        }
+                        return Ok(Some(ScalarAnswer {
+                            write: None,
+                            next: *next,
+                            formula,
+                        }));
+                    }
                     CheckedKind::Phase => {
                         return Ok(Some(ScalarAnswer {
                             write: None,

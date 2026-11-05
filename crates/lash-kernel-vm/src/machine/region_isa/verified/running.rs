@@ -6,6 +6,7 @@ use lash_kernel_state::kernel_internals::logical::{LeaseValue, StateLease};
 
 pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) arguments: Vec<Value>,
+    pub(super) loops: Box<[super::control::LoopState]>,
     pub(super) scratch: super::phase::Scratch,
     pub(super) crossing: Option<super::charge::Crossing>,
     pub(in crate::machine::region_isa) view: StateLease<'m>,
@@ -70,8 +71,10 @@ impl<'m> Running<'m> {
             prefix: prefix.index() as u32,
             debt: 0,
         };
+        let loops = super::control::bind(&code.program, &canonical)?;
         let scratch = super::phase::Scratch::new(code.transfer_width, code.quotes)?;
         Ok(Self {
+            loops,
             scratch,
             crossing: None,
             arguments,

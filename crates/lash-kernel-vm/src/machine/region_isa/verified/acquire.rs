@@ -54,19 +54,59 @@ impl<'m> RegionLease<'m> {
         {
             return Err(invalid(Refused::Source));
         }
-        let pc = code
-            .program
-            .at(frontier
-                .position()
-                .unpaid
-                .as_ref()
-                .ok_or_else(|| invalid(Refused::Exit))?)
-            .ok_or_else(|| invalid(Refused::Path))?;
-        let prefix = code
-            .program
-            .step(pc)
-            .ok_or_else(|| invalid(Refused::Path))?
-            .before;
+        let unpaid = frontier
+            .position()
+            .unpaid
+            .as_ref()
+            .ok_or_else(|| invalid(Refused::Exit))?;
+        let (pc, prefix) = match machine
+            .regs
+            .region_position(&code.program, invocation.id())
+            .map_err(RegionError::Heap)?
+        {
+            Some((pc, prefix)) => {
+                if code.program.step(pc).is_none_or(|step| &step.at != unpaid)
+                    || code
+                        .program
+                        .recovery(prefix)
+                        .is_none_or(|map| map.continuation != frontier.position().at)
+                {
+                    return Err(invalid(Refused::Exit));
+                }
+                (pc, prefix)
+            }
+            None => {
+                let mut pc = code
+                    .program
+                    .at(unpaid)
+                    .ok_or_else(|| invalid(Refused::Path))?;
+                let mut index = 0;
+                while let Some(info) = code.program.loop_info(index) {
+                    if info.while_loop && unpaid == &info.entry {
+                        let active = frame.control.iter().any(|control| matches!(control, crate::machine::Control::While { stmt, .. } if *stmt == info.statement));
+                        pc = code
+                            .program
+                            .stage(crate::compile::region_isa::LoopStage {
+                                info: index,
+                                phase: if active {
+                                    crate::compile::region_isa::LoopPhase::Test
+                                } else {
+                                    crate::compile::region_isa::LoopPhase::Enter
+                                },
+                            })
+                            .ok_or_else(|| invalid(Refused::Path))?;
+                        break;
+                    }
+                    index += 1;
+                }
+                let prefix = code
+                    .program
+                    .step(pc)
+                    .ok_or_else(|| invalid(Refused::Path))?
+                    .before;
+                (pc, prefix)
+            }
+        };
         let mut actual = BTreeMap::new();
         let source = code.program.source();
         for (index, state) in frame.slot_states().iter().enumerate() {

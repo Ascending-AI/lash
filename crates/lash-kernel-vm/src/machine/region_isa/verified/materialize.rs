@@ -40,6 +40,21 @@ impl<'m> Running<'m> {
                 .collect::<Result<_, _>>()?,
             pending: map.pending.map(read).transpose()?,
         };
+        self.canonical.control = self.controls()?;
+        let mut statement = program
+            .step(self.pc)
+            .ok_or_else(|| invalid(Refused::Path))?
+            .at
+            .site
+            .clone();
+        while statement.path.len() > program.source().site.path.len()
+            && self.code.exe.stmt_at(program.code(), &statement).is_none()
+        {
+            statement.path.pop();
+        }
+        self.canonical.statement =
+            lash_kernel_state::paged::SiteRef::new(&statement, self.view.heap().pages())
+                .map_err(RegionError::Heap)?;
         let graph = self.view.materialize_graph().map_err(RegionError::Heap)?;
         let translated = frame.materialize(&graph)?;
         let mut position = self
@@ -50,6 +65,10 @@ impl<'m> Running<'m> {
             .position()
             .clone();
         position.at = translated.continuation.clone();
+        position.occurrence.loops =
+            crate::machine::source_publication::source_loops(&self.canonical, &self.code.exe)
+                .map_err(RegionError::Heap)?
+                .ok_or_else(|| invalid(Refused::Exit))?;
         position.unpaid = Some(
             program
                 .step(self.pc)
@@ -113,6 +132,12 @@ impl<'m> Running<'m> {
             task,
             self.reached.invocation,
             &translated.roles,
+            crate::machine::registers::RegionCursor::new(
+                Arc::clone(program),
+                self.reached.invocation,
+                self.pc,
+                self.prefix,
+            ),
         )
         .map_err(RegionError::Heap)?;
         let (issued_invocations, invocations) = self.invocations.finish()?;

@@ -2,7 +2,9 @@
 use std::ops::Index;
 use std::slice::SliceIndex;
 mod entry;
+mod region;
 pub(super) use entry::PreparedEntryBank;
+pub(in crate::machine) use region::RegionCursor;
 mod resume;
 mod source;
 pub(super) use resume::{ResumeAt, ResumeValue};
@@ -146,6 +148,7 @@ impl PreparedOutput<'_> {
 
 #[derive(Default)]
 pub(super) struct Registers {
+    region_cursor: Option<RegionCursor>,
     /// Current ISA roles, translated by the exit packet before the atomic swap.
     /// These are physical aliases of the single published source roots.
     region: Vec<(lash_kernel_state::kernel_internals::logical::Owner, Value)>,
@@ -267,6 +270,7 @@ impl Registers {
         task: lash_kernel_doc::TaskId,
         invocation: u64,
         roles: &[(lash_kernel_state::kernel_internals::logical::Slot, Value)],
+        cursor: RegionCursor,
     ) -> Result<Self, HeapFault> {
         let mut region = Vec::new();
         region
@@ -296,6 +300,7 @@ impl Registers {
                 }),
         );
         Ok(Self {
+            region_cursor: Some(cursor),
             region,
             ..Self::default()
         })
@@ -323,6 +328,7 @@ impl Registers {
     /// Releases the prepared set at every exit of its statement's step.
     #[inline]
     pub(super) fn kill_statement(&mut self) {
+        self.region_cursor = None;
         self.region.clear();
         self.ready = None;
         self.source.clear();
@@ -408,6 +414,7 @@ impl Registers {
     }
 
     pub(super) fn clear(&mut self) {
+        self.region_cursor = None;
         self.region.clear();
         self.ready = None;
         self.source.clear();
@@ -697,6 +704,7 @@ impl From<Vec<Value>> for Registers {
         let extent = values.len();
         let owns_values = values.iter().any(|value| !reusable(value));
         Self {
+            region_cursor: None,
             region: Vec::new(),
             values,
             written: vec![true; extent],

@@ -20,6 +20,7 @@ pub(super) struct Amount {
     pub(super) terms: Box<[(Fact, i128)]>,
 }
 pub(super) struct Flow {
+    pub(super) loop_branch: Option<u32>,
     pub(super) holds: Box<[Root]>,
     pub(super) releases: Box<[Root]>,
     pub(super) quotes: Box<[Box<[Root]>]>,
@@ -145,6 +146,7 @@ impl Flow {
             })
             .transpose()?;
         Ok(Self {
+            loop_branch: super::control::branch(code, pc),
             holds,
             releases,
             quotes: quotes.into(),

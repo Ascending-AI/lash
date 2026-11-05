@@ -129,11 +129,13 @@ impl Running<'_> {
                 .get(self.pc.index())
                 .and_then(Option::as_ref)
                 .ok_or_else(|| invalid(Refused::Facts))?;
+            let control = self.prepare_control(op, &answer, flow.loop_branch)?;
             let Some(resources) = self.resources(flow, &answer)? else {
                 self.attempted = Some(step.at.clone());
                 return self.halt(RegionStop::Refusal);
             };
             let counters = resources.accept()?;
+            self.accept_control(control);
             if let Some((destination, value)) = answer.write {
                 self.registers.write(
                     &mut self.view,
