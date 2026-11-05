@@ -162,7 +162,7 @@ pub(crate) fn start(
         session_cell: matches!(start.target, Target::Main),
         session: Session::default(),
         pins: Pins::default(),
-        native_answer: None,
+        served: None,
         projecting: false,
         charging: false,
         paced: false,

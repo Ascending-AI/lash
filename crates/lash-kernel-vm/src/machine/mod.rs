@@ -431,9 +431,9 @@ pub struct KernelMachine {
     session: session::Session,
     /// What the statement being run holds outside any variable.
     pins: Pins,
-    /// A native answer the machine computed for a region standing before
-    /// its call, taken when the region resumes.
-    native_answer: Option<region_isa::NativeAnswer>,
+    /// A step the machine served for a region standing before it, taken
+    /// when the region resumes.
+    served: Option<region_isa::Served>,
     /// A seal ran out of budget mid-projection: the run refuses to run
     /// until a seal completes it (seam G).
     projecting: bool,

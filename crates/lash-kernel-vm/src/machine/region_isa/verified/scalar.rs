@@ -147,7 +147,7 @@ impl Running<'_> {
                     formula: None,
                 }));
             }
-            // The machine performs an effect once its step is accepted.
+            // The machine served the effect before its step was accepted.
             RegionOp::Effect { next, .. } => {
                 return Ok(Some(ScalarAnswer {
                     write: None,

@@ -112,8 +112,11 @@ pub(crate) enum RegionStop {
     Boundary,
     /// The region stands at a delivering action for the machine to perform.
     Action,
-    /// The region accepted an effect; its value is the task's Incoming.
+    /// The region stands before an effect, its value held by the frame's
+    /// roles: the machine copies it out and the region takes the step.
     Effect(crate::compile::region_isa::EffectKind),
+    /// The region accepted a finish or fail: the run ends with it.
+    End,
     /// The region stands before a native call its checked kernel cannot
     /// answer in place; the machine answers it and the region takes it.
     Native,
@@ -124,12 +127,13 @@ pub(crate) enum RegionStop {
     Handoff,
     Complete,
 }
-/// A native answer computed outside the region for `task`'s top frame,
-/// standing before the call at `at`.
-pub(in crate::machine) struct NativeAnswer {
+/// A step the machine served outside the region for `task`'s top frame,
+/// standing before the step at `at`: a native call's answer, or an effect
+/// with none. The region takes that step at once.
+pub(in crate::machine) struct Served {
     task: lash_kernel_doc::TaskId,
     at: Point,
-    value: Value,
+    answer: Option<Value>,
 }
 
 #[derive(Debug)]

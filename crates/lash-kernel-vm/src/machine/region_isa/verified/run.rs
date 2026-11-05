@@ -22,6 +22,26 @@ impl Running<'_> {
         outcome
     }
 
+    /// The charge for copying the value in `value` out of the run.
+    fn copy_charge<T>(
+        &mut self,
+        counters: execute::Counters,
+        value: crate::compile::region_isa::Reg<T>,
+    ) -> Result<charge::Payment, RegionError> {
+        if !self.limits.charge_enabled {
+            return Ok(charge::Payment {
+                counters,
+                crossing: None,
+            });
+        }
+        let value = self.value(value)?;
+        let size = self
+            .view
+            .measure(value, lash_kernel_doc::Measure::DeepSize)
+            .map_err(storage_fault)?;
+        Ok(charge::export(counters, self.limits, size))
+    }
+
     fn halt(&mut self, reason: RegionStop) -> Result<RegionStop, RegionError> {
         self.stop = Some(reason);
         Ok(reason)
@@ -80,24 +100,57 @@ impl Running<'_> {
             {
                 return self.halt(RegionStop::Boundary);
             }
-            // A native its checked kernel cannot answer in place stands
-            // unbilled for the machine to answer; the step then takes that
-            // answer through the same acceptance.
+            // A step the machine serves stands unbilled for it; the step
+            // then takes what was served through the same acceptance. A
+            // native its checked kernel cannot answer in place is answered;
+            // an effect's value is copied out of the roles holding it, once
+            // its statement charge is known to fit.
+            let served = match self.served.take() {
+                Some((at, answer)) if at == step.at => Some(answer),
+                Some(_) => return Err(invalid(Refused::Facts)),
+                None => None,
+            };
             let mut native = None;
-            if let RegionOp::Checked { kernel, .. } = op
-                && matches!(
-                    kernel.kind(),
-                    crate::compile::region_isa::CheckedKind::Native { .. }
-                )
-            {
-                native = match self.delivered.take() {
-                    Some((at, value)) if at == step.at => Some(self.delivered_answer(op, value)?),
-                    Some(_) => return Err(invalid(Refused::Facts)),
-                    None => match self.scalar_answer(op)? {
-                        Some(answer) => Some(answer),
-                        None => return self.halt(RegionStop::Native),
-                    },
-                };
+            match op {
+                RegionOp::Checked { kernel, .. }
+                    if matches!(
+                        kernel.kind(),
+                        crate::compile::region_isa::CheckedKind::Native { .. }
+                    ) =>
+                {
+                    native = match served {
+                        Some(Some(value)) => Some(self.delivered_answer(op, value)?),
+                        Some(None) => return Err(invalid(Refused::Facts)),
+                        None => match self.scalar_answer(op)? {
+                            Some(answer) => Some(answer),
+                            None => return self.halt(RegionStop::Native),
+                        },
+                    };
+                }
+                RegionOp::Effect { kind, value, .. } => match served {
+                    Some(None) => {}
+                    Some(Some(_)) => return Err(invalid(Refused::Facts)),
+                    // A charge that would not fit refuses below, unserved.
+                    None => {
+                        let before = charge::bill(
+                            self.counters,
+                            self.limits,
+                            &step.charges,
+                            ChargeMoment::Before,
+                            None,
+                        )?;
+                        if before.crossing.is_none()
+                            && self
+                                .copy_charge(before.counters, *value)?
+                                .crossing
+                                .is_none()
+                        {
+                            return self.halt(RegionStop::Effect(*kind));
+                        }
+                    }
+                },
+                _ if served.is_some() => return Err(invalid(Refused::Facts)),
+                _ => {}
             }
             let before = charge::bill(
                 self.counters,
@@ -112,6 +165,17 @@ impl Running<'_> {
                 self.crossing = Some(crossing);
                 self.attempted = Some(step.at.clone());
                 return self.halt(RegionStop::Refusal);
+            }
+            // K-CHG-005: an effect's value is copied out at one deep-size fee.
+            if let RegionOp::Effect { value, .. } = op {
+                let copy = self.copy_charge(self.counters, *value)?;
+                self.counters = copy.counters;
+                if let Some(crossing) = copy.crossing {
+                    self.refusal = Some(crate::Bound::Charge);
+                    self.crossing = Some(crossing);
+                    self.attempted = Some(step.at.clone());
+                    return self.halt(RegionStop::Refusal);
+                }
             }
             if self
                 .counters
@@ -164,10 +228,6 @@ impl Running<'_> {
                         .scalar_answer(op)?
                         .ok_or_else(|| invalid(Refused::Facts))?,
                 },
-            };
-            let effect = match op {
-                RegionOp::Effect { kind, value, .. } => Some((*kind, self.value(*value)?)),
-                _ => None,
             };
             let departure = if matches!(op, RegionOp::Exit { .. }) && self.departing.is_none() {
                 let map = code
@@ -297,10 +357,15 @@ impl Running<'_> {
             if matches!(op, RegionOp::Boundary { .. }) {
                 return self.halt(RegionStop::Action);
             }
-            // An accepted effect hands its value to the machine.
-            if let Some((kind, value)) = effect {
-                self.effect = Some(value);
-                return self.halt(RegionStop::Effect(kind));
+            // An accepted finish or fail ends the program.
+            if let RegionOp::Effect {
+                kind:
+                    crate::compile::region_isa::EffectKind::Finish
+                    | crate::compile::region_isa::EffectKind::Fail,
+                ..
+            } = op
+            {
+                return self.halt(RegionStop::End);
             }
             if let Some(stop) = self.prefix_stop(request) {
                 return Ok(stop);

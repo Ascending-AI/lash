@@ -35,6 +35,8 @@ impl KernelMachine {
         }
         // A native the region cannot answer in place is answered here and
         // taken by the region at once, before any other task runs.
+        // A finish or fail served before its step, ending the run once taken.
+        let mut ending = None;
         loop {
             let frame = self.frame(task)?;
             let id = frame.code;
@@ -75,9 +77,9 @@ impl KernelMachine {
             };
             let mut lease = RegionLease::acquire_verified(self, tables, limits).map_err(halt)?;
             let outcome = lease.run(request);
-            // The point the region stopped at, and, standing before a native
-            // call, that call's library and argument slots in its own frame.
-            let (at, native) = match &lease.execution {
+            // The point the region stopped at, and, standing before a step
+            // the machine serves, the slots its frame holds its operands in.
+            let (at, native, effect) = match &lease.execution {
                 Executing::Machine(execution) => (
                     execution
                         .code
@@ -85,9 +87,10 @@ impl KernelMachine {
                         .step(execution.pc)
                         .map(|step| step.at.clone()),
                     execution.code.program.native_arguments(execution.pc),
+                    execution.code.program.effect_argument(execution.pc),
                 ),
                 #[cfg(test)]
-                Executing::Fixture(_) => (None, None),
+                Executing::Fixture(_) => (None, None, None),
             };
             let stop = outcome.map_err(|error| match error {
                 RegionError::Heap(error) => error.into(),
@@ -123,26 +126,28 @@ impl KernelMachine {
                 // canonical safe point: the physical cursor is discarded, since
                 // performing the action may run another task before it resumes.
                 RegionStop::Action => self.regs.clear(),
+                // The effect's statement and copy charges fit: it is served
+                // now, and the region takes its step at once.
                 RegionStop::Effect(kind) => {
                     self.regs.clear();
-                    let value = result.ok_or_else(|| fault("an accepted effect has no value"))?;
-                    self.spend_effect(task)?;
-                    let datum = super::actions::answered(self.copy_out(&value))?;
+                    let slot = effect.ok_or_else(|| fault("an effect stop stands at no effect"))?;
+                    let at = at.ok_or_else(|| fault("an effect stop has no point"))?;
+                    let datum = self.serve_effect(task, at, slot)?;
                     match kind {
                         crate::compile::region_isa::EffectKind::Print => host.print(&datum),
                         crate::compile::region_isa::EffectKind::Finish => {
-                            return Err(Halt::Finish(Box::new(datum)));
+                            ending = Some(Halt::Finish(Box::new(datum)));
                         }
                         crate::compile::region_isa::EffectKind::Fail => {
-                            return Err(Halt::Fail(Box::new(datum)));
+                            ending = Some(Halt::Fail(Box::new(datum)));
                         }
                     }
-                    // What the copy charged outside the region is paid: the
-                    // frame resumes at the machine's charge.
-                    let charged = self.charged;
-                    if let Some(source) = self.frame(task)?.pending.source.as_mut() {
-                        source.debt.paid = charged;
-                    }
+                    continue;
+                }
+                RegionStop::End => {
+                    return Err(ending
+                        .take()
+                        .ok_or_else(|| fault("a program ended with no served effect"))?);
                 }
                 RegionStop::Native => {
                     self.regs.clear();

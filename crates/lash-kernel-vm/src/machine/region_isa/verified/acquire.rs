@@ -161,14 +161,14 @@ impl<'m> RegionLease<'m> {
             sessions.push((index, cell.register, value));
         }
         dependencies.extend(machine.regs.region_values().map(|(_, value)| value));
-        // A native answered outside the region enters with it, for the step
-        // standing before that call to take.
-        let delivered = machine
-            .native_answer
+        // A step served outside the region enters with its answer, for the
+        // step standing there to take.
+        let served = machine
+            .served
             .take()
-            .filter(|answer| answer.task == task_id)
-            .map(|answer| (answer.at, answer.value));
-        if let Some((_, value)) = &delivered {
+            .filter(|served| served.task == task_id)
+            .map(|served| (served.at, served.answer));
+        if let Some((_, Some(value))) = &served {
             dependencies.push(*value);
         }
         let top = stack.last().ok_or_else(|| invalid(Refused::Facts))?;
@@ -332,7 +332,7 @@ impl<'m> RegionLease<'m> {
             activation = Some(next_activation);
         }
         execution.activation = activation;
-        execution.delivered = delivered;
+        execution.served = served;
         let saved = execution
             .canonical_callees
             .last()

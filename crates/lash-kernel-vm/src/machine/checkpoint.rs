@@ -403,7 +403,7 @@ impl KernelMachine {
             heap,
             session: super::session::Session::default(),
             pins: Pins::default(),
-            native_answer: None,
+            served: None,
             projecting: false,
             charging: true,
             paced: false,

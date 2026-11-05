@@ -143,29 +143,9 @@ impl<'m> Running<'m> {
         .map_err(RegionError::Heap)?;
         let pending = current.pending;
         let (sessions, written) = self.session_images(&graph)?;
-        // An accepted effect's value leaves as the task's Incoming.
-        if matches!(stop, RegionStop::Effect(_)) != self.effect.is_some() {
-            return Err(invalid(Refused::Exit));
-        }
-        let effect = self
-            .effect
-            .map(|value| {
-                let materialized = graph.value(value).map_err(RegionError::Heap)?;
-                let page = crate::machine::project::project_region(
-                    &mut self
-                        .view
-                        .recovery_projection(&graph)
-                        .map_err(RegionError::Heap)?,
-                    self.view.heap().pages(),
-                    &materialized,
-                )
-                .map_err(RegionError::Heap)?;
-                Ok((value, materialized, page))
-            })
-            .transpose()?;
         let live = live::Live {
             frames: frames.into_boxed_slice(),
-            payload: effect.as_ref().map(|(value, _, _)| *value),
+            payload: None,
             returning: None,
             sessions,
         };
@@ -178,7 +158,7 @@ impl<'m> Running<'m> {
             attempted: self.attempted,
             counters: self.counters,
             stop,
-            payload: effect.as_ref().map(|(_, value, _)| *value),
+            payload: None,
             returning: None,
             source_counts: self.source.freeze(),
             entering: None,
@@ -187,8 +167,7 @@ impl<'m> Running<'m> {
                 frames: canonical,
                 registers: Some(registers),
                 crossing: self.crossing,
-                incoming: effect
-                    .map(|(_, _, page)| lash_kernel_state::paged::IncomingRecord::Value(page)),
+                incoming: None,
             }),
         };
         Ok(reconstruct::Finished {

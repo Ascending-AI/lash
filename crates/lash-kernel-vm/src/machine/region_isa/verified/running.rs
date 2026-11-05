@@ -23,11 +23,9 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     /// The held session values captured when the root frame left.
     pub(super) closed_sessions: Option<SessionValues>,
     pub(super) returning: Option<super::returns::Incoming>,
-    /// An accepted effect's value, the task's Incoming at the stop.
-    pub(super) effect: Option<LeaseValue>,
-    /// A native answer the machine computed for the step standing at this
-    /// point, taken by that step alone.
-    pub(super) delivered: Option<(Point, Value)>,
+    /// The step at this point the machine served, with a native's answer,
+    /// taken by that step alone.
+    pub(super) served: Option<(Point, Option<Value>)>,
     pub(super) complete: bool,
     pub(super) activation: Option<CallActivation>,
     pub(super) identity: Rc<()>,
@@ -186,8 +184,7 @@ impl<'m> Running<'m> {
             sessions: vec![SessionState::default(); code.sessions.len()].into(),
             closed_sessions: None,
             returning: None,
-            effect: None,
-            delivered: None,
+            served: None,
             complete: false,
             activation: None,
             identity: Rc::new(()),

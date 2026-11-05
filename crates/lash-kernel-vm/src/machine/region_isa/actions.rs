@@ -246,6 +246,30 @@ impl KernelMachine {
         })
     }
 
+    /// The values `task`'s top frame holds in `slots`, in order.
+    fn role_values(
+        &mut self,
+        task: TaskId,
+        slots: &[lash_kernel_state::kernel_internals::logical::Slot],
+    ) -> Result<Vec<Value>, Halt> {
+        let source = self
+            .frame(task)?
+            .pending
+            .source
+            .as_ref()
+            .ok_or_else(|| fault("a served step has no source continuation"))?;
+        slots
+            .iter()
+            .map(|slot| {
+                source
+                    .roles
+                    .iter()
+                    .find_map(|(saved, value)| (saved == slot).then_some(*value))
+                    .ok_or_else(|| fault("a served step lacks a held operand"))
+            })
+            .collect()
+    }
+
     /// Answers the native call `task`'s top frame stands before, its checked
     /// kernel unable to answer in place: the machine's general call runs it
     /// with the frame's argument values, charging nothing, and the answer
@@ -257,22 +281,7 @@ impl KernelMachine {
         lib: crate::compile::LibId,
         slots: &[lash_kernel_state::kernel_internals::logical::Slot],
     ) -> Result<(), Halt> {
-        let source = self
-            .frame(task)?
-            .pending
-            .source
-            .as_ref()
-            .ok_or_else(|| fault("a standing native has no source continuation"))?;
-        let arguments = slots
-            .iter()
-            .map(|slot| {
-                source
-                    .roles
-                    .iter()
-                    .find_map(|(saved, value)| (saved == slot).then_some(*value))
-                    .ok_or_else(|| fault("a standing native lacks an argument"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let arguments = self.role_values(task, slots)?;
         let exe = Arc::clone(&self.exe);
         let used = exe.lib(lib).arity.max(arguments.len()).max(1);
         for (at, value) in arguments.iter().enumerate() {
@@ -290,30 +299,32 @@ impl KernelMachine {
             Err(halt) => Err(halt),
         };
         self.regs.clear_range(0..used);
-        self.native_answer = Some(super::NativeAnswer {
+        self.served = Some(super::Served {
             task,
             at,
-            value: value?,
+            answer: Some(value?),
         });
         Ok(())
     }
 
-    /// Spends the task's Incoming an accepted effect carried out of the
-    /// region: the machine holds its value now, the ledger no longer.
-    pub(super) fn spend_effect(&mut self, task: TaskId) -> Result<(), Halt> {
-        use lash_kernel_state::kernel_internals::logical::Owner;
-        if !matches!(self.task(task)?.take_incoming(), Some(Incoming::Value(_))) {
-            return Err(fault("an accepted effect left no incoming value"));
-        }
-        let store = self.logical.clone();
-        store.borrow_mut().transfer_source(
-            &mut self.arena.borrow_mut(),
-            &self.heap,
-            &[Owner::Incoming(task)],
-            &[],
-        )?;
-        self.publish_logical_meter()?;
-        Ok(())
+    /// Copies out the value of the effect `task`'s top frame stands before,
+    /// held in `slot`: the region charges the copy when it takes the step.
+    pub(super) fn serve_effect(
+        &mut self,
+        task: TaskId,
+        at: crate::compile::room::Point,
+        slot: lash_kernel_state::kernel_internals::logical::Slot,
+    ) -> Result<lash_kernel_doc::Datum, Halt> {
+        let [value] = self.role_values(task, &[slot])?[..] else {
+            return Err(fault("an effect has one operand"));
+        };
+        let datum = answered(self.copy_datum(&value).map_err(Into::into))?;
+        self.served = Some(super::Served {
+            task,
+            at,
+            answer: None,
+        });
+        Ok(datum)
     }
 
     /// Delivers `incoming` to the action `standing` names: the top frame

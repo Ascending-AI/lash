@@ -598,6 +598,18 @@ impl RegionCode {
             .collect::<Option<_>>()?;
         Some((*lib, slots))
     }
+    /// The source slot holding the value of the effect at `pc`, for the
+    /// machine to copy out before the region takes its step.
+    pub(crate) fn effect_argument(&self, pc: Pc) -> Option<Slot> {
+        let RegionOp::Effect { value, .. } = self.op(pc)? else {
+            return None;
+        };
+        self.draft
+            .roles
+            .iter()
+            .find_map(|(role, actual)| (actual == value).then_some(role.slot()))
+            .flatten()
+    }
     /// The atoms a statement call loads at its Enter.
     pub(crate) fn call_atoms(&self, site: CallId) -> Option<&[AtomLoad]> {
         Some(&self.draft.calls.get(site.offset())?.atoms)
