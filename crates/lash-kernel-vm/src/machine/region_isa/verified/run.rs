@@ -50,6 +50,16 @@ impl Running<'_> {
                 .program
                 .op(self.pc)
                 .ok_or_else(|| invalid(Refused::Path))?;
+            if let RegionOp::Call { site, .. } = op {
+                let Some(activation) = self.prepare_call(site.index())? else {
+                    return self.halt(RegionStop::Refusal);
+                };
+                self.activation = Some(activation);
+                if matches!(request, StopAt::NextLegalPrefix) {
+                    return self.halt(RegionStop::Handoff);
+                }
+                continue;
+            }
             if matches!(op, RegionOp::Boundary { .. }) {
                 return self.halt(RegionStop::Boundary);
             }
@@ -139,7 +149,7 @@ impl Running<'_> {
             if let Some((destination, value)) = answer.write {
                 self.registers.write(
                     &mut self.view,
-                    0,
+                    self.parked.len(),
                     self.reached.invocation,
                     destination,
                     value,

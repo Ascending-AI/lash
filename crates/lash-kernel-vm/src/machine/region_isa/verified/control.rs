@@ -74,7 +74,7 @@ impl Running<'_> {
                 crate::compile::region_isa::CheckedKind::LoopControl { stage, .. } => {
                     let current = *self
                         .loops
-                        .get(stage.info as usize)
+                        .get(self.loop_index(stage.info)?)
                         .ok_or_else(|| invalid(Refused::Facts))?;
                     let next = match stage.phase {
                         LoopPhase::Enter => LoopState {
@@ -92,7 +92,7 @@ impl Running<'_> {
                 let index = branch.ok_or_else(|| invalid(Refused::Facts))?;
                 let mut next = *self
                     .loops
-                    .get(index as usize)
+                    .get(self.loop_index(index)?)
                     .filter(|state| state.active)
                     .ok_or_else(|| invalid(Refused::Facts))?;
                 if answer.next == *yes {
@@ -108,7 +108,7 @@ impl Running<'_> {
             _ => return Ok(None),
         };
         Ok(Some(Edit {
-            index: index as usize,
+            index: self.loop_index(index)?,
             next,
         }))
     }
@@ -168,10 +168,14 @@ impl Running<'_> {
             let site = &code.exe.block(*child).site;
             point.site.unit == site.unit && point.site.path.starts_with(&site.path)
         });
-        let active = self.loops.iter().enumerate().find_map(|(index, state)| {
-            let info = code.program.loop_info(index as u32)?;
-            (info.site == statement.site && state.active).then_some((info, state))
-        });
+        let start = self.frame_index() * self.programs.loops;
+        let active = self.loops[start..start + self.programs.loops]
+            .iter()
+            .enumerate()
+            .find_map(|(index, state)| {
+                let info = code.program.loop_info(index as u32)?;
+                (info.site == statement.site && state.active).then_some((info, state))
+            });
         values.push(Control::Block {
             block,
             next: index + usize::from(nested.is_some() || active.is_some()),

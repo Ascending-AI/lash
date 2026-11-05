@@ -29,12 +29,16 @@ impl Running<'_> {
                 dst,
                 next,
             } => {
-                let a = self
-                    .registers
-                    .integer(0, self.reached.invocation, lhs.index())?;
-                let b = self
-                    .registers
-                    .integer(0, self.reached.invocation, rhs.index())?;
+                let a = self.registers.integer(
+                    self.frame_index(),
+                    self.reached.invocation,
+                    lhs.index(),
+                )?;
+                let b = self.registers.integer(
+                    self.frame_index(),
+                    self.reached.invocation,
+                    rhs.index(),
+                )?;
                 let Some(value) = kernel.apply(a, b) else {
                     return Ok(None);
                 };
@@ -91,7 +95,11 @@ impl Running<'_> {
                             .and_then(Option::as_ref)
                             .and_then(|flow| flow.local)
                             .ok_or_else(|| invalid(Refused::Facts))?;
-                        self.registers.read(0, self.reached.invocation, register)?
+                        self.registers.read(
+                            self.frame_index(),
+                            self.reached.invocation,
+                            register,
+                        )?
                     }
                     CheckedKind::IntTruth {
                         operation,
@@ -100,12 +108,16 @@ impl Running<'_> {
                         units,
                         ..
                     } => {
-                        let a = self
-                            .registers
-                            .integer(0, self.reached.invocation, lhs.index())?;
-                        let b = self
-                            .registers
-                            .integer(0, self.reached.invocation, rhs.index())?;
+                        let a = self.registers.integer(
+                            self.frame_index(),
+                            self.reached.invocation,
+                            lhs.index(),
+                        )?;
+                        let b = self.registers.integer(
+                            self.frame_index(),
+                            self.reached.invocation,
+                            rhs.index(),
+                        )?;
                         let Some(value) = lash_kernel_doc::scalar::int_truth(*operation, a, b)
                         else {
                             return Ok(None);
@@ -120,12 +132,16 @@ impl Running<'_> {
                         units,
                         ..
                     } => {
-                        let a = self
-                            .registers
-                            .float(0, self.reached.invocation, lhs.index())?;
-                        let b = self
-                            .registers
-                            .float(0, self.reached.invocation, rhs.index())?;
+                        let a = self.registers.float(
+                            self.frame_index(),
+                            self.reached.invocation,
+                            lhs.index(),
+                        )?;
+                        let b = self.registers.float(
+                            self.frame_index(),
+                            self.reached.invocation,
+                            rhs.index(),
+                        )?;
                         let value = if operation.compares() {
                             let Some(value) = kernel.float_truth(a, b) else {
                                 return Ok(None);
@@ -140,16 +156,20 @@ impl Running<'_> {
                         formula = Some(*units);
                         Operand::Immediate(value)
                     }
-                    CheckedKind::PackInt { input } => Operand::Immediate(Value::Int(
-                        self.registers
-                            .integer(0, self.reached.invocation, input.index())?,
-                    )),
-                    CheckedKind::PackFloat { input } => {
-                        Operand::Immediate(Value::Float(lash_kernel_doc::Float::new(
-                            self.registers
-                                .float(0, self.reached.invocation, input.index())?,
-                        )))
+                    CheckedKind::PackInt { input } => {
+                        Operand::Immediate(Value::Int(self.registers.integer(
+                            self.frame_index(),
+                            self.reached.invocation,
+                            input.index(),
+                        )?))
                     }
+                    CheckedKind::PackFloat { input } => Operand::Immediate(Value::Float(
+                        lash_kernel_doc::Float::new(self.registers.float(
+                            self.frame_index(),
+                            self.reached.invocation,
+                            input.index(),
+                        )?),
+                    )),
                     CheckedKind::PackBool { input } => {
                         let Some(Value::Bool(value)) = self.inline(*input)? else {
                             return Ok(None);

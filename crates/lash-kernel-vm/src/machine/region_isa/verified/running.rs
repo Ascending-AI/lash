@@ -8,7 +8,10 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) programs: Arc<super::programs::Programs>,
     pub(super) call_values: Vec<LeaseValue>,
     pub(super) arguments: Vec<Value>,
-    pub(super) loops: Box<[super::control::LoopState]>,
+    pub(super) loops: Vec<super::control::LoopState>,
+    pub(super) parked: Vec<super::calls::Parked>,
+    pub(super) activation: Option<CallActivation>,
+    pub(super) identity: Rc<()>,
     pub(super) scratch: super::phase::Scratch,
     pub(super) crossing: Option<super::charge::Crossing>,
     pub(in crate::machine::region_isa) view: StateLease<'m>,
@@ -27,6 +30,18 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(in crate::machine::region_isa) canonical: Box<crate::machine::Frame>,
 }
 impl<'m> Running<'m> {
+    pub(super) fn frame_index(&self) -> usize {
+        self.parked.len()
+    }
+    pub(super) fn loop_index(&self, index: u32) -> Result<usize, RegionError> {
+        if index as usize >= self.programs.loops {
+            return Err(invalid(Refused::Facts));
+        }
+        self.frame_index()
+            .checked_mul(self.programs.loops)
+            .and_then(|base| base.checked_add(index as usize))
+            .ok_or_else(|| invalid(Refused::Facts))
+    }
     #[expect(
         clippy::too_many_arguments,
         reason = "all arguments bind independent actual entry facts"
@@ -74,13 +89,26 @@ impl<'m> Running<'m> {
             prefix: prefix.index() as u32,
             debt: 0,
         };
-        let loops = super::control::bind(&code.program, &canonical)?;
-        let scratch = super::phase::Scratch::new(programs.transfer_width, programs.quotes)?;
+        let mut loops = super::control::bind(&code.program, &canonical)?.into_vec();
+        loops
+            .try_reserve(programs.loops.saturating_sub(loops.len()))
+            .map_err(|_| invalid(Refused::Scratch))?;
+        loops.resize(programs.loops, super::control::LoopState::default());
+        let scratch = super::phase::Scratch::new(
+            programs
+                .transfer_width
+                .max(programs.arguments)
+                .max(programs.parameters),
+            programs.quotes,
+        )?;
         let mut call_values = Vec::new();
         call_values
             .try_reserve_exact(programs.parameters)
             .map_err(|_| invalid(Refused::Scratch))?;
         Ok(Self {
+            parked: Vec::new(),
+            activation: None,
+            identity: Rc::new(()),
             call_values,
             programs,
             loops,
@@ -116,12 +144,6 @@ impl<'m> Running<'m> {
         stop: StopAt,
     ) -> Result<RegionStop, RegionError> {
         self.execute(stop)
-    }
-    pub(in crate::machine::region_isa) fn enter_call(
-        &mut self,
-        _site: u32,
-    ) -> Result<CallActivation, RegionError> {
-        Err(invalid(Refused::Facts))
     }
     pub(in crate::machine::region_isa) fn leave_call(
         &mut self,

@@ -7,7 +7,7 @@ use lash_kernel_state::kernel_internals::logical::LeaseValue;
 impl Running<'_> {
     pub(super) fn read<T>(&self, reg: Reg<T>) -> Result<Operand<LeaseValue>, RegionError> {
         self.registers.read(
-            0,
+            self.parked.len(),
             self.reached.invocation,
             super::bind::physical(&self.code.program, reg)?,
         )
@@ -24,7 +24,7 @@ impl Running<'_> {
     ) -> Result<(), RegionError> {
         self.registers.write(
             &mut self.view,
-            0,
+            self.parked.len(),
             self.reached.invocation,
             super::bind::physical(&self.code.program, reg)?,
             value,
@@ -39,6 +39,7 @@ impl Running<'_> {
     }
     pub(super) fn guard(&mut self, kernel: &CheckedKernel) -> Result<bool, RegionError> {
         let invocation = self.reached.invocation;
+        let frame = self.parked.len();
         match kernel.kind() {
             CheckedKind::UnpackPair { inputs, outputs } => {
                 let (Some(Value::Int(a)), Some(Value::Int(b))) =
@@ -49,7 +50,7 @@ impl Running<'_> {
                 for (output, value) in outputs.iter().zip([a, b]) {
                     self.registers.write(
                         &mut self.view,
-                        0,
+                        frame,
                         invocation,
                         Register::Int(output.index()),
                         Operand::Immediate(Value::Int(value)),
@@ -65,7 +66,7 @@ impl Running<'_> {
                 for (output, value) in outputs.iter().zip([a, b]) {
                     self.registers.write(
                         &mut self.view,
-                        0,
+                        frame,
                         invocation,
                         Register::Float(output.index()),
                         Operand::Immediate(Value::Float(value)),
@@ -78,7 +79,7 @@ impl Running<'_> {
                 };
                 self.registers.write(
                     &mut self.view,
-                    0,
+                    self.parked.len(),
                     invocation,
                     Register::Bool(output.index()),
                     Operand::Immediate(Value::Bool(value)),
@@ -90,7 +91,7 @@ impl Running<'_> {
                 };
                 self.registers.write(
                     &mut self.view,
-                    0,
+                    self.parked.len(),
                     invocation,
                     Register::Int(output.index()),
                     Operand::Immediate(Value::Int(value)),

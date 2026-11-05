@@ -8,8 +8,8 @@ use super::{
 use lash_kernel_state::kernel_internals::logical::{LeaseMeasure, LeaseOp, LeaseStep, LeaseValue};
 
 pub(super) struct Scratch {
-    holds: Vec<(LeaseValue, bool)>,
-    releases: Vec<(LeaseValue, bool)>,
+    pub(super) holds: Vec<(LeaseValue, bool)>,
+    pub(super) releases: Vec<(LeaseValue, bool)>,
     quote: Vec<(LeaseValue, bool)>,
     quoted: Vec<u64>,
 }
@@ -31,6 +31,7 @@ impl Scratch {
 }
 fn read(
     registers: &registers::Registers<LeaseValue>,
+    frame: usize,
     invocation: u64,
     root: Root,
     view: &mut lash_kernel_state::kernel_internals::logical::StateLease<'_>,
@@ -39,7 +40,7 @@ fn read(
 ) -> Result<LeaseValue, RegionError> {
     let value = match answer.and_then(|answer| answer.write) {
         Some((reg, value)) if Some(reg) == destination && reg == root.register => value,
-        _ => registers.read(0, invocation, root.register)?,
+        _ => registers.read(frame, invocation, root.register)?,
     };
     value.bind(view).map_err(RegionError::Heap)
 }
@@ -62,6 +63,7 @@ impl<'s> Running<'s> {
         answer: &ScalarAnswer,
     ) -> Result<Option<PreparedResources<'a, 's>>, RegionError> {
         let invocation = self.reached.invocation;
+        let frame = self.frame_index();
         let Scratch {
             holds,
             releases,
@@ -75,6 +77,7 @@ impl<'s> Running<'s> {
         for &root in &flow.holds {
             let value = read(
                 &self.registers,
+                frame,
                 invocation,
                 root,
                 &mut self.view,
@@ -91,6 +94,7 @@ impl<'s> Running<'s> {
         for &root in &flow.releases {
             let value = read(
                 &self.registers,
+                frame,
                 invocation,
                 root,
                 &mut self.view,
@@ -111,6 +115,7 @@ impl<'s> Running<'s> {
             for &root in group {
                 let value = read(
                     &self.registers,
+                    frame,
                     invocation,
                     root,
                     &mut self.view,
@@ -159,7 +164,7 @@ impl<'s> Running<'s> {
                         Fact::Local(register) => {
                             let value = self
                                 .registers
-                                .read(0, invocation, *register)?
+                                .read(frame, invocation, *register)?
                                 .bind(&mut self.view)
                                 .map_err(RegionError::Heap)?;
                             i128::from(self.view.price(value).map_err(RegionError::Heap)?)

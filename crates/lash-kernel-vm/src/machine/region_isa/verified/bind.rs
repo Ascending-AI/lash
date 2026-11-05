@@ -148,6 +148,7 @@ impl Code {
                         result: role(plan.result_role().slot())?,
                         next: *next,
                     };
+                    arguments = arguments.max(call.arguments.len());
                     if calls.insert(site.index() as usize, call).is_some() {
                         return Err(invalid(Refused::Source));
                     }

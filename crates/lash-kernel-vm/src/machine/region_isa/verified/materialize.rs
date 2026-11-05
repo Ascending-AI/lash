@@ -8,7 +8,7 @@ impl<'m> Running<'m> {
     pub(in crate::machine::region_isa) fn reconstruct(
         mut self,
     ) -> Result<reconstruct::Finished<StateLease<'m>>, RegionError> {
-        if self.faulted {
+        if self.faulted || !self.parked.is_empty() {
             return Err(invalid(Refused::Facts));
         }
         let stop = self.stop.ok_or_else(|| invalid(Refused::Exit))?;
@@ -18,7 +18,7 @@ impl<'m> Running<'m> {
             .ok_or_else(|| invalid(Refused::Exit))?;
         let read = |reg| {
             self.registers.read(
-                0,
+                self.parked.len(),
                 self.reached.invocation,
                 super::bind::physical(program, reg)?,
             )

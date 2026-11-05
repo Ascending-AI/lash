@@ -4,10 +4,7 @@ use crate::compile::room::region::calls::region_isa::compile_calls;
 use crate::laws::embedder::{Embedder, Setup};
 use lash_kernel_doc::TaskId;
 
-/// K-FN-004/K-EVAL-008: C reads actual ordered caller slots and pads missing
-/// formals without inventing a holding or consuming an invocation identity.
-#[test]
-fn callee_inputs_preserve_order_absence_and_reserved_identity() {
+fn call_machine() -> Embedder {
     fn probes(
         registry: &mut lash_kernel_doc::FunctionRegistry,
         _: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
@@ -23,11 +20,18 @@ fn callee_inputs_preserve_order_absence_and_reserved_identity() {
         ..Setup::default()
     };
     setup.start.target = crate::Target::Entry("go".into());
-    let mut run = Embedder::with(
+    Embedder::with(
         r#"definition "function go() -> Any\nkernel 1\nmetering statements\nbody { return isa.pick(7, 9) }"
 main {}"#,
         setup,
-    );
+    )
+}
+
+/// K-FN-004/K-EVAL-008: C reads actual ordered caller slots and pads missing
+/// formals without inventing a holding or consuming an invocation identity.
+#[test]
+fn callee_inputs_preserve_order_absence_and_reserved_identity() {
+    let mut run = call_machine();
     let machine = &mut run.machine;
     machine.current = Some(TaskId::MAIN);
     let code = machine.frame(TaskId::MAIN).unwrap().code;
@@ -283,4 +287,114 @@ main {}"#,
         )
     );
     prefix.prepare_exit().unwrap().commit().unwrap();
+}
+
+/// K-FN-004/K-LIM-002: frame admission moves the actual formals once,
+/// retains caller registers, and refuses before consuming a callee identity.
+#[test]
+fn static_body_entry_uses_its_own_bank_and_exact_frame_limits() {
+    for (memory_offset, depth_offset) in [-1_i128, 0, 1, 16, 17, 18]
+        .into_iter()
+        .flat_map(|memory| [-1_i64, 0, 1].map(|depth| (memory, depth)))
+    {
+        let mut run = call_machine();
+        let machine = &mut run.machine;
+        machine.current = Some(TaskId::MAIN);
+        let root = machine.frame(TaskId::MAIN).unwrap().code;
+        let draft = compile_region(&machine.exe, root).unwrap();
+        let calls = compile_calls(&machine.exe, &draft).unwrap();
+        let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
+        let stamp = machine.logical.borrow().stamp();
+        let canonical = (machine.charged, machine.logical_memory.get());
+        let mut lease = RegionLease::acquire(machine, program).unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                lease.run(StopAt::NextLegalPrefix).unwrap(),
+                RegionStop::Handoff
+            );
+        }
+        let Executing::Machine(execution) = &mut lease.execution else {
+            unreachable!()
+        };
+        let before = execution.counters;
+        let first = execution.invocations.prepare().unwrap().id;
+        let required = before.balance
+            + lash_kernel_doc::LogicalHeldV1::FRAME
+            + lash_kernel_doc::LogicalHeldV1::REFERENCE;
+        execution.limits.memory = u64::try_from(i128::from(required) + memory_offset).unwrap();
+        execution.limits.depth = u32::try_from(i64::from(before.depth) + 1 + depth_offset).unwrap();
+        if memory_offset < 0 || depth_offset < 0 {
+            assert_eq!(
+                lease.run(StopAt::NextLegalPrefix).unwrap(),
+                RegionStop::Refusal
+            );
+            let Executing::Machine(execution) = &lease.execution else {
+                unreachable!()
+            };
+            assert_eq!(execution.invocations.prepare().unwrap().id, first);
+            assert_eq!(execution.frame_index(), 0);
+            assert_eq!(
+                (execution.counters.balance, execution.counters.depth),
+                (before.balance, before.depth)
+            );
+        } else {
+            assert_eq!(
+                lease.run(StopAt::NextLegalPrefix).unwrap(),
+                RegionStop::Handoff
+            );
+            let Executing::Machine(execution) = &mut lease.execution else {
+                unreachable!()
+            };
+            assert_ne!(execution.code.program.code(), root);
+            assert_eq!(execution.reached.invocation, first);
+            assert_eq!(execution.frame_index(), 1);
+            assert_eq!(execution.counters.depth, before.depth + 1);
+            assert_eq!(execution.counters.balance, required);
+            assert_eq!(execution.counters.peak, before.peak.max(required));
+            let target = execution
+                .programs
+                .target(root, 0, execution.code.program.code())
+                .unwrap();
+            for (parameter, expected) in
+                target
+                    .parameters
+                    .iter()
+                    .zip([Value::Int(7), Value::Int(9), Value::Absent])
+            {
+                let actual = execution
+                    .registers
+                    .read(1, first, parameter.output)
+                    .unwrap()
+                    .scalar(&execution.view)
+                    .unwrap();
+                assert!(actual.same(&expected));
+            }
+            // The callee's read of b must use frame 1, while its caller's
+            // evaluated operands remain qualified by the caller invocation.
+            let result = lease.run(StopAt::NextLegalPrefix).unwrap();
+            if memory_offset < 17 {
+                assert_eq!(result, RegionStop::Refusal);
+            } else {
+                assert_eq!(result, RegionStop::Handoff);
+                let Executing::Machine(execution) = &lease.execution else {
+                    unreachable!()
+                };
+                let map = execution.code.program.recovery(execution.prefix).unwrap();
+                assert!(map.roles.iter().any(|(slot, register)| {
+                    matches!(
+                        slot,
+                        lash_kernel_state::kernel_internals::logical::Slot::Operand(_)
+                    ) && execution
+                        .read(*register)
+                        .unwrap()
+                        .scalar(&execution.view)
+                        .unwrap()
+                        .same(&Value::Int(9))
+                }));
+            }
+        }
+        drop(lease);
+        assert!(machine.logical.borrow().is_current(&stamp));
+        assert_eq!((machine.charged, machine.logical_memory.get()), canonical);
+    }
 }
