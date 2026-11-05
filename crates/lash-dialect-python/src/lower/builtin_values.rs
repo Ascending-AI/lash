@@ -302,9 +302,7 @@ impl Lowerer<'_> {
 impl Lowerer<'_> {
     pub(super) fn namespace_copy(&mut self, global: bool) -> Lowering<Operand> {
         let index = if global {
-            self.module_environment
-                .as_ref()
-                .map_or(0, |(scope, _)| *scope)
+            self.module_scope()
         } else {
             self.scopes.len() - 1
         };
@@ -319,15 +317,7 @@ impl Lowerer<'_> {
             // Unbound slots are filtered by the helper rather than raising.
             entries.push(lash_kernel_doc::MapEntry {
                 key: Expr::Literal(Literal::Text(name.clone())),
-                value: Expr::Variable(
-                    self.module_environment
-                        .as_ref()
-                        .filter(|(scope, _)| *scope == index)
-                        .and_then(|(_, bindings)| bindings.get(&name))
-                        .or_else(|| self.scopes[index].names.get(&name))
-                        .cloned()
-                        .unwrap_or_else(|| Name::new(name)),
-                ),
+                value: Expr::Variable(self.scope_name(index, &name)),
             });
         }
         self.invoke(

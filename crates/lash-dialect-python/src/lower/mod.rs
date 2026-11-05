@@ -168,6 +168,18 @@ struct Found {
     scope: Option<usize>,
 }
 
+enum EntryContext {
+    Outside,
+    Active(EntryEnvironment),
+}
+
+struct EntryEnvironment {
+    /// The private module scope, including its renamed bindings.
+    scope: usize,
+    /// The first unmaterialized module binding this entry reads.
+    captured: std::cell::RefCell<Option<(String, Option<Span>)>>,
+}
+
 pub(crate) struct Lowerer<'a> {
     cell_result_at: Option<usize>,
     source: &'a str,
@@ -205,16 +217,10 @@ pub(crate) struct Lowerer<'a> {
     module: Option<workflow::Module>,
     /// The module's entry declarations: its top-level `async def`s.
     entry_defs: HashSet<TextRange>,
-    /// Whether an entry is being lowered: original main bindings do not
-    /// resolve, but its private materialized module environment does.
-    in_entry: bool,
+    /// Original main bindings do not resolve inside an entry's private scope.
+    entry_context: EntryContext,
     module_statements: &'a [ast::Stmt],
-    module_environment: Option<(usize, BTreeMap<String, Name>)>,
     creates_tasks: bool,
-    /// Inline deferred calls retain their body notes without a statement binding.
-    /// The first unmaterialized module name an entry reads, and where;
-    /// its initialization must move into the entry or its arguments.
-    captured: std::cell::RefCell<Option<(String, Option<Span>)>>,
     /// The captions the source spells, by where what each captions starts.
     captions: BTreeMap<usize, lash_kernel_doc::Caption>,
     /// The captions of the module's entries, their parameters and their
@@ -379,11 +385,9 @@ pub(crate) fn lower_with_calls(
         declared_notes: BTreeMap::new(),
         module: workflow,
         entry_defs,
-        in_entry: false,
+        entry_context: EntryContext::Outside,
         module_statements: &module.body,
-        module_environment: None,
         creates_tasks: false,
-        captured: std::cell::RefCell::new(None),
         captions: spelled.captions,
         declared_captions: Vec::new(),
         cell_result_at: if limits.cell_result && matches!(mode, Mode::Cell(_)) {
@@ -520,16 +524,24 @@ impl Lowerer<'_> {
         }
         let index = self.variable_scope(id)?;
         Some(Found {
-            name: self
-                .module_environment
-                .as_ref()
-                .filter(|(scope, _)| *scope == index)
-                .and_then(|(_, bindings)| bindings.get(id))
-                .or_else(|| self.scopes[index].names.get(id))
-                .cloned()
-                .unwrap_or_else(|| Name::new(id)),
+            name: self.scope_name(index, id),
             scope: Some(index),
         })
+    }
+
+    fn scope_name(&self, index: usize, id: &str) -> Name {
+        self.scopes[index]
+            .names
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| Name::new(id))
+    }
+
+    fn module_scope(&self) -> usize {
+        match &self.entry_context {
+            EntryContext::Outside => 0,
+            EntryContext::Active(environment) => environment.scope,
+        }
     }
 
     fn variable_scope(&self, id: &str) -> Option<usize> {
@@ -540,10 +552,7 @@ impl Lowerer<'_> {
         while index > 0 {
             let bindings = &self.scopes[index].bindings;
             if bindings.globals.contains(id) {
-                index = self
-                    .module_environment
-                    .as_ref()
-                    .map_or(0, |(scope, _)| *scope);
+                index = self.module_scope();
                 break;
             }
             if bindings.locals.contains(id) {
@@ -551,11 +560,14 @@ impl Lowerer<'_> {
             }
             index -= 1;
         }
-        if index == 0 && self.in_entry {
+        if index == 0
+            && let EntryContext::Active(environment) = &self.entry_context
+        {
             // An entry runs apart from its module: a module name is
             // captured, which the entry is refused for.
             if self.scopes[0].bindings.locals.contains(id) {
-                self.captured
+                environment
+                    .captured
                     .borrow_mut()
                     .get_or_insert_with(|| (id.to_owned(), self.span));
             }

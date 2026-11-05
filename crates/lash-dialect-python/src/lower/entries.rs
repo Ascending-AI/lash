@@ -19,7 +19,7 @@ use ruff_text_size::TextRange;
 use {lash_kernel_value::Name, lash_kernel_value::Signature};
 
 use super::statements::Body;
-use super::{Buf, Lowerer, Lowering, Scope, ScopeKind};
+use super::{Buf, EntryContext, EntryEnvironment, Lowerer, Lowering, Scope, ScopeKind};
 use crate::diagnostics;
 use ruff_python_ast::visitor::{self, Visitor};
 use std::collections::{BTreeMap, BTreeSet};
@@ -50,111 +50,69 @@ impl Lowerer<'_> {
             .collect();
         let captions = self.signature_captions(def, &names);
         self.declared_captions.extend(captions);
-        self.in_entry = true;
-        let creates_tasks = std::mem::take(&mut self.creates_tasks);
         let declarations =
             materialized_declarations(self.module_statements, def, &self.scopes[0].bindings.locals);
-        let entry_defs = std::mem::take(&mut self.entry_defs);
         let bindings = crate::scope::bindings(&declarations, None, &self.rebound);
         let mut environment = BTreeMap::new();
         for name in &bindings.locals {
             environment.insert(name.clone(), self.fresh("module"));
         }
-        let previous_environment = self
-            .module_environment
-            .replace((self.scopes.len(), environment));
-        self.scopes.push(Scope {
-            direct_defs: Default::default(),
-            packed_defs: Default::default(),
-            names: BTreeMap::new(),
-            kind: ScopeKind::Module,
-            bindings,
-            integer_locals: BTreeSet::new(),
-            value_locals: BTreeMap::new(),
-            bound: vec![BTreeSet::new()],
-            handlers: Vec::new(),
-            loops: 0,
-        });
-        let body: Lowering<(Vec<Name>, Buf)> = (|| {
-            let mut prefix = self.block(|this| {
-                let span = this.span.take();
-                let Some((_, environment)) = &this.module_environment else {
-                    unreachable!("entry environment is active");
-                };
-                let names: Vec<_> = environment.values().cloned().collect();
-                for name in names {
-                    this.emit(Stmt::Let {
-                        name: name.clone(),
-                        value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-                    });
-                }
-                this.span = span;
-                this.statements(&declarations)
-            })?;
-            // A workflow has no module execution phase. Its start adapter
-            // initializes omitted arguments in definition order, in the
-            // materialized module environment (not the parameter scope).
-            let defaults = self.block(|this| {
-                for param in def
-                    .parameters
-                    .posonlyargs
-                    .iter()
-                    .chain(&def.parameters.args)
-                    .chain(&def.parameters.kwonlyargs)
-                {
-                    if let Some(default) = &param.default {
-                        let name = Name::new(param.parameter.name.id.as_str());
-                        let missing = this.native(
-                            "same",
-                            vec![Expr::Variable(name.clone()), Expr::Literal(Literal::Absent)],
-                        )?;
-                        let fill = this.block(|this| {
-                            let value = this.expr(default)?;
-                            this.emit(Stmt::Assign {
-                                place: Place::Variable(name.clone()),
-                                value: Rhs::Expr(value.expr),
-                                order: AssignOrder::ValueFirst,
-                            });
-                            Ok(())
-                        })?;
-                        this.emit_if(missing, fill, Buf::default());
+        let ((params, body), convention) =
+            self.with_entry_environment(bindings, environment, |this, names| {
+                let mut prefix = this.block(|this| {
+                    let span = this.span.take();
+                    for name in names {
+                        this.emit(Stmt::Let {
+                            name: name.clone(),
+                            value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+                        });
                     }
-                }
-                Ok(())
+                    this.span = span;
+                    this.statements(&declarations)
+                })?;
+                // A workflow has no module execution phase. Its start adapter
+                // initializes omitted arguments in definition order, in the
+                // materialized module environment (not the parameter scope).
+                let defaults = this.block(|this| {
+                    for param in def
+                        .parameters
+                        .posonlyargs
+                        .iter()
+                        .chain(&def.parameters.args)
+                        .chain(&def.parameters.kwonlyargs)
+                    {
+                        if let Some(default) = &param.default {
+                            let name = Name::new(param.parameter.name.id.as_str());
+                            let missing = this.native(
+                                "same",
+                                vec![Expr::Variable(name.clone()), Expr::Literal(Literal::Absent)],
+                            )?;
+                            let fill = this.block(|this| {
+                                let value = this.expr(default)?;
+                                this.emit(Stmt::Assign {
+                                    place: Place::Variable(name.clone()),
+                                    value: Rhs::Expr(value.expr),
+                                    order: AssignOrder::ValueFirst,
+                                });
+                                Ok(())
+                            })?;
+                            this.emit_if(missing, fill, Buf::default());
+                        }
+                    }
+                    Ok(())
+                })?;
+                prefix.extend(defaults);
+                let (params, body) = this.function_body(
+                    Some(&def.parameters),
+                    Body::Suite(&def.body),
+                    def.is_async,
+                    &[],
+                    None,
+                )?;
+                prefix.extend(body);
+                Ok((params, prefix))
             })?;
-            prefix.extend(defaults);
-            let (params, body) = self.function_body(
-                Some(&def.parameters),
-                Body::Suite(&def.body),
-                def.is_async,
-                &[],
-                None,
-            )?;
-            prefix.extend(body);
-            Ok((params, prefix))
-        })();
-        self.scopes.pop();
-        self.module_environment = previous_environment;
-        self.entry_defs = entry_defs;
-        self.in_entry = false;
-        let convention = match self.creates_tasks {
-            true => self
-                .function_target("tasks.cancel_all")
-                .map(|cleanup| lash_kernel_doc::StartConvention::PyDirect { cleanup }),
-            false => Ok(lash_kernel_doc::StartConvention::Direct),
-        };
-        self.creates_tasks = creates_tasks;
-        if let Some((captured, at)) = self.captured.borrow_mut().take() {
-            return Err(ModuleRefusal::DynamicModuleInitialization
-                .at(
-                    format!("module binding `{captured}` needs dynamic initialization"),
-                    at,
-                )
-                .into_diagnostic());
-        }
-        let (params, body) = body?;
         let (body, notes) = body.into_parts();
-        let convention = convention?;
         let entry = Name::new(name);
         let definition = lash_kernel_dialect::authoring::local_function(
             params,
@@ -187,6 +145,60 @@ impl Lowerer<'_> {
             order: AssignOrder::ValueFirst,
         });
         Ok(())
+    }
+
+    /// Owns entry activation and restores the enclosing context on success or refusal.
+    fn with_entry_environment<T>(
+        &mut self,
+        bindings: crate::scope::Bindings,
+        names: BTreeMap<String, Name>,
+        lower: impl FnOnce(&mut Self, Vec<Name>) -> Lowering<T>,
+    ) -> Lowering<(T, lash_kernel_doc::StartConvention)> {
+        let slots = names.values().cloned().collect();
+        let previous = std::mem::replace(
+            &mut self.entry_context,
+            EntryContext::Active(EntryEnvironment {
+                scope: self.scopes.len(),
+                captured: Default::default(),
+            }),
+        );
+        let creates_tasks = std::mem::take(&mut self.creates_tasks);
+        let entry_defs = std::mem::take(&mut self.entry_defs);
+        self.scopes.push(Scope {
+            direct_defs: Default::default(),
+            packed_defs: Default::default(),
+            names,
+            kind: ScopeKind::Module,
+            bindings,
+            integer_locals: BTreeSet::new(),
+            value_locals: BTreeMap::new(),
+            bound: vec![BTreeSet::new()],
+            handlers: Vec::new(),
+            loops: 0,
+        });
+        let body = lower(self, slots);
+        self.scopes.pop();
+        let captured = match std::mem::replace(&mut self.entry_context, previous) {
+            EntryContext::Outside => None,
+            EntryContext::Active(environment) => environment.captured.into_inner(),
+        };
+        self.entry_defs = entry_defs;
+        let convention = match self.creates_tasks {
+            true => self
+                .function_target("tasks.cancel_all")
+                .map(|cleanup| lash_kernel_doc::StartConvention::PyDirect { cleanup }),
+            false => Ok(lash_kernel_doc::StartConvention::Direct),
+        };
+        self.creates_tasks = creates_tasks;
+        if let Some((captured, at)) = captured {
+            return Err(ModuleRefusal::DynamicModuleInitialization
+                .at(
+                    format!("module binding `{captured}` needs dynamic initialization"),
+                    at,
+                )
+                .into_diagnostic());
+        }
+        Ok((body?, convention?))
     }
 
     /// A cell's task cleanup belongs to its root, including tasks made by
