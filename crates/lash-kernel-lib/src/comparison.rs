@@ -92,7 +92,10 @@ pub fn same(a: &Value, b: &Value, args: &Args<'_>) -> Result<bool, NativeError> 
                 {
                     return Ok(false);
                 }
-                pending.push((left.data, right.data));
+                pending.push((
+                    lash_kernel_doc::error_object::raw_value(*args, &left.data)?,
+                    lash_kernel_doc::error_object::raw_value(*args, &right.data)?,
+                ));
             }
             _ if a.kind() == b.kind() => {
                 if !args.equal(&a, &b)? {

@@ -797,7 +797,15 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             return Some(match field.name.as_str() {
                 "kind" => parts.kind,
                 "message" => parts.message,
-                "data" => parts.data,
+                "object" => parts.data,
+                "data" => {
+                    let Value::Record(object) = parts.data else {
+                        return None;
+                    };
+                    let key =
+                        crate::compile::Field::uncached(lash_kernel_doc::error_object::RAW).key;
+                    find_property(self.arena, object, None, &key).ok()?.0?
+                }
                 _ => Value::Absent,
             });
         }

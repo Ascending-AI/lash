@@ -314,11 +314,11 @@ fn unconstrained_decode_mismatches_keep_map_and_error_value_paths() {
     };
     let invalid = Datum::Number(NumberToken::new("1e999").unwrap());
     let error = |data| {
-        Datum::Error(Box::new(ErrorDatum {
-            kind: "example".into(),
-            message: String::new(),
+        Datum::Error(Box::new(ErrorDatum::new(
+            "example".into(),
+            String::new(),
             data,
-        }))
+        )))
     };
     for ty in [Type::Any, Type::Json] {
         for (value, path) in [

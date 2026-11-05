@@ -27,8 +27,8 @@ kernel 1
 charge 8
 native
 body {
-  if same(kind(value.data), "record") {
-    let properties = value.data.properties
+  if same(kind(value.object), "record") {
+    let properties = value.object.properties
     if same(kind(properties), "record") {
       if record.contains(properties, "name") { return properties.name }
     }
@@ -81,17 +81,10 @@ body {
       let name = invoke ts.exotic.error_name(target)
       return name
     }
-    if same(kind(target.data), "record") {
-      let properties = target.data.properties
-      if same(kind(properties), "record") {
-        if record.contains(properties, key) { return properties[key] }
-        if same(key, "message") { return "" }
-        return absent
-      }
-    }
-    # Host errors carry typed cause data, not guest Error property slots.
-    if same(key, "message") { return target.message }
+    let properties = target.object.properties
+    if record.contains(properties, key) { return properties[key] }
     if same(key, "data") { return target.data }
+    if same(key, "message") { return "" }
     return absent
   }
   if same(k, "record") {
@@ -113,9 +106,7 @@ charge sum(16, deep(value))
 body {
   let k = kind(target)
   if same(k, "error") {
-    if same(kind(target.data), "record") {} else { throw error.new("type_error", "This kernel error has no mutable slots", null) }
-    let properties = target.data.properties
-    if same(kind(properties), "record") {} else { throw error.new("type_error", "This kernel error has no mutable slots", null) }
+    let properties = target.object.properties
     set properties[key] = value
     return value
   }

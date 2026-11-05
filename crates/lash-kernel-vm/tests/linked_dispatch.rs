@@ -858,7 +858,7 @@ fn spawned_immediate_export_mismatch_keeps_child_identity() {
                     };
                     assert_eq!(error.kind, "entry_type_mismatch");
                     assert_eq!(
-                        error.data,
+                        error.raw().clone(),
                         lash_kernel_doc::diagnostic_datum(&lash_kernel_value::EntryTypeMismatch {
                             callable: lash_kernel_value::CallableId {
                                 link: child_link_id,
@@ -1770,7 +1770,7 @@ fn entry_nested_result_mismatch_retains_typed_boundary_facts() {
                 })) => {
                     assert_eq!(error.kind, "entry_type_mismatch");
                     assert_eq!(
-                        error.data,
+                        error.raw().clone(),
                         lash_kernel_doc::diagnostic_datum(&lash_kernel_value::EntryTypeMismatch {
                             callable: lash_kernel_value::CallableId {
                                 link: link_id,

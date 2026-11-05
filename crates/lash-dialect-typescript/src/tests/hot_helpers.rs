@@ -399,11 +399,11 @@ fn leaf(bits: &mut Bits) -> Datum {
             nanoseconds: Integer::from(1_000_000_000i64),
         }),
         _ => match bits.below(3) {
-            0 => Datum::Error(Box::new(ErrorDatum {
-                kind: "boom".to_owned(),
-                message: "m".to_owned(),
-                data: Datum::List(vec![Datum::Tuple(Vec::new())]),
-            })),
+            0 => Datum::Error(Box::new(ErrorDatum::new(
+                "boom".to_owned(),
+                "m".to_owned(),
+                Datum::List(vec![Datum::Tuple(Vec::new())]),
+            ))),
             1 => Datum::Bytes(lash_kernel_doc::Bytes::new(vec![1u8, 2])),
             _ => Datum::Set(vec![text("k"), float(2.0)]),
         },

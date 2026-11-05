@@ -101,7 +101,39 @@
           "raised": {
             "kind": "unordered",
             "message": "NaN has no ordering",
-            "data": "null"
+            "data": {
+              "record": [
+                [
+                  "properties",
+                  {
+                    "record": [
+                      [
+                        "code",
+                        {
+                          "text": "unordered"
+                        }
+                      ],
+                      [
+                        "message",
+                        {
+                          "text": "NaN has no ordering"
+                        }
+                      ]
+                    ]
+                  }
+                ],
+                [
+                  "nonEnumerable",
+                  {
+                    "record": []
+                  }
+                ],
+                [
+                  "__lash_raw",
+                  "null"
+                ]
+              ]
+            }
           }
         },
         "charged": 10,

@@ -267,7 +267,39 @@
           "error": {
             "kind": "example",
             "message": "message",
-            "data": "null"
+            "data": {
+              "record": [
+                [
+                  "properties",
+                  {
+                    "record": [
+                      [
+                        "code",
+                        {
+                          "text": "example"
+                        }
+                      ],
+                      [
+                        "message",
+                        {
+                          "text": "message"
+                        }
+                      ]
+                    ]
+                  }
+                ],
+                [
+                  "nonEnumerable",
+                  {
+                    "record": []
+                  }
+                ],
+                [
+                  "__lash_raw",
+                  "null"
+                ]
+              ]
+            }
           }
         }
       ],
@@ -286,7 +318,10 @@
       "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
-          "function": {"link":"1111111111111111111111111111111111111111111111111111111111111111","function":"ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"}
+          "function": {
+            "link": "1111111111111111111111111111111111111111111111111111111111111111",
+            "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"
+          }
         }
       ],
       "expected": {

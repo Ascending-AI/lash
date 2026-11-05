@@ -1212,6 +1212,12 @@ fn k_col_015_error_new_has_strict_text_and_retains_data_identity() {
             Datum::Absent
         ])
     );
+    assert_eq!(
+        body(
+            r#"let raw = {__lash_raw: "evidence"} let e = error.new("kind", "message", raw) return (same(e.data, raw), e.data.__lash_raw)"#
+        ),
+        tuple(vec![Datum::Bool(true), text("evidence")])
+    );
     assert_eq!(error("return error.new(1, \"message\")"), "type_error");
     assert_eq!(error("return error.new(\"kind\", false)"), "type_error");
 }
@@ -1488,11 +1494,11 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
         (
             "error.new".into(),
             "\"k\", \"m\", 7".into(),
-            Ok(Datum::Error(Box::new(ErrorDatum {
-                kind: "k".into(),
-                message: "m".into(),
-                data: int(7),
-            }))),
+            Ok(Datum::Error(Box::new(ErrorDatum::new(
+                "k".into(),
+                "m".into(),
+                int(7),
+            )))),
         ),
         (
             "collection.unordered".into(),

@@ -12,11 +12,7 @@ pub fn check_branded(
     value: &Datum,
     numbers: NumberPolicy,
 ) -> Result<(), ErrorDatum> {
-    let error = |kind: &str, message: String| ErrorDatum {
-        kind: kind.into(),
-        message,
-        data: Datum::Null,
-    };
+    let error = |kind: &str, message: String| ErrorDatum::new(kind.into(), message, Datum::Null);
     if expected != actual {
         return Err(error(
             "type_error",

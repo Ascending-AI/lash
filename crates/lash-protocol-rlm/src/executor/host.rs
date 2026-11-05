@@ -36,6 +36,7 @@ use lash_kernel_value::sites::EffectId;
 use lash_kernel_vm::{EffectRequest, Outcome};
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::kernel::graph::{FrozenRequest, Projections};
+use lash_vm_broker::kernel::value::tool_failed;
 use lash_vm_broker::kernel::{
     AdmittedCall, AdmittedEffect, EFFECT_CANCELLED, HostParts, KernelEffects, datum_from_json,
     datum_to_json, outcome_of,
@@ -284,21 +285,7 @@ pub(super) struct RecordedOutcome {
 }
 
 pub(super) fn refused(kind: &str, message: impl Into<String>) -> ErrorDatum {
-    ErrorDatum {
-        kind: kind.to_owned(),
-        message: message.into(),
-        data: Datum::Null,
-    }
-}
-
-/// The error a call's or a read's own failure raises: `tool_failed`,
-/// carrying the typed failure as data.
-pub(super) fn tool_failed(failure: &lash_core::ToolFailure) -> ErrorDatum {
-    ErrorDatum {
-        kind: TOOL_FAILED.to_owned(),
-        message: failure.message.clone(),
-        data: datum_from_json(&failure.to_json_value().to_string()).unwrap_or(Datum::Null),
-    }
+    ErrorDatum::new(kind.to_owned(), message.into(), Datum::Null)
 }
 
 /// The refusal of a control call, carrying its typed cause as data.
@@ -312,14 +299,14 @@ fn control_refused(effect: &OperationUse, cause: lash_core::ToolFailureCause) ->
         ),
         _ => format!("`{effect}` was refused: this cell already made its one turn-ending call"),
     };
-    ErrorDatum {
-        kind: CONTROL_REFUSED.to_owned(),
+    ErrorDatum::new(
+        CONTROL_REFUSED.to_owned(),
         message,
-        data: serde_json::to_string(&cause)
+        serde_json::to_string(&cause)
             .ok()
             .and_then(|json| datum_from_json(&json).ok())
             .unwrap_or(Datum::Null),
-    }
+    )
 }
 
 impl CellHost<'_> {
@@ -478,7 +465,7 @@ impl CellHost<'_> {
                 Datum::Record(values) => {
                     pending.extend(values.iter().rev().map(|(_, value)| value))
                 }
-                Datum::Error(error) => pending.push(&error.data),
+                Datum::Error(error) => pending.push(error.data()),
                 _ => {}
             }
         }
@@ -793,12 +780,12 @@ impl KernelEffects for CellHost<'_> {
                 }
             }
             lash_core::ToolCallOutcome::Failure(failure) => Outcome::Failed(tool_failed(failure)),
-            lash_core::ToolCallOutcome::Cancelled(cancelled) => Outcome::Failed(ErrorDatum {
-                kind: EFFECT_CANCELLED.to_owned(),
-                message: cancelled.message.clone(),
-                data: datum_from_json(&cancelled.to_json_value().to_string())
+            lash_core::ToolCallOutcome::Cancelled(cancelled) => Outcome::Failed(ErrorDatum::new(
+                EFFECT_CANCELLED.to_owned(),
+                cancelled.message.clone(),
+                datum_from_json(&cancelled.to_json_value().to_string())
                     .unwrap_or_else(|_| Datum::Text(cancelled.to_json_value().to_string())),
-            }),
+            )),
         };
         if matches!(
             output,
@@ -823,18 +810,19 @@ impl KernelEffects for CellHost<'_> {
                     } => name.to_string(),
                 };
                 let identity = &call.effect;
-                error.message = format!(
+                let message = format!(
                     "effect `{name}` at {identity} started and never settled; outside work may already have happened, so check outside state before calling again",
                 );
-                error.data = Datum::Record(vec![
+                let data = Datum::Record(vec![
                     ("effect".to_owned(), Datum::Text(name)),
                     (
                         "position".to_owned(),
                         Datum::Text(identity.position().to_string()),
                     ),
                     ("identity".to_owned(), Datum::Text(identity.to_string())),
-                    ("cause".to_owned(), error.data.clone()),
+                    ("cause".to_owned(), error.raw().clone()),
                 ]);
+                *error = ErrorDatum::new(error.kind.clone(), message, data);
             }
         }
         if let Some(record) = reply.record {

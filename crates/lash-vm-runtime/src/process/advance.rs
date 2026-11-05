@@ -226,11 +226,11 @@ pub(super) fn effect_outcome(output: &SettledOutput) -> Option<lash_kernel_vm::O
         return Some(generic);
     };
     let failed = |kind: &str, message: String, data| {
-        lash_kernel_vm::Outcome::Failed(lash_kernel_doc::ErrorDatum {
-            kind: kind.to_owned(),
+        lash_kernel_vm::Outcome::Failed(lash_kernel_doc::ErrorDatum::new(
+            kind.to_owned(),
             message,
             data,
-        })
+        ))
     };
     Some(match &output.outcome {
         lash_core::ToolCallOutcome::Success(_) => {

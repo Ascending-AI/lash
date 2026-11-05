@@ -104,17 +104,15 @@ impl NativeResourceContract {
         ))
     }
 
-    /// A refusal becomes an immutable error with null data. Kind/message are
-    /// payload, rather than separate text occurrences (ErrorRef's rule).
+    /// A refusal becomes an error object retaining null failure data.
+    /// Its property records and immutable kind/message payload are priced together.
     pub fn refused(kind: &str, message: &str) -> Option<Self> {
-        let bytes = (kind.len() as u64)
-            .checked_add(message.len() as u64)?
-            .checked_add(LogicalHeldV1::REFERENCE.checked_mul(2)?)?;
-        Some(Self::value(
-            NativeResourceExit::Raised,
-            bytes,
-            NativeResourceOrigin::Immutable,
-        ))
+        crate::error_object::refused_contract(Vec::new(), kind, message)
+    }
+
+    /// Retire partial construction and append the raised error object's events.
+    pub fn with_refusal(self, kind: &str, message: &str) -> Option<Self> {
+        crate::error_object::refused_contract(self.events, kind, message)
     }
 
     /// Convert an input-only query's answer to its exit obligation. This must

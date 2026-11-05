@@ -4,7 +4,7 @@ use super::*;
 use lash_kernel_doc::{
     LogicalHeldV1 as Cost, NativeResourceContract as Contract, NativeResourceEntity as Entity,
     NativeResourceEvent as Event, NativeResourceExit as Exit, NativeResourceHolding as Holding,
-    NativeResourceOrigin as Origin, NativeResourceOwner as Owner, NativeResourceRelease as Release,
+    NativeResourceOrigin as Origin, NativeResourceOwner as Owner,
 };
 
 fn overflow() -> NativeError {
@@ -152,22 +152,18 @@ fn parse_contract(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
         };
         graph.node(&json, &numbers, policy, maps, op == "parse_binary64")
     })();
-    let mut contract = match answer {
-        Ok(output) => Contract {
-            exit: Exit::Returned,
-            output,
-            events: vec![],
-        },
-        Err(error) => {
-            for event in &mut graph.events {
-                if let Event::Entity { release, .. } = event {
-                    *release = Some(Release::Exit);
-                }
-            }
-            refused(error)?
-        }
+    let mut contract = Contract {
+        exit: Exit::Returned,
+        output: immutable(0),
+        events: graph.events,
     };
-    contract.events = graph.events;
+    match answer {
+        Ok(output) => contract.output = output,
+        Err(NativeError::Refused { kind, message }) => {
+            contract = contract.with_refusal(kind, &message).ok_or_else(overflow)?;
+        }
+        Err(error) => return Err(error),
+    }
     // At most one parsed node and one construction continuation per source
     // byte, plus decoded text/token payload and converted number occurrences.
     // Decimal digits need at most three bytes per integer magnitude byte;

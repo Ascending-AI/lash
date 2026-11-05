@@ -251,11 +251,11 @@ fn run_with_options<const L: u64>(
                             if operation.as_str() == "cenote.read_document" {
                                 let path = document_path(&effect.args);
                                 let outcome = if path == "archive" {
-                                    Outcome::Failed(ErrorDatum {
-                                        kind: "tool_failed".into(),
-                                        message: "page unavailable".into(),
-                                        data: Datum::Null,
-                                    })
+                                    Outcome::Failed(ErrorDatum::new(
+                                        "tool_failed".into(),
+                                        "page unavailable".into(),
+                                        Datum::Null,
+                                    ))
                                 } else {
                                     Outcome::Completed(Datum::Record(vec![(
                                         "text".into(),

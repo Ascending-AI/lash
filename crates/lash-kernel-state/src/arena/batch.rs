@@ -1487,7 +1487,7 @@ pub(super) fn raw_body(object: NewObject) -> Result<Body, NativeError> {
         } => Body::Error(ErrorBody {
             kind,
             message,
-            data,
+            data: data.value(),
         }),
     })
 }

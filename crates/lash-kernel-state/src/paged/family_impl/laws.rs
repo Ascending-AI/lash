@@ -479,17 +479,17 @@ fn freezing_rejects_cycles_and_runtime_identities() {
 #[test]
 fn a_paged_frozen_error_keeps_its_receiving_family_at_every_immutable_depth() {
     let (mut heap, pages) = fresh();
-    let datum = lash_kernel_doc::Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
-        kind: "outer".into(),
-        message: "message".into(),
-        data: lash_kernel_doc::Datum::Tuple(vec![lash_kernel_doc::Datum::Error(Box::new(
-            lash_kernel_doc::ErrorDatum {
-                kind: "inner".into(),
-                message: "message".into(),
-                data: lash_kernel_doc::Datum::List(vec![lash_kernel_doc::Datum::Int(1.into())]),
-            },
+    let datum = lash_kernel_doc::Datum::Error(Box::new(lash_kernel_doc::ErrorDatum::new(
+        "outer".into(),
+        "message".into(),
+        lash_kernel_doc::Datum::Tuple(vec![lash_kernel_doc::Datum::Error(Box::new(
+            lash_kernel_doc::ErrorDatum::new(
+                "inner".into(),
+                "message".into(),
+                lash_kernel_doc::Datum::List(vec![lash_kernel_doc::Datum::Int(1.into())]),
+            ),
         ))]),
-    }));
+    )));
     let frozen = heap.freeze_datum(&datum).expect("freeze");
     let a = heap.instantiate(&frozen).expect("first");
     let b = heap.instantiate(&frozen).expect("second");
@@ -497,7 +497,17 @@ fn a_paged_frozen_error_keeps_its_receiving_family_at_every_immutable_depth() {
         let PageValue::Error(error) = value else {
             panic!("outer error")
         };
-        let PageValue::Tuple(tuple) = heap.error_data(&error).expect("outer data") else {
+        let PageValue::Record(object) = heap.error_data(&error).expect("outer object") else {
+            panic!("error object")
+        };
+        let raw = heap
+            .record_get(
+                object,
+                lash_kernel_doc::heap::FieldName::Static(lash_kernel_doc::error_object::RAW),
+            )
+            .unwrap()
+            .unwrap();
+        let PageValue::Tuple(tuple) = raw else {
             panic!("tuple")
         };
         let PageValue::Error(error) = heap
@@ -507,7 +517,17 @@ fn a_paged_frozen_error_keeps_its_receiving_family_at_every_immutable_depth() {
         else {
             panic!("inner error")
         };
-        list(heap.error_data(&error).expect("inner data"))
+        let PageValue::Record(object) = heap.error_data(&error).expect("inner object") else {
+            panic!("error object")
+        };
+        list(
+            heap.record_get(
+                object,
+                lash_kernel_doc::heap::FieldName::Static(lash_kernel_doc::error_object::RAW),
+            )
+            .unwrap()
+            .unwrap(),
+        )
     }
     let a = child(&heap, a);
     let b = child(&heap, b);
@@ -538,14 +558,14 @@ fn an_issued_intent_projects_identical_data_without_allocating_entities() {
     let (mut heap, _) = fresh();
     let datum = Datum::Tuple(vec![
         Datum::Text("request".repeat(32_000)),
-        Datum::Error(Box::new(ErrorDatum {
-            kind: "intent".into(),
-            message: "issued".into(),
-            data: Datum::List(vec![
+        Datum::Error(Box::new(ErrorDatum::new(
+            "intent".into(),
+            "issued".into(),
+            Datum::List(vec![
                 Datum::Int(7.into()),
                 Datum::Record(vec![("args".into(), Datum::Text("x".repeat(100_000)))]),
             ]),
-        })),
+        ))),
     ]);
     let frozen = heap.freeze_datum(&datum).expect("freeze request");
     assert_eq!(heap.frozen_datum(&frozen).expect("report request"), datum);

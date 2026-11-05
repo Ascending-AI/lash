@@ -389,14 +389,14 @@ fn text(value: &str) -> Datum {
 /// The scripted answer to one tool call.
 pub(crate) fn answer(effect: &str, argument: Datum) -> Outcome {
     match effect {
-        "perf.boom" => Outcome::Failed(ErrorDatum {
-            kind: "boom".to_string(),
-            message: match &argument {
+        "perf.boom" => Outcome::Failed(ErrorDatum::new(
+            "boom".to_string(),
+            match &argument {
                 Datum::Text(message) => message.clone(),
                 other => format!("{other:?}"),
             },
-            data: Datum::Null,
-        }),
+            Datum::Null,
+        )),
         "perf.spawn_child" => {
             let task = match field(&argument, "task") {
                 Some(Datum::Text(task)) => task.clone(),

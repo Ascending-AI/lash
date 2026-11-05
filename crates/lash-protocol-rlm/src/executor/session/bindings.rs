@@ -166,7 +166,7 @@ fn datum_fits(datum: &Datum, remaining: &mut usize, depth: usize) -> bool {
             take(
                 remaining,
                 error.kind.len().saturating_add(error.message.len()),
-            ) && datum_fits(&error.data, remaining, depth + 1)
+            ) && datum_fits(error.data(), remaining, depth + 1)
         }
         Datum::FunctionValue(_) => false,
         _ => true,

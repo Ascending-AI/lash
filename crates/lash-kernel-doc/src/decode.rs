@@ -63,6 +63,17 @@ impl DecodeRefusal {
             _ => self.within(part).within(&index.to_string()),
         }
     }
+    fn in_error_data(mut self) -> Self {
+        if let Self::Type { mismatch } = &mut self {
+            let prefix = format!("/{}", crate::error_object::RAW);
+            if let Some(path) = mismatch.path.strip_prefix(&prefix)
+                && (path.is_empty() || path.starts_with('/'))
+            {
+                mismatch.path = path.to_owned();
+            }
+        }
+        self.within("data")
+    }
 }
 
 /// A shallow kind witness, bounded independently of a value's contents.
@@ -221,13 +232,12 @@ impl Decoder<'_> {
             }
             (Type::Float, Datum::Number(token)) => nearest(token),
             (Type::Number, Datum::Number(token)) => self.bare(token),
-            (Type::Error, Datum::Error(error)) => Ok(Datum::Error(Box::new(ErrorDatum {
-                kind: error.kind.clone(),
-                message: error.message.clone(),
-                data: self
-                    .any(&error.data, budget)
-                    .map_err(|e| e.within("data"))?,
-            }))),
+            (Type::Error, Datum::Error(error)) => Ok(Datum::Error(Box::new(ErrorDatum::new(
+                error.kind.clone(),
+                error.message.clone(),
+                self.any(error.data(), budget)
+                    .map_err(DecodeRefusal::in_error_data)?,
+            )))),
             (Type::Enum(members), Datum::Text(text)) => {
                 if members.contains(text) {
                     Ok(datum.clone())
@@ -373,13 +383,12 @@ impl Decoder<'_> {
                     })
                     .collect::<Result<_, DecodeRefusal>>()?,
             ),
-            Datum::Error(error) => Datum::Error(Box::new(ErrorDatum {
-                kind: error.kind.clone(),
-                message: error.message.clone(),
-                data: self
-                    .json(&error.data, budget)
-                    .map_err(|e| e.within("data"))?,
-            })),
+            Datum::Error(error) => Datum::Error(Box::new(ErrorDatum::new(
+                error.kind.clone(),
+                error.message.clone(),
+                self.json(error.data(), budget)
+                    .map_err(DecodeRefusal::in_error_data)?,
+            ))),
             other => other.clone(),
         })
     }
@@ -449,13 +458,12 @@ impl Decoder<'_> {
                     })
                     .collect::<Result<_, DecodeRefusal>>()?,
             ),
-            Datum::Error(error) => Datum::Error(Box::new(ErrorDatum {
-                kind: error.kind.clone(),
-                message: error.message.clone(),
-                data: self
-                    .any(&error.data, budget)
-                    .map_err(|e| e.within("data"))?,
-            })),
+            Datum::Error(error) => Datum::Error(Box::new(ErrorDatum::new(
+                error.kind.clone(),
+                error.message.clone(),
+                self.any(error.data(), budget)
+                    .map_err(DecodeRefusal::in_error_data)?,
+            ))),
             other => other.clone(),
         })
     }
@@ -504,10 +512,6 @@ impl DecodeRefusal {
             Self::Type { mismatch } => ("effect_result", diagnostic_datum(mismatch)?),
             _ => ("decode_refused", diagnostic_datum(self)?),
         };
-        Ok(ErrorDatum {
-            kind: kind.into(),
-            message: kind.into(),
-            data,
-        })
+        Ok(ErrorDatum::new(kind.into(), kind.into(), data))
     }
 }

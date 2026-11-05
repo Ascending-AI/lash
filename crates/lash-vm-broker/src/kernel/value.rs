@@ -394,6 +394,14 @@ fn json_value_type(value: &serde_json::Value) -> lash_kernel_value::Type {
     }
 }
 
+/// A tool or read failure raised into model code. The typed failure stays
+/// in `data`; TypeScript sees enumerable `code` and `message` properties
+/// and a nonenumerable `data` property holding that original failure.
+pub fn tool_failed(failure: &lash_protocol_types::ToolFailure) -> lash_kernel_doc::ErrorDatum {
+    let evidence = datum_from_json(&failure.to_json_value().to_string()).unwrap_or(Datum::Null);
+    lash_kernel_doc::ErrorDatum::new("tool_failed".into(), failure.message.clone(), evidence)
+}
+
 /// Convert an admitted read answer to the kernel boundary. Provider panics
 /// leave through the owner channel, never through a guest error value.
 pub fn read_answer(
@@ -401,12 +409,13 @@ pub fn read_answer(
     answer: Result<serde_json::Value, lash_protocol_types::ReadFailure>,
 ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_protocol_types::ReadPanic> {
     use lash_protocol_types::ReadFailure;
-    let error =
-        |kind: &str, message: String, data: serde_json::Value| lash_kernel_doc::ErrorDatum {
-            kind: kind.into(),
+    let error = |kind: &str, message: String, data: serde_json::Value| {
+        lash_kernel_doc::ErrorDatum::new(
+            kind.into(),
             message,
-            data: datum_from_json(&data.to_string()).unwrap_or(Datum::Null),
-        };
+            datum_from_json(&data.to_string()).unwrap_or(Datum::Null),
+        )
+    };
     Ok(match answer {
         Ok(value) => datum_from_tool_json(&value, expected).map_err(|refusal| {
             refusal.error_datum().unwrap_or_else(|failure| {
@@ -421,16 +430,16 @@ pub fn read_answer(
         Err(ReadFailure::Arguments(message)) => {
             Err(error("tool_arguments", message, serde_json::Value::Null))
         }
-        Err(ReadFailure::Tool(failure)) => Err(error(
+        Err(ReadFailure::Tool(failure)) => {
+            let mut error = tool_failed(&failure);
             if failure.code == "tool_call_limit" {
-                "tool_call_limit"
-            } else {
-                "tool_failed"
-            },
-            failure.message.clone(),
-            failure.to_json_value(),
+                error.kind = "tool_call_limit".into();
+            }
+            Err(error)
+        }
+        Err(ReadFailure::Reader { message, data }) => Err(tool_failed(
+            &lash_protocol_types::ToolFailure::new("read_failed", message).with_raw(data),
         )),
-        Err(ReadFailure::Reader { message, data }) => Err(error("tool_failed", message, data)),
         Err(ReadFailure::Cancelled) => Err(error(
             super::EFFECT_CANCELLED,
             "the read was stopped with its owner".into(),

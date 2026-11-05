@@ -270,15 +270,15 @@ py.gather	9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167	task	
 py.sleep	1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48	task	yield; perform import 2	true	0	false	512	nests an action that is not a library call
 py.gather.options	b997f5567a697759d5708b4600a6629f1cca66d1cf9a1cf39ba949591340f638	closed	-	false	0	true	sum(4, size(kwargs))	generated
 py.json_dump	4ddc9f001d712f54f8f2be96d75df69addc656eeb1165cd9c66cee3677ca16a6	callback	apply prepare	false	1	false	sum(16, deep_size(value), deep_size(options), size(result))	segment of 1 sites
-py.value_attribute	0cddd6740e4cba74c8420278fbfa760182dd3e96c2f8a4934e75c28d7caafe39	closed	-	false	0	false	32	generated
-py.format.attribute	124554e9f4b821d65de9f000e45cd4143fbfb4aaf20715aff996fa01942790d5	closed	-	true	0	false	sum(8, size(name))	generated
-py.method.format	8629523e9553c11e2a586b519956ec62f88ed2c4602ee096211312d6cf06220c	callback	apply render	true	1	false	sum(16, size(self), deep_size(args), deep_size(keywords), size(result))	segment of 1 sites
-py.method.format_map	c58478f198fed43e369a86b1b1e649911edca6dd14c9083edac7b2d7802c0534	callback	invoke py.method.format	true	0	false	sum(8, size(self), deep_size(mapping), size(result))	segment of 1 sites
-py.attribute_names	226c2fbdad5be0224843e4d45dcf6b0f8aba80678ac6199846401459d1e05e04	closed	-	true	0	false	sum(128, size(result))	generated
-py.dir	93efb4cc7526035740466082205bfd0e50fd1e42be80ad66e0a08d33b5d4a5a9	closed	-	true	0	false	statements	generated
-py.attribute	08938a628eb782d8b6cee05db283fb37bc0a6e1516077f867114a5929ae94bf3	closed	-	true	110	false	sum(1024, size(name))	generated
-py.getattr	3c3ffeb45191fb6884377395b16f63e05831d4e6fc3a0a08fefc2870d749f9a6	closed	-	true	0	false	sum(12, size(name))	generated
-py.hasattr	330e4541eacd59afd7bb724037ae6e1909ce52e3c287ee4872d5eec8789ebddd	closed	-	true	0	false	sum(12, size(name))	generated
+py.value_attribute	2f395813822d7fb382fe090a5d587a3d22ed0e26315d4a351f1259efb4da9d1a	closed	-	false	0	false	32	generated
+py.format.attribute	ec5753ee6057974d2ad7af4075991684f882ca3f4b3cc5950c4667b8c5763319	closed	-	true	0	false	sum(8, size(name))	generated
+py.method.format	ce096affdd73b2ffbd330c3d3f659849a0c9b67e44a1aadc1dfab6123761f788	callback	apply render	true	1	false	sum(16, size(self), deep_size(args), deep_size(keywords), size(result))	segment of 1 sites
+py.method.format_map	205acaf8adb199ff3956a3015b8bbff7a7770677659385d45e04820450a5295b	callback	invoke py.method.format	true	0	false	sum(8, size(self), deep_size(mapping), size(result))	segment of 1 sites
+py.attribute_names	1522363c8d8243171b8a7445dea9fc0fbe0d3501bc2e864a63b85053365f6219	closed	-	true	0	false	sum(128, size(result))	generated
+py.dir	0b2292edc36fca00f1d4a25603397c049771673902c462fc663d1cc8e36fd459	closed	-	true	0	false	statements	generated
+py.attribute	382eafffcd7938a773f27f0c89e0cc22ca04a3ccccd803d83c5b09dbed3c66c5	closed	-	true	110	false	sum(1024, size(name))	generated
+py.getattr	9d0bf230a3ffdbec01e45217602c4bed4f2ecb18dda7b63c5abee236d92e87e1	closed	-	true	0	false	sum(12, size(name))	generated
+py.hasattr	2cc8e26322ebdd0640e049e7580edd54ea7fd248bc164af5dc4dc3a31e5ffce1	closed	-	true	0	false	sum(12, size(name))	generated
 py.math.acos	82321a42c8b1f0cd7ec0099d7625105a0db15f53a1b5231b2dbdd3018446801a	closed	-	false	0	false	32	generated
 py.math.acosh	cf92db901541ad48eb3fdba43b0602789d6d2a1fa9f1e03272760edb0d904dad	closed	-	false	0	false	32	generated
 py.math.asin	0a3b2e557fbe057904c996bf5d8ba295db2ad0c58ca70f403a77bc470c96b00e	closed	-	false	0	false	32	generated

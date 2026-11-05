@@ -175,7 +175,7 @@ pub(crate) fn decode(heap: &mut PagedHeap, datum: Datum) -> PageValue {
         }
         Datum::Error(v) => {
             let mut error = ErrorRef::new(&v.kind, &v.message);
-            error.data = Payload::Resident(Arc::new(decode(heap, v.data)));
+            error.data = Payload::Resident(Arc::new(decode(heap, v.data().clone())));
             heap.canonical_value(PageValue::Error(Arc::new(error)))
                 .unwrap()
         }

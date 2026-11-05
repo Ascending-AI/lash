@@ -25,7 +25,6 @@ use crate::compile::{
     StmtId,
 };
 use crate::interface::{Bound, EffectRequest, Host, Request, WaitId};
-use lash_kernel_doc::heap::ErrorRef;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{PhaseRecord, WaitKindRecord, WaitPhase, WaitRecord};
@@ -45,20 +44,22 @@ pub(super) enum Target {
     ),
 }
 
-/// The raise a `cancel` delivers, in page form (`K-TASK-017`).
-fn cancelled() -> PageValue {
-    PageValue::Error(Arc::new(ErrorRef::new(
-        "cancelled",
-        "the task was cancelled",
-    )))
-}
-
 /// A task's own `cancel` of itself raises at once.
 pub(in crate::machine) fn cancelled_here() -> Interrupt {
     Interrupt::refused("cancelled", "the task was cancelled")
 }
 
 impl KernelMachine {
+    /// The raise a `cancel` delivers, using the shared guest error object.
+    fn cancelled(&mut self) -> Result<PageValue, Halt> {
+        let value = self.thrown(super::Refusal {
+            kind: "cancelled".into(),
+            message: "the task was cancelled".into(),
+            data: None,
+        })?;
+        self.page_form(&value)
+    }
+
     /// A `join` on `handle`: what it gives when the task has ended
     /// (`K-TASK-007`, `K-TASK-009`), or the task it waits on.
     pub(in crate::machine) fn join_one(
@@ -1117,11 +1118,11 @@ impl KernelMachine {
                 (None, Some(results)) if !results.is_empty() => {
                     let errors = results.into_iter().filter_map(Result::err).collect();
                     let errors = self.new_object(NewObject::List(errors))?;
-                    Some(Err(self.arena.borrow_mut().error(
-                        "all_failed",
-                        "every task of the `join any` failed",
-                        errors,
-                    )))
+                    Some(Err(self
+                        .arena
+                        .borrow_mut()
+                        .error("all_failed", "every task of the `join any` failed", errors)
+                        .map_err(|error| super::fault(&error.to_string()))?))
                 }
                 _ => None,
             },
@@ -1188,7 +1189,7 @@ impl KernelMachine {
                     lash_kernel_doc::kernel_internals::wait_number(wait),
                     self.heap.pages(),
                 )?;
-                let incoming = Incoming::Raise(cancelled());
+                let incoming = Incoming::Raise(self.cancelled()?);
                 self.logical_incoming(target, &incoming)?;
                 let exe = Arc::clone(&self.exe);
                 let requeue = then_yields(&exe, self.frame(target)?);
@@ -1210,7 +1211,7 @@ impl KernelMachine {
         let Some(wait) = self.task(target)?.wait() else {
             // The raise replaces what a ready task resumes with; a
             // delivered one still takes its turn first (`K-TASK-005`).
-            let incoming = Incoming::Raise(cancelled());
+            let incoming = Incoming::Raise(self.cancelled()?);
             self.logical_incoming(target, &incoming)?;
             let ready = self.task(target)?;
             let requeue = ready.owes_turn();
@@ -1253,7 +1254,7 @@ impl KernelMachine {
                 }
             }
         }
-        let incoming = Incoming::Raise(cancelled());
+        let incoming = Incoming::Raise(self.cancelled()?);
         self.logical_incoming(target, &incoming)?;
         self.task(target)?.wake(incoming, requeue);
         self.ready.push_back(target)?;

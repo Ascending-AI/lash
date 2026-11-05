@@ -266,10 +266,12 @@ impl NativeFunction for LargeError {
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let kind = call.new.text(&"k".repeat(1 << 20));
         let message = call.new.text(&"m".repeat(1 << 20));
+        let data =
+            lash_kernel_doc::error_object::native(call.args, call.new, kind, message, Value::Null)?;
         Err(NativeError::Raised(call.new.allocate(NewObject::Error {
             kind,
             message,
-            data: Value::Null,
+            data,
         })))
     }
 }
@@ -529,14 +531,14 @@ fn answer_effect(effect: &str, args: &[Datum]) -> Outcome {
             Datum::Text(text) => Outcome::Completed(Datum::Number(NumberToken::new(text).unwrap())),
             other => Outcome::Completed(other),
         },
-        _ => Outcome::Failed(ErrorDatum {
-            kind: "boom".to_string(),
-            message: match &first {
+        _ => Outcome::Failed(ErrorDatum::new(
+            "boom".to_string(),
+            match &first {
                 Datum::Text(text) => text.clone(),
                 _ => effect.to_string(),
             },
-            data: first,
-        }),
+            first,
+        )),
     }
 }
 

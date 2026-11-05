@@ -23,11 +23,11 @@ pub(crate) struct Raised {
 
 impl Raised {
     pub(crate) fn into_datum(self) -> Datum {
-        Datum::Error(Box::new(ErrorDatum {
-            kind: self.kind.to_string(),
-            message: self.message,
-            data: Datum::Null,
-        }))
+        Datum::Error(Box::new(ErrorDatum::new(
+            self.kind.to_string(),
+            self.message,
+            Datum::Null,
+        )))
     }
 }
 
@@ -345,6 +345,21 @@ pub(crate) fn view_nested_size(
     if !matches!(value, Value::Tuple(_) | Value::Error(_)) {
         return Ok(0);
     }
+    if let Value::Error(handle) = value {
+        let Body::Error(error) = arena.body(*handle)? else {
+            return Err(NativeError::Malformed("an error handle names another body"));
+        };
+        let Value::Record(object) = error.data else {
+            return Err(NativeError::Malformed("an error has no object"));
+        };
+        let raw = arena.entries(object)?.as_chunks::<2>().0.iter().find_map(|[key, value]| {
+            matches!(key, Value::Text(name) if name.as_str() == lash_kernel_doc::error_object::RAW).then_some(value)
+        }).ok_or(NativeError::Malformed("an error has no raw data"))?;
+        return Ok(match raw {
+            Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => 1,
+            _ => view_size(arena, raw)?.saturating_add(view_nested_size(arena, raw)?),
+        });
+    }
     let mut total = 0u64;
     immutable_members(arena, value, &mut |member| {
         let amount = match member {
@@ -441,11 +456,11 @@ fn copy(
             _ => return Err(NativeError::Malformed("a handle names another body").into()),
         },
         Value::Error(error) => match arena.body(*error)? {
-            Body::Error(error) => Datum::Error(Box::new(ErrorDatum {
-                kind: text_of(arena, &error.kind)?,
-                message: text_of(arena, &error.message)?,
-                data: copy(arena, limit, &error.data, budget, path)?,
-            })),
+            Body::Error(error) => Datum::Error(Box::new(ErrorDatum::new(
+                text_of(arena, &error.kind)?,
+                text_of(arena, &error.message)?,
+                copy(arena, limit, &error.data, budget, path)?,
+            ))),
             _ => return Err(NativeError::Malformed("an error names another body").into()),
         },
         Value::Tuple(tuple) => Datum::Tuple(
@@ -616,11 +631,11 @@ fn copy_page(
         PageValue::Timestamp(t) => Datum::Timestamp(t.clone()),
         PageValue::Function(n) => Datum::Function(**n),
         PageValue::Handle(h) => Datum::Handle(h.as_ref().clone()),
-        PageValue::Error(e) => Datum::Error(Box::new(ErrorDatum {
-            kind: text_copy(heap, &e.kind)?,
-            message: text_copy(heap, &e.message)?,
-            data: copy_page(heap, &heap.error_data(e)?, budget, path)?,
-        })),
+        PageValue::Error(e) => Datum::Error(Box::new(ErrorDatum::new(
+            text_copy(heap, &e.kind)?,
+            text_copy(heap, &e.message)?,
+            copy_page(heap, &heap.error_data(e)?, budget, path)?,
+        ))),
         PageValue::Tuple(t) => {
             let mut items = Vec::new();
             for index in 0..t.summary.len {

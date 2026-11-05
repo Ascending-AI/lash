@@ -342,7 +342,7 @@ impl CellObservation {
             RunError::Uncaught { error: value, .. } => {
                 if let Datum::Error(error) = &value
                     && error.kind == "unbound_variable"
-                    && let Datum::Text(binding) = &error.data
+                    && let Datum::Text(binding) = error.raw()
                     && let Some(why) = not_carried.get(&Name::new(binding.as_str()))
                 {
                     Self::BindingNotCarried {
@@ -647,7 +647,7 @@ pub(crate) fn datum_text(value: &Datum, model: lash_kernel_lib::JsonModel) -> St
     match value {
         Datum::Error(error)
             if error.kind == crate::executor::TOOL_FAILED
-                && let Datum::Record(fields) = &error.data
+                && let Datum::Record(fields) = error.raw()
                 && let Some(Datum::Text(code)) = fields
                     .iter()
                     .find_map(|(name, value)| (name == "code").then_some(value)) =>

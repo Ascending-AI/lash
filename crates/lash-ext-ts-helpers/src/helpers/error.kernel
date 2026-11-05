@@ -71,7 +71,6 @@ set error_items = invoke ts.iterate(builtin_arg_0)
   let attributes = {}
   let properties = {}
   let data = {classes: [name, "Error"], properties: properties, nonEnumerable: attributes}
-  if same(kind(message), "absent") {} else { set properties.message = text set attributes.message = true }
   if same(kind(options), "record") {
     if record.contains(options, "cause") { set properties.cause = options.cause set attributes.cause = true }
   }
@@ -112,8 +111,8 @@ errors "type_error", "RangeError"
 charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
-  if same(kind(value.data), "record") {
-    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "TypeError") }
+  if same(kind(value.object), "record") {
+    if record.contains(value.object, "classes") { return list.contains(value.object.classes, "TypeError") }
   }
   let name = invoke ts.error.name(value)
   return same(name, "TypeError")
@@ -134,8 +133,8 @@ errors "type_error", "RangeError"
 charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
-  if same(kind(value.data), "record") {
-    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "RangeError") }
+  if same(kind(value.object), "record") {
+    if record.contains(value.object, "classes") { return list.contains(value.object.classes, "RangeError") }
   }
   let name = invoke ts.error.name(value)
   return same(name, "RangeError")
@@ -156,8 +155,8 @@ errors "type_error", "RangeError"
 charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
-  if same(kind(value.data), "record") {
-    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "SyntaxError") }
+  if same(kind(value.object), "record") {
+    if record.contains(value.object, "classes") { return list.contains(value.object.classes, "SyntaxError") }
   }
   let name = invoke ts.error.name(value)
   return same(name, "SyntaxError")
@@ -178,8 +177,8 @@ errors "type_error", "RangeError"
 charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
-  if same(kind(value.data), "record") {
-    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "ReferenceError") }
+  if same(kind(value.object), "record") {
+    if record.contains(value.object, "classes") { return list.contains(value.object.classes, "ReferenceError") }
   }
   let name = invoke ts.error.name(value)
   return same(name, "ReferenceError")
@@ -200,8 +199,8 @@ errors "type_error", "RangeError"
 charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
-  if same(kind(value.data), "record") {
-    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "URIError") }
+  if same(kind(value.object), "record") {
+    if record.contains(value.object, "classes") { return list.contains(value.object.classes, "URIError") }
   }
   let name = invoke ts.error.name(value)
   return same(name, "URIError")
@@ -222,8 +221,8 @@ errors "type_error", "RangeError"
 charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
-  if same(kind(value.data), "record") {
-    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "EvalError") }
+  if same(kind(value.object), "record") {
+    if record.contains(value.object, "classes") { return list.contains(value.object.classes, "EvalError") }
   }
   let name = invoke ts.error.name(value)
   return same(name, "EvalError")
@@ -244,8 +243,8 @@ errors "type_error", "RangeError"
 charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
-  if same(kind(value.data), "record") {
-    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "AggregateError") }
+  if same(kind(value.object), "record") {
+    if record.contains(value.object, "classes") { return list.contains(value.object.classes, "AggregateError") }
   }
   let name = invoke ts.error.name(value)
   return same(name, "AggregateError")

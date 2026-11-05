@@ -1169,11 +1169,11 @@ impl KernelMachine {
         payload: &impl serde::Serialize,
     ) -> Eval<T> {
         let data = lash_kernel_doc::diagnostic_datum(payload).map_err(|e| fault(&e.to_string()))?;
-        let datum = lash_kernel_doc::Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
-            kind: kind.into(),
-            message: kind.into(),
+        let datum = lash_kernel_doc::Datum::Error(Box::new(lash_kernel_doc::ErrorDatum::new(
+            kind.into(),
+            kind.into(),
             data,
-        }));
+        )));
         self.raise_datum(datum)
     }
 
@@ -1556,7 +1556,7 @@ fn crossed_bytes(datum: &lash_kernel_doc::Datum) -> u64 {
             .map(|(key, value)| crossed_bytes(key) + crossed_bytes(value))
             .sum(),
         Datum::Record(fields) => fields.iter().map(|(_, value)| crossed_bytes(value)).sum(),
-        Datum::Error(error) => crossed_bytes(&error.data),
+        Datum::Error(error) => crossed_bytes(error.data()),
         _ => 0,
     }
 }

@@ -162,14 +162,14 @@ fn answer(request: &Request) -> (WaitId, Outcome) {
                     effect.args.first().cloned().unwrap_or(Datum::Null)
                 };
             let outcome = if crate::tests::linked::operation(&effect.use_).as_str() == "host.boom" {
-                Outcome::Failed(ErrorDatum {
-                    kind: "boom".to_string(),
-                    message: match &argument {
+                Outcome::Failed(ErrorDatum::new(
+                    "boom".to_string(),
+                    match &argument {
                         Datum::Text(text) => text.clone(),
                         other => format!("{other:?}"),
                     },
-                    data: Datum::Null,
-                })
+                    Datum::Null,
+                ))
             } else {
                 Outcome::Completed(argument)
             };

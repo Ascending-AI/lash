@@ -548,6 +548,157 @@ async fn a_tool_failure_keeps_its_code_and_plain_message_in_feedback() {
     );
 }
 
+/// FIG-7638: caught tool and read failures expose their code and message
+/// as enumerable own properties without losing the provider's raw evidence.
+#[tokio::test]
+async fn caught_tool_and_read_errors_have_enumerable_code_and_message() {
+    use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
+
+    struct FailedCalls;
+
+    impl FailedCalls {
+        fn definitions() -> [lash_vocabulary::tool_contract::ToolDefinition; 2] {
+            [
+                definition("failed-tool", "failures.tool"),
+                definition("failed-read", "failures.read")
+                    .with_execution_policy(lash_core::ExecutionPolicy::Read),
+            ]
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl lash_core::ToolProvider for FailedCalls {
+        fn tool_manifests(
+            &self,
+            _config: &lash_core::OwnerConfigView,
+        ) -> Result<
+            Vec<lash_vocabulary::tool_contract::ToolManifest>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
+            Ok(Self::definitions().map(|tool| tool.manifest()).into())
+        }
+
+        fn resolve_contract(
+            &self,
+            name: &str,
+            _config: &lash_core::OwnerConfigView,
+        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
+            Self::definitions()
+                .into_iter()
+                .find(|tool| tool.manifest().tool() == name)
+                .map(|tool| Arc::new(tool.contract()))
+        }
+
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+            assert_eq!(call.name(), "failures.tool", "the read uses its reader");
+            lash_core::ToolOutcome::failure(
+                lash_core::ToolFailure::new("admission_denied", "Choose another block")
+                    .with_raw(serde_json::json!({ "block": "locked" })),
+            )
+            .into()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl lash_core::ToolReads for FailedCalls {
+        async fn read(
+            &self,
+            _call: lash_core::ReadCall<'_>,
+        ) -> Result<serde_json::Value, lash_core::ReadError> {
+            Err(lash_core::ReadError::new("Document is unavailable")
+                .with_data(serde_json::json!({ "document": "private" })))
+        }
+    }
+
+    let host = open_host().await;
+    let (provider, catalog) = crate::testing::with_finish(Arc::new(FailedCalls));
+    let context = |cell: &str| {
+        lash_core::testing::TestExecutionContextBuilder::new(host.ports())
+            .provider_registration(provider.clone().with_reads(Arc::new(FailedCalls)))
+            .tool_catalog(catalog.clone())
+            .runtime_parent_invocation(lash_core::testing::exec_code_invocation(
+                SESSION,
+                TURN,
+                0,
+                0,
+                "exec-code",
+                cell,
+            ))
+            .build()
+            .into_runtime()
+            .with_session_pages(host.session_pages())
+    };
+    let response = run_cell(
+        &mut typescript_state(),
+        context("ts-errors"),
+        &typescript_services(),
+        r#"const inspect = (e) => ({
+    code: e.code ?? null,
+    message: e.message,
+    keys: Object.keys(e),
+    json: JSON.stringify(e),
+    raw: e.data.raw
+});
+let tool = null;
+let read = null;
+try { await failures.tool({}); } catch (e) { tool = inspect(e); }
+try { await failures.read({}); } catch (e) { read = inspect(e); }
+await control.finish({ tool, read });"#,
+    )
+    .await;
+    assert_eq!(
+        finish_of(&response),
+        serde_json::json!({
+            "tool": {
+                "code": "admission_denied",
+                "message": "Choose another block",
+                "keys": ["code", "message"],
+                "json": "{\"code\":\"admission_denied\",\"message\":\"Choose another block\"}",
+                "raw": { "block": "locked" }
+            },
+            "read": {
+                "code": "read_failed",
+                "message": "Document is unavailable",
+                "keys": ["code", "message"],
+                "json": "{\"code\":\"read_failed\",\"message\":\"Document is unavailable\"}",
+                "raw": { "document": "private" }
+            }
+        })
+    );
+    let dialect = CellDialect::python();
+    let response = run_cell(
+        &mut crate::testing::session_state(&dialect),
+        context("py-errors"),
+        &cell_services(&dialect, python_workers()),
+        r#"def inspect(e):
+    return {"code": e.code, "message": e.message, "raw": e.data["raw"]}
+tool = None
+read = None
+try:
+    await failures.tool({})
+except Exception as e:
+    tool = inspect(e)
+try:
+    await failures.read({})
+except Exception as e:
+    read = inspect(e)
+try:
+    raise ValueError("guest argument")
+except ValueError as e:
+    guest = {"code": e.code, "message": e.message, "args": list(e.args)}
+await control.finish({"tool": tool, "read": read, "guest": guest})"#,
+    )
+    .await;
+    assert_eq!(
+        finish_of(&response),
+        serde_json::json!({
+            "tool": { "code": "admission_denied", "message": "Choose another block", "raw": { "block": "locked" } },
+            "read": { "code": "read_failed", "message": "Document is unavailable", "raw": { "document": "private" } },
+            "guest": { "code": "ValueError", "message": "guest argument", "args": ["guest argument"] }
+        })
+    );
+}
+
 fn finish_of(response: &lash_core::ExecResponse) -> serde_json::Value {
     assert!(
         response.error().is_none(),
@@ -980,11 +1131,11 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
         ("unbound_variable", "other", false),
         ("other_error", "format", false),
     ] {
-        let value = lash_kernel_doc::Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
-            kind: kind.to_owned(),
-            message: "original diagnostic".to_owned(),
-            data: lash_kernel_doc::Datum::Text(binding.to_owned()),
-        }));
+        let value = lash_kernel_doc::Datum::Error(Box::new(lash_kernel_doc::ErrorDatum::new(
+            kind.to_owned(),
+            "original diagnostic".to_owned(),
+            lash_kernel_doc::Datum::Text(binding.to_owned()),
+        )));
         let observation = crate::feedback::CellObservation::of_run_error(
             lash_kernel_vm::RunError::Uncaught {
                 error: value.clone(),

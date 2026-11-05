@@ -513,7 +513,7 @@ fn field_facet(target: &Type, field: &str) -> Type {
         },
         Type::Error => match field {
             "kind" | "message" => Type::Text,
-            "data" => Type::Any,
+            "data" | "object" => Type::Any,
             _ => Type::Absent,
         },
         _ => Type::Any,

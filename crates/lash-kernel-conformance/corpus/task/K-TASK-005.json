@@ -279,7 +279,39 @@
                 "failed": {
                   "kind": "test",
                   "message": "no",
-                  "data": "null"
+                  "data": {
+                    "record": [
+                      [
+                        "properties",
+                        {
+                          "record": [
+                            [
+                              "code",
+                              {
+                                "text": "test"
+                              }
+                            ],
+                            [
+                              "message",
+                              {
+                                "text": "no"
+                              }
+                            ]
+                          ]
+                        }
+                      ],
+                      [
+                        "nonEnumerable",
+                        {
+                          "record": []
+                        }
+                      ],
+                      [
+                        "__lash_raw",
+                        "null"
+                      ]
+                    ]
+                  }
                 }
               }
             },

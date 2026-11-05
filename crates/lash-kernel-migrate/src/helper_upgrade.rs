@@ -182,7 +182,7 @@ pub fn check_upgrade_data(
                 }
                 data.extend(fields.iter().map(|(_, value)| value));
             }
-            D::Error(error) => data.push(&error.data),
+            D::Error(error) => data.push(error.data()),
             _ => {}
         }
     }

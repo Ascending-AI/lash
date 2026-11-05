@@ -83,10 +83,11 @@ pub mod document {
         StatementRuleViolation, Stmt, Survivor, SymbolicNative, TableView, TaskId, TextView,
         Timestamp, TryStmt, TypeDef, TypeMember, TypeMismatch, ValidatedFunctions, Value,
         ValueKind, WorkCounter, WrittenSignature, arena, check_declarations, check_statement,
-        core_support, document_work, heap, parse_definition, parse_definition_with_limits,
-        parse_document, parse_document_with_limits, plan, print_definition, print_document,
-        require_entry_signature, required_declarations, scalar, validate_definition,
-        validate_definition_with_limits, validate_document, validate_document_with_limits,
+        core_support, document_work, error_object, heap, parse_definition,
+        parse_definition_with_limits, parse_document, parse_document_with_limits, plan,
+        print_definition, print_document, require_entry_signature, required_declarations, scalar,
+        validate_definition, validate_definition_with_limits, validate_document,
+        validate_document_with_limits,
     };
     pub use lash_kernel_value::HelperUnavailableReason;
     pub use lash_kernel_value::claims::{HelperGeneration, HelperRequirements};

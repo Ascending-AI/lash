@@ -831,13 +831,16 @@ impl KernelMachine {
     }
 
     /// The value a refusal raises: its error, built in the arena.
-    pub(super) fn thrown(&mut self, refusal: Refusal) -> Box<Value> {
+    pub(super) fn thrown(&mut self, refusal: Refusal) -> Result<Box<Value>, Halt> {
         let mut arena = self.arena.borrow_mut();
         let data = match &refusal.data {
             Some(text) => arena.text(text),
             None => Value::Null,
         };
-        Box::new(arena.error(&refusal.kind, &refusal.message, data))
+        arena
+            .error(&refusal.kind, &refusal.message, data)
+            .map(Box::new)
+            .map_err(|error| fault(&error.to_string()))
     }
 
     /// The value an interrupt `task` meets raises, or the halt it is.
@@ -848,7 +851,7 @@ impl KernelMachine {
     ) -> Result<Box<Value>, Halt> {
         let value = match interrupt {
             Interrupt::Raise(value) => value,
-            Interrupt::Refuse(refusal) => self.thrown(*refusal),
+            Interrupt::Refuse(refusal) => self.thrown(*refusal)?,
             Interrupt::Halt(halt) => return Err(*halt),
         };
         self.raise_born(task)?;

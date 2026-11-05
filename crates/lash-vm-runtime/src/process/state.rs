@@ -494,9 +494,9 @@ impl KernelRunOutput {
 
 /// A refused effect's error, as the machine is handed it.
 pub(crate) fn refused(kind: &str, message: String) -> OutcomeWire {
-    OutcomeWire::Failed(lash_kernel_doc::ErrorDatum {
-        kind: kind.to_owned(),
+    OutcomeWire::Failed(lash_kernel_doc::ErrorDatum::new(
+        kind.to_owned(),
         message,
-        data: Datum::Null,
-    })
+        Datum::Null,
+    ))
 }

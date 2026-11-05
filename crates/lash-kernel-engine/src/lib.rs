@@ -319,11 +319,11 @@ impl Engine {
             }
             let outcome = match answer.result {
                 Ok(value) => Outcome::Completed(value.into_data()),
-                Err(error) => Outcome::Failed(ErrorDatum {
-                    kind: error.kind,
-                    message: error.message,
-                    data: error.data.into_data(),
-                }),
+                Err(error) => Outcome::Failed(ErrorDatum::new(
+                    error.kind,
+                    error.message,
+                    error.data.into_data(),
+                )),
             };
             machine
                 .deliver(answer.id.wait, outcome)

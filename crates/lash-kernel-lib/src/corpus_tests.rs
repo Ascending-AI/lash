@@ -133,7 +133,19 @@ fn nested_size(value: &Value, heap: &Bench) -> u64 {
     if !matches!(value, Value::Tuple(_) | Value::Error(_)) {
         return 0;
     }
-    members(value, heap)
+    let members = if let Value::Error(handle) = value {
+        let data = error_parts(*handle, heap).2;
+        let Value::Record(object) = data else {
+            panic!("error object")
+        };
+        let semantics = heap.arena().semantics();
+        vec![semantics.entries(object).unwrap().as_chunks::<2>().0.iter().find_map(|[key, value]| {
+            matches!(key, Value::Text(name) if name.as_str() == lash_kernel_doc::error_object::RAW).then_some(*value)
+        }).unwrap()]
+    } else {
+        members(value, heap)
+    };
+    members
         .into_iter()
         .map(|value| match value {
             Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => 1,

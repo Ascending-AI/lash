@@ -36,7 +36,7 @@ The kernel is one small language with one meaning. It replaces the ECMAScript-sh
 | tuple | Immutable, fixed length. |
 | list, map, set, record | Mutable heap objects with identity. Map and set keep insertion order. |
 | closure | Captures variables by reference: a closure and its defining scope share the variable. |
-| error | `kind`, `message`, `data`. |
+| error | Text `kind` and `message`, a canonical `object` payload with enumerable code/message properties, and retained original `data`. |
 | task handle | A task started by `spawn` (§2.3). It holds the task's state and, once the task ends, its result or error. Joining it twice gives the same answer. |
 | function reference | A closed declared function of the document, by name. It is data: it captures nothing and may be passed to an effect. |
 | handle | An opaque typed reference carried as data. |

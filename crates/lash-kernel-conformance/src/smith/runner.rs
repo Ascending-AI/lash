@@ -82,11 +82,7 @@ impl Host for World {
 }
 
 fn error(data: Datum) -> ErrorDatum {
-    ErrorDatum {
-        kind: "scripted".into(),
-        message: "scripted failure".into(),
-        data,
-    }
+    ErrorDatum::new("scripted".into(), "scripted failure".into(), data)
 }
 
 fn fault(error: impl std::fmt::Display) -> HarnessError {

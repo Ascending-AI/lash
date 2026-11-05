@@ -50,16 +50,7 @@ pub(super) fn error(args: Args<'_>) -> Result<Contract, NativeError> {
         let kind = field(nth(args.values(), 0)?)?;
         let message = field(nth(args.values(), 1)?)?;
         let data = args.get(2).copied().unwrap_or(Value::Absent);
-        let data_bytes = Cost::native_local(args, &data)?;
-        let bytes = args
-            .text(kind)?
-            .ok_or_else(overflow)?
-            .len()
-            .checked_add(args.text(message)?.ok_or_else(overflow)?.len())
-            .and_then(|bytes| bytes.checked_add(Cost::REFERENCE))
-            .and_then(|bytes| bytes.checked_add(data_bytes))
-            .ok_or_else(overflow)?;
-        Ok(Contract::value(Exit::Returned, bytes, Origin::Immutable))
+        lash_kernel_doc::error_object::native_contract(args, *kind, *message, data)
     })();
     match answer {
         Err(NativeError::Refused { kind, message }) => {

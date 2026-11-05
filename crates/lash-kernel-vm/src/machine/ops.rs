@@ -205,12 +205,16 @@ impl KernelMachine {
     }
 
     /// An error value of `kind` and `message`, built in the arena.
-    pub(super) fn error_value(&mut self, kind: &'static str, message: impl Into<String>) -> Value {
-        *self.thrown(Refusal {
+    pub(super) fn error_value(
+        &mut self,
+        kind: &'static str,
+        message: impl Into<String>,
+    ) -> Eval<Value> {
+        Ok(*self.thrown(Refusal {
             kind: kind.into(),
             message: message.into(),
             data: None,
-        })
+        })?)
     }
 
     /// A transient census root outside the frame that returned it.
@@ -333,7 +337,11 @@ impl KernelMachine {
                 match field.name.as_str() {
                     "kind" => parts.kind,
                     "message" => parts.message,
-                    "data" => parts.data,
+                    "object" => parts.data,
+                    "data" => self.field_value(
+                        parts.data,
+                        &crate::compile::Field::uncached(lash_kernel_doc::error_object::RAW),
+                    )?,
                     _ => Value::Absent,
                 }
             }
@@ -896,10 +904,10 @@ impl KernelMachine {
                 Some(Value::ObjectRef(object)) => {
                     match self.in_arena(|arena| arena.object_value(object))? {
                         Some(value) => Ok(value),
-                        None => Err(self.error_value("type_error", "the ref names no object")),
+                        None => Err(self.error_value("type_error", "the ref names no object")?),
                     }
                 }
-                _ => Err(self.error_value("type_error", "`deref` takes a ref")),
+                _ => Err(self.error_value("type_error", "`deref` takes a ref")?),
             },
             LibRun::Machine(MachineFunction::TasksUnfinished) => {
                 let mut unfinished = Vec::new();
@@ -916,7 +924,7 @@ impl KernelMachine {
             LibRun::Machine(MachineFunction::BrandBuilt) => Err(self.error_value(
                 "type_error",
                 "`brand.built` is called by name in an expression",
-            )),
+            )?),
             LibRun::Native { native, body, .. } => {
                 let limit = match &function.limit {
                     Some(limit) => {
@@ -1007,7 +1015,7 @@ impl KernelMachine {
                                     "a value exceeds the configured {}-level value depth",
                                     self.limits.value_depth()
                                 ),
-                            ))
+                            )?)
                         } else {
                             // What the call built is counted before its
                             // value is published: pinned, it is a root, and
@@ -1023,7 +1031,7 @@ impl KernelMachine {
                     }
                     Err(NativeError::Raised(error)) => Err(error),
                     Err(NativeError::Refused { kind, message }) => {
-                        Err(self.error_value(kind, message))
+                        Err(self.error_value(kind, message)?)
                     }
                     Err(NativeError::Guard(guard)) => {
                         return Err(bound(

@@ -351,11 +351,7 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
             let outcome = if rejected {
                 Outcome::Completed(Datum::Text("not an integer".into()))
             } else {
-                Outcome::Failed(ErrorDatum {
-                    kind: "host".into(),
-                    message: "bad".into(),
-                    data: Datum::Null,
-                })
+                Outcome::Failed(ErrorDatum::new("host".into(), "bad".into(), Datum::Null))
             };
             embedder.machine.deliver(request.wait, outcome).unwrap();
             assert_eq!(
@@ -368,8 +364,10 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
             }
             assert_eq!(result(embedder.run_to_end(&[])), int(1));
             // Return 1: statement 1 + literal 1 + outbound integer size 2.
-            // Failed error: size 1 + kind bytes 4 + message bytes 3 + null 1.
-            let expected = 4 + if rejected { 0 } else { 9 };
+            // Failed error: header 1 + kind bytes 4 + message bytes 3;
+            // object record 4; properties record 3 + code text 5 + message text 4;
+            // empty nonEnumerable record 1; raw null 1. Deep size = 26.
+            let expected = 4 + if rejected { 0 } else { 26 };
             assert_eq!(
                 embedder.machine.meters().charged.expect("exact charge") - before,
                 expected,
@@ -449,7 +447,7 @@ fn a_megabyte_native_error_survives_a_parked_finally() {
     };
     assert_eq!(error.kind, "k".repeat(1 << 20));
     assert_eq!(error.message, "m".repeat(1 << 20));
-    assert_eq!(error.data, lash_kernel_doc::Datum::Null);
+    assert_eq!(error.raw().clone(), lash_kernel_doc::Datum::Null);
 }
 
 /// `K-SES-003` across execution closures (FIG-6193): the session a main
@@ -597,14 +595,14 @@ fn a_failed_outcomes_number_tokens_are_decoded_before_it_is_frozen() {
         .machine
         .deliver(
             effect.wait,
-            crate::Outcome::Failed(lash_kernel_doc::ErrorDatum {
-                kind: "refused".into(),
-                message: "a host refusal with numeric detail".into(),
-                data: lash_kernel_doc::Datum::Record(vec![(
+            crate::Outcome::Failed(lash_kernel_doc::ErrorDatum::new(
+                "refused".into(),
+                "a host refusal with numeric detail".into(),
+                lash_kernel_doc::Datum::Record(vec![(
                     "n".into(),
                     lash_kernel_doc::Datum::Number(lash_kernel_doc::NumberToken::new("2").unwrap()),
                 )]),
-            }),
+            )),
         )
         .unwrap();
     let crate::End::Finished(finished) = embedder.run_to_end(&[]) else {

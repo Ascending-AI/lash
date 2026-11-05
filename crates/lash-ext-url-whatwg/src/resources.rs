@@ -140,10 +140,9 @@ pub(super) fn contract(native: &Function, args: Args<'_>) -> Result<Option<Contr
     match evaluate(native.operation, args, &mut plan) {
         Ok(output) => plan.output = output,
         Err(NativeError::Refused { kind, message }) => {
-            plan.output = Contract::refused(kind, &message)
-                .ok_or(NativeError::Malformed("native logical cost overflow"))?
-                .output;
-            plan.exit = Exit::Raised;
+            plan = plan
+                .with_refusal(kind, &message)
+                .ok_or(NativeError::Malformed("native logical cost overflow"))?;
         }
         Err(error) => return Err(error),
     }

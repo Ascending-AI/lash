@@ -532,6 +532,7 @@ impl NativeFunction for ErrorNew {
         let kind = *field(nth(values, 0)?)?;
         let message = *field(nth(values, 1)?)?;
         let data = values.get(2).copied().unwrap_or(Value::Absent);
+        let data = lash_kernel_doc::error_object::native(call.args, call.new, kind, message, data)?;
         Ok(call.new.allocate(NewObject::Error {
             kind,
             message,

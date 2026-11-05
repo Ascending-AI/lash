@@ -45,6 +45,15 @@ pub(crate) struct Field {
 }
 
 impl Field {
+    pub(crate) fn uncached(name: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            key: Key::of_text(name),
+            normal: text_key(name),
+            site: None,
+        }
+    }
+
     pub(super) fn new(name: &str, site: u32, layout: Layout) -> Self {
         Self {
             name: name.to_owned(),

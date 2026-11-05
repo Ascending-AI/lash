@@ -275,11 +275,7 @@ pub struct Settled {
 /// final record; `None` while the record is not final.
 pub fn outcome_of(output: &SettledOutput) -> Option<Outcome> {
     let failed = |kind: &str, message: String, data: Datum| {
-        Outcome::Failed(ErrorDatum {
-            kind: kind.to_owned(),
-            message,
-            data,
-        })
+        Outcome::Failed(ErrorDatum::new(kind.to_owned(), message, data))
     };
     Some(match output {
         SettledOutput::Completed(material) => match datum_from_json(material.payload()) {
@@ -337,15 +333,16 @@ fn settled_in(
                         && error.kind == EFFECT_INTERRUPTED
                     {
                         let name = entry.effect.as_ref().map(ToString::to_string).unwrap_or_else(|| "operation".into());
-                        error.message = format!(
+                        let message = format!(
                             "effect `{name}` at {identity} started and never settled; outside work may already have happened, so check outside state before calling again",
                         );
-                        error.data = Datum::Record(vec![
+                        let data = Datum::Record(vec![
                             ("effect".to_owned(), Datum::Text(name.to_owned())),
                             ("position".to_owned(), Datum::Text(identity.position().to_string())),
                             ("identity".to_owned(), Datum::Text(identity.to_string())),
-                            ("cause".to_owned(), error.data.clone()),
+                            ("cause".to_owned(), error.raw().clone()),
                         ]);
+                        *error = ErrorDatum::new(error.kind.clone(), message, data);
                     }
                     result
                 },

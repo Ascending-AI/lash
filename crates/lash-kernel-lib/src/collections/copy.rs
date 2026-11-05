@@ -61,6 +61,9 @@ impl Copy<'_, '_> {
                 };
                 let (kind, message) = (error.kind, error.message);
                 let data = self.value(&error.data, depth + 1)?;
+                let data = lash_kernel_doc::error_object::native(
+                    *self.args, self.new, kind, message, data,
+                )?;
                 Ok(self.new.allocate(NewObject::Error {
                     kind,
                     message,

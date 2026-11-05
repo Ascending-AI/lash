@@ -291,6 +291,9 @@ const PROPERTIES: &[(&str, &str, &str)] = &[
     ("tuple", "stop", "invoke py.slice.stop(value)"),
     ("tuple", "step", "invoke py.slice.step(value)"),
     ("error", "args", "invoke py.exc.args(value)"),
+    ("error", "code", "value.object.properties.code"),
+    ("error", "message", "value.object.properties.message"),
+    ("error", "data", "value.data"),
     ("error", "__cause__", "invoke py.exc.cause(value)"),
 ];
 

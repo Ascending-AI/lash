@@ -95,7 +95,11 @@ and the dialects:
 - **K-BOOL-001.** `bool.not(x)` takes a bool and returns its inverse. Every
   other kind raises `type_error`; it charges one unit.
 - **K-COL-015.** `error.new(kind, message, data?)` constructs an error value
-  with text kind/message and the data given, or absent when omitted. It rejects
+  with text kind/message and the data given, or absent when omitted. Its shared
+  object constructor retains that data and gives every new error enumerable own
+  text `code` and `message` properties. A text code in the supplied properties or
+  raw record is retained; otherwise code is the error kind. `error.data` reads the
+  original data and `error.object` reads the complete payload. It rejects
   non-text kind/message. Its charge covers text sizes and the result's own size;
   it preserves guest identities in data until a boundary copies them.
 - **K-COL-016.** `collection.holds_none(value, kinds)` answers whether a deep

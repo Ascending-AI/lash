@@ -10,7 +10,39 @@
             "kind": "example",
             "message": "m",
             "data": {
-              "int": "1"
+              "record": [
+                [
+                  "properties",
+                  {
+                    "record": [
+                      [
+                        "code",
+                        {
+                          "text": "example"
+                        }
+                      ],
+                      [
+                        "message",
+                        {
+                          "text": "m"
+                        }
+                      ]
+                    ]
+                  }
+                ],
+                [
+                  "nonEnumerable",
+                  {
+                    "record": []
+                  }
+                ],
+                [
+                  "__lash_raw",
+                  {
+                    "int": "1"
+                  }
+                ]
+              ]
             }
           }
         },
@@ -19,7 +51,39 @@
             "kind": "example",
             "message": "m",
             "data": {
-              "float": "1.0"
+              "record": [
+                [
+                  "properties",
+                  {
+                    "record": [
+                      [
+                        "code",
+                        {
+                          "text": "example"
+                        }
+                      ],
+                      [
+                        "message",
+                        {
+                          "text": "m"
+                        }
+                      ]
+                    ]
+                  }
+                ],
+                [
+                  "nonEnumerable",
+                  {
+                    "record": []
+                  }
+                ],
+                [
+                  "__lash_raw",
+                  {
+                    "float": "1.0"
+                  }
+                ]
+              ]
             }
           }
         }
@@ -30,7 +94,7 @@
             "bool": true
           }
         },
-        "charged": 443,
+        "charged": 3251,
         "work": 0
       }
     }

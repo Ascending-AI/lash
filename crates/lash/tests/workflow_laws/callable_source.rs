@@ -167,11 +167,11 @@ async fn saved_source(
     function.captures.insert(
         Name::new("typed_surplus"),
         CaptureValue::Data(Datum::Tuple(vec![
-            Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
-                kind: "saved".into(),
-                message: "typed value".into(),
-                data: Datum::Absent,
-            })),
+            Datum::Error(Box::new(lash_kernel_doc::ErrorDatum::new(
+                "saved".into(),
+                "typed value".into(),
+                Datum::Absent,
+            ))),
             Datum::Timestamp(lash_kernel_doc::Timestamp {
                 nanoseconds: lash_kernel_doc::Integer::parse("123456789012345678901234567890")
                     .unwrap(),

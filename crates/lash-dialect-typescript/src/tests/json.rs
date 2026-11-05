@@ -371,11 +371,11 @@ fn trap(bits: &mut Bits) -> Datum {
         }),
         12 => Datum::Tuple(vec![text("ts.bigint"), Datum::Int(Integer::from(-12i64))]),
         13 => Datum::Tuple(vec![text("ts.object"), text("Math"), text("Math")]),
-        14 => Datum::Error(Box::new(ErrorDatum {
-            kind: "boom".to_owned(),
-            message: "m".to_owned(),
-            data: Datum::Null,
-        })),
+        14 => Datum::Error(Box::new(ErrorDatum::new(
+            "boom".to_owned(),
+            "m".to_owned(),
+            Datum::Null,
+        ))),
         _ => Datum::Bytes(lash_kernel_doc::Bytes::new(vec![1u8, 2])),
     }
 }
@@ -474,7 +474,7 @@ fn callable_links(value: &Datum) -> BTreeSet<lash_kernel_value::LinkId> {
             Datum::Map(entries) => {
                 pending.extend(entries.iter().flat_map(|(key, value)| [key, value]))
             }
-            Datum::Error(error) => pending.push(&error.data),
+            Datum::Error(error) => pending.push(error.data()),
             _ => {}
         }
     }
@@ -792,11 +792,11 @@ try { console.warn({title: 1n}); } catch (error) { console.log(error.message); }
                     host.push(json);
                     Outcome::Completed(lash_kernel_doc::diagnostic_datum(&returned).unwrap())
                 }
-                Err(error) => Outcome::Failed(ErrorDatum {
-                    kind: "not_data".into(),
-                    message: error.to_string(),
-                    data: Datum::Null,
-                }),
+                Err(error) => Outcome::Failed(ErrorDatum::new(
+                    "not_data".into(),
+                    error.to_string(),
+                    Datum::Null,
+                )),
             };
             (effect.wait, outcome)
         },

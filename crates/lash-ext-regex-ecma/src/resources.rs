@@ -100,16 +100,9 @@ pub(super) fn contract(native: &Function, args: Args<'_>) -> Result<Option<Contr
     match evaluate(native, args, &mut plan) {
         Ok(output) => plan.output = output,
         Err(NativeError::Refused { kind, message }) => {
-            plan.exit = Exit::Raised;
-            plan.output = Contract::refused(kind, &message)
-                .ok_or(NativeError::Malformed("native logical cost overflow"))?
-                .output;
-            // A late surrogate error retires every partially built match entity.
-            for event in &mut plan.events {
-                if let Event::Entity { release, .. } = event {
-                    *release = Some(Release::Exit);
-                }
-            }
+            plan = plan
+                .with_refusal(kind, &message)
+                .ok_or(NativeError::Malformed("native logical cost overflow"))?;
         }
         Err(NativeError::Guard(_)) => return Ok(None),
         Err(error) => return Err(error),

@@ -82,11 +82,11 @@ pub(crate) fn exhausted<T>(answer: &Result<T, NativeError>) -> bool {
 /// A raised error as data: a refusal's data is null.
 pub(crate) fn error_datum(bench: &Bench, error: &NativeError) -> Option<Datum> {
     match error {
-        NativeError::Refused { kind, message } => Some(Datum::Error(Box::new(ErrorDatum {
-            kind: (*kind).to_owned(),
-            message: message.clone(),
-            data: Datum::Null,
-        }))),
+        NativeError::Refused { kind, message } => Some(Datum::Error(Box::new(ErrorDatum::new(
+            (*kind).to_owned(),
+            message.clone(),
+            Datum::Null,
+        )))),
         NativeError::Raised(error) => bench.datum(error).ok(),
         _ => None,
     }

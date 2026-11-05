@@ -336,15 +336,15 @@ fn errors_keep_class_cause_message_and_aliases_as_kernel_data() {
     );
 }
 
-/// Error instance slots are writable and configurable but not enumerable;
-/// inherited name is not an own slot until assigned, and absent message stays absent.
+/// FIG-7638: errors have enumerable code/message; custom hidden slots and
+/// inherited name retain their attributes, and own properties can be deleted.
 #[test]
 fn error_instance_own_slots_keep_presence_attributes_and_deletion() {
     agrees(
-        "const cause = {}; const e = new Error('bad', {cause}); const a = new AggregateError([]); const empty = new Error(); let rejected; try { await Promise.any([Promise.reject(7)]); } catch (error) { rejected = error; } let noMembers; try { await Promise.any([]); } catch (error) { noMembers = error; } e.extra = 3; let own = Object.hasOwn(e, 'cause'); let present = 'cause' in e; let inherited = 'name' in e; let named = Object.hasOwn(e, 'name'); const keys = Object.keys(e); e.cause = 4; delete e.message; delete e.cause; await control.finish(own && present && inherited && !named && keys.length === 1 && keys[0] === 'extra' && !Object.hasOwn(e, 'message') && !Object.hasOwn(e, 'cause') && e.message === '' && !Object.hasOwn(empty, 'message') && Object.hasOwn(a, 'errors') && !a.propertyIsEnumerable('errors') && rejected.errors[0] === 7 && Object.hasOwn(rejected, 'message') && noMembers.errors.length === 0 && !noMembers.propertyIsEnumerable('message'));",
+        "const cause = {}; const e = new Error('bad', {cause}); const a = new AggregateError([]); const empty = new Error(); let rejected; try { await Promise.any([Promise.reject(7)]); } catch (error) { rejected = error; } let noMembers; try { await Promise.any([]); } catch (error) { noMembers = error; } e.extra = 3; let own = Object.hasOwn(e, 'cause'); let present = 'cause' in e; let inherited = 'name' in e; let named = Object.hasOwn(e, 'name'); const keys = Object.keys(e); const json = JSON.stringify(e); e.cause = 4; delete e.message; delete e.cause; await control.finish(own && present && inherited && !named && keys.length === 3 && keys[0] === 'code' && keys[1] === 'message' && keys[2] === 'extra' && json === '{\"code\":\"Error\",\"message\":\"bad\",\"extra\":3}' && !Object.hasOwn(e, 'message') && !Object.hasOwn(e, 'cause') && e.message === '' && Object.hasOwn(empty, 'message') && empty.message === '' && empty.code === 'Error' && Object.hasOwn(a, 'errors') && !a.propertyIsEnumerable('errors') && rejected.errors[0] === 7 && Object.hasOwn(rejected, 'message') && noMembers.errors.length === 0 && noMembers.propertyIsEnumerable('message'));",
     );
     agrees(
-        r#"const e = new Error('hidden', {cause: 5}); e.b = 'b'; e['10'] = 'ten'; e['01'] = 'leading'; e['2'] = 'two'; e['4294967295'] = 'max'; e['-0'] = 'negative'; e['1e0'] = 'exponent'; e['4294967294'] = 'last'; e['0'] = 'zero'; e.a = 'a'; await control.finish(JSON.stringify(Object.keys(e)) === '["0","2","10","4294967294","b","01","4294967295","-0","1e0","a"]' && JSON.stringify(Object.values(e)) === '["zero","two","ten","last","b","leading","max","negative","exponent","a"]' && JSON.stringify(Object.entries(e)[0]) === '["0","zero"]');"#,
+        r#"const e = new Error('hidden', {cause: 5}); e.b = 'b'; e['10'] = 'ten'; e['01'] = 'leading'; e['2'] = 'two'; e['4294967295'] = 'max'; e['-0'] = 'negative'; e['1e0'] = 'exponent'; e['4294967294'] = 'last'; e['0'] = 'zero'; e.a = 'a'; await control.finish(JSON.stringify(Object.keys(e)) === '["0","2","10","4294967294","code","message","b","01","4294967295","-0","1e0","a"]' && JSON.stringify(Object.values(e)) === '["zero","two","ten","last","Error","hidden","b","leading","max","negative","exponent","a"]' && JSON.stringify(Object.entries(e)[0]) === '["0","zero"]');"#,
     );
 }
 

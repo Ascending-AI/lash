@@ -192,9 +192,81 @@ pub enum Datum {
 
 /// An error value copied across the effect boundary.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, try_from = "ErrorDatumWire")]
 pub struct ErrorDatum {
     pub kind: String,
     pub message: String,
-    pub data: Datum,
+    data: Datum,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[schemars(rename = "ErrorDatum")]
+#[serde(deny_unknown_fields)]
+struct ErrorDatumWire {
+    kind: String,
+    message: String,
+    data: Datum,
+}
+
+impl TryFrom<ErrorDatumWire> for ErrorDatum {
+    type Error = &'static str;
+
+    fn try_from(wire: ErrorDatumWire) -> Result<Self, Self::Error> {
+        Self::decode_object(wire.kind, wire.message, wire.data)
+    }
+}
+
+impl ErrorDatum {
+    /// Creates a guest error object, preserving its original failure data.
+    pub fn new(kind: String, message: String, data: Datum) -> Self {
+        let data = crate::error_object::construct(
+            &mut crate::error_object::DatumBuilder,
+            Datum::Text(kind.clone()),
+            Datum::Text(message.clone()),
+            data,
+        )
+        .unwrap_or_else(|never| match never {});
+        Self {
+            kind,
+            message,
+            data,
+        }
+    }
+
+    /// The complete object payload, including the mandatory property map.
+    pub fn data(&self) -> &Datum {
+        &self.data
+    }
+
+    /// The failure evidence supplied when this error was constructed.
+    pub fn raw(&self) -> &Datum {
+        let Datum::Record(fields) = &self.data else {
+            unreachable!("an error object is a record")
+        };
+        &fields
+            .iter()
+            .find(|(name, _)| name == crate::error_object::RAW)
+            .unwrap_or_else(|| unreachable!("an error object retains its raw data"))
+            .1
+    }
+
+    pub(crate) fn decode_object(
+        kind: String,
+        message: String,
+        data: Datum,
+    ) -> Result<Self, &'static str> {
+        let Datum::Record(fields) = &data else {
+            return Err("an error object requires a properties map");
+        };
+        if !fields
+            .iter()
+            .any(|(name, value)| name == "properties" && matches!(value, Datum::Record(_)))
+            || !fields
+                .iter()
+                .any(|(name, _)| name == crate::error_object::RAW)
+        {
+            return Err("an error object requires properties and raw failure data");
+        }
+        Ok(Self::new(kind, message, data))
+    }
 }

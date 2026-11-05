@@ -420,10 +420,21 @@ fn graph_execution(projected: bool, shape: u8, bound: u64) -> (u64, bool, Option
         Value::Task(doc::TaskId(7)),
         Value::TaskRef(doc::TaskId(7)),
     ]));
+    let kind = Value::Text(doc::arena::ShortText::new("kind").unwrap());
+    let message = Value::Text(doc::arena::ShortText::new("message").unwrap());
+    let semantics = arena.semantics();
+    let data = doc::error_object::native(
+        doc::Args::new(&[], arena.objects(), &semantics),
+        &mut nursery,
+        kind,
+        message,
+        tuple,
+    )
+    .unwrap();
     let error = nursery.allocate(NewObject::Error {
-        kind: Value::Text(doc::arena::ShortText::new("kind").unwrap()),
-        message: Value::Text(doc::arena::ShortText::new("message").unwrap()),
-        data: tuple,
+        kind,
+        message,
+        data,
     });
     let map = nursery.allocate(NewObject::Map(vec![
         (Value::Int(1), first),

@@ -230,16 +230,17 @@ impl TokenCodec for ErrorDatum {
         out.seq(3);
         out.text(&self.kind);
         out.text(&self.message);
-        self.data.encode(out);
+        self.data().encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(3)?;
-        Ok(Self {
-            kind: String::decode(input)?,
-            message: String::decode(input)?,
-            data: Datum::decode(input)?,
-        })
+        Self::decode_object(
+            String::decode(input)?,
+            String::decode(input)?,
+            Datum::decode(input)?,
+        )
+        .map_err(|error| TokenError::Invalid(error.into()))
     }
 }
 

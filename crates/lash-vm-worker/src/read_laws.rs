@@ -387,11 +387,11 @@ fn a_read_is_charged_exactly_as_the_same_perform_recorded_in_both_dialects() {
         ("an answer", Ok(Datum::Int(Integer::from(7)))),
         (
             "an error",
-            Err(ErrorDatum {
-                kind: "tool_failed".to_owned(),
-                message: "the read failed".to_owned(),
-                data: Datum::Null,
-            }),
+            Err(ErrorDatum::new(
+                "tool_failed".to_owned(),
+                "the read failed".to_owned(),
+                Datum::Null,
+            )),
         ),
         (
             "an answer its type refuses",
@@ -627,11 +627,11 @@ fn read_path(args: &[Datum]) -> Option<&str> {
 }
 fn answer_at(args: &[Datum], answer: &Result<Datum, ErrorDatum>) -> Result<Datum, ErrorDatum> {
     if read_path(args) == Some("archive") {
-        Err(ErrorDatum {
-            kind: "tool_failed".into(),
-            message: "page unavailable".into(),
-            data: Datum::Null,
-        })
+        Err(ErrorDatum::new(
+            "tool_failed".into(),
+            "page unavailable".into(),
+            Datum::Null,
+        ))
     } else {
         answer.clone()
     }

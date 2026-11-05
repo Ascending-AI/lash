@@ -87,7 +87,7 @@ fn measure(data: &Datum, max_bytes: usize) -> Result<usize, ValueError> {
                     .checked_sub(e.kind.len())
                     .and_then(|n| n.checked_sub(e.message.len()))
                     .ok_or(ValueError::Limit)?;
-                visit(&e.data, depth + 1, remaining)?;
+                visit(e.data(), depth + 1, remaining)?;
             }
             _ => {}
         }

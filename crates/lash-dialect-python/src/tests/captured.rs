@@ -194,11 +194,11 @@ fn on_the_kernel(source: &str, script: &Script) -> Capture {
                 };
                 let row = &script.tools[*id];
                 let outcome = match (&row.value, &row.error) {
-                    (_, Some(error)) => Outcome::Failed(ErrorDatum {
-                        kind: error.kind.clone(),
-                        message: error.message.clone(),
-                        data: Datum::Null,
-                    }),
+                    (_, Some(error)) => Outcome::Failed(ErrorDatum::new(
+                        error.kind.clone(),
+                        error.message.clone(),
+                        Datum::Null,
+                    )),
                     (Some(value), None) => Outcome::Completed(datum(value)),
                     (None, None) => Outcome::Completed(Datum::Null),
                 };

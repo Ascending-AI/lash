@@ -150,7 +150,7 @@ fn check_data(datum: &Datum, depth: usize) -> Result<(), FunctionValueRefusal> {
                     .iter()
                     .flat_map(|(key, value)| [(key, remaining), (value, remaining)]),
             ),
-            Datum::Error(error) => pending.push((&error.data, remaining)),
+            Datum::Error(error) => pending.push((error.data(), remaining)),
             _ => {}
         }
     }

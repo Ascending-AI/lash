@@ -78,6 +78,7 @@ pub use identified::{IdentifiedDocument, document_work};
 pub mod snapshot;
 use lash_kernel_value::names as name;
 
+pub mod error_object;
 mod native;
 mod number;
 /// Generated execution plans for library bodies (FIG-6678): what a build's

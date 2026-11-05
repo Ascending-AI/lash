@@ -680,9 +680,9 @@ fn cancel_reaches_a_ready_task_the_running_task_and_a_task_cleaning_up() {
     // Ready: `w`'s outcome is delivered, and `main` cancels it first.
     let mut ready = Embedder::new(
         r#"
-definition "function waits() -> Any\nkernel 1\nmetering statements\nbody { \n  try { do perform 0(\"w\") as Any return \"delivered\" } catch e { return e.kind }\n }"
+definition "function waits() -> Any\nkernel 1\nmetering statements\nbody { \n  try { do perform 0(\"w\") as Any return \"delivered\" } catch e { return (e.kind, e.object.properties.code, e.object.properties.message, e.data) }\n }"
 
-definition "function cancels_itself(box: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  do yield\n  let h = box.h\n  try { do cancel h } catch e { return e.kind }\n  return \"not raised\"\n }"
+definition "function cancels_itself(box: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  do yield\n  let h = box.h\n  try { do cancel h } catch e { return (e.kind, e.object.properties.code, e.object.properties.message, e.data) }\n  return \"not raised\"\n }"
 
 main {
   let w = spawn call waits()
@@ -701,7 +701,20 @@ main {
     ready.deliver("w");
     assert_eq!(
         result(ready.run_to_end(&[])),
-        pair("cancelled", "cancelled")
+        Datum::Tuple(vec![
+            Datum::Tuple(vec![
+                text("cancelled"),
+                text("cancelled"),
+                text("the task was cancelled"),
+                Datum::Null
+            ]),
+            Datum::Tuple(vec![
+                text("cancelled"),
+                text("cancelled"),
+                text("the task was cancelled"),
+                Datum::Null
+            ]),
+        ])
     );
 
     // Cleaning up: the second cancel raises at the cleanup's own wait.

@@ -228,17 +228,39 @@ fn materialize_values_keeps_exact_kinds_and_refuses_unrepresentable_paths() {
             },
         ),
         (
-            Datum::Error(Box::new(ErrorDatum {
-                kind: "kind".into(),
-                message: "message".into(),
-                data: Datum::Absent,
-            })),
+            Datum::Error(Box::new(ErrorDatum::new(
+                "kind".into(),
+                "message".into(),
+                Datum::Absent,
+            ))),
             Expr::Call {
                 function: helpers.functions().named("error.new").next().unwrap(),
                 args: vec![
                     Expr::Literal(Literal::Text("kind".into())),
                     Expr::Literal(Literal::Text("message".into())),
-                    Expr::Literal(Literal::Absent),
+                    Expr::Record(vec![
+                        RecordEntry {
+                            field: "properties".into(),
+                            value: Expr::Record(vec![
+                                RecordEntry {
+                                    field: "code".into(),
+                                    value: Expr::Literal(Literal::Text("kind".into())),
+                                },
+                                RecordEntry {
+                                    field: "message".into(),
+                                    value: Expr::Literal(Literal::Text("message".into())),
+                                },
+                            ]),
+                        },
+                        RecordEntry {
+                            field: "nonEnumerable".into(),
+                            value: Expr::Record(vec![]),
+                        },
+                        RecordEntry {
+                            field: "__lash_raw".into(),
+                            value: Expr::Literal(Literal::Absent),
+                        },
+                    ]),
                 ],
             },
         ),

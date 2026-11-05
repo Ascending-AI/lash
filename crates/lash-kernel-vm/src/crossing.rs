@@ -407,11 +407,11 @@ fn copy(
         }
         PageValue::Error(error) => {
             let data = heap.heap.error_data(error)?;
-            Datum::Error(Box::new(ErrorDatum {
-                kind: text_of(heap.heap, &error.kind)?,
-                message: text_of(heap.heap, &error.message)?,
-                data: member(heap, run, &data, slot, Step::ErrorData, at, budget, path)?,
-            }))
+            Datum::Error(Box::new(ErrorDatum::new(
+                text_of(heap.heap, &error.kind)?,
+                text_of(heap.heap, &error.message)?,
+                member(heap, run, &data, slot, Step::ErrorData, at, budget, path)?,
+            )))
         }
         other => crate::data::copy_page_out(heap.heap, other)?,
     })

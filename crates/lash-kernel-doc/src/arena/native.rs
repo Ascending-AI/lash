@@ -638,7 +638,7 @@ pub enum NewObject {
     Error {
         kind: Value,
         message: Value,
-        data: Value,
+        data: crate::error_object::ErrorObjectValue,
     },
 }
 

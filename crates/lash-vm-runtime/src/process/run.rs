@@ -1390,7 +1390,7 @@ fn uncaught(
             .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
     };
     let (error_kind, message, raw) = match error {
-        Datum::Error(error) => match &error.data {
+        Datum::Error(error) => match error.raw() {
             Datum::Null => (Some(error.kind), error.message, None),
             data => match json(data) {
                 Ok(raw) => (Some(error.kind), error.message, Some(raw)),
@@ -1474,11 +1474,11 @@ mod tests {
             .within("output"),
         };
         let outcome = uncaught(
-            Datum::Error(Box::new(ErrorDatum {
-                kind: "entry_type_mismatch".into(),
-                message: "entry_type_mismatch".into(),
-                data: lash_kernel_doc::diagnostic_datum(&source).expect("diagnostic data"),
-            })),
+            Datum::Error(Box::new(ErrorDatum::new(
+                "entry_type_mismatch".into(),
+                "entry_type_mismatch".into(),
+                lash_kernel_doc::diagnostic_datum(&source).expect("diagnostic data"),
+            ))),
             None,
             lash_vm_broker::kernel::JsonModel::Kernel,
         );

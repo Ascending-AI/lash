@@ -147,11 +147,11 @@ fn an_uncaught_throw_preserves_collections_and_errors() {
             site: Some(Site::new(Unit::Main, [0])),
         }),
     );
-    let error = Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
-        kind: "boom".into(),
-        message: "bang".into(),
-        data: text("bang"),
-    }));
+    let error = Datum::Error(Box::new(lash_kernel_doc::ErrorDatum::new(
+        "boom".into(),
+        "bang".into(),
+        text("bang"),
+    )));
     assert_eq!(
         run(r#"main { do perform 1("bang") as Any }"#).0,
         End::Error(crate::RunError::Uncaught {

@@ -364,7 +364,7 @@ body {
     return names
   }
   if same(receiver, "brand:regex.ecma.reg_exp") { return ["lastIndex"] }
-  if same(receiver, "error") { if same(kind(target.data), "record") { return record.keys(target.data.properties) } return ["message"] }
+  if same(receiver, "error") { if same(kind(target.object), "record") { return record.keys(target.object.properties) } return ["message"] }
   if same(receiver, "brand:typescript.arguments") {
     let names = invoke ts.object.own_keys(target.properties)
     set names[list.len(names)] = "callee"

@@ -909,13 +909,21 @@ fn flat_charge_summaries_preserve_exact_graph_sizes() {
             call: lash_kernel_doc::NativeCall<'_, '_>,
         ) -> Result<Value, lash_kernel_doc::NativeError> {
             if matches!(call.args.values()[1], Value::Bool(true)) {
+                let kind = Value::Text(lash_kernel_doc::arena::ShortText::new("law").unwrap());
+                let message =
+                    Value::Text(lash_kernel_doc::arena::ShortText::new("raised").unwrap());
+                let data = lash_kernel_doc::error_object::native(
+                    call.args,
+                    call.new,
+                    kind,
+                    message,
+                    Value::Null,
+                )?;
                 return Err(lash_kernel_doc::NativeError::Raised(call.new.allocate(
                     NewObject::Error {
-                        kind: Value::Text(lash_kernel_doc::arena::ShortText::new("law").unwrap()),
-                        message: Value::Text(
-                            lash_kernel_doc::arena::ShortText::new("raised").unwrap(),
-                        ),
-                        data: Value::Null,
+                        kind,
+                        message,
+                        data,
                     },
                 )));
             }

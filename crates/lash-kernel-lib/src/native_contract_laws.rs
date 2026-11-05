@@ -176,7 +176,7 @@ pub(crate) fn new_values_bytes(
                 kind,
                 message,
                 data,
-            } => new_values_bytes(args, new, &[*kind, *message, *data]) - 16,
+            } => new_values_bytes(args, new, &[*kind, *message, data.value()]) - 16,
             NewObject::LongText(text) => 16 + text.len() as u64,
             NewObject::Bytes(bytes) => 16 + bytes.len() as u64,
             NewObject::BigInt(n) | NewObject::Timestamp(n) => 16 + n.bits().div_ceil(8),
@@ -770,11 +770,11 @@ fn more_shapes(registry: &FunctionRegistry) -> usize {
             vec![
                 Datum::Tuple(vec![
                     Datum::Tuple(vec![int(1)]),
-                    Datum::Error(Box::new(ErrorDatum {
-                        kind: "kind".into(),
-                        message: "message".into(),
-                        data: Datum::Null,
-                    })),
+                    Datum::Error(Box::new(ErrorDatum::new(
+                        "kind".into(),
+                        "message".into(),
+                        Datum::Null,
+                    ))),
                 ]),
                 int(0),
                 text("error"),
@@ -794,11 +794,11 @@ fn more_shapes(registry: &FunctionRegistry) -> usize {
         vec![
             Datum::Tuple(vec![
                 Datum::Tuple(vec![Datum::Absent]),
-                Datum::Error(Box::new(ErrorDatum {
-                    kind: "kind".into(),
-                    message: "message".into(),
-                    data: Datum::Null,
-                })),
+                Datum::Error(Box::new(ErrorDatum::new(
+                    "kind".into(),
+                    "message".into(),
+                    Datum::Null,
+                ))),
             ]),
             text(&"x".repeat(8192)),
             text("error"),

@@ -228,7 +228,7 @@ impl Freezer<'_> {
             Datum::Error(e) => {
                 let kind = text(&self.heap.access, &e.kind)?;
                 let message = text(&self.heap.access, &e.message)?;
-                let data = self.datum(&e.data)?;
+                let data = self.datum(e.data())?;
                 PageValue::Error(Arc::new(frozen_error(
                     &self.heap.access,
                     kind,

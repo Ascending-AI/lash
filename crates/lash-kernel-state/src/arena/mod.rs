@@ -840,16 +840,28 @@ impl Arena {
     }
 
     /// An error value of `kind`, `message` and `data`.
-    pub fn error(&mut self, kind: &str, message: &str, data: Value) -> Value {
+    pub fn error(&mut self, kind: &str, message: &str, data: Value) -> Result<Value, NativeError> {
         let kind = self.text(kind);
         let message = self.text(message);
         self.error_of(kind, message, data)
     }
 
     /// An error value of texts `kind` and `message`, and `data`.
-    pub fn error_of(&mut self, kind: Value, message: Value, data: Value) -> Value {
+    pub fn error_of(
+        &mut self,
+        kind: Value,
+        message: Value,
+        data: Value,
+    ) -> Result<Value, NativeError> {
+        let semantics = self.semantics();
+        let args = lash_kernel_doc::Args::new(&[], self.objects(), &semantics);
+        let mut nursery = lash_kernel_doc::Nursery::unaccounted(self.objects());
+        let data = lash_kernel_doc::error_object::native(args, &mut nursery, kind, message, data)?;
+        let data = data.value();
+        let new = nursery.into_new();
+        self.install(new)?;
         let summary = composite(&self.facts, std::slice::from_ref(&data));
-        Value::Error(self.insert(
+        Ok(Value::Error(self.insert(
             Body::Error(ErrorBody {
                 kind,
                 message,
@@ -859,7 +871,7 @@ impl Arena {
                 summary,
                 ..Facts::default()
             },
-        ))
+        )))
     }
 
     /// Prepares and atomically installs what a native call built, in reservation
@@ -976,6 +988,7 @@ impl Arena {
                 message,
                 data,
             } => {
+                let data = data.value();
                 let summary = composite(&self.facts, std::slice::from_ref(&data));
                 return Ok((
                     Body::Error(ErrorBody {
@@ -1649,11 +1662,12 @@ mod tests {
             Some(descriptor),
         ));
         let outer = arena.tuple(vec![child, child], 8).unwrap();
-        let error = arena.error("k", "m", outer);
+        let error = arena.error("k", "m", outer).unwrap();
         // The cold tuple holds one 17-byte integer: 16 + 17 = 33.
         // Ordinary immutable occurrences are priced twice: 16 + 2*33 = 82.
         assert_eq!(arena.logical_local(&outer).unwrap(), 82);
-        assert_eq!(arena.logical_local(&error).unwrap(), 100);
+        // The error contains two one-byte texts and a record reference.
+        assert_eq!(arena.logical_local(&error).unwrap(), 16 + 1 + 1 + 16);
         let mut shared = child;
         for _ in 0..32 {
             shared = arena.tuple(vec![shared, shared], 64).unwrap();

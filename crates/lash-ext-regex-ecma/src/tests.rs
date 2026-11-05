@@ -132,11 +132,11 @@ fn run(
                 };
                 Err(Failure::Raised(*error))
             }
-            Err(NativeError::Refused { kind, message }) => Err(Failure::Raised(ErrorDatum {
-                kind: kind.to_owned(),
+            Err(NativeError::Refused { kind, message }) => Err(Failure::Raised(ErrorDatum::new(
+                kind.to_owned(),
                 message,
-                data: Datum::Null,
-            })),
+                Datum::Null,
+            ))),
             Err(NativeError::Guard(error)) => Err(Failure::Guard(error)),
             Err(NativeError::Retry(Retry::Room { .. })) => Err(Failure::Memory),
             Err(error) => unreachable!("a regex native answered {error:?}"),

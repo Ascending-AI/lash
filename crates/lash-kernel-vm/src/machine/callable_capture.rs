@@ -189,11 +189,10 @@ impl KernelMachine {
                 let kind = self.decode(exe, &Datum::Text(kind.clone()), &Type::Text)?;
                 let message = self.decode(exe, &Datum::Text(message.clone()), &Type::Text)?;
                 let data = self.restore_capture(exe, data, nodes)?;
-                self.new_object(NewObject::Error {
-                    kind,
-                    message,
-                    data,
-                })?
+                self.arena
+                    .borrow_mut()
+                    .error_of(kind, message, data)
+                    .map_err(|error| super::fault(&error.to_string()))?
             }
         })
     }

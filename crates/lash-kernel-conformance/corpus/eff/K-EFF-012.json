@@ -65,6 +65,44 @@
                         {
                           "int": "4"
                         }
+                      ],
+                      [
+                        "properties",
+                        {
+                          "record": [
+                            [
+                              "code",
+                              {
+                                "text": "test"
+                              }
+                            ],
+                            [
+                              "message",
+                              {
+                                "text": "message"
+                              }
+                            ]
+                          ]
+                        }
+                      ],
+                      [
+                        "nonEnumerable",
+                        {
+                          "record": []
+                        }
+                      ],
+                      [
+                        "__lash_raw",
+                        {
+                          "record": [
+                            [
+                              "n",
+                              {
+                                "int": "4"
+                              }
+                            ]
+                          ]
+                        }
                       ]
                     ]
                   }

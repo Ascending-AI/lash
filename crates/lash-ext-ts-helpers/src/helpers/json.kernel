@@ -136,8 +136,10 @@ body {
     let k = invoke ts.receiver(value)
     let array = same(k, "list")
     let object = same(k, "record")
+    if same(k, "error") { set object = true }
     if array {} else { if object {} else { return value } }
-    let identity = ref(value)
+    let identity = absent
+    if same(k, "error") { set identity = ref(value.object.properties) } else { set identity = ref(value) }
     let position = 0
     for ancestor in active {
       if same(ancestor, identity) { return copies[position] }

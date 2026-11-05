@@ -1,7 +1,7 @@
 //! Input-only graph projection. No native execution or nursery is used here.
 use super::*;
 use crate::collections::native::{items, raise};
-use lash_kernel_doc::{NativeResourceRelease as Release, arena::ArenaHandle};
+use lash_kernel_doc::arena::ArenaHandle;
 use std::collections::HashMap;
 
 struct Plan<'a> {
@@ -44,29 +44,22 @@ impl<'a> Plan<'a> {
             origin: Origin::Fresh(owner),
         })
     }
-    fn finish(mut self, answer: Result<Holding, NativeError>) -> Result<Contract, NativeError> {
-        let (exit, output) = match answer {
-            Ok(output) => (Exit::Returned, output),
-            Err(NativeError::Refused { kind, message }) => {
-                for event in &mut self.events {
-                    if let Event::Entity { release, .. } = event {
-                        *release = Some(Release::Exit);
-                    }
-                }
-                (
-                    Exit::Raised,
-                    Contract::refused(kind, &message)
-                        .ok_or_else(overflow)?
-                        .output,
-                )
-            }
-            Err(error) => return Err(error),
-        };
+    fn finish(self, answer: Result<Holding, NativeError>) -> Result<Contract, NativeError> {
         let mut contract = Contract {
-            exit,
-            output,
+            exit: Exit::Returned,
+            output: Holding {
+                bytes: 0,
+                origin: Origin::Immutable,
+            },
             events: self.events,
         };
+        match answer {
+            Ok(output) => contract.output = output,
+            Err(NativeError::Refused { kind, message }) => {
+                contract = contract.with_refusal(kind, &message).ok_or_else(overflow)?;
+            }
+            Err(error) => return Err(error),
+        }
         crate::resource_contracts::scratch(&mut contract, self.scratch)?;
         Ok(contract)
     }

@@ -40,11 +40,11 @@ fn project(
             }
             Datum::Tuple(values)
         }
-        PageValue::Error(error) => Datum::Error(Box::new(ErrorDatum {
-            kind: heap.copy_text(&error.kind)?.to_string(),
-            message: heap.copy_text(&error.message)?.to_string(),
-            data: nested(&heap.error_data(error)?)?,
-        })),
+        PageValue::Error(error) => Datum::Error(Box::new(ErrorDatum::new(
+            heap.copy_text(&error.kind)?.to_string(),
+            heap.copy_text(&error.message)?.to_string(),
+            nested(&heap.error_data(error)?)?,
+        ))),
         PageValue::List(id) | PageValue::Map(id) | PageValue::Set(id) | PageValue::Record(id) => {
             validate_occurrence(value, header.summary.entities, !header.summary.data_only)?;
             let head = header

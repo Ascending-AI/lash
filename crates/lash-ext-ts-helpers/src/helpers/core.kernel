@@ -1643,10 +1643,10 @@ body {
   }
   if same(k, "error") {
     let name = invoke ts.to_property_key(key)
-    if same(kind(target.data), "record") {
-      let properties = target.data.properties
+    if same(kind(target.object), "record") {
+      let properties = target.object.properties
       if same(kind(properties), "record") { remove properties[name] }
-      let attributes = target.data.nonEnumerable
+      let attributes = target.object.nonEnumerable
       if same(kind(attributes), "record") { remove attributes[name] }
     }
     return true
@@ -1767,8 +1767,8 @@ body {
     return num.le(0, position)
   }
   if same(k, "error") {
-    if same(kind(target.data), "record") {
-      let properties = target.data.properties
+    if same(kind(target.object), "record") {
+      let properties = target.object.properties
       if same(kind(properties), "record") { return record.contains(properties, name) }
       return false
     }
@@ -1879,9 +1879,9 @@ body {
   }
   let keys = []
   if same(k, "error") {
-    if same(kind(target.data), "record") {
-      let attributes = target.data.nonEnumerable
-      let properties = target.data.properties
+    if same(kind(target.object), "record") {
+      let attributes = target.object.nonEnumerable
+      let properties = target.object.properties
       if same(kind(properties), "record") {
         for name in record.keys(properties) {
           let hidden = false

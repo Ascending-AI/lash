@@ -224,7 +224,7 @@ impl<'a> Values<'a> {
             }
             Datum::Error(e) => {
                 self.bound(depth, e.kind.len().saturating_add(e.message.len()))?;
-                let data = self.datum(node, &format!("{path}.data"), &e.data, depth + 1)?;
+                let data = self.datum(node, &format!("{path}.data"), e.data(), depth + 1)?;
                 return self.helper(
                     "error.new",
                     vec![

@@ -61,7 +61,7 @@ history[1]['missing']
     assert_eq!(error.kind, "KeyError");
     assert_eq!(error.message, "'missing'");
     assert_eq!(
-        error.data,
+        error.raw().clone(),
         Datum::Tuple(vec![
             Datum::Tuple(vec![Datum::Text("missing".into())]),
             Datum::Null,

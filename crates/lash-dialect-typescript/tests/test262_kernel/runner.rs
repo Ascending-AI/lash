@@ -292,7 +292,7 @@ fn library() -> &'static NamedLibrary {
 fn thrown_name(value: &Datum) -> Option<String> {
     let (record, kind) = match value {
         Datum::Record(_) => (Some(value), None),
-        Datum::Error(error) => (Some(&error.data), Some(error.kind.as_str())),
+        Datum::Error(error) => (Some(error.data()), Some(error.kind.as_str())),
         _ => (None, None),
     };
     if let Some(Datum::Record(fields)) = record

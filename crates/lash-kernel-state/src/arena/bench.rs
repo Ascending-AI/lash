@@ -129,8 +129,8 @@ impl Bench {
                 self.object(NewObject::Record(fields))?
             }
             Datum::Error(error) => {
-                let data = self.build(&error.data)?;
-                self.arena.error(&error.kind, &error.message, data)
+                let data = self.build(error.data())?;
+                self.arena.error(&error.kind, &error.message, data)?
             }
             Datum::Number(_) => return Err(NativeError::Malformed("an undecoded number")),
             Datum::FunctionValue(_) => {
@@ -325,11 +325,11 @@ impl Bench {
                     .collect::<Result<_, NativeError>>()?,
             ),
             Value::Error(_) => match self.arena.body(handle(value)?)? {
-                Body::Error(error) => Datum::Error(Box::new(ErrorDatum {
-                    kind: semantics.text(&error.kind)?.to_owned(),
-                    message: semantics.text(&error.message)?.to_owned(),
-                    data: self.datum(&error.data)?,
-                })),
+                Body::Error(error) => Datum::Error(Box::new(ErrorDatum::new(
+                    semantics.text(&error.kind)?.to_owned(),
+                    semantics.text(&error.message)?.to_owned(),
+                    self.datum(&error.data)?,
+                ))),
                 _ => return Err(NativeError::Malformed("an error names another body")),
             },
             _ => return Err(NativeError::Malformed("a value with no data form")),

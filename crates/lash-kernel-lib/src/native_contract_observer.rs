@@ -1,9 +1,8 @@
 //! Independent installed-value and allocation observer shared by native laws.
 use lash_kernel_doc::{
-    Datum, ErrorDatum, LogicalHeldV1 as Cost, NativeCall, NativeError,
-    NativeResourceContract as Contract, NativeResourceEntity as Entity,
-    NativeResourceEvent as Event, NativeResourceExit as Exit, NativeResourceOrigin as Origin,
-    NewObject, Value, WorkCounter,
+    Datum, LogicalHeldV1 as Cost, NativeCall, NativeError, NativeResourceContract as Contract,
+    NativeResourceEntity as Entity, NativeResourceEvent as Event, NativeResourceExit as Exit,
+    NativeResourceOrigin as Origin, NewObject, Value, WorkCounter,
 };
 use lash_kernel_state::arena::Bench;
 
@@ -109,7 +108,7 @@ fn local(value: &Datum) -> u64 {
             Datum::Timestamp(value) => value.nanoseconds.bits().div_ceil(8),
             Datum::Tuple(values) => values.iter().map(local).sum(),
             Datum::Error(error) => {
-                (error.kind.len() + error.message.len()) as u64 + local(&error.data)
+                (error.kind.len() + error.message.len()) as u64 + local(error.data())
             }
             Datum::Handle(handle) => (handle.kind.len() + handle.id.len()) as u64,
             _ => 0,
@@ -259,6 +258,26 @@ pub(crate) fn check_values(
                 new,
                 counter: &mut WorkCounter::new(None),
             });
+            let answer = match answer {
+                Err(NativeError::Refused { kind, message }) => {
+                    let kind = new.text(kind);
+                    let message = new.text(&message);
+                    let data = lash_kernel_doc::error_object::native(
+                        args,
+                        new,
+                        kind,
+                        message,
+                        Value::Null,
+                    )
+                    .unwrap();
+                    Err(NativeError::Raised(new.allocate(NewObject::Error {
+                        kind,
+                        message,
+                        data,
+                    })))
+                }
+                answer => answer,
+            };
             (answer, new.built().to_vec())
         })
         .unwrap();
@@ -268,15 +287,6 @@ pub(crate) fn check_values(
     let (exit, output, output_value) = match &answer {
         Ok(value) => (Exit::Returned, value_cost(&bench, value), Some(value)),
         Err(NativeError::Raised(value)) => (Exit::Raised, value_cost(&bench, value), Some(value)),
-        Err(NativeError::Refused { kind, message }) => (
-            Exit::Raised,
-            local(&Datum::Error(Box::new(ErrorDatum {
-                kind: (*kind).into(),
-                message: message.clone(),
-                data: Datum::Null,
-            }))),
-            None,
-        ),
         Err(error) => panic!("{name}: execution {error:?}"),
     };
     let mut actual = Vec::new();

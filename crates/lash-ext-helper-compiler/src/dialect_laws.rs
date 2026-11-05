@@ -395,11 +395,11 @@ fn ordinary_sleep_deliveries_keep_their_queue_turn() {
                     .deliver(
                         wait,
                         if failed && index == 0 {
-                            Outcome::Failed(ErrorDatum {
-                                kind: "sleep_failure".into(),
-                                message: "scripted".into(),
-                                data: Datum::Null,
-                            })
+                            Outcome::Failed(ErrorDatum::new(
+                                "sleep_failure".into(),
+                                "scripted".into(),
+                                Datum::Null,
+                            ))
                         } else {
                             Outcome::Completed(Datum::Null)
                         },
