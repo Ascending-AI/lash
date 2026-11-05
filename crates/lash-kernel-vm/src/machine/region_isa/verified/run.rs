@@ -9,9 +9,12 @@ impl Running<'_> {
         if self.faulted {
             return Err(invalid(Refused::Facts));
         }
-        if let Some(stop) = self.stop {
+        if let Some(stop) = self.stop
+            && stop != RegionStop::Handoff
+        {
             return Ok(stop);
         }
+        self.stop = None;
         let outcome = self.dispatch(request);
         if outcome.is_err() {
             self.faulted = true;

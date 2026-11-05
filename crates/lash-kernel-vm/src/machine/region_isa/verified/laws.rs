@@ -31,11 +31,15 @@ main {}"#,
         lease.run(StopAt::NextLegalPrefix).unwrap(),
         RegionStop::Handoff
     );
+    assert_eq!(
+        lease.run(StopAt::NextLegalPrefix).unwrap(),
+        RegionStop::Handoff
+    );
     let prefix = lease.materialize().unwrap();
     let image = prefix.reconstruction();
     assert!(image.frames[0].roles.iter().any(|(slot, value)| matches!(
         slot,
-        lash_kernel_state::kernel_internals::logical::Slot::Operand(_)
+        lash_kernel_state::kernel_internals::logical::Slot::Binding(_)
     ) && value.same(&Value::Int(7))));
     let prepared = prefix.prepare_exit().unwrap();
     drop(prepared);
