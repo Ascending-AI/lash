@@ -203,106 +203,8 @@ impl Arena {
             },
         }
     }
-    pub(super) fn prepare_region_table_keys(
-        &mut self,
-        edits: &[MemberEdit],
-        keys: Vec<Key>,
-    ) -> Result<Option<PreparedTableMember>, HeapFault> {
-        let Some(first) = edits.first() else {
-            return Ok(None);
-        };
-        if keys.len() != edits.len() {
-            return Err(bad("region table keys do not cover its edits"));
-        }
-        let mut patches = Vec::new();
-        reserve(&mut patches, edits.len())?;
-        let mut version = None;
-        let mut kind = None;
-        let mut inserts = 0_usize;
-        let mut removes = false;
-        for (edit, normalized) in edits.iter().zip(keys) {
-            if edit.handle != first.handle {
-                return Err(bad("region table group changes identity"));
-            }
-            let key = match &edit.member {
-                Member::Table(value) => Some(*value),
-                Member::Field(name) => ShortText::new(name).map(Value::Text),
-                _ => return Err(bad("region table has another address kind")),
-            };
-            let Some((current, current_kind, mut patch)) =
-                self.table_patch(edit.handle, edit.member.clone(), key, edit.next, normalized)?
-            else {
-                return Ok(None);
-            };
-            if patch.old.is_none() && patch.next.is_some() {
-                patch.sequence = patch
-                    .sequence
-                    .checked_add(inserts as u64)
-                    .ok_or_else(|| bad("table sequence overflow"))?;
-                inserts += 1;
-            }
-            removes |= patch.old.is_some() && patch.next.is_none();
-            version = Some(current);
-            kind = Some(current_kind);
-            patches.push(patch);
-        }
-        let mut seen: std::collections::HashSet<&Key, foldhash::fast::RandomState> =
-            Default::default();
-        seen.try_reserve(patches.len())
-            .map_err(|_| HeapFault::Exhausted {
-                resource: HostResource::StagingBytes,
-            })?;
-        for patch in &patches {
-            if !seen.insert(&patch.normalized) {
-                return Err(bad("region repeats a normalized table member"));
-            }
-        }
-        drop(seen);
-        let Some(version) = version else {
-            return Ok(None);
-        };
-        let Some(kind) = kind else {
-            return Ok(None);
-        };
-        let spill = self.reserve_table_patch_values(first.handle, inserts)?;
-        let growth = self.facts[first.handle.index() as usize]
-            .index
-            .as_mut()
-            .ok_or_else(|| bad("resident table has no index"))?
-            .prepare_growth(
-                inserts,
-                removes,
-                if edits.len() == 1 {
-                    Some(&patches[0].normalized)
-                } else {
-                    None
-                },
-            )?;
-        patches.sort_by_key(|patch| match (patch.old, patch.next) {
-            (Some(_), Some(_)) => (0, 0),
-            (Some(_), None) => (1, u64::MAX - patch.place.unwrap_or(0) as u64),
-            (None, Some(_)) => (2, patch.sequence),
-            (None, None) => (3, 0),
-        });
-        let first_patch = patches.remove(0);
-        let mut prepared = PreparedTableMember {
-            version,
-            handle: first.handle,
-            kind,
-            first: first_patch,
-            rest: patches,
-            growth,
-            spill,
-            flat: None,
-            next_sequence: None,
-        };
-        prepared.seal_flat(
-            &self.objects,
-            self.facts[first.handle.index() as usize].flat,
-        );
-        Ok(Some(prepared))
-    }
 }
+
 impl PreparedTableMember {
     fn patches(&self) -> impl Iterator<Item = &Patch> {
         std::iter::once(&self.first).chain(self.rest.iter())
@@ -547,36 +449,6 @@ fn remove_pair(chunks: &mut Chunks, at: usize) {
             }
             _ => unreachable!("prepared resident table"),
         },
-    }
-}
-
-impl PreparedInstallation<'_> {
-    pub(crate) fn prepare_region_table_members(
-        &mut self,
-        edits: &[MemberEdit],
-    ) -> Result<Option<PreparedTableMember>, HeapFault> {
-        let Some(first) = edits.first() else {
-            return Ok(None);
-        };
-        let flat = self.registration.read_arena().facts[first.handle.index() as usize].flat;
-        let keys = edits
-            .iter()
-            .map(|edit| match &edit.member {
-                Member::Table(value) => keys::key_of(self, self, value)
-                    .map_err(fault)?
-                    .ok_or_else(|| bad("invalid detached table key")),
-                Member::Field(name) => Ok(Key::of_text(name)),
-                _ => Err(bad("region table has another address kind")),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut prepared = self
-            .registration
-            .arena()
-            .prepare_region_table_keys(edits, keys)?;
-        if let Some(prepared) = &mut prepared {
-            prepared.seal_flat(self, flat);
-        }
-        Ok(prepared)
     }
 }
 

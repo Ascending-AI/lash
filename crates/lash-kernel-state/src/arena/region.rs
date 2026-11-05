@@ -36,7 +36,6 @@ impl PreparedInstallation<'_> {
             original,
             flat,
             cards,
-            structural: false,
             resident_before: body_values(before),
         })
     }
@@ -74,7 +73,6 @@ pub(crate) struct RegionMemberBody {
     original: Vec<Value>,
     flat: Option<sizes::FlatSize>,
     cards: Vec<u64>,
-    structural: bool,
     resident_before: u64,
 }
 fn fault(error: NativeError) -> HeapFault {
@@ -91,12 +89,7 @@ fn reserve<T>(values: &mut Vec<T>, count: usize) -> Result<(), HeapFault> {
         resource: HostResource::StagingBytes,
     })
 }
-fn copied(values: &[Value]) -> Result<Vec<Value>, HeapFault> {
-    let mut result = Vec::new();
-    reserve(&mut result, values.len())?;
-    result.extend_from_slice(values);
-    Ok(result)
-}
+
 impl Arena {
     pub(crate) fn region_body_resident(&self, handle: ArenaHandle) -> Result<bool, NativeError> {
         Ok(!self.facts(handle)?.cold && !has_cold(self.body(handle)?))
@@ -177,117 +170,50 @@ impl Arena {
     }
 }
 impl PreparedInstallation<'_> {
-    pub(crate) fn prepare_region_members(
-        &mut self,
+    pub(crate) fn prepare_region_cells(
+        &self,
         edits: &[MemberEdit],
     ) -> Result<Vec<RegionMemberBody>, HeapFault> {
+        let arena = self.registration.read_arena();
         let mut prepared = Vec::new();
-        for edits in groups(edits) {
-            if matches!(
-                self.registration.read_arena().body(edits[0].handle),
-                Ok(Body::Map(_) | Body::Set(_) | Body::Record(_))
-            ) {
-                let table = self
-                    .prepare_region_table_members(&edits)?
-                    .ok_or_else(|| bad("region table patch unavailable"))?;
-                prepared.push(RegionMemberBody::table(edits[0].handle, table));
-            } else {
-                prepared.extend(prepare(self.registration.read_arena(), self, &edits)?);
+        reserve(&mut prepared, edits.len())?;
+        let mut seen = std::collections::BTreeSet::new();
+        for edit in edits {
+            if !matches!(edit.member, Member::Variable)
+                || !seen.insert((edit.handle.index(), edit.handle.generation()))
+            {
+                return Err(bad("region cell patch repeats or changes its address"));
             }
+            let Body::Cell(old) = arena.body(edit.handle).map_err(fault)? else {
+                return Err(bad("region variable changed its body kind"));
+            };
+            if !arena
+                .facts(edit.handle)
+                .is_ok_and(|facts| !facts.cold && facts.content_revision != u64::MAX)
+            {
+                return Err(bad("region variable is cold or saturated"));
+            }
+            let body = Body::Cell(
+                edit.next
+                    .ok_or_else(|| bad("a variable cannot remove its member"))?,
+            );
+            let mut original = Vec::new();
+            reserve(&mut original, 1)?;
+            original.push(*old);
+            prepared.push(RegionMemberBody {
+                handle: edit.handle,
+                flat: sizes::summarize_flat(self, &body),
+                body: Some(body),
+                table: None,
+                original,
+                cards: Vec::new(),
+                resident_before: 1,
+            });
         }
         Ok(prepared)
     }
 }
-fn prepare(
-    arena: &Arena,
-    objects: &impl Bodies,
-    edits: &[MemberEdit],
-) -> Result<Vec<RegionMemberBody>, HeapFault> {
-    let mut groups: Vec<(ArenaHandle, Vec<&MemberEdit>)> = Vec::new();
-    for edit in edits {
-        if let Some((_, group)) = groups.iter_mut().find(|(handle, _)| *handle == edit.handle) {
-            group.push(edit);
-        } else {
-            groups.push((edit.handle, vec![edit]));
-        }
-    }
-    let mut result = Vec::new();
-    reserve(&mut result, groups.len())?;
-    for (handle, edits) in groups {
-        let before = arena.body(handle).map_err(fault)?;
-        if !arena
-            .facts(handle)
-            .is_ok_and(|facts| !facts.cold && facts.content_revision != u64::MAX)
-        {
-            return Err(bad("region member target is cold, stale, or saturated"));
-        }
-        let mut original = Vec::new();
-        each_member(before, &mut |value| original.push(*value));
-        let mut cards = Vec::new();
-        let mut structural = false;
-        let body = match before {
-            Body::Cell(old) => {
-                if edits.len() != 1 || !matches!(edits[0].member, Member::Variable) {
-                    return Err(bad("region repeats or changes a variable address"));
-                }
-                let _ = old;
-                Body::Cell(
-                    edits[0]
-                        .next
-                        .ok_or_else(|| bad("a variable cannot remove its member"))?,
-                )
-            }
-            Body::List(_) => {
-                let mut values = copied(arena.sequence(handle).map_err(fault)?)?;
-                let initial = values.len();
-                let mut seen = std::collections::BTreeSet::new();
-                let edit_count = edits.len();
-                for edit in edits {
-                    let Member::List(at) = edit.member else {
-                        return Err(bad("list member has another address kind"));
-                    };
-                    if !seen.insert(at) {
-                        return Err(bad("region repeats a final list member"));
-                    }
-                    let at = usize::try_from(at).map_err(|_| bad("list index overflow"))?;
-                    if at > initial || at > values.len() {
-                        return Err(bad("region list member is absent"));
-                    }
-                    match (at == values.len(), edit.next) {
-                        (true, Some(value)) => {
-                            reserve(&mut values, 1)?;
-                            values.push(value);
-                        }
-                        (false, Some(value)) => values[at] = value,
-                        (false, None) if edit_count == 1 => {
-                            values.remove(at);
-                            cards.extend(at as u64 / CARD..=(initial as u64 - 1) / CARD);
-                            structural = true;
-                        }
-                        _ => return Err(bad("region list removal needs its own boundary")),
-                    }
-                    cards.push(at as u64 / CARD);
-                }
-                Body::List(Sequence::whole(values))
-            }
-            _ => return Err(bad("region member target has no mutable body")),
-        };
-        cards.sort_unstable();
-        cards.dedup();
-        let flat = sizes::summarize_flat(objects, &body);
-        result.push(RegionMemberBody {
-            handle,
-            body: Some(body),
-            table: None,
-            original,
-            flat,
-            cards,
-            structural,
-            resident_before: body_values(before),
-        });
-    }
-    Ok(result)
-}
+
 impl RegionMemberBody {
     /// Only StateLease's fully prepared transaction calls this swap. Every
     /// address, value, generation and capacity was checked before it was built.
@@ -299,7 +225,6 @@ impl RegionMemberBody {
             original: Vec::new(),
             flat: None,
             cards: Vec::new(),
-            structural: false,
             resident_before: 0,
         }
     }
@@ -325,9 +250,6 @@ impl RegionMemberBody {
         *held = body;
         let facts = &mut arena.facts[self.handle.index() as usize];
         facts.flat = self.flat;
-        if self.structural {
-            facts.revision = facts.revision.saturating_add(1);
-        }
         if self.cards.is_empty() {
             Arena::mark_resident(facts, &mut arena.dirty, self.handle, None);
         } else {
@@ -336,21 +258,6 @@ impl RegionMemberBody {
             }
         }
     }
-}
-
-fn groups(edits: &[MemberEdit]) -> Vec<Vec<MemberEdit>> {
-    let mut groups: Vec<Vec<MemberEdit>> = Vec::new();
-    for edit in edits {
-        if let Some(group) = groups
-            .iter_mut()
-            .find(|group| group[0].handle == edit.handle)
-        {
-            group.push(edit.clone());
-        } else {
-            groups.push(vec![edit.clone()]);
-        }
-    }
-    groups
 }
 
 pub(crate) fn region_mutable_body(body: &Body) -> bool {

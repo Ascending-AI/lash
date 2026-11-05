@@ -462,13 +462,13 @@ impl<'s> StateLease<'s> {
         address: &Address,
     ) -> Result<Option<Entry>, LeaseFault> {
         let slot = &self.local.slots[index];
+        if slot.existing.as_ref().is_some_and(|existing| existing.cold) {
+            return Err(LeaseFault::BoundaryRequired);
+        }
         if matches!(member, LeaseMember::Field(_)) && slot.kind != Kind::Record {
             return Err(NativeError::Decline.into());
         }
         if let Some(existing) = &slot.existing {
-            if existing.cold {
-                return Err(LeaseFault::BoundaryRequired);
-            }
             if let Some(overlay) = existing.overlays.get(address) {
                 return Ok(overlay.current.clone());
             }

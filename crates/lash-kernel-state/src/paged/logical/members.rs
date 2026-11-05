@@ -229,22 +229,6 @@ impl Ledger {
         member: Member,
         next: Option<Value>,
     ) -> Result<(Change, Vec<EntityId>, Vec<ArenaHandle>), MemberFault> {
-        self.member_change_with_graph(arena, access, handle, member, next, None, None)
-    }
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "one canonical member edit and its detached view"
-    )]
-    pub(super) fn member_change_with_graph(
-        &self,
-        arena: &mut Arena,
-        access: &Access<'_>,
-        handle: ArenaHandle,
-        member: Member,
-        next: Option<Value>,
-        graph: Option<&crate::arena::PreparedGraphProof>,
-        normalized: Option<&crate::arena::Key>,
-    ) -> Result<(Change, Vec<EntityId>, Vec<ArenaHandle>), MemberFault> {
         let entity = arena.ledger_key(handle)?;
         if self.entity_holding(entity, access)?.is_none() {
             return Err(invalid("member owner is absent").into());
@@ -271,17 +255,17 @@ impl Ledger {
                     return Err(invalid("member position is absent").into());
                 }
                 if let Some(value) = old {
-                    remove = region_occurrence(arena, access, &value, graph)?;
+                    remove = Holding::from_native(arena, access, &value)?;
                 }
                 if let Some(value) = next {
-                    add = region_occurrence(arena, access, &value, graph)?;
+                    add = Holding::from_native(arena, access, &value)?;
                 }
             }
             Member::Variable => {
                 let old = arena.cell(handle)?;
                 let next = next.ok_or_else(|| invalid("a variable cannot remove its member"))?;
-                remove = region_occurrence(arena, access, &old, graph)?;
-                add = region_occurrence(arena, access, &next, graph)?;
+                remove = Holding::from_native(arena, access, &old)?;
+                add = Holding::from_native(arena, access, &next)?;
             }
             Member::Field(name) => {
                 if !matches!(arena.body(handle)?, Body::Record(_)) {
@@ -289,9 +273,7 @@ impl Ledger {
                 }
                 let old = arena.logical_entry_key(handle, &crate::arena::Key::of_text(&name))?;
                 match (old, next) {
-                    (Some((key, value)), None) => {
-                        remove = region_entry(arena, access, key, value, true, graph)?
-                    }
+                    (Some((key, value)), None) => remove = entry(arena, access, key, value, true)?,
                     (None, Some(value)) => {
                         let key = lash_kernel_doc::heap::PageValue::Text(
                             lash_kernel_doc::heap::TextRef {
@@ -302,14 +284,14 @@ impl Ledger {
                         );
                         add = entry_holdings(
                             Holding::from_page(access, &key)?,
-                            region_occurrence(arena, access, &value, graph)?,
+                            Holding::from_native(arena, access, &value)?,
                             true,
                             access,
                         )?;
                     }
                     (Some((_, old)), Some(value)) => {
-                        remove = region_occurrence(arena, access, &old, graph)?;
-                        add = region_occurrence(arena, access, &value, graph)?;
+                        remove = Holding::from_native(arena, access, &old)?;
+                        add = Holding::from_native(arena, access, &value)?;
                     }
                     (None, None) => {}
                 }
@@ -320,20 +302,17 @@ impl Ledger {
                     Body::Map(_) | Body::Set(_) => false,
                     _ => return Err(NativeError::Decline.into()),
                 };
-                let old = match normalized {
-                    Some(normalized) => arena.logical_entry_key(handle, normalized)?,
-                    None => arena.logical_entry(handle, &key)?,
-                };
+                let old = arena.logical_entry(handle, &key)?;
                 match (old, next) {
                     (Some((old_key, value)), None) => {
-                        remove = region_entry(arena, access, old_key, value, record, graph)?;
+                        remove = entry(arena, access, old_key, value, record)?;
                     }
                     (None, Some(value)) => {
-                        add = region_entry(arena, access, key, value, record, graph)?;
+                        add = entry(arena, access, key, value, record)?;
                     }
                     (Some((_, old)), Some(value)) => {
-                        remove = region_occurrence(arena, access, &old, graph)?;
-                        add = region_occurrence(arena, access, &value, graph)?;
+                        remove = Holding::from_native(arena, access, &old)?;
+                        add = Holding::from_native(arena, access, &value)?;
                     }
                     (None, None) => {}
                 }
@@ -425,39 +404,4 @@ pub(super) fn occurrence(
                 MemberFault::Native(error) => invalid(&error.to_string()),
             }),
     }
-}
-
-fn region_occurrence(
-    arena: &mut Arena,
-    access: &Access<'_>,
-    value: &Value,
-    graph: Option<&crate::arena::PreparedGraphProof>,
-) -> Result<Holding, HeapFault> {
-    if let Some(graph) = graph {
-        if let Some(holding) = graph.holding_for(value) {
-            return Ok(holding);
-        }
-        if value
-            .handle()
-            .is_some_and(|handle| graph.contains_handle(handle))
-        {
-            return Err(invalid("detached member value has no sealed occurrence"));
-        }
-    }
-    Holding::from_native(arena, access, value)
-}
-fn region_entry(
-    arena: &mut Arena,
-    access: &Access<'_>,
-    key: Value,
-    value: Value,
-    record: bool,
-    graph: Option<&crate::arena::PreparedGraphProof>,
-) -> Result<Holding, MemberFault> {
-    if record && !matches!(key, Value::Text(_) | Value::LongText(_)) {
-        return Err(NativeError::Decline.into());
-    }
-    let key = region_occurrence(arena, access, &key, graph)?;
-    let value = region_occurrence(arena, access, &value, graph)?;
-    entry_holdings(key, value, record, access)
 }

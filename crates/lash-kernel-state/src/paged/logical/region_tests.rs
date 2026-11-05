@@ -172,6 +172,7 @@ fn region_lease_excludes_alias_writers_and_sibling_invocations() {
 /// every canonical body, ledger root, identity cursor and invocation grant.
 #[test]
 fn region_failed_prepare_and_changed_dependencies_are_atomic() {
+    cold_placeholder_requires_boundary();
     let (mut heap, _) = fresh();
     let mut arena = Arena::new();
     let shared = heap.logical_ledger();
@@ -323,6 +324,55 @@ fn region_failed_prepare_and_changed_dependencies_are_atomic() {
     assert!(lease.prepare(packet, u64::MAX).is_err());
     *shared.borrow_mut() = original;
     assert_eq!(shared.borrow().balance().unwrap(), before);
+}
+
+// A proxy known only by a ref does not reveal the actual body's native kind.
+fn cold_placeholder_requires_boundary() {
+    let (mut heap, _) = fresh();
+    let mut arena = Arena::new();
+    let shared = heap.logical_ledger();
+    let access = heap.pages().clone();
+    admit(
+        &mut shared.borrow_mut(),
+        vec![
+            Change::Allocate {
+                entity: id(7),
+                body: Holding::scalar(32),
+            },
+            Change::Roots(vec![(owner(0), Some(value(16, &[7], &access)))]),
+        ],
+        48,
+        &access,
+    );
+    let handle = arena.proxy(id(7), crate::arena::ProxyKind::Unknown);
+    let stamp = shared.borrow().stamp();
+    let mut lease = StateLease::acquire(&mut heap, &mut arena).unwrap();
+    let record = lease.import(&Value::Record(handle)).unwrap();
+    let object = lease.object(record).unwrap();
+    let member = LeaseMember::Field(std::sync::Arc::from("field"));
+    assert!(matches!(
+        lease.read(object, &member),
+        Err(LeaseFault::BoundaryRequired)
+    ));
+    assert!(matches!(
+        lease.stage(LeaseOp::Member {
+            object,
+            member,
+            next: Some(record),
+        }),
+        Err(LeaseFault::BoundaryRequired)
+    ));
+    assert!(matches!(
+        lease.stage(LeaseOp::HoldCapture {
+            cell: object,
+            count: 1
+        }),
+        Err(LeaseFault::BoundaryRequired)
+    ));
+    drop(lease);
+    assert!(arena.is_cold(handle).unwrap());
+    assert!(shared.borrow().is_current(&stamp));
+    assert_eq!(shared.borrow().balance().unwrap().total().unwrap(), 48);
 }
 
 /// ISA-D: the lease graph and the independent itemized source program agree

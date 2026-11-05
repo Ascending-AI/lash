@@ -58,6 +58,13 @@ impl<'s> StateLease<'s> {
             }
             LeaseOp::HoldCapture { cell, count } | LeaseOp::ReleaseCapture { cell, count } => {
                 let index = self.local.index(*cell)?;
+                if self.local.slots[index]
+                    .existing
+                    .as_ref()
+                    .is_some_and(|existing| existing.cold)
+                {
+                    return Err(LeaseFault::BoundaryRequired);
+                }
                 if self.local.slots[index].kind != Kind::Cell {
                     return Err(invalid("a capture phase must name a variable cell").into());
                 }
@@ -114,6 +121,13 @@ impl<'s> StateLease<'s> {
                 next,
             } => {
                 let index = self.local.index(*object)?;
+                if self.local.slots[index]
+                    .existing
+                    .as_ref()
+                    .is_some_and(|existing| existing.cold)
+                {
+                    return Err(LeaseFault::BoundaryRequired);
+                }
                 let kind = self.local.slots[index].kind;
                 if !kind.editable() {
                     return Err(NativeError::Decline.into());

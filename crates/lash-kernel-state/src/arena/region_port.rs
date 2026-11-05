@@ -98,7 +98,7 @@ impl RegionRegistration<'_> {
             .unwrap_or_else(|| unreachable!("region rollback owner"));
         let registration = record.attach(self.authority.write());
         let mut installation = PreparedInstallation::from_region_parts(registration, batch);
-        let mut members = installation.prepare_region_members(edits)?;
+        let mut members = installation.prepare_region_cells(edits)?;
         for (handle, values, cards) in lists {
             members.push(installation.prepare_lease_list(handle, values, cards)?);
         }
