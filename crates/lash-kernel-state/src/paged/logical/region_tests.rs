@@ -380,6 +380,7 @@ fn cold_placeholder_requires_boundary() {
 /// identity progression. Each exit reaches its prefix through real phases.
 #[test]
 fn region_graph_projection_commutes_with_itemized_source() {
+    atomic_source_root_transfer();
     linear_chain_release_and_binding();
     imported_tuple_reads();
     call_and_measure_views();
@@ -1251,4 +1252,76 @@ fn linear_chain_release_and_binding() {
         .commit(|| {})
         .unwrap();
     assert_eq!(ledger.borrow().balance().unwrap(), Balance::default());
+}
+
+// ISA-D: one source transfer protects its new aliases before last-owner
+// cascades. An abandoned phase leaves the accepted local graph unchanged.
+fn atomic_source_root_transfer() {
+    use lash_kernel_doc::LogicalHeldV1 as Cost;
+    let (mut heap, _) = fresh();
+    let mut arena = Arena::new();
+    let mut lease = StateLease::acquire(&mut heap, &mut arena).unwrap();
+    let leaf = allocate(&mut lease, LeaseAllocation::list(&[]));
+    let parent = allocate(&mut lease, LeaseAllocation::list(&[leaf]));
+    accept(
+        &mut lease,
+        LeaseOp::Release {
+            value: leaf,
+            count: 1,
+        },
+    );
+    accept(
+        &mut lease,
+        LeaseOp::Hold {
+            value: parent,
+            count: 2,
+        },
+    );
+    let parent_object = lease.object(parent).unwrap();
+    let leaf_object = lease.object(leaf).unwrap();
+    let holds = [(leaf, false)];
+    let releases = [(parent, false); 3];
+    let expected = -i128::from(Cost::OBJECT + 3 * Cost::REFERENCE);
+    for accepted in [false, true] {
+        let step = lease
+            .stage(LeaseOp::Transfer {
+                holds: &holds,
+                releases: &releases,
+            })
+            .unwrap();
+        assert_eq!(step.facts().delta(), expected);
+        assert_eq!(step.facts().peak(), 0);
+        assert_eq!(
+            step.facts().measure(&LeaseMeasure::RELEASED),
+            Some(Cost::OBJECT + Cost::REFERENCE)
+        );
+        let ready = step.reserve().unwrap();
+        if accepted {
+            ready.accept();
+        } else {
+            drop(ready);
+        }
+        assert_eq!(
+            region_fixtures::storage_work(&lease).live_objects,
+            if accepted { 1 } else { 2 }
+        );
+        assert_eq!(lease.object(leaf).unwrap(), leaf_object);
+        if !accepted {
+            assert_eq!(lease.object(parent).unwrap(), parent_object);
+            let child = lease.read(parent_object, &LeaseMember::List(0)).unwrap();
+            assert_eq!(lease.object(child).unwrap(), leaf_object);
+        } else {
+            assert!(lease.object(parent).is_err());
+        }
+    }
+    let step = lease
+        .stage(LeaseOp::Transfer {
+            holds: &holds,
+            releases: &holds,
+        })
+        .unwrap();
+    assert_eq!(step.facts().delta(), 0);
+    assert_eq!(step.facts().measure(&LeaseMeasure::RELEASED), Some(0));
+    step.reserve().unwrap().accept();
+    assert_eq!(lease.object(leaf).unwrap(), leaf_object);
 }

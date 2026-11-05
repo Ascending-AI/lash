@@ -143,6 +143,11 @@ impl<'a> LeaseAllocation<'a> {
     }
 }
 pub enum LeaseOp<'a> {
+    /// One source root transfer. The bool selects zero-byte capture pricing.
+    Transfer {
+        holds: &'a [(LeaseValue, bool)],
+        releases: &'a [(LeaseValue, bool)],
+    },
     Allocate(LeaseAllocation<'a>),
     Member {
         object: LeaseObject,

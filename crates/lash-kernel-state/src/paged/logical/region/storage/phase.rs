@@ -13,6 +13,35 @@ impl<'s> StateLease<'s> {
         };
         let mut facts = LeaseFacts::default();
         match &candidate.op {
+            LeaseOp::Transfer { holds, releases } => {
+                for (values, sign) in [(*holds, 1_i128), (*releases, -1_i128)] {
+                    for &(value, capture) in values {
+                        if capture {
+                            let object = self.object(value)?;
+                            let index = self.local.index(object)?;
+                            if self.local.slots[index]
+                                .existing
+                                .as_ref()
+                                .is_some_and(|existing| existing.cold)
+                            {
+                                return Err(LeaseFault::BoundaryRequired);
+                            }
+                            if self.local.slots[index].kind != Kind::Cell {
+                                return Err(
+                                    invalid("a capture phase must name a variable cell").into()
+                                );
+                            }
+                            self.local.change(object, sign)?;
+                        } else {
+                            facts.delta = facts
+                                .delta
+                                .checked_add(i128::from(self.price(value)?) * sign)
+                                .ok_or_else(|| invalid("lease root transfer overflow"))?;
+                            self.value_edges(value, sign)?;
+                        }
+                    }
+                }
+            }
             LeaseOp::Allocate(allocation) => {
                 let (kind, bytes, members, payload) = self.allocation_facts(&allocation.body)?;
                 facts.members = members;
