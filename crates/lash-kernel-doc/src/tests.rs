@@ -91,32 +91,41 @@ fn validated_functions_join_only_the_registry_they_were_validated_against() {
         registry.register(definition(name, false), None).unwrap();
         registry
     };
-    let mut built = holding("helper.base");
-    let validated = built
-        .validate_functions(vec![definition("helper.joined", false)])
-        .unwrap();
-    let image: &'static [u8] = Vec::leak(validated.to_image(&|_| None));
-    let validated = ReleasedFunctions::read(image).unwrap();
-    let mut same = holding("helper.base");
-    same.register_released(validated).unwrap();
-    assert!(
-        same.iter()
-            .map(|(id, _)| id)
-            .eq(built.iter().map(|(id, _)| id))
-    );
-    let mut wider = holding("helper.base");
-    wider
-        .register(definition("helper.other", false), None)
-        .unwrap();
-    wider.register_released(validated).unwrap();
-    assert_eq!(wider.len(), built.len() + 1);
-    for mut other in [holding("helper.other"), FunctionRegistry::new()] {
-        let held = other.len();
-        assert!(matches!(
-            other.register_released(validated),
-            Err(RegistryError::OtherBasis { .. })
-        ));
-        assert_eq!(other.len(), held, "nothing joins another registry");
+    for framed in [false, true] {
+        let base = holding("helper.base");
+        let mut built = if framed {
+            crate::FrameRegistryBuilder::new(Vec::leak(base.to_image()))
+                .unwrap()
+                .finish_declarations()
+        } else {
+            base
+        };
+        let validated = built
+            .validate_functions(vec![definition("helper.joined", false)])
+            .unwrap();
+        let image: &'static [u8] = Vec::leak(validated.to_image(&|_| None));
+        let validated = ReleasedFunctions::read(image).unwrap();
+        let mut same = holding("helper.base");
+        same.register_released(validated).unwrap();
+        assert!(
+            same.iter()
+                .map(|(id, _)| id)
+                .eq(built.iter().map(|(id, _)| id))
+        );
+        let mut wider = holding("helper.base");
+        wider
+            .register(definition("helper.other", false), None)
+            .unwrap();
+        wider.register_released(validated).unwrap();
+        assert_eq!(wider.len(), built.len() + 1);
+        for mut other in [holding("helper.other"), FunctionRegistry::new()] {
+            let held = other.len();
+            assert!(matches!(
+                other.register_released(validated),
+                Err(RegistryError::OtherBasis { .. })
+            ));
+            assert_eq!(other.len(), held, "nothing joins another registry");
+        }
     }
 }
 

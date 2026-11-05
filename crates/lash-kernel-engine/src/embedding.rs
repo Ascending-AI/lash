@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::NamedLibrary;
-use lash_kernel_doc::{BuildHelpers, FunctionRegistry, NativeFunction};
+use lash_kernel_doc::{BuildHelpers, FrameRegistryBuilder, FunctionRegistry, NativeFunction};
 use lash_kernel_value::FunctionId;
 use lash_kernel_vm::PreparedLibrary;
 
@@ -31,15 +31,16 @@ pub fn install(
     helpers: Arc<BuildHelpers>,
     natives: &BTreeMap<FunctionId, Arc<dyn NativeFunction>>,
 ) -> Result<Installed, InstallError> {
-    let mut registry = FunctionRegistry::over_frame(image)?;
-    registry.bind_native_tables(positions, crate::native_tables::native_tables(), natives)?;
+    let builder = FrameRegistryBuilder::new(image)?;
+    #[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
+    let mut builder = builder;
     #[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
     let members: BTreeSet<_> = lash_kernel_doc::ReleasedFunctions::over_frame(image)
         .map_err(|error| InstallError::Library(error.to_string()))?
         .ids()
         .collect();
     #[cfg(feature = "dialect-typescript")]
-    registry.bind_frame_plans(
+    builder.bind_plans(
         positions,
         &lash_ext_ts_core::PLANS
             .iter()
@@ -48,7 +49,7 @@ pub fn install(
             .collect::<Vec<_>>(),
     )?;
     #[cfg(feature = "dialect-python")]
-    registry.bind_frame_plans(
+    builder.bind_plans(
         positions,
         &lash_ext_py_core::PLANS
             .iter()
@@ -56,7 +57,11 @@ pub fn install(
             .filter(|plan| members.contains(&plan.function))
             .collect::<Vec<_>>(),
     )?;
-    let registry = Arc::new(registry);
+    let registry = Arc::new(builder.finish_execution(
+        positions,
+        crate::native_tables::native_tables(),
+        natives,
+    )?);
     let names = NamedLibrary::resolving(&registry, |id| roots.contains(id))
         .map_err(|e| InstallError::Library(e.to_string()))?;
     let prepared =

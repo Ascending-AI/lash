@@ -10,8 +10,8 @@
 #[path = "native_frame.rs"]
 mod frame;
 use crate::FrameArray;
-pub use frame::NativeCtor;
 use frame::RegistryFrame;
+pub use frame::{FrameRegistryBuilder, NativeCtor};
 
 use std::any::{Any, TypeId};
 use std::collections::{BTreeMap, BTreeSet};
@@ -557,7 +557,25 @@ pub enum RegistryError {
 /// (FIG-6843).
 #[derive(Clone, Debug, Default)]
 pub struct FunctionRegistry {
-    frame: Option<Arc<RegistryFrame>>,
+    storage: RegistryStorage,
+    /// Definitions-only admission is independent of the storage representation.
+    declarations: bool,
+}
+
+#[derive(Clone, Debug)]
+enum RegistryStorage {
+    Frame(Arc<RegistryFrame>),
+    Owned(OwnedRegistry),
+}
+
+impl Default for RegistryStorage {
+    fn default() -> Self {
+        Self::Owned(OwnedRegistry::default())
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct OwnedRegistry {
     /// Every function, ordered by identity. Clones share it until one
     /// changes.
     functions: Arc<Vec<RegisteredFunction>>,
@@ -571,8 +589,6 @@ pub struct FunctionRegistry {
     /// where the last ends: a lookup compares within one bucket. Insertion
     /// advances the later boundaries without discarding the index.
     buckets: Option<Box<[u32]>>,
-    /// The registry holds definitions alone ([`FunctionRegistry::declarations`]).
-    declarations: bool,
 }
 
 /// How many leading bits of an identity choose its bucket: about one
@@ -637,6 +653,22 @@ fn insert_shared<T: Clone>(values: &mut Arc<Vec<T>>, at: usize, value: T) {
 }
 
 impl FunctionRegistry {
+    /// One transition gives an editor all registrations and indexes together.
+    fn edit<R>(&mut self, edit: impl FnOnce(&mut OwnedRegistry) -> R) -> R {
+        match &mut self.storage {
+            RegistryStorage::Owned(owned) => edit(owned),
+            RegistryStorage::Frame(frame) => {
+                let registry = Self {
+                    storage: RegistryStorage::Frame(Arc::clone(frame)),
+                    declarations: self.declarations,
+                };
+                let owned = frame.materialize(&registry);
+                self.storage = RegistryStorage::Owned(owned);
+                self.edit(edit)
+            }
+        }
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -664,43 +696,10 @@ impl FunctionRegistry {
 
     /// Where `function` stands in identity order.
     fn find(&self, function: &FunctionId) -> Result<usize, usize> {
-        if let Some(frame) = &self.frame {
-            let image = frame.image();
-            let (mut lo, mut hi) = frame.range(function);
-            while lo < hi {
-                let mid = (lo + hi) / 2;
-                if image.id(mid) < *function {
-                    lo = mid + 1;
-                } else {
-                    hi = mid;
-                }
-            }
-            return if lo < image.len() && image.id(lo) == *function {
-                Ok(lo)
-            } else {
-                Err(lo)
-            };
+        match &self.storage {
+            RegistryStorage::Frame(frame) => frame.find(function),
+            RegistryStorage::Owned(owned) => owned.find(function),
         }
-        let (start, end) = match &self.buckets {
-            Some(buckets) => {
-                let at = bucket(function);
-                (buckets[at] as usize, buckets[at + 1] as usize)
-            }
-            None => (0, self.functions.len()),
-        };
-        match self.functions[start..end]
-            .binary_search_by(|registered| registered.function.cmp(function))
-        {
-            Ok(at) => Ok(start + at),
-            Err(at) => Err(start + at),
-        }
-    }
-
-    /// Indexes the functions by identity bucket.
-    fn index_buckets(&mut self) {
-        self.buckets = Some(identity_buckets(
-            self.functions.iter().map(|registered| registered.function),
-        ));
     }
 
     /// Registers a function and returns its identity.
@@ -712,7 +711,6 @@ impl FunctionRegistry {
         definition: FunctionDefinition,
         native: Option<Arc<dyn NativeFunction>>,
     ) -> Result<FunctionId, RegistryError> {
-        self.materialize();
         let name = definition.name.clone();
         let identity = validate_identified_definition(
             &definition,
@@ -738,36 +736,7 @@ impl FunctionRegistry {
             Some(function) => function,
             None => definition.identity(),
         };
-        let at = match self.find(&function) {
-            Ok(_) => return Err(RegistryError::AlreadyRegistered { name, function }),
-            Err(at) => at,
-        };
-        let registered = RegisteredFunction::new(function, definition, native);
-        let definition = Arc::clone(registered.definition());
-        self.dangling.remove(&function);
-        if let Some(body) = definition.body() {
-            for callee in body.functions.keys() {
-                if *callee != function && self.find(callee).is_err() {
-                    self.dangling.insert(*callee);
-                }
-            }
-        }
-        insert_shared(&mut self.functions, at, registered);
-        if let Some(buckets) = &mut self.buckets {
-            for boundary in &mut buckets[bucket(&function) + 1..] {
-                *boundary += 1;
-            }
-        } else {
-            self.index_buckets();
-        }
-        let named = Named {
-            name: NameRef::Defined(definition),
-            function,
-        };
-        let place = self
-            .names
-            .partition_point(|other| other.key() < named.key());
-        insert_shared(&mut self.names, place, named);
+        self.edit(|owned| owned.register(RegisteredFunction::new(function, definition, native)))?;
         Ok(function)
     }
 
@@ -782,11 +751,14 @@ impl FunctionRegistry {
         &mut self,
         definitions: Vec<FunctionDefinition>,
     ) -> Result<ValidatedFunctions, RegistryError> {
-        let basis = self
-            .functions
-            .iter()
-            .map(|registered| registered.function)
-            .collect();
+        let basis = match &self.storage {
+            RegistryStorage::Frame(frame) => frame.image().ids().collect(),
+            RegistryStorage::Owned(owned) => owned
+                .functions
+                .iter()
+                .map(|registered| registered.function)
+                .collect(),
+        };
         let mut functions = Vec::with_capacity(definitions.len());
         for definition in definitions {
             let function = self.register(definition.clone(), None)?;
@@ -850,7 +822,237 @@ impl FunctionRegistry {
     /// they were validated against, and [`RegistryError::AlreadyRegistered`].
     /// A refused image registers nothing.
     pub fn register_released(&mut self, image: ReleasedFunctions) -> Result<(), RegistryError> {
-        self.materialize();
+        self.edit(|owned| owned.register_released(image))
+    }
+
+    /// Adds the native implementation of a registered function whose
+    /// definition states one beside its kernel body: an operation's
+    /// partial native, which answers the inputs it can and declines the
+    /// rest to the body (`NativeError::Decline`). A dialect's helpers are
+    /// registered as their build validated them, and the embedder adds
+    /// their natives afterwards.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError::NotRegistered`], [`RegistryError::NativeNotStated`]
+    /// and [`RegistryError::AlreadyImplemented`].
+    pub fn implement(
+        &mut self,
+        function: FunctionId,
+        native: Arc<dyn NativeFunction>,
+    ) -> Result<(), RegistryError> {
+        self.edit(|owned| owned.implement(function, native))
+    }
+
+    /// [`FunctionRegistry::implement`] for the function named `name`: how an
+    /// embedder adds the natives of definitions its build's release image
+    /// holds (FIG-6843). It returns the function's identity.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError::NameNotRegistered`], and
+    /// [`FunctionRegistry::implement`]'s.
+    pub fn implement_named(
+        &mut self,
+        name: &str,
+        native: Arc<dyn NativeFunction>,
+    ) -> Result<FunctionId, RegistryError> {
+        let function = self
+            .named(name)
+            .next()
+            .ok_or_else(|| RegistryError::NameNotRegistered {
+                name: name.to_owned(),
+            })?;
+        self.implement(function, native)?;
+        Ok(function)
+    }
+
+    /// Installs the plans a build generated, each beside the definition
+    /// it was generated from, by identity. A plan whose function is not
+    /// registered is skipped: the registry holds another dialect's or
+    /// another release's helpers. Every callee a plan calls outside its
+    /// callback sites must answer at once: a native without a body, a
+    /// machine function, or an installed plan that has no callback site.
+    /// When a native beside a plan declines, that plan executes the
+    /// callee's body without offering the native the call again.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError::PlanWithoutBody`], [`RegistryError::AlreadyPlanned`]
+    /// and [`RegistryError::PlanCalleeUnanswered`].
+    pub fn install_plans(&mut self, plans: &[&'static HelperPlan]) -> Result<usize, RegistryError> {
+        self.install(plans, true)
+    }
+
+    /// [`FunctionRegistry::install_plans`], skipping each plan that calls a
+    /// callee nothing answers: a registry assembled from an execution's
+    /// stored closure holds a plan's function without every callee the
+    /// build generated it against, and runs that function's body instead.
+    /// It returns how many plans it installed.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError::PlanWithoutBody`] and
+    /// [`RegistryError::AlreadyPlanned`].
+    pub fn install_answered_plans(
+        &mut self,
+        plans: &[&'static HelperPlan],
+    ) -> Result<usize, RegistryError> {
+        self.install(plans, false)
+    }
+
+    fn install(
+        &mut self,
+        plans: &[&'static HelperPlan],
+        strict: bool,
+    ) -> Result<usize, RegistryError> {
+        self.edit(|owned| owned.install(plans, strict))
+    }
+
+    pub fn get(&self, function: &FunctionId) -> Option<&RegisteredFunction> {
+        self.find(function).ok().and_then(|at| self.at(at))
+    }
+
+    /// Where `function` stands among every registered function in identity
+    /// order ([`FunctionRegistry::iter`]), when the registry holds it.
+    pub fn position(&self, function: &FunctionId) -> Option<usize> {
+        self.find(function).ok()
+    }
+
+    /// Whether every function a registered body names is registered: then
+    /// no body reaches a function the registry lacks.
+    pub fn holds_every_callee(&self) -> bool {
+        match &self.storage {
+            RegistryStorage::Frame(frame) => frame.image().dangling().len() == 0,
+            RegistryStorage::Owned(owned) => owned.dangling.is_empty(),
+        }
+    }
+
+    /// The functions whose definitions are named `name`, in identity order.
+    pub fn named<'a>(&'a self, name: &'a str) -> impl Iterator<Item = FunctionId> + 'a {
+        let mut lo = 0;
+        let mut hi = self.len();
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if self.name_at(mid).is_some_and(|(found, _)| found < name) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        (lo..self.len()).map_while(move |at| {
+            self.name_at(at)
+                .filter(|(found, _)| *found == name)
+                .map(|(_, function)| function)
+        })
+    }
+
+    /// Every function in the frame's name index, without a registration allocation.
+    pub fn names(&self) -> impl ExactSizeIterator<Item = (&str, FunctionId)> + '_ {
+        (0..self.len()).map(|rank| {
+            self.name_at(rank)
+                .unwrap_or_else(|| unreachable!("name index"))
+        })
+    }
+
+    /// The `rank`th entry of [`FunctionRegistry::names`].
+    pub fn name_at(&self, rank: usize) -> Option<(&str, FunctionId)> {
+        match &self.storage {
+            RegistryStorage::Frame(frame) => {
+                let image = frame.image();
+                if rank >= image.len() {
+                    return None;
+                }
+                let at = image.name_order(rank);
+                Some((image.name(at), image.id(at)))
+            }
+            RegistryStorage::Owned(owned) => {
+                let named = owned.names.get(rank)?;
+                Some((named.name(), named.function))
+            }
+        }
+    }
+
+    /// A function's name without materializing its registration or native.
+    pub fn name_of(&self, function: &FunctionId) -> Option<&str> {
+        let at = self.position(function)?;
+        match &self.storage {
+            RegistryStorage::Frame(frame) => Some(frame.image().name(at)),
+            RegistryStorage::Owned(owned) => owned.functions.get(at).map(RegisteredFunction::name),
+        }
+    }
+
+    /// The native implementation registered for a function named `name`,
+    /// when one is: what a partial native delegates to, so that it answers
+    /// exactly as the body's own call does.
+    pub fn native_named(&self, name: &str) -> Option<Arc<dyn NativeFunction>> {
+        self.named(name)
+            .find_map(|function| self.get(&function)?.native.clone())
+    }
+
+    /// Export the complete library as typed, serialisable declarations.
+    ///
+    /// The result implements [`FunctionCatalog`]. A host can decode it and
+    /// derive a workflow view without this registry's native implementations
+    /// or the engine that owns it. Identities, names, signatures and bodies
+    /// are preserved, including transitive library dependencies.
+    pub fn export_declarations(&self) -> crate::FunctionDeclarations {
+        self.iter()
+            .map(|(_, registered)| {
+                (
+                    registered.function,
+                    registered.definition().as_ref().clone(),
+                )
+            })
+            .collect()
+    }
+
+    /// Every registered function, ordered by identity.
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (&FunctionId, &RegisteredFunction)> {
+        (0..self.len()).map(|at| {
+            let registered = self
+                .at(at)
+                .unwrap_or_else(|| unreachable!("registry position"));
+            (&registered.function, registered)
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        match &self.storage {
+            RegistryStorage::Frame(frame) => frame.image().len(),
+            RegistryStorage::Owned(owned) => owned.functions.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl OwnedRegistry {
+    fn find(&self, function: &FunctionId) -> Result<usize, usize> {
+        let (start, end) = match &self.buckets {
+            Some(buckets) => {
+                let at = bucket(function);
+                (buckets[at] as usize, buckets[at + 1] as usize)
+            }
+            None => (0, self.functions.len()),
+        };
+        match self.functions[start..end]
+            .binary_search_by(|registered| registered.function.cmp(function))
+        {
+            Ok(at) => Ok(start + at),
+            Err(at) => Err(start + at),
+        }
+    }
+
+    fn index_buckets(&mut self) {
+        self.buckets = Some(identity_buckets(
+            self.functions.iter().map(|registered| registered.function),
+        ));
+    }
+
+    fn register_released(&mut self, image: ReleasedFunctions) -> Result<(), RegistryError> {
         let mut held = self
             .functions
             .iter()
@@ -923,23 +1125,11 @@ impl FunctionRegistry {
         Ok(())
     }
 
-    /// Adds the native implementation of a registered function whose
-    /// definition states one beside its kernel body: an operation's
-    /// partial native, which answers the inputs it can and declines the
-    /// rest to the body (`NativeError::Decline`). A dialect's helpers are
-    /// registered as their build validated them, and the embedder adds
-    /// their natives afterwards.
-    ///
-    /// # Errors
-    ///
-    /// [`RegistryError::NotRegistered`], [`RegistryError::NativeNotStated`]
-    /// and [`RegistryError::AlreadyImplemented`].
-    pub fn implement(
+    fn implement(
         &mut self,
         function: FunctionId,
         native: Arc<dyn NativeFunction>,
     ) -> Result<(), RegistryError> {
-        self.materialize();
         let at = self
             .find(&function)
             .map_err(|_| RegistryError::NotRegistered { function })?;
@@ -959,69 +1149,11 @@ impl FunctionRegistry {
         Ok(())
     }
 
-    /// [`FunctionRegistry::implement`] for the function named `name`: how an
-    /// embedder adds the natives of definitions its build's release image
-    /// holds (FIG-6843). It returns the function's identity.
-    ///
-    /// # Errors
-    ///
-    /// [`RegistryError::NameNotRegistered`], and
-    /// [`FunctionRegistry::implement`]'s.
-    pub fn implement_named(
-        &mut self,
-        name: &str,
-        native: Arc<dyn NativeFunction>,
-    ) -> Result<FunctionId, RegistryError> {
-        let function = self
-            .named(name)
-            .next()
-            .ok_or_else(|| RegistryError::NameNotRegistered {
-                name: name.to_owned(),
-            })?;
-        self.implement(function, native)?;
-        Ok(function)
-    }
-
-    /// Installs the plans a build generated, each beside the definition
-    /// it was generated from, by identity. A plan whose function is not
-    /// registered is skipped: the registry holds another dialect's or
-    /// another release's helpers. Every callee a plan calls outside its
-    /// callback sites must answer at once: a native without a body, a
-    /// machine function, or an installed plan that has no callback site.
-    /// When a native beside a plan declines, that plan executes the
-    /// callee's body without offering the native the call again.
-    ///
-    /// # Errors
-    ///
-    /// [`RegistryError::PlanWithoutBody`], [`RegistryError::AlreadyPlanned`]
-    /// and [`RegistryError::PlanCalleeUnanswered`].
-    pub fn install_plans(&mut self, plans: &[&'static HelperPlan]) -> Result<usize, RegistryError> {
-        self.install(plans, true)
-    }
-
-    /// [`FunctionRegistry::install_plans`], skipping each plan that calls a
-    /// callee nothing answers: a registry assembled from an execution's
-    /// stored closure holds a plan's function without every callee the
-    /// build generated it against, and runs that function's body instead.
-    /// It returns how many plans it installed.
-    ///
-    /// # Errors
-    ///
-    /// [`RegistryError::PlanWithoutBody`] and
-    /// [`RegistryError::AlreadyPlanned`].
-    pub fn install_answered_plans(
-        &mut self,
-        plans: &[&'static HelperPlan],
-    ) -> Result<usize, RegistryError> {
-        self.install(plans, false)
-    }
-
     fn install(
         &mut self,
         plans: &[&'static HelperPlan],
         strict: bool,
     ) -> Result<usize, RegistryError> {
-        self.materialize();
         let mut installing: Vec<(usize, &'static HelperPlan)> = Vec::with_capacity(plans.len());
         let mut seen = vec![false; self.functions.len()];
         for plan in plans {
@@ -1117,118 +1249,43 @@ impl FunctionRegistry {
             .map(|(_, callee)| *callee)
     }
 
-    pub fn get(&self, function: &FunctionId) -> Option<&RegisteredFunction> {
-        self.find(function).ok().and_then(|at| self.at(at))
-    }
-
-    /// Where `function` stands among every registered function in identity
-    /// order ([`FunctionRegistry::iter`]), when the registry holds it.
-    pub fn position(&self, function: &FunctionId) -> Option<usize> {
-        self.find(function).ok()
-    }
-
-    /// Whether every function a registered body names is registered: then
-    /// no body reaches a function the registry lacks.
-    pub fn holds_every_callee(&self) -> bool {
-        self.frame.as_ref().map_or_else(
-            || self.dangling.is_empty(),
-            |frame| frame.image().dangling().len() == 0,
-        )
-    }
-
-    /// The functions whose definitions are named `name`, in identity order.
-    pub fn named<'a>(&'a self, name: &'a str) -> impl Iterator<Item = FunctionId> + 'a {
-        let mut lo = 0;
-        let mut hi = self.len();
-        while lo < hi {
-            let mid = (lo + hi) / 2;
-            if self.name_at(mid).is_some_and(|(found, _)| found < name) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
+    fn register(&mut self, registered: RegisteredFunction) -> Result<FunctionId, RegistryError> {
+        let function = registered.function;
+        let at = match self.find(&function) {
+            Ok(_) => {
+                return Err(RegistryError::AlreadyRegistered {
+                    name: registered.definition().name.clone(),
+                    function,
+                });
+            }
+            Err(at) => at,
+        };
+        let definition = Arc::clone(registered.definition());
+        self.dangling.remove(&function);
+        if let Some(body) = definition.body() {
+            for callee in body.functions.keys() {
+                if *callee != function && self.find(callee).is_err() {
+                    self.dangling.insert(*callee);
+                }
             }
         }
-        (lo..self.len()).map_while(move |at| {
-            self.name_at(at)
-                .filter(|(found, _)| *found == name)
-                .map(|(_, function)| function)
-        })
-    }
-
-    /// Every function in the frame's name index, without a registration allocation.
-    pub fn names(&self) -> impl ExactSizeIterator<Item = (&str, FunctionId)> + '_ {
-        (0..self.len()).map(|rank| {
-            self.name_at(rank)
-                .unwrap_or_else(|| unreachable!("name index"))
-        })
-    }
-
-    /// The `rank`th entry of [`FunctionRegistry::names`].
-    pub fn name_at(&self, rank: usize) -> Option<(&str, FunctionId)> {
-        if let Some(frame) = &self.frame {
-            let image = frame.image();
-            if rank >= image.len() {
-                return None;
+        insert_shared(&mut self.functions, at, registered);
+        if let Some(buckets) = &mut self.buckets {
+            for boundary in &mut buckets[bucket(&function) + 1..] {
+                *boundary += 1;
             }
-            let at = image.name_order(rank);
-            return Some((image.name(at), image.id(at)));
+        } else {
+            self.index_buckets();
         }
-        let named = self.names.get(rank)?;
-        Some((named.name(), named.function))
-    }
-
-    /// A function's name without materializing its registration or native.
-    pub fn name_of(&self, function: &FunctionId) -> Option<&str> {
-        let at = self.position(function)?;
-        match &self.frame {
-            Some(frame) => Some(frame.image().name(at)),
-            None => self.functions.get(at).map(RegisteredFunction::name),
-        }
-    }
-
-    /// The native implementation registered for a function named `name`,
-    /// when one is: what a partial native delegates to, so that it answers
-    /// exactly as the body's own call does.
-    pub fn native_named(&self, name: &str) -> Option<Arc<dyn NativeFunction>> {
-        self.named(name)
-            .find_map(|function| self.get(&function)?.native.clone())
-    }
-
-    /// Export the complete library as typed, serialisable declarations.
-    ///
-    /// The result implements [`FunctionCatalog`]. A host can decode it and
-    /// derive a workflow view without this registry's native implementations
-    /// or the engine that owns it. Identities, names, signatures and bodies
-    /// are preserved, including transitive library dependencies.
-    pub fn export_declarations(&self) -> crate::FunctionDeclarations {
-        self.iter()
-            .map(|(_, registered)| {
-                (
-                    registered.function,
-                    registered.definition().as_ref().clone(),
-                )
-            })
-            .collect()
-    }
-
-    /// Every registered function, ordered by identity.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = (&FunctionId, &RegisteredFunction)> {
-        (0..self.len()).map(|at| {
-            let registered = self
-                .at(at)
-                .unwrap_or_else(|| unreachable!("registry position"));
-            (&registered.function, registered)
-        })
-    }
-
-    pub fn len(&self) -> usize {
-        self.frame
-            .as_ref()
-            .map_or_else(|| self.functions.len(), |frame| frame.image().len())
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        let named = Named {
+            name: NameRef::Defined(definition),
+            function,
+        };
+        let place = self
+            .names
+            .partition_point(|other| other.key() < named.key());
+        insert_shared(&mut self.names, place, named);
+        Ok(function)
     }
 }
 

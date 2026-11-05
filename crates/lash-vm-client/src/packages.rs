@@ -218,7 +218,11 @@ impl WorkerLibrary {
         let [image, _, _, roots, content, metadata] = sections(owner)?;
         let documents = read_documents(content)?;
         let roots = lash_kernel_value::tokens::decode_body(roots).map_err(malformed)?;
-        let registry = Arc::new(FunctionRegistry::over_frame(image).map_err(malformed)?);
+        let registry = Arc::new(
+            lash_kernel_doc::FrameRegistryBuilder::new(image)
+                .map_err(malformed)?
+                .finish_declarations(),
+        );
         let mut reader = TokenReader::new(metadata);
         reader.expect_struct(5).map_err(malformed)?;
         let identity = lash_kernel_value::HelperLibraryId::from_bytes(

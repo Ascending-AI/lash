@@ -576,9 +576,10 @@ pub(crate) mod tests {
         }));
         let library = WorkerLibrary::built().expect("production image");
         let [image, _, positions, _] = library.indexes().expect("production positions");
-        let mut registry = FunctionRegistry::over_frame(image).expect("production frame");
-        let error = registry
-            .bind_frame_plans(positions, &[plan])
+        let mut builder =
+            lash_kernel_doc::FrameRegistryBuilder::new(image).expect("production frame");
+        let error = builder
+            .bind_plans(positions, &[plan])
             .expect_err("unknown plan");
         assert_eq!(
             error,

@@ -129,8 +129,8 @@ pub use heap::{EntityId, FamilyId, Identity};
 
 use name::{DocumentId, FunctionId};
 pub use native::{
-    FunctionCatalog, FunctionRegistry, GuardExceeded, RegisteredFunction, RegistryError,
-    ValidatedFunctions, WorkCounter,
+    FrameRegistryBuilder, FunctionCatalog, FunctionRegistry, GuardExceeded, RegisteredFunction,
+    RegistryError, ValidatedFunctions, WorkCounter,
 };
 pub use number::{
     Float, Integer, InvalidFloat, InvalidInteger, InvalidNumberToken, NumberPolicy, NumberToken,
