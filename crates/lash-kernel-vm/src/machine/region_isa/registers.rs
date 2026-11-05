@@ -18,6 +18,7 @@ impl<T: Default> Default for Cell<T> {
 }
 pub(super) struct Registers<V: Copy> {
     ints: Vec<Cell<i64>>,
+    floats: Vec<Cell<f64>>,
     bools: Vec<Cell<bool>>,
     values: Vec<Cell<Option<V>>>,
     width: usize,
@@ -37,6 +38,7 @@ impl<V: Copy> Registers<V> {
         }
         Ok(Self {
             ints: bank(count)?,
+            floats: bank(count)?,
             bools: bank(count)?,
             values: bank(count)?,
             width,
@@ -61,6 +63,7 @@ impl<V: Copy> Registers<V> {
             Ok(())
         }
         grow(&mut self.ints, count)?;
+        grow(&mut self.floats, count)?;
         grow(&mut self.bools, count)?;
         grow(&mut self.values, count)
     }
@@ -91,6 +94,12 @@ impl<V: Copy> Registers<V> {
                 self.ints.get(self.at(frame, index)?),
                 invocation,
             )?)),
+            Register::Float(index) => {
+                Operand::Immediate(Value::Float(lash_kernel_doc::Float::new(read(
+                    self.floats.get(self.at(frame, index)?),
+                    invocation,
+                )?)))
+            }
             Register::Bool(index) => Operand::Immediate(Value::Bool(read(
                 self.bools.get(self.at(frame, index)?),
                 invocation,
@@ -109,6 +118,21 @@ impl<V: Copy> Registers<V> {
     ) -> Result<i64, RegionError> {
         let cell = self
             .ints
+            .get(self.at(frame, index)?)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        if !cell.valid || cell.invocation != invocation {
+            return Err(invalid(Refused::Facts));
+        }
+        Ok(cell.value)
+    }
+    pub(super) fn float(
+        &self,
+        frame: usize,
+        invocation: u64,
+        index: u32,
+    ) -> Result<f64, RegionError> {
+        let cell = self
+            .floats
             .get(self.at(frame, index)?)
             .ok_or_else(|| invalid(Refused::Facts))?;
         if !cell.valid || cell.invocation != invocation {
@@ -145,6 +169,13 @@ impl<V: Copy> Registers<V> {
                 let at = self.at(frame, index)?;
                 write(self.ints.get_mut(at), invocation, value)
             }
+            Register::Float(index) => {
+                let Value::Float(value) = value.scalar(view)? else {
+                    return Err(invalid(Refused::Facts));
+                };
+                let at = self.at(frame, index)?;
+                write(self.floats.get_mut(at), invocation, value.get())
+            }
             Register::Bool(index) => {
                 let Value::Bool(value) = value.scalar(view)? else {
                     return Err(invalid(Refused::Facts));
@@ -169,6 +200,13 @@ impl<V: Copy> Registers<V> {
             .ok_or_else(|| invalid(Refused::Facts))?;
         for cell in self
             .ints
+            .get_mut(base..end)
+            .ok_or_else(|| invalid(Refused::Facts))?
+        {
+            cell.valid = false;
+        }
+        for cell in self
+            .floats
             .get_mut(base..end)
             .ok_or_else(|| invalid(Refused::Facts))?
         {

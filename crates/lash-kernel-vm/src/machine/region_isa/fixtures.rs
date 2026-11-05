@@ -166,7 +166,12 @@ impl<'m> RegionLease<'m> {
         let programs = programs::Programs::bind(Box::new([Arc::clone(&code)]))?;
         let view = storage_fixture::FixtureView::bind(&programs, &code)?;
         authority.view_id = Some(view.lease);
-        let execution = Executing::Fixture(Execution::acquire(code, limits, view)?);
+        let first = code
+            .invocation
+            .checked_add(1)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        let invocations = super::invocations::Invocations::fixture(first, u64::MAX - first)?;
+        let execution = Executing::Fixture(Execution::acquire(code, limits, invocations, view)?);
         Ok(Self {
             authority: Authority::Fixture(authority),
             execution,
@@ -184,8 +189,19 @@ impl<'m> RegionLease<'m> {
         let mut authority = StateLease::acquire(state)?;
         let view = storage_fixture::FixtureView::bind(&programs, programs.code(entry)?)?;
         authority.view_id = Some(view.lease);
-        let execution =
-            Executing::Fixture(Execution::acquire_programs(programs, entry, limits, view)?);
+        let first = programs
+            .code(entry)?
+            .invocation
+            .checked_add(1)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        let invocations = super::invocations::Invocations::fixture(first, u64::MAX - first)?;
+        let execution = Executing::Fixture(Execution::acquire_programs(
+            programs,
+            entry,
+            limits,
+            invocations,
+            view,
+        )?);
         Ok(Self {
             authority: Authority::Fixture(authority),
             execution,
@@ -199,5 +215,26 @@ impl View {
         inspect: impl FnOnce(Option<&storage_fixture::FixtureGraph>) -> T,
     ) -> T {
         inspect(self.shared.borrow().graph.as_ref())
+    }
+}
+
+impl<'m> RegionLease<'m> {
+    pub(super) fn acquire_fixture_reserved(
+        state: &'m mut State,
+        code: Arc<Code>,
+        limits: Limits,
+        first: u64,
+        count: u64,
+    ) -> Result<Self, RegionError> {
+        let mut authority = StateLease::acquire(state)?;
+        let programs = programs::Programs::bind(Box::new([Arc::clone(&code)]))?;
+        let view = storage_fixture::FixtureView::bind(&programs, &code)?;
+        authority.view_id = Some(view.lease);
+        let invocations = super::invocations::Invocations::fixture(first, count)?;
+        let execution = Executing::Fixture(Execution::acquire(code, limits, invocations, view)?);
+        Ok(Self {
+            authority: Authority::Fixture(authority),
+            execution,
+        })
     }
 }

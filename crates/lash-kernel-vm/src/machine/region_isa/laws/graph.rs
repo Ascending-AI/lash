@@ -8,7 +8,7 @@ pub(super) fn local_edit() -> Arc<Code> {
             instruction(
                 Op::Read {
                     base: 1,
-                    member: 0,
+                    member: ReadSelector::List(0),
                     dst: Register::Int(1),
                 },
                 2,
@@ -39,6 +39,7 @@ pub(super) fn local_edit() -> Arc<Code> {
     code.dependencies = Box::new([ReadDependency {
         identity: object(99),
         members: Box::new([Value::Int(7)]),
+        fields: Box::new([]),
     }]);
     code.heap = Box::new([HeapAction {
         kind: HeapKind::Member(0),
@@ -48,14 +49,37 @@ pub(super) fn local_edit() -> Arc<Code> {
     Arc::new(code)
 }
 
+fn field_edit() -> Arc<Code> {
+    use crate::machine::region_isa::code::HeapKind;
+    let mut code = Arc::try_unwrap(local_edit())
+        .ok()
+        .expect("unique field fixture");
+    let identity = Value::Record(lash_kernel_doc::arena::ArenaHandle::new(99, 1));
+    code.initial[0].1 = identity;
+    code.initial[1].1 = identity;
+    code.dependencies[0].identity = identity;
+    code.dependencies[0].fields = Box::new([Arc::from("field")]);
+    code.fields = Box::new([Arc::from("field")]);
+    code.heap[0].kind = HeapKind::Field(0);
+    let Op::Read { member, .. } = &mut code.instructions[1].op else {
+        unreachable!()
+    };
+    *member = ReadSelector::Field(0);
+    Arc::new(code)
+}
+
 #[test]
 fn local_alias_edits_recover_the_reached_graph_and_publish_once() {
-    for cap in [0, 1, 2, 3] {
+    check_called_fresh_graph();
+    for (cap, field) in [0, 1, 2, 3]
+        .into_iter()
+        .flat_map(|cap| [(cap, false), (cap, true)])
+    {
         let mut state = State::new();
         let view = state.view();
         let mut lease = RegionLease::acquire_fixture(
             &mut state,
-            local_edit(),
+            if field { field_edit() } else { local_edit() },
             Limits {
                 charge: cap,
                 ..limits()
@@ -182,7 +206,7 @@ pub(super) fn fresh_list() -> Arc<Code> {
             instruction(
                 Op::Read {
                     base: 1,
-                    member: 0,
+                    member: ReadSelector::List(0),
                     dst: Register::Int(1),
                 },
                 5,
@@ -487,7 +511,7 @@ fn repeated_edit(n: i64) -> Arc<Code> {
             instruction(
                 Op::Read {
                     base: 1,
-                    member: 0,
+                    member: ReadSelector::List(0),
                     dst: Register::Int(4),
                 },
                 2,
@@ -554,6 +578,7 @@ fn repeated_edit(n: i64) -> Arc<Code> {
     code.dependencies = Box::new([ReadDependency {
         identity: object(99),
         members: Box::new([Value::Int(7)]),
+        fields: Box::new([]),
     }]);
     code.heap = Box::new([
         HeapAction {
@@ -568,4 +593,181 @@ fn repeated_edit(n: i64) -> Arc<Code> {
         },
     ]);
     Arc::new(code)
+}
+
+fn called_fresh_graph() -> Arc<programs::Programs> {
+    use crate::machine::region_isa::code::{HeapAction, HeapKind};
+    let mut root = code(
+        vec![
+            instruction(Op::Heap { site: 0 }, 1, 1, cost(1, 0, 0, 0)),
+            instruction(Op::Heap { site: 1 }, 2, 2, Cost::ZERO),
+            instruction(Op::Call { site: 0 }, 3, 3, cost(2, 8, 8, 1)),
+            instruction(
+                Op::Return {
+                    value: Register::Value(1),
+                },
+                3,
+                7,
+                Cost::ZERO,
+            ),
+        ],
+        vec![(Register::Int(0), Value::Int(7))],
+        &[],
+        8,
+    );
+    for prefix in 1..8 {
+        root.recovery[prefix].roles = Box::new([(Slot::Binding(0), Register::Value(0))]);
+    }
+    root.recovery[2].operands = Box::new([Register::Value(0)]);
+    for prefix in [4, 5] {
+        root.recovery[prefix].incoming = true;
+    }
+    for prefix in [6, 7] {
+        root.recovery[prefix].roles = Box::new([
+            (Slot::Binding(0), Register::Value(0)),
+            (Slot::Binding(1), Register::Value(1)),
+        ]);
+    }
+    root.heap = Box::new([
+        HeapAction {
+            kind: HeapKind::List,
+            args: Box::new([Register::Int(0)]),
+            destination: Some(0),
+        },
+        HeapAction {
+            kind: HeapKind::Hold(1),
+            args: Box::new([Register::Value(0)]),
+            destination: None,
+        },
+    ]);
+    root.calls = Box::new([Call {
+        target: CodeId(1),
+        before: Cost::ZERO,
+        before_prefix: 2,
+        entry: 0,
+        prefix: 0,
+        arguments: Box::new([(Register::Value(0), Register::Value(0))]),
+        result: Register::Value(0),
+        destination: Register::Value(1),
+        leave: cost(0, -8, 0, -1),
+        leave_prefix: 4,
+        completion: cost(3, 0, 0, 0),
+        completion_prefix: 5,
+        restore: Cost::ZERO,
+        restore_prefix: 6,
+    }]);
+    let mut callee = code(
+        vec![
+            instruction(
+                Op::Constant {
+                    dst: Register::Value(1),
+                    value: Value::Int(23),
+                },
+                1,
+                1,
+                Cost::ZERO,
+            ),
+            instruction(Op::Heap { site: 0 }, 2, 2, cost(1, 0, 0, 0)),
+            instruction(
+                Op::Return {
+                    value: Register::Value(0),
+                },
+                2,
+                3,
+                Cost::ZERO,
+            ),
+        ],
+        vec![],
+        &[(Slot::Binding(0), Register::Value(0))],
+        4,
+    );
+    callee.id = CodeId(1);
+    callee.heap = Box::new([HeapAction {
+        kind: HeapKind::Member(0),
+        args: Box::new([Register::Value(0), Register::Value(1)]),
+        destination: None,
+    }]);
+    programs::Programs::bind(Box::new([Arc::new(root), Arc::new(callee)]))
+        .expect("graph call registry")
+}
+
+fn check_called_fresh_graph() {
+    for cap in [3, 4, 6, 7, 8] {
+        let mut state = State::new();
+        let view = state.view();
+        let mut lease = RegionLease::acquire_fixture_programs(
+            &mut state,
+            called_fresh_graph(),
+            CodeId(0),
+            Limits {
+                charge: cap,
+                ..limits()
+            },
+        )
+        .expect("fresh argument entry");
+        let stop = lease
+            .run(StopAt::NextBoundary)
+            .expect("callee edits the shared lease graph");
+        assert_eq!(
+            stop,
+            if cap < 7 {
+                RegionStop::Refusal
+            } else {
+                RegionStop::Complete
+            }
+        );
+        view.inspect_graph(|graph| assert!(graph.is_none()));
+        let prefix = lease
+            .materialize()
+            .expect("one graph mapping for caller and callee");
+        let image = prefix.reconstruction();
+        let FrozenGraph::Fixture(graph) = &prefix.graph else {
+            unreachable!()
+        };
+        let body = graph.bodies[0]
+            .as_ref()
+            .expect("same retained fresh argument");
+        assert!(body.members[0].same(&Value::Int(if cap == 3 { 7 } else { 23 })));
+        assert_eq!(body.retained, 2);
+        assert_eq!(image.counters.peak, 20);
+        assert_eq!(
+            (
+                image.counters.balance,
+                image.counters.depth,
+                image.frames.len()
+            ),
+            if cap == 3 { (20, 1, 2) } else { (12, 0, 1) }
+        );
+        assert!(role(image, 0, 0).same(&body.identity));
+        if cap == 3 {
+            assert!(role(image, 1, 0).same(&body.identity));
+            assert!(image.pending.is_none());
+        } else if cap < 7 {
+            assert!(
+                image
+                    .pending
+                    .expect("post-Leave graph result")
+                    .same(&body.identity)
+            );
+            assert!(
+                image
+                    .returning
+                    .as_ref()
+                    .expect("unpaid completion")
+                    .value
+                    .same(&body.identity)
+            );
+            assert_eq!(image.counters.charge, 4);
+        } else {
+            assert!(role(image, 0, 1).same(&body.identity));
+            assert!(image.payload.expect("returned alias").same(&body.identity));
+            assert_eq!(image.counters.charge, 7);
+        }
+        prefix
+            .prepare_exit()
+            .expect("one complete graph exit")
+            .commit()
+            .expect("atomic publication");
+        view.inspect(|_, version, roots| assert_eq!((version, roots), (1, 1)));
+    }
 }

@@ -148,6 +148,11 @@ impl FixtureView {
                         usize::try_from(index).map_err(|_| bad("fixture member overflow"))?
                     }
                     storage::Selector::Variable => 0,
+                    storage::Selector::Field(name) => self.objects[index]
+                        .fields
+                        .iter()
+                        .position(|field| field == &name)
+                        .ok_or_else(|| bad("fixture field absent"))?,
                     _ => return Err(bad("fixture member selector unsupported").into()),
                 };
                 let old = *self.objects[index]
@@ -284,6 +289,7 @@ impl Ready for FixtureReady<'_> {
                 ));
                 let object = Object {
                     identity,
+                    fields: Box::new([]),
                     members: self.body.expect("reserved fixture body"),
                     generation,
                     version: 0,

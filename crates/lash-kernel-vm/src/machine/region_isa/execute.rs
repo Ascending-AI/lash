@@ -1,4 +1,4 @@
-use super::code::{Cost, Fee, Op, Register};
+use super::code::{Cost, Fee, Op, ReadSelector, Register};
 use super::operands::Operand;
 use super::registers::Registers;
 use super::storage::View;
@@ -39,18 +39,24 @@ pub(super) struct Execution<V: View> {
     pub(super) lease: Rc<()>,
     pub(super) returning: Option<returns::Returning<V::Value>>,
     pub(super) entering: Option<u32>,
-    next_invocation: u64,
+    pub(super) invocations: super::invocations::Invocations,
     #[cfg(test)]
     pub(super) executed: u64,
 }
 
 impl<V: View> Execution<V> {
-    pub(super) fn acquire(code: Arc<Code>, limits: Limits, view: V) -> Result<Self, RegionError> {
+    pub(super) fn acquire(
+        code: Arc<Code>,
+        limits: Limits,
+        invocations: super::invocations::Invocations,
+        view: V,
+    ) -> Result<Self, RegionError> {
         let id = code.id;
         Self::acquire_programs(
             programs::Programs::bind(Box::new([code]))?,
             id,
             limits,
+            invocations,
             view,
         )
     }
@@ -58,10 +64,12 @@ impl<V: View> Execution<V> {
         programs: Arc<programs::Programs>,
         entry: CodeId,
         limits: Limits,
+        invocations: super::invocations::Invocations,
         mut view: V,
     ) -> Result<Self, RegionError> {
         let code = Arc::clone(programs.code(entry)?);
         if code.invocation == 0
+            || !invocations.follows(code.invocation)
             || limits.entry_balance > limits.memory
             || limits.entry_charge > limits.charge
             || limits.entry_depth > limits.depth
@@ -112,10 +120,6 @@ impl<V: View> Execution<V> {
             depth: limits.entry_depth,
             debt: 0,
         };
-        let next_invocation = code
-            .invocation
-            .checked_add(1)
-            .ok_or_else(|| invalid(Refused::Facts))?;
         let mut arguments = Vec::new();
         arguments
             .try_reserve_exact(programs.arguments)
@@ -138,7 +142,7 @@ impl<V: View> Execution<V> {
             lease: Rc::new(()),
             returning: None,
             entering: None,
-            next_invocation,
+            invocations,
             #[cfg(test)]
             executed: 0,
         })
@@ -421,6 +425,32 @@ impl<V: View> Execution<V> {
                         }
                         Some((dst, Operand::Immediate(answer)))
                     }
+                    Op::Float {
+                        kernel,
+                        lhs,
+                        rhs,
+                        dst,
+                    } => {
+                        let frame = self.frames.last().ok_or_else(|| invalid(Refused::Facts))?;
+                        let index = self.frames.len() - 1;
+                        let lhs = self.registers.float(index, frame.invocation, lhs)?;
+                        let rhs = self.registers.float(index, frame.invocation, rhs)?;
+                        #[cfg(test)]
+                        self.code
+                            .semantic_operations
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let answer = if kernel.compares() {
+                            lash_kernel_doc::scalar::float_truth(kernel, lhs, rhs).map(Value::Bool)
+                        } else {
+                            lash_kernel_doc::scalar::float_number(kernel, lhs, rhs)
+                                .map(|n| Value::Float(lash_kernel_doc::Float::new(n)))
+                        };
+                        let Some(answer) = answer else {
+                            self.stop = Some(RegionStop::Boundary);
+                            return Ok(RegionStop::Boundary);
+                        };
+                        Some((dst, Operand::Immediate(answer)))
+                    }
                     Op::Branch { test, yes, no } => {
                         jump = match self.read(Register::Bool(test))?.scalar(&self.view)? {
                             Value::Bool(true) => yes,
@@ -435,10 +465,29 @@ impl<V: View> Execution<V> {
                             .semantic_operations
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let actual = self.value(Register::Value(base))?;
-                        let value = self
-                            .view
-                            .read(actual, &super::storage::Selector::List(u64::from(member)))
-                            .map_err(storage_fault)?;
+                        let selector = match member {
+                            ReadSelector::List(index) => super::storage::Selector::List(index),
+                            ReadSelector::Table(key) => {
+                                super::storage::Selector::Table(self.value(key)?)
+                            }
+                            ReadSelector::Field(index) => {
+                                super::storage::Selector::Field(Arc::clone(
+                                    self.code
+                                        .fields
+                                        .get(index as usize)
+                                        .ok_or_else(|| invalid(Refused::Facts))?,
+                                ))
+                            }
+                            ReadSelector::Variable => super::storage::Selector::Variable,
+                        };
+                        let value = match self.view.read(actual, &selector) {
+                            Ok(value) => value,
+                            Err(lash_kernel_state::kernel_internals::logical::LeaseFault::BoundaryRequired) => {
+                                self.stop = Some(RegionStop::Boundary);
+                                return Ok(RegionStop::Boundary);
+                            }
+                            Err(error) => return Err(storage_fault(error)),
+                        };
                         Some((dst, Operand::Dynamic(value)))
                     }
 
@@ -551,10 +600,8 @@ impl<V: View> Execution<V> {
             self.refuse(prefix)?;
             return Err(invalid(Refused::Peak));
         };
-        let invocation = self.next_invocation;
-        let following = invocation
-            .checked_add(1)
-            .ok_or_else(|| invalid(Refused::Facts))?;
+        let reserved = self.invocations.prepare()?;
+        let invocation = reserved.id;
         let depth = self.frames.len();
         self.frames
             .try_reserve(1)
@@ -581,7 +628,7 @@ impl<V: View> Execution<V> {
             return_pc: next,
             activation: None,
         });
-        self.next_invocation = following;
+        self.invocations.accept(reserved);
         self.code = target_code;
         self.entering = None;
         self.reached(entry_prefix, counters)?;

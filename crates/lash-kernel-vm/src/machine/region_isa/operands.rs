@@ -12,7 +12,7 @@ impl<V: Copy> Operand<V> {
     pub(super) fn scalar<S: View<Value = V>>(self, view: &S) -> Result<Value, RegionError> {
         match self {
             Self::Immediate(value) => {
-                if !matches!(value, Value::Int(_) | Value::Bool(_)) {
+                if !matches!(value, Value::Int(_) | Value::Float(_) | Value::Bool(_)) {
                     return Err(invalid(Refused::Facts));
                 }
                 Ok(value)

@@ -32,6 +32,16 @@ impl<V: View> Execution<V> {
                 member: Selector::List(index),
                 next: Some(args[1]),
             },
+            HeapKind::Field(index) if args.len() == 2 => Operation::Member {
+                object: args[0],
+                member: Selector::Field(Arc::clone(
+                    self.code
+                        .fields
+                        .get(index as usize)
+                        .ok_or_else(|| invalid(Refused::Facts))?,
+                )),
+                next: Some(args[1]),
+            },
             HeapKind::Grow(additional) if args.len() == 1 => Operation::Grow {
                 object: args[0],
                 additional,

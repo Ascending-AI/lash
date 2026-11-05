@@ -14,8 +14,15 @@ pub(super) struct FrameImage {
     pub(super) pending: Option<Value>,
 }
 
+pub(super) struct Finished<V: View> {
+    pub(super) image: Reconstruction,
+    pub(super) view: V,
+    pub(super) graph: V::Graph,
+    pub(super) invocations: Option<lash_kernel_state::kernel_internals::logical::InvocationRange>,
+}
+
 impl<V: View> Execution<V> {
-    pub(super) fn reconstruct(mut self) -> Result<(Reconstruction, V, V::Graph), RegionError> {
+    pub(super) fn reconstruct(mut self) -> Result<Finished<V>, RegionError> {
         if self.faulted {
             return Err(invalid(Refused::Facts));
         }
@@ -100,7 +107,9 @@ impl<V: View> Execution<V> {
                 })
             })
             .transpose()?;
+        let (issued_invocations, invocations) = self.invocations.finish()?;
         let reconstruction = Reconstruction {
+            issued_invocations,
             prefix: self.reached,
             frames,
             pending,
@@ -115,6 +124,11 @@ impl<V: View> Execution<V> {
             entering: self.entering,
             returning,
         };
-        Ok((reconstruction, self.view, graph))
+        Ok(Finished {
+            image: reconstruction,
+            view: self.view,
+            graph,
+            invocations,
+        })
     }
 }

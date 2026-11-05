@@ -1,4 +1,6 @@
-use super::code::{Call, Cost, Fee, Instruction, Op, ReadDependency, Recovery, Register};
+use super::code::{
+    Call, Cost, Fee, Instruction, Op, ReadDependency, ReadSelector, Recovery, Register,
+};
 use super::fixtures::State;
 use super::*;
 use crate::compile::room::Phase;
@@ -73,6 +75,7 @@ fn code(
         calls: Box::new([]),
         heap: Box::new([]),
         dependencies: Box::new([]),
+        fields: Box::new([]),
         registers: 5,
         source_initial: Box::new([]),
         initial: initial.into_boxed_slice(),
@@ -341,7 +344,7 @@ fn read_loop(iterations: i64) -> Arc<Code> {
             instruction(
                 Op::Read {
                     base: 0,
-                    member: 0,
+                    member: ReadSelector::List(0),
                     dst: Register::Int(4),
                 },
                 1,
@@ -448,14 +451,35 @@ fn read_loop(iterations: i64) -> Arc<Code> {
     code.dependencies = Box::new([ReadDependency {
         identity: object(99),
         members: Box::new([Value::Int(7)]),
+        fields: Box::new([]),
     }]);
+    Arc::new(code)
+}
+
+fn field_loop(n: i64) -> Arc<Code> {
+    let mut code = Arc::try_unwrap(read_loop(n))
+        .ok()
+        .expect("unique field fixture");
+    let identity = Value::Record(lash_kernel_doc::arena::ArenaHandle::new(99, 1));
+    code.initial.last_mut().expect("read base").1 = identity;
+    code.dependencies[0].identity = identity;
+    code.dependencies[0].fields = Box::new([Arc::from("field")]);
+    code.fields = Box::new([Arc::from("field")]);
+    for instruction in &mut code.instructions {
+        if let Op::Read { member, .. } = &mut instruction.op {
+            *member = ReadSelector::Field(0);
+        }
+    }
     Arc::new(code)
 }
 
 #[test]
 fn stable_scalar_and_member_loops_publish_once_with_bounded_recovery() {
-    for n in [1, 17, 4096] {
-        let code = read_loop(n);
+    for (n, field) in [1, 17, 4096]
+        .into_iter()
+        .flat_map(|n| [(n, false), (n, true)])
+    {
+        let code = if field { field_loop(n) } else { read_loop(n) };
         let census = Arc::clone(&code.semantic_operations);
         let mut state = State::new();
         let view = state.view();
@@ -610,6 +634,7 @@ fn recursive(n: i64) -> Arc<Code> {
 
 #[test]
 fn affine_calls_use_the_executor_stack_and_preserve_exact_depth_prefixes() {
+    calls::reserved_invocations();
     for (n, depth, entry_depth, memory) in [
         (8, 8, 0, u64::MAX),
         (8, 9, 0, u64::MAX),
@@ -935,6 +960,91 @@ fn slices_and_explicit_boundaries_keep_the_actual_operands_and_unpaid_result() {
 
 #[test]
 fn overflow_number_policy_and_read_identity_are_checked_without_publication() {
+    for (kernel, lhs, rhs, expected) in [
+        (
+            ScalarOp::Add,
+            0.5,
+            0.25,
+            Value::Float(lash_kernel_doc::Float::new(0.75)),
+        ),
+        (ScalarOp::Lt, 0.5, 0.75, Value::Bool(true)),
+        (
+            ScalarOp::Mul,
+            f64::MAX,
+            2.0,
+            Value::Float(lash_kernel_doc::Float::new(f64::INFINITY)),
+        ),
+    ] {
+        for cap in [99, 100, 101] {
+            let destination = if kernel.compares() {
+                Register::Bool(0)
+            } else {
+                Register::Float(2)
+            };
+            let mut code = code(
+                vec![
+                    instruction(
+                        Op::Float {
+                            kernel,
+                            lhs: 0,
+                            rhs: 1,
+                            dst: destination,
+                        },
+                        1,
+                        1,
+                        cost(100, 0, 0, 0),
+                    ),
+                    instruction(Op::Return { value: destination }, 1, 2, Cost::ZERO),
+                ],
+                vec![
+                    (
+                        Register::Float(0),
+                        Value::Float(lash_kernel_doc::Float::new(lhs)),
+                    ),
+                    (
+                        Register::Float(1),
+                        Value::Float(lash_kernel_doc::Float::new(rhs)),
+                    ),
+                ],
+                &[(Slot::Binding(0), Register::Float(0))],
+                3,
+            );
+            for prefix in [1, 2] {
+                code.recovery[prefix].roles = Box::new([(Slot::Binding(0), destination)]);
+            }
+            let operations = Arc::clone(&code.semantic_operations);
+            let mut state = State::new();
+            let mut lease = RegionLease::acquire_fixture(
+                &mut state,
+                Arc::new(code),
+                Limits {
+                    charge: cap,
+                    ..limits()
+                },
+            )
+            .expect("typed float entry");
+            let stop = lease
+                .run(StopAt::NextBoundary)
+                .expect("one canonical float execution");
+            let prefix = lease
+                .materialize()
+                .expect("pack only the current float bank");
+            let image = prefix.reconstruction();
+            if cap < 100 {
+                assert_eq!(stop, RegionStop::Refusal);
+                assert_eq!(image.counters.charge, 0);
+                assert!(role(image, 0, 0).same(&Value::Float(lash_kernel_doc::Float::new(lhs))));
+                assert_eq!(operations.load(Ordering::Relaxed), 0);
+            } else {
+                assert_eq!(stop, RegionStop::Complete);
+                assert_eq!(image.counters.charge, 100);
+                assert!(role(image, 0, 0).same(&expected));
+                assert!(image.payload.expect("typed answer").same(&expected));
+                assert_eq!(operations.load(Ordering::Relaxed), 1);
+            }
+        }
+    }
+
     for (left, right, safe) in [(i64::MAX, 1, false), (9_007_199_254_740_991, 1, true)] {
         let mut code = Arc::try_unwrap(arithmetic()).ok().expect("unique fixture");
         code.initial[0].1 = Value::Int(left);
@@ -953,6 +1063,31 @@ fn overflow_number_policy_and_read_identity_are_checked_without_publication() {
         let materialized = lease.materialize().expect("recover inputs");
         assert_eq!(materialized.reconstruction().counters.charge, 0);
         assert!(role(materialized.reconstruction(), 0, 0).same(&Value::Int(left)));
+        view.inspect(|image, revision, roots| {
+            assert!(image.is_none());
+            assert_eq!((revision, roots), (0, 0));
+        });
+    }
+    {
+        let mut state = State::new();
+        let view = state.view();
+        let mut lease =
+            RegionLease::acquire_fixture(&mut state, field_loop(1), limits()).expect("entry");
+        let Executing::Fixture(execution) = &mut lease.execution else {
+            unreachable!()
+        };
+        execution.view.boundary_reads = true;
+        assert_eq!(
+            lease.run(StopAt::NextBoundary).expect("authority miss"),
+            RegionStop::Boundary
+        );
+        let prefix = lease
+            .materialize()
+            .expect("preceding prefix remains recoverable");
+        let image = prefix.reconstruction();
+        assert_eq!((image.prefix.ordinal, image.counters.charge), (0, 0));
+        assert_eq!(image.source_counts.as_ref(), &[17, 91]);
+        assert!(image.pending.is_none());
         view.inspect(|image, revision, roots| {
             assert!(image.is_none());
             assert_eq!((revision, roots), (0, 0));
@@ -1351,3 +1486,5 @@ fn calls_and_recovery_use_each_frames_own_code_and_the_callers_plan() {
 }
 
 mod graph;
+
+mod calls;

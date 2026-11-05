@@ -16,6 +16,7 @@ mod execute;
 #[cfg(test)]
 mod fixture_phases;
 mod heap;
+mod invocations;
 mod operands;
 mod programs;
 mod reconstruct;
@@ -61,6 +62,7 @@ pub(crate) struct ReachedPrefix {
     debt: u64,
 }
 pub(crate) struct Reconstruction {
+    issued_invocations: u64,
     prefix: ReachedPrefix,
     frames: Box<[reconstruct::FrameImage]>,
     pending: Option<Value>,
@@ -211,15 +213,30 @@ fn storage_fault(fault: lash_kernel_state::kernel_internals::logical::LeaseFault
     }
 }
 
+#[cfg_attr(
+    test,
+    allow(
+        clippy::large_enum_variant,
+        reason = "the fixture variant is test-only; production execution stays inline"
+    )
+)]
 enum Executing<'m> {
     Machine(Execution<lash_kernel_state::kernel_internals::logical::StateLease<'m>>),
     #[cfg(test)]
     Fixture(Execution<storage_fixture::FixtureView>),
 }
+#[cfg_attr(
+    test,
+    allow(
+        clippy::large_enum_variant,
+        reason = "the fixture variant is test-only; production graph authority stays inline"
+    )
+)]
 enum FrozenGraph<'m> {
     Machine {
         lease: lash_kernel_state::kernel_internals::logical::StateLease<'m>,
         graph: lash_kernel_state::kernel_internals::logical::LeaseGraphExit,
+        invocations: Option<lash_kernel_state::kernel_internals::logical::InvocationRange>,
     },
     #[cfg(test)]
     Fixture(storage_fixture::FixtureGraph),
@@ -270,12 +287,32 @@ impl<'m> Executing<'m> {
     fn reconstruct(self) -> Result<(Reconstruction, FrozenGraph<'m>), RegionError> {
         match self {
             Self::Machine(execution) => {
-                let (image, lease, graph) = execution.reconstruct()?;
-                Ok((image, FrozenGraph::Machine { lease, graph }))
+                let reconstruct::Finished {
+                    image,
+                    view: lease,
+                    graph,
+                    invocations,
+                } = execution.reconstruct()?;
+                Ok((
+                    image,
+                    FrozenGraph::Machine {
+                        lease,
+                        graph,
+                        invocations,
+                    },
+                ))
             }
             #[cfg(test)]
             Self::Fixture(execution) => {
-                let (image, _view, graph) = execution.reconstruct()?;
+                let reconstruct::Finished {
+                    image,
+                    view: _view,
+                    graph,
+                    invocations,
+                } = execution.reconstruct()?;
+                if invocations.is_some() {
+                    return Err(invalid(Refused::Facts));
+                }
                 Ok((image, FrozenGraph::Fixture(graph)))
             }
         }

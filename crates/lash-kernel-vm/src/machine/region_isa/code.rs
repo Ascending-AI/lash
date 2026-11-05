@@ -5,6 +5,7 @@ use lash_kernel_state::kernel_internals::logical::Slot;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Register {
     Int(u32),
+    Float(u32),
     Bool(u32),
     Value(u32),
 }
@@ -24,6 +25,12 @@ pub(super) enum Op {
         rhs: u32,
         dst: Register,
     },
+    Float {
+        kernel: ScalarOp,
+        lhs: u32,
+        rhs: u32,
+        dst: Register,
+    },
     Pack {
         src: Register,
         dst: Register,
@@ -35,7 +42,7 @@ pub(super) enum Op {
     },
     Read {
         base: u32,
-        member: u32,
+        member: ReadSelector,
         dst: Register,
     },
     Call {
@@ -53,6 +60,13 @@ pub(super) enum Op {
     Boundary,
     Meter,
     Exit,
+}
+#[derive(Clone, Copy)]
+pub(super) enum ReadSelector {
+    List(u64),
+    Table(Register),
+    Field(u32),
+    Variable,
 }
 #[derive(Clone, Copy)]
 pub(super) enum Fee {
@@ -119,6 +133,7 @@ pub(super) struct Call {
 pub(super) enum HeapKind {
     List,
     Member(u64),
+    Field(u32),
     Grow(u64),
     Hold(u64),
     Release(u64),
@@ -131,6 +146,7 @@ pub(super) struct HeapAction {
 pub(super) struct ReadDependency {
     pub(super) identity: Value,
     pub(super) members: Box<[Value]>,
+    pub(super) fields: Box<[Arc<str>]>,
 }
 
 /// Immutable execution tables. Production construction requires A's verified
@@ -144,6 +160,7 @@ pub(super) struct Code {
     pub(super) calls: Box<[Call]>,
     pub(super) heap: Box<[HeapAction]>,
     pub(super) dependencies: Box<[ReadDependency]>,
+    pub(super) fields: Box<[Arc<str>]>,
     pub(super) registers: usize,
     pub(super) source_initial: Box<[u64]>,
     pub(super) initial: Box<[(Register, Value)]>,

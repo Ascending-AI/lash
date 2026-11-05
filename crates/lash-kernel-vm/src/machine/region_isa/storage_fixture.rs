@@ -18,6 +18,7 @@ pub(super) enum FixtureValue {
 pub(super) struct Object {
     pub(super) identity: Value,
     pub(super) members: Vec<FixtureValue>,
+    pub(super) fields: Box<[Arc<str>]>,
     pub(super) generation: u64,
     pub(super) version: u64,
     pub(super) retained: u64,
@@ -33,6 +34,7 @@ pub(super) struct FixtureView {
     pub(super) next_identity: u64,
     pub(super) fail_reserve: bool,
     pub(super) fail_freeze: bool,
+    pub(super) boundary_reads: bool,
 }
 pub(super) struct FixtureGraph {
     pub(super) next_identity: u64,
@@ -55,6 +57,7 @@ impl FixtureView {
         for dependency in &code.dependencies {
             objects.push(Object {
                 identity: dependency.identity,
+                fields: dependency.fields.clone(),
                 members: dependency
                     .members
                     .iter()
@@ -84,6 +87,7 @@ impl FixtureView {
             next_identity: 1,
             fail_reserve: false,
             fail_freeze: false,
+            boundary_reads: false,
         })
     }
     pub(super) fn object(&self, value: FixtureValue) -> Result<&Object, HeapFault> {
@@ -144,7 +148,11 @@ impl View for FixtureView {
             }),
             value => {
                 self.object(value)?;
-                Ok(ValueKind::List)
+                Ok(if self.object(value)?.fields.is_empty() {
+                    ValueKind::List
+                } else {
+                    ValueKind::Record
+                })
             }
         }
     }
@@ -159,10 +167,18 @@ impl View for FixtureView {
         if self.frozen {
             return Err(bad("fixture graph is frozen").into());
         }
+        if self.boundary_reads {
+            return Err(LeaseFault::BoundaryRequired);
+        }
         let object = self.object(value)?;
         let index = match selector {
             storage::Selector::List(index) => *index as usize,
             storage::Selector::Variable => 0,
+            storage::Selector::Field(name) => object
+                .fields
+                .iter()
+                .position(|field| field == name)
+                .ok_or_else(|| bad("fixture field absent"))?,
             _ => return Err(bad("fixture selector is not indexed").into()),
         };
         object
@@ -207,6 +223,7 @@ impl View for FixtureView {
                     .collect::<Result<Box<[_]>, _>>()?;
                 Ok(Some(Snapshot {
                     identity: object.identity,
+                    fields: object.fields.clone(),
                     members,
                     version: object.version,
                     retained: object.retained,
@@ -242,6 +259,7 @@ impl Graph for FixtureGraph {
 pub(super) struct Snapshot {
     pub(super) identity: Value,
     pub(super) members: Box<[Value]>,
+    pub(super) fields: Box<[Arc<str>]>,
     pub(super) version: u64,
     pub(super) retained: u64,
 }
