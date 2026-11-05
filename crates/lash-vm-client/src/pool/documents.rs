@@ -20,7 +20,10 @@ impl Checkout {
         document: &str,
         class: ExecutionClass,
     ) -> Result<(), PoolError> {
-        if self.started {
+        if !matches!(
+            self.state.live()?.phase,
+            LeasePhase::Fresh | LeasePhase::Prepared { .. }
+        ) {
             return Err(PoolError::breach(SequenceFault::CheckoutAlreadyStarted));
         }
         // The host configuration is the ceiling the pool admits, never a
@@ -29,10 +32,10 @@ impl Checkout {
             return Err(PoolError::refused(refusal));
         }
         self.pool.library.prepare_start(&mut start)?;
-        self.reference_documents(&mut start)?;
+        let document_sources = Self::reference_documents(&mut start)?;
         // The start crosses within what the checkout reserved for it, as
         // if it crossed alone.
-        let worker = self.worker.as_ref().ok_or_else(PoolError::eof)?;
+        let worker = &self.state.live()?.worker;
         let size = worker
             .codec
             .borrowed_frame_len(&BorrowedParentFrame {
@@ -53,44 +56,46 @@ impl Checkout {
                 return Err(error);
             }
         }
-        self.execution_class = Some(class);
-        self.execution_recorded = false;
-        self.owner = Some(start.owner.clone());
-        self.document = Some(document.to_owned());
+        let run = Run {
+            owner: start.owner.clone(),
+            document: document.to_owned(),
+            class,
+            computed: false,
+            print_budget: start.bounds.memory,
+            state: RunState::Ready(ReadyRun {
+                start: StartDispatch::Queued(Box::new(start)),
+                deliveries: Vec::new(),
+            }),
+            document_sources,
+            grants: Vec::new(),
+        };
+        self.state.live_mut()?.phase = LeasePhase::Run(Box::new(run));
         self.phase_identity();
         if let Some(scope) = self.phase_scope() {
             scope.point("document_start");
         }
-        self.print_budget = start.bounds.memory;
-        self.started = true;
-        self.computed = false;
-        self.unsent_start = Some(Box::new(start));
         Ok(())
     }
 
-    fn reference_documents(&mut self, start: &mut Start) -> Result<(), PoolError> {
+    fn reference_documents(
+        start: &mut Start,
+    ) -> Result<std::collections::BTreeMap<DocumentId, EncodedPayload>, PoolError> {
+        let mut sources = std::collections::BTreeMap::new();
         for supplied in std::iter::once(&mut start.document).chain(&mut start.documents) {
-            if let StoredDocument::Supplied { document, .. } = supplied {
+            if let StoredDocument::Supplied { document, body } = supplied {
                 let id = *document;
-                let StoredDocument::Supplied { body, .. } =
-                    std::mem::replace(supplied, StoredDocument::Cached { document: id })
-                else {
-                    unreachable!()
-                };
-                if self
-                    .document_sources
-                    .get(&id)
-                    .is_some_and(|known| known != &body)
-                {
+                let body = EncodedPayload(std::mem::take(&mut body.0));
+                if sources.get(&id).is_some_and(|known| known != &body) {
                     return Err(PoolError::payload(
                         lash_protocol_types::engine_fault::PayloadKind::Start,
                         "conflicting document bodies",
                     ));
                 }
-                self.document_sources.insert(id, body);
+                sources.insert(id, body);
+                *supplied = StoredDocument::Cached { document: id };
             }
         }
-        Ok(())
+        Ok(sources)
     }
 
     pub(super) fn answer_documents(
@@ -107,11 +112,18 @@ impl Checkout {
                     "duplicate document miss",
                 ));
             }
-            let body = self.document_sources.get(&document).ok_or_else(|| {
-                PoolError::refused(
-                    lash_protocol_types::engine_fault::RunRefusal::DocumentNotSupplied { document },
-                )
-            })?;
+            let body = self
+                .state
+                .run()?
+                .document_sources
+                .get(&document)
+                .ok_or_else(|| {
+                    PoolError::refused(
+                        lash_protocol_types::engine_fault::RunRefusal::DocumentNotSupplied {
+                            document,
+                        },
+                    )
+                })?;
             documents.push(StoredDocument::Supplied {
                 document,
                 body: body.clone(),

@@ -1385,7 +1385,8 @@ main {
 /// reaped, and leaves the parent with a pool that hands out a replacement.
 /// It died after it began computing the run, so it died running it: a
 /// verdict another attempt may pass, which still spends one of the
-/// execution's attempts (FIG-6786).
+/// execution's attempts (FIG-6786). The discarded checkout rejects later
+/// deliveries rather than acknowledging outcomes it cannot send (FIG-7645).
 fn worker_crash_mid_run_leaves_the_parent_running() {
     let pool = WorkerPool::new(config("abort")).expect("pool");
     let (identity, document) = document(TOOL_LOOP);
@@ -1417,6 +1418,10 @@ fn worker_crash_mid_run_leaves_the_parent_running() {
         "the worker died running the run: {lost:?}"
     );
     assert!(lost.is_some_and(|lost| lost.is_host_verdict()));
+    assert!(
+        worker.deliver(wait, completed(Datum::Null)).is_err(),
+        "a discarded checkout cannot accept another outcome"
+    );
     let next = checkout(&pool);
     assert_ne!(next.pid(), Some(pid));
     next.release().expect("pristine replacement");

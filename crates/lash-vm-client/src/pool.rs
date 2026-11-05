@@ -419,59 +419,150 @@ pub struct Checkout {
     #[cfg(feature = "testing")]
     measured_cpu_receipt: std::cell::Cell<u64>,
     pool: Arc<Pool>,
-    worker: Option<Worker>,
+    state: CheckoutState,
     budget: ExecutionBudget,
-    /// Whether this checkout counts in its execution's held wall time: from
-    /// its admission until it lets its worker go.
-    holding: bool,
     credited_cpu: u64,
     outgoing: MessageFence,
     incoming: MessageFence,
     reservation: usize,
-    /// Whether the lease's one `Prepare` crossed.
-    prepared: bool,
-    started: bool,
-    /// Whether the worker began computing the run: a death from then until
-    /// the run releases it is the run's to answer for (FIG-6786).
-    computed: bool,
-    /// The run's start, until it crosses with the run's first slice.
-    unsent_start: Option<Box<Start>>,
-    document_sources: std::collections::BTreeMap<lash_kernel_value::DocumentId, EncodedPayload>,
-    /// Committed outcomes for the run, until they cross with its next
-    /// slice.
-    deliveries: Vec<Delivery>,
-    /// The host read or page exchange the worker waits on.
-    pending: Option<Pending>,
-    /// The phase a worker waiting on a page exchange answers from: it
-    /// asked while computing and computes on.
-    paged: Option<WorkerPhase>,
-    /// The stage capabilities issued for the last seal batch that crossed
-    /// with the run, until they cross back with its next slice.
-    grants: Vec<PageCapability>,
-    /// The rest of a slice or seal whose start and deliveries outgrew one
-    /// frame and cross an exchange at a time.
-    split: Option<Split>,
-    /// Whether the worker stands at a safe point, where it can be reset.
-    resettable: bool,
-    owner: Option<VmOwner>,
-    /// The document the run executes, as the parent named it at `start`.
-    document: Option<String>,
     printed: Vec<EncodedPayload>,
     /// Position hints and exact count deltas, as the run frames carried them.
     sites: Vec<EncodedPayload>,
-    /// The run's heap bound, which also bounds what one exchange prints
-    /// (FIG-4458).
-    print_budget: u64,
     /// The printed bytes the current exchange has handed over.
     printed_bytes: u64,
-    execution_class: Option<ExecutionClass>,
-    execution_recorded: bool,
 }
-/// What a worker waits on mid-slice.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Pending {
-    Read(HostReadId),
-    Pages(PageExchangeId),
+
+enum CheckoutState {
+    Live(Box<Lease>),
+    Discarded,
+}
+
+struct Lease {
+    worker: Worker,
+    phase: LeasePhase,
+}
+
+enum LeasePhase {
+    Fresh,
+    Preparing { owner: VmOwner },
+    Prepared { owner: VmOwner },
+    Run(Box<Run>),
+}
+
+struct Run {
+    owner: VmOwner,
+    document: String,
+    class: ExecutionClass,
+    /// Once computing is observed, a worker death belongs to this run.
+    computed: bool,
+    state: RunState,
+    document_sources: std::collections::BTreeMap<lash_kernel_value::DocumentId, EncodedPayload>,
+    grants: Vec<PageCapability>,
+    print_budget: u64,
+}
+
+enum RunState {
+    Ready(ReadyRun),
+    InFlight,
+    AwaitHost(HostReadId),
+    /// Pages always resume Computing, including a split Start or Deliver.
+    AwaitPages {
+        id: PageExchangeId,
+        resume: Continuation,
+    },
+}
+
+struct ReadyRun {
+    start: StartDispatch,
+    deliveries: Vec<Delivery>,
+}
+
+enum StartDispatch {
+    Queued(Box<Start>),
+    Sent,
+}
+
+impl StartDispatch {
+    fn take(&mut self) -> Option<Box<Start>> {
+        match std::mem::replace(self, Self::Sent) {
+            Self::Queued(start) => Some(start),
+            Self::Sent => None,
+        }
+    }
+}
+
+/// Owned by the exchange, then by its page wait until that exchange resumes.
+enum Continuation {
+    Run,
+    Split(Split),
+}
+
+impl CheckoutState {
+    fn live(&self) -> Result<&Lease, PoolError> {
+        match self {
+            Self::Live(lease) => Ok(lease),
+            Self::Discarded => Err(PoolError::eof()),
+        }
+    }
+    fn live_mut(&mut self) -> Result<&mut Lease, PoolError> {
+        match self {
+            Self::Live(lease) => Ok(lease),
+            Self::Discarded => Err(PoolError::eof()),
+        }
+    }
+    fn run(&self) -> Result<&Run, PoolError> {
+        match &self.live()?.phase {
+            LeasePhase::Run(run) => Ok(run),
+            _ => Err(PoolError::breach(SequenceFault::NoRun)),
+        }
+    }
+    fn run_mut(&mut self) -> Result<&mut Run, PoolError> {
+        match &mut self.live_mut()?.phase {
+            LeasePhase::Run(run) => Ok(run),
+            _ => Err(PoolError::breach(SequenceFault::NoRun)),
+        }
+    }
+    fn ready(&mut self) -> Result<&mut ReadyRun, PoolError> {
+        match &mut self.run_mut()?.state {
+            RunState::Ready(ready) => Ok(ready),
+            _ => Err(PoolError::breach(SequenceFault::NoRun)),
+        }
+    }
+    fn resume_pages(&mut self, id: PageExchangeId) -> Result<Continuation, PoolError> {
+        let run = self
+            .run_mut()
+            .map_err(|_| PoolError::breach(SequenceFault::WrongPageExchange))?;
+        match std::mem::replace(&mut run.state, RunState::InFlight) {
+            RunState::AwaitPages { id: wait, resume } if wait == id => Ok(resume),
+            state => {
+                run.state = state;
+                Err(PoolError::breach(SequenceFault::WrongPageExchange))
+            }
+        }
+    }
+    fn resettable(&self) -> bool {
+        match self {
+            Self::Live(lease) => match &lease.phase {
+                LeasePhase::Fresh | LeasePhase::Prepared { .. } => true,
+                LeasePhase::Run(run) => matches!(run.state, RunState::Ready(_)),
+                LeasePhase::Preparing { .. } => false,
+            },
+            Self::Discarded => false,
+        }
+    }
+    fn begin_exchange(&mut self) {
+        if let Ok(run) = self.run_mut() {
+            run.state = RunState::InFlight;
+        }
+    }
+    fn safe_point(&mut self) {
+        if let Ok(run) = self.run_mut() {
+            run.state = RunState::Ready(ReadyRun {
+                start: StartDispatch::Sent,
+                deliveries: Vec::new(),
+            });
+        }
+    }
 }
 
 /// What is left to cross of a slice or seal sent an exchange at a time.
@@ -490,18 +581,27 @@ enum SplitThen {
 
 impl Checkout {
     pub(crate) fn phase_scope(&self) -> Option<crate::phases::Scope> {
-        self.worker
-            .as_ref()
-            .and_then(|worker| worker.phases.clone())
+        self.state
+            .live()
+            .ok()
+            .and_then(|lease| lease.worker.phases.clone())
     }
     fn phase_identity(&mut self) {
-        if let Some(scope) = self
-            .worker
-            .as_mut()
-            .and_then(|worker| worker.phases.as_mut())
+        if let Ok(lease) = self.state.live_mut()
+            && let Some(scope) = &mut lease.worker.phases
         {
-            scope.owner = self.owner.as_ref().map(|owner| owner.as_str().to_owned());
-            scope.document = self.document.clone();
+            let (owner, document) = match &lease.phase {
+                LeasePhase::Fresh => (None, None),
+                LeasePhase::Preparing { owner } | LeasePhase::Prepared { owner } => {
+                    (Some(owner.as_str().to_owned()), None)
+                }
+                LeasePhase::Run(run) => (
+                    Some(run.owner.as_str().to_owned()),
+                    Some(run.document.clone()),
+                ),
+            };
+            scope.owner = owner;
+            scope.document = document;
         }
     }
     fn charge_cpu(&self, cpu_nanos: u64) -> Result<(), PoolError> {
@@ -546,15 +646,15 @@ impl Checkout {
         (header.owner_epoch, header.frame_epoch)
     }
     pub fn interruptor(&self) -> Result<std::os::unix::net::UnixStream, PoolError> {
-        self.worker
-            .as_ref()
-            .ok_or_else(PoolError::eof)?
+        self.state
+            .live()?
+            .worker
             .pipe
             .try_clone()
             .map_err(PoolError::io)
     }
     pub fn pid(&self) -> Option<u32> {
-        self.worker.as_ref().map(Worker::pid)
+        self.state.live().ok().map(|lease| lease.worker.pid())
     }
     pub fn budget(&self) -> &ExecutionBudget {
         &self.budget
@@ -575,9 +675,6 @@ impl Checkout {
     /// crossed, and the outcomes delivered since the last slice cross with
     /// it, in one exchange (FIG-5921).
     pub fn run(&mut self, slice: u64, cancel: bool) -> Result<RunStep, PoolError> {
-        if self.pending.is_some() || !self.started {
-            return Err(PoolError::breach(SequenceFault::NoRun));
-        }
         self.drive(slice, cancel)
     }
 
@@ -586,35 +683,41 @@ impl Checkout {
     /// exchange of its own before the slice.
     fn drive(&mut self, slice: u64, cancel: bool) -> Result<RunStep, PoolError> {
         let timeout = self.pool.config.protocol.no_response_watchdog;
-        let start = self.unsent_start.take();
+        let ready = self.state.ready()?;
+        let start = ready.start.take();
+        let deliveries = std::mem::take(&mut ready.deliveries);
         #[cfg(feature = "perf-witness")]
         self.count_warm(start.as_deref());
-        let deliveries = std::mem::take(&mut self.deliveries);
         let scope = self.phase_scope();
         let encode_start = scope.as_ref().map(|scope| scope.recorder.now());
-        let together = self.worker.as_ref().and_then(|worker| {
-            worker
-                .codec
-                .encode_borrowed(&BorrowedParentFrame {
-                    header: self.outgoing.next_header_copy(),
-                    message: BorrowedParentMessage::Run {
-                        start: start.as_deref(),
-                        deliveries: &deliveries,
-                        slice,
-                        cancel,
-                        sealed: &self.grants,
-                    },
-                })
-                .ok()
-                .filter(|bytes| worker.codec.check_frame(bytes).is_ok())
-        });
+        let together = self
+            .state
+            .live()
+            .ok()
+            .map(|lease| &lease.worker)
+            .and_then(|worker| {
+                worker
+                    .codec
+                    .encode_borrowed(&BorrowedParentFrame {
+                        header: self.outgoing.next_header_copy(),
+                        message: BorrowedParentMessage::Run {
+                            start: start.as_deref(),
+                            deliveries: &deliveries,
+                            slice,
+                            cancel,
+                            sealed: &self.state.run().ok()?.grants,
+                        },
+                    })
+                    .ok()
+                    .filter(|bytes| worker.codec.check_frame(bytes).is_ok())
+            });
         if let (Some(scope), Some(start)) = (&scope, encode_start) {
             scope.record("encode_run", start);
         }
         if let Some(bytes) = together {
-            self.grants.clear();
+            self.state.run_mut()?.grants.clear();
             let message = self.exchange_encoded(&bytes, timeout)?;
-            return self.step(message);
+            return self.finish_exchange(message, Continuation::Run, Exchange::Run);
         }
         self.split_from(
             start,
@@ -631,64 +734,76 @@ impl Checkout {
         start: Option<Box<Start>>,
         split: Split,
     ) -> Result<RunStep, PoolError> {
-        let exchange = match split.then {
-            SplitThen::Run { .. } => Exchange::Run,
-            SplitThen::Seal => Exchange::Seal,
-        };
-        self.split = Some(split);
         match start {
-            Some(start) => {
-                let message = self.exchange(
-                    ParentMessage::Start(start),
-                    self.pool.config.protocol.no_response_watchdog,
-                )?;
-                self.split_step(exchange, message)
-            }
-            None => self.split_next(),
+            Some(start) => self.exchange_step(
+                ParentMessage::Start(start),
+                Continuation::Split(split),
+                None,
+            ),
+            None => self.split_next(split),
         }
     }
 
-    /// The worker's answer to one exchange of a split: a page exchange is
-    /// handed to the caller, an acknowledgement sends the next exchange.
-    fn split_step(
-        &mut self,
-        exchange: Exchange,
-        message: WorkerMessage,
-    ) -> Result<RunStep, PoolError> {
-        match message {
-            WorkerMessage::Pages { id, request } => Ok(RunStep::Pages { id, request }),
-            WorkerMessage::Started | WorkerMessage::Delivered => self.split_next(),
-            message => Err(self.unexpected(exchange, &message)),
-        }
-    }
-
-    fn split_next(&mut self) -> Result<RunStep, PoolError> {
-        let timeout = self.pool.config.protocol.no_response_watchdog;
-        let Some(split) = self.split.as_mut() else {
-            return Err(PoolError::breach(SequenceFault::NoRun));
-        };
+    fn split_next(&mut self, mut split: Split) -> Result<RunStep, PoolError> {
         if let Some(Delivery { wait, outcome }) = split.deliveries.next() {
-            let message = self.exchange(ParentMessage::Deliver { wait, outcome }, timeout)?;
-            return self.split_step(Exchange::Deliver, message);
+            return self.exchange_step(
+                ParentMessage::Deliver { wait, outcome },
+                Continuation::Split(split),
+                None,
+            );
         }
-        let then = self.split.take().map(|split| split.then);
-        let message = match then {
-            Some(SplitThen::Run { slice, cancel }) => {
-                let sealed = std::mem::take(&mut self.grants);
-                self.exchange(
-                    ParentMessage::Run {
-                        start: None,
-                        deliveries: Vec::new(),
-                        slice,
-                        cancel,
-                        sealed,
-                    },
-                    timeout,
-                )?
-            }
-            Some(SplitThen::Seal) | None => self.exchange(ParentMessage::Seal, timeout)?,
+        let message = match split.then {
+            SplitThen::Run { slice, cancel } => ParentMessage::Run {
+                start: None,
+                deliveries: Vec::new(),
+                slice,
+                cancel,
+                sealed: std::mem::take(&mut self.state.run_mut()?.grants),
+            },
+            SplitThen::Seal => ParentMessage::Seal,
         };
-        self.step(message)
+        self.exchange_step(message, Continuation::Run, None)
+    }
+
+    /// The continuation stays with its page wait, never in a separate slot.
+    fn exchange_step(
+        &mut self,
+        message: ParentMessage,
+        continuation: Continuation,
+        phase: Option<WorkerPhase>,
+    ) -> Result<RunStep, PoolError> {
+        let exchange = match message {
+            ParentMessage::Start(_) => Exchange::Run,
+            ParentMessage::Deliver { .. } => Exchange::Deliver,
+            ParentMessage::Pages { .. } => Exchange::Pages,
+            ParentMessage::Seal => Exchange::Seal,
+            _ => Exchange::Run,
+        };
+        let timeout = self.pool.config.protocol.no_response_watchdog;
+        let message = self.exchange(message, timeout, phase)?;
+        self.finish_exchange(message, continuation, exchange)
+    }
+
+    fn finish_exchange(
+        &mut self,
+        message: WorkerMessage,
+        continuation: Continuation,
+        exchange: Exchange,
+    ) -> Result<RunStep, PoolError> {
+        if let WorkerMessage::Pages { id, request } = message {
+            self.state.run_mut()?.state = RunState::AwaitPages {
+                id,
+                resume: continuation,
+            };
+            return Ok(RunStep::Pages { id, request });
+        }
+        match continuation {
+            Continuation::Split(split) => match message {
+                WorkerMessage::Started | WorkerMessage::Delivered => self.split_next(split),
+                message => Err(self.unexpected(exchange, &message)),
+            },
+            Continuation::Run => self.step(message),
+        }
     }
 
     /// Answers the machine's pending host read; the slice runs on. The
@@ -699,7 +814,8 @@ impl Checkout {
         id: HostReadId,
         answer: EncodedPayload,
     ) -> Result<RunStep, PoolError> {
-        if self.pending != Some(Pending::Read(id)) {
+        if !matches!(self.state.run().map(|run| &run.state), Ok(RunState::AwaitHost(wait)) if *wait == id)
+        {
             return Err(PoolError::breach(SequenceFault::WrongReadId));
         }
         if let Err(error) = self.effect_bound(answer.0.len()) {
@@ -709,12 +825,11 @@ impl Checkout {
         if let Some(scope) = self.phase_scope() {
             scope.point("answer");
         }
-        self.pending = None;
-        let message = self.exchange(
+        self.exchange_step(
             ParentMessage::HostAnswer { id, answer },
-            self.pool.config.protocol.no_response_watchdog,
-        )?;
-        self.step(message)
+            Continuation::Run,
+            None,
+        )
     }
 
     /// Answers the machine's pending page exchange with the page service's
@@ -725,18 +840,12 @@ impl Checkout {
         id: PageExchangeId,
         reply: PageReply,
     ) -> Result<RunStep, PoolError> {
-        if self.pending != Some(Pending::Pages(id)) {
-            return Err(PoolError::breach(SequenceFault::WrongPageExchange));
-        }
-        self.pending = None;
-        let message = self.exchange(
+        let resume = self.state.resume_pages(id)?;
+        self.exchange_step(
             ParentMessage::Pages { id, reply },
-            self.pool.config.protocol.no_response_watchdog,
-        )?;
-        if self.split.is_some() {
-            return self.split_step(Exchange::Pages, message);
-        }
-        self.step(message)
+            resume,
+            Some(WorkerPhase::Computing),
+        )
     }
 
     fn step(&mut self, message: WorkerMessage) -> Result<RunStep, PoolError> {
@@ -747,7 +856,6 @@ impl Checkout {
                 request,
                 sites,
             } => (RunStep::HostRead { id, kind, request }, sites),
-            WorkerMessage::Pages { id, request } => (RunStep::Pages { id, request }, None),
             WorkerMessage::Parked {
                 park,
                 meters,
@@ -808,7 +916,9 @@ impl Checkout {
     /// the seal batch that crossed with the last step, until they cross
     /// with the run's next slice (FIG-6288).
     pub fn grant(&mut self, sealed: Vec<PageCapability>) {
-        self.grants = sealed;
+        if let Ok(run) = self.state.run_mut() {
+            run.grants = sealed;
+        }
     }
 
     /// Hands the machine one committed outcome, with the run's next slice:
@@ -819,14 +929,15 @@ impl Checkout {
         wait: lash_kernel_value::sites::WaitId,
         outcome: EncodedPayload,
     ) -> Result<(), PoolError> {
-        if self.pending.is_some() || !self.started {
-            return Err(PoolError::breach(SequenceFault::NoRun));
-        }
+        self.state.ready()?;
         if let Err(error) = self.effect_bound(outcome.0.len()) {
             self.discard_after(&error);
             return Err(error);
         }
-        self.deliveries.push(Delivery { wait, outcome });
+        self.state
+            .ready()?
+            .deliveries
+            .push(Delivery { wait, outcome });
         Ok(())
     }
 
@@ -837,10 +948,11 @@ impl Checkout {
     /// [`Checkout::page_reply`] as a slice's are; it ends in
     /// [`RunStep::Sealed`].
     pub fn seal(&mut self) -> Result<RunStep, PoolError> {
-        if self.pending.is_some() || !self.started || !self.deliveries.is_empty() {
+        let ready = self.state.ready()?;
+        if !ready.deliveries.is_empty() {
             return Err(PoolError::breach(SequenceFault::NoRun));
         }
-        let start = self.unsent_start.take();
+        let start = ready.start.take();
         #[cfg(feature = "perf-witness")]
         self.count_warm(start.as_deref());
         self.split_from(
@@ -876,32 +988,42 @@ impl Checkout {
         owner: VmOwner,
         request: EncodedPayload,
     ) -> Result<EncodedPayload, PoolError> {
-        if self.started || self.prepared {
+        if !matches!(self.state.live()?.phase, LeasePhase::Fresh) {
             return Err(PoolError::breach(SequenceFault::CheckoutAlreadyStarted));
         }
-        self.owner = Some(owner.clone());
+        self.state.live_mut()?.phase = LeasePhase::Preparing {
+            owner: owner.clone(),
+        };
         self.phase_identity();
-        self.prepared = true;
         match self.exchange(
-            ParentMessage::Prepare { owner, request },
+            ParentMessage::Prepare {
+                owner: owner.clone(),
+                request,
+            },
             self.pool.config.protocol.no_response_watchdog,
+            None,
         )? {
-            WorkerMessage::Prepared { response } => Ok(response),
-            message => Err(PoolError::breach(ProtocolBreach::Unexpected {
-                exchange: Exchange::Prepare,
-                found: message.kind(),
-            })),
+            WorkerMessage::Prepared { response } => {
+                self.state.live_mut()?.phase = LeasePhase::Prepared { owner };
+                Ok(response)
+            }
+            message => Err(self.unexpected(Exchange::Prepare, &message)),
         }
     }
     /// Physical stop, followed by bounded hard kill on silence. The broker
     /// retains the durable cancellation and completion winner.
     pub fn cancel(&mut self) -> Result<WorkerMessage, PoolError> {
-        self.resettable = false;
+        let phase = matches!(
+            self.state.run().map(|run| &run.state),
+            Ok(RunState::AwaitPages { .. })
+        )
+        .then_some(WorkerPhase::Computing);
+        self.state.begin_exchange();
         self.printed_bytes = 0;
         let grace = self.pool.config.deadlines.cancel_grace;
         let response = self
             .send(ParentMessage::Cancel, grace)
-            .and_then(|()| self.answer(grace, false));
+            .and_then(|()| self.answer(grace, false, phase));
         let response = self.settle(response);
         self.discard_for(false, None);
         response
@@ -909,7 +1031,7 @@ impl Checkout {
     /// Call once the run stands at a safe point the broker stops at: its end,
     /// or a park that outlives this activation.
     pub fn release(mut self) -> Result<(), PoolError> {
-        if (self.started || self.prepared) && !self.resettable {
+        if !self.state.resettable() {
             self.discard();
             return Err(PoolError::breach(SequenceFault::FailedWorkerReset));
         }
@@ -930,16 +1052,17 @@ impl Checkout {
                     return Err(error);
                 }
                 self.credited_cpu = cpu_nanos;
-                if let Some(worker) = &mut self.worker {
-                    worker.cpu_nanos = cpu_nanos;
-                }
-                if let Some(worker) = self.worker.take() {
+                if let CheckoutState::Live(mut lease) =
+                    std::mem::replace(&mut self.state, CheckoutState::Discarded)
+                {
+                    lease.worker.cpu_nanos = cpu_nanos;
+                    self.budget.unhold();
                     let mut state = lock(&self.pool.state);
                     if state.failed {
                         drop(state);
-                        self.pool.discard(worker, true, None);
+                        self.pool.discard(lease.worker, true, None);
                     } else {
-                        state.idle.push(worker);
+                        state.idle.push(lease.worker);
                         self.pool.available.notify_all();
                     }
                 }
@@ -963,7 +1086,7 @@ impl Checkout {
             header: self.outgoing.next_header_copy(),
             message,
         };
-        let worker = self.worker.as_mut().ok_or_else(PoolError::eof)?;
+        let worker = &mut self.state.live_mut()?.worker;
         let encode_start = worker.phases.as_ref().map(|scope| scope.recorder.now());
         let bytes = worker
             .codec
@@ -992,15 +1115,15 @@ impl Checkout {
         kind: usize,
         timeout: Duration,
     ) -> Result<(), PoolError> {
-        let worker = self.worker.as_mut().ok_or_else(PoolError::eof)?;
+        let worker = &mut self.state.live_mut()?.worker;
         self.outgoing.next_header();
         worker.send_encoded(bytes, kind, timeout)
     }
     fn receive_control(&mut self, timeout: Duration) -> Result<WorkerMessage, PoolError> {
         let frame = self
+            .state
+            .live_mut()?
             .worker
-            .as_mut()
-            .ok_or_else(PoolError::eof)?
             .receive(Instant::now() + timeout)?;
         self.incoming
             .admit(&frame.header)
@@ -1011,14 +1134,15 @@ impl Checkout {
         &mut self,
         message: ParentMessage,
         timeout: Duration,
+        phase: Option<WorkerPhase>,
     ) -> Result<WorkerMessage, PoolError> {
-        self.resettable = false;
+        self.state.begin_exchange();
         self.printed_bytes = 0;
         let result = self
             .budget
             .wall(&self.pool.config)
             .and_then(|()| self.send(message, timeout))
-            .and_then(|()| self.answer(timeout, true));
+            .and_then(|()| self.answer(timeout, true, phase));
         self.settle(result)
     }
     /// [`Checkout::exchange`] of a frame already encoded under the next
@@ -1028,7 +1152,7 @@ impl Checkout {
         bytes: &[u8],
         timeout: Duration,
     ) -> Result<WorkerMessage, PoolError> {
-        self.resettable = false;
+        self.state.begin_exchange();
         self.printed_bytes = 0;
         let result = self
             .budget
@@ -1036,7 +1160,7 @@ impl Checkout {
             .and_then(|()| {
                 self.send_encoded(bytes, crate::measurements::IpcTraffic::RUN_KIND, timeout)
             })
-            .and_then(|()| self.answer(timeout, true));
+            .and_then(|()| self.answer(timeout, true, None));
         self.settle(result)
     }
     /// An exchange's result: a failed one discards the worker. A worker
@@ -1047,7 +1171,7 @@ impl Checkout {
     ) -> Result<WorkerMessage, PoolError> {
         let result = match result {
             Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerCrashed { evidence }))
-                if self.started && self.computed =>
+                if self.state.run().is_ok_and(|run| run.computed) =>
             {
                 Err(InfrastructureOutcome::RunCrashedWorker { evidence }.into())
             }
@@ -1085,11 +1209,15 @@ impl Checkout {
     /// The worker's answer to the request just sent, its progress and
     /// prints taken on the way. A `walled` answer is also held to the
     /// execution's held wall time.
-    fn answer(&mut self, timeout: Duration, walled: bool) -> Result<WorkerMessage, PoolError> {
+    fn answer(
+        &mut self,
+        timeout: Duration,
+        walled: bool,
+        mut phase: Option<WorkerPhase>,
+    ) -> Result<WorkerMessage, PoolError> {
         // A worker answered a page exchange computes on, under a fresh
         // compute deadline: none ran while the parent served its pages. The
         // execution's wall time runs on.
-        let mut phase = self.paged.take();
         let wall = walled.then(|| self.budget.wall_deadline(&self.pool.config));
         let bounded = |bound: Duration| {
             let deadline = Instant::now() + bound;
@@ -1099,11 +1227,7 @@ impl Checkout {
         #[cfg(feature = "testing")]
         let mut phase_started = Instant::now();
         loop {
-            let received = self
-                .worker
-                .as_mut()
-                .ok_or_else(PoolError::eof)?
-                .receive(deadline);
+            let received = self.state.live_mut()?.worker.receive(deadline);
             let frame = match received {
                 // The execution held its workers past its wall time, the
                 // run's own limit (FIG-6786).
@@ -1150,7 +1274,7 @@ impl Checkout {
                 .map_err(PoolError::breach)?;
             match frame.message {
                 WorkerMessage::Documents { documents } => {
-                    if phase != Some(WorkerPhase::Computing) || !self.started {
+                    if phase != Some(WorkerPhase::Computing) || self.state.run().is_err() {
                         return Err(PoolError::breach(SequenceFault::InvalidPhase));
                     }
                     self.answer_documents(documents, timeout)?;
@@ -1185,29 +1309,29 @@ impl Checkout {
                     }
                     self.charge_cpu(cpu_nanos)?;
                     self.credited_cpu = cpu_nanos;
-                    self.worker.as_mut().ok_or_else(PoolError::eof)?.cpu_nanos = cpu_nanos;
-                    self.computed |= self.started && next == WorkerPhase::Computing;
-                    if !self.execution_recorded && next == WorkerPhase::Computing {
-                        if let Some(class_name) = self.execution_class {
-                            let worker = self.worker.as_ref().ok_or_else(PoolError::eof)?;
-                            let owner = self
-                                .owner
-                                .as_ref()
-                                .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?;
+                    self.state.live_mut()?.worker.cpu_nanos = cpu_nanos;
+                    if next == WorkerPhase::Computing {
+                        let lease_id = self.lease().0;
+                        let lease = self.state.live_mut()?;
+                        if let LeasePhase::Run(run) = &mut lease.phase
+                            && !run.computed
+                        {
                             lock(&self.pool.measurements).execution(ExecutionReceipt {
-                                lease: self.lease().0,
-                                class_name,
-                                owner: owner.as_str().to_owned(),
-                                pid: worker.pid(),
-                                process_epoch: worker.process_epoch.clone(),
+                                lease: lease_id,
+                                class_name: run.class,
+                                owner: run.owner.as_str().to_owned(),
+                                pid: lease.worker.pid(),
+                                process_epoch: lease.worker.process_epoch.clone(),
                             });
+                            run.computed = true;
                         }
-                        self.execution_recorded = true;
                     }
                     if next == WorkerPhase::Computing
                         && let Some(scope) = self
-                            .worker
-                            .as_mut()
+                            .state
+                            .live_mut()
+                            .ok()
+                            .map(|lease| &mut lease.worker)
                             .and_then(|worker| worker.phases.as_mut())
                     {
                         scope.point(if scope.effect.is_some() {
@@ -1232,7 +1356,9 @@ impl Checkout {
                     // is held to the run's heap bound, never to a transport
                     // bound (FIG-4458).
                     self.printed_bytes = self.printed_bytes.saturating_add(payload.0.len() as u64);
-                    if self.printed_bytes > self.print_budget {
+                    if self.printed_bytes
+                        > self.state.run().map_or(u64::MAX, |run| run.print_budget)
+                    {
                         return Err(limit(WorkerLimit::Observations));
                     }
                     self.printed.push(payload);
@@ -1250,7 +1376,7 @@ impl Checkout {
                             bound: self.pool.config.protocol.max_effect_value_bytes,
                         }));
                     }
-                    self.pending = Some(Pending::Read(id));
+                    self.state.run_mut()?.state = RunState::AwaitHost(id);
                     return Ok(WorkerMessage::HostRead {
                         id,
                         kind,
@@ -1266,8 +1392,6 @@ impl Checkout {
                     if phase != Some(WorkerPhase::Computing) {
                         return Err(PoolError::breach(SequenceFault::InvalidPhase));
                     }
-                    self.pending = Some(Pending::Pages(id));
-                    self.paged = phase;
                     return Ok(WorkerMessage::Pages { id, request });
                 }
                 // Do not consult exit status after a fully decoded step.
@@ -1285,7 +1409,7 @@ impl Checkout {
                             _ => "step_observed",
                         });
                     }
-                    self.resettable = true;
+                    self.state.safe_point();
                     return Ok(message);
                 }
                 WorkerMessage::Cancelled => {
@@ -1319,23 +1443,20 @@ impl Checkout {
         self.discard_for(!own, Some(error));
     }
     fn discard_for(&mut self, failed: bool, cause: Option<&PoolError>) {
-        if let Some(worker) = self.worker.take() {
-            if let Some(scope) = &worker.phases {
+        if let CheckoutState::Live(lease) =
+            std::mem::replace(&mut self.state, CheckoutState::Discarded)
+        {
+            if let Some(scope) = &lease.worker.phases {
                 scope.point("loss");
             }
-            let cpu = self.pool.discard(worker, failed, cause);
+            let cpu = self.pool.discard(lease.worker, failed, cause);
             let _ = self.charge_cpu(cpu);
             self.credited_cpu = cpu;
-            if self.started || self.prepared {
+            if !matches!(lease.phase, LeasePhase::Fresh) {
                 self.budget.replacement(true);
             }
-        }
-        if std::mem::take(&mut self.holding) {
             self.budget.unhold();
         }
-        self.pending = None;
-        self.split = None;
-        self.resettable = false;
     }
 }
 impl Drop for Checkout {
@@ -1506,34 +1627,18 @@ pub mod runtime_ops {
                             #[cfg(feature = "testing")]
                             measured_cpu_receipt: std::cell::Cell::new(credited_cpu),
                             pool: self.0.clone(),
-                            worker: Some(worker),
+                            state: CheckoutState::Live(Box::new(Lease {
+                                worker,
+                                phase: LeasePhase::Fresh,
+                            })),
                             budget,
-                            holding: true,
                             credited_cpu,
                             outgoing: MessageFence::new(lease, owner_epoch, frame_epoch),
                             incoming: MessageFence::new(lease, owner_epoch, frame_epoch),
                             reservation: queued_bytes,
-                            prepared: false,
-                            started: false,
-                            computed: false,
-                            unsent_start: None,
-                            document_sources: Default::default(),
-                            deliveries: Vec::new(),
-                            paged: None,
-                            grants: Vec::new(),
-                            pending: None,
-                            split: None,
-                            // Nothing has crossed: the worker stands where its
-                            // last reset left it.
-                            resettable: true,
-                            owner: None,
-                            document: None,
                             printed: Vec::new(),
                             sites: Vec::new(),
-                            print_budget: u64::MAX,
                             printed_bytes: 0,
-                            execution_class: None,
-                            execution_recorded: false,
                         });
                     }
                     if !queued {
