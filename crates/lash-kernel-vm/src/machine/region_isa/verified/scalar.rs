@@ -265,7 +265,32 @@ impl Running<'_> {
                             return Err(invalid(Refused::Facts));
                         }
                         if self.limits.charge_enabled {
-                            formula = answer.scalar_sizes.and_then(|mask| fast.scalar_units(mask));
+                            formula = match answer
+                                .scalar_sizes
+                                .and_then(|mask| fast.scalar_units(mask))
+                            {
+                                Some(units) => Some(units),
+                                None => {
+                                    self.call_values.clear();
+                                    for argument in &self.arguments {
+                                        self.call_values.push(
+                                            self.view
+                                                .import(argument)
+                                                .map_err(RegionError::Heap)?,
+                                        );
+                                    }
+                                    let result = self
+                                        .view
+                                        .import(&answer.value)
+                                        .map_err(RegionError::Heap)?;
+                                    Some(
+                                        native
+                                            .charge
+                                            .lease(&mut self.view, &self.call_values, result)
+                                            .map_err(storage_fault)?,
+                                    )
+                                }
+                            };
                         }
                         Operand::Immediate(answer.value)
                     }

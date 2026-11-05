@@ -43,6 +43,17 @@ fn event_pc(draft: &RegionDraft, point: &Point) -> Result<Pc, Refused> {
         .ok_or(Refused::Path)?
 }
 
+fn point(info: &LoopInfo, phase: LoopPhase) -> Point {
+    Point {
+        site: info.site.clone(),
+        phase: if phase == LoopPhase::Enter {
+            Phase::Enter
+        } else {
+            Phase::Next
+        },
+    }
+}
+
 pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(), Refused> {
     let events = draft.ops.len();
     let mut ops = std::mem::take(&mut draft.ops).into_vec();
@@ -93,11 +104,7 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
                 info: u32::try_from(index).map_err(|_| Refused::Facts)?,
                 phase,
             };
-            let at = if phase == LoopPhase::Enter {
-                info.entry.clone()
-            } else {
-                info.test.clone()
-            };
+            let at = point(info, phase);
             let iterable = if phase == LoopPhase::Enter && !info.while_loop {
                 Some(lower::reg(
                     &draft.roles,
@@ -177,11 +184,7 @@ pub(super) fn check(draft: &RegionDraft, index: usize) -> Result<(), Refused> {
         .loops
         .get(stage.info as usize)
         .ok_or(Refused::Source)?;
-    let at = if stage.phase == LoopPhase::Enter {
-        &info.entry
-    } else {
-        &info.test
-    };
+    let at = &point(info, stage.phase);
     if &step.at != at
         || step.event.point != *at
         || !step.event.inputs.is_empty()
@@ -251,7 +254,14 @@ pub(super) fn check(draft: &RegionDraft, index: usize) -> Result<(), Refused> {
                 .map(|index| u32::try_from(index).map(Pc).map_err(|_| Refused::Facts))
                 .ok_or(Refused::Path)??
         } else {
-            event_pc(draft, at)?
+            event_pc(
+                draft,
+                if stage.phase == LoopPhase::Enter {
+                    &info.entry
+                } else {
+                    &info.test
+                },
+            )?
         };
     if *next != expected {
         return Err(Refused::Path);

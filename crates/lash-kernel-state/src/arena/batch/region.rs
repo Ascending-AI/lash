@@ -32,6 +32,12 @@ impl PreparedGraphProof {
 }
 
 impl PreparedBatch {
+    pub(crate) fn region_body(&self, handle: ArenaHandle) -> Option<&Body> {
+        self.entries
+            .iter()
+            .find(|entry| entry.handle == handle)
+            .map(|entry| &entry.body)
+    }
     pub(crate) fn region_len(&self) -> usize {
         self.entries.len()
     }

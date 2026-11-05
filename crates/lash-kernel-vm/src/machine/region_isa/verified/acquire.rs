@@ -1,13 +1,21 @@
-//! Bind the actual resident entry before taking the exclusive graph view.
+//! Bind the canonical source stack before taking exclusive graph authority.
 use super::super::*;
 use super::{Code, Running};
-use crate::compile::room::Owner as Selector;
-use crate::machine::{
-    SlotState,
-    controls::{self, Roles},
-};
+use crate::compile::region_isa::{RegionOp, compile_region, verify_region};
+use crate::compile::room::region::calls::region_isa::compile_calls;
 use lash_kernel_state::kernel_internals::logical::{Owner, StateLease};
-use std::collections::BTreeMap;
+
+struct CanonicalPages(Arc<crate::compile::Executable>);
+impl lash_kernel_state::kernel_internals::logical::LeaseLoader for CanonicalPages {
+    fn load(
+        &self,
+        arena: &mut lash_kernel_state::arena::Arena,
+        heap: &lash_kernel_state::kernel_internals::PagedHeap,
+        handle: lash_kernel_doc::arena::ArenaHandle,
+    ) -> Result<(), HeapFault> {
+        crate::machine::project::materialize(arena, heap, &self.0, handle, 0)
+    }
+}
 
 impl<'m> RegionLease<'m> {
     pub(in crate::machine::region_isa) fn acquire_verified(
@@ -15,195 +23,132 @@ impl<'m> RegionLease<'m> {
         code: Arc<Code>,
         limits: Limits,
     ) -> Result<Self, RegionError> {
-        let programs = super::programs::Programs::bind(&code)?;
         let task_id = machine.current.ok_or_else(|| invalid(Refused::Facts))?;
         let exe = Arc::clone(&machine.exe);
+        let mut stack = machine
+            .tasks
+            .get_mut(task_id.0 as usize)
+            .map_err(RegionError::Heap)?
+            .ok_or_else(|| invalid(Refused::Facts))?
+            .frames
+            .region_stack()
+            .map_err(RegionError::Heap)?;
+        if stack
+            .last()
+            .is_none_or(|frame| frame.code != code.program.code())
+        {
+            return Err(invalid(Refused::Source));
+        }
+        let entry_frames = stack.len();
+        let root = stack.first().ok_or_else(|| invalid(Refused::Facts))?;
+        let entry_code = root.code;
+        let entry_invocation = root.invocation;
+        let root_code = if code.program.code() == root.code {
+            code
+        } else {
+            let draft = compile_region(&exe, root.code).map_err(invalid)?;
+            let calls = compile_calls(&exe, &draft).map_err(invalid)?;
+            let program = verify_region(&exe, root.code, draft, &calls).map_err(invalid)?;
+            Code::bind_executable(&exe, &program)?
+        };
+        let programs = super::programs::Programs::bind(&root_code)?;
+        let mut positions = Vec::new();
+        let mut dependencies = Vec::new();
+        let mut inputs = Vec::new();
+        for frame in &mut stack {
+            frame
+                .reconstruct_region_frontier(&exe, &machine.heap, &machine.logical, task_id)
+                .map_err(RegionError::Heap)?;
+            let code = programs.code(frame.code)?;
+            let roots = frame
+                .logical
+                .as_ref()
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            let document = exe
+                .instances
+                .get(&frame.link)
+                .ok_or_else(|| invalid(Refused::Source))?;
+            let kernel = lash_kernel_doc::KernelVersion::of(document.kernel())
+                .ok_or_else(|| invalid(Refused::Source))?;
+            let frontier = frame
+                .source_frontier
+                .as_ref()
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            if !frontier.region_binding_matches(
+                code.program.source(),
+                frame.link,
+                kernel,
+                roots.invocation(),
+            ) || frontier.position().occurrence.task != task_id
+            {
+                return Err(invalid(Refused::Source));
+            }
+            let position = if let Some(source) = &frame.pending.source {
+                if source.debt.paid != machine.charged {
+                    return Err(invalid(Refused::Facts));
+                }
+                super::resume::position(code, source)?
+            } else if let Some(position) = machine
+                .regs
+                .region_position(&code.program, frame.invocation)
+                .map_err(RegionError::Heap)?
+            {
+                position
+            } else {
+                let unpaid = frontier
+                    .position()
+                    .unpaid
+                    .as_ref()
+                    .ok_or_else(|| invalid(Refused::Exit))?;
+                let pc = code
+                    .program
+                    .at(unpaid)
+                    .ok_or_else(|| invalid(Refused::Path))?;
+                let pc =
+                    super::resume::unpaid_pc(code, pc, |stmt| super::resume::active(frame, stmt))?;
+                (
+                    pc,
+                    code.program
+                        .step(pc)
+                        .ok_or_else(|| invalid(Refused::Path))?
+                        .before,
+                )
+            };
+            positions.push(position);
+            frame.each_value(&mut |value| dependencies.push(*value));
+            inputs.extend(
+                machine
+                    .logical
+                    .borrow()
+                    .frame_owners(task_id, frame.invocation, machine.heap.pages())
+                    .map_err(RegionError::Heap)?,
+            );
+        }
+        if machine
+            .logical
+            .borrow()
+            .holding(Owner::Incoming(task_id), machine.heap.pages())
+            .map_err(RegionError::Heap)?
+            .is_some()
+        {
+            inputs.push(Owner::Incoming(task_id));
+        }
+        dependencies.extend(machine.regs.region_values().map(|(_, value)| value));
+        let top = stack.last().ok_or_else(|| invalid(Refused::Facts))?;
+        let top_code = programs.code(top.code)?;
+        let (pc, prefix) = *positions.last().ok_or_else(|| invalid(Refused::Facts))?;
+        super::resume::warm_next(machine, top_code, top, task_id, pc, prefix)?;
+        let indexes: Vec<_> = (0..exe.occurrence_count()).collect();
         let task = machine
             .tasks
             .get_mut(task_id.0 as usize)
             .map_err(RegionError::Heap)?
             .ok_or_else(|| invalid(Refused::Facts))?;
-        let frame = task
-            .frames
-            .last_mut()
-            .map_err(RegionError::Heap)?
-            .ok_or_else(|| invalid(Refused::Facts))?;
-        frame
-            .reconstruct_region_frontier(&exe, &machine.heap, &machine.logical, task_id)
+        let counters = task
+            .counters
+            .lease_counters(&indexes)
             .map_err(RegionError::Heap)?;
-        if frame.code != code.program.code() {
-            return Err(invalid(Refused::Source));
-        }
-        let invocation = frame
-            .logical
-            .as_ref()
-            .ok_or_else(|| invalid(Refused::Facts))?
-            .invocation()
-            .clone();
-        let document = exe
-            .instances
-            .get(&frame.link)
-            .ok_or_else(|| invalid(Refused::Source))?;
-        let kernel = lash_kernel_doc::KernelVersion::of(document.kernel())
-            .ok_or_else(|| invalid(Refused::Source))?;
-        let frontier = frame
-            .source_frontier
-            .as_ref()
-            .ok_or_else(|| invalid(Refused::Facts))?;
-        if !frontier.region_binding_matches(code.program.source(), frame.link, kernel, &invocation)
-            || frontier.position().occurrence.task != task_id
-        {
-            return Err(invalid(Refused::Source));
-        }
-        let unpaid = frontier
-            .position()
-            .unpaid
-            .as_ref()
-            .ok_or_else(|| invalid(Refused::Exit))?;
-        let (pc, prefix) = match machine
-            .regs
-            .region_position(&code.program, invocation.id())
-            .map_err(RegionError::Heap)?
-        {
-            Some((pc, prefix)) => {
-                if code.program.step(pc).is_none_or(|step| &step.at != unpaid)
-                    || code
-                        .program
-                        .recovery(prefix)
-                        .is_none_or(|map| map.continuation != frontier.position().at)
-                {
-                    return Err(invalid(Refused::Exit));
-                }
-                (pc, prefix)
-            }
-            None => {
-                let mut pc = code
-                    .program
-                    .at(unpaid)
-                    .ok_or_else(|| invalid(Refused::Path))?;
-                let mut index = 0;
-                while let Some(info) = code.program.loop_info(index) {
-                    if info.while_loop && unpaid == &info.entry {
-                        let active = frame.control.iter().any(|control| matches!(control, crate::machine::Control::While { stmt, .. } if *stmt == info.statement));
-                        pc = code
-                            .program
-                            .stage(crate::compile::region_isa::LoopStage {
-                                info: index,
-                                phase: if active {
-                                    crate::compile::region_isa::LoopPhase::Test
-                                } else {
-                                    crate::compile::region_isa::LoopPhase::Enter
-                                },
-                            })
-                            .ok_or_else(|| invalid(Refused::Path))?;
-                        break;
-                    }
-                    index += 1;
-                }
-                let prefix = code
-                    .program
-                    .step(pc)
-                    .ok_or_else(|| invalid(Refused::Path))?
-                    .before;
-                (pc, prefix)
-            }
-        };
-        let mut actual = BTreeMap::new();
-        let source = code.program.source();
-        for (index, state) in frame.slot_states().iter().enumerate() {
-            let Some(Owner::Value { slot, .. }) = source.binding_root(
-                exe.code(frame.code).slots_by_at[index],
-                task_id,
-                invocation.id(),
-            ) else {
-                continue;
-            };
-            let value = match state {
-                SlotState::Empty => continue,
-                SlotState::Value(value) => *value,
-                SlotState::Cell(handle) => Value::ObjectRef(*handle),
-            };
-            actual.insert(slot, value);
-        }
-        for (owner, value) in machine.regs.region_values() {
-            if let Owner::Value {
-                task,
-                invocation: id,
-                slot,
-            } = owner
-                && task == task_id
-                && id == invocation.id()
-            {
-                actual.insert(slot, value);
-            }
-        }
-        let slots = source.owner_slots().map_err(invalid)?;
-        if let Some(pending) = frame.pending.peek() {
-            let statement = frame
-                .statement
-                .resolve(machine.heap.pages())
-                .map_err(RegionError::Heap)?;
-            for role in &pending.roles {
-                let mut site = (*statement).clone();
-                site.path.extend_from_slice(&role.site);
-                if let Some(Owner::Value { slot, .. }) =
-                    slots.continuation(&site, task_id, invocation.id())
-                {
-                    actual.insert(slot, role.value);
-                }
-            }
-        }
-        for control in frame.control.iter() {
-            if let Some(Roles::For {
-                stmt,
-                cursor,
-                header,
-            }) = controls::roles(control)
-            {
-                let at = &exe.stmt(stmt).site;
-                for (selector, value) in [
-                    (Selector::LoopCursor(at.clone()), cursor),
-                    (Selector::LoopHeader(at.clone()), header),
-                ] {
-                    if let (Some(Owner::Value { slot, .. }), Some(value)) =
-                        (slots.root(&selector, task_id, invocation.id()), value)
-                    {
-                        actual.insert(slot, value);
-                    }
-                }
-            }
-        }
-        let map = code
-            .program
-            .recovery(prefix)
-            .ok_or_else(|| invalid(Refused::Exit))?;
-        let values = map
-            .roles
-            .iter()
-            .map(|(slot, register)| {
-                Ok((
-                    *register,
-                    *actual.get(slot).ok_or_else(|| invalid(Refused::Facts))?,
-                ))
-            })
-            .collect::<Result<Vec<_>, RegionError>>()?;
-        let mut dependencies = Vec::new();
-        frame.each_value(&mut |value| dependencies.push(*value));
-        dependencies.extend(machine.regs.region_values().map(|(_, value)| value));
-        let image = frame
-            .region_image(Rc::clone(&machine.logical), task_id, &exe)
-            .map_err(RegionError::Heap)?;
-        let inputs = machine
-            .logical
-            .borrow()
-            .frame_owners(task_id, invocation.id(), machine.heap.pages())
-            .map_err(RegionError::Heap)?
-            .into_boxed_slice();
-        let next = machine
-            .logical
-            .borrow()
-            .prospective_invocation(task_id)
-            .id();
+        let source = source_counters::SourceCounters::bind(counters.entry())?;
         if machine
             .logical
             .borrow()
@@ -214,13 +159,21 @@ impl<'m> RegionLease<'m> {
         {
             return Err(invalid(Refused::Facts));
         }
-        let indexes: Vec<_> = (0..exe.occurrence_count()).collect();
-        let counters = task
-            .counters
-            .lease_counters(&indexes)
-            .map_err(RegionError::Heap)?;
-        let source = source_counters::SourceCounters::bind(counters.entry())?;
+        let invocation = stack[0]
+            .logical
+            .as_ref()
+            .ok_or_else(|| invalid(Refused::Facts))?
+            .invocation()
+            .clone();
+        let next = machine
+            .logical
+            .borrow()
+            .prospective_invocation(task_id)
+            .id();
         let mut lease = StateLease::acquire_shared(&mut machine.heap, &machine.arena)
+            .map_err(RegionError::Heap)?;
+        lease
+            .bind_loader(Box::new(CanonicalPages(Arc::clone(&exe))))
             .map_err(RegionError::Heap)?;
         for value in dependencies {
             lease.import(&value).map_err(RegionError::Heap)?;
@@ -229,32 +182,131 @@ impl<'m> RegionLease<'m> {
             .reserve_invocations(&invocation, u64::MAX - next)
             .map_err(RegionError::Heap)?;
         let invocations = invocations::Invocations::bind(range)?;
-        let code_id = code.program.code();
-        let execution = Running::acquire(
-            code,
+        let crossing = if limits.entry_charge > limits.charge {
+            stack
+                .last()
+                .and_then(|frame| frame.pending.source.as_ref())
+                .filter(|source| source.refusal == Some(0) && source.debt.paid == machine.charged)
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            Some(super::charge::Crossing::restore(
+                limits.charge,
+                limits.entry_charge,
+            )?)
+        } else {
+            None
+        };
+        let root = stack.remove(0);
+        let root_source = root.pending.source.clone();
+        let root_values =
+            super::resume::values(&root_code, &root, task_id, positions[0].0, positions[0].1)?;
+        let mut execution = Running::acquire(
+            root_code,
             programs,
-            pc,
-            prefix,
-            invocation.id(),
-            values,
+            positions[0].0,
+            positions[0].1,
+            entry_invocation,
+            root_values,
             source,
             limits,
+            crossing,
             invocations,
             lease,
-            image,
+            root,
         )?;
+        execution.reached = super::resume::reached(&execution.canonical, positions[0].1)?;
+        let mut activation = None;
+        for (offset, frame) in stack.into_iter().enumerate() {
+            let depth = offset + 1;
+            let caller = Arc::clone(&execution.code);
+            let RegionOp::Call { site, .. } = caller
+                .program
+                .op(execution.pc)
+                .ok_or_else(|| invalid(Refused::Path))?
+            else {
+                return Err(invalid(Refused::Path));
+            };
+            let call = caller.call(*site)?;
+            if !call
+                .plan
+                .targets()
+                .iter()
+                .any(|target| target.code() == frame.code)
+            {
+                return Err(invalid(Refused::Source));
+            }
+            let callee = frame
+                .logical
+                .as_ref()
+                .ok_or_else(|| invalid(Refused::Facts))?
+                .invocation()
+                .clone();
+            let next_activation = CallActivation {
+                lease: Rc::clone(&execution.identity),
+                invocation: frame.invocation,
+                depth,
+                plan: site.index(),
+                caller_program: caller.program.code(),
+            };
+            execution.parked.push(super::calls::Parked {
+                callee,
+                code: Arc::clone(&caller),
+                pc: execution.pc,
+                prefix: execution.prefix,
+                reached: execution.reached,
+                activation,
+                site: site.index(),
+                target: frame.code,
+            });
+            execution.registers.reserve_frame(depth)?;
+            let code = Arc::clone(execution.programs.code(frame.code)?);
+            let (pc, prefix) = positions[depth];
+            for (reg, value) in super::resume::values(&code, &frame, task_id, pc, prefix)? {
+                execution.registers.write(
+                    &mut execution.view,
+                    depth,
+                    frame.invocation,
+                    super::bind::physical(&code.program, reg)?,
+                    operands::Operand::Immediate(value),
+                )?;
+            }
+            let loops = super::control::bind(&code.program, &frame)?;
+            execution.loops.resize(
+                (depth + 1) * execution.programs.loops,
+                super::control::LoopState::default(),
+            );
+            execution.loops
+                [depth * execution.programs.loops..depth * execution.programs.loops + loops.len()]
+                .copy_from_slice(&loops);
+            execution.code = code;
+            execution.pc = pc;
+            execution.prefix = prefix;
+            execution.reached = super::resume::reached(&frame, prefix)?;
+            execution.canonical_callees.push(frame);
+            activation = Some(next_activation);
+        }
+        execution.activation = activation;
+        let saved = execution
+            .canonical_callees
+            .last()
+            .and_then(|frame| frame.pending.source.clone())
+            .or(root_source);
+        if let Some(source) = saved {
+            execution.restore_phase(source)?;
+        }
         Ok(Self {
             authority: Authority::Machine(publication::Authority {
                 frames: &mut task.frames,
+                task_state: &mut task.record.state,
                 counters,
                 registers: &mut machine.regs,
                 charged: &mut machine.charged,
                 logical_memory: &machine.logical_memory,
                 task: task_id,
                 exe,
-                entry_code: code_id,
-                entry_invocation: invocation.id(),
-                inputs,
+                entry_code,
+                entry_invocation,
+                entry_frames,
+                inputs: inputs.into_boxed_slice(),
                 limits,
             }),
             execution: Executing::Machine(execution),

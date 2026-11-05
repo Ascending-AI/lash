@@ -10,6 +10,15 @@ pub struct Dependencies {
     values: Vec<ContentVersion>,
 }
 impl Dependencies {
+    /// The caller has authenticated canonical decoding without a source edit.
+    /// Replace only that handle's old content version; retain every other fact.
+    pub(super) fn decoded(&mut self, before: &ContentVersion, after: ContentVersion) {
+        for value in &mut self.values {
+            if value == before {
+                *value = after.clone();
+            }
+        }
+    }
     /// Combine facts captured at the same ledger identity and revision.
     pub fn extend(&mut self, next: Self) -> Result<(), HeapFault> {
         if !Rc::ptr_eq(&self.ledger.identity, &next.ledger.identity)

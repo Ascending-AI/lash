@@ -7,8 +7,8 @@ use crate::machine::{Control, controls::Controls};
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct LoopState {
-    active: bool,
-    started: u64,
+    pub(super) active: bool,
+    pub(super) started: u64,
 }
 #[derive(Clone, Copy)]
 pub(super) struct Edit {
@@ -129,87 +129,94 @@ impl Running<'_> {
         pc: Pc,
         frame: usize,
     ) -> Result<Controls, RegionError> {
-        let point = &code
-            .program
-            .step(pc)
-            .ok_or_else(|| invalid(Refused::Path))?
-            .at;
-        let mut values = Vec::new();
-        self.place(
+        controls_for(
             code,
-            frame,
-            code.exe.code(code.program.code()).body,
-            point,
-            &mut values,
-        )?;
-        Ok(values.into())
+            pc,
+            &self.loops[frame * self.programs.loops..(frame + 1) * self.programs.loops],
+        )
     }
+}
 
-    fn place(
-        &self,
-        code: &super::Code,
-        frame: usize,
-        block: BlockId,
-        point: &Point,
-        values: &mut Vec<Control>,
-    ) -> Result<(), RegionError> {
-        use crate::compile::room::Phase;
-        let source = code.exe.block(block);
-        if point.site == source.site {
-            if point.phase != Phase::Enter {
-                values.push(Control::Block {
-                    block,
-                    next: source.stmts.len(),
+pub(super) fn controls_for(
+    code: &super::Code,
+    pc: Pc,
+    loops: &[LoopState],
+) -> Result<Controls, RegionError> {
+    let point = &code
+        .program
+        .step(pc)
+        .ok_or_else(|| invalid(Refused::Path))?
+        .at;
+    let mut values = Vec::new();
+    place(
+        code,
+        loops,
+        code.exe.code(code.program.code()).body,
+        point,
+        &mut values,
+    )?;
+    Ok(values.into())
+}
+
+fn place(
+    code: &super::Code,
+    loops: &[LoopState],
+    block: BlockId,
+    point: &Point,
+    values: &mut Vec<Control>,
+) -> Result<(), RegionError> {
+    use crate::compile::room::Phase;
+    let source = code.exe.block(block);
+    if point.site == source.site {
+        if point.phase != Phase::Enter {
+            values.push(Control::Block {
+                block,
+                next: source.stmts.len(),
+            });
+        }
+        return Ok(());
+    }
+    let (index, statement) = source
+        .stmts
+        .iter()
+        .enumerate()
+        .find_map(|(index, id)| {
+            let statement = code.exe.stmt(*id);
+            (point.site.unit == statement.site.unit
+                && point.site.path.starts_with(&statement.site.path))
+            .then_some((index, statement))
+        })
+        .ok_or_else(|| invalid(Refused::Path))?;
+    let nested = statement.form.blocks().into_iter().find(|child| {
+        let site = &code.exe.block(*child).site;
+        point.site.unit == site.unit && point.site.path.starts_with(&site.path)
+    });
+    let active = loops.iter().enumerate().find_map(|(index, state)| {
+        let info = code.program.loop_info(index as u32)?;
+        (info.site == statement.site && state.active).then_some((info, state))
+    });
+    values.push(Control::Block {
+        block,
+        next: index + usize::from(nested.is_some() || active.is_some()),
+    });
+    match &statement.form {
+        Form::While { body, .. } => {
+            if let Some((info, state)) = active
+                && (nested.is_none() || nested == Some(*body))
+            {
+                values.push(Control::While {
+                    stmt: info.statement,
+                    started: state.started,
                 });
             }
-            return Ok(());
         }
-        let (index, statement) = source
-            .stmts
-            .iter()
-            .enumerate()
-            .find_map(|(index, id)| {
-                let statement = code.exe.stmt(*id);
-                (point.site.unit == statement.site.unit
-                    && point.site.path.starts_with(&statement.site.path))
-                .then_some((index, statement))
-            })
-            .ok_or_else(|| invalid(Refused::Path))?;
-        let nested = statement.form.blocks().into_iter().find(|child| {
-            let site = &code.exe.block(*child).site;
-            point.site.unit == site.unit && point.site.path.starts_with(&site.path)
-        });
-        let start = frame * self.programs.loops;
-        let active = self.loops[start..start + self.programs.loops]
-            .iter()
-            .enumerate()
-            .find_map(|(index, state)| {
-                let info = code.program.loop_info(index as u32)?;
-                (info.site == statement.site && state.active).then_some((info, state))
-            });
-        values.push(Control::Block {
-            block,
-            next: index + usize::from(nested.is_some() || active.is_some()),
-        });
-        match &statement.form {
-            Form::While { body, .. } => {
-                if let Some((info, state)) = active
-                    && (nested.is_none() || nested == Some(*body))
-                {
-                    values.push(Control::While {
-                        stmt: info.statement,
-                        started: state.started,
-                    });
-                }
-            }
-            Form::For { .. } | Form::Try { .. } if nested.is_some() => {
-                return Err(invalid(Refused::Facts));
-            }
-            _ => {}
+        Form::For { .. } | Form::Try { .. } if nested.is_some() => {
+            return Err(invalid(Refused::Facts));
         }
-        if let Some(nested) = nested {
-            self.place(code, frame, nested, point, values)?;
-        }
-        Ok(())
+        _ => {}
     }
+    if let Some(nested) = nested {
+        place(code, loops, nested, point, values)?;
+    }
+    Ok(())
 }

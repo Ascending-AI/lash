@@ -8,6 +8,12 @@ pub(in crate::machine::region_isa) struct Crossing {
     charged: u64,
 }
 impl Crossing {
+    pub(super) fn restore(bound: u64, charged: u64) -> Result<Self, RegionError> {
+        if charged <= bound {
+            return Err(invalid(Refused::Facts));
+        }
+        Ok(Self { bound, charged })
+    }
     pub(in crate::machine::region_isa) fn authenticates(&self, bound: u64, charged: u64) -> bool {
         self.bound == bound && self.charged == charged && charged > bound
     }
@@ -44,6 +50,17 @@ fn weight(payment: &mut Payment, limits: Limits, weight: Weight) -> bool {
         }
     }
     true
+}
+
+/// K-CHG-005: copying an explicit root Return uses one atomic deep-size fee.
+/// The caller derives this size from the actual lease-owned result.
+pub(super) fn export(counters: execute::Counters, limits: Limits, units: u64) -> Payment {
+    let mut payment = Payment {
+        counters,
+        crossing: None,
+    };
+    weight(&mut payment, limits, Weight::Atomic(units));
+    payment
 }
 
 pub(super) fn bill(

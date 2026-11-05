@@ -1051,7 +1051,7 @@ impl KernelMachine {
                 task,
                 entry,
                 act,
-                lash_kernel_state::paged::PhaseRecord::Called,
+                lash_kernel_state::paged::ContinuationPhase::Call { phase: 0 },
             )?;
         }
         if let Some(stmt) = awaited_by {

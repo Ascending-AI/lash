@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(in crate::machine::region_isa) struct Code {
     pub(in crate::machine::region_isa) exe: Arc<crate::compile::Executable>,
     pub(in crate::machine::region_isa) arguments: usize,
+    pub(super) captures: usize,
     pub(super) flows: Box<[Option<super::flow::Flow>]>,
     pub(super) transfer_width: usize,
     pub(super) quotes: usize,
@@ -27,6 +28,7 @@ pub(in crate::machine::region_isa) struct Call {
     pub(in crate::machine::region_isa) plan: CallPlan,
     pub(in crate::machine::region_isa) arguments: Box<[Register]>,
     pub(super) saved: Box<[SavedRole]>,
+    pub(super) counter: source_counters::CounterPlan,
     pub(in crate::machine::region_isa) callable: Option<Register>,
     pub(in crate::machine::region_isa) callable_origin: Option<Register>,
     pub(in crate::machine::region_isa) next: Pc,
@@ -71,6 +73,7 @@ impl Code {
         }
         let mut flows = BTreeMap::new();
         let mut arguments = 0;
+        let mut captures = 0;
         let mut calls = BTreeMap::new();
         let mut visited = BTreeSet::new();
         let mut pending = vec![program.entry()];
@@ -89,6 +92,15 @@ impl Code {
             }
             flows.insert(pc.index(), super::flow::Flow::bind(program, pc)?);
             let op = program.op(pc).ok_or_else(|| invalid(Refused::Path))?;
+            if let RegionOp::Heap { args, kernel, .. } = op {
+                arguments = arguments.max(args.len());
+                if let crate::compile::region_isa::HeapKind::Closure {
+                    captures: slots, ..
+                } = kernel.kind()
+                {
+                    captures = captures.max(slots.len());
+                }
+            }
             if let RegionOp::Checked { args, kernel, .. } = op {
                 arguments = arguments.max(args.len());
                 if let crate::compile::region_isa::CheckedKind::Native { lib, .. } = kernel.kind() {
@@ -133,6 +145,18 @@ impl Code {
                     };
                     let call = Call {
                         plan: plan.clone(),
+                        counter: match plan.occurrence() {
+                            Some(index) => {
+                                let index =
+                                    u32::try_from(index).map_err(|_| invalid(Refused::Facts))?;
+                                source_counters::CounterPlan::bind(
+                                    Box::new([source_counters::CounterEdit { index, advance: 1 }]),
+                                    Some(source_counters::CounterRead::Issued(index)),
+                                    exe.occurrence_count(),
+                                )?
+                            }
+                            None => source_counters::CounterPlan::empty(),
+                        },
                         arguments: plan
                             .arguments()
                             .iter()
@@ -202,6 +226,7 @@ impl Code {
         Ok(Arc::new(Self {
             exe: Arc::clone(exe),
             arguments,
+            captures,
             flows: flow_table.into(),
             transfer_width,
             quotes,

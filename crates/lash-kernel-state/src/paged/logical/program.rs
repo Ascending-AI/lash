@@ -2,12 +2,12 @@
 //! publication uses ledger boundary transactions without an event journal.
 use super::*;
 mod native;
-#[cfg(any(test, feature = "perf-witness"))]
+#[cfg(any(test, feature = "testing", feature = "perf-witness"))]
 mod oracle;
 use crate::arena::{Arena, Registration};
 use crate::paged::PagedHeap;
 use lash_kernel_doc::{Value, heap::PageValue};
-#[cfg(any(test, feature = "perf-witness"))]
+#[cfg(any(test, feature = "testing", feature = "perf-witness"))]
 pub use oracle::{
     AcceptedProgram, EvaluatedProgram, JournalEvent, Materializations, PreparedProgram, Program,
 };

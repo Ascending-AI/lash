@@ -3,7 +3,7 @@ use super::super::*;
 use super::Running;
 use crate::machine::{
     Frame, SlotState,
-    frames::{Continuation, Pending, Slots},
+    frames::{Continuation, Slots},
 };
 use lash_kernel_state::kernel_internals::logical::{Invocation, LeaseGraphExit, Owner};
 
@@ -41,20 +41,16 @@ impl Running<'_> {
         } else {
             self.parked[depth].pc
         };
-        let mut statement = code
-            .program
-            .step(pc)
-            .ok_or_else(|| invalid(Refused::Path))?
-            .at
-            .site
-            .clone();
-        while statement.path.len() > code.program.source().site.path.len()
-            && code.exe.stmt_at(code.program.code(), &statement).is_none()
-        {
-            statement.path.pop();
-        }
         let mut frame = if depth == 0 {
             self.canonical
+                .region_image(Rc::clone(&bank.ledger), task, &code.exe)
+                .map_err(RegionError::Heap)?
+        } else if let Some(saved) = self
+            .canonical_callees
+            .get(depth - 1)
+            .filter(|frame| frame.invocation == image.invocation && frame.code == image.program)
+        {
+            saved
                 .region_image(Rc::clone(&bank.ledger), task, &code.exe)
                 .map_err(RegionError::Heap)?
         } else {
@@ -131,9 +127,6 @@ impl Running<'_> {
             })
         };
         frame.control = self.controls_for(code, pc, depth)?;
-        frame.statement =
-            lash_kernel_state::paged::SiteRef::new(&statement, self.view.heap().pages())
-                .map_err(RegionError::Heap)?;
         for (index, binding) in code.bindings.iter().enumerate() {
             let Owner::Value { slot, .. } = code
                 .program
@@ -150,46 +143,94 @@ impl Running<'_> {
             };
             frame.restore_slot(index as u32, state);
         }
-        if depth < self.parked.len() {
-            let parked = &self.parked[depth];
-            let call = parked
-                .code
-                .calls
-                .get(parked.site as usize)
-                .and_then(Option::as_ref)
-                .ok_or_else(|| invalid(Refused::Facts))?;
-            let stmt = code
-                .exe
-                .stmt_at(image.program, &statement)
-                .ok_or_else(|| invalid(Refused::Path))?;
-            let (stream, _, _) = code.exe.statement(stmt);
-            if let Some(act) = stream
-                .nested_at
-                .get(&(stmt, call.plan.point().site.clone()))
-            {
-                let entry = &stream.nested[act.ix()];
-                frame.stand_at(
-                    *act,
-                    Pending {
-                        site: Arc::clone(&entry.suffix),
-                        phase: lash_kernel_state::paged::PhaseRecord::Called,
-                        occurrence: parked.reached.occurrence,
-                        roles: call.saved.iter().map(|saved| {
-                            let value = self.registers.read(depth, image.invocation, saved.register)?;
-                            let holding = match value {
-                                operands::Operand::Dynamic(value) => self.view.recovery_holding(graph, value).map_err(RegionError::Heap)?,
-                                operands::Operand::Immediate(value) => lash_kernel_state::kernel_internals::logical::Holding::scalar(self.view.arena().logical_local(&value).map_err(RegionError::Heap)?),
-                            };
-                            Ok(crate::machine::frames::Role { site: Arc::clone(&saved.suffix), value: value.materialize(graph).map_err(RegionError::Heap)?, holding })
-                        }).collect::<Result<_, RegionError>>()?,
-                    },
-                );
-            }
-            frame.awaiting = Some(stmt);
-            if let Some(crate::machine::Control::Block { next, .. }) = frame.control.last_mut() {
-                *next += 1;
-            }
-        }
+        // One canonical continuation carries every resumable semantic phase.
+        // Binding and capture values already have named frame fields.
+        let (prefix, reached) = if depth == self.parked.len() {
+            (self.prefix, self.reached)
+        } else {
+            (self.parked[depth].prefix, self.parked[depth].reached)
+        };
+        let departure = (depth == self.parked.len())
+            .then_some(self.departing.as_ref())
+            .flatten();
+        let incoming = (depth == self.parked.len())
+            .then_some(self.returning.as_ref())
+            .flatten();
+        let unpaid = code
+            .program
+            .step(pc)
+            .ok_or_else(|| invalid(Refused::Path))?
+            .at
+            .clone();
+        frame.statement = lash_kernel_state::paged::SiteRef::new(
+            &code.program.source().site,
+            self.view.heap().pages(),
+        )
+        .map_err(RegionError::Heap)?;
+        frame.pending.clear();
+        frame.pending.source = Some(crate::machine::frames::source::SourceContinuation {
+            at: incoming
+                .map(|incoming| {
+                    code.calls
+                        .get(incoming.site as usize)
+                        .and_then(Option::as_ref)
+                        .map(|call| call.plan.resume().clone())
+                        .ok_or_else(|| invalid(Refused::Facts))
+                })
+                .transpose()?
+                .unwrap_or_else(|| image.continuation.clone()),
+            unpaid,
+            progress: if depth < self.parked.len() {
+                3
+            } else if incoming.is_some() {
+                4
+            } else {
+                code.program
+                    .source_progress(prefix)
+                    .ok_or_else(|| invalid(Refused::Exit))?
+            },
+            occurrence: reached.occurrence,
+            roles: image
+                .roles
+                .iter()
+                .filter(|(slot, _)| {
+                    !matches!(
+                        slot,
+                        lash_kernel_state::kernel_internals::logical::Slot::Binding(_)
+                            | lash_kernel_state::kernel_internals::logical::Slot::Capture(_)
+                    )
+                })
+                .copied()
+                .collect(),
+            pending: incoming
+                .map(|incoming| graph.value(incoming.value).map_err(RegionError::Heap))
+                .transpose()?
+                .or(image.pending),
+            departure: departure.map(|departure| departure.origin.clone()),
+            ordinal: reached.ordinal,
+            debt: lash_kernel_state::paged::ChargeDebtRecord {
+                cursor: reached.debt,
+                paid: self.counters.progress,
+                completion: departure.map_or_else(
+                    || incoming.map_or(0, |incoming| incoming.completion),
+                    |departure| departure.completion,
+                ),
+                completion_paid: incoming.is_some_and(|incoming| incoming.paid),
+            },
+            root: code.program.source().site.clone(),
+            refusal: if depth == self.parked.len() {
+                self.refusal.as_ref().map(|bound| match bound {
+                    crate::Bound::Charge => 0,
+                    crate::Bound::Memory => 1,
+                    crate::Bound::CallDepth => 2,
+                    _ => unreachable!(),
+                })
+            } else {
+                None
+            },
+        });
+        frame.awaiting = None;
+        frame.nested = None;
         let base = self
             .canonical
             .source_frontier

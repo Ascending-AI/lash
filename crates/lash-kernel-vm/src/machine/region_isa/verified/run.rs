@@ -107,6 +107,21 @@ impl Running<'_> {
             {
                 return Err(invalid(Refused::Facts));
             }
+            if let RegionOp::Heap {
+                kernel,
+                args,
+                dst,
+                next,
+            } = op
+            {
+                if !self.heap_step(kernel, args, *dst, *next)? {
+                    return self.halt(self.stop.unwrap_or(RegionStop::Refusal));
+                }
+                if let Some(stop) = self.prefix_stop(request) {
+                    return Ok(stop);
+                }
+                continue;
+            }
             let answer = match op {
                 RegionOp::Read {
                     spec,
@@ -126,13 +141,34 @@ impl Running<'_> {
                     .scalar_answer(op)?
                     .ok_or_else(|| invalid(Refused::Facts))?,
             };
-            let departure = if matches!(op, RegionOp::Return { .. }) {
+            let departure = if matches!(op, RegionOp::Exit { .. }) && self.departing.is_none() {
+                let map = code
+                    .program
+                    .recovery(step.before)
+                    .ok_or_else(|| invalid(Refused::Exit))?;
+                let value = map
+                    .roles
+                    .iter()
+                    .find_map(|(slot, reg)| {
+                        matches!(
+                            slot,
+                            lash_kernel_state::kernel_internals::logical::Slot::Departure(_)
+                        )
+                        .then_some(*reg)
+                    })
+                    .ok_or_else(|| invalid(Refused::Facts))?;
+                let value = self.value(value)?;
+                Some(self.quote_return(value)?)
+            } else if matches!(op, RegionOp::Return { .. }) {
                 let value = answer
                     .write
                     .ok_or_else(|| invalid(Refused::Facts))?
                     .1
                     .bind(&mut self.view)
                     .map_err(RegionError::Heap)?;
+                if !self.export_return(value)? {
+                    return self.halt(RegionStop::Refusal);
+                }
                 Some(self.quote_return(value)?)
             } else {
                 None

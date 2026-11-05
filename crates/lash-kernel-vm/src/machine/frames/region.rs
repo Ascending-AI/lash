@@ -14,6 +14,8 @@ pub(in crate::machine) struct PreparedRegionFrames<'a> {
     replacements: Vec<Box<Frame>>,
     base: u64,
     len: u64,
+    #[expect(clippy::vec_box, reason = "retire frame allocations after commit")]
+    retired: Vec<Box<Frame>>,
 }
 
 impl Frame {
@@ -42,6 +44,7 @@ impl Frame {
         if let Some(value) = self.pending.peek() {
             pending.set(value.clone());
         }
+        pending.source = self.pending.source.clone();
         let mut image = Box::new(Self {
             source_action: self.source_action,
             texts: Vec::new(),
@@ -89,17 +92,86 @@ impl Frame {
 }
 
 impl Frames {
+    /// Snapshot only the active source stack before taking the exclusive lease.
+    /// Cold frames are admitted once at entry, never during private execution.
+    #[expect(clippy::vec_box, reason = "canonical frame allocations")]
+    pub(in crate::machine) fn region_stack(&mut self) -> Result<Vec<Box<Frame>>, HeapFault> {
+        self.last_mut()?;
+        let (task, logical) = self
+            .logical
+            .as_ref()
+            .ok_or_else(|| malformed("region stack has no source context"))?;
+        let mut images = Vec::new();
+        for index in 0..self.len {
+            let mut image = if let Some((_, frame)) = self.cache.iter().find(|(at, _)| *at == index)
+            {
+                frame.region_image(logical.clone(), *task, &self.exe)?
+            } else {
+                let record = row(&self.rows, index, &self.access)?;
+                let mut frame = restore_frame(
+                    &record,
+                    Arrival::Returned,
+                    &self.access,
+                    &self.exe,
+                    &mut self.arena.borrow_mut(),
+                )?;
+                frame.logical = Some(crate::machine::logical_held::FrameRoots::restore(
+                    logical.clone(),
+                    *task,
+                    &frame,
+                    &self.exe,
+                    &self.access,
+                )?);
+                frame
+            };
+            if index + 1 < self.len
+                && image
+                    .pending
+                    .source
+                    .as_ref()
+                    .is_none_or(|source| source.progress != 3)
+            {
+                return Err(malformed("region caller has no suspended source call"));
+            }
+            image.owned = false;
+            images.push(image);
+        }
+        Ok(images)
+    }
+
+    #[expect(clippy::vec_box, reason = "canonical frame allocations")]
+    pub(in crate::machine) fn prepare_region_stack_exit(
+        &mut self,
+        entry_code: crate::compile::CodeId,
+        entry_invocation: u64,
+        entry_frames: usize,
+        replacements: Vec<Box<Frame>>,
+    ) -> Result<PreparedRegionFrames<'_>, HeapFault> {
+        if self.len() != entry_frames || self.len == 0 {
+            return Err(malformed("region entry stack changed"));
+        }
+        let invocation = match self.cache.iter().find(|(at, _)| *at == 0) {
+            Some((_, frame)) => frame.invocation,
+            None => row(&self.rows, 0, &self.access)?.invocation,
+        };
+        if self.code_at(0)? != entry_code || invocation != entry_invocation {
+            return Err(malformed("region entry invocation changed"));
+        }
+        self.reserve_region_exit(0, replacements)
+    }
+
     /// The entry frame must already be resident. Preparing an exit never
     /// restores a cold frame or borrows the arena held by the state lease.
     #[expect(
         clippy::vec_box,
         reason = "move existing frame allocations into the canonical stack"
     )]
+    #[cfg(test)]
     pub(in crate::machine) fn prepare_region_exit(
         &mut self,
         entry_code: crate::compile::CodeId,
         entry_invocation: u64,
-        mut replacements: Vec<Box<Frame>>,
+        replacements: Vec<Box<Frame>>,
     ) -> Result<PreparedRegionFrames<'_>, HeapFault> {
         let base = self
             .len
@@ -114,13 +186,28 @@ impl Frames {
                 "region exit does not replace its actual entry frame",
             ));
         }
+        self.reserve_region_exit(base, replacements)
+    }
+
+    #[expect(clippy::vec_box, reason = "canonical frame allocations")]
+    fn reserve_region_exit(
+        &mut self,
+        base: u64,
+        mut replacements: Vec<Box<Frame>>,
+    ) -> Result<PreparedRegionFrames<'_>, HeapFault> {
         let count = u64::try_from(replacements.len())
             .map_err(|_| malformed("region frame count overflow"))?;
         let len = base
             .checked_add(count)
             .ok_or_else(|| malformed("region frame depth overflow"))?;
         self.cache
-            .try_reserve(replacements.len().saturating_sub(1))
+            .try_reserve(replacements.len())
+            .map_err(|_| HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        let mut retired = Vec::new();
+        retired
+            .try_reserve_exact(self.cache.len())
             .map_err(|_| HeapFault::Exhausted {
                 resource: lash_kernel_doc::heap::HostResource::StagingBytes,
             })?;
@@ -132,6 +219,7 @@ impl Frames {
             replacements,
             base,
             len,
+            retired,
         })
     }
 }
@@ -139,10 +227,27 @@ impl Frames {
 impl PreparedRegionFrames<'_> {
     /// Return the old frame for retirement after the state publication closure.
     /// Every bound, capacity and entry check has already completed.
+    #[cfg(test)]
     pub(in crate::machine) fn publish(self) -> Box<Frame> {
-        let Some((_, retired)) = self.frames.cache.pop() else {
-            unreachable!("prepared resident region entry")
-        };
+        let mut retired = self.publish_stack();
+        debug_assert_eq!(retired.len(), 1);
+        match retired.pop() {
+            Some(frame) => frame,
+            None => unreachable!("prepared resident region entry"),
+        }
+    }
+
+    #[expect(clippy::vec_box, reason = "retire existing allocations after commit")]
+    pub(in crate::machine) fn publish_stack(mut self) -> Vec<Box<Frame>> {
+        while self
+            .frames
+            .cache
+            .last()
+            .is_some_and(|(index, _)| *index >= self.base)
+        {
+            self.retired
+                .extend(self.frames.cache.pop().map(|(_, frame)| frame));
+        }
         let empty = self.replacements.is_empty();
         for (offset, frame) in self.replacements.into_iter().enumerate() {
             self.frames.cache.push((self.base + offset as u64, frame));
@@ -165,7 +270,7 @@ impl PreparedRegionFrames<'_> {
         } else {
             Arrival::Fresh
         };
-        retired
+        self.retired
     }
 }
 

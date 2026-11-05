@@ -108,6 +108,20 @@ fn source_next(source: &Source, at: &Point) -> Result<Option<Point>, Refused> {
             _ => {}
         }
     }
+    if matches!(at.phase, Phase::Commit | Phase::Restore) && at.site != source.site {
+        let mut parent = at.site.clone();
+        if parent.path.pop() == Some(0)
+            && matches!(
+                resources::node(source, &parent)?,
+                doc::Node::Stmt(doc::Stmt::For { via: None, .. })
+            )
+        {
+            return Ok(Some(Point {
+                site: parent,
+                phase: Phase::Test,
+            }));
+        }
+    }
     source.exact_successor(at, Successor::Normal).map(Some)
 }
 
@@ -124,7 +138,16 @@ fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refused> {
         draft
             .steps
             .get(pc.offset())
-            .map(|step| &step.at)
+            .and_then(|step| match step.stage {
+                Some(stage) => draft.loops.get(stage.info as usize).map(|info| {
+                    if stage.phase == LoopPhase::Enter {
+                        &info.entry
+                    } else {
+                        &info.test
+                    }
+                }),
+                None => Some(&step.at),
+            })
             .ok_or(Refused::Path)
     };
     match &draft.ops[index] {
@@ -308,7 +331,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
         RegionOp::Heap {
             kernel, args, dst, ..
         } => {
-            kernel.verify(draft, step, index)?;
+            kernel.verify(exe, draft, step, index)?;
             if expected_inputs.as_deref() != Ok(args.as_ref()) || *dst != expected_output {
                 return Err(Refused::Facts);
             }
@@ -445,8 +468,13 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
             kernel, args, dst, ..
         } => match kernel.kind() {
             CheckedKind::Local { slot } => {
-                let doc::Node::Expr(doc::Expr::Variable(name)) = node else {
-                    return Err(Refused::Source);
+                let name = match (node, step.at.phase) {
+                    (doc::Node::Expr(doc::Expr::Variable(name)), Phase::Commit) => name,
+                    (doc::Node::Expr(doc::Expr::Act(act)), Phase::Open) => match &act.kind {
+                        doc::ActKind::Call(doc::Callee::Value(name)) => name,
+                        _ => return Err(Refused::Source),
+                    },
+                    _ => return Err(Refused::Source),
                 };
                 if Some(*slot)
                     != resources::slot(
@@ -596,9 +624,21 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
         RegionOp::Call { site, .. } => {
             let call = draft.calls.get(site.offset()).ok_or(Refused::Source)?;
             check_origin(exe, draft, &step.at, call.origin)?;
+            let inputs = expected_inputs?;
+            let arguments = if matches!(node, doc::Node::Expr(doc::Expr::Act(act)) if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_))))
+            {
+                inputs.get(1..).ok_or(Refused::Facts)?
+            } else {
+                &inputs
+            };
             if call.at != step.at
-                || expected_inputs.as_deref() != Ok(call.arguments.as_ref())
-                || Some(call.result) != expected_output
+                || arguments != call.arguments.as_ref()
+                || Some(call.result)
+                    != expected_output.or_else(|| {
+                        (step.at.phase == Phase::Enter)
+                            .then(|| Reg::new(draft.roles.len()).ok())
+                            .flatten()
+                    })
             {
                 return Err(Refused::Facts);
             }
@@ -954,9 +994,9 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
         let pending = if matches!(draft.ops[index], RegionOp::Call { .. }) {
             Some(sink)
         } else if matches!(draft.ops[index], RegionOp::Heap { .. }) {
-            match super::heap::source_kind(source, &step.at)? {
-                Some(HeapKind::Tuple | HeapKind::Cell) => None,
-                Some(_) => event
+            match &draft.ops[index] {
+                RegionOp::Heap { kernel, .. } if kernel.atomic_move() => None,
+                RegionOp::Heap { .. } => event
                     .output
                     .as_ref()
                     .map(|owner| {
@@ -965,7 +1005,7 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                         Ok::<_, Refused>(reg)
                     })
                     .transpose()?,
-                None => return Err(Refused::Source),
+                _ => return Err(Refused::Source),
             }
         } else {
             event

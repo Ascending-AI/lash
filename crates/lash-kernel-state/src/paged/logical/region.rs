@@ -4,8 +4,9 @@ use crate::arena::{Arena, ArenaAuthority, PreparedBatch, PreparedGraphProof, Reg
 use crate::paged::heap_impl::PagedHeap;
 use lash_kernel_doc::{Value, arena::ArenaHandle};
 mod exit;
+mod loading;
 mod storage;
-pub use exit::LeaseGraphExit;
+pub use exit::{LeaseGraphExit, LeaseProjection};
 use std::cell::{Cell as Flag, RefMut};
 use storage::LocalStore;
 pub use storage::{
@@ -45,6 +46,17 @@ pub struct StateLease<'s> {
     exclusion: Exclusion,
     reserved: Option<(TaskId, u64)>,
     local: LocalStore,
+    loader: Option<Box<dyn LeaseLoader>>,
+}
+/// Canonical projection can decode an entry body without executing guest work.
+/// The lease authenticates its unchanged source identity and member frontier.
+pub trait LeaseLoader {
+    fn load(
+        &self,
+        arena: &mut Arena,
+        heap: &PagedHeap,
+        handle: ArenaHandle,
+    ) -> Result<(), HeapFault>;
 }
 enum LeaseStorage<'s> {
     Vacant,
@@ -122,6 +134,7 @@ impl<'s> StateLease<'s> {
             exclusion,
             reserved: None,
             local,
+            loader: None,
         })
     }
     pub fn arena(&self) -> &Arena {
@@ -210,6 +223,7 @@ impl<'s> StateLease<'s> {
             exclusion,
             reserved,
             local,
+            loader: _,
         } = self;
         let ledger = heap.region_ledger()?;
         if !ledger.is_current(&entry) {

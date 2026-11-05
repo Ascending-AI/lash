@@ -73,7 +73,6 @@ impl<'s> Running<'s> {
         holds.clear();
         releases.clear();
         quoted.clear();
-        let mut graph = false;
         for &root in &flow.holds {
             let value = read(
                 &self.registers,
@@ -84,11 +83,6 @@ impl<'s> Running<'s> {
                 Some(answer),
                 flow.destination,
             )?;
-            graph |= self
-                .view
-                .inline(value)
-                .map_err(RegionError::Heap)?
-                .is_none();
             holds.push((value, root.capture));
         }
         for &root in &flow.releases {
@@ -101,11 +95,6 @@ impl<'s> Running<'s> {
                 None,
                 None,
             )?;
-            graph |= self
-                .view
-                .inline(value)
-                .map_err(RegionError::Heap)?
-                .is_none();
             releases.push((value, root.capture));
         }
         for group in &flow.quotes {
@@ -209,25 +198,28 @@ impl<'s> Running<'s> {
         if peak > self.limits.memory {
             return Ok(None);
         }
-        let step = if graph {
-            let phase = self
-                .view
-                .stage(LeaseOp::Transfer { holds, releases })
-                .map_err(storage_fault)?;
-            if phase.facts().delta().checked_add(flow.frame_delta) != Some(delta) {
-                return Err(invalid(Refused::Facts));
+        let transfer = match flow.frame_delta {
+            0 => LeaseOp::Transfer { holds, releases },
+            delta if delta == -i128::from(lash_kernel_doc::LogicalHeldV1::FRAME) => {
+                LeaseOp::FrameTransfer {
+                    holds,
+                    releases,
+                    entering: false,
+                }
             }
-            Some(phase)
-        } else {
-            None
+            _ => return Err(invalid(Refused::Facts)),
         };
+        let step = self.view.stage(transfer).map_err(storage_fault)?;
+        if step.facts().delta() != delta {
+            return Err(invalid(Refused::Facts));
+        }
         let debt = self
             .counters
             .debt
             .checked_add(1)
             .ok_or_else(|| invalid(Refused::Facts))?;
         Ok(Some(PreparedResources {
-            step,
+            step: Some(step),
             counters: execute::Counters {
                 balance,
                 peak,

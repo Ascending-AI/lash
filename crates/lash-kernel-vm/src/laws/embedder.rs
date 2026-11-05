@@ -44,7 +44,7 @@ fn type_error(message: &'static str) -> NativeError {
 /// Arena-independent law natives offer a prepared entry with the same
 /// answer.
 macro_rules! prepared {
-    ($native:ident, |$args:ident| $body:expr) => {
+    ($native:ident, $immediate_resources:expr, |$args:ident| $body:expr) => {
         impl $native {
             fn answer($args: &[Value]) -> Result<Value, NativeError> {
                 $body
@@ -73,12 +73,19 @@ macro_rules! prepared {
                     operation: stringify!($native),
                 })
             }
+            fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+                lash_kernel_doc::NativeSpecialization {
+                    immediate: self.prepare(),
+                    immediate_resources: $immediate_resources,
+                    ..Default::default()
+                }
+            }
         }
     };
 }
 
 struct Add;
-prepared!(Add, |args| match args {
+prepared!(Add, true, |args| match args {
     [Value::Int(a), Value::Int(b)] => a
         .checked_add(*b)
         .map(Value::Int)
@@ -87,7 +94,7 @@ prepared!(Add, |args| match args {
 });
 
 struct Less;
-prepared!(Less, |args| match args {
+prepared!(Less, true, |args| match args {
     [Value::Int(a), Value::Int(b)] => Ok(Value::Bool(a < b)),
     _ => Err(type_error("num.lt takes two integers")),
 });
@@ -240,7 +247,7 @@ impl NativeFunction for Repeat {
 }
 
 struct Ref;
-prepared!(Ref, |args| match args.first() {
+prepared!(Ref, false, |args| match args.first() {
     Some(
         Value::List(object)
         | Value::Map(object)

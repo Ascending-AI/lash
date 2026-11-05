@@ -28,7 +28,7 @@ mod observers;
 pub use observers::ObserverExclusion;
 mod ownership;
 mod program;
-#[cfg(any(test, feature = "perf-witness"))]
+#[cfg(any(test, feature = "testing", feature = "perf-witness"))]
 pub use program::{
     AcceptedProgram, EvaluatedProgram, JournalEvent, Materializations, PreparedProgram, Program,
 };
@@ -40,12 +40,12 @@ pub use members::{Member, MemberFault};
 pub use ownership::{PublicationValue, RootValue};
 pub use publication::{AcceptedBoundary, BoundaryTransaction, MemberEdit};
 use region::Lineage;
-#[cfg(any(test, feature = "perf-witness"))]
+#[cfg(any(test, feature = "testing", feature = "perf-witness"))]
 pub use region::fixtures as region_fixtures;
 pub use region::{
-    LeaseAllocation, LeaseCallable, LeaseFacts, LeaseFault, LeaseGraphExit, LeaseMeasure,
-    LeaseMember, LeaseObject, LeaseOp, LeaseStep, LeaseValue, PreparedStateExit, ReadyLeaseStep,
-    StateExit, StateLease,
+    LeaseAllocation, LeaseCallable, LeaseFacts, LeaseFault, LeaseGraphExit, LeaseLoader,
+    LeaseMeasure, LeaseMember, LeaseObject, LeaseOp, LeaseProjection, LeaseStep, LeaseValue,
+    PreparedStateExit, ReadyLeaseStep, StateExit, StateLease,
 };
 mod warming;
 pub use warming::WarmFact;
@@ -1003,7 +1003,116 @@ impl Ledger {
             next_invocation: self.state.next_invocation,
         })
     }
+    /// A source operand can cross a seal only when the canonical frame names
+    /// that exact owner and value. Unprojected evaluator roots still refuse.
+    pub(super) fn validate_frame_continuations(
+        &self,
+        access: &Access<'_>,
+        tasks: &super::tree::Tree<super::directory::execution::TaskRecord>,
+    ) -> Result<(), HeapFault> {
+        let mut saved = BTreeMap::new();
+        let mut error = None;
+        tasks.visit(access, &mut |key, task| {
+            let mut visit = || -> Result<(), HeapFault> {
+                let id = TaskId(u64::from_be_bytes(
+                    key.try_into().map_err(|_| invalid("invalid task key"))?,
+                ));
+                visit_tree(&task.frames, access, &mut |frame| {
+                    let Some(record) = &frame.pending else {
+                        return Ok(());
+                    };
+                    if record.unpaid.is_none() {
+                        return Ok(());
+                    }
+                    if record.invocation == 0 || record.invocation != frame.invocation {
+                        return Err(invalid("continuation names another frame invocation"));
+                    }
+                    for role in record.roles(access)? {
+                        let super::RoleCoordinate::Slot(slot) = role.coordinate else {
+                            return Err(invalid(
+                                "canonical source continuation has an expression role",
+                            ));
+                        };
+                        let owner = Owner::Value {
+                            task: id,
+                            invocation: frame.invocation,
+                            slot,
+                        };
+                        if owner.transient()
+                            && saved
+                                .insert(owner, Holding::from_page(access, &role.value)?)
+                                .is_some()
+                        {
+                            return Err(invalid(
+                                "canonical continuation duplicates a source owner",
+                            ));
+                        }
+                    }
+                    Ok(())
+                })
+            };
+            match visit() {
+                Ok(()) => true,
+                Err(fault) => {
+                    error = Some(fault);
+                    false
+                }
+            }
+        })?;
+        if let Some(fault) = error {
+            return Err(fault);
+        }
+        visit_tree(&self.state.execution, access, &mut |root| {
+            if !root.owner.transient() {
+                return Ok(());
+            }
+            let value = saved
+                .remove(&root.owner)
+                .ok_or_else(|| invalid("transient source owner has no canonical continuation"))?;
+            let mut expected = BTreeMap::new();
+            let mut actual = BTreeMap::new();
+            value.visit_edges(access, &mut |id, count| {
+                expected.insert(id, count);
+                Ok(())
+            })?;
+            root.value.visit_edges(access, &mut |id, count| {
+                actual.insert(id, count);
+                Ok(())
+            })?;
+            if value.bytes != root.value.bytes || expected != actual {
+                return Err(invalid(
+                    "canonical continuation holding differs from its source owner",
+                ));
+            }
+            Ok(())
+        })?;
+        if !saved.is_empty() {
+            return Err(invalid("canonical continuation has an absent source owner"));
+        }
+        Ok(())
+    }
+
+    pub(super) fn seal_with_frames(
+        &mut self,
+        access: &Access<'_>,
+        work: &mut SealWork,
+        tasks: &super::tree::Tree<super::directory::execution::TaskRecord>,
+    ) -> Result<Option<LedgerRoot>, HeapFault> {
+        self.validate_frame_continuations(access, tasks)?;
+        self.seal_canonical(access, work)
+    }
+
     pub(super) fn seal_with(
+        &mut self,
+        access: &Access<'_>,
+        work: &mut SealWork,
+    ) -> Result<Option<LedgerRoot>, HeapFault> {
+        if self.state.execution.live_members(access)? != 0 {
+            return Err(invalid("transient source owners at seal"));
+        }
+        self.seal_canonical(access, work)
+    }
+    fn seal_canonical(
         &mut self,
         access: &Access<'_>,
         work: &mut SealWork,
@@ -1011,9 +1120,6 @@ impl Ledger {
         // A seal ends the active borrowed execution view even if its budget
         // yields. Outstanding admissions cannot survive the handoff.
         self.handoff()?;
-        if self.state.execution.live_members(access)? != 0 {
-            return Err(invalid("transient source owners at seal"));
-        }
         self.drop_provisional(access)?;
         let mut state = self.state.clone();
         if !state.owners.seal(access, work)?
@@ -1257,9 +1363,5 @@ fn keyed<T: Cell>(tree: &Tree<T>) -> Result<KeyedRoot, HeapFault> {
 }
 
 /// Independent itemized state oracle for qualification and witness builds.
-#[cfg(any(test, feature = "perf-witness"))]
-pub mod testing {
-    pub use super::{
-        AcceptedProgram, EvaluatedProgram, JournalEvent, Materializations, PreparedProgram, Program,
-    };
-}
+#[cfg(any(test, feature = "testing", feature = "perf-witness"))]
+pub mod testing;

@@ -12,6 +12,7 @@ pub(in crate::machine) struct FrameImage<T = Value> {
     pub(in crate::machine) roles: Box<[(Slot, T)]>,
     pub(in crate::machine) operands: Box<[T]>,
     pub(in crate::machine) pending: Option<T>,
+    pub(in crate::machine) incoming: bool,
 }
 
 pub(super) struct Finished<V: View> {
@@ -68,6 +69,7 @@ impl<V: View> Execution<V> {
                     continuation: map.continuation.clone(),
                     roles,
                     operands,
+                    incoming: map.incoming,
                     pending: if map.incoming {
                         if map.pending.is_some() || index + 1 != self.frames.len() {
                             return Err(invalid(Refused::Exit));
@@ -153,6 +155,7 @@ impl KernelMachine {
                 "canonical reopen has live execution authority".into(),
             ));
         }
+        self.heap.validate_frame_continuations()?;
         self.tasks.reconstruct_region_context()?;
         self.publish_logical_meter()
     }

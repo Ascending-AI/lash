@@ -54,6 +54,9 @@ impl CallDebt {
     pub(crate) fn before_entry(&self) -> u64 {
         self.before
     }
+    pub(crate) fn needs_arguments(&self) -> bool {
+        self.completion.is_some()
+    }
     /// Quote from current actual lease values while the source operands are
     /// live. C keeps the scalar debt through Leave and bills it at the canonical
     /// completion phase; quoting adds no source holding or charge.
@@ -63,34 +66,12 @@ impl CallDebt {
         arguments: &[LeaseValue],
         result: LeaseValue,
     ) -> Result<Option<u64>, LeaseFault> {
-        if arguments.len() != self.arguments {
-            return Ok(None);
-        }
         let Some(plan) = &self.completion else {
             return Ok(Some(0));
         };
-        let absent = lease.import(&Value::Absent).map_err(LeaseFault::Heap)?;
-        let mut failure = None;
-        let units = plan.evaluate(|source, selector| {
-            if failure.is_some() {
-                return 0;
-            }
-            let value = match source {
-                compile::Source::Arg(index) => arguments.get(index).copied().unwrap_or(absent),
-                compile::Source::Result => result,
-                compile::Source::Nothing => return 0,
-            };
-            match lease.measure(value, selector) {
-                Ok(amount) => amount,
-                Err(error) => {
-                    failure = Some(error);
-                    0
-                }
-            }
-        });
-        match failure {
-            Some(error) => Err(error),
-            None => Ok(Some(units)),
+        if arguments.len() != self.arguments {
+            return Ok(None);
         }
+        plan.lease(lease, arguments, result).map(Some)
     }
 }

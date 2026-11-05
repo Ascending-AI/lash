@@ -28,7 +28,7 @@ use crate::interface::{Bound, EffectRequest, Host, Request, WaitId};
 use lash_kernel_doc::heap::ErrorRef;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree};
-use lash_kernel_state::paged::{PhaseRecord, WaitKindRecord, WaitPhase, WaitRecord};
+use lash_kernel_state::paged::{ContinuationPhase, WaitKindRecord, WaitPhase, WaitRecord};
 use {lash_kernel_value::tokens::decode_body, lash_kernel_value::tokens::encode_body};
 
 /// What a call or a `spawn` runs, once its callee is read.
@@ -308,7 +308,7 @@ impl KernelMachine {
         task: TaskId,
         entry: &Nested,
         act: lash_kernel_exec::ActIx,
-        phase: PhaseRecord,
+        phase: ContinuationPhase,
     ) -> Result<(), Halt> {
         let occurrence = self
             .frame(task)?
@@ -318,7 +318,7 @@ impl KernelMachine {
             .map(|(_, count)| count);
         if entry.guest
             && matches!(entry.kind, NestedKind::Call(_))
-            && phase == PhaseRecord::Called
+            && phase == (ContinuationPhase::Call { phase: 0 })
             && occurrence.is_none()
         {
             return Err(fault(

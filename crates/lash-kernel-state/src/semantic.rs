@@ -223,10 +223,21 @@ pub fn checkpoint(
             if let Some(pending) = &frame.pending {
                 r.put(&pending.site);
                 r.put(&pending.phase);
+                r.put(&pending.occurrence);
+                r.put(&pending.invocation);
+                r.put(&pending.unpaid);
+                r.put(&pending.departure);
+                r.put(&pending.ordinal);
+                r.put(&pending.debt);
+                r.put(&pending.refusal);
+                r.put(&pending.pending.is_some());
+                if let Some(value) = &pending.pending {
+                    r.value(value)?;
+                }
                 let roles = pending.roles(r.heap.pages())?;
                 r.put(&(roles.len() as u64));
                 for role in roles {
-                    r.put(&role.site);
+                    r.put(&role.coordinate);
                     r.value(&role.value)?;
                 }
             }

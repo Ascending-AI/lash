@@ -512,34 +512,10 @@ fn region_graph_projection_commutes_with_itemized_source() {
             .publish(&mut oracle, |_, _| {})
             .unwrap();
         assert_eq!(
-            shared.borrow().balance().unwrap(),
-            oracle.balance().unwrap()
+            shared.borrow().testing_snapshot(heap.pages()).unwrap(),
+            oracle.testing_snapshot(oracle_heap.pages()).unwrap(),
+            "every root, retained entity and incoming edge agrees with the itemized source"
         );
-        for id in ids {
-            let actual = shared.borrow().entity_holding(id, heap.pages()).unwrap();
-            let expected = oracle.entity_holding(id, oracle_heap.pages()).unwrap();
-            assert_eq!(
-                actual.as_ref().map(Holding::bytes),
-                expected.as_ref().map(Holding::bytes)
-            );
-            if let (Some(actual), Some(expected)) = (actual, expected) {
-                let mut a = Vec::new();
-                let mut b = Vec::new();
-                actual
-                    .visit_edges(heap.pages(), &mut |target, count| {
-                        a.push((target, count));
-                        Ok(())
-                    })
-                    .unwrap();
-                expected
-                    .visit_edges(oracle_heap.pages(), &mut |target, count| {
-                        b.push((target, count));
-                        Ok(())
-                    })
-                    .unwrap();
-                assert_eq!(a, b);
-            }
-        }
         // The first overwrite retains the second b edge, so its +1 byte
         // precedes b's last-owner release at the second overwrite. The old
         // final-edit bag concealed this 130-byte source prefix.
@@ -627,8 +603,8 @@ fn normalized_table_allocations() {
     normalized_table_operand_releases();
     use lash_kernel_doc::Float;
     let text = |name| Value::Text(lash_kernel_doc::arena::ShortText::new(name).unwrap());
-    for kind in 0..3 {
-        let keys = if kind == 1 {
+    for kind in 0..4 {
+        let keys = if kind == 1 || kind == 3 {
             [text("a"), text("b"), text("a"), text("b")]
         } else {
             [
@@ -647,7 +623,7 @@ fn normalized_table_allocations() {
         let canonical = oracle_arena
             .create(match kind {
                 0 => NewObject::Map(entries.clone()),
-                1 => NewObject::Record(entries.clone()),
+                1 | 3 => NewObject::Record(entries.clone()),
                 _ => NewObject::Set(keys.to_vec()),
             })
             .unwrap();
@@ -676,9 +652,15 @@ fn normalized_table_allocations() {
                 .map(|(key, value)| (lease.import(key).unwrap(), lease.import(value).unwrap()))
                 .collect();
             let local_keys: Vec<_> = local.iter().map(|(key, _)| *key).collect();
+            let fields: Vec<std::sync::Arc<str>> = ["a", "b", "a", "b"]
+                .into_iter()
+                .map(std::sync::Arc::from)
+                .collect();
+            let field_values: Vec<_> = local.iter().map(|(_, value)| *value).collect();
             let descriptor = || match kind {
                 0 => LeaseAllocation::map(&local),
                 1 => LeaseAllocation::record(&local),
+                3 => LeaseAllocation::record_fields(&fields, &field_values),
                 _ => LeaseAllocation::set(&local_keys),
             };
             let step = lease.stage(LeaseOp::Allocate(descriptor())).unwrap();

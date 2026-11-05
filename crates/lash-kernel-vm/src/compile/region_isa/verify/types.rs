@@ -146,10 +146,28 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                 }
             }
             RegionOp::Call { site, .. } => {
-                let _ = draft.calls.get(site.offset()).ok_or(Refused::Source)?;
+                let call = draft.calls.get(site.offset()).ok_or(Refused::Source)?;
+                for owner in &step.event.inputs {
+                    read(&state, register(draft, owner)?.offset())?;
+                }
+                for reg in &call.arguments {
+                    read(&state, reg.offset())?;
+                }
                 state[draft.roles.len()] = Some(RegisterKind::Value)
             }
-            RegionOp::Heap { args, dst, .. } => {
+            RegionOp::Heap {
+                args, dst, kernel, ..
+            } => {
+                if let HeapKind::Closure { captures, .. } = kernel.kind() {
+                    for slot in captures {
+                        let reg = draft
+                            .roles
+                            .iter()
+                            .find_map(|(actual, reg)| (actual == slot).then_some(*reg))
+                            .ok_or(Refused::Facts)?;
+                        read(&state, reg.offset())?;
+                    }
+                }
                 if step.scalar_resources {
                     return Err(Refused::Retained);
                 }

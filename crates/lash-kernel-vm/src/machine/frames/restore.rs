@@ -27,7 +27,33 @@ pub(super) fn frame(
     }
     let code_id = code_of(record, exe, access)?;
     let code = exe.code(code_id);
-    let pending = match &record.pending {
+    if let Some(pending) = &record.pending {
+        if pending.invocation == 0 || pending.invocation != record.invocation {
+            return Err(malformed("continuation invocation differs from its frame").into());
+        }
+        if pending.unpaid.is_none()
+            && (pending.pending.is_some()
+                || pending.departure.is_some()
+                || pending.ordinal != 0
+                || pending.debt != lash_kernel_state::paged::ChargeDebtRecord::default()
+                || pending.refusal.is_some()
+                || matches!(
+                    pending.phase,
+                    ContinuationPhase::Source { .. } | ContinuationPhase::Completion { .. }
+                ))
+        {
+            return Err(malformed("action continuation carries source phase metadata").into());
+        }
+    }
+    let source = record
+        .pending
+        .as_ref()
+        .filter(|pending| pending.unpaid.is_some())
+        .map(|pending| {
+            source::SourceContinuation::restore(pending, record.invocation, &site, arena, access)
+        })
+        .transpose()?;
+    let pending = match record.pending.as_ref().filter(|_| source.is_none()) {
         Some(pending) => Some(Pending {
             site: pending.site.as_slice().into(),
             phase: pending.phase,
@@ -78,7 +104,19 @@ pub(super) fn frame(
     } else {
         None
     };
-    while adopting.is_none() && cleaning.is_none() {
+    if let Some(source) = &source {
+        control = crate::machine::region_isa::restore_source_controls(
+            exe, code_id, source, record, access,
+        )?
+        .iter()
+        .cloned()
+        .collect();
+        loops = record.loops.len();
+        iterated = record.iterated.len();
+        finally = record.finally.len();
+        departing = record.departing.len();
+    }
+    while source.is_none() && adopting.is_none() && cleaning.is_none() {
         let index = *site.path.get(depth).ok_or_else(nowhere)? as usize;
         let stmts = &exe.block(block).stmts;
         if depth + 1 == site.path.len() {
@@ -319,12 +357,13 @@ pub(super) fn frame(
         paced: code.paced,
         statement: record.statement.clone(),
         pending: Continuation {
-            saved: if pending.is_some() {
+            saved: if pending.is_some() || source.is_some() {
                 Saved::This
             } else {
                 Saved::Nothing
             },
             pending,
+            source,
         },
         control: control.into(),
         awaiting,

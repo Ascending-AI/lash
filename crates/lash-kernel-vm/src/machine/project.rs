@@ -141,6 +141,44 @@ impl ProjectionArena for lash_kernel_state::arena::PreparedInstallation<'_> {
         Ok(())
     }
 }
+impl ProjectionArena for lash_kernel_state::kernel_internals::logical::LeaseProjection<'_> {
+    fn projection_body(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<&Body, lash_kernel_doc::NativeError> {
+        self.body(handle)
+            .map_err(lash_kernel_doc::NativeError::Host)
+    }
+    fn projection_identify(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<EntityId, lash_kernel_doc::NativeError> {
+        self.ledger_key(handle)
+            .map_err(lash_kernel_doc::NativeError::Host)
+    }
+    fn projection_page(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<Option<PageValue>, lash_kernel_doc::NativeError> {
+        self.page(handle)
+            .map_err(lash_kernel_doc::NativeError::Host)
+    }
+    fn projection_keep_page(
+        &mut self,
+        _: ArenaHandle,
+        _: PageValue,
+    ) -> Result<(), lash_kernel_doc::NativeError> {
+        Ok(())
+    }
+}
+
+pub(in crate::machine) fn project_region(
+    arena: &mut lash_kernel_state::kernel_internals::logical::LeaseProjection<'_>,
+    pages: &Access<'_>,
+    value: &Value,
+) -> Result<PageValue, HeapFault> {
+    project_in(arena, pages, value)
+}
 
 /// The page form of `value`, built through `pages`. An immutable's is
 /// built once and kept with it; a mutable object's is its identity, given

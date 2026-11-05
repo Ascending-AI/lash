@@ -228,13 +228,16 @@ impl Running<'_> {
         }
         let phase = self
             .view
-            .stage(LeaseOp::Transfer { holds, releases })
+            .stage(LeaseOp::FrameTransfer {
+                holds,
+                releases,
+                entering: true,
+            })
             .map_err(storage_fault)?;
-        let delta = phase
-            .facts()
-            .delta()
-            .checked_add(i128::from(plan.frame_price()))
-            .ok_or_else(|| invalid(Refused::Facts))?;
+        if plan.frame_price() != lash_kernel_doc::LogicalHeldV1::FRAME {
+            return Err(invalid(Refused::Facts));
+        }
+        let delta = phase.facts().delta();
         let balance = i128::from(self.counters.balance)
             .checked_add(delta)
             .and_then(|balance| u64::try_from(balance).ok())
@@ -242,8 +245,7 @@ impl Running<'_> {
         let peak = self
             .counters
             .balance
-            .checked_add(plan.frame_price())
-            .and_then(|peak| peak.checked_add(phase.facts().peak()))
+            .checked_add(phase.facts().peak())
             .ok_or_else(|| invalid(Refused::Peak))?
             .max(balance)
             .max(self.counters.peak);
@@ -271,18 +273,24 @@ impl Running<'_> {
             plan: site,
             caller_program: caller.program.code(),
         };
+        let counter = self.source.prepare(&call.counter)?;
+        let mut reached = self.reached;
+        // The caller's suspended Pending carries the occurrence issued by
+        // this entry, while the callee starts its own source coordinates.
+        let ready = phase.reserve().map_err(RegionError::Heap)?;
+        reached.occurrence = counter.accept();
         let parked = Parked {
             callee: identity,
             code: Arc::clone(&caller),
             pc: self.pc,
             prefix: self.prefix,
-            reached: self.reached,
+            reached,
             activation: self.activation.take(),
             site,
             target: plan.code(),
         };
         // All bank writes, allocation and checks precede this affine accept.
-        phase.reserve().map_err(RegionError::Heap)?.accept();
+        ready.accept();
         self.parked.push(parked);
         self.invocations.accept(reserved);
         self.code = callee;

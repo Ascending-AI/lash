@@ -22,7 +22,7 @@ pub enum BodyEnd {
 /// observer process. Byte totals are body bytes offered/successfully delivered,
 /// excluding HTTP headers, framing, compression on the wire and TLS.
 #[derive(Clone, Debug)]
-pub struct HttpPhaseRecord {
+pub struct HttpContinuationPhase {
     pub ordinal: usize,
     pub request_built_ns: u64,
     pub headers_received_ns: Option<u64>,
@@ -37,7 +37,7 @@ pub struct HttpPhaseRecord {
 
 #[derive(Debug)]
 struct State {
-    rows: Vec<HttpPhaseRecord>,
+    rows: Vec<HttpContinuationPhase>,
     dropped: usize,
     next: usize,
 }
@@ -69,7 +69,7 @@ impl HttpPhaseLedger {
             epoch,
         )
     }
-    pub fn snapshot(&self) -> (Vec<HttpPhaseRecord>, usize) {
+    pub fn snapshot(&self) -> (Vec<HttpContinuationPhase>, usize) {
         let state = self
             .state
             .lock()
@@ -88,7 +88,7 @@ impl HttpPhaseLedger {
         state.next += 1;
         let index = if state.rows.len() < self.capacity {
             let index = state.rows.len();
-            state.rows.push(HttpPhaseRecord {
+            state.rows.push(HttpContinuationPhase {
                 ordinal,
                 request_built_ns: self.now(),
                 headers_received_ns: None,
@@ -121,7 +121,7 @@ impl fmt::Debug for Recording {
     }
 }
 impl Recording {
-    fn update(&self, update: impl FnOnce(&mut HttpPhaseRecord, u64)) {
+    fn update(&self, update: impl FnOnce(&mut HttpContinuationPhase, u64)) {
         if let Some(index) = self.index {
             let mut state = self
                 .ledger

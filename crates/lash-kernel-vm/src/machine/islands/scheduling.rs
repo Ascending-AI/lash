@@ -12,7 +12,7 @@ use crate::machine::{Incoming, raise};
 use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_exec::Op;
-use lash_kernel_state::paged::PhaseRecord;
+use lash_kernel_state::paged::ContinuationPhase;
 use lash_kernel_value::package::OperationMode;
 
 impl KernelMachine {
@@ -357,7 +357,12 @@ impl KernelMachine {
                         {
                             crate::machine::ops::Answer::Done => Flow::Done,
                             crate::machine::ops::Answer::Body(code) => {
-                                self.capture(task, entry, act, PhaseRecord::Called)?;
+                                self.capture(
+                                    task,
+                                    entry,
+                                    act,
+                                    ContinuationPhase::Call { phase: 0 },
+                                )?;
                                 self.enter_body(
                                     task,
                                     exe,
@@ -384,7 +389,12 @@ impl KernelMachine {
                                 Flow::Step
                             }
                             target => {
-                                self.capture(task, entry, act, PhaseRecord::Called)?;
+                                self.capture(
+                                    task,
+                                    entry,
+                                    act,
+                                    ContinuationPhase::Call { phase: 0 },
+                                )?;
                                 self.call(task, exe, stmt, target, at, count)?
                             }
                         };
@@ -421,7 +431,7 @@ impl KernelMachine {
                 let flow =
                     self.spawn(task, host, exe, stmt, site, target, at, count - (at - args))?;
                 if flow == Flow::Step {
-                    self.capture(task, entry, act, PhaseRecord::Spawned)?;
+                    self.capture(task, entry, act, ContinuationPhase::Spawned)?;
                 }
                 Ok(self.answered_at(flow, at, args))
             }
@@ -441,7 +451,7 @@ impl KernelMachine {
                     self.pin(args)?;
                     return Ok(Flow::Done);
                 }
-                self.capture(task, entry, act, PhaseRecord::Waiting)?;
+                self.capture(task, entry, act, ContinuationPhase::Waiting)?;
                 self.issue_effect(task, stmt, site, effect, copied)?;
                 Ok(Flow::Step)
             }
@@ -456,7 +466,7 @@ impl KernelMachine {
                         Ok(Flow::Done)
                     }
                     Err(joined) => {
-                        self.capture(task, entry, act, PhaseRecord::Joining)?;
+                        self.capture(task, entry, act, ContinuationPhase::Joining)?;
                         self.wait_one(task, stmt, joined)?;
                         Ok(Flow::Step)
                     }
@@ -473,7 +483,7 @@ impl KernelMachine {
                         Ok(Flow::Done)
                     }
                     Err(members) => {
-                        self.capture(task, entry, act, PhaseRecord::Joining)?;
+                        self.capture(task, entry, act, ContinuationPhase::Joining)?;
                         self.wait_list(task, stmt, *mode, members)?;
                         Ok(Flow::Step)
                     }
@@ -483,7 +493,7 @@ impl KernelMachine {
                 if !library {
                     self.enter(task, host, site, entry.occurrence)?;
                 }
-                self.capture(task, entry, act, PhaseRecord::Yielded)?;
+                self.capture(task, entry, act, ContinuationPhase::Yielded)?;
                 self.task(task)?
                     .wake(Incoming::Value(PageValue::Null), false);
                 self.frame(task)?.awaiting = Some(stmt);

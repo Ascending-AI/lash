@@ -1115,6 +1115,9 @@ impl KernelMachine {
 
     /// Runs one statement of `task`, or resumes the one it waits in.
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
+        if self.resume_source_continuation(task)? {
+            return Ok(());
+        }
         let (link, program) = {
             let frame = self.frame(task)?;
             let program = exe
@@ -1496,7 +1499,7 @@ impl KernelMachine {
     /// action, by task and frame index.
     pub(crate) fn pending_phases(
         &mut self,
-    ) -> Vec<(TaskId, usize, lash_kernel_state::paged::PhaseRecord)> {
+    ) -> Vec<(TaskId, usize, lash_kernel_state::paged::ContinuationPhase)> {
         let mut phases = Vec::new();
         let access = self.heap.pages().clone();
         self.publish_holdings().expect("the run publishes");
@@ -1575,7 +1578,7 @@ impl KernelMachine {
         task: TaskId,
         index: usize,
         edit: impl FnOnce(
-            &mut Option<lash_kernel_state::paged::PendingRecord>,
+            &mut Option<lash_kernel_state::paged::ContinuationRecord>,
             &lash_kernel_state::kernel_internals::tree::Access<'_>,
         ),
     ) -> Result<(), String> {

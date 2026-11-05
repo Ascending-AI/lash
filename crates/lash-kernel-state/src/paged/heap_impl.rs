@@ -169,6 +169,12 @@ impl PagedHeap {
     }
     /// The source ledger's complete warm/cold balance, independent of the
     /// physical accounting certificate retained by the interim meter.
+    /// Checks persisted source operands against the restored execution ledger.
+    pub fn validate_frame_continuations(&self) -> Result<(), HeapFault> {
+        self.logical
+            .borrow()
+            .validate_frame_continuations(&self.access, &self.tasks)
+    }
     pub fn logical_balance(&self) -> Result<super::logical::Balance, HeapFault> {
         self.logical.borrow().balance()
     }
@@ -863,7 +869,7 @@ impl SemanticHeap for PagedHeap {
             || self
                 .logical
                 .borrow_mut()
-                .seal_with(&self.access, &mut work)?
+                .seal_with_frames(&self.access, &mut work, &self.tasks)?
                 .is_none()
         {
             return Ok(None);

@@ -10,6 +10,7 @@ pub(crate) enum HeapKind {
     Set,
     Record(Box<[Arc<str>]>),
     Cell,
+    Closure { code: CodeId, captures: Box<[Slot]> },
     Text(Arc<str>),
     Bytes(Arc<[u8]>),
     Field { name: Arc<str>, removing: bool },
@@ -17,7 +18,12 @@ pub(crate) enum HeapKind {
     Variable { slot: Slot },
 }
 
-pub(super) fn source_kind(source: &Source, at: &Point) -> Result<Option<HeapKind>, Refused> {
+pub(super) fn source_kind(
+    exe: &Executable,
+    parent: CodeId,
+    source: &Source,
+    at: &Point,
+) -> Result<Option<HeapKind>, Refused> {
     if at.phase != Phase::Commit {
         return Ok(None);
     }
@@ -29,6 +35,32 @@ pub(super) fn source_kind(source: &Source, at: &Point) -> Result<Option<HeapKind
         }
         doc::Node::Expr(doc::Expr::Literal(doc::Literal::Bytes(bytes))) => {
             HeapKind::Bytes(Arc::from(bytes.as_slice()))
+        }
+        doc::Node::Expr(doc::Expr::Closure(_)) => {
+            let code = exe
+                .closure_entries()
+                .find_map(|(_, site, _, code)| (site == &at.site).then_some(code))
+                .ok_or(Refused::Source)?;
+            let captures = exe
+                .code(code)
+                .captures
+                .iter()
+                .map(|capture| {
+                    let at = *exe
+                        .code(parent)
+                        .slots_by_at
+                        .get(capture.outer_at as usize)
+                        .ok_or(Refused::Source)?;
+                    match source.binding_root(at, doc::TaskId::MAIN, 0) {
+                        Some(lash_kernel_state::kernel_internals::logical::Owner::Value {
+                            slot,
+                            ..
+                        }) => Ok(slot),
+                        _ => Err(Refused::Source),
+                    }
+                })
+                .collect::<Result<_, Refused>>()?;
+            HeapKind::Closure { code, captures }
         }
         doc::Node::Expr(doc::Expr::List(_)) => HeapKind::List,
         doc::Node::Expr(doc::Expr::Tuple(_)) => HeapKind::Tuple,
@@ -179,12 +211,13 @@ impl HeapKernel {
     }
     pub(super) fn verify(
         &self,
+        exe: &Executable,
         draft: &RegionDraft,
         step: &Step,
         index: usize,
     ) -> Result<(), Refused> {
         if self.source != step.at
-            || source_kind(&draft.source, &step.at)?.as_ref() != Some(&self.kind)
+            || source_kind(exe, draft.code, &draft.source, &step.at)?.as_ref() != Some(&self.kind)
         {
             return Err(Refused::Source);
         }

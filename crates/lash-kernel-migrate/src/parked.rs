@@ -205,12 +205,28 @@ impl Carry<'_, '_> {
             match &pending.roles {
                 RolesRecord::Flat(roles) => {
                     for role in roles.iter() {
-                        suffix(&role.site, "operand role")?;
+                        match &role.coordinate {
+                            RoleCoordinate::Expression(site) => suffix(site, "operand role")?,
+                            RoleCoordinate::Slot(_) => {
+                                return Err(state(
+                                    "source role needs admitted source correspondence",
+                                )
+                                .into());
+                            }
+                        }
                     }
                 }
                 RolesRecord::Spilled(chunks) => self.visit(chunks, |chunk| {
                     for role in &chunk.0 {
-                        suffix(&role.site, "operand role")?;
+                        match &role.coordinate {
+                            RoleCoordinate::Expression(site) => suffix(site, "operand role")?,
+                            RoleCoordinate::Slot(_) => {
+                                return Err(state(
+                                    "source role needs admitted source correspondence",
+                                )
+                                .into());
+                            }
+                        }
                     }
                     Ok(())
                 })?,
@@ -266,12 +282,32 @@ impl Carry<'_, '_> {
             match &mut pending.roles {
                 RolesRecord::Flat(roles) => {
                     for role in std::sync::Arc::make_mut(roles) {
-                        role.site = suffix(&role.site, "operand role")?;
+                        match &mut role.coordinate {
+                            RoleCoordinate::Expression(site) => {
+                                *site = suffix(site, "operand role")?
+                            }
+                            RoleCoordinate::Slot(_) => {
+                                return Err(state(
+                                    "source role needs admitted source correspondence",
+                                )
+                                .into());
+                            }
+                        }
                     }
                 }
                 RolesRecord::Spilled(chunks) => self.tree(chunks, |chunk| {
                     for role in &mut chunk.0 {
-                        role.site = suffix(&role.site, "operand role")?;
+                        match &mut role.coordinate {
+                            RoleCoordinate::Expression(site) => {
+                                *site = suffix(site, "operand role")?
+                            }
+                            RoleCoordinate::Slot(_) => {
+                                return Err(state(
+                                    "source role needs admitted source correspondence",
+                                )
+                                .into());
+                            }
+                        }
                     }
                     Ok(())
                 })?,

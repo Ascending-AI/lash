@@ -28,11 +28,11 @@ pub(crate) use recovery::{GraphRecovery, RecoveryMap};
 pub(crate) use resources::{IndexedAmount, ResourceInput};
 
 fn resource_pair(lib: &super::Lib, charged: bool) -> Option<doc::scalar::Pair> {
-    lib.specialization
-        .native
-        .immediate_resources
-        .then(|| super::numeric_pair(lib, charged))
-        .flatten()
+    if lib.specialization.native.immediate_resources {
+        super::numeric_pair(lib, charged)
+    } else {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -559,6 +559,71 @@ impl RegionCode {
     }
     pub(crate) fn roles(&self) -> &[(Slot, Reg<LeaseValue>)] {
         &self.draft.roles
+    }
+    /// Rebuild a recovery entry from its semantic phase and acceptance state.
+    pub(crate) fn source_recovery(
+        &self,
+        point: &Point,
+        progress: u32,
+        departure: Option<&Point>,
+    ) -> Option<PrefixId> {
+        let pc = departure
+            .and_then(|origin| self.departure_at(origin, point))
+            .or_else(|| self.at(point))?;
+        let step = self.step(pc)?;
+        match progress {
+            0 => Some(step.before),
+            1 => Some(step.pending),
+            2 => Some(step.after),
+            _ => None,
+        }
+    }
+    pub(crate) fn source_progress(&self, prefix: PrefixId) -> Option<u32> {
+        self.draft.steps.iter().find_map(|step| {
+            if step.before == prefix {
+                Some(0)
+            } else if step.pending == prefix {
+                Some(1)
+            } else if step.after == prefix {
+                Some(2)
+            } else {
+                None
+            }
+        })
+    }
+    /// The saved next phase must be an actual edge of the reached source event.
+    pub(crate) fn source_successor(
+        &self,
+        point: &Point,
+        progress: u32,
+        departure: Option<&Point>,
+        unpaid: &Point,
+    ) -> bool {
+        if let Some(origin) = departure
+            && !self.draft.departures.iter().any(|route| {
+                self.draft.steps[route.origin.offset()].at == *origin
+                    && (origin == point
+                        || route
+                            .leaves
+                            .iter()
+                            .any(|pc| self.draft.steps[pc.offset()].at == *point))
+            })
+        {
+            return false;
+        }
+        let Some(pc) = departure
+            .and_then(|origin| self.departure_at(origin, point))
+            .or_else(|| self.at(point))
+        else {
+            return false;
+        };
+        match progress {
+            0 | 1 => point == unpaid,
+            2 => recovery::successors(&self.draft, pc.offset())
+                .iter()
+                .any(|next| self.draft.steps[next.offset()].at == *unpaid),
+            _ => false,
+        }
     }
     pub(crate) fn at(&self, point: &Point) -> Option<Pc> {
         self.draft

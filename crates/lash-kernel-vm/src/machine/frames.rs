@@ -15,7 +15,10 @@
 //! code's side table under this layout and against how the task comes to
 //! the frame. Restore fails closed with the [`RestoreRefusal`] that names
 //! what it refuses.
+mod admission;
 mod restore;
+use admission::{admit_roles, continuation, role_records};
+pub(in crate::machine) mod source;
 use restore::frame as restore_frame;
 
 use super::loops::{Guard, Header, TextCursor};
@@ -29,16 +32,17 @@ use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::{HeapFault, PageValue};
 use lash_kernel_exec::ActIx;
 use lash_kernel_exec::coord::{
-    self, ActionEntry, ActionKind, ActionPhase, Arrival, CleanupCoordinate, Departure,
-    LoopCoordinate, LoopPhase, RestoreRefusal, SitePath, StatementCoordinate,
+    self, Arrival, CleanupCoordinate, Departure, LoopCoordinate, LoopPhase, RestoreRefusal,
+    SitePath,
 };
 use lash_kernel_state::arena::Arena;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{
-    BindingRecord, BoundRecord, CursorKind, CursorRecord, EnteredRecord, FinallyRecord,
-    FrameRecord, GuardRecord, HeaderRecord, IncomingRecord, IteratedRecord, LoopRecord, NameRef,
-    PendingRecord, PhaseRecord, RoleRecord, SiteRef, TableCursor, TaskStateRecord,
+    BindingRecord, BoundRecord, ContinuationPhase, ContinuationRecord, CursorKind, CursorRecord,
+    EnteredRecord, FinallyRecord, FrameRecord, GuardRecord, HeaderRecord, IncomingRecord,
+    IteratedRecord, LoopRecord, NameRef, RoleCoordinate, RoleRecord, SiteRef, TableCursor,
+    TaskStateRecord,
 };
 use lash_kernel_value::sites::Site;
 use lash_kernel_value::sites::Unit;
@@ -328,7 +332,7 @@ impl Slots {
 #[derive(Clone, Debug)]
 pub(super) struct Pending {
     pub(super) site: Suffix,
-    pub(super) phase: PhaseRecord,
+    pub(super) phase: ContinuationPhase,
     pub(super) occurrence: Option<u64>,
     pub(super) roles: Vec<Role>,
 }
@@ -360,12 +364,14 @@ enum Saved {
 /// row as it was.
 #[derive(Debug, Default)]
 pub(super) struct Continuation {
+    pub(in crate::machine) source: Option<source::SourceContinuation>,
     pending: Option<Pending>,
     saved: Saved,
 }
 
 impl Continuation {
     pub(super) fn set(&mut self, pending: Pending) {
+        self.source = None;
         self.pending = Some(pending);
         if self.saved == Saved::This {
             self.saved = Saved::Another;
@@ -388,7 +394,7 @@ impl Continuation {
     /// Whether the row holds the continuation as it is.
     fn projected(&self) -> bool {
         match self.saved {
-            Saved::Nothing => self.pending.is_none(),
+            Saved::Nothing => self.pending.is_none() && self.source.is_none(),
             Saved::This => true,
             Saved::Another => false,
         }
@@ -398,6 +404,7 @@ impl Continuation {
     /// written afresh.
     pub(super) fn clear(&mut self) {
         self.pending = None;
+        self.source = None;
         self.saved = Saved::Nothing;
     }
 }
@@ -417,7 +424,7 @@ impl KernelMachine {
     pub(super) fn continuation(
         &mut self,
         site: &Suffix,
-        phase: PhaseRecord,
+        phase: ContinuationPhase,
         count: usize,
         mut role: impl FnMut(&mut Self, usize) -> Result<Role, Halt>,
     ) -> Result<Pending, Halt> {
@@ -505,6 +512,9 @@ impl Frame {
         if let Some(pending) = &self.pending.pending {
             pending.roles.iter().for_each(|role| visit(&role.value));
         }
+        if let Some(source) = &self.pending.source {
+            source.each_value(visit);
+        }
         self.visit_held(&mut |value| {
             visit(value);
             true
@@ -549,6 +559,9 @@ impl Frame {
         }
         if let Some(pending) = &self.pending.pending {
             out.extend(pending.roles.iter().filter_map(|role| role.value.handle()));
+        }
+        if let Some(source) = &self.pending.source {
+            source.each_value(&mut |value| out.extend(value.handle()));
         }
         self.visit_held(&mut |value| {
             out.extend(value.handle());
@@ -784,19 +797,25 @@ impl Frame {
             self.pending.saved = Saved::Nothing;
         }
         if !self.pending.projected() {
-            stored.pending = match &self.pending.pending {
-                Some(pending) => Some(
-                    PendingRecord::new(
-                        pending.site.to_vec(),
-                        pending.phase,
-                        role_records(arena, access, &pending.roles)?,
-                        access,
-                    )?
-                    .with_occurrence(pending.occurrence),
-                ),
-                None => None,
+            stored.pending = if let Some(source) = &self.pending.source {
+                Some(source.project(self.invocation, arena, access)?)
+            } else {
+                match &self.pending.pending {
+                    Some(pending) => Some(
+                        ContinuationRecord::new(
+                            pending.site.to_vec(),
+                            pending.phase,
+                            role_records(arena, access, &pending.roles)?,
+                            access,
+                        )?
+                        .with_occurrence(pending.occurrence)
+                        .with_invocation(self.invocation),
+                    ),
+                    None => None,
+                }
             };
-            self.pending.saved = if self.pending.pending.is_some() {
+            self.pending.saved = if self.pending.pending.is_some() || self.pending.source.is_some()
+            {
                 Saved::This
             } else {
                 Saved::Nothing
@@ -818,6 +837,13 @@ impl Frame {
         exe: &Executable,
         access: &Access<'_>,
     ) -> Result<bool, HeapFault> {
+        if self.pending.source.is_some() {
+            if stored.statement.same_version(&self.statement) {
+                return Ok(false);
+            }
+            stored.statement = self.statement.clone();
+            return Ok(true);
+        }
         let statement = match self.block_statement(exe, self.awaiting.is_some())? {
             Some(statement) => {
                 if stored.statement.matches(&statement, access)? {
@@ -1276,20 +1302,21 @@ impl Frames {
     pub(super) fn pending_mut(
         &mut self,
         index: u64,
-        edit: &mut dyn FnMut(&mut Option<PendingRecord>, &Access<'_>),
+        edit: &mut dyn FnMut(&mut Option<ContinuationRecord>, &Access<'_>),
     ) -> Result<bool, HeapFault> {
         let access = self.access.clone();
         if let Some((_, frame)) = self.cache.iter_mut().find(|(at, _)| *at == index) {
             let mut arena = self.arena.borrow_mut();
             let mut record = match frame.pending.take() {
                 Some(pending) => Some(
-                    PendingRecord::new(
+                    ContinuationRecord::new(
                         pending.site.to_vec(),
                         pending.phase,
                         role_records(&mut arena, &access, &pending.roles)?,
                         &access,
                     )?
-                    .with_occurrence(pending.occurrence),
+                    .with_occurrence(pending.occurrence)
+                    .with_invocation(frame.invocation),
                 ),
                 None => None,
             };
@@ -1503,127 +1530,6 @@ fn admit_finally(
 
 /// The action kind the side table states for a nested action: `None` for
 /// a `cancel`, which never stands.
-fn action_kind(kind: &NestedKind) -> Option<ActionKind> {
-    Some(match kind {
-        NestedKind::Yield => ActionKind::Yield,
-        NestedKind::Cancel | NestedKind::CancelEffect => return None,
-        NestedKind::Call(_) => ActionKind::Call,
-        NestedKind::Body(_) => ActionKind::Body,
-        NestedKind::Perform { then_yield, .. } => ActionKind::Perform {
-            then_yield: *then_yield,
-        },
-        NestedKind::Spawn(_) => ActionKind::Spawn,
-        NestedKind::Join => ActionKind::Join,
-        NestedKind::JoinMany(_) => ActionKind::JoinMany,
-    })
-}
-
-/// The page forms of `roles`, in their order: what a projection writes.
-fn role_records(
-    arena: &mut Arena,
-    access: &Access<'_>,
-    roles: &[Role],
-) -> Result<Vec<RoleRecord>, HeapFault> {
-    roles
-        .iter()
-        .map(|role| {
-            Ok(RoleRecord {
-                site: role.site.to_vec(),
-                value: project(arena, access, &role.value)?,
-            })
-        })
-        .collect()
-}
-
-/// The arena values of the saved `roles`, in their order.
-fn admit_roles(
-    arena: &mut Arena,
-    access: &Access<'_>,
-    roles: Vec<RoleRecord>,
-) -> Result<Vec<Role>, HeapFault> {
-    roles
-        .into_iter()
-        .map(|role| {
-            Ok(Role {
-                holding: lash_kernel_state::kernel_internals::logical::Holding::from_page(
-                    access,
-                    &role.value,
-                )?,
-                value: admit(arena, access, &role.value)?,
-                site: role.site.into(),
-            })
-        })
-        .collect()
-}
-
-fn action_phase(phase: PhaseRecord) -> ActionPhase {
-    match phase {
-        PhaseRecord::Yielded => ActionPhase::Yielded,
-        PhaseRecord::Called => ActionPhase::Called,
-        PhaseRecord::Waiting => ActionPhase::Waiting,
-        PhaseRecord::Spawned => ActionPhase::Spawned,
-        PhaseRecord::Joining => ActionPhase::Joining,
-    }
-}
-
-/// The resume entry of `pending`, the continuation a frame saved where it
-/// stands at an action nested in statement `stmt`, at `site`, admitted by
-/// the coordinate grammar beside `arrival` (`K-EVAL-008`): its action names
-/// one of the statement's own nested actions under this layout.
-fn continuation(
-    exe: &Executable,
-    stmt: StmtId,
-    site: &Site,
-    pending: &Pending,
-    arrival: Arrival,
-) -> Result<ActIx, RestoreRefusal> {
-    let (stream, _, _) = exe.statement(stmt);
-    let depth = site.path.len();
-    let action = SitePath(pending.site[..].into());
-    let full = Site::new(
-        site.unit.clone(),
-        site.path
-            .iter()
-            .chain(pending.site.iter())
-            .copied()
-            .collect::<Vec<_>>(),
-    );
-    // The entry must be the statement's own: an action in a closure
-    // written inside it belongs to the closure's statement.
-    let Some((act, nested)) = stream
-        .nested_at
-        .get(&(stmt, full))
-        .map(|act| (*act, &stream.nested[act.ix()]))
-        .filter(|(_, nested)| nested.depth as usize == depth)
-    else {
-        return Err(RestoreRefusal::UnknownSite { action });
-    };
-    let phase = action_phase(pending.phase);
-    let Some(kind) = action_kind(&nested.kind) else {
-        return Err(RestoreRefusal::IllegalPhase { action, phase });
-    };
-    let entry = ActionEntry {
-        action: action.clone(),
-        kind,
-        roles: nested
-            .roles
-            .iter()
-            .map(|role| SitePath(role.site.path[depth..].into()))
-            .collect(),
-    };
-    let saved = StatementCoordinate::Nested {
-        action,
-        phase,
-        roles: pending
-            .roles
-            .iter()
-            .map(|role| SitePath(role.site[..].into()))
-            .collect(),
-    };
-    coord::admit(&entry, &saved, arrival)?;
-    Ok(act)
-}
-
 /// How many arguments a saved call retains, if any.
 fn retained(record: &FrameRecord) -> Option<u32> {
     record

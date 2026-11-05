@@ -3,7 +3,7 @@ use super::*;
 use crate::compile::Nested;
 use crate::machine::frames::{Pending, Role};
 use lash_kernel_exec::{ActIx, Reg};
-use lash_kernel_state::paged::PhaseRecord;
+use lash_kernel_state::paged::ContinuationPhase;
 
 pub(in crate::machine) struct CallerArguments {
     pub(in crate::machine) args: usize,
@@ -69,7 +69,7 @@ impl Caller<'_> {
             act,
             Pending {
                 site: Arc::clone(&entry.suffix),
-                phase: PhaseRecord::Called,
+                phase: ContinuationPhase::Call { phase: 0 },
                 occurrence: ordinal,
                 roles,
             },
@@ -184,7 +184,9 @@ impl KernelMachine {
                     if frontier.position().occurrence.invocation != caller.invocation
                         || frontier.position().occurrence.action.as_ref()
                             != Some(&(at.clone(), actual))
-                        || pending.is_some_and(|pending| pending.phase != PhaseRecord::Called)
+                        || pending.is_some_and(|pending| {
+                            pending.phase != (ContinuationPhase::Call { phase: 0 })
+                        })
                     {
                         return Err(
                             malformed("entry caller lost its accepted source action").into()

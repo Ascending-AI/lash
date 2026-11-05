@@ -48,7 +48,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     ),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/directory/continuation.rs",
-///         ROLE_FLAT, ROLE_CHUNK, PendingRecord, RolesRecord, PhaseRecord, RoleRecord, RoleChunk,
+///         ROLE_FLAT, ROLE_CHUNK, ContinuationRecord, RolesRecord, ContinuationPhase, RoleRecord, RoleChunk,
 ///         decode_cell, encode_roles, encode, decode,
 ///     ),
 ///     items(path = "crates/lash-kernel-state/src/paged/tree/key.rs", Key),

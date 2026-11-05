@@ -7,7 +7,7 @@ use lash_kernel_state::kernel_internals::logical::LeaseValue;
 pub(super) struct Departure {
     pub(super) origin: Point,
     pub(super) value: LeaseValue,
-    completion: u64,
+    pub(super) completion: u64,
 }
 pub(super) struct Incoming {
     pub(super) value: LeaseValue,
@@ -16,7 +16,73 @@ pub(super) struct Incoming {
     pub(super) site: u32,
 }
 impl Running<'_> {
+    fn authenticate_activation(&self) -> Result<(), RegionError> {
+        match (self.parked.last(), self.activation.as_ref()) {
+            (None, None) => Ok(()),
+            (Some(parked), Some(activation))
+                if Rc::ptr_eq(&activation.lease, &self.identity)
+                    && activation.depth == self.parked.len()
+                    && activation.invocation == self.reached.invocation
+                    && activation.caller_program == parked.code.program.code()
+                    && activation.plan == parked.site
+                    && self.code.program.code() == parked.target =>
+            {
+                Ok(())
+            }
+            _ => Err(invalid(Refused::Facts)),
+        }
+    }
+    pub(super) fn export_return(&mut self, value: LeaseValue) -> Result<bool, RegionError> {
+        use lash_kernel_state::kernel_internals::logical::Owner;
+        if !self.parked.is_empty() || !self.limits.charge_enabled {
+            return Ok(true);
+        }
+        let Owner::Frame { task, .. } = self
+            .canonical
+            .logical
+            .as_ref()
+            .ok_or_else(|| invalid(Refused::Facts))?
+            .invocation()
+            .frame()
+        else {
+            return Err(invalid(Refused::Facts));
+        };
+        if task != lash_kernel_doc::TaskId::MAIN
+            || matches!(
+                self.canonical.convention,
+                Some(
+                    lash_kernel_doc::StartConvention::TsDirect { .. }
+                        | lash_kernel_doc::StartConvention::TsArgsList { .. }
+                )
+            )
+        {
+            return Ok(true);
+        }
+        let size = self
+            .view
+            .measure(value, lash_kernel_doc::Measure::DeepSize)
+            .map_err(storage_fault)?;
+        let payment = charge::export(self.counters, self.limits, size);
+        self.counters = payment.counters;
+        if let Some(crossing) = payment.crossing {
+            self.refusal = Some(crate::Bound::Charge);
+            self.crossing = Some(crossing);
+            self.attempted = Some(
+                self.code
+                    .program
+                    .step(self.pc)
+                    .ok_or_else(|| invalid(Refused::Path))?
+                    .at
+                    .clone(),
+            );
+            self.stop = Some(RegionStop::Refusal);
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
     pub(super) fn quote_return(&mut self, value: LeaseValue) -> Result<Departure, RegionError> {
+        self.authenticate_activation()?;
         let completion = if let Some(parked) = self.parked.last() {
             let call = parked
                 .code
@@ -31,13 +97,30 @@ impl Running<'_> {
                 .find(|plan| plan.code() == parked.target)
                 .ok_or_else(|| invalid(Refused::Facts))?;
             self.call_values.clear();
-            for register in &call.arguments {
-                self.call_values.push(
-                    self.registers
-                        .read(self.parked.len() - 1, parked.reached.invocation, *register)?
-                        .bind(&mut self.view)
-                        .map_err(RegionError::Heap)?,
-                );
+            if plan.debt().needs_arguments() {
+                if let Some(frame) = self
+                    .canonical_callees
+                    .get(self.parked.len() - 1)
+                    .filter(|frame| frame.invocation == self.reached.invocation)
+                {
+                    let library = frame
+                        .library
+                        .as_ref()
+                        .ok_or_else(|| invalid(Refused::Facts))?;
+                    for value in library.args.iter().take(call.arguments.len()) {
+                        self.call_values
+                            .push(self.view.import(value).map_err(RegionError::Heap)?);
+                    }
+                } else {
+                    for register in &call.arguments {
+                        self.call_values.push(
+                            self.registers
+                                .read(self.parked.len() - 1, parked.reached.invocation, *register)?
+                                .bind(&mut self.view)
+                                .map_err(RegionError::Heap)?,
+                        );
+                    }
+                }
             }
             plan.debt()
                 .completion(&mut self.view, &self.call_values, value)
@@ -59,6 +142,32 @@ impl Running<'_> {
         })
     }
     pub(super) fn finish_frame(&mut self) -> Result<(), RegionError> {
+        self.authenticate_activation()?;
+        if self.parked.is_empty()
+            && (self.canonical.library.is_some()
+                || self.canonical.cleaning.is_some()
+                || self
+                    .canonical
+                    .public_result
+                    .as_ref()
+                    .is_some_and(|ty| !matches!(ty, lash_kernel_value::types::Type::Any))
+                || !matches!(
+                    self.canonical.convention,
+                    None | Some(
+                        lash_kernel_doc::StartConvention::Direct
+                            | lash_kernel_doc::StartConvention::PyArgsList { .. }
+                    )
+                )
+                || (self.canonical.convention.is_none()
+                    && self
+                        .code
+                        .exe
+                        .root_cleanup(self.code.program.code())
+                        .is_some()))
+        {
+            return Err(invalid(Refused::Facts));
+        }
+        self.activation.take();
         let departing = self
             .departing
             .take()
@@ -96,10 +205,16 @@ impl Running<'_> {
         });
         self.code = parked.code;
         self.pc = parked.pc;
-        self.prefix = parked.prefix;
+        self.prefix = self
+            .code
+            .program
+            .step(self.pc)
+            .ok_or_else(|| invalid(Refused::Path))?
+            .pending;
         self.reached = ReachedPrefix {
             ordinal: self.reached.ordinal,
             debt: self.counters.debt,
+            prefix: self.prefix.index() as u32,
             ..parked.reached
         };
         self.activation = parked.activation;

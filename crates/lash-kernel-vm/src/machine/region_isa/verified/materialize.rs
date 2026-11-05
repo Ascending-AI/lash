@@ -7,14 +7,15 @@ impl<'m> Running<'m> {
     pub(in crate::machine::region_isa) fn reconstruct(
         mut self,
     ) -> Result<reconstruct::Finished<StateLease<'m>>, RegionError> {
-        // These new execution phases still need their canonical incoming/debt
-        // reconstruction. Refuse before freezing or publishing a partial image.
-        if self.faulted || self.departing.is_some() || self.returning.is_some() || self.complete {
+        if self.faulted {
             return Err(invalid(Refused::Facts));
         }
         let stop = self.stop.ok_or_else(|| invalid(Refused::Exit))?;
         if (stop == RegionStop::Refusal) != self.refusal.is_some() {
             return Err(invalid(Refused::Facts));
+        }
+        if self.complete {
+            return self.reconstruct_complete(stop);
         }
         let refusal = self.refusal.as_ref().map(|bound| {
             let limit = match bound {
@@ -119,7 +120,15 @@ impl<'m> Running<'m> {
                     .filter(|reg| !moved(**reg))
                     .map(|reg| read(*reg))
                     .collect::<Result<_, _>>()?,
-                pending: map.pending.map(read).transpose()?,
+                incoming: depth == self.parked.len()
+                    && (self.returning.is_some() || map.graph.incoming().is_some()),
+                pending: if depth == self.parked.len() && self.returning.is_some() {
+                    self.returning
+                        .as_ref()
+                        .map(|incoming| operands::Operand::Dynamic(incoming.value))
+                } else {
+                    map.pending.map(read).transpose()?
+                },
             });
         }
         let graph = self.view.materialize_graph().map_err(RegionError::Heap)?;
@@ -185,11 +194,69 @@ impl<'m> Running<'m> {
                 frames: canonical,
                 registers: Some(registers),
                 crossing: self.crossing,
+                incoming: None,
             }),
         };
         Ok(reconstruct::Finished {
             image,
             live,
+            view: self.view,
+            graph,
+            invocations,
+        })
+    }
+
+    fn reconstruct_complete(
+        mut self,
+        stop: RegionStop,
+    ) -> Result<reconstruct::Finished<StateLease<'m>>, RegionError> {
+        if stop != RegionStop::Complete || !self.parked.is_empty() || self.activation.is_some() {
+            return Err(invalid(Refused::Exit));
+        }
+        let incoming = self
+            .returning
+            .take()
+            .ok_or_else(|| invalid(Refused::Exit))?;
+        if !incoming.paid {
+            return Err(invalid(Refused::Facts));
+        }
+        let graph = self.view.materialize_graph().map_err(RegionError::Heap)?;
+        let value = graph.value(incoming.value).map_err(RegionError::Heap)?;
+        let page = crate::machine::project::project_region(
+            &mut self
+                .view
+                .recovery_projection(&graph)
+                .map_err(RegionError::Heap)?,
+            self.view.heap().pages(),
+            &value,
+        )
+        .map_err(RegionError::Heap)?;
+        let (issued_invocations, invocations) = self.invocations.finish()?;
+        Ok(reconstruct::Finished {
+            image: Reconstruction {
+                issued_invocations,
+                prefix: self.reached,
+                pending: None,
+                frames: Box::new([]),
+                attempted: self.attempted,
+                counters: self.counters,
+                stop,
+                payload: Some(value),
+                returning: None,
+                source_counts: self.source.freeze(),
+                entering: None,
+                canonical: Some(publication::Canonical {
+                    frames: Vec::new(),
+                    registers: Some(crate::machine::registers::Registers::default()),
+                    crossing: self.crossing,
+                    incoming: Some(lash_kernel_state::paged::IncomingRecord::Value(page)),
+                }),
+            },
+            live: live::Live {
+                frames: Box::new([]),
+                payload: Some(incoming.value),
+                returning: None,
+            },
             view: self.view,
             graph,
             invocations,

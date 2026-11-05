@@ -47,6 +47,7 @@ impl Programs {
         while let Some(code) = pending.pop() {
             result.registers = result.registers.max(code.program.registers().len());
             result.arguments = result.arguments.max(code.arguments);
+            result.captures = result.captures.max(code.captures);
             result.transfer_width = result.transfer_width.max(code.transfer_width);
             result.quotes = result.quotes.max(code.quotes);
             let mut loops = 0;
@@ -89,13 +90,15 @@ impl Programs {
             .map(super::call_bind::Calls::width)
             .max()
             .unwrap_or(0);
-        result.captures = result
-            .calls
-            .iter()
-            .flatten()
-            .map(super::call_bind::Calls::captures)
-            .max()
-            .unwrap_or(0);
+        result.captures = result.captures.max(
+            result
+                .calls
+                .iter()
+                .flatten()
+                .map(super::call_bind::Calls::captures)
+                .max()
+                .unwrap_or(0),
+        );
         result.codes = codes.into();
         Ok(Arc::new(result))
     }

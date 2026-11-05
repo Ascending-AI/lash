@@ -11,21 +11,35 @@ impl StateLease<'_> {
         let len = match body {
             Allocation::Map(entries) | Allocation::Record(entries) => entries.len(),
             Allocation::Set(values) => values.len(),
+            Allocation::RecordFields { fields, values } => {
+                if fields.len() != values.len() {
+                    return Err(invalid("record fields differ from their values").into());
+                }
+                fields.len()
+            }
             _ => unreachable!("table allocation descriptor"),
         };
         for at in 0..len {
-            let key = match body {
-                Allocation::Map(entries) | Allocation::Record(entries) => {
-                    self.local.value_index(entries[at].1)?;
-                    entries[at].0
+            let normalized = match body {
+                Allocation::RecordFields { fields, values } => {
+                    self.local.value_index(values[at])?;
+                    LeaseKey::Canonical(Key::of_text(&fields[at]))
                 }
-                Allocation::Set(values) => values[at],
-                _ => unreachable!("table allocation descriptor"),
+                _ => {
+                    let key = match body {
+                        Allocation::Map(entries) | Allocation::Record(entries) => {
+                            self.local.value_index(entries[at].1)?;
+                            entries[at].0
+                        }
+                        Allocation::Set(values) => values[at],
+                        _ => unreachable!("table allocation descriptor"),
+                    };
+                    if matches!(body, Allocation::Record(_)) && !self.is_text(key)? {
+                        return Err(NativeError::Decline.into());
+                    }
+                    self.key(key)?
+                }
             };
-            let normalized = self.key(key)?;
-            if matches!(body, Allocation::Record(_)) && !self.is_text(key)? {
-                return Err(NativeError::Decline.into());
-            }
             let inputs = &mut self.local.table_inputs;
             if let Some(row) = inputs.index.get(&normalized).copied() {
                 inputs.rows[row].1 = at;
@@ -40,6 +54,13 @@ impl StateLease<'_> {
     }
     pub(super) fn normalized_entry(&self, body: &Allocation<'_>, row: usize) -> Entry {
         let (first, last) = self.local.table_inputs.rows[row];
+        if let Allocation::RecordFields { fields, values } = body {
+            return Entry {
+                key: Spelling::Field(Arc::clone(&fields[first])),
+                value: values[last],
+                sequence: row as u64,
+            };
+        }
         let (key, value) = match body {
             Allocation::Map(entries) | Allocation::Record(entries) => {
                 (entries[first].0, entries[last].1)
@@ -114,7 +135,10 @@ impl StateLease<'_> {
                 value.extend_from_slice(source);
                 LocalBody::Bytes(value)
             }
-            Allocation::Map(_) | Allocation::Record(_) | Allocation::Set(_) => {
+            Allocation::Map(_)
+            | Allocation::Record(_)
+            | Allocation::RecordFields { .. }
+            | Allocation::Set(_) => {
                 let (mut entries, mut index) = match reusable.take() {
                     Some(LocalBody::Table(table)) => (table.entries, table.index),
                     _ => (Vec::new(), std::collections::HashMap::default()),

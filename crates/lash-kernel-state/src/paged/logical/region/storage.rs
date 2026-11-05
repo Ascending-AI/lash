@@ -1,7 +1,7 @@
 //! Unpublished source holdings and generation-qualified local storage.
 use super::*;
 use crate::arena::Key;
-use lash_kernel_doc::heap::HostResource;
+use lash_kernel_doc::heap::{HostResource, PageValue};
 use lash_kernel_doc::{
     NativeError,
     arena::{Body, ShortText},
@@ -82,6 +82,10 @@ enum Allocation<'a> {
     Map(&'a [(LeaseValue, LeaseValue)]),
     Set(&'a [LeaseValue]),
     Record(&'a [(LeaseValue, LeaseValue)]),
+    RecordFields {
+        fields: &'a [Arc<str>],
+        values: &'a [LeaseValue],
+    },
     Tuple(&'a [LeaseValue]),
     Cell(&'a LeaseValue),
     Text(&'a str),
@@ -121,6 +125,13 @@ impl<'a> LeaseAllocation<'a> {
             body: Allocation::Record(entries),
         }
     }
+    /// Static record spellings belong to the record allocation, without an
+    /// intermediate text occurrence or an extra logical holding.
+    pub fn record_fields(fields: &'a [Arc<str>], values: &'a [LeaseValue]) -> Self {
+        Self {
+            body: Allocation::RecordFields { fields, values },
+        }
+    }
     pub fn tuple(values: &'a [LeaseValue]) -> Self {
         Self {
             body: Allocation::Tuple(values),
@@ -147,6 +158,13 @@ pub enum LeaseOp<'a> {
     Transfer {
         holds: &'a [(LeaseValue, bool)],
         releases: &'a [(LeaseValue, bool)],
+    },
+    /// The same source transfer at a canonical activation Enter or Leave.
+    /// Header prices are fixed here, never supplied as a byte allowance.
+    FrameTransfer {
+        holds: &'a [(LeaseValue, bool)],
+        releases: &'a [(LeaseValue, bool)],
+        entering: bool,
     },
     Allocate(LeaseAllocation<'a>),
     /// Allocation and the source occurrences moved into its members form one
@@ -343,7 +361,7 @@ pub(super) struct Existing {
     pub(super) len: u64,
     pub(super) next: u64,
     callable: Option<LocalCallable>,
-    cold: bool,
+    pub(super) cold: bool,
 }
 pub(super) struct ObjectSlot {
     pub(super) generation: u64,
@@ -387,6 +405,7 @@ pub(super) struct LocalStore {
     epoch: u64,
     measure_epoch: u64,
     measure_pending: Vec<LeaseValue>,
+    measure_pages: Vec<(PageValue, bool)>,
     pub(super) ordinal: u64,
     pub(super) version: u64,
     pub(super) frozen: bool,
@@ -435,6 +454,7 @@ impl LocalStore {
             epoch: 0,
             measure_epoch: 0,
             measure_pending: Vec::new(),
+            measure_pages: Vec::new(),
             ordinal: 0,
             version: 0,
             frozen: false,
@@ -552,7 +572,7 @@ impl LocalBody {
         }
     }
 }
-fn local_native(error: NativeError) -> LeaseFault {
+pub(super) fn local_native(error: NativeError) -> LeaseFault {
     match error {
         NativeError::Retry(_) => LeaseFault::BoundaryRequired,
         error => LeaseFault::Native(error),
@@ -560,13 +580,13 @@ fn local_native(error: NativeError) -> LeaseFault {
 }
 
 impl ObjectSlot {
-    fn existing(&self) -> &Existing {
+    pub(super) fn existing(&self) -> &Existing {
         let Some(existing) = &self.existing else {
             unreachable!("bound entry slot")
         };
         existing
     }
-    fn existing_mut(&mut self) -> &mut Existing {
+    pub(super) fn existing_mut(&mut self) -> &mut Existing {
         let Some(existing) = &mut self.existing else {
             unreachable!("bound entry slot")
         };

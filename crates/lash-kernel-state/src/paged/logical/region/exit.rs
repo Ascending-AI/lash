@@ -20,6 +20,49 @@ pub struct LeaseGraphExit {
     proof: Option<PreparedGraphProof>,
     fields: BTreeMap<std::sync::Arc<str>, Value>,
 }
+/// Read-only page projection of a frozen graph, including detached bodies.
+/// It cannot identify, allocate, edit, install, or refresh a graph packet.
+pub struct LeaseProjection<'a> {
+    arena: &'a Arena,
+    batch: &'a PreparedBatch,
+    graph: &'a LeaseGraphExit,
+}
+impl LeaseProjection<'_> {
+    pub fn body(&self, handle: ArenaHandle) -> Result<&Body, HeapFault> {
+        match self.batch.region_body(handle) {
+            Some(body) => Ok(body),
+            None => self.arena.body(handle).map_err(arena_fault),
+        }
+    }
+    pub fn page(
+        &self,
+        handle: ArenaHandle,
+    ) -> Result<Option<lash_kernel_doc::heap::PageValue>, HeapFault> {
+        if self.batch.region_body(handle).is_some() {
+            return Ok(None);
+        }
+        Ok(self
+            .arena
+            .facts(handle)
+            .map_err(arena_fault)?
+            .page
+            .get()
+            .cloned())
+    }
+    pub fn ledger_key(&self, handle: ArenaHandle) -> Result<EntityId, HeapFault> {
+        self.graph
+            .proof
+            .as_ref()
+            .and_then(|proof| proof.region_entity(handle))
+            .or_else(|| {
+                self.arena
+                    .facts(handle)
+                    .ok()
+                    .and_then(|facts| facts.ledger_entity())
+            })
+            .ok_or_else(|| invalid("frozen projection has no authenticated mutable identity"))
+    }
+}
 impl LeaseGraphExit {
     fn mapped(&self, object: LeaseObject) -> Result<&Mapped, HeapFault> {
         if object.lease != self.lease {
@@ -108,6 +151,24 @@ impl LeaseGraphExit {
     }
 }
 impl StateLease<'_> {
+    pub fn recovery_projection<'a>(
+        &'a self,
+        graph: &'a LeaseGraphExit,
+    ) -> Result<LeaseProjection<'a>, HeapFault> {
+        graph.authenticate(&self.local, &self.exclusion)?;
+        let LeaseStorage::Installation {
+            registration,
+            batch,
+        } = &self.storage
+        else {
+            return Err(invalid("frozen graph has no installation"));
+        };
+        Ok(LeaseProjection {
+            arena: registration.read(),
+            batch,
+            graph,
+        })
+    }
     /// Translate a recovery role's existing canonical holding through the
     /// frozen packet. This neither adds a source occurrence nor publishes it.
     pub fn recovery_holding(

@@ -9,7 +9,7 @@ use crate::compile::Executable;
 use crate::compile::LibId;
 use crate::compile::{NestedCallee, NestedKind};
 use lash_kernel_doc::{NewObject, Value};
-use lash_kernel_state::paged::PhaseRecord;
+use lash_kernel_state::paged::ContinuationPhase;
 impl KernelMachine {
     /// A document enters a body helper under its declared contract, as it
     /// enters imported code. The helper keeps the caller's Link for operations;
@@ -278,7 +278,7 @@ impl KernelMachine {
                 Ok(Flow::Done)
             }
             super::ops::Answer::Body(code) => {
-                self.capture(task, entry, act, PhaseRecord::Called)?;
+                self.capture(task, entry, act, ContinuationPhase::Call { phase: 0 })?;
                 self.enter_body(
                     task,
                     exe,

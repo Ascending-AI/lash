@@ -13,7 +13,7 @@ use crate::machine::{
 };
 use lash_kernel_state::{
     kernel_internals::logical::{Owner, PublicationValue},
-    paged::PhaseRecord,
+    paged::ContinuationPhase,
 };
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
@@ -45,7 +45,7 @@ impl KernelMachine {
             let counted = entry.guest && matches!(entry.kind, NestedKind::Call(_));
             let body = matches!(entry.kind, NestedKind::Body(_));
             if !(counted || body)
-                || pending.phase != PhaseRecord::Called
+                || pending.phase != (ContinuationPhase::Call { phase: 0 })
                 || pending.site != entry.suffix
                 || pending.roles.len() != entry.roles.len()
                 || !exe.code(frame.code).charged

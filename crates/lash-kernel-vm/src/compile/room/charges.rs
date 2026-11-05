@@ -389,6 +389,23 @@ fn point(site: &Site, op: Op) -> Point {
 }
 
 fn source_point(stream: &compile::Stream, site: &Site, op: Op) -> Point {
+    // A dynamic callable is read before its arguments. Its local read shares
+    // the action's site, but belongs to Open, never the call's Commit.
+    if matches!(op, Op::Local { .. } | Op::Session { .. })
+        && stream.nested.iter().any(|entry| {
+            entry.site == *site
+                && matches!(
+                    entry.kind,
+                    compile::NestedKind::Call(compile::NestedCallee::Read)
+                        | compile::NestedKind::Spawn(compile::NestedCallee::Read)
+                )
+        })
+    {
+        return Point {
+            site: site.clone(),
+            phase: super::Phase::Open,
+        };
+    }
     if matches!(op, Op::Act) {
         return Point {
             site: site.clone(),

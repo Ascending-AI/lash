@@ -502,6 +502,52 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     src: args[0],
                     next,
                 },
+                (doc::Node::Expr(doc::Expr::Act(act)), Phase::Open, Some(next), Some(dst), _)
+                    if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_))) =>
+                {
+                    let doc::ActKind::Call(doc::Callee::Value(name)) = &act.kind else {
+                        return Err(Refused::Source);
+                    };
+                    RegionOp::Checked {
+                        kernel: CheckedKernel {
+                            kind: CheckedKind::Local {
+                                slot: resources::slot(
+                                    &source,
+                                    &Owner::Visible {
+                                        at: at.site.clone(),
+                                        name: name.clone(),
+                                    },
+                                )
+                                .ok_or(Refused::Facts)?,
+                            },
+                        },
+                        args: Box::new([]),
+                        dst,
+                        next,
+                    }
+                }
+                (
+                    doc::Node::Expr(doc::Expr::Act(act)),
+                    Phase::Enter,
+                    Some(next),
+                    None,
+                    Ok(args),
+                ) if matches!(act.kind, doc::ActKind::Call(_)) => {
+                    let origin = origin.ok_or(Refused::Source)?;
+                    let site = CallId(u32::try_from(calls.len()).map_err(|_| Refused::Facts)?);
+                    calls.push(CallSite {
+                        at: at.clone(),
+                        origin,
+                        arguments: if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_)))
+                        {
+                            args.get(1..).ok_or(Refused::Facts)?.into()
+                        } else {
+                            args
+                        },
+                        result: sink,
+                    });
+                    RegionOp::Call { site, next }
+                }
                 (
                     doc::Node::Expr(doc::Expr::Variable(name)),
                     Phase::Commit,
@@ -696,14 +742,16 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         next,
                     }
                 }
-                (_, _, next, dst, Ok(args)) if heap::source_kind(&source, at)?.is_some() => {
+                (_, _, next, dst, Ok(args))
+                    if heap::source_kind(exe, code, &source, at)?.is_some() =>
+                {
                     RegionOp::Heap {
                         kernel: HeapKernel::compile(
                             &source,
                             &roles,
                             &event,
                             steps.len(),
-                            heap::source_kind(&source, at)?.ok_or(Refused::Source)?,
+                            heap::source_kind(exe, code, &source, at)?.ok_or(Refused::Source)?,
                         )?,
                         args,
                         dst,

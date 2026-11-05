@@ -25,6 +25,7 @@ mod publication;
 pub(in crate::machine) mod reconstruct;
 mod registers;
 mod returns;
+mod runtime;
 mod source_counters;
 mod storage;
 #[cfg(test)]
@@ -32,6 +33,7 @@ mod storage_fixture;
 mod verified;
 use code::{Code, Limits};
 use execute::Execution;
+pub(in crate::machine) use verified::restore_source_controls;
 #[cfg(test)]
 mod fixtures;
 #[cfg(test)]
@@ -221,7 +223,9 @@ fn storage_fault(fault: lash_kernel_state::kernel_internals::logical::LeaseFault
         lash_kernel_state::kernel_internals::logical::LeaseFault::Heap(fault) => {
             RegionError::Heap(fault)
         }
-        _ => invalid(Refused::Facts),
+        error => RegionError::Heap(HeapFault::Malformed(format!(
+            "verified state operation failed: {error}"
+        ))),
     }
 }
 

@@ -20,6 +20,7 @@ pub(super) struct PublishedFrame {
     // Physical aliases are deliberately separate from source-owned roles.
     pub(super) operands: Box<[PublicationValue]>,
     pub(super) pending: Option<PublicationValue>,
+    pub(super) incoming: bool,
 }
 pub(super) struct Published {
     pub(super) frames: Box<[PublishedFrame]>,
@@ -49,6 +50,7 @@ impl<V: Copy> FrameImage<Operand<V>> {
                 .map(|value| read(*value))
                 .collect::<Result<_, _>>()?,
             pending: self.pending.map(read).transpose()?,
+            incoming: self.incoming,
         })
     }
 }
@@ -103,6 +105,7 @@ impl Live<LeaseValue> {
                             .iter()
                             .map(|value| publication(graph, *value, false))
                             .collect::<Result<_, _>>()?,
+                        incoming: frame.incoming,
                         pending: frame
                             .pending
                             .map(|value| publication(graph, value, false))

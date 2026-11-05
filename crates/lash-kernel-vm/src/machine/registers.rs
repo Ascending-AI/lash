@@ -267,10 +267,9 @@ impl Registers {
         self.source.live_values().chain(self.region.iter().copied())
     }
     pub(super) fn source_owners(&self) -> Vec<lash_kernel_state::kernel_internals::logical::Owner> {
-        self.source
-            .live_owners()
-            .chain(self.region.iter().map(|(owner, _)| *owner))
-            .collect()
+        // Canonical source frames own region roles. Register mirrors carry
+        // no temporary receipt for statement cleanup to release.
+        self.source.live_owners().collect()
     }
     pub(super) fn take_source_arguments(
         &mut self,

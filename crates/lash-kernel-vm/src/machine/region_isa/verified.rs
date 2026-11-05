@@ -7,13 +7,16 @@ mod canonical;
 mod charge;
 mod control;
 mod flow;
+mod heap;
 #[cfg(test)]
 mod laws;
 mod materialize;
 mod phase;
 mod programs;
 mod read;
+mod resume;
 mod returns;
+pub(in crate::machine) use resume::restore_source_controls;
 mod run;
 mod running;
 mod scalar;

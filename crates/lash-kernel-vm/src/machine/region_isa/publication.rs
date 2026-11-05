@@ -13,6 +13,7 @@ use lash_kernel_state::kernel_internals::logical::{
 
 pub(super) struct Authority<'m> {
     pub(super) frames: &'m mut Frames,
+    pub(super) task_state: &'m mut lash_kernel_state::paged::TaskStateRecord,
     pub(super) counters: CounterLease<'m>,
     pub(super) registers: &'m mut Registers,
     pub(super) charged: &'m mut u64,
@@ -21,6 +22,7 @@ pub(super) struct Authority<'m> {
     pub(super) exe: Arc<crate::compile::Executable>,
     pub(super) entry_code: CodeId,
     pub(super) entry_invocation: u64,
+    pub(super) entry_frames: usize,
     pub(super) inputs: Box<[Owner]>,
     pub(super) limits: Limits,
 }
@@ -29,6 +31,7 @@ pub(super) struct Canonical {
     pub(super) frames: Vec<Box<Frame>>,
     pub(super) registers: Option<Registers>,
     pub(super) crossing: Option<verified::Crossing>,
+    pub(super) incoming: Option<lash_kernel_state::paged::IncomingRecord>,
 }
 pub(super) struct Prepared<'m> {
     state: PreparedStateExit<'m>,
@@ -38,6 +41,8 @@ pub(super) struct Prepared<'m> {
     next_registers: Option<Registers>,
     charged: &'m mut u64,
     logical_memory: &'m std::cell::Cell<u64>,
+    task_state: &'m mut lash_kernel_state::paged::TaskStateRecord,
+    incoming: Option<lash_kernel_state::paged::IncomingRecord>,
 }
 impl<'m> Authority<'m> {
     pub(super) fn prepare(
@@ -71,6 +76,12 @@ impl<'m> Authority<'m> {
         {
             return Err(invalid(Refused::Facts));
         }
+        if canonical.incoming.is_some() != image.payload.is_some()
+            || image.payload.is_some() != (image.stop == RegionStop::Complete)
+            || (image.stop == RegionStop::Complete && !image.frames.is_empty())
+        {
+            return Err(invalid(Refused::Exit));
+        }
         let mut outputs = Vec::new();
         for ((frame, actual), published) in canonical
             .frames
@@ -85,6 +96,18 @@ impl<'m> Authority<'m> {
                 || actual.program.0 as usize >= self.exe.code_count()
             {
                 return Err(invalid(Refused::Source));
+            }
+            if published.incoming {
+                if outputs
+                    .iter()
+                    .any(|(owner, _)| *owner == Owner::Incoming(self.task))
+                {
+                    return Err(invalid(Refused::Exit));
+                }
+                outputs.push((
+                    Owner::Incoming(self.task),
+                    published.pending.ok_or_else(|| invalid(Refused::Exit))?,
+                ));
             }
             outputs.push((
                 Owner::Frame {
@@ -122,7 +145,12 @@ impl<'m> Authority<'m> {
             .map_err(RegionError::Heap)?;
         let frames = self
             .frames
-            .prepare_region_exit(self.entry_code, self.entry_invocation, canonical.frames)
+            .prepare_region_stack_exit(
+                self.entry_code,
+                self.entry_invocation,
+                self.entry_frames,
+                canonical.frames,
+            )
             .map_err(RegionError::Heap)?;
         let state = lease
             .prepare(
@@ -146,6 +174,8 @@ impl<'m> Authority<'m> {
             next_registers: canonical.registers,
             charged: self.charged,
             logical_memory: self.logical_memory,
+            task_state: self.task_state,
+            incoming: canonical.incoming,
         })
     }
 }
@@ -159,18 +189,26 @@ impl Prepared<'_> {
             next_registers,
             charged,
             logical_memory,
+            task_state,
+            incoming,
         } = self;
         let mut retired = None;
         let mut old_registers = None;
         state
             .commit(|| {
-                retired = Some(frames.publish());
+                retired = Some(frames.publish_stack());
                 counters.publish();
                 if let Some(next) = next_registers {
                     old_registers = Some(std::mem::replace(registers, next));
                 }
                 *charged = image.counters.progress;
                 logical_memory.set(image.counters.balance);
+                if let Some(incoming) = incoming {
+                    *task_state = lash_kernel_state::paged::TaskStateRecord::Resuming {
+                        incoming,
+                        requeue: false,
+                    };
+                }
             })
             .map_err(RegionError::Heap)?;
         drop((retired, old_registers));

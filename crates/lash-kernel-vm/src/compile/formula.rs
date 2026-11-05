@@ -79,6 +79,35 @@ enum Fold {
 }
 
 impl Plan {
+    /// Measure the current exclusive graph without replaying the native/body.
+    pub(crate) fn lease(
+        &self,
+        lease: &mut lash_kernel_state::kernel_internals::logical::StateLease<'_>,
+        arguments: &[lash_kernel_state::kernel_internals::logical::LeaseValue],
+        result: lash_kernel_state::kernel_internals::logical::LeaseValue,
+    ) -> Result<u64, lash_kernel_state::kernel_internals::logical::LeaseFault> {
+        let absent = lease.import(&Value::Absent)?;
+        let mut failure = None;
+        let units = self.evaluate(|source, selector| {
+            if failure.is_some() {
+                return 0;
+            }
+            let value = match source {
+                Source::Arg(index) => arguments.get(index).copied().unwrap_or(absent),
+                Source::Result => result,
+                Source::Nothing => return 0,
+            };
+            match lease.measure(value, selector) {
+                Ok(amount) => amount,
+                Err(error) => {
+                    failure = Some(error);
+                    0
+                }
+            }
+        });
+        failure.map_or(Ok(units), Err)
+    }
+
     /// A size minimum capped at one needs no collection measurement when
     /// every value is resident. Other terms still require immediate measures.
     pub(crate) fn resident_minimum(&self, args: &[Value], result: &Value) -> Option<u64> {

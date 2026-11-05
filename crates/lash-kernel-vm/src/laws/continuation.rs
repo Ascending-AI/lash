@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use lash_kernel_doc::{Datum, FunctionRegistry, TaskId, parse_definition};
 
 use lash_kernel_state::paged::{
-    HeaderRecord, IncomingRecord, PendingRecord, PhaseRecord, RoleRecord, RolesRecord,
+    ContinuationPhase, ContinuationRecord, HeaderRecord, IncomingRecord, RoleRecord, RolesRecord,
     TaskStateRecord,
 };
 use lash_kernel_value::names::FunctionId;
@@ -161,7 +161,7 @@ impl Drive {
 /// generated plans made.
 #[derive(Default)]
 struct Seen {
-    phases: Vec<PhaseRecord>,
+    phases: Vec<ContinuationPhase>,
     headers: Vec<HeaderRecord>,
     parks: usize,
     reopens: u64,
@@ -301,7 +301,13 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
 /// CONT-EXACT and CONT-ONCE of one case: the uninterrupted run gives
 /// `expected` and prints `printed`; every sliced and reopened run leaves
 /// its trace; the reopened runs see each phase of `want`.
-fn case(text: &str, order: &[&str], expected: &Datum, printed: &[Datum], want: &[PhaseRecord]) {
+fn case(
+    text: &str,
+    order: &[&str],
+    expected: &Datum,
+    printed: &[Datum],
+    want: &[ContinuationPhase],
+) {
     let phases = exact(Drive::new(u64::MAX, false), text, order, expected, printed).phases;
     for phase in want {
         assert!(phases.contains(phase), "the reopens saw {phases:?}: {text}");
@@ -376,7 +382,10 @@ fn nested_await_resumes_exactly() {
         &["tool", "c"],
         &expected,
         &printed,
-        &[PhaseRecord::Called, PhaseRecord::Waiting],
+        &[
+            ContinuationPhase::Call { phase: 0 },
+            ContinuationPhase::Waiting,
+        ],
     );
     let (_, crossed) = drive(NESTED_AWAIT, &["tool", "c"], Drive::new(u64::MAX, true));
     assert!(
@@ -407,7 +416,7 @@ fn parked_role_keeps_the_evaluated_value() {
         &["w", "m"],
         &expected,
         &[],
-        &[PhaseRecord::Waiting],
+        &[ContinuationPhase::Waiting],
     );
     case(MUTATED_RECEIVER_HOISTED, &["w", "m"], &expected, &[], &[]);
 }
@@ -426,7 +435,10 @@ fn callback_inside_expression_resumes_exactly() {
         &["echo", "echo"],
         &expected,
         &[text("a"), text("b")],
-        &[PhaseRecord::Called, PhaseRecord::Waiting],
+        &[
+            ContinuationPhase::Call { phase: 0 },
+            ContinuationPhase::Waiting,
+        ],
     );
     case(
         CALLBACK_HOISTED,
@@ -453,7 +465,10 @@ fn a_spawn_inside_an_expression_resumes_exactly() {
         &["child"],
         &expected,
         &printed,
-        &[PhaseRecord::Spawned, PhaseRecord::Called],
+        &[
+            ContinuationPhase::Spawned,
+            ContinuationPhase::Call { phase: 0 },
+        ],
     );
     case(SPAWNED_HOISTED, &["child"], &expected, &printed, &[]);
 }
@@ -481,7 +496,10 @@ fn library_bodies_inside_expressions_resume_exactly() {
         &["w"],
         &expected,
         &[int(1)],
-        &[PhaseRecord::Called, PhaseRecord::Waiting],
+        &[
+            ContinuationPhase::Call { phase: 0 },
+            ContinuationPhase::Waiting,
+        ],
     );
 }
 
@@ -502,7 +520,10 @@ fn while_condition_actions_resume_exactly() {
         &[],
         &expected,
         &printed,
-        &[PhaseRecord::Called, PhaseRecord::Waiting],
+        &[
+            ContinuationPhase::Call { phase: 0 },
+            ContinuationPhase::Waiting,
+        ],
     );
     case(WHILE_CONDITION_HOISTED, &[], &expected, &printed, &[]);
 }
@@ -534,7 +555,10 @@ fn assignment_place_actions_resume_exactly() {
         &[],
         &expected,
         &printed,
-        &[PhaseRecord::Called, PhaseRecord::Waiting],
+        &[
+            ContinuationPhase::Call { phase: 0 },
+            ContinuationPhase::Waiting,
+        ],
     );
     case(PLACES_HOISTED, &[], &expected, &printed, &[]);
 }
@@ -564,7 +588,7 @@ fn an_assignments_order_decides_what_its_place_reads() {
         &[],
         &tuple(&[written, untouched]),
         &[],
-        &[PhaseRecord::Called],
+        &[ContinuationPhase::Call { phase: 0 }],
     );
 }
 
@@ -577,11 +601,14 @@ fn a_missing_role_at_a_condition_or_a_place_is_refused() {
         "main { let i = 0\nwhile [i, perform 0(false) as Any][1] { set i = 1 }\nreturn i }\n",
         "main { let t = [0]\nset t[0] = [1, perform 0(\"w\") as Any][1] place first\nreturn t }\n",
     ] {
-        let mut embedder = park_where(source, |phases| phases == only(PhaseRecord::Waiting));
+        let mut embedder = park_where(source, |phases| phases == only(ContinuationPhase::Waiting));
         let mut dropped = None;
         edit_roles(&mut embedder, |roles| {
             assert!(!roles.is_empty(), "{source}");
-            dropped = Some(roles.remove(0).site);
+            dropped = Some(match roles.remove(0).coordinate {
+                lash_kernel_state::paged::RoleCoordinate::Expression(site) => site,
+                _ => panic!("source expression role"),
+            });
         });
         let role = SitePath(dropped.unwrap().into());
         assert_eq!(
@@ -599,7 +626,13 @@ fn a_missing_role_at_a_condition_or_a_place_is_refused() {
 fn a_nested_call_reads_its_callee_before_its_arguments() {
     const SOURCE: &str = "definition \"function g(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return [\\\"g\\\", x]  }\"\n\ndefinition \"function h(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return [\\\"h\\\", x]  }\"\n\nmain { let f = &g\nlet swap = fn() { set f = &h let w = perform 0(\"w\") as Any return w }\nlet r = [apply f(apply swap()), apply f(2)]\nreturn r }\n";
     let expected = list(&[list(&[text("g"), text("w")]), list(&[text("h"), int(2)])]);
-    case(SOURCE, &["w"], &expected, &[], &[PhaseRecord::Called]);
+    case(
+        SOURCE,
+        &["w"],
+        &expected,
+        &[],
+        &[ContinuationPhase::Call { phase: 0 }],
+    );
 }
 
 /// A task cancelled while it waits at a nested `perform` resumes at its
@@ -612,7 +645,7 @@ fn cancel_at_a_nested_wait_resumes_exactly() {
         &[],
         &text("cancelled"),
         &[],
-        &[PhaseRecord::Waiting],
+        &[ContinuationPhase::Waiting],
     );
 }
 
@@ -787,7 +820,10 @@ fn a_wait_in_a_while_condition_is_named_inside_its_loop() {
 
 /// Runs `source` at slice 0 until `want` accepts the phases its frames
 /// stand at, and leaves the run there.
-fn park_where(source: &str, want: impl Fn(&[(TaskId, usize, PhaseRecord)]) -> bool) -> Embedder {
+fn park_where(
+    source: &str,
+    want: impl Fn(&[(TaskId, usize, ContinuationPhase)]) -> bool,
+) -> Embedder {
     let mut embedder = Embedder::with(source, setup(0));
     for _ in 0..200 {
         let step = embedder.run();
@@ -804,18 +840,22 @@ fn park_where(source: &str, want: impl Fn(&[(TaskId, usize, PhaseRecord)]) -> bo
     panic!("the run never stood where it was wanted")
 }
 
-fn only(phase: PhaseRecord) -> Vec<(TaskId, usize, PhaseRecord)> {
+fn only(phase: ContinuationPhase) -> Vec<(TaskId, usize, ContinuationPhase)> {
     vec![(TaskId::MAIN, 0, phase)]
 }
 
 /// `main` parked at the nested `perform` of [`NESTED_AWAIT`].
 fn waiting() -> Embedder {
-    park_where(NESTED_AWAIT, |phases| phases == only(PhaseRecord::Waiting))
+    park_where(NESTED_AWAIT, |phases| {
+        phases == only(ContinuationPhase::Waiting)
+    })
 }
 
 /// `main` standing at the nested `call a()`, its callee's frame above.
 fn called() -> Embedder {
-    park_where(NESTED_AWAIT, |phases| phases == only(PhaseRecord::Called))
+    park_where(NESTED_AWAIT, |phases| {
+        phases == only(ContinuationPhase::Call { phase: 0 })
+    })
 }
 
 /// Opens `embedder` cold under an odd layout: the refusal the grammar
@@ -875,8 +915,10 @@ fn edit_roles(embedder: &mut Embedder, edit: impl FnOnce(&mut Vec<RoleRecord>)) 
             let pending = pending.as_mut().expect("a saved continuation");
             let mut roles = pending.roles(access).unwrap();
             edit(&mut roles);
-            *pending =
-                PendingRecord::new(pending.site.clone(), pending.phase, roles, access).unwrap();
+            let invocation = pending.invocation;
+            *pending = ContinuationRecord::new(pending.site.clone(), pending.phase, roles, access)
+                .unwrap()
+                .with_invocation(invocation);
         })
         .unwrap();
 }
@@ -906,7 +948,7 @@ fn a_called_phase_at_a_wait_is_refused() {
     embedder
         .machine
         .tamper_pending(TaskId::MAIN, 0, |pending, _| {
-            pending.as_mut().unwrap().phase = PhaseRecord::Called;
+            pending.as_mut().unwrap().phase = ContinuationPhase::Call { phase: 0 };
         })
         .unwrap();
     assert_eq!(
@@ -925,7 +967,7 @@ fn a_waiting_phase_at_a_call_is_refused() {
     embedder
         .machine
         .tamper_pending(TaskId::MAIN, 0, |pending, _| {
-            pending.as_mut().unwrap().phase = PhaseRecord::Waiting;
+            pending.as_mut().unwrap().phase = ContinuationPhase::Waiting;
         })
         .unwrap();
     assert_eq!(
@@ -947,7 +989,13 @@ fn a_continuation_on_a_fresh_frame_is_refused() {
         .machine
         .tamper_pending(TaskId::MAIN, 0, |pending, access| {
             *pending = Some(
-                PendingRecord::new(vec![0, 0], PhaseRecord::Called, Vec::new(), access).unwrap(),
+                ContinuationRecord::new(
+                    vec![0, 0],
+                    ContinuationPhase::Call { phase: 0 },
+                    Vec::new(),
+                    access,
+                )
+                .unwrap(),
             );
         })
         .unwrap();
@@ -966,7 +1014,7 @@ fn an_extra_role_is_refused() {
     let mut embedder = waiting();
     edit_roles(&mut embedder, |roles| {
         roles.push(RoleRecord {
-            site: vec![9],
+            coordinate: lash_kernel_state::paged::RoleCoordinate::Expression(vec![9]),
             value: lash_kernel_doc::heap::PageValue::Null,
         });
     });
@@ -983,7 +1031,10 @@ fn a_role_saved_twice_is_refused() {
     let mut twice = None;
     edit_roles(&mut embedder, |roles| {
         let role = roles[0].clone();
-        twice = Some(role.site.clone());
+        twice = Some(match &role.coordinate {
+            lash_kernel_state::paged::RoleCoordinate::Expression(site) => site.clone(),
+            _ => panic!("source expression role"),
+        });
         roles.push(role);
     });
     let role = SitePath(twice.unwrap().into());
@@ -1064,7 +1115,7 @@ fn a_continuation_keeps_its_roles_flat_and_spills_a_long_list() {
         let operands: String = (0..count).map(|i| format!("{i}, ")).collect();
         let source =
             format!("main {{ let r = [{operands}perform 0(\"w\") as Any]\nreturn list.len(r) }}\n");
-        let mut embedder = park_where(&source, |phases| phases == only(PhaseRecord::Waiting));
+        let mut embedder = park_where(&source, |phases| phases == only(ContinuationPhase::Waiting));
         let mut saved = None;
         embedder
             .machine
@@ -1103,7 +1154,7 @@ fn nested_join_resumes_exactly() {
         &["b", "a"],
         &expected,
         &[],
-        &[PhaseRecord::Joining],
+        &[ContinuationPhase::Joining],
     );
     case(NESTED_JOIN_HOISTED, &["b", "a"], &expected, &[], &[]);
 }
@@ -1132,11 +1183,11 @@ main {
         &text("done"),
         &[list(&[Datum::Null])],
         &[
-            PhaseRecord::Called,
-            PhaseRecord::Waiting,
-            PhaseRecord::Yielded,
-            PhaseRecord::Spawned,
-            PhaseRecord::Joining,
+            ContinuationPhase::Call { phase: 0 },
+            ContinuationPhase::Waiting,
+            ContinuationPhase::Yielded,
+            ContinuationPhase::Spawned,
+            ContinuationPhase::Joining,
         ],
     );
 }

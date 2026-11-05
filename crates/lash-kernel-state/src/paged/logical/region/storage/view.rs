@@ -1,9 +1,10 @@
 //! Borrowed call views and canonical charge measurements of the current graph.
 use super::*;
 use lash_kernel_doc::{Measure, ValueKind};
+mod page_measure;
 
 impl StateLease<'_> {
-    pub(super) fn bind_callable(
+    pub(in crate::paged::logical::region) fn bind_callable(
         &mut self,
         index: u32,
         handle: ArenaHandle,
@@ -52,10 +53,8 @@ impl StateLease<'_> {
             return Err(NativeError::Decline.into());
         }
         let index = self.local.index(self.object(value)?)?;
+        self.load_head(index)?;
         let slot = &self.local.slots[index];
-        if slot.existing.as_ref().is_some_and(|existing| existing.cold) {
-            return Err(LeaseFault::BoundaryRequired);
-        }
         let closure = match &slot.body {
             Some(LocalBody::Closure(closure)) => closure,
             _ => match slot
@@ -125,13 +124,15 @@ impl StateLease<'_> {
         let mut pending = std::mem::take(&mut self.local.measure_pending);
         pending.clear();
         let result = (|| {
-            if matches!(selector, Measure::NestedSize) {
+            let mut total = 0u64;
+            if self.is_cold_value(value)? {
+                total = self.measure_cold(value, selector, &mut pending)?;
+            } else if matches!(selector, Measure::NestedSize) {
                 self.measure_members(value, &mut pending, true)?;
             } else {
                 capacity(&mut pending, 1)?;
                 pending.push(value);
             }
-            let mut total = 0u64;
             while let Some(value) = pending.pop() {
                 let kind = self.kind(value)?;
                 let mutable = matches!(
@@ -140,6 +141,11 @@ impl StateLease<'_> {
                 );
                 if matches!(selector, Measure::NestedSize) && mutable {
                     total = total.saturating_add(1);
+                    continue;
+                }
+                if self.is_cold_value(value)? {
+                    total =
+                        total.saturating_add(self.measure_cold(value, selector, &mut pending)?);
                     continue;
                 }
                 if mutable {
@@ -198,11 +204,6 @@ impl StateLease<'_> {
             Repr::Object(object, native) => {
                 let index = self.local.index(object)?;
                 let slot = &self.local.slots[index];
-                if let Some(existing) = &slot.existing
-                    && existing.cold
-                {
-                    return Err(LeaseFault::BoundaryRequired);
-                }
                 let kind = self.kind(value)?;
                 if matches!(
                     kind,

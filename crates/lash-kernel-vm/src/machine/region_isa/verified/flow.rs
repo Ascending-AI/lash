@@ -150,27 +150,6 @@ impl Flow {
                                 .incoming()
                                 .ok_or_else(|| invalid(Refused::Facts))?,
                         )?),
-                        ResourceInput::SourceFact(Measure::Release(owners))
-                            if owners.iter().all(|owner| {
-                                matches!(owner, crate::compile::room::Owner::Incoming(_))
-                            }) =>
-                        {
-                            let index = quotes.len();
-                            quotes.push(
-                                vec![Root {
-                                    register: super::bind::physical(
-                                        code,
-                                        before
-                                            .graph
-                                            .incoming()
-                                            .ok_or_else(|| invalid(Refused::Facts))?,
-                                    )?,
-                                    capture: false,
-                                }]
-                                .into_boxed_slice(),
-                            );
-                            Fact::Release(index, 0)
-                        }
                         ResourceInput::SourceFact(Measure::CallPeak { at, callee }
                             | Measure::CallDelta { at, callee })
                             if *at == step.at.site && matches!(callee,

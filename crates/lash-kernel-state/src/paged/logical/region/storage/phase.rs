@@ -13,19 +13,16 @@ impl<'s> StateLease<'s> {
         };
         let mut facts = LeaseFacts::default();
         match &candidate.op {
-            LeaseOp::Transfer { holds, releases } => {
+            LeaseOp::Transfer { holds, releases }
+            | LeaseOp::FrameTransfer {
+                holds, releases, ..
+            } => {
                 for (values, sign) in [(*holds, 1_i128), (*releases, -1_i128)] {
                     for &(value, capture) in values {
                         if capture {
                             let object = self.object(value)?;
                             let index = self.local.index(object)?;
-                            if self.local.slots[index]
-                                .existing
-                                .as_ref()
-                                .is_some_and(|existing| existing.cold)
-                            {
-                                return Err(LeaseFault::BoundaryRequired);
-                            }
+                            self.load_head(index)?;
                             if self.local.slots[index].kind != Kind::Cell {
                                 return Err(
                                     invalid("a capture phase must name a variable cell").into()
@@ -103,13 +100,7 @@ impl<'s> StateLease<'s> {
             }
             LeaseOp::HoldCapture { cell, count } | LeaseOp::ReleaseCapture { cell, count } => {
                 let index = self.local.index(*cell)?;
-                if self.local.slots[index]
-                    .existing
-                    .as_ref()
-                    .is_some_and(|existing| existing.cold)
-                {
-                    return Err(LeaseFault::BoundaryRequired);
-                }
+                self.load_head(index)?;
                 if self.local.slots[index].kind != Kind::Cell {
                     return Err(invalid("a capture phase must name a variable cell").into());
                 }
@@ -166,13 +157,7 @@ impl<'s> StateLease<'s> {
                 next,
             } => {
                 let index = self.local.index(*object)?;
-                if self.local.slots[index]
-                    .existing
-                    .as_ref()
-                    .is_some_and(|existing| existing.cold)
-                {
-                    return Err(LeaseFault::BoundaryRequired);
-                }
+                self.load_head(index)?;
                 let kind = self.local.slots[index].kind;
                 if !kind.editable() {
                     return Err(NativeError::Decline.into());
@@ -293,6 +278,19 @@ impl<'s> StateLease<'s> {
         self.finish_releases(&candidate, &mut facts)?;
         facts.peak =
             u64::try_from(facts.delta.max(0)).map_err(|_| invalid("lease phase peak overflow"))?;
+        if let LeaseOp::FrameTransfer { entering, .. } = candidate.op {
+            let header = i128::from(Cost::FRAME);
+            facts.delta = facts
+                .delta
+                .checked_add(if entering { header } else { -header })
+                .ok_or_else(|| invalid("lease frame transfer overflow"))?;
+            if entering {
+                facts.peak = facts
+                    .peak
+                    .checked_add(Cost::FRAME)
+                    .ok_or_else(|| invalid("lease frame peak overflow"))?;
+            }
+        }
         self.local
             .delta
             .checked_add(facts.delta)
@@ -364,8 +362,14 @@ impl<'s> StateLease<'s> {
                     Kind::Tuple
                 }
             }
-            Allocation::Map(_) | Allocation::Record(_) | Allocation::Set(_) => {
-                let record = matches!(body, Allocation::Record(_));
+            Allocation::Map(_)
+            | Allocation::Record(_)
+            | Allocation::RecordFields { .. }
+            | Allocation::Set(_) => {
+                let record = matches!(
+                    body,
+                    Allocation::Record(_) | Allocation::RecordFields { .. }
+                );
                 self.normalize_table_inputs(body)?;
                 members = count(self.local.table_inputs.rows.len())?;
                 for row in 0..self.local.table_inputs.rows.len() {
@@ -433,7 +437,10 @@ impl<'s> StateLease<'s> {
                     self.value_edges(*value, 1)?;
                 }
             }
-            Allocation::Map(_) | Allocation::Record(_) | Allocation::Set(_) => {
+            Allocation::Map(_)
+            | Allocation::Record(_)
+            | Allocation::RecordFields { .. }
+            | Allocation::Set(_) => {
                 for row in 0..self.local.table_inputs.rows.len() {
                     self.entry_edges(&self.normalized_entry(body, row), true, 1)?;
                 }

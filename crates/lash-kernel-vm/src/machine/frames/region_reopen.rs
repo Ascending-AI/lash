@@ -32,37 +32,41 @@ impl Frame {
             .logical
             .as_ref()
             .ok_or_else(|| malformed("restored region has no invocation"))?;
-        let at = match self.control.last() {
-            Some(Control::Block { block, next }) => {
-                let block = exe.block(*block);
-                if *next == block.stmts.len() {
-                    Point {
-                        site: block.site.clone(),
-                        phase: Phase::Leave,
+        let at = if let Some(source) = &self.pending.source {
+            source.at.clone()
+        } else {
+            match self.control.last() {
+                Some(Control::Block { block, next }) => {
+                    let block = exe.block(*block);
+                    if *next == block.stmts.len() {
+                        Point {
+                            site: block.site.clone(),
+                            phase: Phase::Leave,
+                        }
+                    } else {
+                        let stmt = *block
+                            .stmts
+                            .get(*next)
+                            .ok_or_else(|| malformed("restored region block index is invalid"))?;
+                        source
+                            .first_event(&exe.stmt(stmt).site)
+                            .map_err(|_| malformed("restored statement has no source prefix"))?
                     }
-                } else {
-                    let stmt = *block
-                        .stmts
-                        .get(*next)
-                        .ok_or_else(|| malformed("restored region block index is invalid"))?;
-                    source
-                        .first_event(&exe.stmt(stmt).site)
-                        .map_err(|_| malformed("restored statement has no source prefix"))?
                 }
-            }
-            Some(Control::While { stmt, .. }) => source
-                .first_event(&exe.stmt(*stmt).site.child(0))
-                .map_err(|_| malformed("restored while has no source test"))?,
-            Some(Control::For { stmt, .. }) => Point {
-                site: exe.stmt(*stmt).site.clone(),
-                phase: Phase::Test,
-            },
-            Some(Control::Try { .. }) => return Ok(()),
-            None => {
-                let statement = self.statement.resolve(heap.pages())?;
-                source
-                    .first_event(&statement)
-                    .map_err(|_| malformed("restored entry has no source prefix"))?
+                Some(Control::While { stmt, .. }) => source
+                    .first_event(&exe.stmt(*stmt).site.child(0))
+                    .map_err(|_| malformed("restored while has no source test"))?,
+                Some(Control::For { stmt, .. }) => Point {
+                    site: exe.stmt(*stmt).site.clone(),
+                    phase: Phase::Test,
+                },
+                Some(Control::Try { .. }) => return Ok(()),
+                None => {
+                    let statement = self.statement.resolve(heap.pages())?;
+                    source
+                        .first_event(&statement)
+                        .map_err(|_| malformed("restored entry has no source prefix"))?
+                }
             }
         };
         let document = exe
@@ -81,7 +85,12 @@ impl Frame {
         encoding.unsigned(roots.invocation().id());
         let position = Position {
             at: at.clone(),
-            unpaid: Some(at),
+            unpaid: Some(
+                self.pending
+                    .source
+                    .as_ref()
+                    .map_or(at, |source| source.unpaid.clone()),
+            ),
             recovery: logical_digest(&encoding.into_bytes()),
             occurrence: Occurrence {
                 task,

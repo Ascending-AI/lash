@@ -9,8 +9,12 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) call_values: Vec<LeaseValue>,
     pub(super) call_captures: Vec<LeaseValue>,
     pub(super) arguments: Vec<Value>,
+    pub(super) heap_values: Vec<LeaseValue>,
+    pub(super) heap_pairs: Vec<(LeaseValue, LeaseValue)>,
     pub(super) loops: Vec<super::control::LoopState>,
     pub(super) parked: Vec<super::calls::Parked>,
+    #[expect(clippy::vec_box, reason = "reuse admitted canonical frame allocations")]
+    pub(super) canonical_callees: Vec<Box<crate::machine::Frame>>,
     pub(super) departing: Option<super::returns::Departure>,
     pub(super) returning: Option<super::returns::Incoming>,
     pub(super) complete: bool,
@@ -60,13 +64,17 @@ impl<'m> Running<'m> {
         values: Vec<(Reg<LeaseValue>, Value)>,
         source: source_counters::SourceCounters,
         limits: Limits,
+        crossing: Option<super::charge::Crossing>,
         invocations: invocations::Invocations,
         mut view: StateLease<'m>,
         canonical: Box<crate::machine::Frame>,
     ) -> Result<Self, RegionError> {
         if invocation == 0
             || !invocations.follows(invocation)
-            || limits.entry_charge > limits.charge
+            || (limits.entry_charge > limits.charge
+                && !crossing.as_ref().is_some_and(|crossing| {
+                    crossing.authenticates(limits.charge, limits.entry_charge)
+                }))
             || limits.entry_balance > limits.memory
             || limits.entry_depth > limits.depth
         {
@@ -84,6 +92,14 @@ impl<'m> Running<'m> {
         }
         let mut arguments = Vec::new();
         arguments
+            .try_reserve_exact(programs.arguments)
+            .map_err(|_| invalid(Refused::Scratch))?;
+        let mut heap_values = Vec::new();
+        heap_values
+            .try_reserve_exact(programs.arguments)
+            .map_err(|_| invalid(Refused::Scratch))?;
+        let mut heap_pairs = Vec::new();
+        heap_pairs
             .try_reserve_exact(programs.arguments)
             .map_err(|_| invalid(Refused::Scratch))?;
         let reached = ReachedPrefix {
@@ -117,6 +133,7 @@ impl<'m> Running<'m> {
         Ok(Self {
             call_captures,
             parked: Vec::new(),
+            canonical_callees: Vec::new(),
             departing: None,
             returning: None,
             complete: false,
@@ -126,9 +143,11 @@ impl<'m> Running<'m> {
             programs,
             loops,
             scratch,
-            crossing: None,
+            crossing,
             refusal: None,
             arguments,
+            heap_values,
+            heap_pairs,
             view,
             code,
             registers,

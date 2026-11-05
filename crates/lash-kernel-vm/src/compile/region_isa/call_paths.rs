@@ -11,14 +11,18 @@ pub(super) fn connect(
     source: &Source,
     graph: &mut BTreeMap<Point, lower::Edge>,
 ) -> Result<Option<Point>, Refused> {
-    let doc::Node::Expr(doc::Expr::Call { function, .. }) = node else {
-        return Ok(None);
+    let dynamic = match node {
+        doc::Node::Expr(doc::Expr::Call { function, .. }) => {
+            if !matches!(source.calls.get(function), Some(CallSource::Body(_))) {
+                return Ok(None);
+            }
+            false
+        }
+        doc::Node::Expr(doc::Expr::Act(act)) if matches!(act.kind, doc::ActKind::Call(_)) => true,
+        _ => return Ok(None),
     };
-    if !matches!(source.calls.get(function), Some(CallSource::Body(_))) {
-        return Ok(None);
-    }
     let restore = lower::point(site, Phase::Restore);
-    let commit = lower::point(site, Phase::Commit);
+    let commit = lower::point(site, if dynamic { Phase::Enter } else { Phase::Commit });
     graph.insert(
         restore.clone(),
         next.map_or(lower::Edge::Stop, lower::Edge::Next),
@@ -33,6 +37,12 @@ pub(super) fn connect(
             source,
             graph,
         )?;
+    }
+    if matches!(node, doc::Node::Expr(doc::Expr::Act(act)) if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_))))
+    {
+        let open = lower::point(site, Phase::Open);
+        graph.insert(open.clone(), lower::Edge::Next(entry));
+        entry = open;
     }
     Ok(Some(entry))
 }
