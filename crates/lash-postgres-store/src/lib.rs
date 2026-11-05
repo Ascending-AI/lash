@@ -960,7 +960,10 @@ pub use host::{
     PostgresHostError, PostgresPoolMetrics, PostgresPoolSet, PostgresRolePoolMetrics,
     TransactionPrelude, validate_host_config,
 };
-pub use migrate::{MigrateError, MigrationPhase, MigrationRefusal, MigrationReport, MigrationStep};
+pub use migrate::{
+    BackfillProgress, MigrateError, MigrationPhase, MigrationPlan, MigrationRefusal,
+    MigrationReport, MigrationStep,
+};
 mod connection_budget;
 pub use connection_budget::{
     PostgresConnectionBudget, PostgresConnectionBudgetRefusal, PostgresConnectionBudgetReport,

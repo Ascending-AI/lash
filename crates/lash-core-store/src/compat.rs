@@ -65,6 +65,7 @@ pub struct CompatDescriptor {
 ///         path = "crates/lash-postgres-store/schema.sql",
 ///         cover(
 ///             "CREATE TABLE IF NOT EXISTS lash_schema_versions",
+///             "CREATE TABLE IF NOT EXISTS lash_migrations",
 ///             "CREATE TABLE IF NOT EXISTS lash_blobs", "CREATE TABLE IF NOT EXISTS lash_session_head",
 ///             "CREATE TABLE IF NOT EXISTS lash_graph_nodes",
 ///             "CREATE TABLE IF NOT EXISTS lash_session_meta",

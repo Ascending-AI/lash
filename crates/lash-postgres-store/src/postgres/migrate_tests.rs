@@ -522,7 +522,7 @@ mod rollout {
         .await
         .expect("the backfill completes");
         assert_eq!(backfilled.executed.len(), 1);
-        assert_eq!(backfilled.executed[0].state, "applied");
+        assert!(backfilled.executed[0].is_applied());
         let contracted = run_phase(
             next.pool(),
             MigrationPhase::Contract,
@@ -535,7 +535,10 @@ mod rollout {
         .await
         .expect("contract runs once its backfill is applied");
         assert_eq!(contracted.executed.len(), 1);
-        assert_eq!(contracted.executed[0].migration, "synthetic-next-contract");
+        assert_eq!(
+            contracted.executed[0].migration(),
+            "synthetic-next-contract"
+        );
         let (min_reader, validated): (i32, bool) = sqlx::query_as(
             "SELECT versions.min_reader, constraint_row.convalidated
          FROM lash_schema_versions AS versions, pg_catalog.pg_constraint AS constraint_row

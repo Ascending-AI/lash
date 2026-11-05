@@ -48,6 +48,12 @@ CREATE TABLE IF NOT EXISTS lash_migrations (
     backfill_cursor TEXT,
     backfill_rows BIGINT,
     PRIMARY KEY (phase, migration),
+    CONSTRAINT ck_lash_migrations_receipt
+        CHECK ((state = 'running' AND phase = 'backfill' AND finished_at_ms IS NULL)
+            OR (state = 'applied' AND finished_at_ms IS NOT NULL)),
+    CONSTRAINT ck_lash_migrations_versions
+        CHECK (phase = 'expand'
+            OR (from_version IS NOT NULL AND from_version = to_version)),
     CONSTRAINT ck_lash_migrations_backfill_progress
         CHECK ((phase = 'backfill' AND backfill_rows IS NOT NULL AND backfill_rows >= 0)
             OR (phase <> 'backfill' AND backfill_cursor IS NULL AND backfill_rows IS NULL))

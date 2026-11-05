@@ -350,33 +350,139 @@ impl From<MigrationRefusal> for MigrateError {
     }
 }
 
-/// One recorded or planned migrate step.
+/// The work a migration will perform, without a recorded receipt.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MigrationStep {
-    /// `expand`, `backfill`, or `contract`.
-    pub phase: String,
-    /// The step's ledger id — `bootstrap-{version}` for a fresh provision.
-    pub migration: String,
-    /// The release that applied the step; empty while the step is only planned.
-    pub release: String,
-    /// `running` or `applied`. Expand and contract rows are always `applied`;
-    /// a backfill is `running` from its first batch until the batch that
-    /// finds nothing left.
-    pub state: String,
-    /// The stamped version it started from; `None` only for a bootstrap.
-    pub from_version: Option<i32>,
-    /// The stamped version after it applies.
-    pub to_version: i32,
-    /// Server-clock instant the step's transaction began; `None` while the step
-    /// is only planned.
-    pub started_at_ms: Option<i64>,
-    /// Server-clock instant the step finished; `None` while it is planned or
-    /// still running.
-    pub finished_at_ms: Option<i64>,
-    /// A backfill's cursor: the key its last committed batch ended at.
-    pub backfill_cursor: Option<String>,
-    /// The rows a backfill has rewritten so far; `None` for other phases.
-    pub backfill_rows: Option<i64>,
+pub enum MigrationPlan {
+    /// Provision a fresh catalog or advance its component version.
+    Expand {
+        from_version: Option<i32>,
+        to_version: i32,
+    },
+    /// Rewrite rows at this component version.
+    Backfill { version: i32 },
+    /// Tighten the catalog at this component version.
+    Contract { version: i32 },
+}
+
+/// A backfill's committed cursor and nonnegative rewritten-row count.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackfillProgress {
+    cursor: Option<String>,
+    rows: i64,
+}
+
+impl BackfillProgress {
+    /// The key the last committed batch ended at, absent before any scan.
+    pub fn cursor(&self) -> Option<&str> {
+        self.cursor.as_deref()
+    }
+
+    /// The number of rows rewritten by committed batches.
+    pub fn rows(&self) -> i64 {
+        self.rows
+    }
+
+    fn advance(self, cursor: Option<String>, rewritten: i64) -> Result<Self, StoreError> {
+        let rows = self
+            .rows
+            .checked_add(rewritten)
+            .filter(|_| rewritten >= 0)
+            .ok_or_else(|| corrupt_ledger("invalid backfill batch row count"))?;
+        Ok(Self {
+            cursor: cursor.or(self.cursor),
+            rows,
+        })
+    }
+}
+
+/// One planned, resumable or completed migration. Only a backfill can run
+/// across transactions; every applied variant carries completion evidence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MigrationStep {
+    /// Work with no durable receipt yet.
+    Planned {
+        migration: String,
+        plan: MigrationPlan,
+    },
+    /// A backfill whose preparation and progress have committed.
+    RunningBackfill {
+        migration: String,
+        release: String,
+        version: i32,
+        started_at_ms: i64,
+        progress: BackfillProgress,
+    },
+    /// An expand or bootstrap committed in one transaction.
+    AppliedExpand {
+        migration: String,
+        release: String,
+        from_version: Option<i32>,
+        to_version: i32,
+        started_at_ms: i64,
+        finished_at_ms: i64,
+    },
+    /// A backfill with its final progress and completion receipt.
+    AppliedBackfill {
+        migration: String,
+        release: String,
+        version: i32,
+        started_at_ms: i64,
+        finished_at_ms: i64,
+        progress: BackfillProgress,
+    },
+    /// A contract committed in one transaction.
+    AppliedContract {
+        migration: String,
+        release: String,
+        version: i32,
+        started_at_ms: i64,
+        finished_at_ms: i64,
+    },
+}
+
+impl MigrationStep {
+    /// The stable ledger identity, including `bootstrap-{version}`.
+    pub fn migration(&self) -> &str {
+        match self {
+            Self::Planned { migration, .. }
+            | Self::RunningBackfill { migration, .. }
+            | Self::AppliedExpand { migration, .. }
+            | Self::AppliedBackfill { migration, .. }
+            | Self::AppliedContract { migration, .. } => migration,
+        }
+    }
+
+    /// The work's phase, independent of whether it has run.
+    pub fn phase(&self) -> MigrationPhase {
+        match self {
+            Self::Planned {
+                plan: MigrationPlan::Expand { .. },
+                ..
+            }
+            | Self::AppliedExpand { .. } => MigrationPhase::Expand,
+            Self::Planned {
+                plan: MigrationPlan::Backfill { .. },
+                ..
+            }
+            | Self::RunningBackfill { .. }
+            | Self::AppliedBackfill { .. } => MigrationPhase::Backfill,
+            Self::Planned {
+                plan: MigrationPlan::Contract { .. },
+                ..
+            }
+            | Self::AppliedContract { .. } => MigrationPhase::Contract,
+        }
+    }
+
+    /// Whether the step carries a committed completion receipt.
+    pub fn is_applied(&self) -> bool {
+        matches!(
+            self,
+            Self::AppliedExpand { .. }
+                | Self::AppliedBackfill { .. }
+                | Self::AppliedContract { .. }
+        )
+    }
 }
 
 /// What a plan or run found on the database and did about it.
@@ -415,9 +521,9 @@ struct MigrationState {
 impl MigrationState {
     /// Whether the ledger shows `migration` of `phase` applied.
     fn is_applied(&self, phase: MigrationPhase, migration: &str) -> bool {
-        self.applied.iter().any(|step| {
-            step.phase == phase.name() && step.migration == migration && step.state == "applied"
-        })
+        self.applied
+            .iter()
+            .any(|step| step.phase() == phase && step.migration() == migration && step.is_applied())
     }
 }
 
@@ -446,7 +552,16 @@ type LedgerRow = (
     Option<i64>,
 );
 
-fn ledger_step(row: LedgerRow) -> MigrationStep {
+fn corrupt_ledger(message: impl Into<String>) -> StoreError {
+    StoreError::StoredDataCorrupt {
+        record_kind: "migration ledger",
+        message: message.into(),
+    }
+}
+
+/// The sole decoder for durable migration receipts. Raw labels never grant
+/// completion or resumption authority without their phase's evidence.
+fn ledger_step(row: LedgerRow) -> Result<MigrationStep, StoreError> {
     let (
         phase,
         migration,
@@ -456,20 +571,63 @@ fn ledger_step(row: LedgerRow) -> MigrationStep {
         to_version,
         started_at_ms,
         finished_at_ms,
-        backfill_cursor,
-        backfill_rows,
+        cursor,
+        rows,
     ) = row;
-    MigrationStep {
-        phase,
-        migration,
-        release,
-        state,
+    let invalid = || corrupt_ledger(format!("invalid {phase}/{migration} {state} receipt"));
+    match (
+        phase.as_str(),
+        state.as_str(),
         from_version,
-        to_version,
-        started_at_ms: Some(started_at_ms),
         finished_at_ms,
-        backfill_cursor,
-        backfill_rows,
+        cursor,
+        rows,
+    ) {
+        ("expand", "applied", from_version, Some(finished_at_ms), None, None) => {
+            Ok(MigrationStep::AppliedExpand {
+                migration,
+                release,
+                from_version,
+                to_version,
+                started_at_ms,
+                finished_at_ms,
+            })
+        }
+        ("contract", "applied", Some(version), Some(finished_at_ms), None, None)
+            if version == to_version =>
+        {
+            Ok(MigrationStep::AppliedContract {
+                migration,
+                release,
+                version,
+                started_at_ms,
+                finished_at_ms,
+            })
+        }
+        ("backfill", "running", Some(version), None, cursor, Some(rows))
+            if version == to_version && rows >= 0 =>
+        {
+            Ok(MigrationStep::RunningBackfill {
+                migration,
+                release,
+                version,
+                started_at_ms,
+                progress: BackfillProgress { cursor, rows },
+            })
+        }
+        ("backfill", "applied", Some(version), Some(finished_at_ms), cursor, Some(rows))
+            if version == to_version && rows >= 0 =>
+        {
+            Ok(MigrationStep::AppliedBackfill {
+                migration,
+                release,
+                version,
+                started_at_ms,
+                finished_at_ms,
+                progress: BackfillProgress { cursor, rows },
+            })
+        }
+        _ => Err(invalid()),
     }
 }
 
@@ -513,7 +671,7 @@ async fn read_state(
         .map_err(store_sqlx_error)?
         .into_iter()
         .map(ledger_step)
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?
     } else {
         Vec::new()
     };
@@ -642,48 +800,47 @@ async fn server_clock_ms(tx: &mut sqlx::Transaction<'_, Postgres>) -> Result<i64
     .map_err(store_sqlx_error)
 }
 
-/// Records one applied step in the ledger and returns its committed row's
-/// instants. `ON CONFLICT DO NOTHING` keeps the statement honest when a row
+/// Records one applied step in the ledger and returns its decoded receipt. `ON CONFLICT DO NOTHING` keeps the statement honest when a row
 /// survived from a run whose planning missed it; the read-back then returns
 /// the original row rather than rewriting history.
 async fn record_step(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     ledger: &str,
-    phase: &str,
+    phase: MigrationPhase,
     migration: &str,
     from_version: Option<i32>,
     to_version: i32,
     started_at_ms: i64,
-) -> Result<(String, String, i64, Option<i64>), StoreError> {
-    let recorded: Option<(String, String, i64, Option<i64>)> =
-        crate::observed_sql::query_as(&format!(
-            "INSERT INTO {ledger} (phase, migration, release, state,
+) -> Result<MigrationStep, StoreError> {
+    let recorded: Option<LedgerRow> = crate::observed_sql::query_as(&format!(
+        "INSERT INTO {ledger} (phase, migration, release, state,
                                from_version, to_version, started_at_ms, finished_at_ms)
          VALUES ($1, $2, $3, 'applied', $4, $5, $6,
                  CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT))
          ON CONFLICT (phase, migration) DO NOTHING
-         RETURNING release, state, started_at_ms, finished_at_ms"
-        ))
-        .bind(phase)
-        .bind(migration)
-        .bind(crate::release_stamp::BUILD_RELEASE)
-        .bind(from_version)
-        .bind(to_version)
-        .bind(started_at_ms)
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?;
+         RETURNING {LEDGER_COLUMNS}"
+    ))
+    .bind(phase.name())
+    .bind(migration)
+    .bind(crate::release_stamp::BUILD_RELEASE)
+    .bind(from_version)
+    .bind(to_version)
+    .bind(started_at_ms)
+    .fetch_optional(crate::observed_sql::executor(&mut **tx))
+    .await
+    .map_err(store_sqlx_error)?;
     match recorded {
-        Some(row) => Ok(row),
+        Some(row) => ledger_step(row),
         None => crate::observed_sql::query_as(&format!(
-            "SELECT release, state, started_at_ms, finished_at_ms FROM {ledger}
+            "SELECT {LEDGER_COLUMNS} FROM {ledger}
              WHERE phase = $1 AND migration = $2"
         ))
-        .bind(phase)
+        .bind(phase.name())
         .bind(migration)
         .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
-        .map_err(store_sqlx_error),
+        .map_err(store_sqlx_error)
+        .and_then(ledger_step),
     }
 }
 
@@ -752,10 +909,10 @@ async fn apply_step(
             )
         }
     };
-    let (release, state, started_at_ms, finished_at_ms) = record_step(
+    let recorded = record_step(
         &mut tx,
         &ledger,
-        MigrationPhase::Expand.name(),
+        MigrationPhase::Expand,
         &migration,
         from_version,
         to_version,
@@ -766,18 +923,7 @@ async fn apply_step(
         .await
         .map_err(store_sqlx_error)?;
     tx.commit().await.map_err(store_sqlx_error)?;
-    Ok(MigrationStep {
-        phase: MigrationPhase::Expand.name().to_string(),
-        migration,
-        release,
-        state,
-        from_version,
-        to_version,
-        started_at_ms: Some(started_at_ms),
-        finished_at_ms,
-        backfill_cursor: None,
-        backfill_rows: None,
-    })
+    Ok(recorded)
 }
 
 /// Run the expand phase under the exclusive schema lock, as a build whose
@@ -918,48 +1064,18 @@ async fn read_state_under_lock(
 }
 
 fn planned_step(step: &PlannedStep<'_>) -> MigrationStep {
-    match step {
-        PlannedStep::Bootstrap => MigrationStep {
-            phase: MigrationPhase::Expand.name().to_string(),
-            migration: format!("bootstrap-{SCHEMA_VERSION}"),
-            release: String::new(),
-            state: String::new(),
-            from_version: None,
-            to_version: SCHEMA_VERSION,
-            started_at_ms: None,
-            finished_at_ms: None,
-            backfill_cursor: None,
-            backfill_rows: None,
+    let (migration, from_version, to_version) = match step {
+        PlannedStep::Bootstrap => (format!("bootstrap-{SCHEMA_VERSION}"), None, SCHEMA_VERSION),
+        PlannedStep::Migration(step) => {
+            (step.id.to_owned(), Some(step.from_version), step.to_version)
+        }
+    };
+    MigrationStep::Planned {
+        migration,
+        plan: MigrationPlan::Expand {
+            from_version,
+            to_version,
         },
-        PlannedStep::Migration(migration) => MigrationStep {
-            phase: MigrationPhase::Expand.name().to_string(),
-            migration: migration.id.to_string(),
-            release: String::new(),
-            state: String::new(),
-            from_version: Some(migration.from_version),
-            to_version: migration.to_version,
-            started_at_ms: None,
-            finished_at_ms: None,
-            backfill_cursor: None,
-            backfill_rows: None,
-        },
-    }
-}
-
-/// A backfill or contract step not yet recorded, as a plan lists it. Neither
-/// phase moves the component version, so both record the one the store is at.
-fn planned_later_step(phase: MigrationPhase, migration: &str, version: i32) -> MigrationStep {
-    MigrationStep {
-        phase: phase.name().to_string(),
-        migration: migration.to_string(),
-        release: String::new(),
-        state: String::new(),
-        from_version: Some(version),
-        to_version: version,
-        started_at_ms: None,
-        finished_at_ms: None,
-        backfill_cursor: None,
-        backfill_rows: (phase == MigrationPhase::Backfill).then_some(0),
     }
 }
 
@@ -1057,11 +1173,17 @@ pub(crate) async fn plan_on(
             }
             MigrationPhase::Backfill => pending_backfills(&state)?
                 .into_iter()
-                .map(|backfill| planned_later_step(phase, backfill.id, version))
+                .map(|backfill| MigrationStep::Planned {
+                    migration: backfill.id.to_owned(),
+                    plan: MigrationPlan::Backfill { version },
+                })
                 .collect(),
             MigrationPhase::Contract => pending_contracts(&state)?
                 .into_iter()
-                .map(|contract| planned_later_step(phase, contract.id, version))
+                .map(|contract| MigrationStep::Planned {
+                    migration: contract.id.to_owned(),
+                    plan: MigrationPlan::Contract { version },
+                })
                 .collect(),
         };
         let mut planned_report = report(&state, Vec::new());
@@ -1193,14 +1315,14 @@ pub(crate) async fn start_backfill(
     backfill: &BackfillMigration,
     limits: MigrationLimits,
 ) -> Result<(), MigrateError> {
-    let started: Option<String> = crate::observed_sql::query_scalar(
-        "SELECT state FROM lash_migrations WHERE phase = 'backfill' AND migration = $1",
-    )
+    let started = crate::observed_sql::query_as::<_, LedgerRow>(&format!(
+        "SELECT {LEDGER_COLUMNS} FROM lash_migrations WHERE phase = 'backfill' AND migration = $1"
+    ))
     .bind(backfill.id)
     .fetch_optional(crate::observed_sql::executor(pool))
     .await
     .map_err(store_sqlx_error)?;
-    if started.is_some() {
+    if started.map(ledger_step).transpose()?.is_some() {
         return Ok(());
     }
     let mut connection = lock_connection(pool, false, limits).await?;
@@ -1216,16 +1338,16 @@ pub(crate) async fn start_backfill(
             .into());
         }
         // Another run may have started it while this one waited for the lock.
-        let started: Option<String> = crate::observed_sql::query_scalar(
-            "SELECT state FROM lash_migrations
+        let started = crate::observed_sql::query_as::<_, LedgerRow>(&format!(
+            "SELECT {LEDGER_COLUMNS} FROM lash_migrations
              WHERE phase = 'backfill' AND migration = $1
-             FOR UPDATE",
-        )
+             FOR UPDATE"
+        ))
         .bind(backfill.id)
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
-        if started.is_some() {
+        if started.map(ledger_step).transpose()?.is_some() {
             return Ok(());
         }
         let started_at_ms = server_clock_ms(&mut tx).await?;
@@ -1287,38 +1409,32 @@ pub(crate) async fn backfill_batch_in(
         }
         .into());
     }
-    let row: Option<(String, Option<String>)> = crate::observed_sql::query_as(
-        "SELECT state, backfill_cursor FROM lash_migrations
-         WHERE phase = 'backfill' AND migration = $1
-         FOR UPDATE",
-    )
+    let row = crate::observed_sql::query_as::<_, LedgerRow>(&format!(
+        "SELECT {LEDGER_COLUMNS} FROM lash_migrations
+         WHERE phase = 'backfill' AND migration = $1 FOR UPDATE"
+    ))
     .bind(backfill.id)
-    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+    .fetch_one(crate::observed_sql::executor(&mut ***tx))
     .await
     .map_err(store_sqlx_error)?;
-    let cursor = match row {
-        None => {
-            return Err(StoreError::Backend(format!(
-                "backfill {} has no ledger row to resume from",
-                backfill.id
-            ))
-            .into());
-        }
-        Some((state, _)) if state == "applied" => return Ok(BatchOutcome::Completed),
-        Some((_, cursor)) => cursor,
+    let progress = match ledger_step(row)? {
+        MigrationStep::AppliedBackfill { .. } => return Ok(BatchOutcome::Completed),
+        MigrationStep::RunningBackfill { progress, .. } => progress,
+        _ => return Err(corrupt_ledger("expected a backfill receipt").into()),
     };
     let (last_key, scanned, rewritten): (Option<String>, i64, i64) =
         crate::observed_sql::query_as(backfill.batch)
-            .bind(cursor.as_deref())
+            .bind(progress.cursor())
             .bind(batch_rows)
             .fetch_one(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(store_sqlx_error)?;
+    let progress = progress.advance(last_key, rewritten)?;
     let completed = scanned < batch_rows;
     crate::observed_sql::query(
         "UPDATE lash_migrations
-         SET backfill_cursor = COALESCE($2, backfill_cursor),
-             backfill_rows = backfill_rows + $3,
+         SET backfill_cursor = $2,
+             backfill_rows = $3,
              state = CASE WHEN $4 THEN 'applied' ELSE 'running' END,
              finished_at_ms = CASE WHEN $4
                  THEN CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT)
@@ -1326,8 +1442,8 @@ pub(crate) async fn backfill_batch_in(
          WHERE phase = 'backfill' AND migration = $1",
     )
     .bind(backfill.id)
-    .bind(last_key)
-    .bind(rewritten)
+    .bind(progress.cursor())
+    .bind(progress.rows())
     .bind(completed)
     .execute(crate::observed_sql::executor(&mut ***tx))
     .await
@@ -1352,8 +1468,8 @@ async fn ledger_row(
     .bind(migration)
     .fetch_one(crate::observed_sql::executor(pool))
     .await
-    .map(ledger_step)
     .map_err(store_sqlx_error)
+    .and_then(ledger_step)
 }
 
 /// Run every backfill this build carries that the ledger does not show
@@ -1367,14 +1483,15 @@ pub(crate) async fn run_backfills(
 ) -> Result<Vec<MigrationStep>, MigrateError> {
     let mut executed = Vec::new();
     for backfill in BACKFILL_MIGRATIONS {
-        let recorded: Option<String> = crate::observed_sql::query_scalar(
-            "SELECT state FROM lash_migrations WHERE phase = 'backfill' AND migration = $1",
-        )
+        let recorded = crate::observed_sql::query_as::<_, LedgerRow>(&format!(
+            "SELECT {LEDGER_COLUMNS} FROM lash_migrations WHERE phase = 'backfill' AND migration = $1"
+        ))
         .bind(backfill.id)
         .fetch_optional(crate::observed_sql::executor(pool))
         .await
-        .map_err(store_sqlx_error)?;
-        if recorded.as_deref() == Some("applied") {
+        .map_err(store_sqlx_error)?
+        .map(ledger_step).transpose()?;
+        if recorded.as_ref().is_some_and(MigrationStep::is_applied) {
             continue;
         }
         start_backfill(pool, fence, backfill, limits).await?;
@@ -1454,11 +1571,10 @@ async fn apply_contract(
     contract: &ContractMigration,
 ) -> Result<MigrationStep, MigrateError> {
     let mut tx = crate::guarded_tx::begin_migration(connection, fence).await?;
-    let applied: Vec<String> = crate::observed_sql::query_scalar(
-        "SELECT migration FROM lash_migrations
-         WHERE phase = 'backfill' AND state = 'applied' AND migration = ANY($1)
-         FOR SHARE",
-    )
+    let receipts = crate::observed_sql::query_as::<_, LedgerRow>(&format!(
+        "SELECT {LEDGER_COLUMNS} FROM lash_migrations
+         WHERE phase = 'backfill' AND migration = ANY($1) FOR SHARE"
+    ))
     .bind(
         contract
             .after_backfills
@@ -1469,8 +1585,14 @@ async fn apply_contract(
     .fetch_all(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
+    let applied = receipts
+        .into_iter()
+        .map(ledger_step)
+        .collect::<Result<Vec<_>, _>>()?;
     contract_admitted(contract, tx.fleet().version(), |backfill| {
-        applied.iter().any(|name| name == backfill)
+        applied
+            .iter()
+            .any(|step| step.migration() == backfill && step.is_applied())
     })?;
     let started_at_ms = server_clock_ms(&mut tx).await?;
     let version = written_version()?;
@@ -1487,10 +1609,10 @@ async fn apply_contract(
     .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
-    let (release, state, started_at_ms, finished_at_ms) = record_step(
+    let recorded = record_step(
         &mut tx,
         "lash_migrations",
-        MigrationPhase::Contract.name(),
+        MigrationPhase::Contract,
         contract.id,
         Some(version),
         version,
@@ -1501,18 +1623,7 @@ async fn apply_contract(
         .await
         .map_err(store_sqlx_error)?;
     tx.commit().await.map_err(store_sqlx_error)?;
-    Ok(MigrationStep {
-        phase: MigrationPhase::Contract.name().to_string(),
-        migration: contract.id.to_string(),
-        release,
-        state,
-        from_version: Some(version),
-        to_version: version,
-        started_at_ms: Some(started_at_ms),
-        finished_at_ms,
-        backfill_cursor: None,
-        backfill_rows: None,
-    })
+    Ok(recorded)
 }
 
 /// Runs `phase` through `endpoints` under `config.maintenance`: its pool,

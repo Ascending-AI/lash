@@ -201,8 +201,8 @@ async fn record_component(database_url: &str, schema: &str, version: i32) {
         .expect("provision the scratch schema from schema.sql");
     sqlx::query(
         "INSERT INTO lash_migrations (phase, migration, release, state,
-                                      from_version, to_version, started_at_ms)
-         VALUES ('expand', $1, 'predecessor', 'applied', NULL, $2, 0)",
+                                      from_version, to_version, started_at_ms, finished_at_ms)
+         VALUES ('expand', $1, 'predecessor', 'applied', NULL, $2, 0, 0)",
     )
     .bind(format!("bootstrap-{version}"))
     .bind(version)
@@ -249,7 +249,7 @@ async fn migrate_on_a_fresh_schema_creates_the_schema_and_the_ledger() {
         report
             .executed
             .iter()
-            .map(|step| step.migration.clone())
+            .map(|step| step.migration().to_owned())
             .collect::<Vec<_>>(),
         std::iter::once(format!("bootstrap-{}", PostgresStorage::schema_version()))
             .chain(
@@ -260,8 +260,7 @@ async fn migrate_on_a_fresh_schema_creates_the_schema_and_the_ledger() {
             .collect::<Vec<_>>(),
         "a fresh migrate applies the bootstrap and this build's component expands: {report:?}"
     );
-    assert!(report.executed[0].started_at_ms.is_some());
-    assert_eq!(report.executed[0].state, "applied");
+    assert!(report.executed[0].is_applied());
     assert!(report.planned.is_empty(), "nothing remains pending");
 
     let ledger = ledger_rows(&url).await;
@@ -625,6 +624,79 @@ async fn concurrent_migrates_serialize_and_converge() {
     drop(database);
 }
 
+/// A rerun must not adopt an applied label without a completion receipt,
+/// even if an external writer bypassed the ledger's constraints.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rerun_rejects_a_receipt_without_completion_evidence() {
+    let Some(database) = migrator_database().await else {
+        return;
+    };
+    let database_url = database.url();
+    let schema = create_scratch_schema(database_url).await;
+    let url = scratch_url(database_url, &schema);
+    lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
+        .await
+        .expect("bootstrap");
+    let mut connection = PgConnection::connect(&url).await.expect("corrupt ledger");
+    for (statement, constraint) in [
+        (
+            "UPDATE lash_migrations SET finished_at_ms = NULL WHERE phase = 'expand'",
+            "ck_lash_migrations_receipt",
+        ),
+        (
+            "UPDATE lash_migrations SET state = 'running', finished_at_ms = NULL WHERE phase = 'expand'",
+            "ck_lash_migrations_receipt",
+        ),
+        (
+            "UPDATE lash_migrations SET phase = 'contract', state = 'running', from_version = to_version, finished_at_ms = NULL WHERE phase = 'expand'",
+            "ck_lash_migrations_receipt",
+        ),
+        (
+            "UPDATE lash_migrations SET phase = 'backfill', state = 'running', from_version = to_version, backfill_rows = 0 WHERE phase = 'expand'",
+            "ck_lash_migrations_receipt",
+        ),
+        (
+            "UPDATE lash_migrations SET phase = 'backfill', from_version = to_version + 1, backfill_rows = 0 WHERE phase = 'expand'",
+            "ck_lash_migrations_versions",
+        ),
+    ] {
+        let error = sqlx::query(statement)
+            .execute(&mut connection)
+            .await
+            .expect_err("an incomplete or inconsistent receipt must be rejected at write");
+        assert_eq!(
+            error
+                .as_database_error()
+                .and_then(sqlx::error::DatabaseError::constraint),
+            Some(constraint),
+            "wrong ledger guard: {error}"
+        );
+    }
+    sqlx::query("ALTER TABLE lash_migrations DROP CONSTRAINT IF EXISTS ck_lash_migrations_receipt")
+        .execute(&mut connection)
+        .await
+        .expect("bypass the write guard");
+    sqlx::query("UPDATE lash_migrations SET finished_at_ms = NULL WHERE phase = 'expand'")
+        .execute(&mut connection)
+        .await
+        .expect("remove completion evidence");
+    connection.close().await.expect("close corrupting writer");
+    let outcome = lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand).await;
+    assert!(
+        matches!(
+            outcome,
+            Err(MigrateError::Store(
+                lash_core_store::store::StoreError::StoredDataCorrupt {
+                    record_kind: "migration ledger",
+                    ..
+                }
+            ))
+        ),
+        "a rerun adopted an incomplete receipt: {outcome:?}"
+    );
+    drop_scratch_schema(database_url, &schema).await;
+}
+
 /// The catalog is the only path that moves the stamp (FIG-4704): a database
 /// this build bootstraps and one provisioned from `schema.sql` are carried to
 /// the version this build writes by the same catalog steps. The plan names
@@ -644,7 +716,25 @@ async fn a_fresh_store_and_an_expanded_store_reach_one_stamp_through_the_catalog
             &report.executed
         };
         rows.iter()
-            .map(|step| (step.migration.clone(), step.from_version, step.to_version))
+            .map(|step| {
+                let (from, to) = match step {
+                    lash_postgres_store::MigrationStep::Planned {
+                        plan:
+                            lash_postgres_store::MigrationPlan::Expand {
+                                from_version,
+                                to_version,
+                            },
+                        ..
+                    }
+                    | lash_postgres_store::MigrationStep::AppliedExpand {
+                        from_version,
+                        to_version,
+                        ..
+                    } => (*from_version, *to_version),
+                    other => panic!("expected an expand step: {other:?}"),
+                };
+                (step.migration().to_owned(), from, to)
+            })
             .collect::<Vec<_>>()
     };
     let bootstrap = (

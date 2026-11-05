@@ -9,8 +9,9 @@ use lash_core_store::store::{
 };
 use lash_core_store::store::{ObligationKey, StalledObligation, StoreError};
 use lash_postgres_store::{
-    MigrateError, MigrationPhase, MigrationReport, MigrationStep, PostgresConnectionBudget,
-    PostgresConnectionBudgetReport, PostgresStorage, PostgresStorePreflight,
+    MigrateError, MigrationPhase, MigrationPlan, MigrationReport, MigrationStep,
+    PostgresConnectionBudget, PostgresConnectionBudgetReport, PostgresStorage,
+    PostgresStorePreflight,
 };
 mod recovery;
 
@@ -275,17 +276,102 @@ struct StepDto<'a> {
 
 impl<'a> From<&'a MigrationStep> for StepDto<'a> {
     fn from(step: &'a MigrationStep) -> Self {
+        let (release, state, from_version, to_version, started_at_ms, finished_at_ms, progress) =
+            match step {
+                MigrationStep::Planned { plan, .. } => {
+                    let (from, to) = match plan {
+                        MigrationPlan::Expand {
+                            from_version,
+                            to_version,
+                        } => (*from_version, *to_version),
+                        MigrationPlan::Backfill { version }
+                        | MigrationPlan::Contract { version } => (Some(*version), *version),
+                    };
+                    ("", "", from, to, None, None, None)
+                }
+                MigrationStep::RunningBackfill {
+                    release,
+                    version,
+                    started_at_ms,
+                    progress,
+                    ..
+                } => (
+                    release.as_str(),
+                    "running",
+                    Some(*version),
+                    *version,
+                    Some(*started_at_ms),
+                    None,
+                    Some(progress),
+                ),
+                MigrationStep::AppliedExpand {
+                    release,
+                    from_version,
+                    to_version,
+                    started_at_ms,
+                    finished_at_ms,
+                    ..
+                } => (
+                    release.as_str(),
+                    "applied",
+                    *from_version,
+                    *to_version,
+                    Some(*started_at_ms),
+                    Some(*finished_at_ms),
+                    None,
+                ),
+                MigrationStep::AppliedBackfill {
+                    release,
+                    version,
+                    started_at_ms,
+                    finished_at_ms,
+                    progress,
+                    ..
+                } => (
+                    release.as_str(),
+                    "applied",
+                    Some(*version),
+                    *version,
+                    Some(*started_at_ms),
+                    Some(*finished_at_ms),
+                    Some(progress),
+                ),
+                MigrationStep::AppliedContract {
+                    release,
+                    version,
+                    started_at_ms,
+                    finished_at_ms,
+                    ..
+                } => (
+                    release.as_str(),
+                    "applied",
+                    Some(*version),
+                    *version,
+                    Some(*started_at_ms),
+                    Some(*finished_at_ms),
+                    None,
+                ),
+            };
         Self {
-            phase: &step.phase,
-            migration: &step.migration,
-            release: &step.release,
-            state: &step.state,
-            from_version: step.from_version,
-            to_version: step.to_version,
-            started_at_ms: step.started_at_ms,
-            finished_at_ms: step.finished_at_ms,
-            backfill_cursor: step.backfill_cursor.as_deref(),
-            backfill_rows: step.backfill_rows,
+            phase: step.phase().name(),
+            migration: step.migration(),
+            release,
+            state,
+            from_version,
+            to_version,
+            started_at_ms,
+            finished_at_ms,
+            backfill_cursor: progress.and_then(|progress| progress.cursor()),
+            backfill_rows: progress.map(|progress| progress.rows()).or_else(|| {
+                matches!(
+                    step,
+                    MigrationStep::Planned {
+                        plan: MigrationPlan::Backfill { .. },
+                        ..
+                    }
+                )
+                .then_some(0)
+            }),
         }
     }
 }
