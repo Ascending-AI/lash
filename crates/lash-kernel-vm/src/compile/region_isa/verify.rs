@@ -391,7 +391,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 return Err(Refused::Source);
             }
             let lib = exe.lib(kernel.lib);
-            if super::super::numeric_pair(lib, true).and_then(|pair| pair.ints) != Some(kernel.op)
+            if super::resource_pair(lib, true).and_then(|pair| pair.ints) != Some(kernel.op)
                 || kernel.op.compares()
             {
                 return Err(Refused::Source);
@@ -478,7 +478,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 };
                 if function != actual
                     || exe.library_lib(function) != Some(*lib)
-                    || super::super::numeric_pair(exe.lib(*lib), true).and_then(|pair| pair.floats)
+                    || super::resource_pair(exe.lib(*lib), true).and_then(|pair| pair.floats)
                         != Some(*operation)
                 {
                     return Err(Refused::Source);
@@ -523,7 +523,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 };
                 if function != actual
                     || exe.library_lib(function) != Some(*lib)
-                    || super::super::numeric_pair(exe.lib(*lib), true).and_then(|pair| pair.ints)
+                    || super::resource_pair(exe.lib(*lib), true).and_then(|pair| pair.ints)
                         != Some(*operation)
                     || !operation.compares()
                 {

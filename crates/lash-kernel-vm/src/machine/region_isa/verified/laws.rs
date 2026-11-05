@@ -709,49 +709,62 @@ fn a_scalar_prefix_obeys_the_exact_source_memory_cutoff() {
     }
 }
 
-/// K-FN-004/K-EVAL-008: a real body call must transfer its actual result,
-/// release the callee's formals and frame, and restore its caller exactly once.
+/// K-FN-004: Return releases its frame and transfers the actual result
+/// through Incoming before the caller Restore.
 #[test]
-fn a_body_return_leaves_its_frame_and_restores_the_actual_result() {
+fn a_returned_call_restores_its_result_after_releasing_the_callee() {
     let mut run = call_machine();
     let machine = &mut run.machine;
     machine.current = Some(TaskId::MAIN);
-    let entry_depth = machine.tasks.get_mut(0).unwrap().unwrap().frames.len() as u32
-        + u32::from(!machine.session_cell);
-    let id = machine.frame(TaskId::MAIN).unwrap().code;
-    let draft = compile_region(&machine.exe, id).unwrap();
+    let root = machine.frame(TaskId::MAIN).unwrap().code;
+    let draft = compile_region(&machine.exe, root).unwrap();
     let calls = compile_calls(&machine.exe, &draft).unwrap();
-    let program = verify_region(&machine.exe, id, draft, &calls).unwrap();
+    let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
+    let stamp = machine.logical.borrow().stamp();
     let mut lease = RegionLease::acquire(machine, program).unwrap();
-    for _ in 0..4 {
+    let mut entered = false;
+    let mut restored = false;
+    for _ in 0..32 {
+        let result = lease.run(StopAt::NextLegalPrefix);
+        let Executing::Machine(execution) = &lease.execution else {
+            unreachable!()
+        };
         assert_eq!(
-            lease.run(StopAt::NextLegalPrefix).unwrap(),
+            result.unwrap_or_else(|error| panic!(
+                "{error:?} at {:?}: {:?}",
+                execution.pc,
+                execution
+                    .code
+                    .program
+                    .step(execution.pc)
+                    .map(|step| &step.at)
+            )),
             RegionStop::Handoff
         );
+        let Executing::Machine(execution) = &lease.execution else {
+            unreachable!()
+        };
+        entered |= execution.frame_index() == 1;
+        if entered && execution.frame_index() == 0 && execution.returning.is_none() {
+            let map = execution.code.program.recovery(execution.prefix).unwrap();
+            if map.graph.incoming().is_none() {
+                assert!(map.roles.iter().any(|(_, reg)| {
+                    execution
+                        .read(*reg)
+                        .unwrap()
+                        .scalar(&execution.view)
+                        .unwrap()
+                        .same(&Value::Int(9))
+                }));
+                assert_eq!(execution.counters.depth, execution.limits.entry_depth);
+                restored = true;
+                break;
+            }
+        }
     }
-    let Executing::Machine(execution) = &mut lease.execution else {
-        unreachable!()
-    };
-    assert!(matches!(
-        execution.code.program.op(execution.pc),
-        Some(crate::compile::region_isa::RegionOp::Return { .. })
-    ));
-    let activation = execution.activation.take().unwrap();
-    execution.leave_call(activation).unwrap();
-    assert!(execution.parked.is_empty());
-    assert_eq!(execution.counters.depth, entry_depth);
-    // The source retains one caller frame and one Int(9) occurrence.
-    assert_eq!(
-        execution.counters.balance,
-        lash_kernel_doc::LogicalHeldV1::FRAME + 17
-    );
-    let call = execution.code.calls.iter().flatten().next().unwrap();
-    assert_eq!(execution.pc, call.next);
-    let result = execution
-        .registers
-        .read(0, execution.reached.invocation, call.result)
-        .unwrap()
-        .bind(&mut execution.view)
-        .unwrap();
-    assert!(execution.view.scalar(result).unwrap().same(&Value::Int(9)));
+    assert!(entered && restored);
+    let prefix = lease.materialize().unwrap();
+    assert_eq!(prefix.reconstruction().frames.len(), 1);
+    prefix.prepare_exit().unwrap().commit().unwrap();
+    assert!(!machine.logical.borrow().is_current(&stamp));
 }

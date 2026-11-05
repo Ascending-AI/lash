@@ -901,6 +901,12 @@ pub trait NativeFunction: Send + Sync {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NativeSpecialization {
     pub immediate: Option<PreparedNative>,
+    /// Every successful answer from `immediate` has exactly its immutable
+    /// output occurrence as its logical resource obligation, with no scratch
+    /// or fresh mutable entity. The claim covers only inputs accepted by that
+    /// entry. It must agree with this implementation's `resource_contract`.
+    /// Absence of this certificate never implies zero scratch.
+    pub immediate_resources: bool,
     pub resident: Option<ResidentRead>,
     /// An allocation-free UTF-16 relation on both inline and heap texts.
     pub text_relation: Option<crate::scalar::ScalarOp>,

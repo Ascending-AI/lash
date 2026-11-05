@@ -8,7 +8,9 @@ impl<'a, 's> LeaseStep<'a, 's> {
         capacity(&mut self.lease.local.free, self.lease.local.touched.len())?;
         let mut list = Vec::new();
         let body = match &self.candidate.op {
-            LeaseOp::Allocate(allocation) if self.candidate.allocation.is_some() => {
+            LeaseOp::Allocate(allocation) | LeaseOp::AllocateMove { allocation, .. }
+                if self.candidate.allocation.is_some() =>
+            {
                 let Some(LeaseValue {
                     repr: Repr::Object(object, _),
                 }) = self.candidate.result

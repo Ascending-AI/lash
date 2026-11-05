@@ -149,6 +149,13 @@ pub enum LeaseOp<'a> {
         releases: &'a [(LeaseValue, bool)],
     },
     Allocate(LeaseAllocation<'a>),
+    /// Allocation and the source occurrences moved into its members form one
+    /// canonical phase. Tuple and variable construction have no gross-output
+    /// prefix between allocation and these moves.
+    AllocateMove {
+        allocation: LeaseAllocation<'a>,
+        releases: &'a [LeaseValue],
+    },
     Member {
         object: LeaseObject,
         member: LeaseMember,

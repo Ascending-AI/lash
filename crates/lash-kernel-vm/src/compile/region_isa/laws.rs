@@ -39,6 +39,13 @@ fn scalar_probes(
                 .map(|value| doc::NativeResourceContract::returned(args, &value))
                 .transpose()
         }
+        fn specialization(&self) -> doc::NativeSpecialization {
+            doc::NativeSpecialization {
+                immediate: self.prepare(),
+                immediate_resources: true,
+                ..Default::default()
+            }
+        }
         fn prepare(&self) -> Option<doc::PreparedNative> {
             let entry = match self.0 {
                 doc::scalar::ScalarOp::Add => {

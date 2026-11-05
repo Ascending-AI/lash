@@ -178,9 +178,11 @@ impl<'s> Running<'s> {
                                 .map_err(RegionError::Heap)?;
                             i128::from(self.view.price(value).map_err(RegionError::Heap)?)
                         }
-                        Fact::Release(index) => {
+                        Fact::Release(index, headers) => {
                             i128::from(*quoted.get(*index).ok_or_else(|| invalid(Refused::Facts))?)
+                                + i128::from(*headers)
                         }
+                        Fact::Zero => 0,
                         Fact::Source(_) => return Err(invalid(Refused::Facts)),
                     };
                     sum.checked_add(

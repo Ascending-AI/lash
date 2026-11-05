@@ -29,7 +29,6 @@ pub(in crate::machine::region_isa) struct Call {
     pub(super) saved: Box<[SavedRole]>,
     pub(in crate::machine::region_isa) callable: Option<Register>,
     pub(in crate::machine::region_isa) callable_origin: Option<Register>,
-    pub(in crate::machine::region_isa) result: Register,
     pub(in crate::machine::region_isa) next: Pc,
 }
 
@@ -148,7 +147,6 @@ impl Code {
                             .callable_origin()
                             .map(|input| role(input.slot()))
                             .transpose()?,
-                        result: role(plan.result_role().slot())?,
                         next: *next,
                     };
                     arguments = arguments.max(call.arguments.len());

@@ -42,7 +42,14 @@ impl<'s> StateLease<'s> {
                     }
                 }
             }
-            LeaseOp::Allocate(allocation) => {
+            LeaseOp::Allocate(allocation) | LeaseOp::AllocateMove { allocation, .. } => {
+                if matches!(candidate.op, LeaseOp::AllocateMove { .. })
+                    && !matches!(allocation.body, Allocation::Tuple(_) | Allocation::Cell(_))
+                {
+                    return Err(
+                        invalid("atomic source allocation must construct a tuple or cell").into(),
+                    );
+                }
                 let (kind, bytes, members, payload) = self.allocation_facts(&allocation.body)?;
                 facts.members = members;
                 facts.payload = payload;
@@ -83,6 +90,15 @@ impl<'s> StateLease<'s> {
                             0
                         };
                     self.allocation_edges(&allocation.body)?;
+                }
+                if let LeaseOp::AllocateMove { releases, .. } = &candidate.op {
+                    for &value in *releases {
+                        facts.delta = facts
+                            .delta
+                            .checked_sub(i128::from(self.price(value)?))
+                            .ok_or_else(|| invalid("allocation source move overflow"))?;
+                        self.value_edges(value, -1)?;
+                    }
                 }
             }
             LeaseOp::HoldCapture { cell, count } | LeaseOp::ReleaseCapture { cell, count } => {

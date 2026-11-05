@@ -2,7 +2,7 @@
 use super::super::{operands::Operand, *};
 use super::{Running, charge};
 use crate::compile::region_isa::RegionOp;
-use lash_kernel_state::kernel_internals::logical::{LeaseOp, LeaseValue};
+use lash_kernel_state::kernel_internals::logical::LeaseValue;
 
 pub(super) struct Departure {
     pub(super) origin: Point,
@@ -150,20 +150,17 @@ impl Running<'_> {
             &mut self.view,
             self.parked.len(),
             self.reached.invocation,
-            call.result,
+            super::bind::physical(
+                &code.program,
+                code.program
+                    .call_incoming(match code.program.op(self.pc) {
+                        Some(RegionOp::Call { site, .. }) => *site,
+                        _ => return Err(invalid(Refused::Path)),
+                    })
+                    .ok_or_else(|| invalid(Refused::Facts))?,
+            )?,
             Operand::Dynamic(value),
         )?;
-        // Restore transfers the existing incoming occurrence, with no extra holding.
-        let pairs = [(value, false)];
-        self.view
-            .stage(LeaseOp::Transfer {
-                holds: &pairs,
-                releases: &pairs,
-            })
-            .map_err(storage_fault)?
-            .reserve()
-            .map_err(RegionError::Heap)?
-            .accept();
         self.registers.publish_write(write);
         let step = code
             .program

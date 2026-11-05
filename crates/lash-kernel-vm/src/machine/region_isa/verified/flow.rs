@@ -12,7 +12,8 @@ pub(super) struct Root {
 pub(super) enum Fact {
     Local(Register),
     Result,
-    Release(usize),
+    Release(usize, u64),
+    Zero,
     Source(Measure),
 }
 pub(super) struct Amount {
@@ -65,7 +66,7 @@ impl Flow {
                 capture: matches!(slot, Slot::Capture(_)),
             })
         };
-        let releases = before
+        let mut releases: Vec<Root> = before
             .roles
             .iter()
             .filter(|(slot, reg)| {
@@ -74,7 +75,7 @@ impl Flow {
             })
             .map(|(slot, reg)| root(*slot, *reg))
             .collect::<Result<_, RegionError>>()?;
-        let holds = after
+        let mut holds: Vec<Root> = after
             .roles
             .iter()
             .filter(|(slot, reg)| {
@@ -83,6 +84,30 @@ impl Flow {
             })
             .map(|(slot, reg)| root(*slot, *reg))
             .collect::<Result<_, RegionError>>()?;
+        if before.graph.incoming() != after.graph.incoming() {
+            if let Some(reg) = before.graph.incoming() {
+                releases.push(Root {
+                    register: super::bind::physical(code, reg)?,
+                    capture: false,
+                });
+            }
+            if let Some(reg) = after.graph.incoming() {
+                holds.push(Root {
+                    register: super::bind::physical(code, reg)?,
+                    capture: false,
+                });
+            }
+        }
+        let native = match code.op(pc) {
+            Some(RegionOp::IntBinary { kernel, .. }) => Some(kernel.function()),
+            Some(RegionOp::Checked { kernel, .. }) => match kernel.kind() {
+                CheckedKind::Native { function, .. }
+                | CheckedKind::IntTruth { function, .. }
+                | CheckedKind::FloatBinary { function, .. } => Some(*function),
+                _ => None,
+            },
+            _ => None,
+        };
         let mut groups = Vec::new();
         let mut quotes = Vec::new();
         let mut amount = |amount: &IndexedAmount| -> Result<Amount, RegionError> {
@@ -114,7 +139,57 @@ impl Flow {
                                     index
                                 }
                             };
-                            Fact::Release(index)
+                            Fact::Release(index, 0)
+                        }
+                        ResourceInput::SourceFact(Measure::Local(
+                            crate::compile::room::Owner::Incoming(_),
+                        )) => Fact::Local(super::bind::physical(
+                            code,
+                            before
+                                .graph
+                                .incoming()
+                                .ok_or_else(|| invalid(Refused::Facts))?,
+                        )?),
+                        ResourceInput::SourceFact(Measure::Release(owners))
+                            if owners.iter().all(|owner| {
+                                matches!(owner, crate::compile::room::Owner::Incoming(_))
+                            }) =>
+                        {
+                            let index = quotes.len();
+                            quotes.push(
+                                vec![Root {
+                                    register: super::bind::physical(
+                                        code,
+                                        before
+                                            .graph
+                                            .incoming()
+                                            .ok_or_else(|| invalid(Refused::Facts))?,
+                                    )?,
+                                    capture: false,
+                                }]
+                                .into_boxed_slice(),
+                            );
+                            Fact::Release(index, 0)
+                        }
+                        ResourceInput::SourceFact(Measure::CallPeak { at, callee }
+                            | Measure::CallDelta { at, callee })
+                            if *at == step.at.site && matches!(callee,
+                                crate::compile::room::CallSource::Native(function) if Some(*function) == native) => Fact::Result,
+                        ResourceInput::SourceFact(Measure::NativeScratch { at, function })
+                            if *at == step.at.site && Some(*function) == native => Fact::Zero,
+                        ResourceInput::SourceFact(Measure::Release(owners)) => {
+                            let (roots, headers) = release_roots(code, before, owners)?;
+                            let index = quotes.len();
+                            quotes.push(roots);
+                            Fact::Release(index, headers)
+                        }
+                        ResourceInput::SourceFact(Measure::NativeRelease { at, callee, owners })
+                            if *at == step.at.site && matches!(callee,
+                                crate::compile::room::CallSource::Native(function) if Some(*function) == native) => {
+                            let (roots, headers) = release_roots(code, before, owners)?;
+                            let index = quotes.len();
+                            quotes.push(roots);
+                            Fact::Release(index, headers)
                         }
                         ResourceInput::SourceFact(measure) => Fact::Source(measure.clone()),
                     };
@@ -160,8 +235,8 @@ impl Flow {
                 0
             },
             loop_branch: super::control::branch(code, pc),
-            holds,
-            releases,
+            holds: holds.into(),
+            releases: releases.into(),
             quotes: quotes.into(),
             peak,
             delta,
@@ -178,4 +253,58 @@ impl Flow {
                 .unwrap_or(0),
         )
     }
+}
+
+fn release_roots(
+    code: &RegionCode,
+    before: &crate::compile::region_isa::RecoveryMap,
+    owners: &[crate::compile::room::Owner],
+) -> Result<(Box<[Root]>, u64), RegionError> {
+    use lash_kernel_state::kernel_internals::logical::Owner;
+    let slots = code.source().owner_slots().map_err(invalid)?;
+    let mut roots = std::collections::BTreeSet::new();
+    for owner in owners {
+        if let Some(root) = slots.root(owner, lash_kernel_doc::TaskId::MAIN, 0) {
+            roots.insert(root);
+        } else {
+            roots.extend(
+                slots
+                    .group(owner, lash_kernel_doc::TaskId::MAIN, 0)
+                    .ok_or_else(|| invalid(Refused::Facts))?
+                    .iter()
+                    .copied(),
+            );
+        }
+    }
+    let mut headers = 0_u64;
+    let mut quote = Vec::new();
+    for owner in roots {
+        let (register, capture) = match owner {
+            Owner::Frame { .. } => {
+                headers = headers
+                    .checked_add(lash_kernel_doc::LogicalHeldV1::FRAME)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
+                continue;
+            }
+            Owner::Incoming(_) => (
+                before
+                    .graph
+                    .incoming()
+                    .ok_or_else(|| invalid(Refused::Facts))?,
+                false,
+            ),
+            Owner::Value { slot, .. } => {
+                let Some((_, reg)) = before.roles.iter().find(|(actual, _)| *actual == slot) else {
+                    continue;
+                };
+                (*reg, matches!(slot, Slot::Capture(_)))
+            }
+            _ => return Err(invalid(Refused::Facts)),
+        };
+        quote.push(Root {
+            register: super::bind::physical(code, register)?,
+            capture,
+        });
+    }
+    Ok((quote.into(), headers))
 }

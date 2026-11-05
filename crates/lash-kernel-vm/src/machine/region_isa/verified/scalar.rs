@@ -225,7 +225,10 @@ impl Running<'_> {
                         if native.specialization.function != *function {
                             return Err(invalid(Refused::Source));
                         }
-                        if native.limit.is_some() || native.shares_params {
+                        if native.limit.is_some()
+                            || native.shares_params
+                            || !native.specialization.native.immediate_resources
+                        {
                             return Ok(None);
                         }
                         if self.arguments.len() > native.arity {

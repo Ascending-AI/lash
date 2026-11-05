@@ -85,8 +85,8 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
                             let function = exe.lib(*lib);
                             if types.len() == 2
                                 && types.iter().all(|kind| *kind == RegisterKind::Int)
-                                && let Some(op) = super::super::numeric_pair(function, true)
-                                    .and_then(|pair| pair.ints)
+                                && let Some(op) =
+                                    super::resource_pair(function, true).and_then(|pair| pair.ints)
                             {
                                 if op.compares() {
                                     return RegisterKind::Bool;
@@ -97,7 +97,7 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
                             }
                             if types.len() == 2
                                 && types.iter().all(|kind| *kind == RegisterKind::Float)
-                                && let Some(op) = super::super::numeric_pair(function, true)
+                                && let Some(op) = super::resource_pair(function, true)
                                     .and_then(|pair| pair.floats)
                             {
                                 return if op.compares() {
@@ -155,7 +155,7 @@ pub(super) fn specialize(exe: &Executable, draft: &mut RegionDraft) -> Result<()
             args,
             ..
         } = op
-            && let Some(pair) = super::super::numeric_pair(exe.lib(*lib), true)
+            && let Some(pair) = super::resource_pair(exe.lib(*lib), true)
         {
             let floats = pair.floats.is_some()
                 && (pair.ints.is_none()
@@ -192,7 +192,7 @@ pub(super) fn specialize(exe: &Executable, draft: &mut RegionDraft) -> Result<()
         {
             if let CheckedKind::Native { lib, function } = kernel.kind() {
                 let native = exe.lib(*lib);
-                let both = super::super::numeric_pair(native, true);
+                let both = super::resource_pair(native, true);
                 let floats = both.and_then(|pair| pair.floats).filter(|_| {
                     both.is_some_and(|pair| pair.ints.is_none())
                         || args

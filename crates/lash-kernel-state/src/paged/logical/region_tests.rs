@@ -383,6 +383,7 @@ fn region_graph_projection_commutes_with_itemized_source() {
     normalized_table_allocations();
     lease_read_presence_and_inline_values();
     atomic_source_root_transfer();
+    atomic_source_allocation_transfer();
     linear_chain_release_and_binding();
     imported_tuple_reads();
     call_and_measure_views();
@@ -1600,4 +1601,83 @@ fn lease_read_presence_and_inline_values() {
             .is_none()
     );
     assert_eq!(lease.member_count(object).unwrap(), 1);
+}
+
+// K-MEM-001: tuple and variable-cell membership consumes the actual source
+// occurrences in its allocation phase. A gross allocation peak is not legal.
+fn atomic_source_allocation_transfer() {
+    use lash_kernel_doc::LogicalHeldV1 as Cost;
+    for cell in [false, true] {
+        let (mut heap, _) = fresh();
+        let mut arena = Arena::new();
+        let ledger = heap.logical_ledger();
+        let source = if cell {
+            vec![Value::Int(7)]
+        } else {
+            vec![Value::Int(7), Value::Int(9)]
+        };
+        let inputs: Vec<_> = source
+            .iter()
+            .enumerate()
+            .map(|(index, value)| (owner(index as u32 + 1), RootValue::Value(value)))
+            .collect();
+        ledger
+            .borrow_mut()
+            .transfer_source(&mut arena, &heap, &[], &inputs)
+            .unwrap();
+        let entry = ledger.borrow().balance().unwrap().total().unwrap();
+        let stamp = ledger.borrow().stamp();
+        let mut lease = StateLease::acquire(&mut heap, &mut arena).unwrap();
+        let values: Vec<_> = source
+            .iter()
+            .map(|value| lease.import(value).unwrap())
+            .collect();
+        let expected = if cell {
+            Cost::OBJECT + Cost::REFERENCE
+        } else {
+            Cost::REFERENCE
+        };
+        let mut result = None;
+        for accepted in [false, true] {
+            let allocation = if cell {
+                LeaseAllocation::cell(&values[0])
+            } else {
+                LeaseAllocation::tuple(&values)
+            };
+            let step = lease
+                .stage(LeaseOp::AllocateMove {
+                    allocation,
+                    releases: &values,
+                })
+                .unwrap();
+            assert_eq!(step.facts().delta(), i128::from(expected));
+            assert_eq!(step.facts().peak(), expected);
+            let ready = step.reserve().unwrap();
+            if accepted {
+                result = ready.accept();
+            } else {
+                drop(ready);
+            }
+            assert!(ledger.borrow().is_current(&stamp));
+        }
+        let value = result.unwrap();
+        let graph = lease.materialize_graph().unwrap();
+        let output = graph.publication(value).unwrap();
+        let exit = region_fixtures::exit(
+            graph,
+            inputs.iter().map(|(owner, _)| *owner).collect::<Vec<_>>(),
+            [(owner(0), output)],
+            entry + expected,
+            i128::from(expected),
+        );
+        lease
+            .prepare(exit, entry + expected)
+            .unwrap()
+            .commit(|| {})
+            .unwrap();
+        assert_eq!(
+            ledger.borrow().balance().unwrap().total().unwrap(),
+            entry + expected
+        );
+    }
 }

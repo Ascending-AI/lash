@@ -27,6 +27,14 @@ pub(crate) use super::room::charges::region_isa::LoopInfo;
 pub(crate) use recovery::{GraphRecovery, RecoveryMap};
 pub(crate) use resources::{IndexedAmount, ResourceInput};
 
+fn resource_pair(lib: &super::Lib, charged: bool) -> Option<doc::scalar::Pair> {
+    lib.specialization
+        .native
+        .immediate_resources
+        .then(|| super::numeric_pair(lib, charged))
+        .flatten()
+}
+
 #[derive(Clone)]
 pub(crate) struct RegionDraft {
     executable: u64,
