@@ -1,8 +1,8 @@
-//! json.encode native version 1: the six-field style writer that archived
-//! helper definitions bind. ADR 0149 keeps each Rust implementation while a
-//! supported archived declaration binds it, so this is the exact pre-FIG-7637
-//! answer and resource contract. Version 2 is the shared encoder; this module
-//! must not change behavior.
+//! Native version 1 of json.encode, json.render and json.stringify: the
+//! writer that archived helper definitions bind. ADR 0149 keeps each Rust
+//! implementation while a supported archived declaration binds it, so this is
+//! the exact pre-FIG-7637 answer and resource contract of all three. Version 2
+//! is the shared encoder; this module must not change behavior.
 use std::sync::Arc;
 
 use lash_kernel_doc::NativeFunction;
@@ -13,15 +13,64 @@ use lash_kernel_doc::{
 
 use super::*;
 
-/// The version 1 native, with its own call and resource contract.
-pub(crate) fn native() -> Arc<dyn NativeFunction> {
-    Arc::new(super::super::Native {
-        function: encode,
-        arity: 3..=3,
+/// The version 1 native of `name`, with its own call and resource contract,
+/// or `None` when `name` has no version 1 writer.
+pub(super) fn native(name: &str) -> Option<Arc<dyn NativeFunction>> {
+    type Writer = fn(NativeCall<'_, '_>) -> Result<Value, NativeError>;
+    type Evaluator = crate::text_json::resources::Evaluator;
+    let (function, arity, resources): (Writer, _, Evaluator) = match name {
+        "json.encode" => (encode, 3..=3, |args| contract(args, Op::Encode)),
+        "json.render" => (render, 4..=4, |args| contract(args, Op::Render)),
+        "json.stringify" => (stringify, 1..=1, |args| contract(args, Op::Stringify)),
+        _ => return None,
+    };
+    Some(Arc::new(super::super::Native {
+        function,
+        arity,
         prepared: None,
         text_append: false,
-        resources: Some(contract),
-    })
+        resources: Some(resources),
+    }))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Op {
+    Encode,
+    Render,
+    Stringify,
+}
+
+/// Reads json.render's verbatim kinds, verbatim field and layout; `held`
+/// reads each text argument.
+fn render_policy<'call>(
+    args: &Args<'call>,
+    mut held: impl FnMut(&'call Value) -> Result<Cow<'call, str>, NativeError>,
+) -> Result<(u8, Option<String>, DecimalLayout), NativeError> {
+    let kinds = arg(args.values(), 1)?;
+    let (Value::Set(_), Some(table)) = (kinds, args.table(kinds)?) else {
+        return Err(raise("type_error", "JSON verbatim kinds must be a set"));
+    };
+    let mut verbatim_kinds = 0;
+    for chunk in table.chunks() {
+        for pair in chunk?.as_chunks::<2>().0.iter() {
+            if args.text(&pair[0])?.is_none() {
+                return Err(raise("type_error", "JSON verbatim kinds must be text"));
+            }
+            verbatim_kinds |= kind_bit(&held(&pair[0])?);
+        }
+    }
+    let verbatim_field = match arg(args.values(), 2)? {
+        Value::Absent => None,
+        field @ (Value::Text(_) | Value::LongText(_)) => Some(held(field)?.into_owned()),
+        _ => {
+            return Err(raise(
+                "type_error",
+                "JSON verbatim field must be text or absent",
+            ));
+        }
+    };
+    let layout = DecimalLayout::read(arg(args.values(), 3)?, args)?;
+    Ok((verbatim_kinds, verbatim_field, layout))
 }
 
 /// Reads the layout and six-field style; `held` reads each text argument.
@@ -84,16 +133,39 @@ fn style<'call>(
 fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let args = call.args;
     let (layout, encoding) = style(&args, |value| text_held(&args, call.new, value))?;
+    written(call, Some(layout), 0, None, Some(encoding), true)
+}
+
+fn render(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let args = call.args;
+    let (kinds, field, layout) = render_policy(&args, |value| text_held(&args, call.new, value))?;
+    written(call, Some(layout), kinds, field, None, true)
+}
+
+fn stringify(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    written(call, None, 0, None, None, false)
+}
+
+/// Writes argument 0 under the given policy into fresh text.
+fn written(
+    call: NativeCall<'_, '_>,
+    layout: Option<DecimalLayout>,
+    verbatim_kinds: u8,
+    verbatim_field: Option<String>,
+    encoding: Option<Encoding>,
+    raw_numbers: bool,
+) -> Result<Value, NativeError> {
+    let args = call.args;
     let mut out = Out {
         output: TextOutput {
             text: String::new(),
             new: call.new,
         },
         args: Some(&args),
-        layout: Some(layout),
-        verbatim_kinds: 0,
-        verbatim_field: None,
-        encoding: Some(encoding),
+        layout,
+        verbatim_kinds,
+        verbatim_field,
+        encoding,
         indentation: None,
     };
     write(
@@ -101,14 +173,14 @@ fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         arg(args.values(), 0)?,
         &mut Vec::new(),
         0,
-        true,
+        raw_numbers,
         &mut out,
     )?;
     let text = out.output.text;
     Ok(call.new.text(&text))
 }
 
-fn contract(args: Args<'_>) -> Result<Contract, NativeError> {
+fn contract(args: Args<'_>, op: Op) -> Result<Contract, NativeError> {
     let mut out = Out {
         output: output::Count::default(),
         args: Some(&args),
@@ -118,18 +190,30 @@ fn contract(args: Args<'_>) -> Result<Contract, NativeError> {
         encoding: None,
         indentation: None,
     };
-    let answer = style(&args, |value| text_copy(&args, value)).and_then(|(layout, encoding)| {
-        out.layout = Some(layout);
-        out.encoding = Some(encoding);
+    let answer = (|| {
+        match op {
+            Op::Encode => {
+                let (layout, encoding) = style(&args, |value| text_copy(&args, value))?;
+                out.layout = Some(layout);
+                out.encoding = Some(encoding);
+            }
+            Op::Render => {
+                let (kinds, field, layout) = render_policy(&args, |value| text_copy(&args, value))?;
+                out.verbatim_kinds = kinds;
+                out.verbatim_field = field;
+                out.layout = Some(layout);
+            }
+            Op::Stringify => {}
+        }
         write(
             &args,
             arg(args.values(), 0)?,
             &mut vec![],
             0,
-            true,
+            op != Op::Stringify,
             &mut out,
         )
-    });
+    })();
     let mut contract = match answer {
         Ok(()) => Contract::value(
             Exit::Returned,
@@ -297,7 +381,18 @@ fn write<'call, S: Output>(
                 let raw_numbers = if matches!(value, Value::Map(_)) {
                     out.raw_numbers("map", raw_numbers)
                 } else {
-                    out.raw_numbers("record", raw_numbers)
+                    let mut verbatim = false;
+                    if let Some(field) = &out.verbatim_field {
+                        for (name, value) in &fields {
+                            if matches!(value, Value::Text(_) | Value::LongText(_))
+                                && *text_copy(args, name)? == **field
+                            {
+                                verbatim = true;
+                                break;
+                            }
+                        }
+                    }
+                    out.raw_numbers("record", raw_numbers) && !verbatim
                 };
                 #[cfg(test)]
                 let _fields = crate::native_contract_laws::scratch_values(

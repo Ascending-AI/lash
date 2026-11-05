@@ -19,8 +19,28 @@ mod output;
 pub(super) mod resources;
 use output::{Output, Text as TextOutput};
 
-mod encode_v1;
-pub(super) use encode_v1::native as encode_v1;
+mod v1;
+
+/// The native version the current definition of `name` binds (ADR 0149).
+/// FIG-7637 moved these writers onto the shared encoder, which changed their
+/// answers, so each is at version 2 and keeps its version 1 writer.
+pub(super) fn native_version(name: &str) -> u32 {
+    match name {
+        "json.encode" | "json.render" | "json.stringify" => 2,
+        _ => lash_kernel_doc::FIRST_NATIVE_VERSION,
+    }
+}
+
+/// A superseded native version that archived definitions still bind.
+pub(super) fn retained_native(
+    name: &str,
+    version: u32,
+) -> Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> {
+    match version {
+        1 if native_version(name) == 2 => v1::native(name),
+        _ => None,
+    }
+}
 mod encoder;
 pub use encoder::{JsonModel, JsonTarget, encode_datum};
 use encoder::{Live, Numeric, Policy, encode as encode_value};
@@ -609,6 +629,7 @@ fn write(
             context: "json",
             path: "$",
             limit: args.limits().document_depth().min(64),
+            json_number: false,
         },
     )
     .map(|_| ())
@@ -1066,7 +1087,7 @@ struct Encoding {
 }
 
 fn encode_definition(selection: &Selection<'_>) -> Function {
-    let mut function = definition(
+    definition(
         selection,
         "json.encode",
         &[
@@ -1100,11 +1121,7 @@ fn encode_definition(selection: &Selection<'_>) -> Function {
             "cycle",
         ],
         encode,
-    );
-    if let Some(definition) = &mut function.definition {
-        definition.native_version = 2;
-    }
-    function
+    )
 }
 fn encoding(args: &Args<'_>, out: &mut Out<'_, '_, impl Output>) -> Result<(), NativeError> {
     out.layout = Some(DecimalLayout::read(arg(args.values(), 1)?, args)?);
@@ -1190,6 +1207,7 @@ fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             context: "json.dumps",
             path: "$",
             limit: args.limits().document_depth(),
+            json_number: false,
         },
     )?;
     let text = out.output.text;
@@ -1248,6 +1266,7 @@ fn boundary(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             context: &context,
             path: &path,
             limit: args.limits().document_depth(),
+            json_number: false,
         },
     )?;
     let text = out.output.text;

@@ -167,10 +167,15 @@ pub fn text_json() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
         .collect()
 }
 
-/// json.encode native version 1, retained while archived definitions bind it
-/// (ADR 0149). The catalogue authors only the current version 2.
-pub(crate) fn json_encode_v1() -> Arc<dyn NativeFunction> {
-    json::encode_v1()
+/// The native version the current definition of `name` binds (ADR 0149).
+pub(crate) fn native_version(name: &str) -> u32 {
+    json::native_version(name)
+}
+
+/// A superseded native version that archived definitions still bind
+/// (ADR 0149). The catalogue authors only current versions.
+pub(crate) fn retained_native(name: &str, version: u32) -> Option<Arc<dyn NativeFunction>> {
+    json::retained_native(name, version)
 }
 
 /// Constructs one native from the same catalogue that authors its definition.
@@ -248,6 +253,7 @@ fn prepared_definition(
     }
     // All names are literals supplied by this module, or literals followed by
     // decimal Unicode-version components; none comes from guest input.
+    let native_version = json::native_version(name);
     let name = match FunctionName::new(name) {
         Ok(name) => name,
         Err(_) => unreachable!("library names are qualified identifiers"),
@@ -280,7 +286,7 @@ fn prepared_definition(
             errors: errors.iter().map(|kind| (*kind).to_owned()).collect(),
             guard: None,
             implementation: Implementation::Native { charge },
-            native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+            native_version,
         })),
         native: Some(Arc::new(Native {
             function: native,

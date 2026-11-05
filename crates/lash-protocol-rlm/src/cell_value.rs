@@ -1,10 +1,19 @@
 //! Guest JSON projections share the host/text encoder. A renderer must always
 //! produce a diagnostic, so a refused document becomes one error record carrying
-//! the encoder's call and path. It never recursively invents JSON for guest kinds.
+//! the encoder's call and path. It never recursively invents JSON for guest
+//! kinds, with one exception: an error is read as its typed fact (see
+//! [`typed_error`]), because a host reads a caught failure's cause from it.
 use lash_kernel_doc::{Datum, Float, Integer, NumberPolicy};
 use serde_json::Value as Json;
 
 pub(crate) fn datum_json(value: &Datum, model: lash_kernel_lib::JsonModel, context: &str) -> Json {
+    let typed;
+    let value = if holds_error(value) {
+        typed = typed_errors(value);
+        &typed
+    } else {
+        value
+    };
     lash_kernel_lib::encode_datum(
         value,
         model,
@@ -15,6 +24,55 @@ pub(crate) fn datum_json(value: &Datum, model: lash_kernel_lib::JsonModel, conte
     .map_err(|error| error.to_string())
     .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
     .unwrap_or_else(|message| serde_json::json!({"$kind": "not_data", "message": message}))
+}
+
+/// FIG-5803: a binding that caught a refusal names its typed cause. Guest
+/// JSON text writes an error object as `{}`, which would drop it, so a host
+/// reads an error as `{"$kind": "error", kind, message, data}`, `data` being
+/// the failure evidence the error was raised with.
+fn typed_error(error: &lash_kernel_doc::ErrorDatum) -> Datum {
+    Datum::Record(vec![
+        ("$kind".into(), Datum::Text("error".into())),
+        ("kind".into(), Datum::Text(error.kind.clone())),
+        ("message".into(), Datum::Text(error.message.clone())),
+        ("data".into(), typed_errors(error.raw())),
+    ])
+}
+
+fn holds_error(value: &Datum) -> bool {
+    match value {
+        Datum::Error(_) => true,
+        Datum::List(items) | Datum::Tuple(items) | Datum::Set(items) => {
+            items.iter().any(holds_error)
+        }
+        Datum::Record(fields) => fields.iter().any(|(_, value)| holds_error(value)),
+        Datum::Map(entries) => entries
+            .iter()
+            .any(|(key, value)| holds_error(key) || holds_error(value)),
+        _ => false,
+    }
+}
+
+fn typed_errors(value: &Datum) -> Datum {
+    match value {
+        Datum::Error(error) => typed_error(error),
+        Datum::List(items) => Datum::List(items.iter().map(typed_errors).collect()),
+        Datum::Tuple(items) => Datum::Tuple(items.iter().map(typed_errors).collect()),
+        Datum::Set(items) => Datum::Set(items.iter().map(typed_errors).collect()),
+        Datum::Record(fields) => Datum::Record(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), typed_errors(value)))
+                .collect(),
+        ),
+        Datum::Map(entries) => Datum::Map(
+            entries
+                .iter()
+                .map(|(key, value)| (typed_errors(key), typed_errors(value)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 /// A host's JSON as data a session binds: an array is a list and an object

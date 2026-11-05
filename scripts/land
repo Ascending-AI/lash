@@ -204,6 +204,12 @@ def main():
         run("python3", "scripts/perf-gates.py", "check-sources")
         run("python3", "scripts/apply_format_witnesses.py", "--check-artifacts")
         run("kiln", "build", "//:schema_checks", "//:workspace_clippy")
+        # ADR 0149's release law: a changed helper or native answer lands
+        # only with its recorded release and native version. It is a test,
+        # so the build above cannot run it (FIG-7640).
+        run("kiln", "test", "//crates/lash-kernel-releases:lash-kernel-releases__unit_test",
+            "--test_arg=--exact",
+            "--test_arg=tests::checked_archive_covers_current_release_and_native_implementations")
         if args.dry_run:
             print("dry-run: push skipped; HEAD " + git("rev-parse", "HEAD"))
             return

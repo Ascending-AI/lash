@@ -71,9 +71,19 @@ pub use collections::{
     implement_collections, register_collections,
 };
 
-/// json.encode native version 1, retained while archived definitions bind it.
-pub fn json_encode_v1() -> std::sync::Arc<dyn lash_kernel_doc::NativeFunction> {
-    text_json::json_encode_v1()
+/// The native version the current kernel-library definition of `name` binds
+/// (ADR 0149). A name this library does not define is at the first version.
+pub fn native_version(name: &str) -> u32 {
+    text_json::native_version(name)
+}
+
+/// A superseded kernel-library native version that archived definitions still
+/// bind (ADR 0149), or `None` when `name` keeps no such version.
+pub fn retained_native(
+    name: &str,
+    version: u32,
+) -> Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> {
+    text_json::retained_native(name, version)
 }
 
 /// A pure native constructor selected by a build's identity table. The

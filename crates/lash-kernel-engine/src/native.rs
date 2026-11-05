@@ -35,10 +35,10 @@ pub(crate) fn implementation(
     let _ = (registry, callees, function);
     // These version cases belong to Rust implementations, never declarations.
     match (package, native_version) {
-        ("kernel", 1) if name == "json.encode" => Some(lash_kernel_lib::json_encode_v1()),
-        ("kernel", version) if version == if name == "json.encode" { 2 } else { 1 } => {
+        ("kernel", version) if version == lash_kernel_lib::native_version(name) => {
             lash_kernel_lib::native(name).or_else(|| lash_kernel_vm::machine_native(name))
         }
+        ("kernel", version) => lash_kernel_lib::retained_native(name, version),
         #[cfg(feature = "dialect-typescript")]
         ("regex.ecma", 1) => lash_ext_regex_ecma::native(
             name,
@@ -82,26 +82,22 @@ mod tests {
         assert!(implementation("kernel", "same", 2, function, &[], &registry).is_none());
     }
 
-    /// FIG-7639: a superseded version that archived definitions bind keeps
-    /// its own answer. json.encode version 1 reads a six-field style, which
-    /// the current version 2 refuses.
-    #[test]
-    fn a_retained_native_version_answers_with_its_own_implementation() {
+    /// Runs `main` over the archived version 1 declaration of kernel `name`,
+    /// whose call is `invoke @<id>(<args>)` after `lets`.
+    fn run_version_1(name: &str, lets: &str, args: &str) -> Result<crate::Datum, (String, String)> {
         let archive = lash_kernel_releases::helper_archive().unwrap();
         let id = archive
             .releases
             .iter()
             .flat_map(|release| &release.natives)
             .find(|(_, native)| {
-                native.package == "kernel"
-                    && native.name == "json.encode"
-                    && native.native_version == 1
+                native.package == "kernel" && native.name == name && native.native_version == 1
             })
             .map(|(id, _)| *id)
-            .unwrap();
+            .unwrap_or_else(|| panic!("no archived kernel:{name} version 1"));
         let engine = crate::Engine::new(crate::Limits::default()).unwrap();
         let document = lash_kernel_doc::parse_document(&format!(
-            "kernel 1\nnumbers by_spelling\nlibrary @{id}\nmain {{ let v = invoke @{id}([1, \"é\"], (0, 21, false, false), (true, \",\", \":\", 2, false, (\"a\", \"b\", \"c\"))) return v }}"
+            "kernel 1\nnumbers by_spelling\nlibrary @{id}\nmain {{ {lets} let v = invoke @{id}({args}) return v }}"
         ))
         .unwrap();
         let link = lash_kernel_value::Link {
@@ -117,10 +113,45 @@ mod tests {
         let program = engine
             .prepare(link.identity(), &content, lash_kernel_vm::Target::Main)
             .unwrap();
-        let crate::Progress::Complete(Ok(value)) = engine.run(&program, vec![]).unwrap().state
-        else {
-            panic!("json.encode version 1 did not complete");
-        };
-        assert_eq!(value.data(), &crate::Datum::Text("[1,\"\\u00e9\"]".into()));
+        match engine.run(&program, vec![]).unwrap().state {
+            crate::Progress::Complete(Ok(value)) => Ok(value.data().clone()),
+            crate::Progress::Complete(Err(crate::CompletionError::Run(
+                crate::RunError::Uncaught {
+                    error: crate::Datum::Error(error),
+                    ..
+                },
+            ))) => Err((error.kind.clone(), error.message.clone())),
+            _ => panic!("kernel:{name} version 1 neither answered nor raised"),
+        }
+    }
+
+    /// FIG-7639, FIG-7640: a superseded version that archived definitions
+    /// bind keeps its own answer. The expected answers follow the writer as
+    /// it was before FIG-7637 (0f8721081a^): json.encode version 1 reads a
+    /// six-field style, which version 2 refuses; json.render and
+    /// json.stringify version 1 refuse without a JSON path, where version 2
+    /// names one (`json $: ...`, `json $[1]: ...`).
+    #[test]
+    fn a_retained_native_version_answers_with_its_own_implementation() {
+        assert_eq!(
+            run_version_1(
+                "json.encode",
+                "",
+                "[1, \"é\"], (0, 21, false, false), (true, \",\", \":\", 2, false, (\"a\", \"b\", \"c\"))"
+            ),
+            Ok(crate::Datum::Text("[1,\"\\u00e9\"]".into()))
+        );
+        assert_eq!(
+            run_version_1(
+                "json.render",
+                "let m = map { 1: 2 } let kinds = set { }",
+                "m, kinds, absent, (0, 21, false, false)"
+            ),
+            Err(("json_key".into(), "JSON map keys must be text".into()))
+        );
+        assert_eq!(
+            run_version_1("json.stringify", "let l = [1, nan]", "l"),
+            Err(("json_number".into(), "JSON refuses NaN and infinity".into()))
+        );
     }
 }

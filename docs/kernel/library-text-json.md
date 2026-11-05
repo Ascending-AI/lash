@@ -211,6 +211,10 @@ the baseline needs a new definition identity (`K-VER-002`).
   The target changes only function transport: `host` retains the existing
   canonical `$lash_function` wire object and its reserved-key escaping;
   `text` omits function properties and emits null for function array entries.
+  `encode_datum` spells each finite float as `Float::json_number` does, the
+  one number spelling of host reads such as tool arguments and cell values: a
+  whole float below 2^53 is a JSON integer and `2**53` is
+  `9007199254740992.0`. `json.boundary` spells floats in JavaScript's decimal layout.
   Callbacks and toJSON evaluation prepare values before this encoder runs.
   The encoder alone owns omission, escaping, ordering and path diagnostics.
   A root without a JSON representation returns absent to JSON.stringify;

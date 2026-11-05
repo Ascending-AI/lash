@@ -283,6 +283,7 @@ fn writer(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
                     context: &context,
                     path: &path,
                     limit: args.limits().document_depth(),
+                    json_number: false,
                 },
             )
         } else if op == "encode" {
@@ -297,6 +298,7 @@ fn writer(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
                     context: "json.dumps",
                     path: "$",
                     limit: args.limits().document_depth(),
+                    json_number: false,
                 },
             )
         } else {

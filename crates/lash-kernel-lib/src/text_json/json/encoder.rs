@@ -318,6 +318,7 @@ fn normalize<A: Source>(
                         target: None,
                         context: policy.context,
                         limit: policy.limit,
+                        json_number: policy.json_number,
                         active: Vec::new(),
                     }
                     .walk(key, view, 0, true, policy.path)?;
@@ -400,6 +401,7 @@ struct Encoder<'a, 'out, 'args, 'call, A: Source, S: Output> {
     target: Option<JsonTarget>,
     context: &'a str,
     limit: usize,
+    json_number: bool,
     active: Vec<A::Identity>,
 }
 
@@ -408,6 +410,10 @@ pub(super) struct Policy<'a> {
     pub context: &'a str,
     pub path: &'a str,
     pub limit: usize,
+    /// Spell finite floats as [`Float::json_number`] does: the host's one
+    /// number spelling, for copied-out data ([`encode_datum`]). Guest JSON
+    /// text spells them by the caller's decimal layout instead.
+    pub json_number: bool,
 }
 
 pub(super) fn encode<A: Source>(
@@ -428,6 +434,7 @@ pub(super) fn encode<A: Source>(
         target: policy.target,
         context: policy.context,
         limit: policy.limit,
+        json_number: policy.json_number,
         active: Vec::new(),
     }
     .walk(value, view, depth, raw_numbers, policy.path)
@@ -488,6 +495,12 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                         "JSON refuses NaN and infinity",
                     ));
                 }
+            }
+            View::Number(Numeric::Float(number)) if self.json_number => {
+                let number = number
+                    .json_number()
+                    .ok_or(NativeError::Malformed("a finite float has a JSON number"))?;
+                self.out.push(&number.to_string())?;
             }
             View::Number(number) => self
                 .out
@@ -564,6 +577,7 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                                     context,
                                     path: &child,
                                     limit,
+                                    json_number: self.json_number,
                                 },
                             )
                         })
@@ -630,6 +644,7 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                                     context,
                                     path: &child,
                                     limit,
+                                    json_number: self.json_number,
                                 },
                             )
                         })
@@ -693,7 +708,11 @@ impl Output for StringOutput {
 
 /// Encode copied-out guest data using the very same traversal as `json.boundary`.
 /// A required JSON document refuses an undefined root. The target changes only
-/// function transport, as documented on [`JsonTarget`]. No guest value is mutated.
+/// function transport, as documented on [`JsonTarget`]. A finite float is
+/// spelled as [`Float::json_number`] does, the one spelling of every host
+/// reading (a tool's arguments, a cell's values): a whole float below 2^53 is
+/// a JSON integer, and `2**53` stays `9007199254740992.0`. No guest value is
+/// mutated.
 pub fn encode_datum(
     value: &Datum,
     model: JsonModel,
@@ -704,12 +723,7 @@ pub fn encode_datum(
     let mut out = Out {
         output: StringOutput(String::new()),
         args: None,
-        layout: Some(DecimalLayout {
-            fixed_from: -5,
-            fixed_until: 21,
-            exponent_plus: true,
-            negative_zero: false,
-        }),
+        layout: None,
         verbatim_kinds: 0,
         verbatim_field: None,
         encoding: None,
@@ -726,6 +740,7 @@ pub fn encode_datum(
             context,
             path: "$",
             limit,
+            json_number: true,
         },
     )?;
     if written {
