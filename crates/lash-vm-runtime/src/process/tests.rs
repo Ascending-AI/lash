@@ -14,7 +14,7 @@ use lash_vm_client::wire::OutcomeWire;
 
 use super::advance::{advance, decode, state_format};
 use super::state::{
-    Admission, Issued, KERNEL_RUN_STEP, KernelRunInput, KernelRunOutput, ParkedPage, Phase,
+    Admission, Issued, KERNEL_RUN_STEP, KernelRunInput, KernelRunOutput, ParkedPage,
 };
 use lash_kernel_doc::KernelVersion;
 use lash_kernel_state::{AdmittedRequest, AdmittedWait};
@@ -204,26 +204,32 @@ fn a_state_missing_the_origin_of_its_page_admission_or_outcome_is_refused() {
     let (state, _) = settle(state, &first, completed("\"a\"".to_owned()));
     let (written, _) = decode(KernelVersion::NEWEST, &state).expect("a written state decodes");
     assert!(
-        written.parked.is_some() && written.admissions.len() == 2 && written.settled.len() == 1,
+        written.progress.park().is_some()
+            && written.admissions.len() == 2
+            && written.settled.len() == 1,
         "the state holds a parked page, two admissions and a settled outcome"
     );
     let json: serde_json::Value =
         serde_json::from_slice(&state.bytes).expect("a written state is JSON");
-    // Each holder of an origin, by its JSON pointer: the parked run, every
-    // held admission and the settled outcome.
-    let holders = std::iter::once(("a parked page", "/parked".to_owned(), "by"))
-        .chain(
-            json["admissions"]
-                .as_object()
-                .expect("the parked run holds admissions")
-                .keys()
-                .map(|wait| ("an admission", format!("/admissions/{wait}"), "by")),
-        )
-        .chain(std::iter::once((
-            "a settled outcome",
-            "/settled/0".to_owned(),
-            "source",
-        )));
+    // Each holder of an origin, by its JSON pointer: the park the in-flight
+    // run resumes, every held admission and the settled outcome.
+    let holders = std::iter::once((
+        "a parked page",
+        "/progress/running/from/run".to_owned(),
+        "by",
+    ))
+    .chain(
+        json["admissions"]
+            .as_object()
+            .expect("the parked run holds admissions")
+            .keys()
+            .map(|wait| ("an admission", format!("/admissions/{wait}"), "by")),
+    )
+    .chain(std::iter::once((
+        "a settled outcome",
+        "/settled/0".to_owned(),
+        "source",
+    )));
     for (what, holder, origin) in holders {
         let mut stripped = json.clone();
         stripped
@@ -354,7 +360,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         let outcome = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
             lash_core::ToolCallOutput::success(serde_json::json!(["a", "b"])),
         );
-        let (state, action) = settle(
+        let (_, action) = settle(
             state,
             &run2,
             completed(
@@ -370,14 +376,6 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
             ),
         );
         assert_eq!(action, EngineAction::Terminal(outcome));
-        assert_eq!(state.pages, None);
-        assert_eq!(
-            decode(KernelVersion::NEWEST, &state)
-                .expect("the state decodes")
-                .0
-                .phase,
-            Phase::Ended
-        );
     }
 }
 

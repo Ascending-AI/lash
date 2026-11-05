@@ -63,7 +63,13 @@ const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMEN
 /// A parked run carries through a checked correspondence. Its pages,
 /// execution requirements and closure roots move in one owner transaction.
 ///
+/// The same execution root holds the engine state that names the run
+/// (`process::state::KernelEngineState`): its progress, the park it stands
+/// on with that park's requirements, and its waits, admissions and settled
+/// outcomes. This guard names that state too.
+///
 /// version_guard(
+///     roots(path = "crates/lash-vm-runtime/src/process/state.rs", KernelEngineState),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/root.rs",
 ///         CheckpointRoot, HeapRoot, RootStatus, EndedRecord, SavedMeters, CellTargetKind,

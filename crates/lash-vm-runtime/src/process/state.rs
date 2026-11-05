@@ -205,18 +205,54 @@ pub(crate) enum Wait {
     Step { step: StepName, identity: EffectId },
 }
 
-/// Where the process is between transitions.
+/// The run as the machine sealed it at a park, with what running the
+/// process requires of a node while it stands on that park: what the park
+/// recorded (FIG-6985).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Park {
+    pub(crate) run: ParkedRun,
+    #[serde(
+        default,
+        skip_serializing_if = "lash_vocabulary::claims::ClaimRequirements::is_empty"
+    )]
+    pub(crate) requirements: lash_vocabulary::claims::ClaimRequirements,
+}
+
+/// Where the process is between transitions. An ended process has no
+/// engine state: its terminal transaction deletes the state it stood on,
+/// whatever ended it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum Phase {
-    /// A `kernel_run` is admitted: it resumes the saved run and hands it
-    /// `delivering`.
+pub(crate) enum Progress {
+    /// A `kernel_run` is admitted: it resumes `from`, the last park, or
+    /// the document's entry when the process has not parked yet, and hands
+    /// the run what settled.
     Running {
         step: StepName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<Park>,
     },
     /// The run is parked on its open waits.
-    Parked,
-    Ended,
+    Parked(Park),
+}
+
+impl Progress {
+    /// The park the process stands on: the one it is parked at, or the one
+    /// its in-flight run resumes.
+    pub(crate) fn park(&self) -> Option<&Park> {
+        match self {
+            Self::Running { from, .. } => from.as_ref(),
+            Self::Parked(park) => Some(park),
+        }
+    }
+
+    pub(crate) fn park_mut(&mut self) -> Option<&mut Park> {
+        match self {
+            Self::Running { from, .. } => from.as_mut(),
+            Self::Parked(park) => Some(park),
+        }
+    }
 }
 
 /// The engine state of one process.
@@ -224,10 +260,7 @@ pub(crate) enum Phase {
 #[serde(deny_unknown_fields)]
 pub(crate) struct KernelEngineState {
     pub(crate) payload: serde_json::Value,
-    /// The run as the machine sealed it at its last park; `None` before
-    /// the first and once it ended.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) parked: Option<ParkedRun>,
+    pub(crate) progress: Progress,
     /// The admission of every wait the parked run holds, by the machine's
     /// wait id, until a committed run has been handed its outcome.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -243,15 +276,6 @@ pub(crate) struct KernelEngineState {
     /// order they settled.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) settled: Vec<Delivery>,
-    pub(crate) phase: Phase,
-    /// What running the process requires of a node while its run is
-    /// parked: what the run's last park recorded (FIG-6985). Empty before
-    /// the first park and once the run ended.
-    #[serde(
-        default,
-        skip_serializing_if = "lash_vocabulary::claims::ClaimRequirements::is_empty"
-    )]
-    pub(crate) requirements: lash_vocabulary::claims::ClaimRequirements,
 }
 
 /// The input of one `kernel_run`: everything the step recomputes from.

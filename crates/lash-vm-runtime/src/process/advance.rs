@@ -26,7 +26,7 @@ use lash_kernel_doc::KernelVersion;
 
 use super::state::{
     Delivery, DeliverySource, HeldAdmission, Issued, KERNEL_RUN_STEP, KernelEngineState,
-    KernelRunInput, KernelRunOutput, ParkedRun, Phase, Wait, refused,
+    KernelRunInput, KernelRunOutput, Park, ParkedRun, Progress, Wait, refused,
 };
 use super::{KernelProcessFailureCode, failure};
 
@@ -49,16 +49,18 @@ fn infra(message: impl Into<String>) -> ProcessInfraError {
 }
 
 /// `state` in the format of the kernel version its run is parked under,
-/// or `written` when it holds no run yet, standing on its run's page.
+/// or `written` when it has not parked yet, standing on its park's page
+/// and requiring what that park recorded.
 pub(crate) fn encode(
     state: &KernelEngineState,
     written: KernelVersion,
 ) -> Result<EngineState, ProcessInfraError> {
-    let kernel = match &state.parked {
-        Some(parked) => KernelVersion::of(parked.page.kernel).ok_or_else(|| {
+    let park = state.progress.park();
+    let kernel = match park {
+        Some(park) => KernelVersion::of(park.run.page.kernel).ok_or_else(|| {
             infra(format!(
                 "the run is parked under kernel version {}, which this build does not interpret",
-                parked.page.kernel
+                park.run.page.kernel
             ))
         })?,
         None => written,
@@ -67,13 +69,10 @@ pub(crate) fn encode(
         staged: Vec::new(),
         format: state_format(kernel),
         bytes: serde_json::to_vec(state).map_err(|error| infra(error.to_string()))?,
-        pages: state.parked.map(|parked| parked.page.root),
-        // An ended process requires nothing, whatever its last park did.
-        requirements: if matches!(state.phase, Phase::Ended) {
-            lash_vocabulary::claims::ClaimRequirements::default()
-        } else {
-            state.requirements.clone()
-        },
+        pages: park.map(|park| park.run.page.root),
+        requirements: park
+            .map(|park| park.requirements.clone())
+            .unwrap_or_default(),
     })
 }
 
@@ -92,12 +91,9 @@ pub(crate) fn decode(
                 state_format(writes)
             ))
         })?;
-    let decoded: KernelEngineState = serde_json::from_slice(&state.bytes).map_err(|error| {
-        infra(
-            pre_heap(&state.bytes).map_or_else(|| error.to_string(), |refusal| refusal.to_string()),
-        )
-    })?;
-    if decoded.parked.map(|parked| parked.page.root) != state.pages {
+    let decoded: KernelEngineState = serde_json::from_slice(&state.bytes)
+        .map_err(|error| infra(retired(&state.bytes).unwrap_or_else(|| error.to_string())))?;
+    if decoded.progress.park().map(|park| park.run.page.root) != state.pages {
         return Err(infra(
             "the state names another run page than the process's root holds",
         ));
@@ -105,19 +101,36 @@ pub(crate) fn decode(
     Ok((decoded, written))
 }
 
-/// The refusal of a state that parks its run in the whole-state shape the
-/// persistent heap retired (FIG-6193): such a state names its run by the
-/// sealed KernelWhole graph itself, as base64 text, where this build names
-/// a page. Asked only of a state that did not decode, so a state of this
-/// build is read once; the old shape is named, never read.
-fn pre_heap(bytes: &[u8]) -> Option<GraphRefusal> {
+/// The refusal of a state in a shape this build retired. Asked only of a
+/// state that did not decode, so a state of this build is read once; an
+/// old shape is named, never read.
+///
+/// - The whole-state shape the persistent heap retired (FIG-6193) names
+///   its run by the sealed KernelWhole graph itself, as base64 text, where
+///   this build names a page.
+/// - The phase shape (FIG-7652) kept its park, its requirements and its
+///   phase apart, so an ended process could hold its last park; this build
+///   keeps them as one `progress`.
+fn retired(bytes: &[u8]) -> Option<String> {
     const KERNEL_WHOLE: NodeKind = NodeKind(16);
     let state: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-    state.get("parked")?.is_string().then_some(())?;
-    Some(GraphRefusal::RetiredFormat {
-        node: None,
-        kind: KERNEL_WHOLE.0,
-        format: KERNEL_WHOLE.retired_format()?,
+    if state
+        .get("parked")
+        .is_some_and(serde_json::Value::is_string)
+    {
+        return Some(
+            GraphRefusal::RetiredFormat {
+                node: None,
+                kind: KERNEL_WHOLE.0,
+                format: KERNEL_WHOLE.retired_format()?,
+            }
+            .to_string(),
+        );
+    }
+    state.get("phase").map(|_| {
+        "the state is in the phase shape this build retired (FIG-7652); reset the store or \
+         recreate the process"
+            .to_owned()
     })
 }
 
@@ -132,38 +145,47 @@ pub(crate) fn advance(
         if !state.bytes.is_empty() {
             return Err(infra("a started process already has state"));
         }
-        let mut state = KernelEngineState {
+        let step = run_step(0);
+        let request = run_request(
+            step.clone(),
+            KernelRunInput {
+                payload: payload.clone(),
+                parked: None,
+                admissions: Default::default(),
+                deliver: Vec::new(),
+            },
+        )?;
+        let state = KernelEngineState {
             payload,
-            parked: None,
+            progress: Progress::Running { step, from: None },
             admissions: Default::default(),
-            runs: 0,
+            runs: 1,
             effects: 0,
             waits: Default::default(),
             settled: Vec::new(),
-            phase: Phase::Ended,
-            requirements: lash_vocabulary::claims::ClaimRequirements::default(),
         };
-        let action = run(&mut state, Vec::new())?;
+        let action = EngineAction::Steps {
+            steps: vec![request],
+            wake: None,
+        };
         return Ok((encode(&state, writes)?, action));
     }
-    let (mut state, written) = decode(writes, &state)?;
-    let action = transition(&mut state, event)?;
-    Ok((encode(&state, written)?, action))
+    let (mut decoded, written) = decode(writes, &state)?;
+    match transition(&mut decoded, event)? {
+        // An ended process has no state: its terminal transaction deletes
+        // the one it stood on, so the transition hands that back untouched.
+        terminal @ EngineAction::Terminal(_) => Ok((state, terminal)),
+        action => Ok((encode(&decoded, written)?, action)),
+    }
 }
 
 fn transition(
     state: &mut KernelEngineState,
     event: EngineEvent,
 ) -> Result<EngineAction, ProcessInfraError> {
-    if matches!(state.phase, Phase::Ended) {
-        return Err(infra("an ended process received an event"));
-    }
     match event {
         EngineEvent::Started { .. } => Err(infra("a process started twice")),
-        EngineEvent::Cancelled { origin, .. } => {
-            state.phase = Phase::Ended;
-            Ok(EngineAction::Terminal(cancelled(origin)))
-        }
+        EngineEvent::Cancelled { origin, .. } => Ok(EngineAction::Terminal(cancelled(origin))),
         EngineEvent::StepSettled { step, outcome, .. } => step_settled(state, &step, outcome),
         EngineEvent::Woke => Ok(EngineAction::Idle),
         // A process is awaited through the await effect, which is a step.
@@ -183,7 +205,7 @@ fn step_settled(
     step: &StepName,
     outcome: SettledOutput,
 ) -> Result<EngineAction, ProcessInfraError> {
-    if matches!(&state.phase, Phase::Running { step: running } if running == step) {
+    if matches!(&state.progress, Progress::Running { step: running, .. } if running == step) {
         return run_settled(state, outcome);
     }
     let Some(wait) = state
@@ -264,14 +286,15 @@ fn resume(
     state: &mut KernelEngineState,
     steps: Vec<StepRequest>,
 ) -> Result<EngineAction, ProcessInfraError> {
-    if matches!(state.phase, Phase::Running { .. }) {
+    let Progress::Parked(park) = &state.progress else {
         return Ok(if steps.is_empty() {
             standing(state)
         } else {
             EngineAction::Steps { steps, wake: None }
         });
-    }
-    run(state, steps)
+    };
+    let park = park.clone();
+    run(state, Some(park), steps)
 }
 
 fn run_settled(
@@ -286,13 +309,11 @@ fn run_settled(
         SettledOutput::Failed(material) => {
             let output = serde_json::from_str::<lash_core::ToolCallOutput>(material.payload())
                 .map_err(|error| infra(format!("kernel_run failure answered {error}")))?;
-            state.phase = Phase::Ended;
             return Ok(EngineAction::Terminal(
                 lash_execution_contracts::process::ProcessOutcome::from_tool_output(output),
             ));
         }
         SettledOutput::TimedOut { cause, .. } => {
-            state.phase = Phase::Ended;
             return Ok(EngineAction::Terminal(failure(
                 KernelProcessFailureCode::BoundExceeded,
                 format!("the run passed its limit ({cause:?}) before it parked"),
@@ -302,7 +323,6 @@ fn run_settled(
         // An interrupted or stopped run reached no park, after every retry
         // its step kind's policy allowed: the process ends.
         unsettled => {
-            state.phase = Phase::Ended;
             return Ok(EngineAction::Terminal(failure(
                 KernelProcessFailureCode::RunUnsettled,
                 format!(
@@ -314,13 +334,7 @@ fn run_settled(
         }
     };
     match output {
-        KernelRunOutput::Ended { outcome, .. } => {
-            // An ended run stands on no page, and requires nothing.
-            state.parked = None;
-            state.requirements = lash_vocabulary::claims::ClaimRequirements::default();
-            state.phase = Phase::Ended;
-            Ok(EngineAction::Terminal(*outcome))
-        }
+        KernelRunOutput::Ended { outcome, .. } => Ok(EngineAction::Terminal(*outcome)),
         KernelRunOutput::Parked {
             read_count,
             state: parked,
@@ -331,13 +345,14 @@ fn run_settled(
         } => {
             // Runs are sequential: the one settling is the last asked for.
             let settling = state.runs.saturating_sub(1);
-            state.parked = Some(ParkedRun {
-                read_count,
-                page: parked,
-                by: settling,
-            });
-            state.requirements = *requirements;
-            state.phase = Phase::Parked;
+            let park = Park {
+                run: ParkedRun {
+                    read_count,
+                    page: parked,
+                    by: settling,
+                },
+                requirements: *requirements,
+            };
             let explicit_cancel = !cancel_requests.is_empty();
             let mut cancelled = Vec::new();
             for request in cancel_requests {
@@ -410,7 +425,7 @@ fn run_settled(
                 .collect();
             state.admissions.retain(|wait, _| held.contains(wait));
             if explicit_cancel {
-                let next = run(state, steps)?;
+                let next = run(state, Some(park), steps)?;
                 return Ok(EngineAction::CancelCalls {
                     steps: cancelled,
                     cancellation: lash_protocol_types::ToolCancellation::runtime(
@@ -421,17 +436,17 @@ fn run_settled(
                 });
             }
             if !state.settled.is_empty() {
-                return run(state, steps);
+                return run(state, Some(park), steps);
             }
             if state.waits.is_empty() {
                 // The machine parks only on a wait it asked for.
-                state.phase = Phase::Ended;
                 return Ok(EngineAction::Terminal(failure(
                     KernelProcessFailureCode::RunUnsettled,
                     "the run parked on no wait",
                     None,
                 )));
             }
+            state.progress = Progress::Parked(park);
             Ok(if steps.is_empty() {
                 standing(state)
             } else {
@@ -445,27 +460,39 @@ fn standing(_state: &KernelEngineState) -> EngineAction {
     EngineAction::Idle
 }
 
-/// Asks for the next `kernel_run`, handing it every settled outcome, and
-/// for `steps` beside it.
+/// Asks for the next `kernel_run`, resuming `from` and handing it every
+/// settled outcome, and for `steps` beside it.
 fn run(
     state: &mut KernelEngineState,
+    from: Option<Park>,
     mut steps: Vec<StepRequest>,
 ) -> Result<EngineAction, ProcessInfraError> {
-    let step = StepName(format!("{KERNEL_RUN_STEP}.{}", state.runs));
+    let step = run_step(state.runs);
     state.runs += 1;
-    let input = KernelRunInput {
-        payload: state.payload.clone(),
-        parked: state.parked,
-        admissions: state.admissions.clone(),
-        deliver: std::mem::take(&mut state.settled),
-    };
-    state.phase = Phase::Running { step: step.clone() };
-    steps.push(StepRequest::Engine {
+    steps.push(run_request(
+        step.clone(),
+        KernelRunInput {
+            payload: state.payload.clone(),
+            parked: from.as_ref().map(|park| park.run),
+            admissions: state.admissions.clone(),
+            deliver: std::mem::take(&mut state.settled),
+        },
+    )?);
+    state.progress = Progress::Running { step, from };
+    Ok(EngineAction::Steps { steps, wake: None })
+}
+
+/// The name of the process's `run`th `kernel_run`.
+fn run_step(run: u64) -> StepName {
+    StepName(format!("{KERNEL_RUN_STEP}.{run}"))
+}
+
+fn run_request(step: StepName, input: KernelRunInput) -> Result<StepRequest, ProcessInfraError> {
+    Ok(StepRequest::Engine {
         step,
         kind: EngineStepKind::new(KERNEL_RUN_STEP),
         input: serde_json::to_value(input).map_err(|error| infra(error.to_string()))?,
-    });
-    Ok(EngineAction::Steps { steps, wake: None })
+    })
 }
 
 fn cancelled(

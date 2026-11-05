@@ -1,5 +1,5 @@
 //! Copy immutable per-use outcomes under an explicit successor correspondence; never resolve during adoption.
-use super::state::Phase;
+use super::state::Progress;
 use super::{KernelProcessEngine, KernelProcessInput, advance};
 use lash_core_store::resolutions::ResolutionRecord;
 use lash_execution_contracts::process::{
@@ -103,7 +103,7 @@ impl EngineSuccession for KernelSuccession {
         if let Some(state) = state {
             let (mut state, _written) =
                 advance::decode(self.engine.writes, state).map_err(|e| refuse(e.to_string()))?;
-            if matches!(state.phase, Phase::Running { .. } | Phase::Ended) {
+            if matches!(state.progress, Progress::Running { .. }) {
                 return Ok(SuccessorCarry::InFlight);
             }
             let input = KernelProcessInput::from_payload(&state.payload)
@@ -303,10 +303,10 @@ impl EngineSuccession for KernelSuccession {
                     }
                 })?;
             predecessor_code = debt;
-            requirements.machine.extend(&state.requirements.machine);
             state.payload = context.to_payload.clone();
             let mut carried =
                 advance::encode(&state, self.engine.writes).map_err(|e| refuse(e.to_string()))?;
+            requirements.machine.extend(&carried.requirements.machine);
             carried.staged = staged;
             encoded = Some(Box::new(carried));
             own_formats = after.kernel() == self.engine.writes.number();

@@ -201,7 +201,7 @@ fn assert_pair(value: &Stored, before: &Stored, old: &Pair, new: &Pair) -> bool 
             "UseCorrespondence preserves the accepted binding at {use_:?}"
         );
     }
-    assert_eq!(value.state["phase"], "parked");
+    assert!(value.state["progress"].get("parked").is_some());
     for field in ["admissions", "waits", "runs", "effects", "settled"] {
         assert_eq!(
             value.state[field], before.state[field],
@@ -332,7 +332,7 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
     );
     nodes.quiesce().await;
     let before = stored(&core, &process).await;
-    assert_eq!(before.state["phase"], "parked");
+    assert!(before.state["progress"].get("parked").is_some());
     assert_eq!(before.state["waits"].as_object().unwrap().len(), 1);
     assert_eq!(before.state["admissions"].as_object().unwrap().len(), 1);
     assert_eq!(before.page.header().pending_waits, 1);

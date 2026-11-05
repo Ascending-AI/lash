@@ -124,7 +124,7 @@ impl KernelProcessEngine {
         ),
         CarryFault,
     > {
-        let Some(parked) = state.parked else {
+        let Some(park) = state.progress.park_mut() else {
             return Ok(Default::default());
         };
         let input = super::state::KernelProcessInput::from_payload(&state.payload)
@@ -137,7 +137,7 @@ impl KernelProcessEngine {
             .prepare_checkpoint_carry(
                 stores.as_ref(),
                 &ExecKey::Process(process.clone()),
-                parked.page.root,
+                park.run.page.root,
                 &input.code,
                 successor,
                 rewritten,
@@ -146,16 +146,15 @@ impl KernelProcessEngine {
                 uses,
             )
             .await?;
-        if let Some(parked) = &mut state.parked {
-            parked.page = super::state::ParkedPage {
-                root: prepared.root,
-                kernel: rewritten.document.kernel(),
-            };
-        }
+        park.run.page = super::state::ParkedPage {
+            root: prepared.root,
+            kernel: rewritten.document.kernel(),
+        };
+        // Only code requirements change here. The owner derives link
+        // requirements from the successor env at the same commit that
+        // repoints that env.
+        park.requirements.machine = prepared.machine;
         let correspondence = &rewritten.correspondence;
-        // Only code requirements change here. The owner derives link requirements
-        // from the successor env at the same commit that repoints that env.
-        state.requirements.machine = prepared.machine;
         for held in state.admissions.values_mut() {
             held.admission.0.identity = lash_kernel_migrate::carry_effect(
                 correspondence,
@@ -815,7 +814,7 @@ impl KernelProcessEngine {
     > {
         use lash_execution_contracts::process::SuccessionError;
         let unavailable = |error: String| SuccessionError::Unavailable(error);
-        let Some(parked) = state.parked else {
+        let Some(root) = state.progress.park().map(|park| park.run.page.root) else {
             return Ok(lash_kernel_doc::HelperUpgradeSafety::Safe);
         };
         let input = super::KernelProcessInput::from_payload(&state.payload)
@@ -853,7 +852,6 @@ impl KernelProcessEngine {
         .map_err(|e| unavailable(e.to_string()))?;
         let helpers = Arc::clone(&self.helpers);
         let upgrade = upgrade.clone();
-        let root = parked.page.root;
         tokio::task::spawn_blocking(move || {
             let mut source = source;
             let page = source
