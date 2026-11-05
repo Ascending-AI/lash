@@ -161,6 +161,16 @@ impl<'m> RegionLease<'m> {
             sessions.push((index, cell.register, value));
         }
         dependencies.extend(machine.regs.region_values().map(|(_, value)| value));
+        // A native answered outside the region enters with it, for the step
+        // standing before that call to take.
+        let delivered = machine
+            .native_answer
+            .take()
+            .filter(|answer| answer.task == task_id)
+            .map(|answer| (answer.at, answer.value));
+        if let Some((_, value)) = &delivered {
+            dependencies.push(*value);
+        }
         let top = stack.last().ok_or_else(|| invalid(Refused::Facts))?;
         let top_code = programs.code(top.code)?;
         let (pc, prefix) = *positions.last().ok_or_else(|| invalid(Refused::Facts))?;
@@ -322,6 +332,7 @@ impl<'m> RegionLease<'m> {
             activation = Some(next_activation);
         }
         execution.activation = activation;
+        execution.delivered = delivered;
         let saved = execution
             .canonical_callees
             .last()

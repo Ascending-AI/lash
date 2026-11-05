@@ -114,6 +114,9 @@ pub(crate) enum RegionStop {
     Action,
     /// The region accepted an effect; its value is the task's Incoming.
     Effect(crate::compile::region_isa::EffectKind),
+    /// The region stands before a native call its checked kernel cannot
+    /// answer in place; the machine answers it and the region takes it.
+    Native,
     Refusal,
     Throw,
     Slice,
@@ -121,6 +124,14 @@ pub(crate) enum RegionStop {
     Handoff,
     Complete,
 }
+/// A native answer computed outside the region for `task`'s top frame,
+/// standing before the call at `at`.
+pub(in crate::machine) struct NativeAnswer {
+    task: lash_kernel_doc::TaskId,
+    at: Point,
+    value: Value,
+}
+
 #[derive(Debug)]
 pub(crate) enum RegionError {
     Invalid(Refused),

@@ -80,6 +80,25 @@ impl Running<'_> {
             {
                 return self.halt(RegionStop::Boundary);
             }
+            // A native its checked kernel cannot answer in place stands
+            // unbilled for the machine to answer; the step then takes that
+            // answer through the same acceptance.
+            let mut native = None;
+            if let RegionOp::Checked { kernel, .. } = op
+                && matches!(
+                    kernel.kind(),
+                    crate::compile::region_isa::CheckedKind::Native { .. }
+                )
+            {
+                native = match self.delivered.take() {
+                    Some((at, value)) if at == step.at => Some(self.delivered_answer(op, value)?),
+                    Some(_) => return Err(invalid(Refused::Facts)),
+                    None => match self.scalar_answer(op)? {
+                        Some(answer) => Some(answer),
+                        None => return self.halt(RegionStop::Native),
+                    },
+                };
+            }
             let before = charge::bill(
                 self.counters,
                 self.limits,
@@ -139,9 +158,12 @@ impl Running<'_> {
                     }
                     Err(fault) => return Err(storage_fault(fault)),
                 },
-                _ => self
-                    .scalar_answer(op)?
-                    .ok_or_else(|| invalid(Refused::Facts))?,
+                _ => match native {
+                    Some(answer) => answer,
+                    None => self
+                        .scalar_answer(op)?
+                        .ok_or_else(|| invalid(Refused::Facts))?,
+                },
             };
             let effect = match op {
                 RegionOp::Effect { kind, value, .. } => Some((*kind, self.value(*value)?)),

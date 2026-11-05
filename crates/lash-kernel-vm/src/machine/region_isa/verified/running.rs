@@ -25,6 +25,9 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) returning: Option<super::returns::Incoming>,
     /// An accepted effect's value, the task's Incoming at the stop.
     pub(super) effect: Option<LeaseValue>,
+    /// A native answer the machine computed for the step standing at this
+    /// point, taken by that step alone.
+    pub(super) delivered: Option<(Point, Value)>,
     pub(super) complete: bool,
     pub(super) activation: Option<CallActivation>,
     pub(super) identity: Rc<()>,
@@ -184,6 +187,7 @@ impl<'m> Running<'m> {
             closed_sessions: None,
             returning: None,
             effect: None,
+            delivered: None,
             complete: false,
             activation: None,
             identity: Rc::new(()),

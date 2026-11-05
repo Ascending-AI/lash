@@ -10,6 +10,66 @@ pub(super) struct ScalarAnswer {
     pub(super) formula: Option<u64>,
 }
 impl Running<'_> {
+    /// The answer the machine computed for the native call `op` makes: the
+    /// value it imports, charged by the native's formula over the actual
+    /// arguments and answer, as the in-place kernel charges it.
+    pub(super) fn delivered_answer(
+        &mut self,
+        op: &RegionOp,
+        value: Value,
+    ) -> Result<ScalarAnswer, RegionError> {
+        let RegionOp::Checked {
+            kernel,
+            args,
+            dst,
+            next,
+        } = op
+        else {
+            return Err(invalid(Refused::Facts));
+        };
+        let CheckedKind::Native { lib, function } = kernel.kind() else {
+            return Err(invalid(Refused::Facts));
+        };
+        let code = Arc::clone(&self.code);
+        let native = code.exe.lib(*lib);
+        if native.specialization.function != *function
+            || !crate::compile::import_result_fits(&native.header.signature.result, value)
+        {
+            return Err(invalid(Refused::Facts));
+        }
+        let result = self.view.import(&value).map_err(RegionError::Heap)?;
+        let formula = if self.limits.charge_enabled {
+            self.call_values.clear();
+            for reg in args {
+                let argument = self.value(*reg)?;
+                self.call_values.push(argument);
+            }
+            while self.call_values.len() < native.arity {
+                let absent = self
+                    .view
+                    .import(&Value::Absent)
+                    .map_err(RegionError::Heap)?;
+                self.call_values.push(absent);
+            }
+            Some(
+                native
+                    .charge
+                    .lease(&mut self.view, &self.call_values, result)
+                    .map_err(storage_fault)?,
+            )
+        } else {
+            None
+        };
+        Ok(ScalarAnswer {
+            write: Some((
+                super::bind::physical(&self.code.program, *dst)?,
+                Operand::Dynamic(result),
+            )),
+            next: *next,
+            formula,
+        })
+    }
+
     /// None delegates to the same instruction's general checked kernel.
     /// It is not permission to re-evaluate an answered operation.
     pub(super) fn scalar_answer(

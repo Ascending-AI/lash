@@ -576,6 +576,28 @@ impl RegionCode {
             .collect::<Option<_>>()?;
         Some((slots, spec.next()?))
     }
+    /// The library a native call at `pc` calls and the source slots of its
+    /// arguments, for the machine to answer it when its checked kernel
+    /// cannot in place.
+    pub(crate) fn native_arguments(&self, pc: Pc) -> Option<(LibId, Box<[Slot]>)> {
+        let RegionOp::Checked { kernel, args, .. } = self.op(pc)? else {
+            return None;
+        };
+        let CheckedKind::Native { lib, .. } = kernel.kind() else {
+            return None;
+        };
+        let slots = args
+            .iter()
+            .map(|reg| {
+                self.draft
+                    .roles
+                    .iter()
+                    .find_map(|(role, actual)| (actual == reg).then_some(role.slot()))
+                    .flatten()
+            })
+            .collect::<Option<_>>()?;
+        Some((*lib, slots))
+    }
     /// The atoms a statement call loads at its Enter.
     pub(crate) fn call_atoms(&self, site: CallId) -> Option<&[AtomLoad]> {
         Some(&self.draft.calls.get(site.offset())?.atoms)

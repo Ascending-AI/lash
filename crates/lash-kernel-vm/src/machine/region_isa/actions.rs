@@ -246,6 +246,58 @@ impl KernelMachine {
         })
     }
 
+    /// Answers the native call `task`'s top frame stands before, its checked
+    /// kernel unable to answer in place: the machine's general call runs it
+    /// with the frame's argument values, charging nothing, and the answer
+    /// waits for the region to take that call's step, which charges it.
+    pub(super) fn answer_native(
+        &mut self,
+        task: TaskId,
+        at: crate::compile::room::Point,
+        lib: crate::compile::LibId,
+        slots: &[lash_kernel_state::kernel_internals::logical::Slot],
+    ) -> Result<(), Halt> {
+        let source = self
+            .frame(task)?
+            .pending
+            .source
+            .as_ref()
+            .ok_or_else(|| fault("a standing native has no source continuation"))?;
+        let arguments = slots
+            .iter()
+            .map(|slot| {
+                source
+                    .roles
+                    .iter()
+                    .find_map(|(saved, value)| (saved == slot).then_some(*value))
+                    .ok_or_else(|| fault("a standing native lacks an argument"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let exe = Arc::clone(&self.exe);
+        let used = exe.lib(lib).arity.max(arguments.len()).max(1);
+        for (at, value) in arguments.iter().enumerate() {
+            self.put(at, *value);
+        }
+        let charging = std::mem::replace(&mut self.charging, false);
+        let answer = self.answer(task, &exe, lib, 0, arguments.len(), 0);
+        self.charging = charging;
+        let answer = answered(answer);
+        let value = match answer {
+            Ok(crate::machine::ops::Answer::Done) => Ok(self.take(0)),
+            Ok(crate::machine::ops::Answer::Body(_)) => Err(fault(
+                "a declined native's kernel body is not integrated into the region",
+            )),
+            Err(halt) => Err(halt),
+        };
+        self.regs.clear_range(0..used);
+        self.native_answer = Some(super::NativeAnswer {
+            task,
+            at,
+            value: value?,
+        });
+        Ok(())
+    }
+
     /// Spends the task's Incoming an accepted effect carried out of the
     /// region: the machine holds its value now, the ledger no longer.
     pub(super) fn spend_effect(&mut self, task: TaskId) -> Result<(), Halt> {
