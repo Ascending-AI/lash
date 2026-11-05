@@ -84,11 +84,26 @@ pub enum HelperUpgradeSafety {
     Deferred { functions: BTreeSet<FunctionId> },
 }
 
+/// Schema version of the helper run upgrade response, independent of kernel code.
+/// version_surface = "coexist"
+/// format_outside_manifest = "host response JSON, not durable execution state"
+/// version_guard(roots(HelperRunUpgrade), items(from_json))
+pub const HELPER_RUN_UPGRADE_VERSION: u32 = 2;
+
+/// The artifact prepared by this request, coupled to the succession result.
+/// A publication is not evidence that the owner has applied the successor.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum HelperRunUpgradeState {
-    Requested,
-    AlreadyCurrent,
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HelperRunUpgradeOutcome {
+    /// Succession is pending, possibly until an active continuation drains.
+    Requested {
+        publication: HelperPublicationUpgrade,
+    },
+    /// The prepared revision is already selected.
+    AlreadyCurrent {
+        publication: HelperPublicationUpgrade,
+    },
+    /// The request id has settled. No new publication is returned.
     AlreadyResolved,
 }
 
@@ -96,8 +111,15 @@ pub enum HelperRunUpgradeState {
 #[serde(deny_unknown_fields)]
 pub struct HelperRunUpgrade {
     pub request_id: String,
-    /// A newly prepared revision. An already settled id returns no new publication.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub publication: Option<HelperPublicationUpgrade>,
-    pub state: HelperRunUpgradeState,
+    pub outcome: HelperRunUpgradeOutcome,
+}
+
+impl HelperRunUpgrade {
+    /// Decode the current response schema, refusing the old state/publication pair.
+    pub fn from_json(text: &str) -> Result<Self, crate::DecodeError> {
+        crate::document::from_json_with_limits(
+            text,
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
+        )
+    }
 }

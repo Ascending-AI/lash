@@ -2,7 +2,8 @@
 //! shapes: the workflow [`Document`], its [`SourceMap`] and [`Captions`], a
 //! [`FunctionDefinition`], plus the library declarations a runtime exports.
 //!
-//! All are owned by [`KERNEL_VERSION`]. Every object in them is
+//! Kernel shapes use [`KERNEL_VERSION`]; helper run responses have their own stamp.
+//! Every object in them is
 //! closed: an unknown member is refused, as the decoders refuse it.
 
 use lash_kernel_doc::{
@@ -18,7 +19,11 @@ const VERSION_CONSTANT: &str = "KERNEL_VERSION";
 fn main() -> Result<(), String> {
     let documents = vec![
         document::<Document>("kernel-document")?,
-        document::<lash_kernel_doc::HelperRunUpgrade>("kernel-helper-run-upgrade")?,
+        versioned_document::<lash_kernel_doc::HelperRunUpgrade>(
+            "kernel-helper-run-upgrade",
+            lash_kernel_doc::HELPER_RUN_UPGRADE_VERSION,
+            "HELPER_RUN_UPGRADE_VERSION",
+        )?,
         document::<lash_kernel_doc::HelperPublicationUpgradeRequest>(
             "kernel-helper-publication-upgrade-request",
         )?,
@@ -37,6 +42,14 @@ fn main() -> Result<(), String> {
 }
 
 fn document<T: JsonSchema>(shape: &'static str) -> Result<Value, String> {
+    versioned_document::<T>(shape, KERNEL_VERSION, VERSION_CONSTANT)
+}
+
+fn versioned_document<T: JsonSchema>(
+    shape: &'static str,
+    version: u32,
+    version_constant: &'static str,
+) -> Result<Value, String> {
     let mut schema = serde_json::to_value(schemars::schema_for!(T))
         .map_err(|error| format!("cannot serialize {shape} schema: {error}"))?;
     let root = schema
@@ -44,22 +57,20 @@ fn document<T: JsonSchema>(shape: &'static str) -> Result<Value, String> {
         .ok_or_else(|| format!("{shape} schema root is not an object"))?;
     root.insert(
         "$id".to_string(),
-        Value::String(format!(
-            "https://lash.dev/schemas/{shape}/v{KERNEL_VERSION}"
-        )),
+        Value::String(format!("https://lash.dev/schemas/{shape}/v{version}")),
     );
     root.insert(
         "x-lash-schema-version".to_string(),
-        Value::Number(KERNEL_VERSION.into()),
+        Value::Number(version.into()),
     );
     root.insert(
         "x-lash-version-constant".to_string(),
-        Value::String(VERSION_CONSTANT.to_string()),
+        Value::String(version_constant.to_string()),
     );
     Ok(json!({
         "shape": shape,
-        "version": KERNEL_VERSION,
-        "version_constant": VERSION_CONSTANT,
+        "version": version,
+        "version_constant": version_constant,
         "schema": schema,
     }))
 }

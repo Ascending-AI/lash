@@ -188,7 +188,7 @@ pub mod linked_site;
 
 mod helper_upgrade;
 pub use helper_upgrade::{
-    HelperChange, HelperId, HelperPublicationUpgrade, HelperPublicationUpgradeRequest,
-    HelperRunUpgrade, HelperRunUpgradeRequest, HelperRunUpgradeState, HelperUpgrade,
-    HelperUpgradeRefusal, HelperUpgradeSafety,
+    HELPER_RUN_UPGRADE_VERSION, HelperChange, HelperId, HelperPublicationUpgrade,
+    HelperPublicationUpgradeRequest, HelperRunUpgrade, HelperRunUpgradeOutcome,
+    HelperRunUpgradeRequest, HelperUpgrade, HelperUpgradeRefusal, HelperUpgradeSafety,
 };

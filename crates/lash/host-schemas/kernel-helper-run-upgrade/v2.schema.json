@@ -96,13 +96,60 @@
       ],
       "type": "object"
     },
-    "HelperRunUpgradeState": {
-      "enum": [
-        "requested",
-        "already_current",
-        "already_resolved"
-      ],
-      "type": "string"
+    "HelperRunUpgradeOutcome": {
+      "description": "The artifact prepared by this request, coupled to the succession result.\nA publication is not evidence that the owner has applied the successor.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Succession is pending, possibly until an active continuation drains.",
+          "properties": {
+            "publication": {
+              "$ref": "#/$defs/HelperPublicationUpgrade"
+            },
+            "status": {
+              "const": "requested",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "publication"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The prepared revision is already selected.",
+          "properties": {
+            "publication": {
+              "$ref": "#/$defs/HelperPublicationUpgrade"
+            },
+            "status": {
+              "const": "already_current",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "publication"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The request id has settled. No new publication is returned.",
+          "properties": {
+            "status": {
+              "const": "already_resolved",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "HelperUpgrade": {
       "additionalProperties": false,
@@ -228,34 +275,23 @@
       ]
     }
   },
-  "$id": "https://lash.dev/schemas/kernel-helper-run-upgrade/v1",
+  "$id": "https://lash.dev/schemas/kernel-helper-run-upgrade/v2",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
-    "publication": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/HelperPublicationUpgrade"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "A newly prepared revision. An already settled id returns no new publication."
+    "outcome": {
+      "$ref": "#/$defs/HelperRunUpgradeOutcome"
     },
     "request_id": {
       "type": "string"
-    },
-    "state": {
-      "$ref": "#/$defs/HelperRunUpgradeState"
     }
   },
   "required": [
     "request_id",
-    "state"
+    "outcome"
   ],
   "title": "HelperRunUpgrade",
   "type": "object",
-  "x-lash-schema-version": 1,
-  "x-lash-version-constant": "KERNEL_VERSION"
+  "x-lash-schema-version": 2,
+  "x-lash-version-constant": "HELPER_RUN_UPGRADE_VERSION"
 }

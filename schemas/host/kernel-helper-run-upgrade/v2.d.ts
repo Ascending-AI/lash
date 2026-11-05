@@ -1,13 +1,9 @@
-// Derived from v1.schema.json by scripts/generate-workflow-schemas.py.
+// Derived from v2.schema.json by scripts/generate-workflow-schemas.py.
 // JSON Schema remains authoritative for value constraints and validation.
 
 export type HelperRunUpgrade = {
-  /**
-   * A newly prepared revision. An already settled id returns no new publication.
-   */
-  "publication"?: (HelperPublicationUpgrade | null);
+  "outcome": HelperRunUpgradeOutcome;
   "request_id": string;
-  "state": HelperRunUpgradeState;
 };
 
 /**
@@ -48,7 +44,19 @@ export type HelperPublicationUpgrade = {
   "upgrade": HelperUpgrade;
 };
 
-export type HelperRunUpgradeState = ("requested" | "already_current" | "already_resolved");
+/**
+ * The artifact prepared by this request, coupled to the succession result.
+ * A publication is not evidence that the owner has applied the successor.
+ */
+export type HelperRunUpgradeOutcome = ({
+  "publication": HelperPublicationUpgrade;
+  "status": "requested";
+} | {
+  "publication": HelperPublicationUpgrade;
+  "status": "already_current";
+} | {
+  "status": "already_resolved";
+});
 
 /**
  * A validated ledger pairing, including anonymous bodies that cannot be paired by name.

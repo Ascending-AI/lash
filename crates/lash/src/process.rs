@@ -238,9 +238,9 @@ pub use lash_kernel_value::providers::{ProcessComponentId, ProcessComponentIdErr
 
 #[cfg(feature = "codemode")]
 pub use lash_kernel_doc::{
-    HelperChange, HelperId, HelperPublicationUpgrade, HelperPublicationUpgradeRequest,
-    HelperRunUpgrade, HelperRunUpgradeRequest, HelperRunUpgradeState, HelperUpgrade,
-    HelperUpgradeRefusal, HelperUpgradeSafety,
+    HELPER_RUN_UPGRADE_VERSION, HelperChange, HelperId, HelperPublicationUpgrade,
+    HelperPublicationUpgradeRequest, HelperRunUpgrade, HelperRunUpgradeOutcome,
+    HelperRunUpgradeRequest, HelperUpgrade, HelperUpgradeRefusal, HelperUpgradeSafety,
 };
 
 #[cfg(feature = "codemode")]

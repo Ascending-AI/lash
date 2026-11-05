@@ -1381,8 +1381,7 @@ impl Processes {
             ) {
                 return Ok(Ok(lash_kernel_doc::HelperRunUpgrade {
                     request_id: request.request_id.clone(),
-                    publication: None,
-                    state: lash_kernel_doc::HelperRunUpgradeState::AlreadyResolved,
+                    outcome: lash_kernel_doc::HelperRunUpgradeOutcome::AlreadyResolved,
                 }));
             }
         }
@@ -1479,21 +1478,20 @@ impl Processes {
             }
             Err(error) => return Err(error),
         };
-        let state = match result {
+        let outcome = match result {
             lash_execution_contracts::process::ProcessSuccession::Requested => {
-                lash_kernel_doc::HelperRunUpgradeState::Requested
+                lash_kernel_doc::HelperRunUpgradeOutcome::Requested { publication }
             }
             lash_execution_contracts::process::ProcessSuccession::AlreadyCurrent => {
-                lash_kernel_doc::HelperRunUpgradeState::AlreadyCurrent
+                lash_kernel_doc::HelperRunUpgradeOutcome::AlreadyCurrent { publication }
             }
             lash_execution_contracts::process::ProcessSuccession::AlreadyResolved => {
-                lash_kernel_doc::HelperRunUpgradeState::AlreadyResolved
+                lash_kernel_doc::HelperRunUpgradeOutcome::AlreadyResolved
             }
         };
         Ok(Ok(lash_kernel_doc::HelperRunUpgrade {
             request_id: request.request_id.clone(),
-            publication: Some(publication),
-            state,
+            outcome,
         }))
     }
 }

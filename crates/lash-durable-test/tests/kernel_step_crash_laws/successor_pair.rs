@@ -19,10 +19,137 @@ use lash_kernel_doc::heap::{PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::Checkpoint;
 use lash_vocabulary::identity::ProcessId;
 use serde_json::Value;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[path = "../support/dialect.rs"]
 mod dialect;
+
+/// Holds the second initial lookup after reading its actual SQLite answer.
+#[derive(Default)]
+struct SettlementPause {
+    remaining: AtomicUsize,
+    reached: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+struct SettlementRace {
+    inner: Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
+    pause: Arc<SettlementPause>,
+}
+
+impl lash_core_store::store::FleetFormatStore for SettlementRace {
+    fn fleet_format(&self) -> lash_core_store::store::FleetFormat {
+        self.inner.fleet_format()
+    }
+}
+
+#[allow(unused_braces, reason = "delegation macros require block hooks")]
+mod delegation {
+    use super::{ProcessId, SettlementRace};
+    use lash::SessionId;
+    use lash_execution_contracts::delegate_process_observer_registry;
+
+    lash_execution_contracts::delegate_process_query!(SettlementRace, inner);
+    lash_execution_contracts::delegate_process_registrar!(
+        SettlementRace,
+        inner,
+        registration | _race,
+        forwarded | { forwarded.await },
+        event | _race,
+        _process,
+        forwarded | { forwarded.await }
+    );
+    lash_execution_contracts::delegate_process_observer_registry!(SettlementRace, inner);
+    lash_execution_contracts::delegate_process_lifecycle!(
+        SettlementRace,
+        inner,
+        event | _race,
+        _process,
+        forwarded | { forwarded.await }
+    );
+    lash_execution_contracts::delegate_process_tool_intents!(SettlementRace, inner);
+    lash_execution_contracts::delegate_process_retention!(SettlementRace, inner);
+}
+
+impl lash_execution_contracts::process::ProcessClockRebind for SettlementRace {
+    fn with_runtime_clock(
+        &self,
+        clock: Arc<dyn lash_core::Clock>,
+    ) -> Option<Arc<dyn lash_execution_contracts::process::ProcessRegistry>> {
+        self.inner.with_runtime_clock(clock).map(|inner| {
+            Arc::new(Self {
+                inner,
+                pause: Arc::clone(&self.pause),
+            }) as Arc<dyn lash_execution_contracts::process::ProcessRegistry>
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_execution_contracts::process::ProcessEventLog for SettlementRace {
+    async fn event_by_replay_key(
+        &self,
+        process: &ProcessId,
+        key: &str,
+        through: u64,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessEventReadOutcome<
+            Option<lash_execution_contracts::process::ProcessEvent>,
+        >,
+        lash_execution_contracts::PluginError,
+    > {
+        let answer = self
+            .inner
+            .event_by_replay_key(process, key, through)
+            .await?;
+        if matches!(
+            self.pause
+                .remaining
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)),
+            Ok(1)
+        ) {
+            assert!(
+                matches!(
+                    answer,
+                    lash_execution_contracts::process::ProcessEventReadOutcome::Retained(None)
+                ),
+                "the lookup must precede settlement"
+            );
+            self.pause.reached.notify_one();
+            self.pause.release.notified().await;
+        }
+        Ok(answer)
+    }
+
+    async fn event_page_after(
+        &self,
+        process: &ProcessId,
+        after: u64,
+        limit: std::num::NonZeroUsize,
+        mode: lash_execution_contracts::process::ProcessEventQueryMode,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessEventReadOutcome<
+            lash_execution_contracts::process::ProcessEventPage,
+        >,
+        lash_execution_contracts::PluginError,
+    > {
+        self.inner
+            .event_page_after(process, after, limit, mode)
+            .await
+    }
+
+    async fn recent_events(
+        &self,
+        process: &ProcessId,
+        limit: usize,
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ProcessEvent>,
+        lash_execution_contracts::PluginError,
+    > {
+        self.inner.recent_events(process, limit).await
+    }
+}
 
 const SOURCE: &str = r#"kernel 1
 numbers float
@@ -236,7 +363,7 @@ fn assert_pair(value: &Stored, before: &Stored, old: &Pair, new: &Pair) -> bool 
     next
 }
 
-async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
+async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>, upgrade_race: bool) -> usize {
     let clock = SimClock::new();
     let keep = Mutex::default();
     let url = if tier == dialect::Dialect::Postgres {
@@ -245,6 +372,15 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
         None
     };
     let (stores, database) = dialect::open(tier, url.as_deref(), Arc::clone(&clock), &keep).await;
+    let pause = Arc::new(SettlementPause::default());
+    let stores = lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+        .map_process_registry(|inner| {
+            Arc::new(SettlementRace {
+                inner,
+                pause: Arc::clone(&pause),
+            })
+        })
+        .into_store_set();
     let backend = served::configured_backend(stores, sim::settings(), Vec::new());
     let core =
         lash::LashCore::rlm_builder(backend.clone(), served::rlm(&backend, sim::workers(&clock)))
@@ -378,6 +514,18 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
         lash::process::ProcessSuccession::Requested,
         "a queued retry keeps the first request's target"
     );
+    let processes = core.processes();
+    let upgrade_request = lash::process::HelperRunUpgradeRequest {
+        request_id: "successor-law".into(),
+    };
+    let mut upgrade = Box::pin(processes.upgrade_run(&process, &pin, &upgrade_request));
+    if upgrade_race {
+        pause.remaining.store(2, Ordering::SeqCst);
+        tokio::select! {
+            () = pause.reached.notified() => {},
+            response = &mut upgrade => panic!("upgrade completed before its lookup pause: {response:?}"),
+        }
+    }
     nodes.quiesce().await;
     // There is only one node until this inspection. In particular, an
     // abort cannot be repaired by a peer before the old-or-whole-new oracle.
@@ -441,6 +589,28 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
         &old,
         &new
     ));
+    if upgrade_race {
+        assert_eq!(
+            pause.remaining.load(Ordering::SeqCst),
+            0,
+            "both pre-settlement lookups ran"
+        );
+        pause.release.notify_one();
+        let response = upgrade.await.unwrap().unwrap();
+        assert!(
+            matches!(
+                response.outcome,
+                lash::process::HelperRunUpgradeOutcome::AlreadyResolved
+            ),
+            "a settled id must not report a newly prepared publication"
+        );
+        assert!(assert_pair(
+            &stored(&core, &process).await,
+            &before,
+            &old,
+            &new
+        ));
+    }
     let count = advances() - offset;
     nodes.kill("a");
     nodes.kill("b");
@@ -450,7 +620,7 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
 }
 
 async fn law(tier: dialect::Dialect) {
-    let advances = Box::pin(cell(tier, None)).await;
+    let advances = Box::pin(cell(tier, None, false)).await;
     assert!(
         advances >= 2,
         "census includes recording and applying the successor"
@@ -464,7 +634,7 @@ async fn law(tier: dialect::Dialect) {
     for nth in 1..=advances {
         for fault in faults {
             eprintln!("successor pair {tier:?}: advance {nth}/{advances}, {fault}");
-            Box::pin(cell(tier, Some((nth, fault)))).await;
+            Box::pin(cell(tier, Some((nth, fault)), false)).await;
         }
     }
     eprintln!(
@@ -483,4 +653,10 @@ async fn a_successor_pair_cut_at_every_advance_leaves_the_old_pair_or_the_whole_
 async fn a_successor_pair_cut_at_every_advance_leaves_the_old_pair_or_the_whole_new_one_postgres() {
     let _ = lash_postgres_store::testing::required_database_url();
     law(dialect::Dialect::Postgres).await;
+}
+
+/// FIG-7651: preparing an artifact does not mean succession selected it.
+#[tokio::test]
+async fn a_helper_upgrade_settled_during_preparation_returns_no_new_publication() {
+    Box::pin(cell(dialect::Dialect::SqliteMemory, None, true)).await;
 }
