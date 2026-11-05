@@ -15,6 +15,7 @@ impl<'m> RegionLease<'m> {
         code: Arc<Code>,
         limits: Limits,
     ) -> Result<Self, RegionError> {
+        let programs = super::programs::Programs::bind(&code)?;
         let task_id = machine.current.ok_or_else(|| invalid(Refused::Facts))?;
         let exe = Arc::clone(&machine.exe);
         let task = machine
@@ -231,6 +232,7 @@ impl<'m> RegionLease<'m> {
         let code_id = code.program.code();
         let execution = Running::acquire(
             code,
+            programs,
             pc,
             prefix,
             invocation.id(),

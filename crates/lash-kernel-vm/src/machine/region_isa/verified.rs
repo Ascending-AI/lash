@@ -8,6 +8,7 @@ mod flow;
 mod laws;
 mod materialize;
 mod phase;
+mod programs;
 mod read;
 mod run;
 mod running;

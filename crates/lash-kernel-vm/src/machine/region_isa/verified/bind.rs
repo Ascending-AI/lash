@@ -50,7 +50,13 @@ impl Code {
         machine: &KernelMachine,
         program: &Arc<RegionCode>,
     ) -> Result<Arc<Self>, RegionError> {
-        let exe = &machine.exe;
+        Self::bind_executable(&machine.exe, program)
+    }
+
+    pub(super) fn bind_executable(
+        exe: &Arc<crate::compile::Executable>,
+        program: &Arc<RegionCode>,
+    ) -> Result<Arc<Self>, RegionError> {
         if program.executable() != exe.local()
             || program.code().0 as usize >= exe.code_count()
             || !Arc::ptr_eq(program.source(), &exe.code(program.code()).source_room)

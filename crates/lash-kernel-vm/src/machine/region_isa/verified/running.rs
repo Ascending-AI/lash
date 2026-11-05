@@ -5,6 +5,7 @@ use crate::compile::region_isa::{Pc, PrefixId, Reg};
 use lash_kernel_state::kernel_internals::logical::{LeaseValue, StateLease};
 
 pub(in crate::machine::region_isa) struct Running<'m> {
+    pub(super) programs: Arc<super::programs::Programs>,
     pub(super) arguments: Vec<Value>,
     pub(super) loops: Box<[super::control::LoopState]>,
     pub(super) scratch: super::phase::Scratch,
@@ -31,6 +32,7 @@ impl<'m> Running<'m> {
     )]
     pub(super) fn acquire(
         code: Arc<Code>,
+        programs: Arc<super::programs::Programs>,
         pc: Pc,
         prefix: PrefixId,
         invocation: u64,
@@ -49,7 +51,7 @@ impl<'m> Running<'m> {
         {
             return Err(invalid(Refused::Facts));
         }
-        let mut registers = registers::Registers::new(code.program.registers().len(), 1)?;
+        let mut registers = registers::Registers::new(programs.registers, 1)?;
         for (reg, value) in values {
             registers.write(
                 &mut view,
@@ -61,7 +63,7 @@ impl<'m> Running<'m> {
         }
         let mut arguments = Vec::new();
         arguments
-            .try_reserve_exact(code.arguments)
+            .try_reserve_exact(programs.arguments)
             .map_err(|_| invalid(Refused::Scratch))?;
         let reached = ReachedPrefix {
             program: code.program.code(),
@@ -72,8 +74,9 @@ impl<'m> Running<'m> {
             debt: 0,
         };
         let loops = super::control::bind(&code.program, &canonical)?;
-        let scratch = super::phase::Scratch::new(code.transfer_width, code.quotes)?;
+        let scratch = super::phase::Scratch::new(programs.transfer_width, programs.quotes)?;
         Ok(Self {
+            programs,
             loops,
             scratch,
             crossing: None,
