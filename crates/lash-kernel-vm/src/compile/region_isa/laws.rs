@@ -60,10 +60,18 @@ fn scalar_probes(
             })
         }
     }
-    [("isa.add", doc::scalar::ScalarOp::Add), ("isa.lt", doc::scalar::ScalarOp::Lt)].into_iter().map(|(name, op)| {
+    let mut probes: Vec<_> = [("isa.add", doc::scalar::ScalarOp::Add), ("isa.lt", doc::scalar::ScalarOp::Lt)].into_iter().map(|(name, op)| {
         let definition = doc::parse_definition(&format!("function {name}(a: Any, b: Any) -> {}\nkernel 1\ncharge sum(3, size(a), size(b), size(result))\nnative\n", if op.compares() { "Bool" } else { "Any" })).unwrap();
         (name, registry.register(definition, Some(Arc::new(Scalar(op)))).unwrap())
-    }).collect()
+    }).collect();
+    for (name, result) in [("isa.first", "a"), ("isa.second", "b")] {
+        let definition = doc::parse_definition(&format!(
+            "function {name}(a: Any, b: Any) -> Any\nkernel 1\ncharge 1\nnative\nbody {{ return {result} }}"
+        ))
+        .unwrap();
+        probes.push((name, registry.register(definition, None).unwrap()));
+    }
+    probes
 }
 
 fn fixture(check: impl FnOnce(&Executable, CodeId, RegionDraft)) {
@@ -108,7 +116,9 @@ fn fixture_body(definition: &str, check: impl FnOnce(&Executable, CodeId, Region
         })
         .unwrap();
     let draft = compile_region(&exe, code).unwrap();
-    verify_region(&exe, code, compile_region(&exe, code).unwrap(), &[])
+    let plans = crate::compile::room::region::calls::region_isa::compile_calls(&exe, &draft)
+        .unwrap_or_else(|reason| panic!("source fixture calls must compile: {reason:?}"));
+    verify_region(&exe, code, compile_region(&exe, code).unwrap(), &plans)
         .unwrap_or_else(|reason| panic!("source fixture must verify: {reason:?}"));
     check(&exe, code, draft);
 }
@@ -595,4 +605,36 @@ fn run_fixture(exe: &Executable, code: &RegionCode) -> (Value, u64) {
 fn declared_fixture_fee(mask: u8) -> u64 {
     // All fixture natives state sum(3, size(a), size(b), size(result)).
     6 + u64::from(mask & 1 != 0) + u64::from(mask & 2 != 0) + u64::from(mask & 8 != 0)
+}
+
+/// Valid callee plans cannot authorize another source call's operation row.
+#[test]
+fn rejects_a_substituted_call_origin() {
+    fixture_body(
+        "function counter() -> Any\nkernel 1\nmetering statements\nbody { let i = isa.first(0, 1) let j = isa.second(2, 3) while isa.lt(i, 4) { set i = isa.add(i, 1) } return j }",
+        |exe, code, mut draft| {
+            let original = draft.clone();
+            let first = draft.calls[0].origin;
+            draft.calls[0].origin = draft.calls[1].origin;
+            draft.calls[1].origin = first;
+            draft.call_sources.swap(0, 1);
+            let plans = crate::compile::room::region::calls::region_isa::compile_calls(exe, &draft)
+                .unwrap_or_else(|reason| {
+                    panic!("substituted source calls must remain valid B plans: {reason:?}")
+                });
+            assert_eq!(
+                verify_region(exe, code, draft, &plans).err(),
+                Some(Refused::Source)
+            );
+            let plans =
+                crate::compile::room::region::calls::region_isa::compile_calls(exe, &original)
+                    .unwrap();
+            let mut invalid_statement = original;
+            invalid_statement.calls[0].origin.statement = StmtId(u32::MAX);
+            assert_eq!(
+                verify_region(exe, code, invalid_statement, &plans).err(),
+                Some(Refused::Source)
+            );
+        },
+    );
 }

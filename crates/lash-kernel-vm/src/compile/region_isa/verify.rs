@@ -238,6 +238,29 @@ fn float_inputs(
     }
 }
 
+fn check_origin(
+    exe: &Executable,
+    draft: &RegionDraft,
+    at: &Point,
+    origin: KirOrigin,
+) -> Result<(), Refused> {
+    if origin.statement.0 as usize >= exe.stmt_count() {
+        return Err(Refused::Source);
+    }
+    let (stream, stmt, _) = exe.statement(origin.statement);
+    if exe.stmt_at(draft.code, &stmt.site) != Some(origin.statement)
+        || stream.ops.get(origin.pc as usize) != Some(&origin.op)
+        || stream
+            .source_sites
+            .get(origin.pc as usize)
+            .and_then(Option::as_deref)
+            != Some(&at.site)
+    {
+        return Err(Refused::Source);
+    }
+    Ok(())
+}
+
 fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), Refused> {
     let step = &draft.steps[index];
     if step.stage.is_some() {
@@ -543,6 +566,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
         RegionOp::Branch { .. } => {}
         RegionOp::Call { site, .. } => {
             let call = draft.calls.get(site.offset()).ok_or(Refused::Source)?;
+            check_origin(exe, draft, &step.at, call.origin)?;
             if call.at != step.at
                 || expected_inputs.as_deref() != Ok(call.arguments.as_ref())
                 || Some(call.result) != expected_output
@@ -564,17 +588,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 return Err(Refused::Source);
             }
             if let Some(origin) = spec.origin {
-                let (stream, stmt, _) = exe.statement(origin.statement);
-                if exe.stmt_at(draft.code, &stmt.site) != Some(origin.statement)
-                    || stream.ops.get(origin.pc as usize) != Some(&origin.op)
-                    || stream
-                        .source_sites
-                        .get(origin.pc as usize)
-                        .and_then(Option::as_deref)
-                        != Some(&step.at.site)
-                {
-                    return Err(Refused::Source);
-                }
+                check_origin(exe, draft, &step.at, origin)?;
             }
         }
         RegionOp::Exit { prefix } => {
@@ -758,6 +772,22 @@ fn verify_layout(
         return Err(Refused::Source);
     }
     for (index, call) in calls.iter().enumerate() {
+        let site = &draft.calls[index];
+        if call.point() != &site.at
+            || call.arguments().len() != site.arguments.len()
+            || call
+                .arguments()
+                .iter()
+                .zip(site.arguments.iter())
+                .any(|(slot, reg)| {
+                    !draft
+                        .roles
+                        .iter()
+                        .any(|(actual_slot, actual_reg)| actual_slot == slot && actual_reg == reg)
+                })
+        {
+            return Err(Refused::Source);
+        }
         call.verify_region(
             exe,
             draft,
