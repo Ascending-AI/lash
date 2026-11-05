@@ -15,9 +15,9 @@ impl<T: Default> Default for Cell<T> {
     }
 }
 pub(super) struct Registers {
-    ints: Box<[Cell<i64>]>,
-    bools: Box<[Cell<bool>]>,
-    values: Box<[Cell<Option<Value>>]>,
+    ints: Vec<Cell<i64>>,
+    bools: Vec<Cell<bool>>,
+    values: Vec<Cell<Option<Value>>>,
     width: usize,
 }
 impl Registers {
@@ -25,13 +25,13 @@ impl Registers {
         let count = width
             .checked_mul(frames)
             .ok_or_else(|| invalid(Refused::Facts))?;
-        fn bank<T: Copy + Default>(count: usize) -> Result<Box<[Cell<T>]>, RegionError> {
+        fn bank<T: Copy + Default>(count: usize) -> Result<Vec<Cell<T>>, RegionError> {
             let mut values = Vec::new();
             values
                 .try_reserve_exact(count)
                 .map_err(|_| invalid(Refused::Scratch))?;
             values.resize(count, Cell::default());
-            Ok(values.into_boxed_slice())
+            Ok(values)
         }
         Ok(Self {
             ints: bank(count)?,
@@ -39,6 +39,28 @@ impl Registers {
             values: bank(count)?,
             width,
         })
+    }
+    pub(super) fn reserve_frame(&mut self, frame: usize) -> Result<(), RegionError> {
+        let required = frame
+            .checked_add(1)
+            .and_then(|n| self.width.checked_mul(n))
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        if required <= self.ints.len() {
+            return Ok(());
+        }
+        let count = required.max(self.ints.len().saturating_mul(2));
+        fn grow<T: Copy + Default>(
+            bank: &mut Vec<Cell<T>>,
+            count: usize,
+        ) -> Result<(), RegionError> {
+            bank.try_reserve(count - bank.len())
+                .map_err(|_| invalid(Refused::Scratch))?;
+            bank.resize(count, Cell::default());
+            Ok(())
+        }
+        grow(&mut self.ints, count)?;
+        grow(&mut self.bools, count)?;
+        grow(&mut self.values, count)
     }
     fn at(&self, frame: usize, index: u32) -> Result<usize, RegionError> {
         if index as usize >= self.width {

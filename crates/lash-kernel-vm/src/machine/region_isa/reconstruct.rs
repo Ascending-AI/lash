@@ -54,7 +54,19 @@ impl Execution {
                     continuation: map.continuation.clone(),
                     roles,
                     operands,
-                    pending: map.pending.map(read).transpose()?,
+                    pending: if map.incoming {
+                        if map.pending.is_some() || index + 1 != self.frames.len() {
+                            return Err(invalid(Refused::Exit));
+                        }
+                        Some(
+                            self.returning
+                                .as_ref()
+                                .ok_or_else(|| invalid(Refused::Exit))?
+                                .incoming()?,
+                        )
+                    } else {
+                        map.pending.map(read).transpose()?
+                    },
                 })
             })
             .collect::<Result<Vec<_>, RegionError>>()?
@@ -68,6 +80,9 @@ impl Execution {
             counters: self.counters,
             stop,
             payload: self.payload,
+            source_counts: self.source.freeze(),
+            entering: self.entering,
+            returning: self.returning.as_ref().map(returns::Returning::image),
         })
     }
 }

@@ -14,6 +14,8 @@ mod code;
 mod execute;
 mod reconstruct;
 mod registers;
+mod returns;
+mod source_counters;
 use code::{Code, Limits};
 use execute::Execution;
 #[cfg(test)]
@@ -42,7 +44,8 @@ enum Authority<'m> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ReachedPrefix {
     invocation: u64,
-    occurrence: u64,
+    ordinal: u64,
+    occurrence: Option<u64>,
     prefix: u32,
     debt: u64,
 }
@@ -54,6 +57,9 @@ pub(crate) struct Reconstruction {
     counters: execute::Counters,
     stop: RegionStop,
     payload: Option<Value>,
+    returning: Option<returns::ReturnImage>,
+    source_counts: Box<[u64]>,
+    entering: Option<u32>,
 }
 pub(crate) struct MaterializedPrefix<'m> {
     authority: Authority<'m>,
@@ -98,7 +104,7 @@ impl<'m> RegionLease<'m> {
         code: Arc<RegionCode>,
     ) -> Result<Self, RegionError> {
         let tables = Code::bind(machine, &code)?;
-        let limits = Limits::machine(machine);
+        let limits = Limits::machine(machine)?;
         let execution = Execution::acquire(tables, limits)?;
         Ok(Self {
             authority: Authority::Machine { machine, code },

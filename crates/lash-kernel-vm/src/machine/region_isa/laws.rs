@@ -18,7 +18,9 @@ fn map(index: u32, roles: &[(Slot, Register)]) -> Recovery {
         roles: roles.into(),
         operands: Box::new([]),
         pending: None,
+        incoming: false,
         continuation: point(index),
+        counters: super::source_counters::CounterPlan::empty(),
     }
 }
 fn limits() -> Limits {
@@ -29,12 +31,15 @@ fn limits() -> Limits {
         slice: u64::MAX,
         entry_balance: 10,
         entry_charge: 0,
+        entry_progress: 0,
+        charge_enabled: true,
         entry_depth: 0,
     }
 }
 fn cost(charge: u64, delta: i128, peak: u64, depth: i32) -> Cost {
     Cost {
         fee: Fee::Fixed(charge),
+        pace: u64::from(charge != 0),
         delta,
         peak,
         depth,
@@ -62,7 +67,7 @@ fn code(
         calls: Box::new([]),
         dependencies: Box::new([]),
         registers: 5,
-        frame_capacity: 1,
+        source_initial: Box::new([]),
         initial: initial.into_boxed_slice(),
         invocation: 1,
         safe_integers: false,
@@ -177,7 +182,7 @@ fn exact_charge_and_memory_prefixes_recover_without_reexecuting() {
             let materialized = lease.materialize().expect("recover reached prefix");
             let image = materialized.reconstruction();
             let (fee, balance, peak, first, sum, bound) = oracle[expected];
-            assert_eq!(image.prefix.occurrence, expected as u64);
+            assert_eq!(image.prefix.ordinal, expected as u64);
             assert_eq!(
                 (
                     image.counters.charge,
@@ -237,7 +242,7 @@ fn an_unaccepted_phase_retains_only_the_reached_prefix_pending_value() {
     );
     let materialized = lease.materialize().expect("entry prefix");
     let image = materialized.reconstruction();
-    assert_eq!((image.prefix.occurrence, image.counters.charge), (0, 0));
+    assert_eq!((image.prefix.ordinal, image.counters.charge), (0, 0));
     assert!(role(image, 0, 0).same(&Value::Int(3)));
     assert!(role(image, 0, 1).same(&Value::Int(0)));
     assert!(
@@ -264,7 +269,7 @@ fn an_unaccepted_phase_retains_only_the_reached_prefix_pending_value() {
     );
     let materialized = lease.materialize().expect("earlier accepted result");
     let image = materialized.reconstruction();
-    assert_eq!((image.prefix.occurrence, image.counters.charge), (1, 0));
+    assert_eq!((image.prefix.ordinal, image.counters.charge), (1, 0));
     assert!(
         image
             .pending
@@ -413,6 +418,24 @@ fn read_loop(iterations: i64) -> Arc<Code> {
         ],
         8,
     );
+    use super::source_counters::{CounterEdit, CounterPlan, CounterRead};
+    code.source_initial = Box::new([17, 91]);
+    for (prefix, counter) in [(1, 1), (5, 0)] {
+        code.recovery[prefix].counters = CounterPlan::bind(
+            Box::new([CounterEdit {
+                index: counter,
+                advance: 1,
+            }]),
+            Some(CounterRead::Issued(counter)),
+            2,
+        )
+        .expect("verified source counter");
+    }
+    for prefix in [6, 7] {
+        code.recovery[prefix].counters =
+            CounterPlan::bind(Box::new([]), Some(CounterRead::Issued(0)), 2)
+                .expect("same reached source occurrence");
+    }
     code.recovery[1].pending = Some(Register::Int(4));
     code.recovery[4].operands = Box::new([Register::Bool(0)]);
     code.dependencies = Box::new([ReadDependency {
@@ -454,6 +477,9 @@ fn stable_scalar_and_member_loops_publish_once_with_bounded_recovery() {
             ),
             (6 * n as u64, 5 * n as u64 + 2, 10, 10)
         );
+        assert_eq!(&*image.source_counts, &[17 + n as u64, 91 + n as u64]);
+        assert_eq!(image.prefix.occurrence, Some(17 + n as u64 - 1));
+        assert_eq!(image.prefix.ordinal, 5 * n as u64 + 2);
         assert_eq!(image.frames[0].roles.len(), 5);
         assert_eq!(census.load(Ordering::Relaxed), 4 * n as u64);
         materialized
@@ -546,10 +572,14 @@ fn recursive(n: i64) -> Arc<Code> {
             (Register::Int(2), Value::Int(0)),
         ],
         &[(Slot::Binding(0), Register::Int(0))],
-        10,
+        16,
     );
-    code.frame_capacity = n as usize + 2;
-    let plan = |leave_prefix| Call {
+    for index in [10, 11, 12, 13] {
+        code.recovery[index].incoming = true;
+    }
+    let plan = |restore_prefix, leave_prefix, completion_prefix, before_prefix| Call {
+        before: Cost::ZERO,
+        before_prefix,
         entry: 2,
         prefix: 8,
         arguments: Box::new([
@@ -559,26 +589,38 @@ fn recursive(n: i64) -> Arc<Code> {
         ]),
         result: Register::Int(0),
         destination: Register::Int(0),
-        leave: cost(3, -8, 0, -1),
+        leave: cost(0, -8, 0, -1),
         leave_prefix,
+        completion: cost(3, 0, 0, 0),
+        completion_prefix,
+        restore: Cost::ZERO,
+        restore_prefix,
     };
-    code.calls = Box::new([plan(7), plan(9)]);
+    code.calls = Box::new([plan(7, 11, 10, 14), plan(9, 13, 12, 15)]);
     Arc::new(code)
 }
 
 #[test]
 fn affine_calls_use_the_executor_stack_and_preserve_exact_depth_prefixes() {
-    for (n, depth) in [(8, 8), (8, 9), (8, 10), (1024, 1025)] {
+    for (n, depth, entry_depth) in [(8, 8, 0), (8, 9, 0), (8, 10, 0), (1024, 1025, 0), (2, 4, 3)] {
         let mut state = State::new();
-        let mut lease =
-            RegionLease::acquire_fixture(&mut state, recursive(n), Limits { depth, ..limits() })
-                .expect("entry");
+        let mut lease = RegionLease::acquire_fixture(
+            &mut state,
+            recursive(n),
+            Limits {
+                depth,
+                entry_depth,
+                ..limits()
+            },
+        )
+        .expect("entry");
         let stopped = lease
             .run(StopAt::NextBoundary)
             .expect("recursive execution");
         let materialized = lease.materialize().expect("active-frame recovery");
         let image = materialized.reconstruction();
-        if depth <= n as u32 {
+        let allowed = depth - entry_depth;
+        if allowed <= n as u32 {
             assert_eq!(stopped, RegionStop::Refusal);
             assert_eq!(
                 (
@@ -586,12 +628,15 @@ fn affine_calls_use_the_executor_stack_and_preserve_exact_depth_prefixes() {
                     image.counters.depth,
                     image.counters.balance
                 ),
-                (5 * u64::from(depth), depth, 10 + 8 * u64::from(depth))
+                (5 * u64::from(allowed), depth, 10 + 8 * u64::from(allowed))
             );
-            assert_eq!(image.frames.len(), depth as usize + 1);
-            assert!(role(image, depth as usize, 0).same(&Value::Int(n - i64::from(depth))));
+            assert_eq!(image.frames.len(), allowed as usize + 1);
+            assert!(role(image, allowed as usize, 0).same(&Value::Int(n - i64::from(allowed))));
             let invocations: Vec<_> = image.frames.iter().map(|frame| frame.invocation).collect();
-            assert_eq!(invocations, (1..=u64::from(depth) + 1).collect::<Vec<_>>());
+            assert_eq!(
+                invocations,
+                (1..=u64::from(allowed) + 1).collect::<Vec<_>>()
+            );
         } else {
             assert_eq!(stopped, RegionStop::Complete);
             assert!(image.payload.expect("return").same(&Value::Int(n)));
@@ -602,7 +647,7 @@ fn affine_calls_use_the_executor_stack_and_preserve_exact_depth_prefixes() {
                     image.counters.balance,
                     image.counters.peak
                 ),
-                (9 * n as u64 + 7, 0, 10, 10 + 8 * (n as u64 + 1))
+                (9 * n as u64 + 7, entry_depth, 10, 10 + 8 * (n as u64 + 1))
             );
             assert_eq!(image.frames.len(), 1);
         }
@@ -780,6 +825,23 @@ fn overflow_number_policy_and_read_identity_are_checked_without_publication() {
             assert_eq!((revision, roots), (0, 0));
         });
     }
+    for initial in [u64::MAX - 1, u64::MAX] {
+        let mut code = Arc::try_unwrap(read_loop(2)).ok().expect("unique fixture");
+        code.source_initial[0] = initial;
+        let mut state = State::new();
+        let view = state.view();
+        let mut lease =
+            RegionLease::acquire_fixture(&mut state, Arc::new(code), limits()).expect("entry");
+        assert!(
+            lease.run(StopAt::NextBoundary).is_err(),
+            "source occurrence overflow must not wrap"
+        );
+        assert!(lease.materialize().is_err());
+        view.inspect(|image, version, roots| {
+            assert!(image.is_none());
+            assert_eq!((version, roots), (0, 0));
+        });
+    }
     let mut code = Arc::try_unwrap(read_loop(1)).ok().expect("unique fixture");
     code.initial.last_mut().expect("actual read base").1 = Value::Int(100);
     let mut state = State::new();
@@ -795,4 +857,241 @@ fn overflow_number_policy_and_read_identity_are_checked_without_publication() {
         assert!(image.is_none());
         assert_eq!((revision, roots), (0, 0));
     });
+}
+
+#[test]
+fn accepted_frame_leave_survives_a_later_completion_fee_refusal() {
+    for bound in [3, 4, 6, 7, 8] {
+        let mut state = State::new();
+        let view = state.view();
+        let mut lease = RegionLease::acquire_fixture(
+            &mut state,
+            recursive(0),
+            Limits {
+                charge: bound,
+                ..limits()
+            },
+        )
+        .expect("entry");
+        let stop = lease
+            .run(StopAt::NextBoundary)
+            .expect("ordered call phases");
+        let materialized = lease.materialize().expect("current call phase");
+        let image = materialized.reconstruction();
+        if bound == 3 {
+            assert_eq!(stop, RegionStop::Refusal);
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.balance,
+                    image.counters.depth
+                ),
+                (3, 18, 1)
+            );
+            assert_eq!(image.frames.len(), 2);
+            assert!(image.pending.is_none());
+        } else if bound < 7 {
+            assert_eq!(stop, RegionStop::Refusal);
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.balance,
+                    image.counters.depth
+                ),
+                (4, 10, 0)
+            );
+            assert_eq!(image.frames.len(), 1);
+            assert!(
+                image
+                    .pending
+                    .expect("returned value survives Leave")
+                    .same(&Value::Int(0))
+            );
+            assert_eq!(image.attempted, Some(point(10)));
+        } else {
+            assert_eq!(stop, RegionStop::Complete);
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.balance,
+                    image.counters.depth
+                ),
+                (7, 10, 0)
+            );
+            assert!(image.pending.is_none());
+            assert!(image.payload.expect("caller return").same(&Value::Int(0)));
+        }
+        view.inspect(|image, version, roots| {
+            assert!(image.is_none());
+            assert_eq!((version, roots), (0, 0));
+        });
+        materialized
+            .prepare_exit()
+            .expect("prepare exact prefix")
+            .commit()
+            .expect("commit exact prefix");
+        view.inspect(|image, version, roots| {
+            assert_eq!((version, roots), (1, 1));
+            let image = image.expect("published prefix");
+            assert_eq!(image.counters.depth, if bound == 3 { 1 } else { 0 });
+        });
+    }
+}
+
+#[test]
+fn callee_body_return_charge_is_paid_before_frame_leave() {
+    for bound in [4, 5, 6, 8, 9, 10] {
+        let mut code = Arc::try_unwrap(recursive(0)).ok().expect("unique fixture");
+        code.instructions[7].cost = cost(2, 0, 0, 0);
+        let mut state = State::new();
+        let mut lease = RegionLease::acquire_fixture(
+            &mut state,
+            Arc::new(code),
+            Limits {
+                charge: bound,
+                ..limits()
+            },
+        )
+        .expect("entry");
+        let stop = lease.run(StopAt::NextBoundary).expect("body return close");
+        let materialized = lease.materialize().expect("current prefix");
+        let image = materialized.reconstruction();
+        if bound < 6 {
+            assert_eq!(stop, RegionStop::Refusal);
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.balance,
+                    image.counters.depth
+                ),
+                (4, 18, 1)
+            );
+            assert_eq!(image.attempted, Some(point(7)));
+        } else if bound < 9 {
+            assert_eq!(stop, RegionStop::Refusal);
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.balance,
+                    image.counters.depth
+                ),
+                (6, 10, 0)
+            );
+            assert!(image.pending.expect("returned result").same(&Value::Int(0)));
+        } else {
+            assert_eq!(stop, RegionStop::Complete);
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.balance,
+                    image.counters.depth
+                ),
+                (9, 10, 0)
+            );
+        }
+    }
+}
+
+#[test]
+fn caller_argument_debt_precedes_a_refused_frame_entry() {
+    for (charge, depth) in [(4, 0), (5, 0), (6, 0), (5, 1), (7, 1)] {
+        let mut code = Arc::try_unwrap(recursive(0)).ok().expect("unique fixture");
+        code.calls[0].before = cost(5, 0, 0, 0);
+        let mut state = State::new();
+        let mut lease = RegionLease::acquire_fixture(
+            &mut state,
+            Arc::new(code),
+            Limits {
+                charge,
+                depth,
+                ..limits()
+            },
+        )
+        .expect("entry");
+        assert_eq!(
+            lease
+                .run(StopAt::NextBoundary)
+                .expect("ordered entry phases"),
+            RegionStop::Refusal
+        );
+        let prefix = lease.materialize().expect("exact caller debt prefix");
+        let image = prefix.reconstruction();
+        if charge < 5 {
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.depth,
+                    image.counters.balance
+                ),
+                (0, 0, 10)
+            );
+            assert_eq!(image.attempted, Some(point(14)));
+            assert_eq!(image.entering, None);
+        } else if depth == 0 || charge < 7 {
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.depth,
+                    image.counters.balance
+                ),
+                (5, 0, 10)
+            );
+            assert_eq!(image.attempted, Some(point(1)));
+            assert_eq!(image.entering, Some(0));
+        } else {
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.depth,
+                    image.counters.balance
+                ),
+                (7, 1, 18)
+            );
+            assert_eq!(image.attempted, Some(point(3)));
+            assert_eq!(image.entering, None);
+        }
+    }
+}
+
+#[test]
+fn charge_off_slices_use_source_pace_and_atomic_fees_keep_the_slice() {
+    for charging in [false, true] {
+        let code = Arc::new(code(
+            vec![
+                instruction(Op::Meter, 1, 1, cost(1000, 0, 0, 0)),
+                instruction(Op::Meter, 2, 2, cost(1000, 0, 0, 0)),
+                instruction(Op::Meter, 3, 3, cost(1000, 0, 0, 0)),
+                instruction(Op::Exit, 3, 4, Cost::ZERO),
+            ],
+            vec![],
+            &[],
+            5,
+        ));
+        let mut state = State::new();
+        let mut lease = RegionLease::acquire_fixture(
+            &mut state,
+            code,
+            Limits {
+                slice: 2,
+                charge_enabled: charging,
+                ..limits()
+            },
+        )
+        .expect("entry");
+        assert_eq!(
+            lease.run(StopAt::NextBoundary).expect("mandatory slice"),
+            RegionStop::Slice
+        );
+        let prefix = lease.materialize().expect("actual reached prefix");
+        let image = prefix.reconstruction();
+        assert_eq!(
+            (
+                image.prefix.ordinal,
+                image.counters.charge,
+                image.counters.progress
+            ),
+            if charging { (1, 1000, 1000) } else { (2, 0, 2) }
+        );
+        assert_eq!(image.frames[0].pc, if charging { 1 } else { 2 });
+    }
 }

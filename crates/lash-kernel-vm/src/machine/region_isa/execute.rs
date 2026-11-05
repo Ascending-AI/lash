@@ -5,6 +5,7 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Counters {
     pub(super) charge: u64,
+    pub(super) progress: u64,
     pub(super) balance: u64,
     pub(super) peak: u64,
     pub(super) depth: u32,
@@ -20,6 +21,7 @@ pub(super) struct Frame {
 pub(super) struct Execution {
     pub(super) code: Arc<Code>,
     pub(super) registers: Registers,
+    pub(super) source: super::source_counters::SourceCounters,
     pub(super) frames: Vec<Frame>,
     pub(super) reached: ReachedPrefix,
     pub(super) counters: Counters,
@@ -28,7 +30,9 @@ pub(super) struct Execution {
     pub(super) stop: Option<RegionStop>,
     pub(super) payload: Option<Value>,
     pub(super) faulted: bool,
-    lease: Rc<()>,
+    pub(super) lease: Rc<()>,
+    pub(super) returning: Option<returns::Returning>,
+    pub(super) entering: Option<u32>,
     next_invocation: u64,
     #[cfg(test)]
     pub(super) executed: u64,
@@ -36,8 +40,7 @@ pub(super) struct Execution {
 
 impl Execution {
     pub(super) fn acquire(code: Arc<Code>, limits: Limits) -> Result<Self, RegionError> {
-        if code.frame_capacity == 0
-            || code.invocation == 0
+        if code.invocation == 0
             || limits.entry_balance > limits.memory
             || limits.entry_charge > limits.charge
             || limits.entry_depth > limits.depth
@@ -46,13 +49,13 @@ impl Execution {
         {
             return Err(invalid(Refused::Facts));
         }
-        let mut registers = Registers::new(code.registers, code.frame_capacity)?;
+        let mut registers = Registers::new(code.registers, 1)?;
         for (reg, value) in &code.initial {
             registers.write(0, code.invocation, *reg, *value)?;
         }
         let mut frames = Vec::new();
         frames
-            .try_reserve_exact(code.frame_capacity)
+            .try_reserve_exact(1)
             .map_err(|_| invalid(Refused::Scratch))?;
         frames.push(Frame {
             invocation: code.invocation,
@@ -61,14 +64,20 @@ impl Execution {
             return_pc: 0,
             activation: None,
         });
+        let mut source = super::source_counters::SourceCounters::bind(&code.source_initial)?;
+        let occurrence = source
+            .prepare(&code.recovery[code.entry_prefix as usize].counters)?
+            .accept();
         let reached = ReachedPrefix {
             invocation: code.invocation,
-            occurrence: 0,
+            ordinal: 0,
+            occurrence,
             prefix: code.entry_prefix,
             debt: 0,
         };
         let counters = Counters {
             charge: limits.entry_charge,
+            progress: limits.entry_progress,
             balance: limits.entry_balance,
             peak: limits.entry_balance,
             depth: limits.entry_depth,
@@ -81,6 +90,7 @@ impl Execution {
         Ok(Self {
             code,
             registers,
+            source,
             frames,
             reached,
             counters,
@@ -90,6 +100,8 @@ impl Execution {
             payload: None,
             faulted: false,
             lease: Rc::new(()),
+            returning: None,
+            entering: None,
             next_invocation,
             #[cfg(test)]
             executed: 0,
@@ -102,7 +114,7 @@ impl Execution {
             .read(self.frames.len() - 1, frame.invocation, reg)
     }
 
-    fn fee(&self, fee: Fee) -> Result<u64, RegionError> {
+    pub(super) fn fee(&self, fee: Fee) -> Result<u64, RegionError> {
         match fee {
             Fee::Fixed(units) => Ok(units),
             Fee::WordSize {
@@ -117,8 +129,21 @@ impl Execution {
         }
     }
 
-    fn affordable(&self, cost: Cost) -> Result<Option<Counters>, RegionError> {
-        let Some(charge) = self.counters.charge.checked_add(self.fee(cost.fee)?) else {
+    pub(super) fn affordable(&self, cost: Cost) -> Result<Option<Counters>, RegionError> {
+        let fee = if self.limits.charge_enabled {
+            self.fee(cost.fee)?
+        } else {
+            0
+        };
+        let Some(charge) = self.counters.charge.checked_add(fee) else {
+            return Ok(None);
+        };
+        let increment = if self.limits.charge_enabled {
+            fee
+        } else {
+            cost.pace
+        };
+        let Some(progress) = self.counters.progress.checked_add(increment) else {
             return Ok(None);
         };
         let Some(balance) = i128::from(self.counters.balance)
@@ -145,6 +170,7 @@ impl Execution {
             && depth <= self.limits.depth)
             .then_some(Counters {
                 charge,
+                progress,
                 balance,
                 peak,
                 depth,
@@ -152,7 +178,7 @@ impl Execution {
             }))
     }
 
-    fn refuse(&mut self, prefix: u32) -> Result<(), RegionError> {
+    pub(super) fn refuse(&mut self, prefix: u32) -> Result<(), RegionError> {
         self.attempted = Some(
             self.code
                 .recovery
@@ -165,23 +191,28 @@ impl Execution {
         Ok(())
     }
 
-    fn reached(&mut self, prefix: u32, counters: Counters) -> Result<(), RegionError> {
-        self.code
+    pub(super) fn reached(&mut self, prefix: u32, counters: Counters) -> Result<(), RegionError> {
+        let map = self
+            .code
             .recovery
             .get(prefix as usize)
             .ok_or_else(|| invalid(Refused::Exit))?;
+        let ordinal = self
+            .reached
+            .ordinal
+            .checked_add(1)
+            .ok_or_else(|| invalid(Refused::Facts))?;
         let frame = self
             .frames
             .last_mut()
             .ok_or_else(|| invalid(Refused::Facts))?;
+        let ready = self.source.prepare(&map.counters)?;
+        let occurrence = ready.accept();
         frame.prefix = prefix;
         self.reached = ReachedPrefix {
             invocation: frame.invocation,
-            occurrence: self
-                .reached
-                .occurrence
-                .checked_add(1)
-                .ok_or_else(|| invalid(Refused::Facts))?,
+            ordinal,
+            occurrence,
             prefix,
             debt: counters.debt,
         };
@@ -208,9 +239,42 @@ impl Execution {
 
     fn run_inner(&mut self, request: StopAt) -> Result<RegionStop, RegionError> {
         loop {
-            if self.counters.charge >= self.limits.slice {
+            if self.counters.progress >= self.limits.slice {
                 self.stop = Some(RegionStop::Slice);
                 return Ok(RegionStop::Slice);
+            }
+            if self.returning.is_some() {
+                match self.advance_return() {
+                    Ok(()) => (),
+                    Err(_) if self.stop == Some(RegionStop::Refusal) => {
+                        return Ok(RegionStop::Refusal);
+                    }
+                    Err(error) => return Err(error),
+                }
+                if matches!(request, StopAt::NextLegalPrefix) {
+                    self.stop = Some(RegionStop::Handoff);
+                    return Ok(RegionStop::Handoff);
+                }
+                continue;
+            }
+            if let Some(site) = self.entering {
+                match self.enter_call(site) {
+                    Ok(activation) => {
+                        self.frames
+                            .last_mut()
+                            .ok_or_else(|| invalid(Refused::Facts))?
+                            .activation = Some(activation)
+                    }
+                    Err(_) if self.stop == Some(RegionStop::Refusal) => {
+                        return Ok(RegionStop::Refusal);
+                    }
+                    Err(error) => return Err(error),
+                }
+                if matches!(request, StopAt::NextLegalPrefix) {
+                    self.stop = Some(RegionStop::Handoff);
+                    return Ok(RegionStop::Handoff);
+                }
+                continue;
             }
             let frame = self.frames.last().ok_or_else(|| invalid(Refused::Facts))?;
             let pc = frame.pc;
@@ -230,13 +294,8 @@ impl Execution {
                 return Ok(RegionStop::Boundary);
             }
             if let Op::Call { site } = op {
-                match self.enter_call(site) {
-                    Ok(activation) => {
-                        self.frames
-                            .last_mut()
-                            .ok_or_else(|| invalid(Refused::Facts))?
-                            .activation = Some(activation)
-                    }
+                match self.begin_enter(site) {
+                    Ok(()) => (),
                     Err(_) if self.stop == Some(RegionStop::Refusal) => {
                         return Ok(RegionStop::Refusal);
                     }
@@ -267,7 +326,7 @@ impl Execution {
                 if plan.result != value {
                     return Err(invalid(Refused::Facts));
                 }
-                match self.leave_call(activation) {
+                match self.begin_return(activation) {
                     Ok(()) => (),
                     Err(_) if self.stop == Some(RegionStop::Refusal) => {
                         return Ok(RegionStop::Refusal);
@@ -383,7 +442,44 @@ impl Execution {
         }
     }
 
+    fn begin_enter(&mut self, site: u32) -> Result<(), RegionError> {
+        if self.entering.is_some() || self.returning.is_some() {
+            return Err(invalid(Refused::Facts));
+        }
+        let caller = self.frames.last().ok_or_else(|| invalid(Refused::Facts))?;
+        let instruction = self
+            .code
+            .instructions
+            .get(caller.pc as usize)
+            .ok_or_else(|| invalid(Refused::Path))?;
+        if !matches!(instruction.op, Op::Call { site: actual } if actual == site) {
+            return Err(invalid(Refused::Facts));
+        }
+        let plan = self
+            .code
+            .calls
+            .get(site as usize)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        for (src, _) in &plan.arguments {
+            self.read(*src)?;
+        }
+        let prefix = plan.before_prefix;
+        let Some(counters) = self.affordable(plan.before)? else {
+            self.refuse(prefix)?;
+            return Err(invalid(Refused::Peak));
+        };
+        self.reached(prefix, counters)?;
+        self.entering = Some(site);
+        Ok(())
+    }
+
     pub(super) fn enter_call(&mut self, site: u32) -> Result<CallActivation, RegionError> {
+        if self.entering.is_none() {
+            self.begin_enter(site)?;
+        }
+        if self.entering != Some(site) {
+            return Err(invalid(Refused::Facts));
+        }
         let caller = self.frames.last().ok_or_else(|| invalid(Refused::Facts))?;
         let instruction = self
             .code
@@ -401,10 +497,6 @@ impl Execution {
             .get(site as usize)
             .ok_or_else(|| invalid(Refused::Facts))?;
         let (next, prefix, cost) = (instruction.next, instruction.prefix, instruction.cost);
-        if self.frames.len() == self.code.frame_capacity {
-            self.refuse(prefix)?;
-            return Err(invalid(Refused::Peak));
-        }
         for (src, _) in &plan.arguments {
             self.read(*src)?;
         }
@@ -417,6 +509,10 @@ impl Execution {
             .checked_add(1)
             .ok_or_else(|| invalid(Refused::Facts))?;
         let depth = self.frames.len();
+        self.frames
+            .try_reserve(1)
+            .map_err(|_| invalid(Refused::Scratch))?;
+        self.registers.reserve_frame(depth)?;
         self.registers.clear(depth)?;
         for (src, dst) in &plan.arguments {
             let value = self.read(*src)?;
@@ -435,6 +531,7 @@ impl Execution {
             activation: None,
         });
         self.next_invocation = following;
+        self.entering = None;
         self.reached(entry_prefix, counters)?;
         Ok(CallActivation {
             lease: Rc::clone(&self.lease),
@@ -442,44 +539,5 @@ impl Execution {
             depth,
             plan: site,
         })
-    }
-
-    pub(super) fn leave_call(&mut self, activation: CallActivation) -> Result<(), RegionError> {
-        let frame = self.frames.last().ok_or_else(|| invalid(Refused::Facts))?;
-        if !Rc::ptr_eq(&activation.lease, &self.lease)
-            || activation.depth + 1 != self.frames.len()
-            || frame.invocation != activation.invocation
-            || self.frames.len() <= 1
-        {
-            return Err(invalid(Refused::Facts));
-        }
-        let plan = self
-            .code
-            .calls
-            .get(activation.plan as usize)
-            .ok_or_else(|| invalid(Refused::Facts))?;
-        if plan.leave.depth != -1
-            || !matches!(self.code.instructions.get(frame.pc as usize).map(|op| op.op), Some(Op::Return { value }) if value == plan.result)
-        {
-            return Err(invalid(Refused::Facts));
-        }
-        let (value, destination, prefix) =
-            (self.read(plan.result)?, plan.destination, plan.leave_prefix);
-        let Some(counters) = self.affordable(plan.leave)? else {
-            self.refuse(prefix)?;
-            return Err(invalid(Refused::Peak));
-        };
-        let next = frame.return_pc;
-        self.registers.clear(self.frames.len() - 1)?;
-        self.frames.pop();
-        let caller_index = self.frames.len() - 1;
-        let caller = self
-            .frames
-            .last_mut()
-            .ok_or_else(|| invalid(Refused::Facts))?;
-        caller.pc = next;
-        self.registers
-            .write(caller_index, caller.invocation, destination, value)?;
-        self.reached(prefix, counters)
     }
 }

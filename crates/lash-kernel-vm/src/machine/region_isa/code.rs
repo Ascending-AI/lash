@@ -63,6 +63,7 @@ pub(super) enum Fee {
 #[derive(Clone, Copy)]
 pub(super) struct Cost {
     pub(super) fee: Fee,
+    pub(super) pace: u64,
     pub(super) delta: i128,
     pub(super) peak: u64,
     pub(super) depth: i32,
@@ -70,6 +71,7 @@ pub(super) struct Cost {
 impl Cost {
     pub(super) const ZERO: Self = Self {
         fee: Fee::Fixed(0),
+        pace: 0,
         delta: 0,
         peak: 0,
         depth: 0,
@@ -85,9 +87,13 @@ pub(super) struct Recovery {
     pub(super) roles: Box<[(Slot, Register)]>,
     pub(super) operands: Box<[Register]>,
     pub(super) pending: Option<Register>,
+    pub(super) incoming: bool,
     pub(super) continuation: Point,
+    pub(super) counters: super::source_counters::CounterPlan,
 }
 pub(super) struct Call {
+    pub(super) before: Cost,
+    pub(super) before_prefix: u32,
     pub(super) entry: u32,
     pub(super) prefix: u32,
     pub(super) arguments: Box<[(Register, Register)]>,
@@ -95,6 +101,10 @@ pub(super) struct Call {
     pub(super) destination: Register,
     pub(super) leave: Cost,
     pub(super) leave_prefix: u32,
+    pub(super) completion: Cost,
+    pub(super) completion_prefix: u32,
+    pub(super) restore: Cost,
+    pub(super) restore_prefix: u32,
 }
 pub(super) struct ReadDependency {
     pub(super) identity: Value,
@@ -111,7 +121,7 @@ pub(super) struct Code {
     pub(super) calls: Box<[Call]>,
     pub(super) dependencies: Box<[ReadDependency]>,
     pub(super) registers: usize,
-    pub(super) frame_capacity: usize,
+    pub(super) source_initial: Box<[u64]>,
     pub(super) initial: Box<[(Register, Value)]>,
     pub(super) invocation: u64,
     pub(super) safe_integers: bool,
@@ -137,11 +147,26 @@ pub(super) struct Limits {
     pub(super) slice: u64,
     pub(super) entry_balance: u64,
     pub(super) entry_charge: u64,
+    pub(super) entry_progress: u64,
+    pub(super) charge_enabled: bool,
     pub(super) entry_depth: u32,
 }
 impl Limits {
-    pub(super) fn machine(machine: &KernelMachine) -> Self {
-        Self {
+    pub(super) fn machine(machine: &mut KernelMachine) -> Result<Self, RegionError> {
+        let task = machine.current.ok_or_else(|| invalid(Refused::Facts))?;
+        let below = usize::from(task != lash_kernel_doc::TaskId::MAIN || !machine.session_cell);
+        let frames = machine
+            .tasks
+            .get_mut(task.0 as usize)
+            .map_err(RegionError::Heap)?
+            .ok_or_else(|| invalid(Refused::Facts))?
+            .frames
+            .len();
+        let entry_depth = frames
+            .checked_add(below)
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        Ok(Self {
             charge: if matches!(machine.bounds.charge, crate::Charge::Off) {
                 u64::MAX
             } else {
@@ -155,8 +180,14 @@ impl Limits {
             depth: machine.bounds.call_depth,
             slice: machine.slice_end,
             entry_balance: machine.logical_memory.get(),
-            entry_charge: machine.charged,
-            entry_depth: 0,
-        }
+            entry_charge: if matches!(machine.bounds.charge, crate::Charge::Off) {
+                0
+            } else {
+                machine.charged
+            },
+            entry_progress: machine.charged,
+            charge_enabled: !matches!(machine.bounds.charge, crate::Charge::Off),
+            entry_depth,
+        })
     }
 }
