@@ -127,7 +127,6 @@ pub(in crate::compile::room) fn resolve(
         let function = exe.lib(lib);
         if !function.body_arity(arguments)
             || function.limit.is_some()
-            || function.shares_params
             || function.specialization.resource
                 != CallSource::Body(function.specialization.function)
         {

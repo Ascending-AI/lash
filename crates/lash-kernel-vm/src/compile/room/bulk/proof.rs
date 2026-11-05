@@ -1,13 +1,10 @@
 //! Source value flow authenticates a finite collection result before storage.
 //! Fact indices are source-local, independent of physical slots and family tags.
 use super::*;
-use crate::compile::room::publication::sort::CallbackProgram;
 use crate::compile::{Entry as NativeEntry, LibId, LibRun};
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_state::kernel_internals::logical::{self, Slot};
 use std::collections::BTreeSet;
-#[path = "proof/callback.rs"]
-mod callback;
 
 #[path = "proof/evaluate.rs"]
 mod evaluate;
@@ -23,12 +20,6 @@ pub(super) enum ValueRule {
         library: LibId,
         arguments: Box<[usize]>,
         after_member: bool,
-    },
-    Callback {
-        call: Arc<region::calls::VerifiedCall>,
-        at: Point,
-        arguments: Box<[usize]>,
-        roles: Box<[(Slot, usize)]>,
     },
     Item {
         target: usize,
@@ -52,8 +43,6 @@ pub(super) struct Compiled {
     pub(super) depth: u64,
 }
 struct Compiler<'a> {
-    callback: Option<&'a CallbackProgram>,
-    callback_results: BTreeMap<Site, usize>,
     source: &'a Source,
     slots: Arc<OwnerSlots>,
     values: Vec<ValueRule>,
@@ -161,9 +150,6 @@ impl Compiler<'_> {
         self.slot(owner)
     }
     fn event(&mut self, exe: &Executable, event: &Event) -> Result<EventRule, Refused> {
-        if callback::handles(self, event) {
-            return callback::compile_event(self, event);
-        }
         if !event.entities.is_empty() {
             return Err(Refused::Source);
         }
@@ -402,33 +388,9 @@ impl Compiled {
         source: &Arc<Source>,
         events: &[Arc<CompiledInterval>],
     ) -> Result<Self, Refused> {
-        Self::compile_with_callback(exe, source, events, None)
-    }
-
-    pub(super) fn compile_with_callback(
-        exe: &Executable,
-        source: &Arc<Source>,
-        events: &[Arc<CompiledInterval>],
-        callback: Option<&CallbackProgram>,
-    ) -> Result<Self, Refused> {
-        Self::compile_events(
-            exe,
-            source,
-            events.iter().flat_map(|interval| interval.events()),
-            callback,
-        )
-    }
-
-    fn compile_events<'event>(
-        exe: &Executable,
-        source: &Arc<Source>,
-        events: impl Iterator<Item = &'event Event>,
-        callback: Option<&CallbackProgram>,
-    ) -> Result<Self, Refused> {
+        let events = events.iter().flat_map(|interval| interval.events());
         let mut events = events.peekable();
         let mut cx = Compiler {
-            callback,
-            callback_results: BTreeMap::new(),
             source,
             slots: source.owner_slots()?,
             values: Vec::new(),

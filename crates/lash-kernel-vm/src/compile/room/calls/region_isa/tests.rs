@@ -2,6 +2,7 @@ use super::callee::Substitution;
 use super::*;
 use crate::compile::region_isa::fixtures as drafts;
 use crate::laws::embedder::Embedder;
+use lash_kernel_state::kernel_internals::logical::{LeaseAllocation, LeaseMember, LeaseOp};
 
 fn executable(run: &Embedder) -> Arc<Executable> {
     let (program, _) = run.program(true);
@@ -40,14 +41,14 @@ fn values(plan: &CalleePlan, inputs: &[(Slot, Value)]) -> Vec<(String, Value)> {
                     parameter,
                     argument,
                 } => (
-                    *parameter,
+                    parameter.role.slot(),
                     inputs
                         .iter()
-                        .find(|(slot, _)| slot == argument)
+                        .find(|(slot, _)| *slot == argument.slot())
                         .expect("source argument must be used")
                         .1,
                 ),
-                Substitution::Absent { parameter } => (*parameter, Value::Absent),
+                Substitution::Absent { parameter } => (parameter.role.slot(), Value::Absent),
             };
             let name = plan
                 .source()
@@ -149,12 +150,77 @@ fn substitutions_preserve_source_arguments_and_saved_operands() {
             let mut parent = plan.at.site.clone();
             parent.path.pop();
             let expected = slot(source, &Owner::Operand(parent.child(0))).unwrap();
-            assert_eq!(plan.saved_roles(), [expected]);
+            assert_eq!(
+                plan.saved_roles()
+                    .iter()
+                    .map(|role| role.slot())
+                    .collect::<Vec<_>>(),
+                [expected]
+            );
         }
         // A forged same-priced source argument must fail call-plan validation.
         let mut forged = fixtures::plan(&exe, caller, site.0, site.1).unwrap();
         forged.targets[0].corrupt_substitution_for_law();
         assert!(forged.verify(&exe).is_err());
+    }
+    for shared in [false, true] {
+        let capture = if shared {
+            "let f = fn() { return a }"
+        } else {
+            ""
+        };
+        let definition = format!(
+            "function echo(a: Any, b: Any) -> Any\nkernel 1\nmetering statements\nbody {{ {capture} return a }}"
+        );
+        let run = Embedder::new(&format!(
+            "definition {}\nmain {{ let values = [1] return (values, invoke echo(values, values)) }}",
+            serde_json::to_string(&definition).unwrap()
+        ));
+        let exe = executable(&run);
+        let caller = exe.main.unwrap();
+        let site = call_site(&exe, caller);
+        let plan = fixtures::plan(&exe, caller, site.0, site.1).unwrap();
+        let target = plan.static_target().unwrap();
+        let first = target.substitutions()[0].parameter();
+        assert_eq!(first.shared, shared);
+        with_lease(|lease| {
+            let one = lease.import(&Value::Int(1)).unwrap();
+            let list = local(lease, LeaseAllocation::list(&[one]));
+            let mut parameters = Vec::new();
+            for substitution in target.substitutions() {
+                let value = substitution.input(lease, |_| Some(list)).unwrap().unwrap();
+                let binding = substitution.parameter();
+                let stored = if binding.shared {
+                    local(lease, LeaseAllocation::cell(&value))
+                } else {
+                    value
+                };
+                parameters.push((binding, stored));
+            }
+            let first_value = if first.shared {
+                let cell = lease.object(parameters[0].1).unwrap();
+                lease
+                    .read(cell, &LeaseMember::Variable)
+                    .unwrap_or_else(|_| panic!("shared argument cell"))
+            } else {
+                parameters[0].1
+            };
+            let object = lease.object(first_value).unwrap();
+            let two = lease.import(&Value::Int(2)).unwrap();
+            accept(
+                lease,
+                LeaseOp::Member {
+                    object,
+                    member: LeaseMember::List(0),
+                    next: Some(two),
+                },
+            );
+            let saved = plan.saved_roles()[0].read(|_| Some(list)).unwrap();
+            let result = plan.result_role().read(|_| Some(first_value)).unwrap();
+            for value in [list, parameters[1].1, saved, result] {
+                assert_list_item(lease, value, 2);
+            }
+        });
     }
 }
 
@@ -193,10 +259,16 @@ fn call_tables_reject_foreign_and_duplicate_source_edges() {
             .1
             .same(&Value::Int(7))
     );
-    assert_eq!(
-        target.debt().completion(&[Value::Int(7)], Value::Int(7)),
-        Some(0)
-    );
+    with_lease(|lease| {
+        let value = lease.import(&Value::Int(7)).unwrap();
+        assert_eq!(
+            target
+                .debt()
+                .completion(lease, &[value], value)
+                .unwrap_or_else(|_| panic!("canonical call debt")),
+            Some(0)
+        );
+    });
 }
 
 /// Closure identity sorts capture names, but actual cells follow the body's
@@ -236,7 +308,16 @@ fn captures_keep_cell_order_instead_of_sorted_identity_names() {
     let pc = (stmt.ops.start..stmt.ops.end())
         .rfind(|pc| matches!(stream.ops[*pc as usize], Op::Act | Op::Nested { .. }))
         .unwrap();
-    let plan = fixtures::plan(&exe, caller, statement, pc).unwrap();
+    let callback = crate::compile::room::publication::sort::CallbackProgram::compile(
+        &exe, caller, statement, pc,
+    )
+    .unwrap();
+    let plan = callback.call();
+    let draft = drafts::calls(&exe, caller, &[(statement, pc)]).unwrap();
+    let RegionOp::Call { site, .. } = draft.ops()[0] else {
+        unreachable!()
+    };
+    callback.verify_region(&exe, &draft, site).unwrap();
     let target = plan
         .targets()
         .iter()
@@ -270,41 +351,153 @@ fn captures_keep_cell_order_instead_of_sorted_identity_names() {
             },
         })
     };
-    let mut arena = Arena::new();
-    let cells = actual_names
-        .iter()
-        .map(|name| arena.new_cell(Value::Int(if name.as_str() == "seed" { 9 } else { 7 })))
-        .collect::<Vec<_>>();
-    let actual = Value::Closure(arena.new_closure(identity(program.link), cells.clone()));
-    let bound = plan.resolve_callable(&exe, &arena, actual).unwrap();
-    let actual_values = bound
-        .captures()
-        .iter()
-        .map(|binding| {
-            let cell = cells[binding.index as usize];
+    with_lease(|lease| {
+        let cells = actual_names
+            .iter()
+            .map(|name| {
+                let value = lease
+                    .import(&Value::Int(if name.as_str() == "seed" { 9 } else { 7 }))
+                    .unwrap();
+                local(lease, LeaseAllocation::cell(&value))
+            })
+            .collect::<Vec<_>>();
+        let actual = local(
+            lease,
+            LeaseAllocation::closure(identity(program.link), &cells),
+        );
+        let bound_roles = {
+            let classified = callback
+                .classify(&exe, lease, Some(actual))
+                .unwrap_or_else(|_| panic!("local callable view"))
+                .unwrap();
+            assert_eq!(classified.plan().code(), target.code());
+            let crate::compile::room::publication::sort::CallbackTarget::Value(bound) = classified
+            else {
+                panic!("source callback is dynamic");
+            };
+            bound.capture_roles().collect::<Vec<_>>()
+        };
+        for (role, cell) in &bound_roles {
             let name = actual_names
                 .iter()
                 .find(|name| {
                     slot(
-                        bound.source(),
+                        target.source(),
                         &Owner::Binding {
-                            declared: bound.source().site.clone(),
+                            declared: target.source().site.clone(),
                             name: (*name).clone(),
                         },
                     )
                     .unwrap()
-                        == binding.slot
+                        == role.slot()
                 })
                 .unwrap();
-            (name.as_str(), arena.cell(cell).unwrap())
-        })
-        .collect::<Vec<_>>();
-    for (name, value) in actual_values {
-        assert!(value.same(&Value::Int(if name == "seed" { 9 } else { 7 })));
+            let cell = lease.object(*cell).unwrap();
+            let value = lease
+                .read(cell, &LeaseMember::Variable)
+                .unwrap_or_else(|_| panic!("capture cell read"));
+            assert!(
+                lease
+                    .scalar(value)
+                    .unwrap()
+                    .same(&Value::Int(if name.as_str() == "seed" { 9 } else { 7 }))
+            );
+        }
+        // Replacing a captured cell's contents must be observed through the
+        // very same captured role, rather than an entry-value snapshot.
+        let one = lease.import(&Value::Int(1)).unwrap();
+        let list = local(lease, LeaseAllocation::list(&[one]));
+        let cell = lease.object(bound_roles[0].1).unwrap();
+        accept(
+            lease,
+            LeaseOp::Member {
+                object: cell,
+                member: LeaseMember::Variable,
+                next: Some(list),
+            },
+        );
+        let alias = lease
+            .read(cell, &LeaseMember::Variable)
+            .unwrap_or_else(|_| panic!("changed capture read"));
+        let list_object = lease.object(alias).unwrap();
+        let changed = lease.import(&Value::Int(42)).unwrap();
+        accept(
+            lease,
+            LeaseOp::Member {
+                object: list_object,
+                member: LeaseMember::List(0),
+                next: Some(changed),
+            },
+        );
+        assert_list_item(lease, list, 42);
+        let foreign = local(
+            lease,
+            LeaseAllocation::closure(
+                identity(lash_kernel_value::LinkId::from_bytes([99; 32])),
+                &cells,
+            ),
+        );
+        assert!(
+            callback
+                .classify(&exe, lease, Some(foreign))
+                .unwrap_or_else(|_| panic!("foreign callable classification"))
+                .is_none()
+        );
+    });
+}
+
+fn with_lease(test: impl FnOnce(&mut StateLease<'_>)) {
+    use lash_kernel_state::paged::{EditEpoch, SemanticHeap};
+    let mut heap = PagedHeap::fresh(Box::new(NoPages), EditEpoch(1));
+    let mut arena = Arena::new();
+    let mut lease = StateLease::acquire(&mut heap, &mut arena).unwrap();
+    test(&mut lease);
+}
+struct NoPages;
+impl lash_kernel_state::paged::PageSource for NoPages {
+    fn read(
+        &mut self,
+        _: &[doc::heap::PageRef],
+    ) -> Result<
+        Vec<Result<lash_kernel_state::paged::PageAnswer, doc::heap::HeapFault>>,
+        doc::heap::HeapFault,
+    > {
+        Err(doc::heap::HeapFault::Malformed(
+            "local call used canonical page reads".into(),
+        ))
     }
-    let foreign = Value::Closure(arena.new_closure(
-        identity(lash_kernel_value::LinkId::from_bytes([99; 32])),
-        cells,
-    ));
-    assert!(plan.resolve_callable(&exe, &arena, foreign).is_none());
+    fn seal(
+        &mut self,
+        _: lash_kernel_state::paged::PageBody,
+    ) -> Result<doc::heap::PageRef, doc::heap::HeapFault> {
+        Err(doc::heap::HeapFault::Malformed(
+            "local call published a canonical page".into(),
+        ))
+    }
+}
+fn local(lease: &mut StateLease<'_>, allocation: LeaseAllocation<'_>) -> LeaseValue {
+    let value = lease
+        .stage(LeaseOp::Allocate(allocation))
+        .unwrap_or_else(|_| panic!("local allocation stage"))
+        .reserve()
+        .unwrap()
+        .accept()
+        .unwrap();
+    accept(lease, LeaseOp::Hold { value, count: 1 });
+    value
+}
+fn accept(lease: &mut StateLease<'_>, op: LeaseOp<'_>) {
+    lease
+        .stage(op)
+        .unwrap_or_else(|_| panic!("local call phase"))
+        .reserve()
+        .unwrap()
+        .accept();
+}
+fn assert_list_item(lease: &mut StateLease<'_>, value: LeaseValue, expected: i64) {
+    let object = lease.object(value).unwrap();
+    let actual = lease
+        .read(object, &LeaseMember::List(0))
+        .unwrap_or_else(|_| panic!("shared local list read"));
+    assert!(lease.scalar(actual).unwrap().same(&Value::Int(expected)));
 }

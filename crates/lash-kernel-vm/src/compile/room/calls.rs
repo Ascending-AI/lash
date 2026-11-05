@@ -156,7 +156,6 @@ fn resolved_static(
             };
             if !lib.body_arity(arguments)
                 || lib.limit.is_some()
-                || lib.shares_params
                 || lib.specialization.resource != CallSource::Body(lib.specialization.function)
                 || exe.code(code).source_room.owner
                     != doc::constant_pool::PoolOwner::Function(lib.specialization.function)
@@ -433,6 +432,7 @@ impl VerifiedCall {
         let body = exe.code(target.code);
         let captures = target.dynamic && !body.captures.is_empty();
         if target.code == caller
+            || target.library.is_some_and(|lib| exe.lib(lib).shares_params)
             || !body.free.is_empty()
             || (!captures && (!body.captures.is_empty() || !body.capture_names.is_empty()))
             || source.bindings.iter().any(|binding| {

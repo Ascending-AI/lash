@@ -4,6 +4,14 @@
 use super::*;
 use crate::compile::region_isa::{CallId, RegionDraft, RegionOp};
 use crate::machine::region_isa::{CallActivation, RegionError};
+use lash_kernel_state::kernel_internals::logical::{
+    LeaseCallable, LeaseFault, LeaseValue, StateLease,
+};
+#[path = "region_isa/dispatch.rs"]
+mod dispatch;
+#[path = "region_isa/roles.rs"]
+mod roles;
+pub(crate) use roles::{CallBinding, CallRole, ParameterBinding};
 #[path = "region_isa/callee.rs"]
 pub(crate) mod callee;
 #[path = "region_isa/debt.rs"]
@@ -25,12 +33,14 @@ pub(crate) struct CallPlan {
     pc: u32,
     at: Point,
     resume: Point,
-    arguments: Box<[Slot]>,
-    saved: Box<[Slot]>,
-    callable: Option<Slot>,
-    callable_origin: Option<Slot>,
+    arguments: Box<[CallRole]>,
+    saved: Box<[CallRole]>,
+    callable: Option<CallRole>,
+    callable_origin: Option<CallRole>,
     targets: Box<[CalleePlan]>,
     occurrence: Option<usize>,
+    result: CallRole,
+    dispatch: dispatch::Dispatch,
 }
 
 pub(crate) fn compile_calls(
@@ -67,7 +77,7 @@ pub(crate) fn compile_calls(
 }
 
 impl CallPlan {
-    fn compile(
+    pub(crate) fn compile(
         exe: &Executable,
         caller: CodeId,
         statement: StmtId,
@@ -116,7 +126,9 @@ impl CallPlan {
         let callable_origin = resolved
             .dynamic
             .then(|| target::root_slot(&source, &resolved.at))
-            .transpose()?;
+            .transpose()?
+            .map(CallRole::new);
+        let result = CallRole::new(slot(&source, &Owner::Operand(resolved.at.site.clone()))?);
         let resume = Point {
             site: resolved.at.site.clone(),
             phase: if resolved.rooted {
@@ -126,6 +138,7 @@ impl CallPlan {
             },
         };
         source.compile_event(&resume, ExitKind::Normal)?;
+        let dispatch = dispatch::Dispatch::compile(exe, &targets)?;
         Ok(Self {
             executable: exe.local(),
             caller,
@@ -134,10 +147,12 @@ impl CallPlan {
             pc,
             at: resolved.at,
             resume,
-            arguments,
-            saved,
-            callable,
+            arguments: arguments.iter().copied().map(CallRole::new).collect(),
+            saved: saved.iter().copied().map(CallRole::new).collect(),
+            callable: callable.map(CallRole::new),
             callable_origin,
+            result,
+            dispatch,
             targets: targets.into(),
             occurrence: resolved.occurrence,
         })
@@ -159,6 +174,8 @@ impl CallPlan {
             || self.saved != expected.saved
             || self.callable != expected.callable
             || self.callable_origin != expected.callable_origin
+            || self.result != expected.result
+            || self.dispatch != expected.dispatch
             || self.occurrence != expected.occurrence
             || self.targets.len() != expected.targets.len()
         {
@@ -187,6 +204,9 @@ impl CallPlan {
         }
         self.verify(exe)
     }
+    pub(crate) fn belongs_to(&self, exe: &Executable) -> bool {
+        self.executable == exe.local()
+    }
     pub(crate) fn caller(&self) -> CodeId {
         self.caller
     }
@@ -196,16 +216,16 @@ impl CallPlan {
     pub(crate) fn resume(&self) -> &Point {
         &self.resume
     }
-    pub(crate) fn arguments(&self) -> &[Slot] {
+    pub(crate) fn arguments(&self) -> &[CallRole] {
         &self.arguments
     }
-    pub(crate) fn saved_roles(&self) -> &[Slot] {
+    pub(crate) fn saved_roles(&self) -> &[CallRole] {
         &self.saved
     }
-    pub(crate) fn callable(&self) -> Option<Slot> {
+    pub(crate) fn callable(&self) -> Option<CallRole> {
         self.callable
     }
-    pub(crate) fn callable_origin(&self) -> Option<Slot> {
+    pub(crate) fn callable_origin(&self) -> Option<CallRole> {
         self.callable_origin
     }
     pub(crate) fn occurrence(&self) -> Option<usize> {
@@ -221,55 +241,33 @@ impl CallPlan {
             None
         }
     }
-    /// Bind the actual callable at lease entry. C authenticates the defining
-    /// Link, actual origin slot and dependencies as part of its shared lease.
-    pub(crate) fn resolve_callable(
-        &self,
+    pub(crate) fn result_role(&self) -> CallRole {
+        self.result
+    }
+    /// Bind actual lease-local or imported callable identities before entry.
+    /// Unsupported/opaque callbacks end the lease before invocation.
+    pub(crate) fn bind_callable<'plan, 'lease>(
+        &'plan self,
         exe: &Executable,
-        arena: &Arena,
-        value: Value,
-    ) -> Option<&CalleePlan> {
+        lease: &'lease mut StateLease<'_>,
+        value: LeaseValue,
+    ) -> Result<Option<CallBinding<'plan, 'lease>>, LeaseFault> {
         if self.callable.is_none() || self.executable != exe.local() {
-            return None;
+            return Ok(None);
         }
-        let code = match value {
-            Value::Function(handle) => {
-                let identity = arena.callable(handle).ok()?;
-                if !exe.admits_callable(&identity) {
-                    return None;
-                }
-                exe.declared.get(&identity.function).copied().or_else(|| {
-                    let lib = exe.library_lib(&identity.function)?;
-                    match exe.lib(lib).run {
-                        LibRun::Body(code)
-                        | LibRun::Native {
-                            body: Some(code), ..
-                        } => Some(code),
-                        _ => None,
-                    }
-                })?
-            }
-            Value::Closure(handle) => {
-                let (identity, cells, _) = arena.closure(handle).ok()?;
-                let code = crate::machine::project::closure_code(
-                    exe,
-                    &identity.callable,
-                    &identity.site.site,
-                    &identity.capture_names,
-                )
-                .ok()?;
-                if cells.len() != exe.code(code).captures.len() {
-                    return None;
-                }
-                code
-            }
-            _ => return None,
+        let view = lease.callable(value)?;
+        let Some(index) = self.dispatch.target(exe, view.identity(), view.closure()) else {
+            return Ok(None);
         };
-        let index = self
-            .targets
-            .binary_search_by_key(&code, CalleePlan::code)
-            .ok()?;
-        Some(&self.targets[index])
+        let plan = &self.targets[index];
+        if view.captures().len() != plan.captures().len() {
+            return Ok(None);
+        }
+        Ok(Some(CallBinding {
+            plan,
+            callable: value,
+            view,
+        }))
     }
 }
 

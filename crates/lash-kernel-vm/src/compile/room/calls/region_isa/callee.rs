@@ -1,33 +1,37 @@
 //! Formal/capture placement is immutable. Actual values remain in C's slots.
 use super::*;
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Substitution {
-    Role { parameter: Slot, argument: Slot },
-    Absent { parameter: Slot },
+    Role {
+        parameter: ParameterBinding,
+        argument: CallRole,
+    },
+    Absent {
+        parameter: ParameterBinding,
+    },
 }
 impl Substitution {
-    fn same(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Role {
-                    parameter: a,
-                    argument: b,
-                },
-                Self::Role {
-                    parameter: c,
-                    argument: d,
-                },
-            ) => a == c && b == d,
-            (Self::Absent { parameter: a }, Self::Absent { parameter: b }) => a == b,
-            _ => false,
+    pub(crate) fn parameter(self) -> ParameterBinding {
+        match self {
+            Self::Role { parameter, .. } | Self::Absent { parameter } => parameter,
+        }
+    }
+    pub(crate) fn input(
+        self,
+        lease: &mut StateLease<'_>,
+        read: impl FnOnce(Slot) -> Option<LeaseValue>,
+    ) -> Result<Option<LeaseValue>, doc::heap::HeapFault> {
+        match self {
+            Self::Role { argument, .. } => Ok(argument.read(read)),
+            Self::Absent { .. } => lease.import(&Value::Absent).map(Some),
         }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CaptureBinding {
     pub(crate) index: u32,
-    pub(crate) slot: Slot,
+    pub(crate) role: CallRole,
 }
 
 #[derive(Clone)]
@@ -84,14 +88,20 @@ impl CalleePlan {
                     .slots
                     .get(parameter.slot as usize)
                     .ok_or(Refused::Source)?;
-                if parameter.shared
-                    || declared.shared
+                if parameter.shared != declared.shared
+                    || parameter.shared
+                        != source
+                            .shared
+                            .get(&(source.site.clone(), name.clone()))
+                            .copied()
+                            .unwrap_or(false)
                     || declared.name != *name
                     || declared.declared != source.site
                     || body.slots_by_at.get(parameter.at as usize) != Some(&parameter.slot)
                 {
                     return Err(Refused::Source);
                 }
+                let shared = parameter.shared;
                 let parameter = slot(
                     &source,
                     &Owner::Binding {
@@ -99,12 +109,16 @@ impl CalleePlan {
                         name: name.clone(),
                     },
                 )?;
+                let parameter = ParameterBinding {
+                    role: CallRole::new(parameter),
+                    shared,
+                };
                 if index >= target.arguments {
                     return Ok(Substitution::Absent { parameter });
                 }
                 Ok(Substitution::Role {
                     parameter,
-                    argument: *roles.arguments.get(index).ok_or(Refused::Source)?,
+                    argument: CallRole::new(*roles.arguments.get(index).ok_or(Refused::Source)?),
                 })
             })
             .collect::<Result<Box<[_]>, Refused>>()?;
@@ -134,7 +148,7 @@ impl CalleePlan {
                 }
                 Ok(CaptureBinding {
                     index: u32::try_from(index).map_err(|_| Refused::Path)?,
-                    slot,
+                    role: CallRole::new(slot),
                 })
             })
             .collect::<Result<Box<[_]>, Refused>>()?;
@@ -147,10 +161,21 @@ impl CalleePlan {
             phase: Phase::Leave,
         };
         let entry = source.room.events.get(&enter).ok_or(Refused::Source)?;
-        // Shared parameters allocate cells and therefore end a graph-free
-        // lease. The admitted entry must retain exactly its real frame header.
-        if entry.peak.fixed != i128::from(doc::LogicalHeldV1::FRAME)
-            || entry.delta.fixed != i128::from(doc::LogicalHeldV1::FRAME)
+        let entry_fixed = source
+            .params
+            .iter()
+            .try_fold(doc::LogicalHeldV1::FRAME, |sum, name| {
+                sum.checked_add(crate::compile::room::shared(
+                    &source.shared,
+                    &source.site,
+                    name,
+                ))
+            })
+            .ok_or(Refused::Facts)?;
+        // The frame header stays distinct from source-required parameter-cell
+        // allocation. A/C execute those verified local phases under one lease.
+        if entry.peak.fixed != i128::from(entry_fixed)
+            || entry.delta.fixed != i128::from(entry_fixed)
             || entry.peak.measures().next().is_some()
             || entry.delta.measures().next().is_some()
             || source
@@ -185,12 +210,7 @@ impl CalleePlan {
             || self.frame_price != expected.frame_price
             || self.library != expected.library
             || self.captures != expected.captures
-            || self.substitutions.len() != expected.substitutions.len()
-            || self
-                .substitutions
-                .iter()
-                .zip(&expected.substitutions)
-                .any(|(a, b)| !a.same(b))
+            || self.substitutions != expected.substitutions
             || !self.debt.same(&expected.debt)
         {
             return Err(Refused::Source);
@@ -231,28 +251,7 @@ impl CalleePlan {
     pub(crate) fn debt(&self) -> &CallDebt {
         &self.debt
     }
-    /// Arguments are the already evaluated callee slot window.
-    pub(crate) fn validate_arguments(&self, exe: &Executable, arguments: &[Value]) -> bool {
-        if arguments.len() != self.substitutions.len() {
-            return false;
-        }
-        let Some(lib) = self.library else {
-            return true;
-        };
-        exe.lib(lib)
-            .header
-            .signature
-            .params
-            .iter()
-            .zip(arguments)
-            .all(|(parameter, value)| {
-                parameter.optional && matches!(value, Value::Absent)
-                    || compile::import_result_fits(&parameter.ty, *value)
-            })
-    }
-    pub(crate) fn validate_result(&self, exe: &Executable, result: Value) -> bool {
-        self.library.is_none_or(|lib| {
-            compile::import_result_fits(&exe.lib(lib).header.signature.result, result)
-        })
+    pub(crate) fn library(&self) -> Option<LibId> {
+        self.library
     }
 }

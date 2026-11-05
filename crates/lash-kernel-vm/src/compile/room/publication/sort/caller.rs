@@ -1,12 +1,11 @@
 //! Original caller events and the verified return edge stay in one route.
 use super::*;
-use crate::compile::room::{evaluate, interval::ComposedInterval, region::calls::CallCompletion};
+use crate::compile::room::{
+    evaluate,
+    interval::ComposedInterval,
+    region::calls::{CallCompletion, VerifiedCall},
+};
 
-pub(in crate::compile::room) struct CallerRoute {
-    pub(in crate::compile::room) interval: Arc<ComposedInterval>,
-    pub(in crate::compile::room) continuation: Box<[Selection]>,
-    pub(in crate::compile::room) call_through: Point,
-}
 struct Route<'a> {
     source: &'a Arc<Source>,
     calls: &'a [Arc<VerifiedCall>],
@@ -82,59 +81,6 @@ impl evaluate::Events for Route<'_> {
     fn selected_end(&self) -> bool {
         self.finished
     }
-}
-
-/// Callers supply source branch choices, never an evaluated price or exit.
-/// The core composed interval independently checks this complete route again.
-pub(in crate::compile::room) fn caller_route(
-    exe: &Executable,
-    code: CodeId,
-    statement: crate::compile::StmtId,
-    first: Point,
-    through: Point,
-    call: &Arc<VerifiedCall>,
-    choices: &[(Site, bool)],
-) -> Result<CallerRoute, Refused> {
-    let interval = source_route(
-        exe,
-        code,
-        first,
-        through,
-        choices,
-        std::slice::from_ref(call),
-    )?;
-    let selected = interval.selections();
-    let completion = interval.calls().first().ok_or(Refused::Source)?;
-    let resume = selected.iter().position(|selection| matches!(selection, Selection::Event { at, .. } if at == completion.resume())).ok_or(Refused::Source)?;
-    let call_through = Point {
-        site: exe.stmt(statement).site.clone(),
-        phase: Phase::Commit,
-    };
-    let end = selected
-        .iter()
-        .enumerate()
-        .skip(resume)
-        .find_map(|(index, selection)| {
-            matches!(selection, Selection::Event { at, .. } if *at == call_through).then_some(index)
-        })
-        .ok_or(Refused::Source)?;
-    let continuation: Box<[Selection]> = if completion.resume() == &call_through {
-        Box::default()
-    } else {
-        selected[resume + 1..=end].into()
-    };
-    if completion.resume() != &call_through {
-        if call.root_arguments().is_some() {
-            interval.scalar(resume + 1, end + 1)?;
-        } else {
-            call.compile_continuation(exe, &call_through, &continuation)?;
-        }
-    }
-    Ok(CallerRoute {
-        interval,
-        continuation,
-        call_through,
-    })
 }
 
 /// The actual selected route also verifies ordinary statement schedules.

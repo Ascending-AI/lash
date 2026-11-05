@@ -780,10 +780,9 @@ fn verify_layout(
                 .iter()
                 .zip(site.arguments.iter())
                 .any(|(slot, reg)| {
-                    !draft
-                        .roles
-                        .iter()
-                        .any(|(actual_slot, actual_reg)| actual_slot == slot && actual_reg == reg)
+                    !draft.roles.iter().any(|(actual_slot, actual_reg)| {
+                        *actual_slot == slot.slot() && actual_reg == reg
+                    })
                 })
         {
             return Err(Refused::Source);

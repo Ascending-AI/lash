@@ -739,6 +739,28 @@ impl Executable {
             .copied()
     }
 
+    /// Immutable closure placement used to compile allocation-free call dispatch.
+    pub(crate) fn closure_entries(
+        &self,
+    ) -> impl Iterator<Item = (&FunctionId, &Site, &[Name], CodeId)> {
+        self.library
+            .0
+            .tables
+            .bodies
+            .iter()
+            .enumerate()
+            .flat_map(|(index, _)| {
+                self.library
+                    .0
+                    .tables
+                    .tables(&self.library.0, index)
+                    .closure_at
+                    .iter()
+            })
+            .chain(self.own.tables.closure_at.iter())
+            .map(|((function, site, names), code)| (function, site, names.as_slice(), *code))
+    }
+
     /// A closure's lexical body under its defining executable tables.
     pub(crate) fn closure_at(
         &self,

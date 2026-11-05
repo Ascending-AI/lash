@@ -54,32 +54,43 @@ impl CallDebt {
     pub(crate) fn before_entry(&self) -> u64 {
         self.before
     }
-    /// Only the actual already evaluated argument window and returned value
-    /// feed the canonical formula. No amount supplied by a caller is trusted.
-    pub(crate) fn completion(&self, arguments: &[Value], result: Value) -> Option<u64> {
+    /// Quote from current actual lease values while the source operands are
+    /// live. C keeps the scalar debt through Leave and bills it at the canonical
+    /// completion phase; quoting adds no source holding or charge.
+    pub(crate) fn completion(
+        &self,
+        lease: &mut StateLease<'_>,
+        arguments: &[LeaseValue],
+        result: LeaseValue,
+    ) -> Result<Option<u64>, LeaseFault> {
         if arguments.len() != self.arguments {
-            return None;
+            return Ok(None);
         }
         let Some(plan) = &self.completion else {
-            return Some(0);
+            return Ok(Some(0));
         };
-        let mut complete = true;
-        let units = plan.evaluate(|source, measure| {
+        let absent = lease.import(&Value::Absent).map_err(LeaseFault::Heap)?;
+        let mut failure = None;
+        let units = plan.evaluate(|source, selector| {
+            if failure.is_some() {
+                return 0;
+            }
             let value = match source {
-                compile::Source::Arg(index) => {
-                    arguments.get(index).copied().unwrap_or(Value::Absent)
-                }
+                compile::Source::Arg(index) => arguments.get(index).copied().unwrap_or(absent),
                 compile::Source::Result => result,
                 compile::Source::Nothing => return 0,
             };
-            match crate::data::immediate_measure(&value, measure) {
-                Some(amount) => amount,
-                None => {
-                    complete = false;
+            match lease.measure(value, selector) {
+                Ok(amount) => amount,
+                Err(error) => {
+                    failure = Some(error);
                     0
                 }
             }
         });
-        complete.then_some(units)
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(Some(units)),
+        }
     }
 }
