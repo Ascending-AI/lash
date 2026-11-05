@@ -3,7 +3,12 @@
 //! These diagnostics never authorize execution. Missing observations are errors,
 //! including on a build where only the declaration or fixture lanes exist.
 use crate::{Bounds, CellStart, Program};
+use lash_kernel_state::kernel_internals::logical::Owner;
 use lash_kernel_state::paged::PageSource;
+
+mod comparison;
+#[cfg(test)]
+mod tests;
 
 /// An admitted source run and a repeatable initial page factory.
 pub struct QualificationCase {
@@ -41,6 +46,8 @@ impl QualificationCase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum IdentityKind {
     Entity,
+    /// Canonical identities supplied by the initial graph never rename.
+    ExistingEntity,
     Invocation,
     Occurrence,
     Provenance,
@@ -59,6 +66,8 @@ pub struct Identity {
 pub enum SemanticValue {
     Scalar(Vec<u8>),
     Reference(Identity),
+    Object { kind: u32, identity: Identity },
+    Tuple(Vec<SemanticValue>),
 }
 
 /// A source coordinate distinguishes each invocation, occurrence and phase.
@@ -79,13 +88,32 @@ pub struct ChargeEntry {
     pub units: u64,
 }
 
+/// A value occurrence is tied to its semantic producer and ordered inputs.
+/// A fresh opaque identity alone cannot establish value provenance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValueOrigin {
+    pub value: Identity,
+    pub at: Coordinate,
+    pub kernel: Vec<u8>,
+    pub inputs: Vec<Identity>,
+}
+
+/// Full source owner identity, direct holding price and outgoing multiplicity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootFact {
+    pub owner: Owner,
+    pub direct_bytes: u64,
+    pub edges: Vec<(Identity, u64)>,
+}
+
 /// All facts required by the frozen E prefix law. Lists use source role/member
 /// order, retaining multiplicity. No prices stand in for identities or values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrefixFacts {
     pub at: Coordinate,
-    pub values: Vec<(u32, SemanticValue, Identity)>,
-    pub roots: Vec<(u32, Identity, u64)>,
+    pub values: Vec<(Owner, SemanticValue, Identity)>,
+    pub origins: Vec<ValueOrigin>,
+    pub roots: Vec<RootFact>,
     pub edges: Vec<(Identity, u32, Identity, u64)>,
     pub retained: Vec<(Identity, Vec<u8>)>,
     pub released: Vec<Identity>,
@@ -98,6 +126,7 @@ pub struct PrefixFacts {
     pub depth: u32,
     pub call_offsets: Vec<(Identity, u64)>,
     pub failure: Option<(String, Coordinate)>,
+    pub stop_payload: Option<SemanticValue>,
     pub operands: Vec<SemanticValue>,
     pub pending: Option<SemanticValue>,
     pub continuation: Vec<u8>,
@@ -108,37 +137,99 @@ pub struct PrefixFacts {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrefixSnapshot {
     facts: PrefixFacts,
+    witness: Option<ExecutionWitness>,
 }
 
 impl PrefixSnapshot {
     /// Records observed facts. This constructor mints no execution capability.
     pub fn observed(facts: PrefixFacts) -> Self {
-        Self { facts }
+        Self {
+            facts,
+            witness: None,
+        }
     }
     pub fn facts(&self) -> &PrefixFacts {
         &self.facts
     }
+
+    /// Physical counters observed from the ISA, separate from source semantics.
+    pub fn with_witness(mut self, witness: ExecutionWitness) -> Self {
+        self.witness = Some(witness);
+        self
+    }
+}
+
+/// Instrumentation from C's real runner. These are diagnostics, never semantic
+/// capabilities. Source execution cannot satisfy this structural requirement.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ExecutionWitness {
+    pub verified_operations: u64,
+    pub interior_root_transactions: u64,
+    pub source_fallbacks: u64,
+    pub interior_roots: u64,
+    pub interior_ledger_calls: u64,
+    pub interior_transactions: u64,
+    pub authentication_hashes: u64,
+    pub table_snapshots: u64,
+    pub phase_proof_allocations: u64,
+    pub max_recovery_values: u64,
+    pub max_active_frames: u64,
 }
 
 /// Evidence from both ISA layouts. Fixture evidence never qualifies a cutover.
 #[derive(Debug)]
 pub struct QualificationReport {
-    pub reached_prefixes: usize,
-    pub layouts: [IsaLayout; 2],
-    pub fixture_only: bool,
+    reached_prefixes: usize,
+    layouts: [IsaLayout; 2],
+    fixture_only: bool,
+    coverage: std::collections::BTreeMap<String, u64>,
+    witnesses: Vec<(IsaLayout, ExecutionWitness)>,
+}
+
+impl QualificationReport {
+    pub fn reached_prefixes(&self) -> usize {
+        self.reached_prefixes
+    }
+    pub fn layouts(&self) -> &[IsaLayout; 2] {
+        &self.layouts
+    }
+    pub fn fixture_only(&self) -> bool {
+        self.fixture_only
+    }
+    pub fn coverage(&self) -> &std::collections::BTreeMap<String, u64> {
+        &self.coverage
+    }
+    pub fn witnesses(&self) -> &[(IsaLayout, ExecutionWitness)] {
+        &self.witnesses
+    }
 }
 
 /// Exact failing prefix and the independently observed expected/actual states.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QualificationFailure {
-    pub prefix: usize,
-    pub layout: Option<IsaLayout>,
-    pub expected: Option<Box<PrefixSnapshot>>,
-    pub actual: Option<Box<PrefixSnapshot>>,
-    pub evidence: String,
+    prefix: usize,
+    layout: Option<IsaLayout>,
+    expected: Option<Box<PrefixSnapshot>>,
+    actual: Option<Box<PrefixSnapshot>>,
+    evidence: String,
 }
 
 impl QualificationFailure {
+    pub fn prefix(&self) -> usize {
+        self.prefix
+    }
+    pub fn layout(&self) -> Option<IsaLayout> {
+        self.layout
+    }
+    pub fn expected(&self) -> Option<&PrefixSnapshot> {
+        self.expected.as_deref()
+    }
+    pub fn actual(&self) -> Option<&PrefixSnapshot> {
+        self.actual.as_deref()
+    }
+    pub fn evidence(&self) -> &str {
+        &self.evidence
+    }
     fn unavailable(evidence: &str) -> Self {
         Self {
             prefix: 0,
@@ -225,10 +316,6 @@ pub fn isa_prefixes(
 /// # Errors
 /// Missing observations or any semantic/resource discrepancy.
 pub fn qualify(case: &QualificationCase) -> Result<QualificationReport, QualificationFailure> {
-    let _source = source_oracle(case)?;
-    let _generic = isa_prefixes(case, IsaLayout::Generic)?;
-    let _specialized = isa_prefixes(case, IsaLayout::Specialized)?;
-    Err(QualificationFailure::unavailable(
-        "prefix comparator has not been installed",
-    ))
+    let source = source_oracle(case)?;
+    comparison::qualify_observations(&source, |layout| isa_prefixes(case, layout), false)
 }
