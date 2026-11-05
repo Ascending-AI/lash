@@ -128,6 +128,7 @@ impl<V: View> Execution<V> {
             source_counts: self.source.freeze(),
             entering: self.entering,
             returning,
+            canonical: None,
         };
         Ok(Finished {
             image: reconstruction,

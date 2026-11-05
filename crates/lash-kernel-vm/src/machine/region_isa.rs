@@ -74,6 +74,7 @@ pub(crate) struct Reconstruction {
     returning: Option<returns::ReturnImage<Value>>,
     source_counts: Box<[u64]>,
     entering: Option<u32>,
+    canonical: Option<publication::Canonical>,
 }
 pub(crate) struct MaterializedPrefix<'m> {
     graph: FrozenGraph<'m>,
@@ -87,7 +88,7 @@ pub(crate) struct PreparedRegionExit<'m> {
 enum PreparedAuthority<'m> {
     #[cfg(test)]
     Fixture(fixtures::PreparedStateExit<'m>),
-    Unavailable(std::marker::PhantomData<&'m mut KernelMachine>),
+    Machine(publication::Prepared<'m>),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StopAt {
@@ -143,10 +144,11 @@ impl<'m> MaterializedPrefix<'m> {
         &self.reconstruction
     }
     pub(crate) fn prepare_exit(self) -> Result<PreparedRegionExit<'m>, RegionError> {
-        let prepared = self.authority.prepare(&self.reconstruction, self.graph)?;
+        let mut reconstruction = self.reconstruction;
+        let prepared = self.authority.prepare(&mut reconstruction, self.graph)?;
         Ok(PreparedRegionExit {
             prepared,
-            reconstruction: self.reconstruction,
+            reconstruction,
         })
     }
 }
@@ -160,12 +162,14 @@ impl PreparedRegionExit<'_> {
 impl<'m> Authority<'m> {
     fn prepare(
         self,
-        reconstruction: &Reconstruction,
+        reconstruction: &mut Reconstruction,
         graph: FrozenGraph<'m>,
     ) -> Result<PreparedAuthority<'m>, RegionError> {
         let _ = (&reconstruction, &graph);
         match self {
-            Self::Machine(_) => Err(invalid(Refused::Facts)),
+            Self::Machine(authority) => authority
+                .prepare(reconstruction, graph)
+                .map(PreparedAuthority::Machine),
             #[cfg(test)]
             Self::Fixture(authority) => {
                 let FrozenGraph::Fixture(graph) = graph else {
@@ -184,7 +188,7 @@ impl PreparedAuthority<'_> {
         match self {
             #[cfg(test)]
             Self::Fixture(prepared) => prepared.commit(reconstruction),
-            Self::Unavailable(_) => Err(invalid(Refused::Facts)),
+            Self::Machine(prepared) => prepared.commit(reconstruction),
         }
     }
 }

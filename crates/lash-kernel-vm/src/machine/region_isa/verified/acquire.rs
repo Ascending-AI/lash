@@ -185,6 +185,7 @@ impl<'m> RegionLease<'m> {
             .reserve_invocations(&invocation, u64::MAX - next)
             .map_err(RegionError::Heap)?;
         let invocations = invocations::Invocations::bind(range)?;
+        let code_id = code.program.code();
         let execution = Running::acquire(
             code,
             pc,
@@ -195,6 +196,7 @@ impl<'m> RegionLease<'m> {
             limits,
             invocations,
             lease,
+            image,
         )?;
         Ok(Self {
             authority: Authority::Machine(publication::Authority {
@@ -205,7 +207,8 @@ impl<'m> RegionLease<'m> {
                 logical_memory: &machine.logical_memory,
                 task: task_id,
                 exe,
-                entry: image,
+                entry_code: code_id,
+                entry_invocation: invocation.id(),
                 inputs,
                 limits,
             }),

@@ -18,6 +18,7 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(in crate::machine::region_isa) attempted: Option<Point>,
     pub(in crate::machine::region_isa) stop: Option<RegionStop>,
     pub(in crate::machine::region_isa) faulted: bool,
+    pub(in crate::machine::region_isa) canonical: Box<crate::machine::Frame>,
 }
 impl<'m> Running<'m> {
     #[expect(
@@ -34,6 +35,7 @@ impl<'m> Running<'m> {
         limits: Limits,
         invocations: invocations::Invocations,
         mut view: StateLease<'m>,
+        canonical: Box<crate::machine::Frame>,
     ) -> Result<Self, RegionError> {
         if invocation == 0
             || !invocations.follows(invocation)
@@ -82,6 +84,7 @@ impl<'m> Running<'m> {
             attempted: None,
             stop: None,
             faulted: false,
+            canonical,
         })
     }
 
@@ -101,11 +104,6 @@ impl<'m> Running<'m> {
         &mut self,
         _activation: CallActivation,
     ) -> Result<(), RegionError> {
-        Err(invalid(Refused::Facts))
-    }
-    pub(in crate::machine::region_isa) fn reconstruct(
-        self,
-    ) -> Result<reconstruct::Finished<StateLease<'m>>, RegionError> {
         Err(invalid(Refused::Facts))
     }
 }

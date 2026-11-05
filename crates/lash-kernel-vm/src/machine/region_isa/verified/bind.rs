@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(in crate::machine::region_isa) struct Code {
     pub(in crate::machine::region_isa) program: Arc<RegionCode>,
+    pub(in crate::machine::region_isa) bindings: Arc<[u32]>,
     pub(in crate::machine::region_isa) calls: Box<[Option<Call>]>,
 }
 
@@ -148,6 +149,7 @@ impl Code {
         Ok(Arc::new(Self {
             program: Arc::clone(program),
             calls: bound.into_boxed_slice(),
+            bindings: Arc::clone(&exe.code(program.code()).slots_by_at),
         }))
     }
 
