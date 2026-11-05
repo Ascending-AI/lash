@@ -5,6 +5,7 @@ use crate::compile::region_isa::{Pc, PrefixId, Reg};
 use lash_kernel_state::kernel_internals::logical::{LeaseValue, StateLease};
 
 pub(in crate::machine::region_isa) struct Running<'m> {
+    pub(super) arguments: Vec<Value>,
     pub(in crate::machine::region_isa) view: StateLease<'m>,
     pub(in crate::machine::region_isa) code: Arc<Code>,
     pub(in crate::machine::region_isa) registers: registers::Registers<LeaseValue>,
@@ -55,6 +56,10 @@ impl<'m> Running<'m> {
                 operands::Operand::Immediate(value),
             )?;
         }
+        let mut arguments = Vec::new();
+        arguments
+            .try_reserve_exact(code.arguments)
+            .map_err(|_| invalid(Refused::Scratch))?;
         let reached = ReachedPrefix {
             program: code.program.code(),
             invocation,
@@ -64,6 +69,7 @@ impl<'m> Running<'m> {
             debt: 0,
         };
         Ok(Self {
+            arguments,
             view,
             code,
             registers,

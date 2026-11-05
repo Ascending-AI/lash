@@ -330,6 +330,20 @@ impl<'s> StateLease<'s> {
         }
         Ok(())
     }
+    /// Inspect an inline value without confusing a valid heap number with a
+    /// malformed scalar. Objects retain identity/generation validation.
+    pub fn inline(&self, value: LeaseValue) -> Result<Option<Value>, HeapFault> {
+        if self.local.frozen {
+            return Err(invalid("lease graph is frozen"));
+        }
+        match value.repr {
+            Repr::Scalar(value) => Ok(Some(value)),
+            Repr::Object(object, _) => {
+                self.local.index(object)?;
+                Ok(None)
+            }
+        }
+    }
     pub fn scalar(&self, value: LeaseValue) -> Result<Value, HeapFault> {
         match value.repr {
             Repr::Scalar(value) => Ok(value),
@@ -571,21 +585,46 @@ impl<'s> StateLease<'s> {
             _ => return Err(NativeError::Decline.into()),
         })
     }
-    pub fn read(
+    /// Presence is distinct from a member whose value is Absent.
+    pub fn lookup(
         &mut self,
         object: LeaseObject,
         member: &LeaseMember,
-    ) -> Result<LeaseValue, LeaseFault> {
+    ) -> Result<Option<LeaseValue>, LeaseFault> {
         if self.local.frozen {
             return Err(invalid("lease graph is frozen").into());
         }
         let index = self.local.index(object)?;
         let address = self.address(member)?;
-        Ok(self.member_entry(index, member, &address)?.map_or(
-            LeaseValue {
-                repr: Repr::Scalar(Value::Absent),
-            },
-            |entry| entry.value,
-        ))
+        Ok(self
+            .member_entry(index, member, &address)?
+            .map(|entry| entry.value))
+    }
+    /// Exact current length, without saturated charge-size encoding.
+    pub fn member_count(&self, object: LeaseObject) -> Result<u64, LeaseFault> {
+        if self.local.frozen {
+            return Err(invalid("lease graph is frozen").into());
+        }
+        let index = self.local.index(object)?;
+        let slot = &self.local.slots[index];
+        if slot.existing.as_ref().is_some_and(|existing| existing.cold) {
+            return Err(LeaseFault::BoundaryRequired);
+        }
+        if !matches!(
+            slot.kind,
+            Kind::List | Kind::Tuple | Kind::Map | Kind::Set | Kind::Record
+        ) {
+            return Err(NativeError::Decline.into());
+        }
+        Ok(self.length(index))
+    }
+    pub fn read(
+        &mut self,
+        object: LeaseObject,
+        member: &LeaseMember,
+    ) -> Result<LeaseValue, LeaseFault> {
+        Ok(self.lookup(object, member)?.unwrap_or(LeaseValue {
+            repr: Repr::Scalar(Value::Absent),
+        }))
     }
 }

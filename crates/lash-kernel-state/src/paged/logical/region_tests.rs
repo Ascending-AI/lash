@@ -380,6 +380,7 @@ fn cold_placeholder_requires_boundary() {
 /// identity progression. Each exit reaches its prefix through real phases.
 #[test]
 fn region_graph_projection_commutes_with_itemized_source() {
+    lease_read_presence_and_inline_values();
     atomic_source_root_transfer();
     linear_chain_release_and_binding();
     imported_tuple_reads();
@@ -1279,6 +1280,9 @@ fn atomic_source_root_transfer() {
     );
     let parent_object = lease.object(parent).unwrap();
     let leaf_object = lease.object(leaf).unwrap();
+    assert!(lease.inline(leaf).unwrap().is_none());
+    assert_eq!(lease.member_count(parent_object).unwrap(), 1);
+    assert_eq!(lease.member_count(leaf_object).unwrap(), 0);
     let holds = [(leaf, false)];
     let releases = [(parent, false); 3];
     let expected = -i128::from(Cost::OBJECT + 3 * Cost::REFERENCE);
@@ -1312,6 +1316,7 @@ fn atomic_source_root_transfer() {
             assert_eq!(lease.object(child).unwrap(), leaf_object);
         } else {
             assert!(lease.object(parent).is_err());
+            assert!(lease.inline(parent).is_err());
         }
     }
     let step = lease
@@ -1324,4 +1329,33 @@ fn atomic_source_root_transfer() {
     assert_eq!(step.facts().measure(&LeaseMeasure::RELEASED), Some(0));
     step.reserve().unwrap().accept();
     assert_eq!(lease.object(leaf).unwrap(), leaf_object);
+}
+
+// K-FORM-006: a present Absent map value differs from a missing key. Scalar
+// inspection cannot turn a boxed number into malformed heap state.
+fn lease_read_presence_and_inline_values() {
+    let (mut heap, _) = fresh();
+    let mut arena = Arena::new();
+    let big = arena.int(lash_kernel_doc::Integer::parse("9223372036854775808").unwrap());
+    let mut lease = StateLease::acquire(&mut heap, &mut arena).unwrap();
+    let big = lease.import(&big).unwrap();
+    assert!(lease.inline(big).unwrap().is_none());
+    let absent = lease.import(&Value::Absent).unwrap();
+    assert!(lease.inline(absent).unwrap().unwrap().same(&Value::Absent));
+    let key = lease.import(&Value::Int(1)).unwrap();
+    let missing = lease.import(&Value::Int(2)).unwrap();
+    let map = allocate(&mut lease, LeaseAllocation::map(&[(key, absent)]));
+    let object = lease.object(map).unwrap();
+    let found = lease
+        .lookup(object, &LeaseMember::Table(key))
+        .unwrap()
+        .unwrap();
+    assert!(lease.scalar(found).unwrap().same(&Value::Absent));
+    assert!(
+        lease
+            .lookup(object, &LeaseMember::Table(missing))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(lease.member_count(object).unwrap(), 1);
 }

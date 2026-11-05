@@ -6,6 +6,8 @@ use lash_kernel_state::kernel_internals::logical::Slot;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(in crate::machine::region_isa) struct Code {
+    pub(in crate::machine::region_isa) exe: Arc<crate::compile::Executable>,
+    pub(in crate::machine::region_isa) arguments: usize,
     pub(in crate::machine::region_isa) program: Arc<RegionCode>,
     pub(in crate::machine::region_isa) bindings: Arc<[u32]>,
     pub(in crate::machine::region_isa) calls: Box<[Option<Call>]>,
@@ -52,6 +54,7 @@ impl Code {
         {
             return Err(invalid(Refused::Source));
         }
+        let mut arguments = 0;
         let mut calls = BTreeMap::new();
         let mut visited = BTreeSet::new();
         let mut pending = vec![program.entry()];
@@ -68,7 +71,14 @@ impl Code {
                     .recovery(prefix)
                     .ok_or_else(|| invalid(Refused::Exit))?;
             }
-            match program.op(pc).ok_or_else(|| invalid(Refused::Path))? {
+            let op = program.op(pc).ok_or_else(|| invalid(Refused::Path))?;
+            if let RegionOp::Checked { args, kernel, .. } = op {
+                arguments = arguments.max(args.len());
+                if let crate::compile::region_isa::CheckedKind::Native { lib, .. } = kernel.kind() {
+                    arguments = arguments.max(exe.lib(*lib).arity);
+                }
+            }
+            match op {
                 RegionOp::Constant { next, .. }
                 | RegionOp::Move { next, .. }
                 | RegionOp::IntBinary { next, .. }
@@ -147,6 +157,8 @@ impl Code {
             bound[index] = Some(call);
         }
         Ok(Arc::new(Self {
+            exe: Arc::clone(exe),
+            arguments,
             program: Arc::clone(program),
             calls: bound.into_boxed_slice(),
             bindings: Arc::clone(&exe.code(program.code()).slots_by_at),
