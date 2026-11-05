@@ -68,15 +68,15 @@ impl Running<'_> {
                             formula,
                         }));
                     }
-                    CheckedKind::Local { slot } => {
-                        let reg = self
+                    CheckedKind::Local { .. } => {
+                        let register = self
                             .code
-                            .program
-                            .roles()
-                            .iter()
-                            .find_map(|(actual, reg)| (actual == slot).then_some(*reg))
+                            .flows
+                            .get(self.pc.index())
+                            .and_then(Option::as_ref)
+                            .and_then(|flow| flow.local)
                             .ok_or_else(|| invalid(Refused::Facts))?;
-                        self.read(reg)?
+                        self.registers.read(0, self.reached.invocation, register)?
                     }
                     CheckedKind::IntTruth {
                         operation,

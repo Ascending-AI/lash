@@ -8,6 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(in crate::machine::region_isa) struct Code {
     pub(in crate::machine::region_isa) exe: Arc<crate::compile::Executable>,
     pub(in crate::machine::region_isa) arguments: usize,
+    pub(super) flows: Box<[Option<super::flow::Flow>]>,
+    pub(super) transfer_width: usize,
+    pub(super) quotes: usize,
     pub(in crate::machine::region_isa) program: Arc<RegionCode>,
     pub(in crate::machine::region_isa) bindings: Arc<[u32]>,
     pub(in crate::machine::region_isa) calls: Box<[Option<Call>]>,
@@ -54,6 +57,7 @@ impl Code {
         {
             return Err(invalid(Refused::Source));
         }
+        let mut flows = BTreeMap::new();
         let mut arguments = 0;
         let mut calls = BTreeMap::new();
         let mut visited = BTreeSet::new();
@@ -71,6 +75,7 @@ impl Code {
                     .recovery(prefix)
                     .ok_or_else(|| invalid(Refused::Exit))?;
             }
+            flows.insert(pc.index(), super::flow::Flow::bind(program, pc)?);
             let op = program.op(pc).ok_or_else(|| invalid(Refused::Path))?;
             if let RegionOp::Checked { args, kernel, .. } = op {
                 arguments = arguments.max(args.len());
@@ -156,9 +161,35 @@ impl Code {
         for (index, call) in calls {
             bound[index] = Some(call);
         }
+        let width = visited
+            .last()
+            .copied()
+            .and_then(|last| last.checked_add(1))
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        let transfer_width = flows
+            .values()
+            .map(super::flow::Flow::width)
+            .max()
+            .unwrap_or(0);
+        let quotes = flows
+            .values()
+            .map(|flow| flow.quotes.len())
+            .max()
+            .unwrap_or(0);
+        let mut flow_table = Vec::new();
+        flow_table
+            .try_reserve_exact(width)
+            .map_err(|_| invalid(Refused::Scratch))?;
+        flow_table.resize_with(width, || None);
+        for (index, flow) in flows {
+            flow_table[index] = Some(flow);
+        }
         Ok(Arc::new(Self {
             exe: Arc::clone(exe),
             arguments,
+            flows: flow_table.into(),
+            transfer_width,
+            quotes,
             program: Arc::clone(program),
             calls: bound.into_boxed_slice(),
             bindings: Arc::clone(&exe.code(program.code()).slots_by_at),

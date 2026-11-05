@@ -6,6 +6,7 @@ use lash_kernel_state::kernel_internals::logical::{LeaseValue, StateLease};
 
 pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) arguments: Vec<Value>,
+    pub(super) scratch: super::phase::Scratch,
     pub(in crate::machine::region_isa) view: StateLease<'m>,
     pub(in crate::machine::region_isa) code: Arc<Code>,
     pub(in crate::machine::region_isa) registers: registers::Registers<LeaseValue>,
@@ -68,7 +69,9 @@ impl<'m> Running<'m> {
             prefix: prefix.index() as u32,
             debt: 0,
         };
+        let scratch = super::phase::Scratch::new(code.transfer_width, code.quotes)?;
         Ok(Self {
+            scratch,
             arguments,
             view,
             code,
