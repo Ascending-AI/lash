@@ -124,8 +124,8 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
                     Reg::<LeaseValue>::new(dst.offset())?,
                     Some(RegisterKind::Int),
                 )),
-                RegionOp::Call { site, .. } => {
-                    Some((draft.calls[site.offset()].result, Some(RegisterKind::Value)))
+                RegionOp::Call { .. } => {
+                    Some((Reg::new(draft.roles.len())?, Some(RegisterKind::Value)))
                 }
                 _ => None,
             };

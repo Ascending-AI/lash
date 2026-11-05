@@ -10,6 +10,7 @@ use lash_kernel_state::kernel_internals::logical::{LeaseValue, Slot};
 use lash_kernel_value::{FunctionId, sites::Site};
 use std::{marker::PhantomData, sync::Arc};
 
+mod call_paths;
 mod departures;
 mod heap;
 #[cfg(test)]
@@ -485,6 +486,11 @@ impl RegionCode {
         } else {
             self.draft.ops.get(pc.offset())
         }
+    }
+    /// Register holding the completed callee result until caller Restore.
+    pub(crate) fn call_incoming(&self, site: CallId) -> Option<Reg<LeaseValue>> {
+        self.draft.calls.get(site.offset())?;
+        Reg::new(self.draft.roles.len()).ok()
     }
     /// Return is followed by its authenticated scope and defining-frame Leaves.
     pub(crate) fn return_successor(&self, pc: Pc) -> Option<Pc> {

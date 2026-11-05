@@ -20,7 +20,7 @@ pub(super) fn point(site: &Site, phase: Phase) -> Point {
     }
 }
 
-fn connect(
+pub(super) fn connect(
     node: doc::Node<'_>,
     site: &Site,
     next: Option<Point>,
@@ -49,6 +49,9 @@ fn connect(
         let enter = point(site, Phase::Enter);
         graph.insert(enter.clone(), Edge::Next(tail));
         return Ok(enter);
+    }
+    if let Some(entry) = super::call_paths::connect(node, site, next.clone(), source, graph)? {
+        return Ok(entry);
     }
     graph.insert(commit.clone(), next.map_or(Edge::Stop, Edge::Next));
     Ok(match node {
@@ -321,6 +324,14 @@ pub(super) fn reg(
     source: &Source,
     owner: &Owner,
 ) -> Result<Reg<LeaseValue>, Refused> {
+    if matches!(owner, Owner::Incoming(_))
+        && source
+            .owner_slots()?
+            .root(owner, doc::TaskId::MAIN, 0)
+            .is_some()
+    {
+        return Reg::new(roles.len());
+    }
     let slot = resources::slot(source, owner).ok_or(Refused::Facts)?;
     roles
         .iter()
@@ -480,6 +491,17 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                 {
                     RegionOp::Return { value: args[0] }
                 }
+                (
+                    doc::Node::Expr(doc::Expr::Call { .. } | doc::Expr::Act(_)),
+                    Phase::Restore,
+                    Some(next),
+                    Some(dst),
+                    Ok(args),
+                ) if args.len() == 1 => RegionOp::Move {
+                    dst,
+                    src: args[0],
+                    next,
+                },
                 (
                     doc::Node::Expr(doc::Expr::Variable(name)),
                     Phase::Commit,
@@ -828,8 +850,21 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
     for (index, state) in states.iter().enumerate() {
         let before = state.clone().unwrap_or_default();
         let after = recovery::transfer(&draft, index, &before)?;
-        let mut pending_live = before.clone();
+        let incoming_before = draft.steps[index]
+            .event
+            .inputs
+            .iter()
+            .any(|owner| matches!(owner, Owner::Incoming(_)))
+            .then_some(sink);
+        let incoming_after = matches!(draft.ops[index], RegionOp::Call { .. }).then_some(sink);
+        let incoming_pending = incoming_after.or(incoming_before);
+        let mut pending_live = if incoming_after.is_some() {
+            after.clone()
+        } else {
+            before.clone()
+        };
         let pending = match &draft.ops[index] {
+            RegionOp::Call { .. } => Some(sink),
             RegionOp::Heap { kernel, .. } if kernel.atomic_move() => None,
             RegionOp::Heap { .. } => draft.steps[index]
                 .event
@@ -844,7 +879,14 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                 .transpose()?,
             _ => draft.steps[index].event.output.as_ref().map(|_| sink),
         };
-        for (phase, live) in [&before, &pending_live, &after].into_iter().enumerate() {
+        for (phase, (live, pending, incoming)) in [
+            (&before, incoming_before, incoming_before),
+            (&pending_live, pending, incoming_pending),
+            (&after, incoming_after, incoming_after),
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let roles: Box<[_]> = draft
                 .roles
                 .iter()
@@ -865,12 +907,13 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                 graph: GraphRecovery::from_roles(
                     &draft.steps[index].at,
                     &roles,
-                    (phase == 1).then_some(pending).flatten(),
+                    pending,
                     phase as u32,
+                    incoming,
                 ),
                 roles,
                 operands,
-                pending: (phase == 1).then_some(pending).flatten(),
+                pending,
                 continuation: draft.steps[index].at.clone(),
             });
         }

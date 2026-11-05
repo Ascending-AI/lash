@@ -146,7 +146,8 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                 }
             }
             RegionOp::Call { site, .. } => {
-                state[draft.calls[site.offset()].result.offset()] = Some(RegisterKind::Value)
+                let _ = draft.calls.get(site.offset()).ok_or(Refused::Source)?;
+                state[draft.roles.len()] = Some(RegisterKind::Value)
             }
             RegionOp::Heap { args, dst, .. } => {
                 if step.scalar_resources {

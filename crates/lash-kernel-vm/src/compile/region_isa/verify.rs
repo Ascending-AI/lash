@@ -10,6 +10,12 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 fn register(draft: &RegionDraft, owner: &Owner) -> Result<Reg<LeaseValue>, Refused> {
     let slots = draft.source.owner_slots()?;
+    if matches!(
+        slots.root(owner, doc::TaskId::MAIN, 0),
+        Some(Root::Incoming(_))
+    ) {
+        return Reg::new(draft.roles.len());
+    }
     let Some(Root::Value { slot, .. }) = slots.root(owner, doc::TaskId::MAIN, 0) else {
         return Err(Refused::Facts);
     };
@@ -123,6 +129,15 @@ fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refused> {
     };
     match &draft.ops[index] {
         RegionOp::Boundary { .. } => {}
+        RegionOp::Call { next, .. } => {
+            let expected = Point {
+                site: step.at.site.clone(),
+                phase: Phase::Restore,
+            };
+            if target(*next)? != &expected || !source.room.events.contains_key(&expected) {
+                return Err(Refused::Path);
+            }
+        }
         RegionOp::Branch { test, yes, no } => {
             if draft.registers.get(test.offset()) != Some(&RegisterKind::Bool) {
                 return Err(Refused::Facts);
@@ -320,13 +335,24 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
             }
         }
         RegionOp::Move { dst, src, .. } => {
-            value_reg(*src)?;
+            if step.at.phase == Phase::Restore {
+                if src.offset() != draft.roles.len() {
+                    return Err(Refused::Facts);
+                }
+            } else {
+                value_reg(*src)?;
+            }
             value_reg(*dst)?;
             if expected_inputs.as_deref() != Ok(&[*src]) {
                 return Err(Refused::Facts);
             }
             let output = match node {
                 doc::Node::Stmt(doc::Stmt::Let { .. }) => expected_output,
+                doc::Node::Expr(doc::Expr::Call { .. } | doc::Expr::Act(_))
+                    if step.at.phase == Phase::Restore =>
+                {
+                    expected_output
+                }
                 doc::Node::Stmt(doc::Stmt::Assign {
                     place: doc::Place::Variable(name),
                     ..
@@ -806,16 +832,31 @@ fn verify_layout(
             CallId(u32::try_from(index).map_err(|_| Refused::Facts)?),
         )?;
     }
-    for step in &draft.steps {
+    for (index, step) in draft.steps.iter().enumerate() {
         for (phase, prefix) in [step.before, step.pending, step.after]
             .into_iter()
             .enumerate()
         {
             let map = draft.recovery.get(prefix.offset()).ok_or(Refused::Exit)?;
             if map.continuation != step.at
-                || !map
-                    .graph
-                    .check(&step.at, &map.roles, map.pending, phase as u32)
+                || !map.graph.check(
+                    &step.at,
+                    &map.roles,
+                    map.pending,
+                    phase as u32,
+                    if (phase < 2
+                        && step
+                            .event
+                            .inputs
+                            .iter()
+                            .any(|owner| matches!(owner, Owner::Incoming(_))))
+                        || (phase > 0 && matches!(draft.ops[index], RegionOp::Call { .. }))
+                    {
+                        Some(Reg::new(draft.roles.len())?)
+                    } else {
+                        None
+                    },
+                )
             {
                 return Err(Refused::Exit);
             }
@@ -874,10 +915,11 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 }
             }
         }
-        if let Some(slot) = event
-            .output
-            .as_ref()
-            .and_then(|owner| resources::slot(source, owner))
+        if !matches!(draft.ops[index], RegionOp::Call { .. })
+            && let Some(slot) = event
+                .output
+                .as_ref()
+                .and_then(|owner| resources::slot(source, owner))
         {
             after.insert(slot);
         }
@@ -897,8 +939,21 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
         {
             after.insert(slot);
         }
-        let mut pending_roles = before.clone();
-        let pending = if matches!(draft.ops[index], RegionOp::Heap { .. }) {
+        let sink = Reg::new(draft.roles.len())?;
+        let incoming_before = event
+            .inputs
+            .iter()
+            .any(|owner| matches!(owner, Owner::Incoming(_)))
+            .then_some(sink);
+        let incoming_after = matches!(draft.ops[index], RegionOp::Call { .. }).then_some(sink);
+        let mut pending_roles = if incoming_after.is_some() {
+            after.clone()
+        } else {
+            before.clone()
+        };
+        let pending = if matches!(draft.ops[index], RegionOp::Call { .. }) {
+            Some(sink)
+        } else if matches!(draft.ops[index], RegionOp::Heap { .. }) {
             match super::heap::source_kind(source, &step.at)? {
                 Some(HeapKind::Tuple | HeapKind::Cell) => None,
                 Some(_) => event
@@ -919,10 +974,15 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 .map(|_| Reg::new(draft.roles.len()))
                 .transpose()?
         };
-        for (prefix, expected, pending) in [
-            (step.before, before, None),
-            (step.pending, &pending_roles, pending),
-            (step.after, &after, None),
+        for (prefix, expected, pending, incoming) in [
+            (step.before, before, incoming_before, incoming_before),
+            (
+                step.pending,
+                &pending_roles,
+                pending,
+                incoming_after.or(incoming_before),
+            ),
+            (step.after, &after, incoming_after, incoming_after),
         ] {
             let map = draft.recovery.get(prefix.offset()).ok_or(Refused::Exit)?;
             let expected_roles: Vec<_> = draft
@@ -936,6 +996,7 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 &expected_roles,
                 map.pending,
                 (prefix.offset() % 3) as u32,
+                incoming,
             ) || map.roles.as_ref() != expected_roles.as_slice()
                 || map.continuation != step.at
                 || map.pending != pending

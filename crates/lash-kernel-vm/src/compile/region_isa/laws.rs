@@ -802,3 +802,61 @@ fn allocated_pending_values_have_their_source_output_role() {
         );
     });
 }
+
+/// K-EVAL-008: callee completion precedes the caller's distinct Restore.
+#[test]
+fn a_guest_call_restores_its_incoming_value_before_continuing() {
+    fixture_body(
+        "function counter() -> Any\nkernel 1\nmetering statements\nbody { let i = isa.first(0, 1) let j = isa.second(2, 3) while isa.lt(i, 4) { set i = isa.add(i, 1) } return j }",
+        |exe, code, draft| {
+            let (index, next) = draft
+                .ops
+                .iter()
+                .enumerate()
+                .find_map(|(index, op)| match op {
+                    RegionOp::Call { next, .. } => Some((index, *next)),
+                    _ => None,
+                })
+                .unwrap();
+            let expected = Point {
+                site: draft.steps[index].at.site.clone(),
+                phase: Phase::Restore,
+            };
+            assert_eq!(draft.steps[next.offset()].at, expected);
+            let RegionOp::Move {
+                dst,
+                src,
+                next: continuation,
+            } = draft.ops[next.offset()]
+            else {
+                panic!("Restore must transfer the returned incoming value")
+            };
+            let output = draft.steps[next.offset()].event.output.as_ref().unwrap();
+            assert_eq!(lower::reg(&draft.roles, &draft.source, output), Ok(dst));
+            assert_eq!(src.offset(), draft.roles.len());
+            assert_eq!(
+                draft.recovery[draft.steps[index].after.offset()].pending,
+                Some(src)
+            );
+            assert_eq!(
+                draft.recovery[draft.steps[next.offset()].before.offset()].pending,
+                Some(src)
+            );
+            assert_eq!(
+                draft.recovery[draft.steps[next.offset()].after.offset()].pending,
+                None
+            );
+            let plans = crate::compile::room::region::calls::region_isa::compile_calls(exe, &draft)
+                .unwrap();
+            let mut bad = draft;
+            let RegionOp::Call { next, .. } = &mut bad.ops[index] else {
+                unreachable!()
+            };
+            *next = continuation;
+            assert_eq!(
+                verify_region(exe, code, bad, &plans).err(),
+                Some(Refused::Path)
+            );
+        },
+    );
+}

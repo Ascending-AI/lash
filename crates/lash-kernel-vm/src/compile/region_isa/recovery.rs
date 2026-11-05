@@ -20,6 +20,7 @@ pub(crate) struct GraphRecovery {
     source: Point,
     roles: Box<[(Slot, Reg<LeaseValue>)]>,
     pending: Option<Reg<LeaseValue>>,
+    incoming: Option<Reg<LeaseValue>>,
     scratch: Box<[Reg<LeaseValue>]>,
     release_phase: u32,
     versions: Box<[(Reg<LeaseValue>, u32)]>,
@@ -31,11 +32,13 @@ impl GraphRecovery {
         roles: &[(Slot, Reg<LeaseValue>)],
         pending: Option<Reg<LeaseValue>>,
         phase: u32,
+        incoming: Option<Reg<LeaseValue>>,
     ) -> Self {
         Self {
             source: source.clone(),
             roles: roles.into(),
             pending,
+            incoming,
             scratch: pending.into_iter().collect(),
             release_phase: phase,
             versions: roles
@@ -56,10 +59,12 @@ impl GraphRecovery {
         roles: &[(Slot, Reg<LeaseValue>)],
         pending: Option<Reg<LeaseValue>>,
         phase: u32,
+        incoming: Option<Reg<LeaseValue>>,
     ) -> bool {
         self.source == *source
             && self.roles.as_ref() == roles
             && self.pending == pending
+            && self.incoming == incoming
             && self.release_phase == phase
             && self.scratch.iter().copied().eq(pending)
             && self.versions.iter().copied().eq(roles
@@ -72,6 +77,11 @@ impl GraphRecovery {
                 .chain(pending.map(|reg| (reg, reg.index()))))
     }
 
+    /// This pending register is the canonical task Incoming holding, rather
+    /// than an extra frame Slot or an unaccepted computed result.
+    pub(crate) fn incoming(&self) -> Option<Reg<LeaseValue>> {
+        self.incoming
+    }
     pub(crate) fn roles(&self) -> &[(Slot, Reg<LeaseValue>)] {
         &self.roles
     }
@@ -103,6 +113,7 @@ impl GraphRecovery {
             source: source.clone(),
             roles: Box::new([]),
             pending: None,
+            incoming: None,
             scratch: Box::new([]),
             release_phase: 0,
             versions: Box::new([]),
@@ -147,10 +158,11 @@ pub(super) fn transfer(
             }
         }
     }
-    if let Some(output) = event
-        .output
-        .as_ref()
-        .and_then(|owner| resources::slot(source, owner))
+    if !matches!(draft.ops[pc], RegionOp::Call { .. })
+        && let Some(output) = event
+            .output
+            .as_ref()
+            .and_then(|owner| resources::slot(source, owner))
     {
         next.insert(output);
     }
