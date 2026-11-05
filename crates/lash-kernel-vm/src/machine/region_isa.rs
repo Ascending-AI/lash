@@ -4,6 +4,7 @@
     reason = "region execution is integrated after verified tables arrive"
 )]
 use super::KernelMachine;
+use crate::compile::CodeId;
 use crate::compile::region_isa::{CallId, RegionCode};
 use crate::compile::room::region::calls::region_isa::RegionCalls;
 use crate::compile::room::{Point, Refused};
@@ -12,6 +13,7 @@ use std::{rc::Rc, sync::Arc};
 
 mod code;
 mod execute;
+mod programs;
 mod reconstruct;
 mod registers;
 mod returns;
@@ -28,6 +30,7 @@ pub(crate) struct CallActivation {
     invocation: u64,
     depth: usize,
     plan: u32,
+    caller_program: CodeId,
 }
 pub(crate) struct RegionLease<'m> {
     authority: Authority<'m>,
@@ -43,6 +46,7 @@ enum Authority<'m> {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ReachedPrefix {
+    program: CodeId,
     invocation: u64,
     ordinal: u64,
     occurrence: Option<u64>,

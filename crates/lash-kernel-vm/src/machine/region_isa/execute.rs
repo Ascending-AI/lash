@@ -12,6 +12,7 @@ pub(super) struct Counters {
     pub(super) debt: u64,
 }
 pub(super) struct Frame {
+    pub(super) program: CodeId,
     pub(super) invocation: u64,
     pub(super) pc: u32,
     pub(super) prefix: u32,
@@ -20,6 +21,7 @@ pub(super) struct Frame {
 }
 pub(super) struct Execution {
     pub(super) code: Arc<Code>,
+    pub(super) programs: Arc<programs::Programs>,
     pub(super) registers: Registers,
     pub(super) source: super::source_counters::SourceCounters,
     pub(super) frames: Vec<Frame>,
@@ -40,6 +42,15 @@ pub(super) struct Execution {
 
 impl Execution {
     pub(super) fn acquire(code: Arc<Code>, limits: Limits) -> Result<Self, RegionError> {
+        let id = code.id;
+        Self::acquire_programs(programs::Programs::bind(Box::new([code]))?, id, limits)
+    }
+    pub(super) fn acquire_programs(
+        programs: Arc<programs::Programs>,
+        entry: CodeId,
+        limits: Limits,
+    ) -> Result<Self, RegionError> {
+        let code = Arc::clone(programs.code(entry)?);
         if code.invocation == 0
             || limits.entry_balance > limits.memory
             || limits.entry_charge > limits.charge
@@ -49,7 +60,7 @@ impl Execution {
         {
             return Err(invalid(Refused::Facts));
         }
-        let mut registers = Registers::new(code.registers, 1)?;
+        let mut registers = Registers::new(programs.registers, 1)?;
         for (reg, value) in &code.initial {
             registers.write(0, code.invocation, *reg, *value)?;
         }
@@ -58,6 +69,7 @@ impl Execution {
             .try_reserve_exact(1)
             .map_err(|_| invalid(Refused::Scratch))?;
         frames.push(Frame {
+            program: entry,
             invocation: code.invocation,
             pc: code.entry,
             prefix: code.entry_prefix,
@@ -69,6 +81,7 @@ impl Execution {
             .prepare(&code.recovery[code.entry_prefix as usize].counters)?
             .accept();
         let reached = ReachedPrefix {
+            program: entry,
             invocation: code.invocation,
             ordinal: 0,
             occurrence,
@@ -89,6 +102,7 @@ impl Execution {
             .ok_or_else(|| invalid(Refused::Facts))?;
         Ok(Self {
             code,
+            programs,
             registers,
             source,
             frames,
@@ -210,6 +224,7 @@ impl Execution {
         let occurrence = ready.accept();
         frame.prefix = prefix;
         self.reached = ReachedPrefix {
+            program: frame.program,
             invocation: frame.invocation,
             ordinal,
             occurrence,
@@ -319,7 +334,8 @@ impl Execution {
                     .and_then(|f| f.activation.take())
                     .ok_or_else(|| invalid(Refused::Facts))?;
                 let plan = self
-                    .code
+                    .programs
+                    .code(activation.caller_program)?
                     .calls
                     .get(activation.plan as usize)
                     .ok_or_else(|| invalid(Refused::Facts))?;
@@ -481,6 +497,7 @@ impl Execution {
             return Err(invalid(Refused::Facts));
         }
         let caller = self.frames.last().ok_or_else(|| invalid(Refused::Facts))?;
+        let caller_program = caller.program;
         let instruction = self
             .code
             .instructions
@@ -519,11 +536,14 @@ impl Execution {
             self.registers.write(depth, invocation, *dst, value)?;
         }
         let (entry, entry_prefix) = (plan.entry, plan.prefix);
+        let target_program = plan.target;
+        let target_code = Arc::clone(self.programs.code(target_program)?);
         self.frames
             .last_mut()
             .ok_or_else(|| invalid(Refused::Facts))?
             .prefix = prefix;
         self.frames.push(Frame {
+            program: target_program,
             invocation,
             pc: entry,
             prefix: entry_prefix,
@@ -531,6 +551,7 @@ impl Execution {
             activation: None,
         });
         self.next_invocation = following;
+        self.code = target_code;
         self.entering = None;
         self.reached(entry_prefix, counters)?;
         Ok(CallActivation {
@@ -538,6 +559,7 @@ impl Execution {
             invocation,
             depth,
             plan: site,
+            caller_program,
         })
     }
 }

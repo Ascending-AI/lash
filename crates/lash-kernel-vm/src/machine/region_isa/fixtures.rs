@@ -157,3 +157,19 @@ impl<'m> RegionLease<'m> {
         })
     }
 }
+
+impl<'m> RegionLease<'m> {
+    pub(super) fn acquire_fixture_programs(
+        state: &'m mut State,
+        programs: Arc<programs::Programs>,
+        entry: CodeId,
+        limits: Limits,
+    ) -> Result<Self, RegionError> {
+        let authority = StateLease::acquire(state)?;
+        let execution = Execution::acquire_programs(programs, entry, limits)?;
+        Ok(Self {
+            authority: Authority::Fixture(authority),
+            execution,
+        })
+    }
+}

@@ -4,6 +4,7 @@ use lash_kernel_state::kernel_internals::logical::Slot;
 
 #[derive(Clone, Debug)]
 pub(super) struct FrameImage {
+    pub(super) program: CodeId,
     pub(super) invocation: u64,
     pub(super) pc: u32,
     pub(super) continuation: Point,
@@ -19,7 +20,8 @@ impl Execution {
         }
         let stop = self.stop.ok_or_else(|| invalid(Refused::Exit))?;
         let current = self.frames.last().ok_or_else(|| invalid(Refused::Facts))?;
-        if current.invocation != self.reached.invocation
+        if current.program != self.reached.program
+            || current.invocation != self.reached.invocation
             || current.prefix != self.reached.prefix
             || self.counters.debt != self.reached.debt
         {
@@ -31,7 +33,8 @@ impl Execution {
             .enumerate()
             .map(|(index, frame)| {
                 let map = self
-                    .code
+                    .programs
+                    .code(frame.program)?
                     .recovery
                     .get(frame.prefix as usize)
                     .ok_or_else(|| invalid(Refused::Exit))?;
@@ -49,6 +52,7 @@ impl Execution {
                     .collect::<Result<Vec<_>, RegionError>>()?
                     .into_boxed_slice();
                 Ok(FrameImage {
+                    program: frame.program,
                     invocation: frame.invocation,
                     pc: frame.pc,
                     continuation: map.continuation.clone(),

@@ -16,8 +16,11 @@ pub(super) struct Returning {
     phase: ReturnPhase,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub(super) struct ReturnImage {
+    pub(super) callee_invocation: u64,
+    pub(super) completion: Cost,
+    pub(super) caller_program: CodeId,
     pub(super) site: u32,
     pub(super) value: Value,
     pub(super) phase: ReturnPhase,
@@ -27,6 +30,9 @@ pub(super) struct ReturnImage {
 impl Returning {
     pub(super) fn image(&self) -> ReturnImage {
         ReturnImage {
+            callee_invocation: self.activation.invocation,
+            completion: self.completion,
+            caller_program: self.activation.caller_program,
             site: self.activation.plan,
             value: self.value,
             phase: self.phase,
@@ -47,14 +53,29 @@ impl Execution {
         let frame = self.frames.last().ok_or_else(|| invalid(Refused::Facts))?;
         if self.returning.is_some()
             || !Rc::ptr_eq(&activation.lease, &self.lease)
-            || activation.depth + 1 != self.frames.len()
+            || activation.depth.checked_add(1) != Some(self.frames.len())
             || frame.invocation != activation.invocation
             || self.frames.len() <= 1
+            || self
+                .frames
+                .get(activation.depth - 1)
+                .map(|frame| frame.program)
+                != Some(activation.caller_program)
         {
             return Err(invalid(Refused::Facts));
         }
-        let plan = self
-            .code
+        let caller = &self.frames[activation.depth - 1];
+        let caller_code = self.programs.code(activation.caller_program)?;
+        let entered = caller_code
+            .instructions
+            .get(caller.pc as usize)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        if !matches!(entered.op, Op::Call { site } if site == activation.plan)
+            || entered.next != frame.return_pc
+        {
+            return Err(invalid(Refused::Facts));
+        }
+        let plan = caller_code
             .calls
             .get(activation.plan as usize)
             .ok_or_else(|| invalid(Refused::Facts))?;
@@ -63,7 +84,8 @@ impl Execution {
             .instructions
             .get(frame.pc as usize)
             .ok_or_else(|| invalid(Refused::Facts))?;
-        if plan.leave.depth != -1
+        if frame.program != plan.target
+            || plan.leave.depth != -1
             || !matches!(instruction.op, Op::Return { value } if value == plan.result)
         {
             return Err(invalid(Refused::Facts));
@@ -99,8 +121,8 @@ impl Execution {
             .returning
             .as_ref()
             .ok_or_else(|| invalid(Refused::Facts))?;
-        let plan = self
-            .code
+        let caller_code = self.programs.code(returning.activation.caller_program)?;
+        let plan = caller_code
             .calls
             .get(returning.activation.plan as usize)
             .ok_or_else(|| invalid(Refused::Facts))?;
@@ -110,13 +132,22 @@ impl Execution {
             ReturnPhase::CallerRestore => (plan.restore, plan.restore_prefix),
         };
         let Some(counters) = self.affordable(cost)? else {
-            self.refuse(prefix)?;
+            self.attempted = Some(
+                caller_code
+                    .recovery
+                    .get(prefix as usize)
+                    .ok_or_else(|| invalid(Refused::Exit))?
+                    .continuation
+                    .clone(),
+            );
+            self.stop = Some(RegionStop::Refusal);
             return Err(invalid(Refused::Peak));
         };
         match returning.phase {
             ReturnPhase::FrameLeave => {
                 self.registers.clear(self.frames.len() - 1)?;
                 self.frames.pop();
+                self.code = Arc::clone(caller_code);
                 self.returning
                     .as_mut()
                     .ok_or_else(|| invalid(Refused::Facts))?

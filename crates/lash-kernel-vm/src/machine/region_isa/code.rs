@@ -92,6 +92,7 @@ pub(super) struct Recovery {
     pub(super) counters: super::source_counters::CounterPlan,
 }
 pub(super) struct Call {
+    pub(super) target: CodeId,
     pub(super) before: Cost,
     pub(super) before_prefix: u32,
     pub(super) entry: u32,
@@ -114,6 +115,7 @@ pub(super) struct ReadDependency {
 /// Immutable execution tables. Production construction requires A's verified
 /// source/phase export; only the test module constructs fixture tables.
 pub(super) struct Code {
+    pub(super) id: CodeId,
     pub(super) entry: u32,
     pub(super) entry_prefix: u32,
     pub(super) instructions: Box<[Instruction]>,

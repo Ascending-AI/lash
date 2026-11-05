@@ -60,6 +60,7 @@ fn code(
     prefixes: u32,
 ) -> Code {
     Code {
+        id: CodeId(0),
         entry: 0,
         entry_prefix: 0,
         instructions: instructions.into_boxed_slice(),
@@ -578,6 +579,7 @@ fn recursive(n: i64) -> Arc<Code> {
         code.recovery[index].incoming = true;
     }
     let plan = |restore_prefix, leave_prefix, completion_prefix, before_prefix| Call {
+        target: CodeId(0),
         before: Cost::ZERO,
         before_prefix,
         entry: 2,
@@ -602,7 +604,19 @@ fn recursive(n: i64) -> Arc<Code> {
 
 #[test]
 fn affine_calls_use_the_executor_stack_and_preserve_exact_depth_prefixes() {
-    for (n, depth, entry_depth) in [(8, 8, 0), (8, 9, 0), (8, 10, 0), (1024, 1025, 0), (2, 4, 3)] {
+    for (n, depth, entry_depth, memory) in [
+        (8, 8, 0, u64::MAX),
+        (8, 9, 0, u64::MAX),
+        (8, 10, 0, u64::MAX),
+        (1024, 1025, 0, u64::MAX),
+        (2, 4, 3, u64::MAX),
+        (8, u32::MAX, 0, 81),
+        (8, u32::MAX, 0, 82),
+        (8, u32::MAX, 0, 83),
+        (0, u32::MAX, 0, 17),
+        (0, u32::MAX, 0, 18),
+        (0, u32::MAX, 0, 19),
+    ] {
         let mut state = State::new();
         let mut lease = RegionLease::acquire_fixture(
             &mut state,
@@ -610,6 +624,7 @@ fn affine_calls_use_the_executor_stack_and_preserve_exact_depth_prefixes() {
             Limits {
                 depth,
                 entry_depth,
+                memory,
                 ..limits()
             },
         )
@@ -619,7 +634,7 @@ fn affine_calls_use_the_executor_stack_and_preserve_exact_depth_prefixes() {
             .expect("recursive execution");
         let materialized = lease.materialize().expect("active-frame recovery");
         let image = materialized.reconstruction();
-        let allowed = depth - entry_depth;
+        let allowed = (u64::from(depth - entry_depth).min((memory - 10) / 8)) as u32;
         if allowed <= n as u32 {
             assert_eq!(stopped, RegionStop::Refusal);
             assert_eq!(
@@ -628,7 +643,11 @@ fn affine_calls_use_the_executor_stack_and_preserve_exact_depth_prefixes() {
                     image.counters.depth,
                     image.counters.balance
                 ),
-                (5 * u64::from(allowed), depth, 10 + 8 * u64::from(allowed))
+                (
+                    5 * u64::from(allowed),
+                    entry_depth + allowed,
+                    10 + 8 * u64::from(allowed)
+                )
             );
             assert_eq!(image.frames.len(), allowed as usize + 1);
             assert!(role(image, allowed as usize, 0).same(&Value::Int(n - i64::from(allowed))));
@@ -704,6 +723,60 @@ fn foreign_and_early_call_leaves_publish_nothing() {
     view.inspect(|image, revision, roots| {
         assert!(image.is_none());
         assert_eq!((revision, roots), (0, 0));
+    });
+    let mut state = State::new();
+    let view = state.view();
+    let mut lease = RegionLease::acquire_fixture_programs(
+        &mut state,
+        multicode_recursive(0),
+        CodeId(0),
+        limits(),
+    )
+    .expect("multi-code entry");
+    let mut activation = lease.enter_call(CallId::fixture(0)).expect("actual caller");
+    for _ in 0..2 {
+        assert_eq!(
+            lease
+                .run(StopAt::NextLegalPrefix)
+                .expect("callee return path"),
+            RegionStop::Handoff
+        );
+    }
+    activation.caller_program = CodeId(1);
+    assert!(
+        lease.leave_call(activation).is_err(),
+        "another valid code table is not this invocation's caller"
+    );
+    assert!(lease.materialize().is_err());
+    view.inspect(|image, version, roots| {
+        assert!(image.is_none());
+        assert_eq!((version, roots), (0, 0));
+    });
+
+    let mut state = State::new();
+    let view = state.view();
+    let mut lease =
+        RegionLease::acquire_fixture(&mut state, recursive(0), limits()).expect("entry");
+    let mut activation = lease
+        .enter_call(CallId::fixture(0))
+        .expect("first source edge");
+    for _ in 0..2 {
+        assert_eq!(
+            lease
+                .run(StopAt::NextLegalPrefix)
+                .expect("callee return path"),
+            RegionStop::Handoff
+        );
+    }
+    activation.plan = 1;
+    assert!(
+        lease.leave_call(activation).is_err(),
+        "another valid call site cannot replace the entered source edge"
+    );
+    assert!(lease.materialize().is_err());
+    view.inspect(|image, version, roots| {
+        assert!(image.is_none());
+        assert_eq!((version, roots), (0, 0));
     });
 }
 
@@ -1093,5 +1166,126 @@ fn charge_off_slices_use_source_pace_and_atomic_fees_keep_the_slice() {
             if charging { (1, 1000, 1000) } else { (2, 0, 2) }
         );
         assert_eq!(image.frames[0].pc, if charging { 1 } else { 2 });
+    }
+}
+
+fn multicode_recursive(n: i64) -> Arc<programs::Programs> {
+    let mut root = Arc::try_unwrap(recursive(n)).ok().expect("unique fixture");
+    let mut body = code(vec![], vec![], &[(Slot::Binding(9), Register::Int(0))], 16);
+    body.id = CodeId(1);
+    let mut instructions = std::mem::take(&mut root.instructions).into_vec();
+    let mut body_instructions = instructions.split_off(2);
+    for instruction in &mut body_instructions {
+        match &mut instruction.op {
+            Op::Branch { yes, no, .. } => {
+                instruction.next = 0;
+                *yes -= 2;
+                *no -= 2;
+            }
+            Op::Call { site } => {
+                instruction.next -= 2;
+                *site = 0;
+            }
+            _ => instruction.next -= 2,
+        }
+    }
+    root.instructions = instructions.into_boxed_slice();
+    body.instructions = body_instructions.into_boxed_slice();
+    let mut calls = std::mem::take(&mut root.calls).into_vec();
+    let mut recursive = calls.pop().expect("recursive edge");
+    let mut outer = calls.pop().expect("outer edge");
+    for plan in [&mut outer, &mut recursive] {
+        plan.target = CodeId(1);
+        plan.entry = 0;
+    }
+    root.calls = Box::new([outer]);
+    body.calls = Box::new([recursive]);
+    for prefix in [10, 11, 12, 13] {
+        body.recovery[prefix].incoming = true;
+    }
+    for (program, code) in [(0, &mut root), (1, &mut body)] {
+        for (prefix, map) in code.recovery.iter_mut().enumerate() {
+            map.continuation.site = Site::new(Unit::Main, vec![program, prefix as u32]);
+        }
+    }
+    programs::Programs::bind(Box::new([Arc::new(root), Arc::new(body)])).expect("fixture registry")
+}
+
+#[test]
+fn calls_and_recovery_use_each_frames_own_code_and_the_callers_plan() {
+    for (n, bound, depth) in [
+        (0, 4, 1),
+        (0, 7, 1),
+        (8, u64::MAX, 8),
+        (8, u64::MAX, 9),
+        (1024, u64::MAX, 1025),
+    ] {
+        let mut state = State::new();
+        let mut lease = RegionLease::acquire_fixture_programs(
+            &mut state,
+            multicode_recursive(n),
+            CodeId(0),
+            Limits {
+                charge: bound,
+                depth,
+                ..limits()
+            },
+        )
+        .expect("entry");
+        let stop = lease
+            .run(StopAt::NextBoundary)
+            .expect("indexed multi-code recursion");
+        let prefix = lease.materialize().expect("qualified recovery maps");
+        let image = prefix.reconstruction();
+        if bound == 4 {
+            assert_eq!(stop, RegionStop::Refusal);
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.depth,
+                    image.counters.balance
+                ),
+                (4, 0, 10)
+            );
+            assert_eq!(image.frames.len(), 1);
+            assert_eq!(image.prefix.program, CodeId(0));
+            assert_eq!(
+                image.frames[0].continuation.site,
+                Site::new(Unit::Main, vec![0, 11])
+            );
+            assert_eq!(
+                image.attempted.as_ref().expect("completion debt").site,
+                Site::new(Unit::Main, vec![0, 10])
+            );
+            assert!(image.pending.expect("actual return").same(&Value::Int(0)));
+            let returning = image.returning.as_ref().expect("completion not accepted");
+            assert_eq!(returning.callee_invocation, 2);
+            assert_eq!(returning.caller_program, CodeId(0));
+            assert!(matches!(returning.completion.fee, Fee::Fixed(3)));
+        } else if depth <= n as u32 {
+            assert_eq!(stop, RegionStop::Refusal);
+            assert_eq!(
+                (
+                    image.counters.charge,
+                    image.counters.depth,
+                    image.counters.balance
+                ),
+                (5 * u64::from(depth), depth, 10 + 8 * u64::from(depth))
+            );
+            assert_eq!(image.prefix.program, CodeId(1));
+            assert_eq!(image.frames.len(), depth as usize + 1);
+            assert!(role(image, 0, 0).same(&Value::Int(n)));
+            for (index, frame) in image.frames.iter().enumerate().skip(1) {
+                assert_eq!(frame.program, CodeId(1));
+                assert_eq!(frame.continuation.site.path[0], 1);
+                assert!(role(image, index, 9).same(&Value::Int(n - index as i64)));
+            }
+        } else {
+            assert_eq!(stop, RegionStop::Complete);
+            assert_eq!(image.frames.len(), 1);
+            assert_eq!(image.frames[0].program, CodeId(0));
+            assert!(image.payload.expect("caller result").same(&Value::Int(n)));
+            assert_eq!(image.counters.charge, 9 * n as u64 + 7);
+        }
     }
 }
