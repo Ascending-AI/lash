@@ -368,7 +368,7 @@ impl KernelMachine {
         ));
         arena.borrow_mut().watch_logical_members();
         let logical = heap.logical_ledger();
-        let machine = Self {
+        let mut machine = Self {
             logical: logical.clone(),
             logical_memory: Default::default(),
             active_link: program.link,
@@ -430,7 +430,9 @@ impl KernelMachine {
             function_origins: Default::default(),
             limiters: Limiters::default(),
         };
-        machine.publish_logical_meter().map_err(OpenError::Heap)?;
+        machine
+            .reconstruct_canonical_region()
+            .map_err(OpenError::Heap)?;
         Ok(machine)
     }
 }
