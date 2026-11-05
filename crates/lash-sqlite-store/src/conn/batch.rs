@@ -148,10 +148,10 @@ impl Member {
             #[cfg(feature = "perf-witness")]
             origin: std::any::type_name::<F>(),
             window: Window::current().map(|_| Window::new(std::any::type_name::<F>(), "sqlite")),
-            body: Box::new(Typed {
-                body: Some(f),
-                result: None,
+            body: Box::new(Queued {
+                body: f,
                 reply,
+                answers: std::marker::PhantomData,
             }),
             #[cfg(feature = "perf-witness")]
             timing: lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.worker")
@@ -174,40 +174,91 @@ impl Member {
         self.writer.operational.write_batch_members.get()
     }
 
-    fn run(&mut self, tx: &FencedTx<'_>) -> Kept {
+    /// Run the member's body, once, in `tx`. Its result then waits for the
+    /// batch to settle.
+    fn execute(self, tx: &FencedTx<'_>) -> Executed {
+        let Self {
+            window,
+            body,
+            #[cfg(feature = "perf-witness")]
+            mut timing,
+            #[cfg(feature = "perf-witness")]
+            queued,
+            ..
+        } = self;
         #[cfg(feature = "perf-witness")]
-        if let Some(queued) = self.queued.take() {
+        if let Some(queued) = queued {
             queued.started();
         }
-        let window = self.window.clone();
-        let body = &mut self.body;
+        let body = {
+            #[cfg(feature = "perf-witness")]
+            let _scope = timing.as_mut().map(|timing| timing.worker_scope());
+            Window::on_worker(window, || body.run(tx))
+        };
+        Executed {
+            body,
+            #[cfg(feature = "perf-witness")]
+            timing,
+        }
+    }
+
+    /// Answer `error` without running the body: the batch could not start
+    /// it (a refused begin, fence or savepoint).
+    fn reject(self, error: rusqlite::Error) {
+        let Self {
+            body,
+            #[cfg(feature = "perf-witness")]
+            timing,
+            ..
+        } = self;
+        body.reject(error);
         #[cfg(feature = "perf-witness")]
-        let _scope = self.timing.as_mut().map(|timing| timing.worker_scope());
-        Window::on_worker(window, || body.run(tx))
+        complete(timing);
+    }
+}
+
+/// A member whose body ran: its result waits for the batch to settle.
+struct Executed {
+    body: Box<dyn Answer>,
+    #[cfg(feature = "perf-witness")]
+    timing: Option<Box<lash_core_ids::perf_witness::queues::Timer>>,
+}
+
+impl Executed {
+    /// What the body left in the transaction.
+    fn kept(&self) -> Kept {
+        self.body.kept()
     }
 
     /// Replace the member's own result with `error`, the refusal its solo
-    /// commit would have answered.
+    /// commit would have answered. It then keeps nothing.
     fn refuse(&mut self, error: rusqlite::Error) {
         self.body.refuse(error);
     }
 
+    /// Answer once the batch is settled: with the body's own result, or with
+    /// `failure` when the batch lost the body's writes.
     fn answer(self, failure: Option<rusqlite::Error>) {
         let Self {
             body,
             #[cfg(feature = "perf-witness")]
-            mut timing,
-            ..
+            timing,
         } = self;
         body.answer(failure);
         #[cfg(feature = "perf-witness")]
-        if let Some(timing) = timing.as_mut() {
-            timing.complete();
-        }
+        complete(timing);
+    }
+}
+
+#[cfg(feature = "perf-witness")]
+fn complete(timing: Option<Box<lash_core_ids::perf_witness::queues::Timer>>) {
+    if let Some(mut timing) = timing {
+        timing.complete();
     }
 }
 
 /// What a member's body left in the transaction.
+#[derive(Clone, Copy)]
 enum Kept {
     /// Its writes stay: its savepoint is released into the batch.
     Writes,
@@ -218,63 +269,93 @@ enum Kept {
     Failed,
 }
 
+/// A queued member's body, erased over its answer type.
 trait Body: Send {
-    fn run(&mut self, tx: &FencedTx<'_>) -> Kept;
+    /// Run the body, catching its panic as its own failure.
+    fn run(self: Box<Self>, tx: &FencedTx<'_>) -> Box<dyn Answer>;
+    /// Answer `error` without running the body.
+    fn reject(self: Box<Self>, error: rusqlite::Error);
+}
+
+/// An executed member's result, erased over its answer type.
+trait Answer: Send {
+    fn kept(&self) -> Kept;
     fn refuse(&mut self, error: rusqlite::Error);
     /// Answer the caller once the batch is settled: with the body's own
-    /// result, or with `failure` when the batch lost the body's writes or
-    /// never ran it.
+    /// result, or with `failure` when the batch lost the body's writes.
     fn answer(self: Box<Self>, failure: Option<rusqlite::Error>);
 }
 
-struct Typed<T, F, R> {
-    body: Option<F>,
-    result: Option<rusqlite::Result<T>>,
+struct Queued<T, F, R> {
+    body: F,
+    reply: R,
+    answers: std::marker::PhantomData<fn() -> T>,
+}
+
+/// A body's result, which also says what it left in the transaction.
+enum Outcome<T> {
+    Writes(T),
+    Nothing(T),
+    Failed(rusqlite::Error),
+}
+
+struct Done<T, R> {
+    outcome: Outcome<T>,
     reply: R,
 }
 
-impl<T, F, R> Body for Typed<T, F, R>
+impl<T, F, R> Body for Queued<T, F, R>
 where
     T: Send + 'static,
     F: FnOnce(&FencedTx<'_>) -> rusqlite::Result<TxOutcome<T>> + Send + 'static,
     R: FnOnce(rusqlite::Result<T>) + Send + 'static,
 {
-    fn run(&mut self, tx: &FencedTx<'_>) -> Kept {
-        let Some(body) = self.body.take() else {
-            return Kept::Nothing;
-        };
+    fn run(self: Box<Self>, tx: &FencedTx<'_>) -> Box<dyn Answer> {
+        let Self { body, reply, .. } = *self;
         // A panic is this member's failure alone: unwinding further would
         // end the connection thread and drop every member's answer.
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             crate::observed_sql::with_origin(std::any::type_name::<F>(), || body(tx))
         }));
-        let (result, kept) = match ran {
-            Ok(Ok(TxOutcome::Commit(value))) => (Ok(value), Kept::Writes),
-            Ok(Ok(TxOutcome::Rollback(value))) => (Ok(value), Kept::Nothing),
-            Ok(Err(error)) => (Err(error), Kept::Failed),
-            Err(panic) => (
-                Err(storage_failure(&format!(
-                    "a write transaction panicked: {}",
-                    panic_message(panic.as_ref())
-                ))),
-                Kept::Failed,
-            ),
+        let outcome = match ran {
+            Ok(Ok(TxOutcome::Commit(value))) => Outcome::Writes(value),
+            Ok(Ok(TxOutcome::Rollback(value))) => Outcome::Nothing(value),
+            Ok(Err(error)) => Outcome::Failed(error),
+            Err(panic) => Outcome::Failed(storage_failure(&format!(
+                "a write transaction panicked: {}",
+                panic_message(panic.as_ref())
+            ))),
         };
-        self.result = Some(result);
-        kept
+        Box::new(Done { outcome, reply })
+    }
+
+    fn reject(self: Box<Self>, error: rusqlite::Error) {
+        (self.reply)(Err(error));
+    }
+}
+
+impl<T, R> Answer for Done<T, R>
+where
+    T: Send + 'static,
+    R: FnOnce(rusqlite::Result<T>) + Send + 'static,
+{
+    fn kept(&self) -> Kept {
+        match self.outcome {
+            Outcome::Writes(_) => Kept::Writes,
+            Outcome::Nothing(_) => Kept::Nothing,
+            Outcome::Failed(_) => Kept::Failed,
+        }
     }
 
     fn refuse(&mut self, error: rusqlite::Error) {
-        self.result = Some(Err(error));
+        self.outcome = Outcome::Failed(error);
     }
 
     fn answer(self: Box<Self>, failure: Option<rusqlite::Error>) {
-        let result = match (failure, self.result) {
+        let result = match (failure, self.outcome) {
             (Some(failure), _) => Err(failure),
-            (None, Some(result)) => result,
-            (None, None) => Err(storage_failure(
-                "a write batch settled a member it never ran",
-            )),
+            (None, Outcome::Writes(value) | Outcome::Nothing(value)) => Ok(value),
+            (None, Outcome::Failed(error)) => Err(error),
         };
         (self.reply)(result);
     }
@@ -284,14 +365,16 @@ where
 /// transaction: it kept no writes and none before it did, so its answer was
 /// decided against committed state alone.
 struct Ran {
-    member: Member,
+    member: Executed,
     standalone: bool,
 }
 
-/// A batch's end: each member it answers, with the failure that replaces
-/// its own result, and the members it never ran.
+/// A batch's end: each member that ran, with the failure that replaces its
+/// own result; the member it could not start, with its refusal; and the
+/// members it never reached.
 struct Settled {
-    answered: Vec<(Member, Option<rusqlite::Error>)>,
+    answered: Vec<(Executed, Option<rusqlite::Error>)>,
+    rejected: Option<(Member, rusqlite::Error)>,
     unrun: Vec<Member>,
 }
 
@@ -303,6 +386,7 @@ impl Settled {
                 .into_iter()
                 .map(|ran| (ran.member, Some(replicate(failure))))
                 .collect(),
+            rejected: None,
             unrun: rest,
         }
     }
@@ -320,6 +404,7 @@ impl Settled {
                     (ran.member, failure)
                 })
                 .collect(),
+            rejected: None,
             unrun: rest,
         }
     }
@@ -387,6 +472,9 @@ pub(super) fn run(c: &mut Connection, mut members: Vec<Member>) -> Vec<Member> {
     for (member, failure) in settled.answered {
         member.answer(failure);
     }
+    if let Some((member, error)) = settled.rejected {
+        member.reject(error);
+    }
     settled.unrun
 }
 
@@ -430,9 +518,9 @@ fn transact(
         // A refused begin or fence answers the first member with its typed
         // error; the rest lead the next batch, which fences again.
         Err(error) => {
-            let first = members.next();
             return Settled {
-                answered: Vec::from_iter(first.map(|member| (member, Some(error)))),
+                answered: Vec::new(),
+                rejected: members.next().map(|member| (member, error)),
                 unrun: members.collect(),
             };
         }
@@ -459,7 +547,7 @@ fn transact(
     let mut unrun = Vec::new();
     let rows_before = tx.total_changes();
     let rows_cap = writer.operational.write_batch_rows.get() as u64;
-    while let Some(mut member) = members.next() {
+    while let Some(member) = members.next() {
         // BATCH-BOUNDS: once the batch has changed its share of rows, no
         // further member starts in it; the rest lead the next batch.
         if !ran.is_empty() && tx.total_changes().saturating_sub(rows_before) >= rows_cap {
@@ -471,17 +559,18 @@ fn transact(
             && let Err(error) =
                 super::cached_execute(&tx, crate::connection_sql::BATCH_MEMBER_SAVEPOINT, [])
         {
-            ran.push(Ran {
-                member,
-                standalone: false,
-            });
-            return Settled::failed(ran, &error, members.collect());
+            // The member never started: it is refused, not settled.
+            let rejected = replicate(&error);
+            return Settled {
+                rejected: Some((member, rejected)),
+                ..Settled::failed(ran, &error, members.collect())
+            };
         }
         #[cfg(feature = "perf-witness")]
         let staged = witness.as_ref().map(|witness| witness.staged());
         with_node_wakes(writer, crate::durable::NodeWakeWriter::begin_member);
-        let mut outcome = member.run(&tx);
-        if matches!(outcome, Kept::Writes) && !tx.is_autocommit() {
+        let mut member = member.execute(&tx);
+        if matches!(member.kept(), Kept::Writes) && !tx.is_autocommit() {
             let wakes = writer
                 .node_wakes
                 .lock()
@@ -490,7 +579,6 @@ fn transact(
                 && let Err(error) = wakes.flush(&tx)
             {
                 member.refuse(error);
-                outcome = Kept::Failed;
             }
         }
         // Release capture even when the body failed before its flush.
@@ -501,7 +589,7 @@ fn transact(
             // error): the writes of every member so far went with it. A
             // member whose error ended it keeps that error; one that kept
             // nothing keeps its answer while no member before it kept writes.
-            let standalone = match outcome {
+            let standalone = match member.kept() {
                 Kept::Failed => true,
                 Kept::Nothing => kept == 0,
                 Kept::Writes => false,
@@ -512,13 +600,10 @@ fn transact(
         // A kept member with siblings may not leave a deferred foreign key
         // violated for the shared `COMMIT` to find: it is refused as its
         // solo `COMMIT` would be.
-        let outcome = match outcome {
-            Kept::Writes if !solo => match deferred_violation(&tx) {
-                Ok(false) => Kept::Writes,
-                Ok(true) => {
-                    member.refuse(foreign_key_failure());
-                    Kept::Failed
-                }
+        if matches!(member.kept(), Kept::Writes) && !solo {
+            match deferred_violation(&tx) {
+                Ok(false) => {}
+                Ok(true) => member.refuse(foreign_key_failure()),
                 Err(error) => {
                     ran.push(Ran {
                         member,
@@ -526,9 +611,9 @@ fn transact(
                     });
                     return Settled::failed(ran, &error, members.collect());
                 }
-            },
-            outcome => outcome,
-        };
+            }
+        }
+        let outcome = member.kept();
         let standalone = kept == 0 && !matches!(outcome, Kept::Writes);
         let undo = match outcome {
             Kept::Writes => {
@@ -588,6 +673,7 @@ fn transact(
     match ended {
         Ok(()) => Settled {
             answered: ran.into_iter().map(|ran| (ran.member, None)).collect(),
+            rejected: None,
             unrun,
         },
         Err(error) => Settled::failed(ran, &error, unrun),
