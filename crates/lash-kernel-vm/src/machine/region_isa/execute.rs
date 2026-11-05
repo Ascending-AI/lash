@@ -1,5 +1,7 @@
 use super::code::{Cost, Fee, Op, Register};
+use super::operands::Operand;
 use super::registers::Registers;
+use super::storage::View;
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,10 +21,12 @@ pub(super) struct Frame {
     pub(super) return_pc: u32,
     pub(super) activation: Option<CallActivation>,
 }
-pub(super) struct Execution {
+pub(super) struct Execution<V: View> {
+    pub(super) view: V,
+    pub(super) arguments: Vec<V::Value>,
     pub(super) code: Arc<Code>,
     pub(super) programs: Arc<programs::Programs>,
-    pub(super) registers: Registers,
+    pub(super) registers: Registers<V::Value>,
     pub(super) source: super::source_counters::SourceCounters,
     pub(super) frames: Vec<Frame>,
     pub(super) reached: ReachedPrefix,
@@ -30,25 +34,31 @@ pub(super) struct Execution {
     pub(super) limits: Limits,
     pub(super) attempted: Option<Point>,
     pub(super) stop: Option<RegionStop>,
-    pub(super) payload: Option<Value>,
+    pub(super) payload: Option<V::Value>,
     pub(super) faulted: bool,
     pub(super) lease: Rc<()>,
-    pub(super) returning: Option<returns::Returning>,
+    pub(super) returning: Option<returns::Returning<V::Value>>,
     pub(super) entering: Option<u32>,
     next_invocation: u64,
     #[cfg(test)]
     pub(super) executed: u64,
 }
 
-impl Execution {
-    pub(super) fn acquire(code: Arc<Code>, limits: Limits) -> Result<Self, RegionError> {
+impl<V: View> Execution<V> {
+    pub(super) fn acquire(code: Arc<Code>, limits: Limits, view: V) -> Result<Self, RegionError> {
         let id = code.id;
-        Self::acquire_programs(programs::Programs::bind(Box::new([code]))?, id, limits)
+        Self::acquire_programs(
+            programs::Programs::bind(Box::new([code]))?,
+            id,
+            limits,
+            view,
+        )
     }
     pub(super) fn acquire_programs(
         programs: Arc<programs::Programs>,
         entry: CodeId,
         limits: Limits,
+        mut view: V,
     ) -> Result<Self, RegionError> {
         let code = Arc::clone(programs.code(entry)?);
         if code.invocation == 0
@@ -62,7 +72,13 @@ impl Execution {
         }
         let mut registers = Registers::new(programs.registers, 1)?;
         for (reg, value) in &code.initial {
-            registers.write(0, code.invocation, *reg, *value)?;
+            registers.write(
+                &mut view,
+                0,
+                code.invocation,
+                *reg,
+                Operand::Immediate(*value),
+            )?;
         }
         let mut frames = Vec::new();
         frames
@@ -100,7 +116,13 @@ impl Execution {
             .invocation
             .checked_add(1)
             .ok_or_else(|| invalid(Refused::Facts))?;
+        let mut arguments = Vec::new();
+        arguments
+            .try_reserve_exact(programs.arguments)
+            .map_err(|_| invalid(Refused::Scratch))?;
         Ok(Self {
+            view,
+            arguments,
             code,
             programs,
             registers,
@@ -122,20 +144,27 @@ impl Execution {
         })
     }
 
-    pub(super) fn read(&self, reg: Register) -> Result<Value, RegionError> {
+    pub(super) fn read(&self, reg: Register) -> Result<Operand<V::Value>, RegionError> {
         let frame = self.frames.last().ok_or_else(|| invalid(Refused::Facts))?;
         self.registers
             .read(self.frames.len() - 1, frame.invocation, reg)
     }
 
+    pub(super) fn value(&mut self, reg: Register) -> Result<V::Value, RegionError> {
+        self.read(reg)?
+            .bind(&mut self.view)
+            .map_err(RegionError::Heap)
+    }
+
     pub(super) fn fee(&self, fee: Fee) -> Result<u64, RegionError> {
         match fee {
+            Fee::Storage { .. } => Err(invalid(Refused::Facts)),
             Fee::Fixed(units) => Ok(units),
             Fee::WordSize {
                 value,
                 zero,
                 nonzero,
-            } => match self.read(value)? {
+            } => match self.read(value)?.scalar(&self.view)? {
                 Value::Int(0) => Ok(zero),
                 Value::Int(_) => Ok(nonzero),
                 _ => Err(invalid(Refused::Facts)),
@@ -149,47 +178,41 @@ impl Execution {
         } else {
             0
         };
-        let Some(charge) = self.counters.charge.checked_add(fee) else {
-            return Ok(None);
-        };
-        let increment = if self.limits.charge_enabled {
+        Ok(Self::budget(self.counters, self.limits, cost, fee))
+    }
+
+    pub(super) fn budget(
+        counters: Counters,
+        limits: Limits,
+        cost: Cost,
+        fee: u64,
+    ) -> Option<Counters> {
+        let charge = counters.charge.checked_add(fee)?;
+        let increment = if limits.charge_enabled {
             fee
         } else {
             cost.pace
         };
-        let Some(progress) = self.counters.progress.checked_add(increment) else {
-            return Ok(None);
-        };
-        let Some(balance) = i128::from(self.counters.balance)
+        let progress = counters.progress.checked_add(increment)?;
+        let balance = i128::from(counters.balance)
             .checked_add(cost.delta)
-            .and_then(|n| u64::try_from(n).ok())
-        else {
-            return Ok(None);
-        };
-        let Some(temporary) = self.counters.balance.checked_add(cost.peak) else {
-            return Ok(None);
-        };
-        let Some(depth) = i64::from(self.counters.depth)
+            .and_then(|n| u64::try_from(n).ok())?;
+        let temporary = counters.balance.checked_add(cost.peak)?;
+        let depth = i64::from(counters.depth)
             .checked_add(i64::from(cost.depth))
-            .and_then(|n| u32::try_from(n).ok())
-        else {
-            return Ok(None);
-        };
-        let Some(debt) = self.counters.debt.checked_add(1) else {
-            return Ok(None);
-        };
-        let peak = self.counters.peak.max(temporary).max(balance);
-        Ok((charge <= self.limits.charge
-            && peak <= self.limits.memory
-            && depth <= self.limits.depth)
-            .then_some(Counters {
+            .and_then(|n| u32::try_from(n).ok())?;
+        let debt = counters.debt.checked_add(1)?;
+        let peak = counters.peak.max(temporary).max(balance);
+        (charge <= limits.charge && peak <= limits.memory && depth <= limits.depth).then_some(
+            Counters {
                 charge,
                 progress,
                 balance,
                 peak,
                 depth,
                 debt,
-            }))
+            },
+        )
     }
 
     pub(super) fn refuse(&mut self, prefix: u32) -> Result<(), RegionError> {
@@ -308,7 +331,18 @@ impl Execution {
                 self.stop = Some(RegionStop::Boundary);
                 return Ok(RegionStop::Boundary);
             }
-            if let Op::Call { site } = op {
+            if let Op::Heap { site } = op {
+                match self.heap_step(site, prefix, next, cost) {
+                    Ok(()) => (),
+                    Err(_) if self.stop == Some(RegionStop::Refusal) => {
+                        return Ok(RegionStop::Refusal);
+                    }
+                    Err(error) => return Err(error),
+                }
+                if let Some(stop) = self.stop {
+                    return Ok(stop);
+                }
+            } else if let Op::Call { site } = op {
                 match self.begin_enter(site) {
                     Ok(()) => (),
                     Err(_) if self.stop == Some(RegionStop::Refusal) => {
@@ -318,7 +352,7 @@ impl Execution {
                 }
             } else if let Op::Return { value } = op {
                 if self.frames.len() == 1 {
-                    let answer = self.read(value)?;
+                    let answer = self.value(value)?;
                     let Some(counters) = self.affordable(cost)? else {
                         self.refuse(prefix)?;
                         return Ok(RegionStop::Refusal);
@@ -357,7 +391,7 @@ impl Execution {
                 let mut jump = next;
                 let mut thrown = None;
                 let write = match op {
-                    Op::Constant { dst, value } => Some((dst, value)),
+                    Op::Constant { dst, value } => Some((dst, Operand::Immediate(value))),
                     Op::Move { dst, src } | Op::Pack { dst, src } => Some((dst, self.read(src)?)),
                     Op::Int {
                         kernel,
@@ -385,10 +419,10 @@ impl Execution {
                         if self.code.safe_integers && [Value::Int(a), Value::Int(b), answer].iter().any(|value| matches!(value, Value::Int(n) if n.unsigned_abs() > 9_007_199_254_740_991)) {
                             self.stop = Some(RegionStop::Boundary); return Ok(RegionStop::Boundary);
                         }
-                        Some((dst, answer))
+                        Some((dst, Operand::Immediate(answer)))
                     }
                     Op::Branch { test, yes, no } => {
-                        jump = match self.read(Register::Bool(test))? {
+                        jump = match self.read(Register::Bool(test))?.scalar(&self.view)? {
                             Value::Bool(true) => yes,
                             Value::Bool(false) => no,
                             _ => return Err(invalid(Refused::Facts)),
@@ -400,36 +434,32 @@ impl Execution {
                         self.code
                             .semantic_operations
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let actual = self.read(Register::Value(base))?;
-                        let dependency = self
-                            .code
-                            .dependencies
-                            .get(base as usize)
-                            .ok_or_else(|| invalid(Refused::Facts))?;
-                        if !dependency.identity.same(&actual) {
-                            return Err(invalid(Refused::Facts));
-                        }
-                        Some((
-                            dst,
-                            *dependency
-                                .members
-                                .get(member as usize)
-                                .ok_or_else(|| invalid(Refused::Facts))?,
-                        ))
+                        let actual = self.value(Register::Value(base))?;
+                        let value = self
+                            .view
+                            .read(actual, &super::storage::Selector::List(u64::from(member)))
+                            .map_err(storage_fault)?;
+                        Some((dst, Operand::Dynamic(value)))
                     }
+
                     Op::Throw { value } => {
-                        thrown = Some(self.read(value)?);
+                        thrown = Some(self.value(value)?);
                         None
                     }
                     Op::Meter | Op::Exit => None,
-                    Op::Call { .. } | Op::Return { .. } | Op::Boundary => {
+                    Op::Heap { .. } | Op::Call { .. } | Op::Return { .. } | Op::Boundary => {
                         unreachable!("handled before scalar dispatch")
                     }
                 };
                 if let Some((dst, value)) = write {
                     let frame = self.frames.last().ok_or_else(|| invalid(Refused::Facts))?;
-                    self.registers
-                        .write(self.frames.len() - 1, frame.invocation, dst, value)?;
+                    self.registers.write(
+                        &mut self.view,
+                        self.frames.len() - 1,
+                        frame.invocation,
+                        dst,
+                        value,
+                    )?;
                 }
                 self.reached(prefix, counters)?;
                 self.frames
@@ -533,7 +563,8 @@ impl Execution {
         self.registers.clear(depth)?;
         for (src, dst) in &plan.arguments {
             let value = self.read(*src)?;
-            self.registers.write(depth, invocation, *dst, value)?;
+            self.registers
+                .write(&mut self.view, depth, invocation, *dst, value)?;
         }
         let (entry, entry_prefix) = (plan.entry, plan.prefix);
         let target_program = plan.target;

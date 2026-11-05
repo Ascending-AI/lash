@@ -7,6 +7,11 @@ use lash_kernel_state::kernel_internals::logical::Slot;
 use lash_kernel_value::sites::{Site, Unit};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+// Canonical-shaped references belong only to the separate fixture graph.
+fn object(index: u32) -> Value {
+    Value::List(lash_kernel_doc::arena::ArenaHandle::new(index, 1))
+}
+
 fn point(index: u32) -> Point {
     Point {
         site: Site::new(Unit::Main, vec![index]),
@@ -66,6 +71,7 @@ fn code(
         instructions: instructions.into_boxed_slice(),
         recovery: (0..prefixes).map(|i| map(i, roles)).collect(),
         calls: Box::new([]),
+        heap: Box::new([]),
         dependencies: Box::new([]),
         registers: 5,
         source_initial: Box::new([]),
@@ -408,7 +414,7 @@ fn read_loop(iterations: i64) -> Arc<Code> {
             (Register::Int(1), Value::Int(iterations)),
             (Register::Int(2), Value::Int(1)),
             (Register::Int(3), Value::Int(0)),
-            (Register::Value(0), Value::Int(99)),
+            (Register::Value(0), object(99)),
         ],
         &[
             (Slot::Binding(0), Register::Int(0)),
@@ -440,7 +446,7 @@ fn read_loop(iterations: i64) -> Arc<Code> {
     code.recovery[1].pending = Some(Register::Int(4));
     code.recovery[4].operands = Box::new([Register::Bool(0)]);
     code.dependencies = Box::new([ReadDependency {
-        identity: Value::Int(99),
+        identity: object(99),
         members: Box::new([Value::Int(7)]),
     }]);
     Arc::new(code)
@@ -454,13 +460,13 @@ fn stable_scalar_and_member_loops_publish_once_with_bounded_recovery() {
         let mut state = State::new();
         let view = state.view();
         let mut lease = RegionLease::acquire_fixture(&mut state, code, limits()).expect("entry");
-        let frame_capacity = lease.execution.frames.capacity();
+        let frame_capacity = lease.execution.fixture().frames.capacity();
         assert_eq!(
             lease.run(StopAt::NextBoundary).expect("loop"),
             RegionStop::Complete
         );
-        assert_eq!(lease.execution.frames.capacity(), frame_capacity);
-        assert_eq!(lease.execution.frames.len(), 1);
+        assert_eq!(lease.execution.fixture().frames.capacity(), frame_capacity);
+        assert_eq!(lease.execution.fixture().frames.len(), 1);
         view.inspect(|image, revision, roots| {
             assert!(image.is_none());
             assert_eq!((revision, roots), (0, 0));
@@ -782,46 +788,100 @@ fn foreign_and_early_call_leaves_publish_nothing() {
 
 #[test]
 fn failed_or_abandoned_exits_leave_canonical_state_unchanged() {
-    for failure in 0..5 {
-        let mut state = State::new();
-        if failure == 0 {
-            state.fail_prepare();
-        }
-        if failure == 1 {
-            state.fail_commit();
-        }
-        let view = state.view();
-        let mut lease =
-            RegionLease::acquire_fixture(&mut state, arithmetic(), limits()).expect("entry");
-        assert!(
-            view.publish_alias().is_err(),
-            "lease exclusion must cover aliases"
-        );
-        lease.run(StopAt::NextBoundary).expect("execute");
-        let materialized = lease.materialize().expect("materialize");
-        if failure == 2 {
-            view.corrupt_dependency();
-        }
-        let prepared = materialized.prepare_exit();
-        if failure == 0 || failure == 2 {
-            assert!(prepared.is_err());
-        } else {
-            let prepared = prepared.expect("prepare");
-            if failure == 3 {
+    for code in [arithmetic(), graph::local_edit(), graph::fresh_list()] {
+        for failure in 0..5 {
+            let mut state = State::new();
+            if failure == 0 {
+                state.fail_prepare();
+            }
+            if failure == 1 {
+                state.fail_commit();
+            }
+            let view = state.view();
+            let mut lease = RegionLease::acquire_fixture(&mut state, Arc::clone(&code), limits())
+                .expect("entry");
+            assert!(
+                view.publish_alias().is_err(),
+                "lease exclusion must cover aliases"
+            );
+            lease.run(StopAt::NextBoundary).expect("execute");
+            let materialized = lease.materialize().expect("materialize");
+            if failure == 2 {
                 view.corrupt_dependency();
             }
-            if failure == 4 {
-                drop(prepared);
+            let prepared = materialized.prepare_exit();
+            if failure == 0 || failure == 2 {
+                assert!(prepared.is_err());
             } else {
-                assert!(prepared.commit().is_err());
+                let prepared = prepared.expect("prepare");
+                if failure == 3 {
+                    view.corrupt_dependency();
+                }
+                if failure == 4 {
+                    drop(prepared);
+                } else {
+                    assert!(prepared.commit().is_err());
+                }
             }
+            view.inspect(|image, revision, _| {
+                assert!(image.is_none());
+                assert_eq!(revision, 0);
+            });
+            view.inspect_graph(|graph| assert!(graph.is_none()));
+            view.publish_alias()
+                .expect("dropping authority releases exclusion");
         }
-        view.inspect(|image, revision, _| {
+    }
+
+    for reserve_failure in [true, false] {
+        let mut state = State::new();
+        let view = state.view();
+        let mut lease =
+            RegionLease::acquire_fixture(&mut state, graph::fresh_list(), limits()).expect("entry");
+        if reserve_failure {
+            lease.execution.fixture_mut().view.fail_reserve = true;
+        } else {
+            lease.execution.fixture_mut().view.fail_freeze = true;
+        }
+        let run = lease.run(StopAt::NextBoundary);
+        if reserve_failure {
+            assert!(run.is_err());
+        } else {
+            assert_eq!(run.expect("private allocation"), RegionStop::Complete);
+        }
+        assert!(lease.materialize().is_err());
+        view.inspect(|image, revision, roots| {
             assert!(image.is_none());
-            assert_eq!(revision, 0);
+            assert_eq!((revision, roots), (0, 0));
         });
+        view.inspect_graph(|graph| assert!(graph.is_none()));
         view.publish_alias()
-            .expect("dropping authority releases exclusion");
+            .expect("failed private work released exclusion");
+    }
+
+    let mut first = State::new();
+    let mut second = State::new();
+    let views = [first.view(), second.view()];
+    let mut a = RegionLease::acquire_fixture(&mut first, graph::fresh_list(), limits())
+        .expect("first lease");
+    let mut b = RegionLease::acquire_fixture(&mut second, graph::fresh_list(), limits())
+        .expect("second lease");
+    a.run(StopAt::NextBoundary).expect("first graph");
+    b.run(StopAt::NextBoundary).expect("second graph");
+    let mut a = a.materialize().expect("first packet");
+    let mut b = b.materialize().expect("second packet");
+    std::mem::swap(&mut a.graph, &mut b.graph);
+    assert!(
+        a.prepare_exit().is_err(),
+        "equal-shaped foreign graph packet cannot publish"
+    );
+    assert!(b.prepare_exit().is_err());
+    for view in views {
+        view.inspect(|image, revision, roots| {
+            assert!(image.is_none());
+            assert_eq!((revision, roots), (0, 0));
+        });
+        view.inspect_graph(|graph| assert!(graph.is_none()));
     }
 }
 
@@ -916,7 +976,7 @@ fn overflow_number_policy_and_read_identity_are_checked_without_publication() {
         });
     }
     let mut code = Arc::try_unwrap(read_loop(1)).ok().expect("unique fixture");
-    code.initial.last_mut().expect("actual read base").1 = Value::Int(100);
+    code.initial.last_mut().expect("actual read base").1 = object(100);
     let mut state = State::new();
     let view = state.view();
     let mut lease =
@@ -1289,3 +1349,5 @@ fn calls_and_recovery_use_each_frames_own_code_and_the_callers_plan() {
         }
     }
 }
+
+mod graph;

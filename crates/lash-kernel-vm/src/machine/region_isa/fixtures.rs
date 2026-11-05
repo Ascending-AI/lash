@@ -15,6 +15,7 @@ struct Storage {
     fail_prepare: bool,
     fail_commit: bool,
     image: Option<Reconstruction>,
+    graph: Option<storage_fixture::FixtureGraph>,
 }
 #[derive(Clone)]
 pub(super) struct View {
@@ -26,10 +27,12 @@ pub(super) struct StateLease<'m> {
     version: u64,
     dependency: u64,
     lineage: Rc<()>,
+    view_id: Option<u64>,
 }
 pub(super) struct PreparedStateExit<'m> {
     authority: StateLease<'m>,
     next_version: u64,
+    graph: storage_fixture::FixtureGraph,
 }
 impl State {
     pub(super) fn new() -> Self {
@@ -41,6 +44,7 @@ impl State {
                 fail_prepare: false,
                 fail_commit: false,
                 image: None,
+                graph: None,
             })),
             leased: Rc::new(Cell::new(false)),
             lineage: Rc::new(()),
@@ -93,6 +97,7 @@ impl<'m> StateLease<'m> {
             version,
             dependency,
             lineage,
+            view_id: None,
         })
     }
     fn current(&self, storage: &Storage) -> bool {
@@ -104,7 +109,11 @@ impl<'m> StateLease<'m> {
     pub(super) fn prepare(
         self,
         _image: &Reconstruction,
+        graph: storage_fixture::FixtureGraph,
     ) -> Result<PreparedStateExit<'m>, RegionError> {
+        if self.view_id != Some(graph.lease) {
+            return Err(invalid(Refused::Facts));
+        }
         let next_version = {
             let mut storage = self.state.shared.borrow_mut();
             if !self.current(&storage) || storage.fail_prepare {
@@ -120,6 +129,7 @@ impl<'m> StateLease<'m> {
         Ok(PreparedStateExit {
             authority: self,
             next_version,
+            graph,
         })
     }
 }
@@ -135,7 +145,10 @@ impl PreparedStateExit<'_> {
             if !self.authority.current(&storage) || storage.fail_commit {
                 return Err(invalid(Refused::Facts));
             }
-            let old = storage.image.replace(image);
+            let old = (
+                storage.image.replace(image),
+                storage.graph.replace(self.graph),
+            );
             storage.version = self.next_version;
             old
         };
@@ -149,8 +162,11 @@ impl<'m> RegionLease<'m> {
         code: Arc<Code>,
         limits: Limits,
     ) -> Result<Self, RegionError> {
-        let authority = StateLease::acquire(state)?;
-        let execution = Execution::acquire(code, limits)?;
+        let mut authority = StateLease::acquire(state)?;
+        let programs = programs::Programs::bind(Box::new([Arc::clone(&code)]))?;
+        let view = storage_fixture::FixtureView::bind(&programs, &code)?;
+        authority.view_id = Some(view.lease);
+        let execution = Executing::Fixture(Execution::acquire(code, limits, view)?);
         Ok(Self {
             authority: Authority::Fixture(authority),
             execution,
@@ -165,11 +181,23 @@ impl<'m> RegionLease<'m> {
         entry: CodeId,
         limits: Limits,
     ) -> Result<Self, RegionError> {
-        let authority = StateLease::acquire(state)?;
-        let execution = Execution::acquire_programs(programs, entry, limits)?;
+        let mut authority = StateLease::acquire(state)?;
+        let view = storage_fixture::FixtureView::bind(&programs, programs.code(entry)?)?;
+        authority.view_id = Some(view.lease);
+        let execution =
+            Executing::Fixture(Execution::acquire_programs(programs, entry, limits, view)?);
         Ok(Self {
             authority: Authority::Fixture(authority),
             execution,
         })
+    }
+}
+
+impl View {
+    pub(super) fn inspect_graph<T>(
+        &self,
+        inspect: impl FnOnce(Option<&storage_fixture::FixtureGraph>) -> T,
+    ) -> T {
+        inspect(self.shared.borrow().graph.as_ref())
     }
 }

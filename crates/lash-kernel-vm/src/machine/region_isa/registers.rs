@@ -1,3 +1,5 @@
+use super::operands::Operand;
+use super::storage::View;
 use super::{code::Register, *};
 #[derive(Clone, Copy)]
 struct Cell<T> {
@@ -14,13 +16,13 @@ impl<T: Default> Default for Cell<T> {
         }
     }
 }
-pub(super) struct Registers {
+pub(super) struct Registers<V: Copy> {
     ints: Vec<Cell<i64>>,
     bools: Vec<Cell<bool>>,
-    values: Vec<Cell<Option<Value>>>,
+    values: Vec<Cell<Option<V>>>,
     width: usize,
 }
-impl Registers {
+impl<V: Copy> Registers<V> {
     pub(super) fn new(width: usize, frames: usize) -> Result<Self, RegionError> {
         let count = width
             .checked_mul(frames)
@@ -76,7 +78,7 @@ impl Registers {
         frame: usize,
         invocation: u64,
         reg: Register,
-    ) -> Result<Value, RegionError> {
+    ) -> Result<Operand<V>, RegionError> {
         fn read<T: Copy>(cell: Option<&Cell<T>>, invocation: u64) -> Result<T, RegionError> {
             let cell = cell.ok_or_else(|| invalid(Refused::Facts))?;
             if !cell.valid || cell.invocation != invocation {
@@ -85,14 +87,18 @@ impl Registers {
             Ok(cell.value)
         }
         Ok(match reg {
-            Register::Int(index) => {
-                Value::Int(read(self.ints.get(self.at(frame, index)?), invocation)?)
-            }
-            Register::Bool(index) => {
-                Value::Bool(read(self.bools.get(self.at(frame, index)?), invocation)?)
-            }
-            Register::Value(index) => read(self.values.get(self.at(frame, index)?), invocation)?
-                .ok_or_else(|| invalid(Refused::Facts))?,
+            Register::Int(index) => Operand::Immediate(Value::Int(read(
+                self.ints.get(self.at(frame, index)?),
+                invocation,
+            )?)),
+            Register::Bool(index) => Operand::Immediate(Value::Bool(read(
+                self.bools.get(self.at(frame, index)?),
+                invocation,
+            )?)),
+            Register::Value(index) => Operand::Dynamic(
+                read(self.values.get(self.at(frame, index)?), invocation)?
+                    .ok_or_else(|| invalid(Refused::Facts))?,
+            ),
         })
     }
     pub(super) fn integer(
@@ -110,12 +116,13 @@ impl Registers {
         }
         Ok(cell.value)
     }
-    pub(super) fn write(
+    pub(super) fn write<S: View<Value = V>>(
         &mut self,
+        view: &mut S,
         frame: usize,
         invocation: u64,
         reg: Register,
-        value: Value,
+        value: Operand<V>,
     ) -> Result<(), RegionError> {
         fn write<T>(
             cell: Option<&mut Cell<T>>,
@@ -130,22 +137,29 @@ impl Registers {
             };
             Ok(())
         }
-        match (reg, value) {
-            (Register::Int(index), Value::Int(value)) => {
+        match reg {
+            Register::Int(index) => {
+                let Value::Int(value) = value.scalar(view)? else {
+                    return Err(invalid(Refused::Facts));
+                };
                 let at = self.at(frame, index)?;
                 write(self.ints.get_mut(at), invocation, value)
             }
-            (Register::Bool(index), Value::Bool(value)) => {
+            Register::Bool(index) => {
+                let Value::Bool(value) = value.scalar(view)? else {
+                    return Err(invalid(Refused::Facts));
+                };
                 let at = self.at(frame, index)?;
                 write(self.bools.get_mut(at), invocation, value)
             }
-            (Register::Value(index), value) => {
+            Register::Value(index) => {
+                let value = value.bind(view).map_err(RegionError::Heap)?;
                 let at = self.at(frame, index)?;
                 write(self.values.get_mut(at), invocation, Some(value))
             }
-            _ => Err(invalid(Refused::Facts)),
         }
     }
+
     pub(super) fn clear(&mut self, frame: usize) -> Result<(), RegionError> {
         let base = frame
             .checked_mul(self.width)
@@ -176,5 +190,34 @@ impl Registers {
             cell.value = None;
         }
         Ok(())
+    }
+}
+
+pub(super) struct DynamicWrite<'a, V: Copy> {
+    cell: &'a mut Cell<Option<V>>,
+    invocation: u64,
+}
+impl<V: Copy> Registers<V> {
+    pub(super) fn prepare_dynamic(
+        &mut self,
+        frame: usize,
+        invocation: u64,
+        index: u32,
+    ) -> Result<DynamicWrite<'_, V>, RegionError> {
+        let at = self.at(frame, index)?;
+        let cell = self
+            .values
+            .get_mut(at)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        Ok(DynamicWrite { cell, invocation })
+    }
+}
+impl<V: Copy> DynamicWrite<'_, V> {
+    pub(super) fn publish(self, value: Option<V>) {
+        *self.cell = Cell {
+            value,
+            invocation: self.invocation,
+            valid: true,
+        };
     }
 }

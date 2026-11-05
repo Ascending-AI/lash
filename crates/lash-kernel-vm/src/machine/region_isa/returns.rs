@@ -1,4 +1,6 @@
 use super::code::{Cost, Fee};
+use super::operands::Operand;
+use super::storage::View;
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -8,27 +10,27 @@ pub(super) enum ReturnPhase {
     CallerRestore,
 }
 
-pub(super) struct Returning {
+pub(super) struct Returning<V: Copy> {
     activation: CallActivation,
-    value: Value,
+    value: V,
     completion: Cost,
     resume_pc: u32,
     phase: ReturnPhase,
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct ReturnImage {
+pub(super) struct ReturnImage<V: Copy> {
     pub(super) callee_invocation: u64,
     pub(super) completion: Cost,
     pub(super) caller_program: CodeId,
     pub(super) site: u32,
-    pub(super) value: Value,
+    pub(super) value: V,
     pub(super) phase: ReturnPhase,
     pub(super) resume_pc: u32,
 }
 
-impl Returning {
-    pub(super) fn image(&self) -> ReturnImage {
+impl<V: Copy> Returning<V> {
+    pub(super) fn image(&self) -> ReturnImage<V> {
         ReturnImage {
             callee_invocation: self.activation.invocation,
             completion: self.completion,
@@ -39,7 +41,7 @@ impl Returning {
             resume_pc: self.resume_pc,
         }
     }
-    pub(super) fn incoming(&self) -> Result<Value, RegionError> {
+    pub(super) fn incoming(&self) -> Result<V, RegionError> {
         if self.phase == ReturnPhase::FrameLeave {
             return Err(invalid(Refused::Exit));
         }
@@ -47,7 +49,7 @@ impl Returning {
     }
 }
 
-impl Execution {
+impl<V: View> Execution<V> {
     pub(super) fn begin_return(&mut self, activation: CallActivation) -> Result<(), RegionError> {
         use super::code::Op;
         let frame = self.frames.last().ok_or_else(|| invalid(Refused::Facts))?;
@@ -92,7 +94,10 @@ impl Execution {
         }
         let prefix = instruction.prefix;
         let resume_pc = frame.return_pc;
-        let value = self.read(plan.result)?;
+        let value = self
+            .read(plan.result)?
+            .bind(&mut self.view)
+            .map_err(RegionError::Heap)?;
         let Some(counters) = self.affordable(instruction.cost)? else {
             self.refuse(prefix)?;
             return Err(invalid(Refused::Peak));
@@ -166,10 +171,11 @@ impl Execution {
                     .last_mut()
                     .ok_or_else(|| invalid(Refused::Facts))?;
                 self.registers.write(
+                    &mut self.view,
                     caller_index,
                     caller.invocation,
                     plan.destination,
-                    returning.value,
+                    Operand::Dynamic(returning.value),
                 )?;
                 caller.pc = returning.resume_pc;
                 self.returning = None;

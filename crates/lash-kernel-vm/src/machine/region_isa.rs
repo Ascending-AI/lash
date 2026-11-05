@@ -13,11 +13,18 @@ use std::{rc::Rc, sync::Arc};
 
 mod code;
 mod execute;
+#[cfg(test)]
+mod fixture_phases;
+mod heap;
+mod operands;
 mod programs;
 mod reconstruct;
 mod registers;
 mod returns;
 mod source_counters;
+mod storage;
+#[cfg(test)]
+mod storage_fixture;
 use code::{Code, Limits};
 use execute::Execution;
 #[cfg(test)]
@@ -34,7 +41,7 @@ pub(crate) struct CallActivation {
 }
 pub(crate) struct RegionLease<'m> {
     authority: Authority<'m>,
-    execution: Execution,
+    execution: Executing<'m>,
 }
 enum Authority<'m> {
     Machine {
@@ -61,11 +68,12 @@ pub(crate) struct Reconstruction {
     counters: execute::Counters,
     stop: RegionStop,
     payload: Option<Value>,
-    returning: Option<returns::ReturnImage>,
+    returning: Option<returns::ReturnImage<Value>>,
     source_counts: Box<[u64]>,
     entering: Option<u32>,
 }
 pub(crate) struct MaterializedPrefix<'m> {
+    graph: FrozenGraph<'m>,
     authority: Authority<'m>,
     reconstruction: Reconstruction,
 }
@@ -107,25 +115,23 @@ impl<'m> RegionLease<'m> {
         machine: &'m mut KernelMachine,
         code: Arc<RegionCode>,
     ) -> Result<Self, RegionError> {
-        let tables = Code::bind(machine, &code)?;
-        let limits = Limits::machine(machine)?;
-        let execution = Execution::acquire(tables, limits)?;
-        Ok(Self {
-            authority: Authority::Machine { machine, code },
-            execution,
-        })
+        let _tables = Code::bind(machine, &code)?;
+        let _limits = Limits::machine(machine)?;
+        Err(invalid(Refused::Facts))
     }
+
     pub(crate) fn run(&mut self, stop: StopAt) -> Result<RegionStop, RegionError> {
         self.execution.run(stop)
     }
     pub(crate) fn prefix(&self) -> &ReachedPrefix {
-        &self.execution.reached
+        self.execution.prefix()
     }
     pub(crate) fn materialize(self) -> Result<MaterializedPrefix<'m>, RegionError> {
-        let reconstruction = self.execution.reconstruct()?;
+        let (reconstruction, graph) = self.execution.reconstruct()?;
         Ok(MaterializedPrefix {
             authority: self.authority,
             reconstruction,
+            graph,
         })
     }
 }
@@ -134,7 +140,7 @@ impl<'m> MaterializedPrefix<'m> {
         &self.reconstruction
     }
     pub(crate) fn prepare_exit(self) -> Result<PreparedRegionExit<'m>, RegionError> {
-        let prepared = self.authority.prepare(&self.reconstruction)?;
+        let prepared = self.authority.prepare(&self.reconstruction, self.graph)?;
         Ok(PreparedRegionExit {
             prepared,
             reconstruction: self.reconstruction,
@@ -152,14 +158,20 @@ impl<'m> Authority<'m> {
     fn prepare(
         self,
         reconstruction: &Reconstruction,
+        graph: FrozenGraph<'m>,
     ) -> Result<PreparedAuthority<'m>, RegionError> {
-        let _ = &reconstruction;
+        let _ = (&reconstruction, &graph);
         match self {
             Self::Machine { .. } => Err(invalid(Refused::Facts)),
             #[cfg(test)]
-            Self::Fixture(authority) => Ok(PreparedAuthority::Fixture(
-                authority.prepare(reconstruction)?,
-            )),
+            Self::Fixture(authority) => {
+                let FrozenGraph::Fixture(graph) = graph else {
+                    return Err(invalid(Refused::Facts));
+                };
+                Ok(PreparedAuthority::Fixture(
+                    authority.prepare(reconstruction, graph)?,
+                ))
+            }
         }
     }
 }
@@ -176,16 +188,113 @@ impl PreparedAuthority<'_> {
 impl RegionCalls for RegionLease<'_> {
     fn enter_call(&mut self, site: CallId) -> Result<CallActivation, RegionError> {
         let result = self.execution.enter_call(site.index());
-        if result.is_err() && self.execution.stop != Some(RegionStop::Refusal) {
-            self.execution.faulted = true;
+        if result.is_err() && self.execution.stop() != Some(RegionStop::Refusal) {
+            self.execution.fault();
         }
         result
     }
     fn leave_call(&mut self, activation: CallActivation) -> Result<(), RegionError> {
         let result = self.execution.leave_call(activation);
-        if result.is_err() && self.execution.stop != Some(RegionStop::Refusal) {
-            self.execution.faulted = true;
+        if result.is_err() && self.execution.stop() != Some(RegionStop::Refusal) {
+            self.execution.fault();
         }
         result
+    }
+}
+
+fn storage_fault(fault: lash_kernel_state::kernel_internals::logical::LeaseFault) -> RegionError {
+    match fault {
+        lash_kernel_state::kernel_internals::logical::LeaseFault::Heap(fault) => {
+            RegionError::Heap(fault)
+        }
+        _ => invalid(Refused::Facts),
+    }
+}
+
+enum Executing<'m> {
+    Machine(Execution<lash_kernel_state::kernel_internals::logical::StateLease<'m>>),
+    #[cfg(test)]
+    Fixture(Execution<storage_fixture::FixtureView>),
+}
+enum FrozenGraph<'m> {
+    Machine {
+        lease: lash_kernel_state::kernel_internals::logical::StateLease<'m>,
+        graph: lash_kernel_state::kernel_internals::logical::LeaseGraphExit,
+    },
+    #[cfg(test)]
+    Fixture(storage_fixture::FixtureGraph),
+}
+impl<'m> Executing<'m> {
+    fn run(&mut self, stop: StopAt) -> Result<RegionStop, RegionError> {
+        match self {
+            Self::Machine(execution) => execution.run(stop),
+            #[cfg(test)]
+            Self::Fixture(execution) => execution.run(stop),
+        }
+    }
+    fn prefix(&self) -> &ReachedPrefix {
+        match self {
+            Self::Machine(execution) => &execution.reached,
+            #[cfg(test)]
+            Self::Fixture(execution) => &execution.reached,
+        }
+    }
+    fn stop(&self) -> Option<RegionStop> {
+        match self {
+            Self::Machine(execution) => execution.stop,
+            #[cfg(test)]
+            Self::Fixture(execution) => execution.stop,
+        }
+    }
+    fn fault(&mut self) {
+        match self {
+            Self::Machine(execution) => execution.faulted = true,
+            #[cfg(test)]
+            Self::Fixture(execution) => execution.faulted = true,
+        }
+    }
+    fn enter_call(&mut self, site: u32) -> Result<CallActivation, RegionError> {
+        match self {
+            Self::Machine(execution) => execution.enter_call(site),
+            #[cfg(test)]
+            Self::Fixture(execution) => execution.enter_call(site),
+        }
+    }
+    fn leave_call(&mut self, activation: CallActivation) -> Result<(), RegionError> {
+        match self {
+            Self::Machine(execution) => execution.leave_call(activation),
+            #[cfg(test)]
+            Self::Fixture(execution) => execution.leave_call(activation),
+        }
+    }
+    fn reconstruct(self) -> Result<(Reconstruction, FrozenGraph<'m>), RegionError> {
+        match self {
+            Self::Machine(execution) => {
+                let (image, lease, graph) = execution.reconstruct()?;
+                Ok((image, FrozenGraph::Machine { lease, graph }))
+            }
+            #[cfg(test)]
+            Self::Fixture(execution) => {
+                let (image, _view, graph) = execution.reconstruct()?;
+                Ok((image, FrozenGraph::Fixture(graph)))
+            }
+        }
+    }
+    #[cfg(test)]
+    fn fixture(&self) -> &Execution<storage_fixture::FixtureView> {
+        match self {
+            Self::Fixture(execution) => execution,
+            _ => panic!("fixture observation used on production authority"),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Executing<'_> {
+    fn fixture_mut(&mut self) -> &mut Execution<storage_fixture::FixtureView> {
+        match self {
+            Self::Fixture(execution) => execution,
+            _ => panic!("fixture mutation used on production authority"),
+        }
     }
 }

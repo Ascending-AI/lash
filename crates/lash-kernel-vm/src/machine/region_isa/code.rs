@@ -41,6 +41,9 @@ pub(super) enum Op {
     Call {
         site: u32,
     },
+    Heap {
+        site: u32,
+    },
     Return {
         value: Register,
     },
@@ -53,6 +56,11 @@ pub(super) enum Op {
 }
 #[derive(Clone, Copy)]
 pub(super) enum Fee {
+    Storage {
+        selector: super::storage::FactMeasure,
+        base: u64,
+        per_unit: u64,
+    },
     Fixed(u64),
     WordSize {
         value: Register,
@@ -107,6 +115,19 @@ pub(super) struct Call {
     pub(super) restore: Cost,
     pub(super) restore_prefix: u32,
 }
+#[derive(Clone, Copy)]
+pub(super) enum HeapKind {
+    List,
+    Member(u64),
+    Grow(u64),
+    Hold(u64),
+    Release(u64),
+}
+pub(super) struct HeapAction {
+    pub(super) kind: HeapKind,
+    pub(super) args: Box<[Register]>,
+    pub(super) destination: Option<u32>,
+}
 pub(super) struct ReadDependency {
     pub(super) identity: Value,
     pub(super) members: Box<[Value]>,
@@ -121,6 +142,7 @@ pub(super) struct Code {
     pub(super) instructions: Box<[Instruction]>,
     pub(super) recovery: Box<[Recovery]>,
     pub(super) calls: Box<[Call]>,
+    pub(super) heap: Box<[HeapAction]>,
     pub(super) dependencies: Box<[ReadDependency]>,
     pub(super) registers: usize,
     pub(super) source_initial: Box<[u64]>,

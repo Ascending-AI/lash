@@ -1,4 +1,5 @@
 use super::code::Register;
+use super::storage::{Graph, View};
 use super::*;
 use lash_kernel_state::kernel_internals::logical::Slot;
 
@@ -13,8 +14,8 @@ pub(super) struct FrameImage {
     pub(super) pending: Option<Value>,
 }
 
-impl Execution {
-    pub(super) fn reconstruct(self) -> Result<Reconstruction, RegionError> {
+impl<V: View> Execution<V> {
+    pub(super) fn reconstruct(mut self) -> Result<(Reconstruction, V, V::Graph), RegionError> {
         if self.faulted {
             return Err(invalid(Refused::Facts));
         }
@@ -27,6 +28,7 @@ impl Execution {
         {
             return Err(invalid(Refused::Facts));
         }
+        let graph = self.view.freeze_graph().map_err(RegionError::Heap)?;
         let frames = self
             .frames
             .iter()
@@ -38,7 +40,12 @@ impl Execution {
                     .recovery
                     .get(frame.prefix as usize)
                     .ok_or_else(|| invalid(Refused::Exit))?;
-                let read = |reg: Register| self.registers.read(index, frame.invocation, reg);
+                let read = |reg: Register| {
+                    self.registers
+                        .read(index, frame.invocation, reg)?
+                        .materialize(&graph)
+                        .map_err(RegionError::Heap)
+                };
                 let roles = map
                     .roles
                     .iter()
@@ -66,7 +73,8 @@ impl Execution {
                             self.returning
                                 .as_ref()
                                 .ok_or_else(|| invalid(Refused::Exit))?
-                                .incoming()?,
+                                .incoming()
+                                .and_then(|value| graph.value(value).map_err(RegionError::Heap))?,
                         )
                     } else {
                         map.pending.map(read).transpose()?
@@ -76,17 +84,37 @@ impl Execution {
             .collect::<Result<Vec<_>, RegionError>>()?
             .into_boxed_slice();
         let pending = frames.last().and_then(|frame| frame.pending);
-        Ok(Reconstruction {
+        let returning = self
+            .returning
+            .as_ref()
+            .map(|returning| {
+                let image = returning.image();
+                Ok::<_, RegionError>(returns::ReturnImage {
+                    callee_invocation: image.callee_invocation,
+                    completion: image.completion,
+                    caller_program: image.caller_program,
+                    site: image.site,
+                    value: graph.value(image.value).map_err(RegionError::Heap)?,
+                    phase: image.phase,
+                    resume_pc: image.resume_pc,
+                })
+            })
+            .transpose()?;
+        let reconstruction = Reconstruction {
             prefix: self.reached,
             frames,
             pending,
             attempted: self.attempted,
             counters: self.counters,
             stop,
-            payload: self.payload,
+            payload: self
+                .payload
+                .map(|value| graph.value(value).map_err(RegionError::Heap))
+                .transpose()?,
             source_counts: self.source.freeze(),
             entering: self.entering,
-            returning: self.returning.as_ref().map(returns::Returning::image),
-        })
+            returning,
+        };
+        Ok((reconstruction, self.view, graph))
     }
 }

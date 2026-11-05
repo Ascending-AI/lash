@@ -5,6 +5,7 @@ use crate::compile::CodeId;
 pub(super) struct Programs {
     codes: Box<[Arc<Code>]>,
     pub(super) registers: usize,
+    pub(super) arguments: usize,
 }
 impl Programs {
     pub(super) fn bind(codes: Box<[Arc<Code>]>) -> Result<Arc<Self>, RegionError> {
@@ -41,7 +42,17 @@ impl Programs {
                 }
             }
         }
-        Ok(Arc::new(Self { codes, registers }))
+        let arguments = codes
+            .iter()
+            .flat_map(|code| code.heap.iter())
+            .map(|action| action.args.len())
+            .max()
+            .unwrap_or(0);
+        Ok(Arc::new(Self {
+            codes,
+            registers,
+            arguments,
+        }))
     }
     pub(super) fn code(&self, code: CodeId) -> Result<&Arc<Code>, RegionError> {
         self.codes
