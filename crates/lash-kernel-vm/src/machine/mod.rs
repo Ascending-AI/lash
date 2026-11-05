@@ -1305,7 +1305,11 @@ impl KernelMachine {
                     }
                 },
             };
-            match self.step(task, host, &exe) {
+            let outcome = match self.regs.take_region_refusal() {
+                Some(exceeded) => Err(Halt::Bound(exceeded)),
+                None => self.step(task, host, &exe),
+            };
+            match outcome {
                 Ok(()) => {}
                 Err(Halt::Fault(problem)) => {
                     self.ended = true;

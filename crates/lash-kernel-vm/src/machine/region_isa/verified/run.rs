@@ -75,6 +75,7 @@ impl Running<'_> {
             )?;
             self.counters = before.counters;
             if let Some(crossing) = before.crossing {
+                self.refusal = Some(crate::Bound::Charge);
                 self.crossing = Some(crossing);
                 self.attempted = Some(step.at.clone());
                 return self.halt(RegionStop::Refusal);
@@ -85,6 +86,7 @@ impl Running<'_> {
                 .checked_add(step.depth)
                 .is_none_or(|depth| depth > self.limits.depth)
             {
+                self.refusal = Some(crate::Bound::CallDepth);
                 self.attempted = Some(step.at.clone());
                 return self.halt(RegionStop::Refusal);
             }
@@ -121,6 +123,7 @@ impl Running<'_> {
             )?;
             self.counters = after.counters;
             if let Some(crossing) = after.crossing {
+                self.refusal = Some(crate::Bound::Charge);
                 self.crossing = Some(crossing);
                 self.attempted = Some(step.at.clone());
                 if let Some(pending) = code
@@ -168,6 +171,7 @@ impl Running<'_> {
                 })
                 .transpose()?;
             let Some(resources) = self.resources(flow, &answer)? else {
+                self.refusal = Some(crate::Bound::Memory);
                 self.attempted = Some(step.at.clone());
                 return self.halt(RegionStop::Refusal);
             };

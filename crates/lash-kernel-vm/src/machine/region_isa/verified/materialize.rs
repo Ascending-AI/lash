@@ -11,6 +11,23 @@ impl<'m> Running<'m> {
             return Err(invalid(Refused::Facts));
         }
         let stop = self.stop.ok_or_else(|| invalid(Refused::Exit))?;
+        if (stop == RegionStop::Refusal) != self.refusal.is_some() {
+            return Err(invalid(Refused::Facts));
+        }
+        let refusal = self.refusal.as_ref().map(|bound| {
+            let limit = match bound {
+                crate::Bound::Charge => self.limits.charge,
+                crate::Bound::Memory => self.limits.memory,
+                crate::Bound::CallDepth => u64::from(self.limits.depth),
+                _ => unreachable!("only execution limits can refuse a region phase"),
+            };
+            Box::new(crate::BoundExceeded {
+                bound: bound.clone(),
+                limit,
+                function: None,
+                site: None,
+            })
+        });
         let mut frames = Vec::new();
         for depth in 0..=self.parked.len() {
             let (code, pc, prefix, reached) = if depth == self.parked.len() {
@@ -128,6 +145,7 @@ impl<'m> Running<'m> {
                 self.reached.invocation,
                 self.pc,
                 self.prefix,
+                refusal,
             ),
         )
         .map_err(RegionError::Heap)?;

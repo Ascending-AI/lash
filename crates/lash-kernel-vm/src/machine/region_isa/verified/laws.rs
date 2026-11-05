@@ -626,3 +626,85 @@ fn an_exhausted_production_slice_preserves_the_exact_caller_prefix() {
         }
     }
 }
+/// K-LIM-002/K-EVAL-008: a literal's exact source occurrence is retained only
+/// when its 17-byte holding fits; refusal preserves the preceding live roles.
+#[test]
+fn a_scalar_prefix_obeys_the_exact_source_memory_cutoff() {
+    use lash_kernel_doc::LogicalHeldV1 as Cost;
+    for offset in [-1_i128, 0, 1] {
+        for commit in [false, true] {
+            let mut run = call_expression("let x = 7 return x");
+            let machine = &mut run.machine;
+            machine.current = Some(TaskId::MAIN);
+            let root = machine.frame(TaskId::MAIN).unwrap().code;
+            let draft = compile_region(&machine.exe, root).unwrap();
+            let calls = compile_calls(&machine.exe, &draft).unwrap();
+            let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
+            let entry = machine.logical_memory.get();
+            assert_eq!(entry, Cost::FRAME);
+            let word = Cost::REFERENCE + 1;
+            machine.bounds.memory = u64::try_from(i128::from(entry + word) + offset).unwrap();
+            let stamp = machine.logical.borrow().stamp();
+            let charged = machine.charged;
+            let mut lease = RegionLease::acquire(machine, program).unwrap();
+            let stop = if offset < 0 {
+                RegionStop::Refusal
+            } else {
+                RegionStop::Handoff
+            };
+            assert_eq!(lease.run(StopAt::NextLegalPrefix).unwrap(), stop);
+            let prefix = lease.materialize().unwrap();
+            let image = prefix.reconstruction();
+            let accepted = u64::from(offset >= 0) * word;
+            assert_eq!(image.counters.balance, entry + accepted);
+            assert_eq!(image.counters.peak, entry + accepted);
+            assert_eq!(image.issued_invocations, 0);
+            let roles = &image.frames[0].roles;
+            if offset < 0 {
+                assert!(roles.is_empty());
+                assert!(image.pending.is_none());
+            } else {
+                let [(_, value)] = roles.as_ref() else {
+                    panic!("one evaluated literal is source-live")
+                };
+                assert!(value.same(&Value::Int(7)));
+            }
+            let prepared = prefix.prepare_exit().unwrap();
+            if commit {
+                assert_eq!(prepared.commit().unwrap(), stop);
+                assert_eq!(machine.logical_memory.get(), entry + accepted);
+                assert_eq!(
+                    machine.logical.borrow().balance().unwrap().total().unwrap(),
+                    entry + accepted
+                );
+                let actual: Vec<_> = machine
+                    .regs
+                    .region_values()
+                    .map(|(_, value)| value)
+                    .collect();
+                if offset < 0 {
+                    assert!(actual.is_empty());
+                    let reached_charge = machine.charged;
+                    let limit = machine.bounds.memory;
+                    let crate::Step::Ended(crate::End::Error(crate::RunError::Bound(exceeded))) =
+                        run.try_run().unwrap()
+                    else {
+                        panic!("the driver must report the committed source refusal")
+                    };
+                    assert_eq!(exceeded.bound, crate::Bound::Memory);
+                    assert_eq!(exceeded.limit, limit);
+                    assert_eq!(run.machine.charged, reached_charge);
+                } else {
+                    assert!(matches!(actual.as_slice(), [Value::Int(7)]));
+                }
+            } else {
+                drop(prepared);
+                assert!(machine.logical.borrow().is_current(&stamp));
+                assert_eq!(
+                    (machine.charged, machine.logical_memory.get()),
+                    (charged, entry)
+                );
+            }
+        }
+    }
+}

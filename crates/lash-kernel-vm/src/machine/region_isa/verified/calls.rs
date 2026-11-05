@@ -94,6 +94,7 @@ impl Running<'_> {
         )?;
         self.counters = payment.counters;
         if let Some(crossing) = payment.crossing {
+            self.refusal = Some(crate::Bound::Charge);
             self.crossing = Some(crossing);
             self.attempted = Some(step.at.clone());
             self.stop = Some(RegionStop::Refusal);
@@ -101,6 +102,7 @@ impl Running<'_> {
         }
         let required_depth = self.counters.depth.checked_add(step.depth.max(1));
         if required_depth.is_none_or(|depth| depth > self.limits.depth) {
+            self.refusal = Some(crate::Bound::CallDepth);
             self.attempted = Some(step.at.clone());
             self.stop = Some(RegionStop::Refusal);
             return Ok(None);
@@ -184,6 +186,7 @@ impl Running<'_> {
             .max(self.counters.peak);
         if peak > self.limits.memory {
             drop(phase);
+            self.refusal = Some(crate::Bound::Memory);
             self.attempted = Some(step.at.clone());
             self.stop = Some(RegionStop::Refusal);
             return Ok(None);
