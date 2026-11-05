@@ -11,7 +11,8 @@ use lash_protocol_types::sync::MutexExt;
 use crate::plugin::environment_sources::SourceCollectionError;
 use crate::{ActorContext, Session};
 use lash_core_execution::session::environment::{
-    ClaimedEnvironment, CollectedRunEnvironment, ResidentEnvironment as Resident,
+    ClaimedEnvironment, CollectedRunEnvironment, EnvironmentProjection, ReadyEnvironment,
+    ResidentEnvironment as Resident,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -174,12 +175,7 @@ impl AdoptionFrontier {
 pub(super) struct Publication {
     resident: Arc<SessionEnvironment>,
     expected: Option<EnvironmentHead>,
-    next: Option<(
-        EnvironmentHead,
-        Arc<EnvironmentBody>,
-        crate::session::ToolCatalogHandle,
-        InputFrontier,
-    )>,
+    next: Option<ReadyEnvironment>,
     owners: Vec<VersionOwnerId>,
     changes: BTreeSet<uuid::Uuid>,
     acknowledged: AtomicBool,
@@ -197,10 +193,10 @@ impl Publication {
         staging: &mut lash_core_store::checkpoint_graph::GraphStaging,
     ) -> Result<(), DurableError> {
         if !self.acknowledged.load(Ordering::Acquire)
-            && let Some((head, _, _, _)) = &self.next
-            && self.expected.as_ref() != Some(head)
+            && let Some(next) = &self.next
+            && self.expected.as_ref() != Some(&next.head)
         {
-            lash_durable::environment::stage_head(staging, head)?;
+            lash_durable::environment::stage_head(staging, &next.head)?;
         }
         Ok(())
     }
@@ -216,12 +212,12 @@ impl Publication {
         // Cold reconciliation may only rebuild the native projection of
         // the same durable head. Acknowledge it locally without adding a
         // write that a warm owner would never produce.
-        if let Some((head, _, _, _)) = &self.next
-            && self.expected.as_ref() != Some(head)
+        if let Some(next) = &self.next
+            && self.expected.as_ref() != Some(&next.head)
         {
             tx.write(DomainWrite::Environment(EnvironmentWrite::Head {
                 expected: self.expected.clone(),
-                head: Some(head.clone()),
+                head: Some(next.head.clone()),
             }));
         }
     }
@@ -230,11 +226,8 @@ impl Publication {
             return;
         }
         let mut state = self.resident.state.lock_recover();
-        if let Some((head, body, handle, frontier)) = &self.next {
-            state.head = Some(head.clone());
-            state.frontier = Some(frontier.clone());
-            state.body = Some(body.clone());
-            state.handle = Some(handle.clone());
+        if let Some(next) = &self.next {
+            state.projection = EnvironmentProjection::Ready(next.clone());
         }
         self.resident
             .mailbox
@@ -257,12 +250,7 @@ impl SessionEnvironment {
                     .lock_recover()
                     .push((lash_core_store::environment::fresh_identity(), change));
             }))?;
-        let head = store.environment_head(session.session_id()).await?;
-        let body = match &head {
-            Some(head) => Some(load_body(store, &head.round()).await?),
-            None => None,
-        };
-        let handle = None;
+        let projection = hydrate(store, session.session_id()).await?;
         let registered = sources
             .descriptors()
             .map(|descriptor| descriptor.source)
@@ -276,9 +264,7 @@ impl SessionEnvironment {
                 assemblies: Default::default(),
                 mailbox,
                 state: Mutex::new(Resident {
-                    head,
-                    body,
-                    handle,
+                    projection,
                     ..Default::default()
                 }),
             }),
@@ -337,7 +323,7 @@ impl SessionEnvironment {
         let reused = {
             let state = self.state.lock_recover();
             state.run_collection.as_ref().is_some_and(|prior| {
-                prior.base == state.head
+                prior.base.as_ref() == state.projection.head()
                     && prior.config == run.config().plugin_config
                     && prior.observed == observed
             })
@@ -367,23 +353,20 @@ impl SessionEnvironment {
             let prior = state
                 .run_collection
                 .as_ref()
-                .filter(|prior| !reconcile && prior.base == state.head)
+                .filter(|prior| !reconcile && prior.base.as_ref() == state.projection.head())
                 .cloned()
-                .or_else(|| {
-                    Some(CollectedRunEnvironment {
-                        base: state.head.clone(),
+                .or_else(|| match &state.projection {
+                    EnvironmentProjection::Ready(ready) => Some(CollectedRunEnvironment {
+                        base: Some(ready.head.clone()),
                         config: run.base().plugin_config.clone(),
-                        body: state.body.clone()?,
-                        handle: state.handle.clone()?,
-                        frontier: state
-                            .frontier
-                            .clone()
-                            .or_else(|| state.head.as_ref().map(|head| head.input_frontier.clone()))
-                            .unwrap_or_default(),
+                        body: ready.body.clone(),
+                        handle: ready.handle.clone(),
+                        frontier: ready.frontier.clone(),
                         observed: BTreeSet::new(),
-                    })
+                    }),
+                    EnvironmentProjection::Empty | EnvironmentProjection::Hydrated { .. } => None,
                 });
-            (state.head.clone(), prior)
+            (state.projection.head().cloned(), prior)
         };
         let config = crate::plugin::OwnerConfigView::session(crate::AdmittedPluginConfig::new(
             run.config().plugin_config.clone(),
@@ -496,21 +479,12 @@ impl SessionEnvironment {
         let AdoptionFrontier { reconcile, changes } = frontier;
         let reload = self.state.lock_recover().epoch.is_some();
         if reconcile && reload {
-            let head = store.environment_head(session.session_id()).await?;
-            let body = match &head {
-                Some(head) => Some(load_body(store.as_ref(), &head.round()).await?),
-                None => None,
-            };
-            let handle = None;
+            let projection = hydrate(store.as_ref(), session.session_id()).await?;
             let mut state = self.state.lock_recover();
             *state = Resident {
-                head,
-                body,
-                handle,
+                projection,
                 epoch: Some(cx.epoch()),
-                reconcile: false,
-                frontier: None,
-                run_collection: None,
+                ..Default::default()
             };
         }
         if reconcile {
@@ -518,15 +492,8 @@ impl SessionEnvironment {
             state.epoch = Some(cx.epoch());
             state.reconcile = false;
         }
-        let (previous, body, handle, native_frontier) = {
-            let state = self.state.lock_recover();
-            (
-                state.head.clone(),
-                state.body.clone(),
-                state.handle.clone(),
-                state.frontier.clone(),
-            )
-        };
+        let projection = self.state.lock_recover().projection.clone();
+        let previous = projection.head().cloned();
         let registered = self.registered.clone();
         let notices: BTreeSet<_> = changes.iter().map(|(id, _)| *id).collect();
         if run.has_override() {
@@ -581,62 +548,62 @@ impl SessionEnvironment {
         }
         // Detached producers cannot make stale revision notices authoritative.
         let changes = changes.into_iter().map(|(_, change)| change).filter(|change| !matches!(change, EnvironmentChange::SourceRevision { source, .. } if !registered.contains(source)));
-        let mut frontier = native_frontier
-            .or_else(|| previous.as_ref().map(|head| head.input_frontier.clone()))
-            .unwrap_or_default();
+        let (body, mut frontier) = match &projection {
+            EnvironmentProjection::Empty => (None, InputFrontier::default()),
+            EnvironmentProjection::Hydrated { head, body } => {
+                (Some(body.as_ref()), head.input_frontier.clone())
+            }
+            EnvironmentProjection::Ready(ready) => {
+                (Some(ready.body.as_ref()), ready.frontier.clone())
+            }
+        };
         let config =
             crate::plugin::OwnerConfigView::session(session.plugins().admitted_plugin_config());
         let mut delta = self.sources.collect(&frontier, changes, &config)?;
-        delta.extend(detached(body.as_deref(), &registered, &frontier));
+        delta.extend(detached(body, &registered, &frontier));
         let mut owners = Vec::new();
         let mut next = None;
-        let (base_head, base_body, base_handle) = if !delta.is_empty() || body.is_none() {
-            let candidate = self.assemble(body.as_deref(), delta, &config, &mut frontier)?;
-            frontier.retain(|source, _| registered.contains(source));
-            let (body, handle, owner) = if body
-                .as_ref()
-                .is_some_and(|body| body.id() == candidate.id())
-            {
-                let owner = previous
-                    .as_ref()
-                    .ok_or(lash_durable::environment::EnvironmentRefusal::Content)?
-                    .owner
-                    .clone();
-                let handle = match handle {
-                    Some(handle) => handle,
-                    None => session.project_environment(&candidate)?,
+        let ready = match &projection {
+            EnvironmentProjection::Ready(ready) if delta.is_empty() => ready.clone(),
+            projection => {
+                let candidate = self.assemble(body, delta, &config, &mut frontier)?;
+                frontier.retain(|source, _| registered.contains(source));
+                let (head, handle) = match projection {
+                    EnvironmentProjection::Hydrated { head, body }
+                        if body.id() == candidate.id() =>
+                    {
+                        (head.clone(), session.project_environment(&candidate)?)
+                    }
+                    EnvironmentProjection::Ready(ready) if ready.body.id() == candidate.id() => {
+                        (ready.head.clone(), ready.handle.clone())
+                    }
+                    EnvironmentProjection::Empty
+                    | EnvironmentProjection::Hydrated { .. }
+                    | EnvironmentProjection::Ready(_) => {
+                        let handle = session.project_environment(&candidate)?;
+                        let owner = prepare(cx, session, &candidate, &handle).await?;
+                        owners.push(owner.clone());
+                        let head = EnvironmentHead {
+                            version: candidate.id().clone(),
+                            owner,
+                            input_frontier: frontier.clone(),
+                        };
+                        (head, handle)
+                    }
                 };
-                (candidate, handle, owner)
-            } else {
-                let handle = session.project_environment(&candidate)?;
-                let owner = prepare(cx, session, &candidate, &handle).await?;
-                owners.push(owner.clone());
-                (candidate, handle, owner)
-            };
-            // Source incarnations and counters belong to this collector's
-            // lifetime. An unchanged observation advances its native frontier,
-            // but only different content publishes a durable head.
-            let head = previous
-                .as_ref()
-                .filter(|head| head.version == *body.id())
-                .cloned()
-                .unwrap_or_else(|| EnvironmentHead {
-                    version: body.id().clone(),
-                    owner: owner.clone(),
-                    input_frontier: frontier.clone(),
-                });
-            next = Some((head.clone(), body.clone(), handle.clone(), frontier.clone()));
-            (head, body, handle)
-        } else {
-            (
-                previous
-                    .clone()
-                    .ok_or(lash_durable::environment::EnvironmentRefusal::Content)?,
-                body.ok_or(lash_durable::environment::EnvironmentRefusal::Content)?,
-                handle.ok_or(lash_durable::environment::EnvironmentRefusal::Content)?,
-            )
+                // Native progress advances even when content is unchanged and
+                // the durable head retains its publication frontier.
+                let ready = ReadyEnvironment {
+                    head,
+                    body: candidate,
+                    handle,
+                    frontier: frontier.clone(),
+                };
+                next = Some(ready.clone());
+                ready
+            }
         };
-        let (round, body, handle) = (base_head.round(), base_body, base_handle);
+        let (round, body, handle) = (ready.head.round(), ready.body, ready.handle);
         let publication = (next.is_some() || !notices.is_empty()).then(|| {
             Arc::new(Publication {
                 resident: self.clone(),
@@ -656,6 +623,19 @@ impl SessionEnvironment {
             frontier,
         })
     }
+}
+
+async fn hydrate(
+    store: &dyn EnvironmentStore,
+    session: &lash_kernel_value::identity::SessionId,
+) -> Result<EnvironmentProjection, DurableError> {
+    Ok(match store.environment_head(session).await? {
+        Some(head) => {
+            let body = load_body(store, &head.round()).await?;
+            EnvironmentProjection::Hydrated { head, body }
+        }
+        None => EnvironmentProjection::Empty,
+    })
 }
 
 async fn prepare(

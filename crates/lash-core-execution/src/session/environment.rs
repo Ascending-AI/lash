@@ -20,13 +20,42 @@ pub struct ClaimedEnvironment {
 pub struct ResidentEnvironment {
     pub epoch: Option<lash_durable::Epoch>,
     pub reconcile: bool,
-    pub head: Option<EnvironmentHead>,
-    /// Progress of these native producers, independent of the last content publication.
-    pub frontier: Option<InputFrontier>,
-    pub body: Option<Arc<EnvironmentBody>>,
-    pub handle: Option<crate::session::ToolCatalogHandle>,
+    pub projection: EnvironmentProjection,
     /// Collected metadata only. Each override prepares its own durable owner.
     pub run_collection: Option<CollectedRunEnvironment>,
+}
+
+/// Durable hydration has content but no native catalog. Only an acknowledged
+/// publication installs a ready projection, including its native source progress.
+#[derive(Clone, Default)]
+pub enum EnvironmentProjection {
+    #[default]
+    Empty,
+    Hydrated {
+        head: EnvironmentHead,
+        body: Arc<EnvironmentBody>,
+    },
+    Ready(ReadyEnvironment),
+}
+
+impl EnvironmentProjection {
+    pub fn head(&self) -> Option<&EnvironmentHead> {
+        match self {
+            Self::Empty => None,
+            Self::Hydrated { head, .. } => Some(head),
+            Self::Ready(ready) => Some(&ready.head),
+        }
+    }
+}
+
+/// One complete candidate, transferred intact into the resident on acknowledgement.
+#[derive(Clone)]
+pub struct ReadyEnvironment {
+    pub head: EnvironmentHead,
+    pub body: Arc<EnvironmentBody>,
+    pub handle: crate::session::ToolCatalogHandle,
+    /// Progress of these native producers, independent of the last content publication.
+    pub frontier: InputFrontier,
 }
 
 /// A claim-local collection, scoped to its base environment and owner config.
