@@ -74,7 +74,11 @@ pub use collections::{
 /// The native version the current kernel-library definition of `name` binds
 /// (ADR 0149). A name this library does not define is at the first version.
 pub fn native_version(name: &str) -> u32 {
-    text_json::native_version(name)
+    if name == "key.identity" {
+        2
+    } else {
+        text_json::native_version(name)
+    }
 }
 
 /// A superseded kernel-library native version that archived definitions still
@@ -84,6 +88,7 @@ pub fn retained_native(
     version: u32,
 ) -> Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> {
     text_json::retained_native(name, version)
+        .or_else(|| collections::retained_native(name, version))
 }
 
 /// A pure native constructor selected by a build's identity table. The

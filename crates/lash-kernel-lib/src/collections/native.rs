@@ -442,10 +442,10 @@ pub(super) fn functions<T>(
     if accepts(name) {
         let definition = define(name, &|| {
             String::from(
-                "function key.identity(value: Any, absent_key: Any, error_tag: Text) -> Any\nkernel 1\nerrors \"type_error\", \"too_deep\"\ncharge sum(1, deep(result))\nnative\n",
+                "function key.identity(value: Any, absent_key: Any, error_tag: Text) -> Any\nkernel 1\nerrors \"type_error\", \"too_deep\"\ncharge sum(1, deep(result))\nnative 2\n",
             )
         })?;
-        functions.push((definition, Arc::new(IdentityKey) as _));
+        functions.push((definition, Arc::new(IdentityKey::<true>) as _));
     }
     Ok(functions)
 }
@@ -1177,13 +1177,13 @@ fn index_of_range(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
 /// K-COL-017: project immutable tuple structure, never object contents.
 /// Encodings for absent and errors are supplied by the caller; no source
 /// dialect's tokens or kind names are recognized here.
-struct IdentityKey;
-impl NativeFunction for IdentityKey {
+pub(super) struct IdentityKey<const RAW: bool>;
+impl<const RAW: bool> NativeFunction for IdentityKey<RAW> {
     fn resource_contract(
         &self,
         args: Args<'_>,
     ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
-        resources::identity(args).map(Some)
+        resources::identity(args, RAW).map(Some)
     }
     fn call(&self, mut call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let values = call.args.values();
@@ -1191,7 +1191,7 @@ impl NativeFunction for IdentityKey {
         let absent = *nth(values, 1)?;
         let tag = *nth(values, 2)?;
         field(&tag)?;
-        project_identity(&value, &absent, &tag, 0, &mut call)
+        project_identity::<RAW>(&value, &absent, &tag, 0, &mut call)
     }
 
     fn prepare(&self) -> Option<PreparedNative> {
@@ -1229,7 +1229,21 @@ fn scalar_identity(value: &Value, absent: &Value) -> Option<Value> {
     })
 }
 
-fn project_identity(
+fn identity_payload(args: Args<'_>, data: Value, raw: bool) -> Result<Value, NativeError> {
+    if !raw {
+        return Ok(data);
+    }
+    let fields = args
+        .table(&data)?
+        .ok_or(NativeError::Malformed("an error payload has no fields"))?;
+    args.lookup(fields, &crate::short(lash_kernel_doc::error_object::RAW))?
+        .copied()
+        .ok_or(NativeError::Malformed(
+            "an error object has no raw failure data",
+        ))
+}
+
+fn project_identity<const RAW: bool>(
     value: &Value,
     absent: &Value,
     tag: &Value,
@@ -1259,7 +1273,7 @@ fn project_identity(
             #[cfg(test)]
             let mut _projected = crate::native_contract_laws::scratch(0);
             for item in &members {
-                projected.push(project_identity(item, absent, tag, depth + 1, call)?);
+                projected.push(project_identity::<RAW>(item, absent, tag, depth + 1, call)?);
                 #[cfg(test)]
                 _projected.resize(crate::native_contract_laws::new_values_bytes(
                     args, call.new, &projected,
@@ -1271,7 +1285,8 @@ fn project_identity(
             let Some(error) = args.error(value)? else {
                 return Err(NativeError::Malformed("an error names another body"));
             };
-            let data = reference(&error.data)
+            let payload = identity_payload(args, error.data, RAW)?;
+            let data = reference(&payload)
                 .ok_or_else(|| raise("type_error", "ref requires an object or task"))?;
             call.new.reserve(4, 0)?;
             Ok(call.new.allocate(NewObject::Tuple(vec![

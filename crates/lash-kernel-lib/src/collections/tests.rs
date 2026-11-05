@@ -1788,3 +1788,53 @@ fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
         assert_eq!(crate::testsupport::datum(&heap, &out), expected);
     }
 }
+
+/// ADR 0149: archived identity keys retain the payload-wrapper identity;
+/// K-COL-017's current implementation keys the original failure data.
+#[test]
+fn identity_key_versions_retain_their_error_data_projection() {
+    use crate::testsupport::{call, decode, heap};
+    use lash_kernel_doc::{Value, WorkCounter};
+    let mut heap = heap();
+    let raw = decode(&mut heap, Datum::Record(vec![]));
+    let kind = decode(&mut heap, text("k"));
+    let message = decode(&mut heap, text("m"));
+    let error = call(
+        &mut heap,
+        &*crate::native("error.new").unwrap(),
+        &[kind, message, raw],
+        u64::MAX,
+        &mut WorkCounter::new(None),
+    )
+    .unwrap();
+    let (payload, _) = heap
+        .run(&[error], u64::MAX, |args, _| {
+            args.error(&error).unwrap().unwrap().data
+        })
+        .unwrap();
+    for (native, expected) in [
+        (crate::retained_native("key.identity", 1).unwrap(), payload),
+        (crate::native("key.identity").unwrap(), raw),
+    ] {
+        let projected = call(
+            &mut heap,
+            &*native,
+            &[error, Value::Int(0), kind],
+            u64::MAX,
+            &mut WorkCounter::new(None),
+        )
+        .unwrap();
+        let (reference, _) = heap
+            .run(&[projected], u64::MAX, |args, _| {
+                *args
+                    .sequence(&projected)
+                    .unwrap()
+                    .unwrap()
+                    .get(1)
+                    .unwrap()
+                    .unwrap()
+            })
+            .unwrap();
+        assert!(matches!(reference, Value::ObjectRef(id) if Some(id) == expected.handle()));
+    }
+}

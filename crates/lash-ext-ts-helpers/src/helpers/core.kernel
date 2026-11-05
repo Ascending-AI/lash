@@ -2000,7 +2000,9 @@ body {
       if same(child[0], "ts.function") {
         if same(child[1], "") { return child }
         if same(kind(forward), "closure") { return apply forward(child) }
+        throw error.new("not_data", "A built-in function is not data", null)
       }
+      if same(child[0], "ts.object") { throw error.new("not_data", "A built-in object is not data", null) }
     }
     return child
   }
@@ -2047,11 +2049,59 @@ body {
   return copied
 }
 
+# Public entry results expose kernel Ints and arrays rather than guest tokens.
+# Argument copying remains faithful until a JSON transport encodes it.
 function ts.boundary(value: Any) -> Any
 kernel 1
 errors "cyclic_value", "too_deep", "type_error", "not_data"
 charge sum(4, deep(value))
-body { return invoke ts.copy_boundary(value, absent) }
+body {
+  let convert = fn(child) {
+    if same(kind(child), "tuple") {
+      if same(child, ()) { return child }
+      if same(child[0], "ts.bigint") { return child[1] }
+    }
+    if same(kind(child), "record") {
+      if same(child.__lash_brand, ("typescript", "template")) { return child.items }
+    }
+    return child
+  }
+  let copied = invoke ts.copy_boundary(value, absent)
+  set copied = apply convert(copied)
+  let pending = [copied]
+  let visited = set{}
+  while num.lt(0, list.len(pending)) metered 2 {
+    let last = num.sub(list.len(pending), 1)
+    let item = pending[last]
+    remove pending[last]
+    let k = kind(item)
+    if same(k, "list") {} else {
+      if same(k, "record") {} else {
+        if same(k, "map") {} else { continue }
+      }
+    }
+    let identity = ref(item)
+    if set.contains(visited, identity) { continue }
+    set visited[identity] = true
+    let keys = []
+    if same(k, "list") {
+      let index = 0
+      while num.lt(index, list.len(item)) {
+        set keys[list.len(keys)] = index
+        set index = num.add(index, 1)
+      }
+    } else {
+      if same(k, "record") { set keys = record.keys(item) } else { set keys = map.keys(item) }
+    }
+    for key in keys {
+      let child = item[key]
+      let converted = apply convert(child)
+      if same(child, ()) {} else { set item[key] = converted }
+      set pending[list.len(pending)] = converted
+    }
+  }
+  return copied
+}
 
 # The strict arguments object owns its indexed properties and independent length.
 function ts.arguments(items: List(Any)) -> Any

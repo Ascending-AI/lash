@@ -165,7 +165,14 @@ body {
     return copied
   }
   let prepared = apply prepare({"": args[0]}, "")
-  return json.boundary(prepared, "text", "JSON.stringify", "$", gap)
+  try {
+    return json.boundary(prepared, "text", "JSON.stringify", "$", gap)
+  } catch invalid {
+    if same(invalid.kind, "not_data") {
+      throw error.new("type_error", invalid.message, invalid.data)
+    }
+    throw invalid
+  }
 }
 
 # Whether JSON.stringify writes `value` as the console's JSON render does:

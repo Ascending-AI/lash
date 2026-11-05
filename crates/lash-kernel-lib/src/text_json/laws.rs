@@ -117,3 +117,43 @@ fn timestamp_construction_preserves_nanoseconds() {
         );
     }
 }
+
+/// K-LJSON-011 preserves ordinary guest keys. ADR 0149 retains the old
+/// marker omission only for archived json.boundary version 1.
+#[test]
+fn boundary_versions_preserve_their_guest_marker_fields() {
+    let mut heap = heap();
+    let input = args(
+        &mut heap,
+        vec![
+            Datum::Record(vec![
+                ("__lash_brand".into(), Datum::List(vec![s("Promise")])),
+                ("__lash_built".into(), s("guest")),
+                (
+                    "value".into(),
+                    Datum::Float(lash_kernel_doc::Float::new(1.0)),
+                ),
+            ]),
+            s("text"),
+            s("JSON.stringify"),
+            s("$"),
+            s(""),
+        ],
+    );
+    for (native, expected) in [
+        (
+            crate::retained_native("json.boundary", 1).unwrap(),
+            r#"{"value":1}"#,
+        ),
+        (
+            crate::native("json.boundary").unwrap(),
+            r#"{"__lash_brand":["Promise"],"__lash_built":"guest","value":1}"#,
+        ),
+    ] {
+        let answer = heap
+            .call(&*native, &input, u64::MAX, &mut WorkCounter::new(None))
+            .answer
+            .unwrap();
+        assert_eq!(datum(&heap, &answer), s(expected));
+    }
+}

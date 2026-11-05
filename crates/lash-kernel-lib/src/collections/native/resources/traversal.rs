@@ -166,6 +166,7 @@ impl<'a> Plan<'a> {
         absent: &Value,
         tag: &Value,
         depth: usize,
+        raw: bool,
     ) -> Result<Holding, NativeError> {
         if depth > self.args.limits().value_depth().min(128) {
             return Err(raise(
@@ -184,14 +185,15 @@ impl<'a> Plan<'a> {
                 self.visit(value)?;
             }
             for item in values {
-                let child = self.identity(&item, absent, tag, depth + 1)?;
+                let child = self.identity(&item, absent, tag, depth + 1, raw)?;
                 self.scratch = self.scratch.checked_add(child.bytes).ok_or_else(overflow)?;
                 projected.push(child);
             }
             return tuple(&projected);
         }
         let error = self.args.error(value)?.ok_or_else(overflow)?;
-        let data = super::super::reference(&error.data)
+        let payload = super::super::identity_payload(self.args, error.data, raw)?;
+        let data = super::super::reference(&payload)
             .ok_or_else(|| raise("type_error", "ref requires an object or task"))?;
         tuple(&[
             holding(self.args, tag)?,
@@ -206,13 +208,13 @@ pub(super) fn deep(args: Args<'_>, value: &Value) -> Result<Contract, NativeErro
     let answer = plan.copy(value, 0);
     plan.finish(answer)
 }
-pub(super) fn identity(args: Args<'_>) -> Result<Contract, NativeError> {
+pub(super) fn identity(args: Args<'_>, raw: bool) -> Result<Contract, NativeError> {
     let mut plan = Plan::new(args);
     let answer = (|| {
         let value = *nth(args.values(), 0)?;
         let absent = *nth(args.values(), 1)?;
         let tag = *field(nth(args.values(), 2)?)?;
-        plan.identity(&value, &absent, &tag, 0)
+        plan.identity(&value, &absent, &tag, 0, raw)
     })();
     plan.finish(answer)
 }

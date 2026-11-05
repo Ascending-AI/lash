@@ -221,6 +221,14 @@ pub(super) fn workspace(
     Ok(bytes)
 }
 fn writer(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
+    writer_version(args, op, false)
+}
+
+pub(super) fn boundary_version(args: Args<'_>, legacy: bool) -> Result<Contract, NativeError> {
+    writer_version(args, "boundary", legacy)
+}
+
+fn writer_version(args: Args<'_>, op: &str, legacy: bool) -> Result<Contract, NativeError> {
     let mut out = Out {
         output: output::Count::default(),
         args: Some(&args),
@@ -284,6 +292,7 @@ fn writer(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
                     path: &path,
                     limit: args.limits().document_depth(),
                     json_number: false,
+                    legacy_markers: legacy,
                 },
             )
         } else if op == "encode" {
@@ -299,6 +308,7 @@ fn writer(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
                     path: "$",
                     limit: args.limits().document_depth(),
                     json_number: false,
+                    legacy_markers: legacy,
                 },
             )
         } else {

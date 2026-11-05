@@ -134,3 +134,12 @@ pub(crate) fn native(
         .next()
         .map(|(_, native)| native)
 }
+
+/// The original identity projection for archived declarations.
+pub(crate) fn retained_native(
+    name: &str,
+    version: u32,
+) -> Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> {
+    (name == "key.identity" && version == 1)
+        .then(|| std::sync::Arc::new(native::IdentityKey::<false>) as _)
+}

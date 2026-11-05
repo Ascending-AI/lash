@@ -751,17 +751,42 @@ fn numeric_computed_keys_admit_before_their_values_are_known() {
 /// Expected lines come from Node with a JSON tool result.
 #[test]
 fn external_integers_are_numbers_and_authored_bigints_stay_exact() {
-    let ended = machine::run(
+    let ended = machine::run_with_answer(
         r#"
-      const x = await host.echo({version: 0n, count: 3n, large: 9007199254740993n});
+      const x = await host.echo({version: 0, count: 3, large: 9007199254740992});
       console.log(typeof x.version, typeof x.count, JSON.stringify({version: x.version, count: x.count}), x.count + 1.5 === 4.5);
       console.log(x.large === JSON.parse("9007199254740993"), String(x.large), Math.max(x.count, 2), x.count === 3);
       console.log(typeof 1n, String(2n ** 64n), typeof BigInt(x.count));
       const exact = {value: 9007199254740993n};
-      const returned = await host.echo([exact, exact]);
-      console.log(returned[0].value === JSON.parse("9007199254740993"), String(exact.value), typeof exact.value);
+      let refused = false;
+      try { await host.echo([exact, exact]); } catch (e) { refused = e.name === "not_data"; }
+      const returned = await host.echo([{value: Number(exact.value)}]);
+      console.log(refused && returned[0].value === JSON.parse("9007199254740993"), String(exact.value), typeof exact.value);
     "#,
         &[],
+        |request| {
+            let lash_kernel_vm::Request::Effect(effect) = request;
+            let outcome = match lash_kernel_lib::encode_datum(
+                &effect.args[0],
+                lash_kernel_lib::JsonModel::JavaScript,
+                lash_kernel_lib::JsonTarget::Host,
+                "host.echo",
+                128,
+            ) {
+                Ok(text) => {
+                    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    lash_kernel_vm::Outcome::Completed(
+                        lash_kernel_doc::diagnostic_datum(&json).unwrap(),
+                    )
+                }
+                Err(error) => lash_kernel_vm::Outcome::Failed(lash_kernel_doc::ErrorDatum::new(
+                    "not_data".into(),
+                    error.to_string(),
+                    lash_kernel_doc::Datum::Null,
+                )),
+            };
+            (effect.wait, outcome)
+        },
     );
     assert_eq!(ended.end, "ok", "{ended:?}");
     assert_eq!(

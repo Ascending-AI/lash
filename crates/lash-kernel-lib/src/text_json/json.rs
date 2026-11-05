@@ -26,7 +26,7 @@ mod v1;
 /// answers, so each is at version 2 and keeps its version 1 writer.
 pub(super) fn native_version(name: &str) -> u32 {
     match name {
-        "json.encode" | "json.render" | "json.stringify" => 2,
+        "json.encode" | "json.render" | "json.stringify" | "json.boundary" => 2,
         _ => lash_kernel_doc::FIRST_NATIVE_VERSION,
     }
 }
@@ -37,6 +37,13 @@ pub(super) fn retained_native(
     version: u32,
 ) -> Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> {
     match version {
+        1 if name == "json.boundary" => Some(std::sync::Arc::new(super::Native {
+            function: boundary_version::<true>,
+            arity: 5..=5,
+            prepared: None,
+            text_append: false,
+            resources: Some(|args| resources::boundary_version(args, true)),
+        })),
         1 if native_version(name) == 2 => v1::native(name),
         _ => None,
     }
@@ -630,6 +637,7 @@ fn write(
             path: "$",
             limit: args.limits().document_depth().min(64),
             json_number: false,
+            legacy_markers: false,
         },
     )
     .map(|_| ())
@@ -1208,6 +1216,7 @@ fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             path: "$",
             limit: args.limits().document_depth(),
             json_number: false,
+            legacy_markers: false,
         },
     )?;
     let text = out.output.text;
@@ -1232,6 +1241,10 @@ fn boundary_definition(selection: &Selection<'_>) -> Function {
 }
 
 fn boundary(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    boundary_version::<false>(call)
+}
+
+fn boundary_version<const LEGACY: bool>(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let args = call.args;
     let (target, context, path) = boundary_policy(&args)?;
     let gap = text_held(&args, call.new, arg(args.values(), 4)?)?.into_owned();
@@ -1267,6 +1280,7 @@ fn boundary(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             path: &path,
             limit: args.limits().document_depth(),
             json_number: false,
+            legacy_markers: LEGACY,
         },
     )?;
     let text = out.output.text;

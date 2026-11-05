@@ -447,17 +447,22 @@ fn tagged_templates_reuse_the_site_object() {
     "#),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
+    let Ended::Finished(value) = end(
+        "const identity = value => value; const text = identity`hello`; await control.finish({ nested: [text, text.raw] });",
+    ) else {
+        panic!("template arrays cross as data")
+    };
+    // K-LJSON-011: the copy retains package records; the encoder emits arrays.
     assert_eq!(
-        end(
-            "const identity = value => value; const text = identity`hello`; await control.finish({ nested: [text, text.raw] });"
-        ),
-        Ended::Finished(lash_kernel_doc::Datum::Record(vec![(
-            "nested".into(),
-            lash_kernel_doc::Datum::List(vec![
-                lash_kernel_doc::Datum::List(vec![lash_kernel_doc::Datum::Text("hello".into())]),
-                lash_kernel_doc::Datum::List(vec![lash_kernel_doc::Datum::Text("hello".into())]),
-            ])
-        )]))
+        lash_kernel_lib::encode_datum(
+            &value,
+            lash_kernel_lib::JsonModel::JavaScript,
+            lash_kernel_lib::JsonTarget::Host,
+            "control.finish",
+            128
+        )
+        .unwrap(),
+        r#"{"nested":[["hello"],["hello"]]}"#
     );
 }
 

@@ -500,34 +500,68 @@ fn invalid_lengths_raise_and_typed_sparse_reads_hide_holes() {
     );
 }
 
-/// The final result exposes JSON-shaped array slots, including nested aliases,
-/// while a boundary copy leaves the guest's sparse property presence intact.
+/// K-LJSON-011: copying retains holes and undefined slots; JSON emission
+/// normalizes both to null, including nested aliases.
 #[test]
 fn final_results_normalize_holes_without_mutating_guest_arrays() {
     let end =
         run("const a = [1, , undefined]; const copied = [a, a]; await control.finish(copied);");
+    let End::Finished(finished) = end else {
+        panic!("{end:?}")
+    };
     let row = Datum::List(vec![
         Datum::Float(lash_kernel_doc::Float::new(1.0)),
-        Datum::Null,
-        Datum::Null,
+        Datum::Tuple(vec![]),
+        Datum::Absent,
     ]);
-    assert!(
-        matches!(end, End::Finished(finished) if finished.result == Datum::List(vec![row.clone(), row]))
+    assert_eq!(finished.result, Datum::List(vec![row.clone(), row]));
+    assert_eq!(
+        lash_kernel_lib::encode_datum(
+            &finished.result,
+            lash_kernel_lib::JsonModel::JavaScript,
+            lash_kernel_lib::JsonTarget::Host,
+            "control.finish",
+            128
+        )
+        .unwrap(),
+        "[[1,null,null],[1,null,null]]"
     );
 }
 
-/// Both a spawned tool and an in-place perform send a copied graph with null
-/// array slots. Delivery and later mutation still see the original holes.
+/// K-LJSON-011: both a spawned tool and an in-place perform copy holes
+/// faithfully. The JSON encoder normalizes the copies without changing the guest.
 #[test]
 fn tool_and_effect_arguments_normalize_nested_holes_on_copies() {
     let row = Datum::List(vec![
-        Datum::Null,
+        Datum::Tuple(vec![]),
         Datum::Float(lash_kernel_doc::Float::new(2.0)),
     ]);
     let expected = [
         vec![row.clone()],
         vec![Datum::Record(vec![("nested".into(), row)])],
     ];
+    assert_eq!(
+        lash_kernel_lib::encode_datum(
+            &expected[0][0],
+            lash_kernel_lib::JsonModel::JavaScript,
+            lash_kernel_lib::JsonTarget::Host,
+            "host.echo",
+            128
+        )
+        .unwrap(),
+        "[null,2]"
+    );
+    assert_eq!(
+        lash_kernel_lib::encode_datum(
+            &expected[1][0],
+            lash_kernel_lib::JsonModel::JavaScript,
+            lash_kernel_lib::JsonTarget::Host,
+            "host.echo",
+            128
+        )
+        .unwrap(),
+        r#"{"nested":[null,2]}"#
+    );
     let end = drive(
         r#"
         const a = [, 2]; const p = host.echo(a); await p;

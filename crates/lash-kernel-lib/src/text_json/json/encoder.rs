@@ -319,6 +319,7 @@ fn normalize<A: Source>(
                         context: policy.context,
                         limit: policy.limit,
                         json_number: policy.json_number,
+                        legacy_markers: policy.legacy_markers,
                         active: Vec::new(),
                     }
                     .walk(key, view, 0, true, policy.path)?;
@@ -402,6 +403,7 @@ struct Encoder<'a, 'out, 'args, 'call, A: Source, S: Output> {
     context: &'a str,
     limit: usize,
     json_number: bool,
+    legacy_markers: bool,
     active: Vec<A::Identity>,
 }
 
@@ -414,6 +416,7 @@ pub(super) struct Policy<'a> {
     /// number spelling, for copied-out data ([`encode_datum`]). Guest JSON
     /// text spells them by the caller's decimal layout instead.
     pub json_number: bool,
+    pub legacy_markers: bool,
 }
 
 pub(super) fn encode<A: Source>(
@@ -435,6 +438,7 @@ pub(super) fn encode<A: Source>(
         context: policy.context,
         limit: policy.limit,
         json_number: policy.json_number,
+        legacy_markers: policy.legacy_markers,
         active: Vec::new(),
     }
     .walk(value, view, depth, raw_numbers, policy.path)
@@ -578,6 +582,7 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                                     path: &child,
                                     limit,
                                     json_number: self.json_number,
+                                    legacy_markers: self.legacy_markers,
                                 },
                             )
                         })
@@ -603,8 +608,21 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                 if let Some(id) = identity {
                     self.active.push(id);
                 }
-                let branded =
-                    target.is_some() && fields.iter().any(|(key, _)| key == "__lash_brand");
+                let branded = if target.is_none() {
+                    false
+                } else if self.legacy_markers {
+                    fields.iter().any(|(key, _)| key == "__lash_brand")
+                } else if source.javascript()
+                    && let Some((_, brand)) = fields.iter().find(|(key, _)| key == "__lash_brand")
+                    && let View::Sequence(parts, "tuple") =
+                        source.view(brand, &mut self.out.output)?
+                    && parts.len() == 2
+                {
+                    text(source, &parts[0], &mut self.out.output)?.is_some()
+                        && text(source, &parts[1], &mut self.out.output)?.is_some()
+                } else {
+                    false
+                };
                 if target.is_some() && source.javascript() && kind == "record" {
                     fields.sort_by_key(|(key, _)| {
                         key.parse::<u32>()
@@ -645,6 +663,7 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                                     path: &child,
                                     limit,
                                     json_number: self.json_number,
+                                    legacy_markers: self.legacy_markers,
                                 },
                             )
                         })
@@ -741,6 +760,7 @@ pub fn encode_datum(
             path: "$",
             limit,
             json_number: true,
+            legacy_markers: false,
         },
     )?;
     if written {

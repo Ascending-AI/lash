@@ -200,8 +200,8 @@ fn evaluate(native: &Native, args: Args<'_>) -> Result<Option<Contract>, NativeE
 pub(super) fn holds_none(args: Args<'_>) -> Result<Contract, NativeError> {
     traversal::holds_none(args)
 }
-pub(super) fn identity(args: Args<'_>) -> Result<Contract, NativeError> {
-    traversal::identity(args)
+pub(super) fn identity(args: Args<'_>, raw: bool) -> Result<Contract, NativeError> {
+    traversal::identity(args, raw)
 }
 
 pub(super) fn index_range(args: Args<'_>) -> Result<Contract, NativeError> {

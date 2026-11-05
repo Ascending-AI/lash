@@ -435,26 +435,43 @@ fn nested(depth: usize, inner: Datum) -> Datum {
     (0..depth).fold(inner, |value, _| Datum::List(vec![value]))
 }
 
+/// Large boundary fixtures need the direct graph and one transformation:
+/// widths also test shared identity; excessive depth also tests a later cycle.
+/// The generated corpus crosses every shape, including formatting and toJSON.
+#[derive(Clone, Copy)]
+enum ShapeCoverage {
+    All,
+    Width,
+    Depth,
+}
+
 /// The guard's depth boundary, values beyond the former 128-node cap,
-/// and shared and cyclic graphs.
-fn edges() -> Vec<Datum> {
+/// and shared and cyclic graphs. Avoid multiplying the large boundary
+/// graphs by transformations already covered by every generated input.
+fn edges() -> Vec<(Datum, ShapeCoverage)> {
     let flat = |count: usize| Datum::List((0..count).map(|n| float(n as f64)).collect());
+    let all = |value| (value, ShapeCoverage::All);
+    let wide = |value| (value, ShapeCoverage::Width);
     vec![
-        nested(8, text("deep")),
-        nested(9, text("deep")),
-        nested(70, Datum::Null),
-        flat(127),
-        flat(128),
-        Datum::Record((0..127).map(|n| (format!("k{n}"), Datum::Null)).collect()),
-        Datum::Record((0..128).map(|n| (format!("k{n}"), Datum::Null)).collect()),
-        Datum::List(vec![flat(63), flat(63)]),
-        Datum::List(vec![flat(63), flat(64)]),
-        Datum::List(Vec::new()),
-        Datum::Record(Vec::new()),
-        text("top-level text"),
-        float(-0.0),
-        Datum::Null,
-        Datum::Absent,
+        all(nested(8, text("deep"))),
+        all(nested(9, text("deep"))),
+        (nested(70, Datum::Null), ShapeCoverage::Depth),
+        wide(flat(127)),
+        wide(flat(128)),
+        wide(Datum::Record(
+            (0..127).map(|n| (format!("k{n}"), Datum::Null)).collect(),
+        )),
+        wide(Datum::Record(
+            (0..128).map(|n| (format!("k{n}"), Datum::Null)).collect(),
+        )),
+        wide(Datum::List(vec![flat(63), flat(63)])),
+        wide(Datum::List(vec![flat(63), flat(64)])),
+        all(Datum::List(Vec::new())),
+        all(Datum::Record(Vec::new())),
+        all(text("top-level text")),
+        all(float(-0.0)),
+        all(Datum::Null),
+        all(Datum::Absent),
     ]
 }
 
@@ -500,28 +517,37 @@ fn number_data(value: Datum) -> Datum {
     }
 }
 
-/// The inputs: generated plain graphs, graphs with traps, the edges, each
-/// shaped by every `build` mode, and some with a replacer or a space.
+/// Generated plain graphs and traps exercise every `build` mode and a tail.
+/// The expensive edge graphs exercise their named size and depth boundaries.
 fn cases() -> Vec<(Case, Arc<Program>)> {
     let mut bits = Bits(0x5873_0000_0000_0001);
     let mut values = edges();
     let (generated, retained) = smith_values();
-    values.extend(generated.into_iter().map(number_data));
+    values.extend(
+        generated
+            .into_iter()
+            .map(|value| (number_data(value), ShapeCoverage::All)),
+    );
     for round in 0..160 {
         let mut budget = 40;
         let odds = if round % 2 == 0 { 0 } else { 12 };
-        values.push(value(&mut bits, 4, &mut budget, odds));
+        values.push((value(&mut bits, 4, &mut budget, odds), ShapeCoverage::All));
     }
     let mut programs = BTreeMap::new();
     let library = machine::prepared().clone();
     let mut cases = Vec::new();
-    for value in values {
+    for (value, coverage) in values {
         let roots = callable_links(&value);
         let program = programs
             .entry(roots.clone())
             .or_insert_with(|| Arc::new(program(&retained, &roots, library.clone())))
             .clone();
-        for mode in 0..8 {
+        let modes: &[u8] = match coverage {
+            ShapeCoverage::All => &[0, 1, 2, 3, 4, 5, 6, 7],
+            ShapeCoverage::Width => &[0, 1],
+            ShapeCoverage::Depth => &[0, 2],
+        };
+        for &mode in modes {
             cases.push((
                 Case {
                     value: value.clone(),
@@ -537,14 +563,18 @@ fn cases() -> Vec<(Case, Arc<Program>)> {
             2 => vec![Datum::Absent, float(2.0)],
             _ => vec![Datum::List(vec![text("id"), text("name")]), text("--")],
         };
-        cases.push((
-            Case {
-                value,
-                mode: 0,
-                tail,
-            },
-            program,
-        ));
+        // Draw every tail even when it is redundant for a boundary fixture,
+        // keeping every generated input's seeded tail exactly unchanged.
+        if matches!(coverage, ShapeCoverage::All) {
+            cases.push((
+                Case {
+                    value,
+                    mode: 0,
+                    tail,
+                },
+                program,
+            ));
+        }
     }
     // Repeated prints may produce identical graphs, but their independently
     // drawn tails can differ. Deduplicate only complete, exactly equal cases.
