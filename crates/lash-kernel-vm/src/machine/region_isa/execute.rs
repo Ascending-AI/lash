@@ -45,16 +45,17 @@ pub(super) struct Execution<V: View> {
 }
 
 impl<V: View> Execution<V> {
+    #[cfg(test)]
     pub(super) fn acquire(
         code: Arc<Code>,
         limits: Limits,
         invocations: super::invocations::Invocations,
         view: V,
     ) -> Result<Self, RegionError> {
-        let id = code.id;
+        let entry = super::entry::Entry::fixture(&code);
         Self::acquire_programs(
             programs::Programs::bind(Box::new([code]))?,
-            id,
+            entry,
             limits,
             invocations,
             view,
@@ -62,28 +63,28 @@ impl<V: View> Execution<V> {
     }
     pub(super) fn acquire_programs(
         programs: Arc<programs::Programs>,
-        entry: CodeId,
+        entry: super::entry::Entry,
         limits: Limits,
         invocations: super::invocations::Invocations,
         mut view: V,
     ) -> Result<Self, RegionError> {
-        let code = Arc::clone(programs.code(entry)?);
-        if code.invocation == 0
-            || !invocations.follows(code.invocation)
+        let code = Arc::clone(programs.code(entry.program)?);
+        if entry.invocation == 0
+            || !invocations.follows(entry.invocation)
             || limits.entry_balance > limits.memory
             || limits.entry_charge > limits.charge
             || limits.entry_depth > limits.depth
-            || code.instructions.get(code.entry as usize).is_none()
-            || code.recovery.get(code.entry_prefix as usize).is_none()
+            || code.instructions.get(entry.pc as usize).is_none()
+            || code.recovery.get(entry.prefix as usize).is_none()
         {
             return Err(invalid(Refused::Facts));
         }
         let mut registers = Registers::new(programs.registers, 1)?;
-        for (reg, value) in &code.initial {
+        for (reg, value) in &entry.values {
             registers.write(
                 &mut view,
                 0,
-                code.invocation,
+                entry.invocation,
                 *reg,
                 Operand::Immediate(*value),
             )?;
@@ -93,23 +94,20 @@ impl<V: View> Execution<V> {
             .try_reserve_exact(1)
             .map_err(|_| invalid(Refused::Scratch))?;
         frames.push(Frame {
-            program: entry,
-            invocation: code.invocation,
-            pc: code.entry,
-            prefix: code.entry_prefix,
+            program: entry.program,
+            invocation: entry.invocation,
+            pc: entry.pc,
+            prefix: entry.prefix,
             return_pc: 0,
             activation: None,
         });
-        let mut source = super::source_counters::SourceCounters::bind(&code.source_initial)?;
-        let occurrence = source
-            .prepare(&code.recovery[code.entry_prefix as usize].counters)?
-            .accept();
+        let source = super::source_counters::SourceCounters::bind(&entry.source_counts)?;
         let reached = ReachedPrefix {
-            program: entry,
-            invocation: code.invocation,
+            program: entry.program,
+            invocation: entry.invocation,
             ordinal: 0,
-            occurrence,
-            prefix: code.entry_prefix,
+            occurrence: entry.occurrence,
+            prefix: entry.prefix,
             debt: 0,
         };
         let counters = Counters {

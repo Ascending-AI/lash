@@ -195,6 +195,7 @@ impl<'m> RegionLease<'m> {
             .checked_add(1)
             .ok_or_else(|| invalid(Refused::Facts))?;
         let invocations = super::invocations::Invocations::fixture(first, u64::MAX - first)?;
+        let entry = super::entry::Entry::fixture(programs.code(entry)?);
         let execution = Executing::Fixture(Execution::acquire_programs(
             programs,
             entry,

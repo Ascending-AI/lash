@@ -475,6 +475,7 @@ fn field_loop(n: i64) -> Arc<Code> {
 
 #[test]
 fn stable_scalar_and_member_loops_publish_once_with_bounded_recovery() {
+    entry::resumed_entries();
     for (n, field) in [1, 17, 4096]
         .into_iter()
         .flat_map(|n| [(n, false), (n, true)])
@@ -1488,3 +1489,5 @@ fn calls_and_recovery_use_each_frames_own_code_and_the_callers_plan() {
 mod graph;
 
 mod calls;
+
+mod entry;

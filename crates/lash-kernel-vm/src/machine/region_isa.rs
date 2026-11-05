@@ -12,6 +12,7 @@ use lash_kernel_doc::{Value, heap::HeapFault};
 use std::{rc::Rc, sync::Arc};
 
 mod code;
+mod entry;
 mod execute;
 #[cfg(test)]
 mod fixture_phases;

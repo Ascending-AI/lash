@@ -9,7 +9,9 @@ pub(super) struct Programs {
 }
 impl Programs {
     pub(super) fn bind(codes: Box<[Arc<Code>]>) -> Result<Arc<Self>, RegionError> {
-        let first = codes.first().ok_or_else(|| invalid(Refused::Source))?;
+        if codes.is_empty() {
+            return Err(invalid(Refused::Source));
+        }
         let registers = codes
             .iter()
             .map(|code| code.registers)
@@ -17,7 +19,6 @@ impl Programs {
             .ok_or_else(|| invalid(Refused::Facts))?;
         for (index, code) in codes.iter().enumerate() {
             if code.id.0 as usize != index
-                || code.source_initial != first.source_initial
                 || code.instructions.get(code.entry as usize).is_none()
                 || code.recovery.get(code.entry_prefix as usize).is_none()
             {

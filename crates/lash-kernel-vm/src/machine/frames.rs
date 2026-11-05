@@ -44,6 +44,7 @@ use lash_kernel_value::sites::Site;
 use lash_kernel_value::sites::Unit;
 use std::sync::Arc;
 
+mod region;
 mod resident;
 
 fn malformed(problem: impl Into<String>) -> HeapFault {

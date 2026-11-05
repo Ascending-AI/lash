@@ -162,8 +162,11 @@ pub(super) struct Code {
     pub(super) dependencies: Box<[ReadDependency]>,
     pub(super) fields: Box<[Arc<str>]>,
     pub(super) registers: usize,
+    #[cfg(test)]
     pub(super) source_initial: Box<[u64]>,
+    #[cfg(test)]
     pub(super) initial: Box<[(Register, Value)]>,
+    #[cfg(test)]
     pub(super) invocation: u64,
     pub(super) safe_integers: bool,
     #[cfg(test)]
