@@ -145,8 +145,15 @@ impl KernelMachine {
     pub(in crate::machine) fn reconstruct_canonical_region(
         &mut self,
     ) -> Result<(), lash_kernel_doc::heap::HeapFault> {
-        Err(lash_kernel_doc::heap::HeapFault::Malformed(
-            "canonical ISA frame reconstruction is not implemented".into(),
-        ))
+        if self.current.is_some()
+            || self.region.is_some()
+            || self.regs.region_values().next().is_some()
+        {
+            return Err(HeapFault::Malformed(
+                "canonical reopen has live execution authority".into(),
+            ));
+        }
+        self.tasks.reconstruct_region_context()?;
+        self.publish_logical_meter()
     }
 }

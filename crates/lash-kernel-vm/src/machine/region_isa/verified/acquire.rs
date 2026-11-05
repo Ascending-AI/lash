@@ -27,6 +27,9 @@ impl<'m> RegionLease<'m> {
             .last_mut()
             .map_err(RegionError::Heap)?
             .ok_or_else(|| invalid(Refused::Facts))?;
+        frame
+            .reconstruct_region_frontier(&exe, &machine.heap, &machine.logical, task_id)
+            .map_err(RegionError::Heap)?;
         if frame.code != code.program.code() {
             return Err(invalid(Refused::Source));
         }

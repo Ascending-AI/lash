@@ -4,7 +4,7 @@ use crate::compile::{Executable, Form};
 use crate::machine::{Control, Frame};
 use lash_kernel_value::sites::Site;
 
-pub(super) fn source_loops(
+pub(in crate::machine) fn source_loops(
     frame: &Frame,
     exe: &Executable,
 ) -> Result<Option<Vec<(Site, u64)>>, HeapFault> {
