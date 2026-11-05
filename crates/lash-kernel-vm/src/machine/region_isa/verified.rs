@@ -3,11 +3,15 @@ mod acquire;
 mod bind;
 mod charge;
 mod flow;
+#[cfg(test)]
+mod laws;
 mod materialize;
 mod phase;
 mod read;
+mod run;
 mod running;
 mod scalar;
 mod values;
 pub(super) use bind::Code;
+pub(super) use charge::Crossing;
 pub(super) use running::Running;

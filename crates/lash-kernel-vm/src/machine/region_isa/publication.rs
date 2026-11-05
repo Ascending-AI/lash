@@ -28,6 +28,7 @@ pub(super) struct Canonical {
     #[expect(clippy::vec_box, reason = "install already allocated canonical frames")]
     pub(super) frames: Vec<Box<Frame>>,
     pub(super) registers: Option<Registers>,
+    pub(super) crossing: Option<verified::Crossing>,
 }
 pub(super) struct Prepared<'m> {
     state: PreparedStateExit<'m>,
@@ -60,7 +61,11 @@ impl<'m> Authority<'m> {
             .ok_or_else(|| invalid(Refused::Exit))?;
         if canonical.frames.len() != image.frames.len()
             || publications.frames.len() != image.frames.len()
-            || image.counters.charge > self.limits.charge
+            || (image.counters.charge > self.limits.charge
+                && !(image.stop == RegionStop::Refusal
+                    && canonical.crossing.as_ref().is_some_and(|crossing| {
+                        crossing.authenticates(self.limits.charge, image.counters.charge)
+                    })))
             || image.counters.peak > self.limits.memory
             || image.counters.depth > self.limits.depth
         {

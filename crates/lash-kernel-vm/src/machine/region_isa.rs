@@ -85,6 +85,13 @@ pub(crate) struct PreparedRegionExit<'m> {
     prepared: PreparedAuthority<'m>,
     reconstruction: Reconstruction,
 }
+#[cfg_attr(
+    test,
+    allow(
+        clippy::large_enum_variant,
+        reason = "the fixture variant is test-only; production keeps its affine transaction inline"
+    )
+)]
 enum PreparedAuthority<'m> {
     #[cfg(test)]
     Fixture(fixtures::PreparedStateExit<'m>),

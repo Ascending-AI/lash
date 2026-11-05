@@ -108,6 +108,18 @@ impl PreparedCounterExit<'_> {
     }
 }
 
+impl super::Tasks {
+    /// Existing cold rows keep the ordinary lazy task/frame restoration path.
+    pub(in crate::machine) fn reconstruct_region_context(&mut self) -> Result<(), HeapFault> {
+        for (index, task) in self.cache.iter_mut().flatten() {
+            task.frames
+                .logical_context(lash_kernel_doc::TaskId(*index), self.logical.clone());
+            task.frames.reconstruct_region_context()?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod laws {
     use super::*;
@@ -154,17 +166,5 @@ mod laws {
             .publish();
         assert_eq!(&*actual.counts, [21, 91, u64::MAX]);
         assert_eq!(actual.dirty, [0, 2]);
-    }
-}
-
-impl super::Tasks {
-    /// Existing cold rows keep the ordinary lazy task/frame restoration path.
-    pub(in crate::machine) fn reconstruct_region_context(&mut self) -> Result<(), HeapFault> {
-        for (index, task) in self.cache.iter_mut().flatten() {
-            task.frames
-                .logical_context(lash_kernel_doc::TaskId(*index), self.logical.clone());
-            task.frames.reconstruct_region_context()?;
-        }
-        Ok(())
     }
 }

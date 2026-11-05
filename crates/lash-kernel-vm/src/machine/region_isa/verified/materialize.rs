@@ -109,6 +109,12 @@ impl<'m> Running<'m> {
             payload: None,
             returning: None,
         };
+        let registers = crate::machine::registers::Registers::region_image(
+            task,
+            self.reached.invocation,
+            &translated.roles,
+        )
+        .map_err(RegionError::Heap)?;
         let (issued_invocations, invocations) = self.invocations.finish()?;
         let image = Reconstruction {
             issued_invocations,
@@ -124,7 +130,8 @@ impl<'m> Running<'m> {
             entering: None,
             canonical: Some(publication::Canonical {
                 frames: vec![self.canonical],
-                registers: None,
+                registers: Some(registers),
+                crossing: self.crossing,
             }),
         };
         Ok(reconstruct::Finished {

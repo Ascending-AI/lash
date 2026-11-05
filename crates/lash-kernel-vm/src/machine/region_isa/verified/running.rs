@@ -7,6 +7,7 @@ use lash_kernel_state::kernel_internals::logical::{LeaseValue, StateLease};
 pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) arguments: Vec<Value>,
     pub(super) scratch: super::phase::Scratch,
+    pub(super) crossing: Option<super::charge::Crossing>,
     pub(in crate::machine::region_isa) view: StateLease<'m>,
     pub(in crate::machine::region_isa) code: Arc<Code>,
     pub(in crate::machine::region_isa) registers: registers::Registers<LeaseValue>,
@@ -72,6 +73,7 @@ impl<'m> Running<'m> {
         let scratch = super::phase::Scratch::new(code.transfer_width, code.quotes)?;
         Ok(Self {
             scratch,
+            crossing: None,
             arguments,
             view,
             code,
@@ -99,9 +101,9 @@ impl<'m> Running<'m> {
 
     pub(in crate::machine::region_isa) fn run(
         &mut self,
-        _stop: StopAt,
+        stop: StopAt,
     ) -> Result<RegionStop, RegionError> {
-        Err(invalid(Refused::Facts))
+        self.execute(stop)
     }
     pub(in crate::machine::region_isa) fn enter_call(
         &mut self,

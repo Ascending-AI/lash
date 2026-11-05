@@ -3,7 +3,7 @@ use super::super::*;
 use crate::compile::room::charges::region_isa::{CanonicalClose, ChargeItem, ChargeMoment};
 use lash_kernel_exec::Weight;
 
-pub(super) struct Crossing {
+pub(in crate::machine::region_isa) struct Crossing {
     bound: u64,
     charged: u64,
 }
