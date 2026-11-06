@@ -155,9 +155,6 @@ pub(super) fn transfer(
     live: &BTreeSet<Slot>,
 ) -> Result<BTreeSet<Slot>, Refused> {
     let step = draft.steps.get(pc).ok_or(Refused::Path)?;
-    if step.stage.is_some() {
-        return Ok(live.clone());
-    }
     let event = &step.event;
     let source = &draft.source;
     let mut next = live.clone();
@@ -232,6 +229,10 @@ pub(super) fn successors(draft: &RegionDraft, pc: usize) -> Vec<super::Pc> {
         | RegionOp::Call { next, .. } => vec![*next],
         RegionOp::Checked { kernel, next, .. } => match kernel.kind() {
             super::CheckedKind::Cursor { exhausted, .. } => vec![*next, *exhausted],
+            super::CheckedKind::Header { driver, ended, .. } => std::iter::once(*next)
+                .chain(*driver)
+                .chain(*ended)
+                .collect(),
             _ => vec![*next],
         },
         RegionOp::Branch { yes, no, .. } => vec![*yes, *no],
@@ -246,6 +247,54 @@ pub(super) fn successors(draft: &RegionDraft, pc: usize) -> Vec<super::Pc> {
         | RegionOp::ReturnVia { .. }
         | RegionOp::Exit { .. } => vec![],
     }
+}
+
+/// Whether `op` reaches `successor` without taking its event: an exhausted
+/// plain `for`, or a protocol header that dispatches to `next` or finds its
+/// own cursor exhausted.
+pub(super) fn unaccepted(op: &RegionOp, successor: super::Pc) -> bool {
+    let RegionOp::Checked { kernel, .. } = op else {
+        return false;
+    };
+    match kernel.kind() {
+        super::CheckedKind::Cursor { exhausted, .. } => *exhausted == successor,
+        super::CheckedKind::Header {
+            stage,
+            driver,
+            ended,
+        } => {
+            stage.phase == super::LoopPhase::Step
+                && (*driver == Some(successor) || *ended == Some(successor))
+        }
+        _ => false,
+    }
+}
+
+/// What a raise at the event of row `base` holds, `live` standing before
+/// it: a hook raises only once its call is entered (`K-ITER-005`), so what
+/// the call moved into its callee is gone.
+fn raised_at(
+    draft: &RegionDraft,
+    base: usize,
+    mut live: BTreeSet<Slot>,
+) -> Result<BTreeSet<Slot>, Refused> {
+    let RegionOp::Call { site, .. } = &draft.ops[base] else {
+        return Ok(live);
+    };
+    if draft
+        .calls
+        .get(site.offset())
+        .ok_or(Refused::Path)?
+        .hook
+        .is_some()
+    {
+        for input in &draft.steps[base].event.inputs {
+            if let Some(slot) = resources::role(&draft.source, input).and_then(Role::slot) {
+                live.remove(&slot);
+            }
+        }
+    }
+    Ok(live)
 }
 
 pub(super) fn liveness(draft: &RegionDraft) -> Result<Vec<Option<BTreeSet<Slot>>>, Refused> {
@@ -284,11 +333,10 @@ pub(super) fn liveness(draft: &RegionDraft) -> Result<Vec<Option<BTreeSet<Slot>>
             let next = transfer(draft, pc, &live)?;
             for successor in successors(draft, pc) {
                 let state = states.get_mut(successor.offset()).ok_or(Refused::Path)?;
-                let next = match &draft.ops[pc] {
-                    RegionOp::Checked { kernel, .. } if matches!(kernel.kind(), super::CheckedKind::Cursor { exhausted, .. } if *exhausted == successor) => {
-                        &live
-                    }
-                    _ => &next,
+                let next = if unaccepted(&draft.ops[pc], successor) {
+                    &live
+                } else {
+                    &next
                 };
                 match state {
                     None => {
@@ -315,7 +363,7 @@ pub(super) fn liveness(draft: &RegionDraft) -> Result<Vec<Option<BTreeSet<Slot>>
                 .position(|step| step.at == *at)
                 .ok_or(Refused::Path)?;
             if let Some(live) = states[base].clone() {
-                states[origin] = Some(live);
+                states[origin] = Some(raised_at(draft, base, live)?);
                 queue.push_back(origin);
             }
         }

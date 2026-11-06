@@ -1567,7 +1567,7 @@ fn retained(record: &FrameRecord) -> Option<u32> {
         .map(|args| u32::try_from(args.len()).unwrap_or(u32::MAX))
 }
 
-fn header_record(header: &Header) -> HeaderRecord {
+pub(in crate::machine) fn header_record(header: &Header) -> HeaderRecord {
     match header {
         Header::Body => HeaderRecord::Body,
         Header::Open => HeaderRecord::Open,
@@ -1578,7 +1578,10 @@ fn header_record(header: &Header) -> HeaderRecord {
     }
 }
 
-fn cursor_record(cursor: &Cursor, guard: Option<&Guard>) -> Option<CursorRecord> {
+pub(in crate::machine) fn cursor_record(
+    cursor: &Cursor,
+    guard: Option<&Guard>,
+) -> Option<CursorRecord> {
     let table = |at: &Option<TableCursor>| at.map(|at| at.0).unwrap_or(u64::MAX);
     let (kind, position) = match cursor {
         Cursor::Opening => return None,

@@ -39,9 +39,6 @@ impl OverlayMap {
                 .map(|at| &mut self.indexed[at].1)
         }
     }
-    pub(in crate::paged::logical::region) fn is_empty(&self) -> bool {
-        self.table.is_empty() && self.indexed.is_empty()
-    }
     pub(in crate::paged::logical::region) fn contains_key(&self, address: &Address) -> bool {
         self.get(address).is_some()
     }

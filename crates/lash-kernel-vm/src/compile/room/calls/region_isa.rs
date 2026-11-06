@@ -45,6 +45,10 @@ pub(crate) struct CallPlan {
     result: CallRole,
     /// The helper whose signature the arguments must fit before entry.
     checked: Option<LibId>,
+    /// Whether the caller holds the arguments across the call.
+    rooted: bool,
+    /// The protocol `for` hook this call runs, at that phase of its loop.
+    hook: Option<Phase>,
 }
 
 #[derive(Clone)]
@@ -80,11 +84,20 @@ pub(crate) fn compile_calls(
     sites
         .iter()
         .enumerate()
-        .map(|(index, &(statement, pc))| {
-            if sites[..index].contains(&(statement, pc)) {
+        .map(|(index, &(statement, pc, hook))| {
+            if sites[..index].contains(&(statement, pc, hook)) {
                 return Err(Refused::Source);
             }
-            CallPlan::compile(exe, draft.code(), statement, pc)
+            match hook {
+                Some(phase) => {
+                    let plan = CallPlan::compile_hook(exe, draft.code(), statement, phase)?;
+                    if plan.pc != pc {
+                        return Err(Refused::Source);
+                    }
+                    Ok(plan)
+                }
+                None => CallPlan::compile(exe, draft.code(), statement, pc),
+            }
         })
         .collect()
 }
@@ -128,6 +141,7 @@ impl CallPlan {
             .then(|| target::root_role(&source, shape.at))
             .transpose()?;
         let result = CallRole::new(slot(&source, &Owner::Operand(shape.at.site.clone()))?);
+        let rooted = shape.rooted;
         let resume = Point {
             site: shape.at.site.clone(),
             phase: if shape.rooted {
@@ -163,6 +177,76 @@ impl CallPlan {
             targets,
             occurrence,
             checked,
+            rooted,
+            hook: None,
+        })
+    }
+
+    /// A protocol `for`'s hook call (`K-ITER-005`). `next` and `check` take
+    /// what the loop walks and `item` the item its header holds too, which
+    /// the loop keeps; `open` moves the iterated value into its callee.
+    /// `check` takes the guard's counts besides. A hook resumes in its
+    /// loop's header: `item` at the Test that takes its result.
+    pub(crate) fn compile_hook(
+        exe: &Executable,
+        caller: CodeId,
+        statement: StmtId,
+        phase: Phase,
+    ) -> Result<Self, Refused> {
+        use callee::{Argument, GuardValue};
+        let source = Arc::clone(&exe.code(caller).source_room);
+        source.verify()?;
+        let (resolved, pc) = resolved_hook(exe, caller, statement, phase)?;
+        let site = resolved.at.site.clone();
+        let cursor = slot(&source, &Owner::LoopCursor(site.clone()))?;
+        let header = slot(&source, &Owner::LoopHeader(site.clone()))?;
+        let arguments: Box<[_]> = match phase {
+            Phase::Open => Box::new([Argument::Role(slot(
+                &source,
+                &Owner::Operand(site.child(0)),
+            )?)]),
+            Phase::Next => Box::new([Argument::Role(cursor)]),
+            Phase::Check => Box::new([
+                Argument::Role(cursor),
+                Argument::Guard(GuardValue::Size),
+                Argument::Guard(GuardValue::Remaining),
+                Argument::Guard(GuardValue::More),
+            ]),
+            Phase::Item => Box::new([Argument::Role(cursor), Argument::Role(header)]),
+            _ => return Err(Refused::Source),
+        };
+        let callee = CalleePlan::placed(exe, caller, &resolved, &arguments)?;
+        Ok(Self {
+            executable: exe.local(),
+            caller,
+            source,
+            statement,
+            pc,
+            at: resolved.at.clone(),
+            resume: Point {
+                site: site.clone(),
+                phase: if phase == Phase::Item {
+                    Phase::Test
+                } else {
+                    phase
+                },
+            },
+            arguments: arguments
+                .iter()
+                .filter_map(|argument| match argument {
+                    Argument::Role(slot) => Some(CallRole::new(*slot)),
+                    Argument::Guard(_) => None,
+                })
+                .collect(),
+            saved: Box::new([]),
+            callable: None,
+            callable_origin: None,
+            targets: Targets::Static(Arc::new(callee)),
+            occurrence: None,
+            result: CallRole::new(header),
+            checked: None,
+            rooted: phase != Phase::Open,
+            hook: Some(phase),
         })
     }
 
@@ -175,8 +259,14 @@ impl CallPlan {
         {
             return Err(Refused::Source);
         }
-        let expected = Self::compile(exe, self.caller, self.statement, self.pc)?;
-        if self.at != expected.at
+        let expected = match self.hook {
+            Some(phase) => Self::compile_hook(exe, self.caller, self.statement, phase)?,
+            None => Self::compile(exe, self.caller, self.statement, self.pc)?,
+        };
+        if self.pc != expected.pc
+            || self.rooted != expected.rooted
+            || self.hook != expected.hook
+            || self.at != expected.at
             || self.resume != expected.resume
             || self.arguments != expected.arguments
             || self.saved != expected.saved
@@ -205,7 +295,8 @@ impl CallPlan {
     ) -> Result<(), Refused> {
         if draft.code() != self.caller
             || !Arc::ptr_eq(draft.source(), &self.source)
-            || draft.call_sources().get(site.index() as usize) != Some(&(self.statement, self.pc))
+            || draft.call_sources().get(site.index() as usize)
+                != Some(&(self.statement, self.pc, self.hook))
             || !draft
                 .ops()
                 .iter()
@@ -234,10 +325,18 @@ impl CallPlan {
     pub(crate) fn resume(&self) -> &Point {
         &self.resume
     }
+    /// The pc of the opcode this call's source edge is.
+    pub(crate) fn pc(&self) -> u32 {
+        self.pc
+    }
     /// A statement call holds its argument atoms until its Commit; a
     /// nested call moves its operands into the callee.
     pub(crate) fn rooted(&self) -> bool {
-        self.resume.phase == Phase::Commit
+        self.rooted
+    }
+    /// The protocol `for` hook this call runs, if any.
+    pub(crate) fn hook(&self) -> Option<Phase> {
+        self.hook
     }
     pub(crate) fn arguments(&self) -> &[CallRole] {
         &self.arguments

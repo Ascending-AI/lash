@@ -480,7 +480,25 @@ impl Source {
                 Ok(*exit)
             }
             fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
-                self.choices.get(site).copied().ok_or(Refused::Facts)
+                // A protocol hook's raise departs from a pass in progress.
+                self.choices
+                    .get(site)
+                    .copied()
+                    .or((self.cursor == 0 && site == self.returning).then_some(true))
+                    .ok_or(Refused::Facts)
+            }
+            fn walked(&mut self, site: &Site) -> Result<Walk, Refused> {
+                // Before the departing event any walk reaches it: the walk
+                // that runs the hook which raised, or one whose hooks the
+                // navigation steps over.
+                if self.cursor != 0 {
+                    return Err(Refused::Facts);
+                }
+                Ok(match self.phase {
+                    Phase::Next if site == self.returning => Walk::Driver,
+                    Phase::Check if site == self.returning => Walk::Guarded,
+                    _ => Walk::Collection,
+                })
             }
             fn selected_end(&self) -> bool {
                 self.cursor == self.route.len()

@@ -167,10 +167,10 @@ pub(in crate::machine) fn raised_at(
     }
     Ok(match source.progress {
         // Before its step, or after the step before it.
-        0 => Some(source.at.clone()),
+        0 => Some(hooked(code, &source.at)),
         2 => Some(match standing(code, source)? {
             Some(standing) => standing.resume,
-            None => source.unpaid.clone(),
+            None => hooked(code, &source.unpaid),
         }),
         3 => code
             .calls
@@ -181,6 +181,27 @@ pub(in crate::machine) fn raised_at(
         4 => Some(source.at.clone()),
         _ => None,
     })
+}
+
+/// A protocol `for`'s header row that refuses what a hook returned raises
+/// at that hook's call, as the hook's own raise does (`K-ITER-005`).
+fn hooked(code: &Code, at: &crate::compile::room::Point) -> crate::compile::room::Point {
+    use crate::compile::room::Phase;
+    let via = code
+        .program
+        .loop_at(&at.site)
+        .and_then(|index| code.program.loop_info(index))
+        .is_some_and(|info| info.via.is_some());
+    let phase = match at.phase {
+        Phase::Restore if via => Phase::Open,
+        Phase::Fallthrough if via => Phase::Next,
+        Phase::Supersede if via => Phase::Check,
+        phase => phase,
+    };
+    crate::compile::room::Point {
+        site: at.site.clone(),
+        phase,
+    }
 }
 
 pub(super) fn unpaid_pc(
@@ -234,45 +255,35 @@ pub(in crate::machine) fn restore_source_controls(
         true
     })?;
     let mut loops = Vec::new();
-    // A plain `for` stands in its body over a list or a tuple, at the
-    // index of the passes it started; what it walks is its one iterated row.
-    let mut walking = 0;
+    // Each loop the point stands in is active at the passes it started, at
+    // its cursor's position and with its guard; where its header stands
+    // follows from the point.
     let mut index = 0;
     while let Some(info) = program.loop_info(index) {
         let mut state = control::LoopState::default();
         for row in &saved {
             if row.site.resolve(access)?.as_ref() == &info.site {
-                let plain = matches!(
-                    exe.stmt(info.statement).form,
-                    crate::compile::Form::For { via: None, .. }
-                );
-                if state.active
-                    || (!info.while_loop
-                        && !(plain
-                            && row.header == lash_kernel_state::paged::HeaderRecord::Body
-                            && row.cursor.is_some_and(|cursor| {
-                                cursor.guard.is_none()
-                                    && match cursor.kind {
-                                        lash_kernel_state::paged::CursorKind::List
-                                        | lash_kernel_state::paged::CursorKind::Tuple => {
-                                            cursor.position == row.started
-                                        }
-                                        lash_kernel_state::paged::CursorKind::Table => true,
-                                        _ => false,
-                                    }
-                            })))
-                {
+                if state.active {
                     return Err(malformed());
                 }
-                walking += u64::from(!info.while_loop);
                 state.active = true;
                 state.started = row.started;
-                // A table cursor saves the sequence it last took, `MAX` for none.
-                state.last = row.cursor.and_then(|cursor| {
-                    (cursor.kind == lash_kernel_state::paged::CursorKind::Table
-                        && cursor.position != u64::MAX)
-                        .then_some(cursor.position)
-                });
+                if let Some(cursor) = row.cursor {
+                    match cursor.kind {
+                        // A table cursor saves the sequence it last took,
+                        // `MAX` for none.
+                        lash_kernel_state::paged::CursorKind::Table => {
+                            state.last = (cursor.position != u64::MAX).then_some(cursor.position);
+                        }
+                        lash_kernel_state::paged::CursorKind::Driver => {}
+                        _ => state.position = cursor.position,
+                    }
+                    state.guard = cursor.guard.map(|guard| super::call_bind::GuardArguments {
+                        size: guard.size,
+                        remaining: guard.remaining,
+                        more: row.header != lash_kernel_state::paged::HeaderRecord::Exhausted,
+                    });
+                }
             }
         }
         loops.push(state);
@@ -280,7 +291,6 @@ pub(in crate::machine) fn restore_source_controls(
     }
     if loops.iter().filter(|state| state.active).count() != saved.len()
         || !record.departing.is_empty()
-        || record.iterated.len() != walking
     {
         return Err(malformed());
     }
@@ -327,6 +337,48 @@ pub(in crate::machine) fn restore_source_controls(
     }
     let controls =
         control::controls_for(&code, pc, &loops, &source.roles).map_err(|_| malformed())?;
+    // The frame records each loop as the point stands in it: what it walks
+    // and the item its header holds are its iterated rows.
+    let mut rows = saved.iter();
+    let mut iterated = 0;
+    for control in controls.iter() {
+        let (stmt, header, cursor, started) = match control {
+            crate::machine::Control::For {
+                stmt,
+                cursor,
+                started,
+                header,
+                guard,
+            } => {
+                iterated +=
+                    u64::from(cursor.walked().is_some()) + u64::from(header.held().is_some());
+                (
+                    *stmt,
+                    crate::machine::frames::header_record(header),
+                    crate::machine::frames::cursor_record(cursor, guard.as_deref()),
+                    *started,
+                )
+            }
+            crate::machine::Control::While { stmt, started } => (
+                *stmt,
+                lash_kernel_state::paged::HeaderRecord::Body,
+                None,
+                *started,
+            ),
+            _ => continue,
+        };
+        let row = rows.next().ok_or_else(malformed)?;
+        if row.site.resolve(access)?.as_ref() != &exe.stmt(stmt).site
+            || row.header != header
+            || row.cursor != cursor
+            || row.started != started
+        {
+            return Err(malformed());
+        }
+    }
+    if rows.next().is_some() || record.iterated.len() != iterated {
+        return Err(malformed());
+    }
     // Each cleanup the point stands in was entered by its body or its catch
     // block ending, in control order; no other cleanup row is saved.
     let mut finally = Vec::new();

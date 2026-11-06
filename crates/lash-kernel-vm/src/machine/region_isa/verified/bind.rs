@@ -160,10 +160,17 @@ impl Code {
                 | RegionOp::Heap { next, .. } => pending.push(*next),
                 RegionOp::Checked { kernel, next, .. } => {
                     pending.push(*next);
-                    if let crate::compile::region_isa::CheckedKind::Cursor { exhausted, .. } =
-                        kernel.kind()
-                    {
-                        pending.push(*exhausted);
+                    match kernel.kind() {
+                        crate::compile::region_isa::CheckedKind::Cursor { exhausted, .. } => {
+                            pending.push(*exhausted);
+                        }
+                        crate::compile::region_isa::CheckedKind::Header {
+                            driver, ended, ..
+                        } => {
+                            pending.extend(*driver);
+                            pending.extend(*ended);
+                        }
+                        _ => {}
                     }
                 }
                 RegionOp::Branch { yes, no, .. } => {

@@ -50,6 +50,14 @@ pub(crate) struct LoopInfo {
     pub(crate) test_origin: KirOrigin,
     pub(crate) entry_charges: Box<[CanonicalClose]>,
     pub(crate) test_charges: Box<[CanonicalClose]>,
+    /// A protocol `for`'s hooks besides `open` (`K-ITER-005`).
+    pub(crate) via: Option<ViaHooks>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ViaHooks {
+    pub(crate) next: bool,
+    pub(crate) check: bool,
+    pub(crate) item: bool,
 }
 pub(crate) struct Program {
     pub(crate) events: BTreeMap<Point, Vec<CanonicalClose>>,
@@ -186,6 +194,14 @@ pub(crate) fn program(exe: &Executable, code: CodeId) -> Result<Program, Refused
                             Box::new([])
                         },
                         test_charges: test_charges.into(),
+                        via: match &stmt.form {
+                            Form::For { via: Some(via), .. } => Some(ViaHooks {
+                                next: via.next.is_some(),
+                                check: via.check.is_some(),
+                                item: via.item.is_some(),
+                            }),
+                            _ => None,
+                        },
                     });
                 }
                 _ => {}

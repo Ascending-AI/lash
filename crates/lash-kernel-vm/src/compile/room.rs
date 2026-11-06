@@ -167,6 +167,18 @@ impl Amount {
         }
         self
     }
+    /// What a protocol `for`'s header row holds once it writes `held`,
+    /// less what it lets go of in `released`.
+    pub(crate) fn header(held: Option<Owner>, released: Option<Owner>) -> Self {
+        let mut amount = Self::default();
+        if let Some(owner) = held {
+            amount = amount.term(Measure::Local(owner), 1);
+        }
+        if let Some(owner) = released {
+            amount = amount.term(release([owner]), -1);
+        }
+        amount
+    }
     pub(crate) fn measures(&self) -> impl ExactSizeIterator<Item = &Measure> {
         self.terms.iter().map(|(measure, _)| measure)
     }
@@ -842,6 +854,14 @@ impl Source {
                     if event.point.phase == Phase::Test && matches!(&event.output, Some(Owner::Binding { declared, .. }) if *declared == child(&event.point.site, 1)) {
                         owners.insert(Owner::LoopCursor(event.point.site.clone()));
                         owners.insert(Owner::LoopHeader(event.point.site.clone()));
+                        // A protocol's hooks return into the loop's Incoming,
+                        // which its header rows take and let go of.
+                        if self.room.events.contains_key(&Point {
+                            site: event.point.site.clone(),
+                            phase: Phase::Open,
+                        }) {
+                            owners.insert(Owner::Incoming(event.point.site.clone()));
+                        }
                     }
                     owners.extend(event.inputs.iter().cloned());
                     owners.extend(event.output.iter().cloned());

@@ -166,7 +166,9 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
                         let result = types.map(|types| native_result(exe, *lib, &types));
                         Some((*dst, result))
                     }
-                    CheckedKind::Cursor { .. } => Some((*dst, Some(RegisterKind::Value))),
+                    CheckedKind::Cursor { .. }
+                    | CheckedKind::Header { .. }
+                    | CheckedKind::LoopItem { .. } => Some((*dst, Some(RegisterKind::Value))),
                     _ => None,
                 },
                 RegionOp::Heap { dst: Some(dst), .. } => Some((*dst, Some(RegisterKind::Value))),

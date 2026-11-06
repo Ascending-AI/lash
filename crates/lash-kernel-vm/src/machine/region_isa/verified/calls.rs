@@ -155,12 +155,14 @@ impl Running<'_> {
             .step(self.pc)
             .ok_or_else(|| invalid(Refused::Path))?;
         let depth = self.frame_index();
+        let guard = self.hook_guard(depth, &caller, call)?;
         target.inputs(
             &self.registers,
             depth,
             self.reached.invocation,
             &mut self.view,
             &mut self.call_values,
+            guard,
         )?;
         // A checked helper's arguments fit its signature before entry. The
         // region shows a scalar fit itself; anything else stands unbilled
@@ -275,6 +277,11 @@ impl Running<'_> {
                 .read(depth, self.reached.invocation, argument)?
                 .bind(&mut self.view)
                 .map_err(RegionError::Heap)?;
+            // `next`, `check` and `item` read what the loop keeps: only the
+            // callee's parameter holds it besides.
+            if rooted && call.plan.hook().is_some() {
+                continue;
+            }
             if rooted {
                 holds.push((value, false));
             } else {
@@ -464,5 +471,43 @@ impl Running<'_> {
             balance = after;
         }
         Ok((balance, peak))
+    }
+}
+
+impl Running<'_> {
+    /// The counts a protocol `for`'s `check` call takes after what the loop
+    /// walks (`K-ITER-005`), from its guard in the frame at `frame`; `None`
+    /// for any other call.
+    pub(super) fn hook_guard(
+        &self,
+        frame: usize,
+        code: &Code,
+        call: &super::bind::Call,
+    ) -> Result<Option<super::call_bind::GuardArguments>, RegionError> {
+        if call.plan.hook() != Some(crate::compile::room::Phase::Check) {
+            return Ok(None);
+        }
+        let index = code
+            .program
+            .loop_at(&call.plan.point().site)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        frame
+            .checked_mul(self.programs.loops)
+            .and_then(|base| base.checked_add(index as usize))
+            .and_then(|at| self.loops.get(at))
+            .and_then(|state| state.guard)
+            .map(Some)
+            .ok_or_else(|| invalid(Refused::Facts))
+    }
+}
+
+impl super::call_bind::GuardArguments {
+    /// The counts as `check` takes them: size, remaining, more.
+    pub(super) fn values(self) -> [Value; 3] {
+        [
+            crate::machine::loops::counted(self.size),
+            crate::machine::loops::counted(self.remaining),
+            Value::Bool(self.more),
+        ]
     }
 }

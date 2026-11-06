@@ -243,6 +243,74 @@ fn resolved_static(
     })
 }
 
+/// A protocol `for`'s hook at `phase` of statement `statement`, resolved
+/// to the library body it calls (`K-ITER-005`), and the pc of its `for`.
+/// The loop holds what `next`, `check` and `item` take; `open` moves the
+/// iterated value into its callee. Only a library body whose parameters
+/// take what the loop gives without a check is a region call.
+pub(in crate::compile::room) fn resolved_hook(
+    exe: &Executable,
+    caller: CodeId,
+    statement: StmtId,
+    phase: Phase,
+) -> Result<(Resolved, u32), Refused> {
+    use lash_kernel_value::Type;
+    let (stream, stmt, _) = exe.statement(statement);
+    if exe.stmt_at(caller, &stmt.site) != Some(statement) {
+        return Err(Refused::Source);
+    }
+    let compile::Form::For { via: Some(via), .. } = &stmt.form else {
+        return Err(Refused::Source);
+    };
+    let pc = (stmt.ops.start..stmt.ops.end())
+        .find(|pc| matches!(stream.ops.get(*pc as usize), Some(Op::ForIn { .. })))
+        .ok_or(Refused::Source)?;
+    let (hook, kinds): (_, &[Type]) = match phase {
+        Phase::Open => (Some(via.open), &[Type::Any]),
+        Phase::Next => (via.next, &[Type::Any]),
+        Phase::Check => (via.check, &[Type::Any, Type::Int, Type::Int, Type::Bool]),
+        Phase::Item => (via.item, &[Type::Any, Type::Any]),
+        _ => return Err(Refused::Source),
+    };
+    let Some(compile::LinkedHook::Library(id)) = hook else {
+        return Err(Refused::Source);
+    };
+    let lib = exe.lib(id);
+    let LibRun::Body(code) = lib.run else {
+        return Err(Refused::Source);
+    };
+    let signature = &lib.header.signature;
+    if !lib.body_arity(kinds.len())
+        || lib.limit.is_some()
+        || lib.specialization.resource != CallSource::Body(lib.specialization.function)
+        || exe.code(code).source_room.owner
+            != doc::constant_pool::PoolOwner::Function(lib.specialization.function)
+        || signature
+            .params
+            .iter()
+            .zip(kinds)
+            .any(|(param, kind)| param.ty != Type::Any && param.ty != *kind)
+    {
+        return Err(Refused::Source);
+    }
+    Ok((
+        Resolved {
+            code,
+            library: Some(id),
+            at: Point {
+                site: stmt.site.clone(),
+                phase,
+            },
+            arguments: kinds.len(),
+            occurrence: None,
+            rooted: phase != Phase::Open,
+            dynamic: false,
+            checked: false,
+        },
+        pc,
+    ))
+}
+
 struct CallerRoles {
     arguments: Box<[Slot]>,
     recovery: Box<[Slot]>,

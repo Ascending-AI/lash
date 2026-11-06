@@ -126,6 +126,7 @@ impl Running<'_> {
             }
             let mut answered = None;
             let mut taken = None;
+            let mut staged = None;
             let mut guarded = false;
             match op {
                 // A plain `for` takes its next item as its Test event. An
@@ -156,13 +157,51 @@ impl Running<'_> {
                         return self.halt(RegionStop::Boundary);
                     };
                     if answer.next == *exhausted {
-                        let edit = self.prepare_control(op, &answer, None, None, None)?;
+                        let edit = self.prepare_control(op, &answer, None, None, None, None)?;
                         self.accept_control(edit);
                         self.pc = *exhausted;
                         continue;
                     }
                     taken = position;
                     answered = Some(answer);
+                }
+                // A protocol `for`'s header row steps, takes what a hook
+                // returned, or goes on unaccepted to `next` or past the loop.
+                RegionOp::Checked {
+                    kernel,
+                    args,
+                    dst,
+                    next,
+                } if matches!(
+                    kernel.kind(),
+                    crate::compile::region_isa::CheckedKind::Header { .. }
+                        | crate::compile::region_isa::CheckedKind::LoopItem { .. }
+                ) =>
+                {
+                    if served.is_some() {
+                        return Err(invalid(Refused::Facts));
+                    }
+                    match self.header_answer(kernel.kind(), args, *dst, *next)? {
+                        super::header::Stood::Taken(answer, info, state) => {
+                            staged = Some((info, state));
+                            answered = Some(answer);
+                        }
+                        super::header::Stood::Passed(next, info, state) => {
+                            let index = self.loop_index(info)?;
+                            self.loops[index] = state;
+                            self.pc = next;
+                            continue;
+                        }
+                        super::header::Stood::Refused(message) => {
+                            return self.halt(RegionStop::Refused {
+                                kind: "type_error",
+                                message,
+                            });
+                        }
+                        super::header::Stood::Boundary => {
+                            return self.halt(RegionStop::Boundary);
+                        }
+                    }
                 }
                 RegionOp::Checked { kernel, .. }
                     if matches!(
@@ -417,8 +456,14 @@ impl Running<'_> {
                 .and_then(Option::as_ref)
                 .ok_or_else(|| invalid(Refused::Facts))?;
             let looping = code.program.loop_departure(self.pc);
-            let control =
-                self.prepare_control(op, &answer, flow.loop_branch, looping.as_ref(), taken)?;
+            let control = self.prepare_control(
+                op,
+                &answer,
+                flow.loop_branch,
+                looping.as_ref(),
+                taken,
+                staged,
+            )?;
             let ordinal = self
                 .reached
                 .ordinal

@@ -189,7 +189,30 @@ pub fn checkpoint(
         let mut frame_index = 0usize;
         r.tree(&task.frames, |r, frame| {
             let site = frame.statement.resolve(r.heap.pages())?;
-            let pending = frame.pending.as_ref().map(encode_body);
+            // The continuation keeps the pending point's scalar state; its
+            // role and result values are graph edges, numbered below by
+            // first reach rather than by durable id.
+            let pending = frame
+                .pending
+                .as_ref()
+                .map(|pending| {
+                    let mut scalar = pending.clone();
+                    scalar.roles = crate::paged::RolesRecord::Flat(
+                        pending
+                            .roles(r.heap.pages())?
+                            .into_iter()
+                            .map(|role| crate::paged::RoleRecord {
+                                coordinate: role.coordinate,
+                                value: PageValue::Null,
+                            })
+                            .collect(),
+                    );
+                    if scalar.pending.is_some() {
+                        scalar.pending = Some(PageValue::Null);
+                    }
+                    Ok::<_, HeapFault>(encode_body(&scalar))
+                })
+                .transpose()?;
             let mut loops = Vec::new();
             for (_, row) in rows(&frame.loops, r.heap.pages())? {
                 loops.push(encode_body(&row));

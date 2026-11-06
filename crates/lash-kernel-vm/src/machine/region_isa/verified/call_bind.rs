@@ -3,12 +3,26 @@ use super::super::{code::Register, *};
 use super::Code;
 use crate::compile::region_isa::Role;
 use crate::compile::room::region::calls::region_isa::CalleePlan;
-use crate::compile::room::region::calls::region_isa::callee::Substitution;
+use crate::compile::room::region::calls::region_isa::callee::{GuardValue, Substitution};
 use lash_kernel_state::kernel_internals::logical::Slot;
 use lash_kernel_state::kernel_internals::logical::{LeaseValue, StateLease};
 
+pub(super) enum Input {
+    Register(Register),
+    Absent,
+    Guard(GuardValue),
+}
+
+/// A protocol `for`'s guard counts, as its `check` takes them.
+#[derive(Clone, Copy)]
+pub(super) struct GuardArguments {
+    pub(super) size: u64,
+    pub(super) remaining: u64,
+    pub(super) more: bool,
+}
+
 pub(super) struct Parameter {
-    pub(super) input: Option<Register>,
+    pub(super) input: Input,
     pub(super) output: Register,
     pub(super) shared: bool,
 }
@@ -33,6 +47,7 @@ impl Target {
         invocation: u64,
         lease: &mut StateLease<'_>,
         values: &mut Vec<LeaseValue>,
+        guard: Option<GuardArguments>,
     ) -> Result<(), RegionError> {
         if values.capacity() < self.parameters.len() {
             return Err(invalid(Refused::Scratch));
@@ -40,11 +55,25 @@ impl Target {
         values.clear();
         for parameter in &self.parameters {
             let value = match parameter.input {
-                Some(input) => registers
+                Input::Register(input) => registers
                     .read(frame, invocation, input)?
                     .bind(lease)
                     .map_err(RegionError::Heap)?,
-                None => lease.import(&Value::Absent).map_err(RegionError::Heap)?,
+                Input::Absent => lease.import(&Value::Absent).map_err(RegionError::Heap)?,
+                Input::Guard(value) => {
+                    let guard = guard.ok_or_else(|| invalid(Refused::Facts))?;
+                    let count = |count: u64| {
+                        i64::try_from(count)
+                            .map(Value::Int)
+                            .map_err(|_| invalid(Refused::Facts))
+                    };
+                    let value = match value {
+                        GuardValue::Size => count(guard.size)?,
+                        GuardValue::Remaining => count(guard.remaining)?,
+                        GuardValue::More => Value::Bool(guard.more),
+                    };
+                    lease.import(&value).map_err(RegionError::Heap)?
+                }
             };
             values.push(value);
         }
@@ -107,9 +136,10 @@ impl Calls {
                                 let binding = substitution.parameter();
                                 let input = match substitution {
                                     Substitution::Role { argument, .. } => {
-                                        Some(role(&caller.program, argument.slot())?)
+                                        Input::Register(role(&caller.program, argument.slot())?)
                                     }
-                                    Substitution::Absent { .. } => None,
+                                    Substitution::Absent { .. } => Input::Absent,
+                                    Substitution::Guard { value, .. } => Input::Guard(*value),
                                 };
                                 Ok(Parameter {
                                     input,

@@ -52,7 +52,7 @@ pub(crate) struct RegionDraft {
     generic_registers: Box<[RegisterKind]>,
     packing: Box<[Option<CheckedKernel>]>,
     calls: Box<[CallSite]>,
-    call_sources: Box<[(StmtId, u32)]>,
+    call_sources: Box<[(StmtId, u32, Option<Phase>)]>,
     loops: Box<[LoopInfo]>,
     departures: Box<[departures::Departure]>,
 }
@@ -229,6 +229,16 @@ pub(crate) enum CheckedKind {
         at: Site,
         exhausted: Pc,
     },
+    /// A protocol `for`'s header stage (`K-ITER-005`): it branches on what
+    /// `open` returned. `driver` is the unaccepted jump to `next`'s call;
+    /// `ended` is where the loop leaves once nothing is left.
+    Header {
+        stage: LoopStage,
+        driver: Option<Pc>,
+        ended: Option<Pc>,
+    },
+    /// A protocol `for` binds the item its header holds, or `item`'s
+    /// result, and starts a pass.
     LoopItem {
         at: Site,
     },
@@ -491,6 +501,16 @@ pub(crate) enum LoopDeparture {
 pub(crate) enum LoopPhase {
     Enter,
     Test,
+    /// A protocol `for` takes what `open` returned.
+    Opened,
+    /// A protocol `for` steps its own cursor, or dispatches to `next`.
+    Step,
+    /// A protocol `for` takes what `next` returned.
+    Pulled,
+    /// A protocol `for` takes what `check` returned.
+    Checked,
+    /// A protocol `for` lets its exhausted header go.
+    Ended,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct LoopStage {
@@ -527,6 +547,8 @@ pub(crate) struct CallSite {
     pub(crate) atoms: Box<[AtomLoad]>,
     pub(crate) arguments: Box<[Reg<LeaseValue>]>,
     pub(crate) result: Reg<LeaseValue>,
+    /// A protocol `for`'s hook this call runs, at that phase of its loop.
+    pub(crate) hook: Option<Phase>,
 }
 
 pub(crate) fn compile_region(exe: &Executable, code: CodeId) -> Result<RegionDraft, Refused> {
@@ -608,7 +630,7 @@ impl RegionDraft {
     pub(crate) fn ops(&self) -> &[RegionOp] {
         &self.ops
     }
-    pub(crate) fn call_sources(&self) -> &[(StmtId, u32)] {
+    pub(crate) fn call_sources(&self) -> &[(StmtId, u32, Option<Phase>)] {
         &self.call_sources
     }
     pub(crate) fn has_calls(&self) -> bool {
@@ -806,6 +828,23 @@ impl RegionCode {
             .iter()
             .find_map(|(role, actual)| (actual == iterable).then_some(role.slot()))
             .flatten()
+    }
+    /// The source slots of a protocol `for`'s header (`K-ITER-005`): what
+    /// it walks, which its Opened row writes, and the item it holds, which
+    /// its Step row writes.
+    pub(crate) fn loop_header_slots(&self, index: u32) -> Option<(Slot, Slot)> {
+        let slot = |phase| {
+            let pc = self.stage(LoopStage { info: index, phase })?;
+            let RegionOp::Checked { dst, .. } = self.op(pc)? else {
+                return None;
+            };
+            self.draft
+                .roles
+                .iter()
+                .find_map(|(role, actual)| (actual == dst).then_some(role.slot()))
+                .flatten()
+        };
+        Some((slot(LoopPhase::Opened)?, slot(LoopPhase::Step)?))
     }
     /// The atoms a statement call loads at its Enter.
     pub(crate) fn call_atoms(&self, site: CallId) -> Option<&[AtomLoad]> {
@@ -1006,7 +1045,21 @@ impl RegionCode {
                     .any(|next| self.draft.steps[next.offset()].at == *unpaid)
         });
         let pc = accepted.next()?;
-        accepted.next().is_none().then_some(pc)
+        // Raise routes each end in their own copy of a `try`'s Catch: once
+        // the departure is taken, copies that keep the same roles and go on
+        // to the same rows are one point.
+        let same = |other: Pc| {
+            let slots = |pc: Pc| {
+                self.step(pc)
+                    .and_then(|step| Self::prefix(step, progress))
+                    .and_then(|prefix| self.recovery(prefix))
+                    .map(|map| map.roles.iter().map(|(slot, _)| *slot).collect::<Vec<_>>())
+            };
+            recovery::successors(&self.draft, other.offset())
+                == recovery::successors(&self.draft, pc.offset())
+                && slots(other) == slots(pc)
+        };
+        accepted.all(same).then_some(pc)
     }
     /// Rebuild a recovery entry from its semantic phase and acceptance state.
     pub(crate) fn source_recovery(
@@ -1157,7 +1210,10 @@ pub(crate) mod fixtures {
                 next: Pc(index + 1),
             })
             .collect();
-        draft.call_sources = sites.into();
+        draft.call_sources = sites
+            .iter()
+            .map(|&(statement, pc)| (statement, pc, None))
+            .collect();
         Ok(draft)
     }
     pub(crate) fn exit(

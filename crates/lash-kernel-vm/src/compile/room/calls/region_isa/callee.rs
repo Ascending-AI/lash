@@ -10,11 +10,32 @@ pub(crate) enum Substitution {
     Absent {
         parameter: ParameterBinding,
     },
+    /// A protocol `for`'s `check` takes its loop's guard counts.
+    Guard {
+        parameter: ParameterBinding,
+        value: GuardValue,
+    },
+}
+/// What a protocol `for`'s guard gives its `check` (`K-ITER-005`): the
+/// size it walks, what it still allows, and whether an item is held.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GuardValue {
+    Size,
+    Remaining,
+    More,
+}
+/// A call's actual argument, as its caller holds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Argument {
+    Role(Slot),
+    Guard(GuardValue),
 }
 impl Substitution {
     pub(crate) fn parameter(self) -> ParameterBinding {
         match self {
-            Self::Role { parameter, .. } | Self::Absent { parameter } => parameter,
+            Self::Role { parameter, .. }
+            | Self::Absent { parameter }
+            | Self::Guard { parameter, .. } => parameter,
         }
     }
     pub(crate) fn input(
@@ -25,6 +46,7 @@ impl Substitution {
         match self {
             Self::Role { argument, .. } => Ok(argument.read(read)),
             Self::Absent { .. } => lease.import(&Value::Absent).map(Some),
+            Self::Guard { .. } => Ok(None),
         }
     }
 }
@@ -54,6 +76,23 @@ impl CalleePlan {
         caller: CodeId,
         target: &Resolved,
     ) -> Result<Self, Refused> {
+        let caller_source = &exe.code(caller).source_room;
+        let roles = caller_roles(caller_source, target.shape())?;
+        let arguments: Box<[_]> = roles
+            .arguments
+            .iter()
+            .copied()
+            .map(Argument::Role)
+            .collect();
+        Self::placed(exe, caller, target, &arguments)
+    }
+    /// The callee of `target`, given the caller's actual `arguments`.
+    pub(super) fn placed(
+        exe: &Executable,
+        caller: CodeId,
+        target: &Resolved,
+        arguments: &[Argument],
+    ) -> Result<Self, Refused> {
         // The source-verified body is the call authority for body-backed
         // libraries, including natives. Compilation never invokes the native.
         if target.library.is_some_and(|lib| {
@@ -81,8 +120,6 @@ impl CalleePlan {
         {
             return Err(Refused::Source);
         }
-        let caller_source = &exe.code(caller).source_room;
-        let roles = caller_roles(caller_source, target.shape())?;
         let substitutions = source
             .params
             .iter()
@@ -121,9 +158,12 @@ impl CalleePlan {
                 if index >= target.arguments {
                     return Ok(Substitution::Absent { parameter });
                 }
-                Ok(Substitution::Role {
-                    parameter,
-                    argument: CallRole::new(*roles.arguments.get(index).ok_or(Refused::Source)?),
+                Ok(match *arguments.get(index).ok_or(Refused::Source)? {
+                    Argument::Role(argument) => Substitution::Role {
+                        parameter,
+                        argument: CallRole::new(argument),
+                    },
+                    Argument::Guard(value) => Substitution::Guard { parameter, value },
                 })
             })
             .collect::<Result<Box<[_]>, Refused>>()?;

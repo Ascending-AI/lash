@@ -425,7 +425,7 @@ pub(super) fn verify(
         .room
         .events
         .len()
-        .checked_add(draft.loops.len().checked_mul(2).ok_or(Refused::Facts)?)
+        .checked_add(super::stages::layout(&draft.loops)?.len())
         .ok_or(Refused::Facts)?;
     let mut cursor = base;
     let mut routes = draft.departures.iter();

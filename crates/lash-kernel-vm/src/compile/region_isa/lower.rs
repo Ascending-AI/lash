@@ -324,12 +324,45 @@ pub(super) fn connect(
                 graph,
             )?
         }
-        // A protocol loop requires hook composition: an explicit boundary,
-        // with no source interpreter embedded in the ISA.
-        doc::Node::Stmt(doc::Stmt::For { via: Some(_), .. }) => {
-            let first = source.first_event(site)?;
-            graph.insert(first.clone(), Edge::Boundary);
-            first
+        // A protocol `for` (`K-ITER-005`) opens what its iterable gave; its
+        // hooks are calls, whose results its header rows take, and its
+        // Test binds a pass. The header rows, appended with the loop's
+        // stages, route each call and find where the loop ends.
+        doc::Node::Stmt(doc::Stmt::For {
+            iterable,
+            body,
+            else_block,
+            via: Some(via),
+            ..
+        }) => {
+            let test = point(site, Phase::Test);
+            let body_entry = connect(
+                doc::Node::Block(body),
+                &site.child(1),
+                Some(test.clone()),
+                source,
+                graph,
+            )?;
+            if !else_block.is_empty() {
+                connect(
+                    doc::Node::Block(else_block),
+                    &site.child(2),
+                    Some(commit),
+                    source,
+                    graph,
+                )?;
+            }
+            graph.insert(test.clone(), Edge::Next(body_entry));
+            for (phase, _) in crate::compile::room::hooks(via) {
+                graph.insert(point(site, phase), Edge::Next(test.clone()));
+            }
+            connect(
+                doc::Node::Expr(iterable),
+                &site.child(0),
+                Some(point(site, Phase::Open)),
+                source,
+                graph,
+            )?
         }
         doc::Node::Expr(doc::Expr::Closure(_)) => commit,
         _ => {
@@ -767,6 +800,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         arguments: atoms.iter().map(|atom| atom.dst).collect(),
                         atoms,
                         result: sink,
+                        hook: None,
                     });
                     RegionOp::Call { site, next }
                 }
@@ -858,6 +892,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                             args
                         },
                         result: sink,
+                        hook: None,
                     });
                     RegionOp::Call { site, next }
                 }
@@ -947,6 +982,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                                 atoms: Box::new([]),
                                 arguments: args,
                                 result: dst,
+                                hook: None,
                             });
                             RegionOp::Call { site, next }
                         } else {
@@ -1060,6 +1096,76 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         ),
                     }
                 }
+                // A protocol `for`'s hook is a call whose result its header
+                // takes; a hook the region cannot call stops it.
+                (
+                    doc::Node::Stmt(doc::Stmt::For { via: Some(_), .. }),
+                    Phase::Open | Phase::Next | Phase::Check | Phase::Item,
+                    Some(next),
+                    None,
+                    Ok(_),
+                ) => {
+                    let statement = exe.stmt_at(code, &at.site).ok_or(Refused::Source)?;
+                    match CallPlan::compile_hook(exe, code, statement, at.phase) {
+                        Ok(plan) => {
+                            let (stream, _, _) = exe.statement(statement);
+                            let pc = plan.pc();
+                            let site =
+                                CallId(u32::try_from(calls.len()).map_err(|_| Refused::Facts)?);
+                            let cursor = reg(&roles, &source, &Owner::LoopCursor(at.site.clone()))?;
+                            calls.push(CallSite {
+                                at: at.clone(),
+                                origin: KirOrigin {
+                                    statement,
+                                    pc,
+                                    op: *stream.ops.get(pc as usize).ok_or(Refused::Path)?,
+                                },
+                                atoms: Box::new([]),
+                                arguments: match at.phase {
+                                    Phase::Open => Box::new([reg(
+                                        &roles,
+                                        &source,
+                                        &Owner::Operand(at.site.child(0)),
+                                    )?]),
+                                    Phase::Item => Box::new([
+                                        cursor,
+                                        reg(&roles, &source, &Owner::LoopHeader(at.site.clone()))?,
+                                    ]),
+                                    _ => Box::new([cursor]),
+                                },
+                                result: sink,
+                                hook: Some(at.phase),
+                            });
+                            RegionOp::Call { site, next }
+                        }
+                        Err(_) => RegionOp::Boundary {
+                            spec: BoundarySpec {
+                                action: None,
+                                at: at.clone(),
+                                origin,
+                                next: None,
+                            },
+                        },
+                    }
+                }
+                // A protocol `for`'s Test binds the item its header holds,
+                // or `item`'s result, and starts a pass.
+                (
+                    doc::Node::Stmt(doc::Stmt::For { via: Some(_), .. }),
+                    Phase::Test,
+                    Some(next),
+                    Some(dst),
+                    Ok(args),
+                ) if !args.is_empty() && event.entities.is_empty() => RegionOp::Checked {
+                    kernel: CheckedKernel {
+                        kind: CheckedKind::LoopItem {
+                            at: at.site.clone(),
+                        },
+                    },
+                    args,
+                    dst,
+                    next,
+                },
                 // A plain `for`'s Enter reads what it walks and refuses a
                 // value it cannot walk; it takes nothing.
                 (
@@ -1101,7 +1207,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                                     | doc::Stmt::If { .. }
                                     | doc::Stmt::While { .. }
                                     | doc::Stmt::Try(_)
-                                    | doc::Stmt::For { via: None, .. }
+                                    | doc::Stmt::For { .. }
                             )
                         ) =>
                 {
@@ -1199,13 +1305,13 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
         packing: Box::new([]),
         call_sources: calls
             .iter()
-            .map(|call| (call.origin.statement, call.origin.pc))
+            .map(|call| (call.origin.statement, call.origin.pc, call.hook))
             .collect(),
         calls: calls.into(),
         loops: program.loops,
         departures: Box::new([]),
     };
-    super::stages::append(&mut draft, sink)?;
+    super::stages::append(&mut draft)?;
     super::departures::append(&mut draft, sink)?;
     super::joins::append(&mut draft)?;
     draft.generic_ops = draft.ops.clone();

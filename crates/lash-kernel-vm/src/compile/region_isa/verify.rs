@@ -2,6 +2,7 @@
 //! It does not invoke the region emitter or execute a candidate semantic path.
 use super::*;
 mod types;
+mod via;
 use crate::compile::room::charges::region_isa as canonical;
 use crate::compile::room::publication::Successor;
 use crate::compile::room::{CallSource, Measure, Owner};
@@ -72,11 +73,19 @@ fn source_next(source: &Source, at: &Point) -> Result<Option<Point>, Refused> {
     {
         return Ok(None);
     }
+    // A protocol `for`'s Test starts the pass it binds.
+    if at.phase == Phase::Test
+        && matches!(node, doc::Node::Stmt(doc::Stmt::For { via: Some(_), .. }))
+    {
+        return source.first_event(&at.site.child(1)).map(Some);
+    }
     // A compound statement's Commit continues after it in its block.
     if at.phase == Phase::Commit
         && matches!(
             node,
-            doc::Node::Stmt(doc::Stmt::If { .. } | doc::Stmt::Try(_))
+            doc::Node::Stmt(
+                doc::Stmt::If { .. } | doc::Stmt::Try(_) | doc::Stmt::For { via: Some(_), .. }
+            )
         )
     {
         let mut parent = at.site.clone();
@@ -124,10 +133,23 @@ fn source_next(source: &Source, at: &Point) -> Result<Option<Point>, Refused> {
                     phase: Phase::Commit,
                 }));
             }
-            doc::Node::Stmt(doc::Stmt::For { via: None, .. }) if index == 1 => {
+            doc::Node::Stmt(doc::Stmt::For { .. }) if index == 1 => {
                 return Ok(Some(Point {
                     site: parent,
                     phase: Phase::Test,
+                }));
+            }
+            // A loop's `else` finishes at the loop's own Commit.
+            doc::Node::Stmt(doc::Stmt::For { .. } | doc::Stmt::While { .. })
+                if index == 2
+                    && source.room.events.contains_key(&Point {
+                        site: parent.clone(),
+                        phase: Phase::Commit,
+                    }) =>
+            {
+                return Ok(Some(Point {
+                    site: parent,
+                    phase: Phase::Commit,
                 }));
             }
             _ => {}
@@ -136,14 +158,16 @@ fn source_next(source: &Source, at: &Point) -> Result<Option<Point>, Refused> {
     if matches!(at.phase, Phase::Commit | Phase::Restore) && at.site != source.site {
         let mut parent = at.site.clone();
         if parent.path.pop() == Some(0)
-            && matches!(
-                resources::node(source, &parent)?,
-                doc::Node::Stmt(doc::Stmt::For { via: None, .. })
-            )
+            && let doc::Node::Stmt(doc::Stmt::For { via, .. }) = resources::node(source, &parent)?
         {
+            // A protocol `for` opens what its iterable gave.
             return Ok(Some(Point {
                 site: parent,
-                phase: Phase::Enter,
+                phase: if via.is_some() {
+                    Phase::Open
+                } else {
+                    Phase::Enter
+                },
             }));
         }
     }
@@ -177,7 +201,10 @@ fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refused> {
     };
     match &draft.ops[index] {
         RegionOp::Boundary { .. } => {}
-        RegionOp::Call { next, .. } => {
+        RegionOp::Call { site, next } => {
+            if let Some(hook) = draft.calls.get(site.offset()).and_then(|call| call.hook) {
+                return via::hook_edge(draft, step, hook, *next);
+            }
             // A statement call's completion is taken at its Commit, a
             // nested call's at its distinct Restore.
             let expected = Point {
@@ -833,7 +860,15 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                     return Err(Refused::Facts);
                 }
             }
-            CheckedKind::LoopControl { .. } => return Err(Refused::Source),
+            CheckedKind::LoopItem { at } => via::check_item(
+                source,
+                step,
+                at,
+                Some(*dst) == expected_output && expected_inputs.as_deref() == Ok(args.as_ref()),
+            )?,
+            CheckedKind::LoopControl { .. } | CheckedKind::Header { .. } => {
+                return Err(Refused::Source);
+            }
             // A plain `for`'s Enter reads only what it walks.
             CheckedKind::Phase
                 if step.at.phase == Phase::Enter
@@ -868,13 +903,11 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                                     | doc::Stmt::Continue
                             )
                     ) && !(step.at.phase == Phase::Catch
-                        && matches!(node, doc::Node::Stmt(doc::Stmt::For { via: None, .. })))
+                        && matches!(node, doc::Node::Stmt(doc::Stmt::For { .. })))
                         && !(step.at.phase == Phase::Commit
                             && matches!(
                                 node,
-                                doc::Node::Stmt(
-                                    doc::Stmt::Try(_) | doc::Stmt::For { via: None, .. }
-                                )
+                                doc::Node::Stmt(doc::Stmt::Try(_) | doc::Stmt::For { .. })
                             ))
                 {
                     return Err(Refused::Source);
@@ -901,13 +934,22 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 {
                     inputs.get(1..).ok_or(Refused::Facts)?
                 }
+                doc::Node::Stmt(doc::Stmt::For { via: Some(_), .. })
+                    if matches!(call.hook, Some(Phase::Next | Phase::Check | Phase::Item))
+                        && inputs.is_empty() =>
+                {
+                    atoms = via::hook_arguments(draft, step, call.hook.ok_or(Refused::Facts)?)?;
+                    &atoms[..]
+                }
                 _ => &inputs,
             };
             if call.at != step.at
                 || arguments != call.arguments.as_ref()
                 || Some(call.result)
                     != expected_output.or_else(|| {
-                        (step.at.phase == Phase::Enter)
+                        // An action, or a protocol hook whose header row
+                        // takes what it returned, resumes into the sink.
+                        (step.at.phase == Phase::Enter || call.hook.is_some())
                             .then(|| Reg::new(draft.roles.len()).ok())
                             .flatten()
                     })
@@ -989,14 +1031,9 @@ fn verify_layout(
     }
     let canonical_program = canonical::program(exe, code)?;
     let source_events = source.room.events.len();
+    let stages = super::stages::layout(&canonical_program.loops)?;
     let loop_steps = source_events
-        .checked_add(
-            canonical_program
-                .loops
-                .len()
-                .checked_mul(2)
-                .ok_or(Refused::Facts)?,
-        )
+        .checked_add(stages.len())
         .ok_or(Refused::Facts)?;
     if draft.steps.len() < loop_steps || draft.ops.len() < loop_steps {
         return Err(Refused::Exit);
@@ -1134,15 +1171,7 @@ fn verify_layout(
         check_op(exe, draft, index)?;
     }
     for index in source_events..loop_steps {
-        let expected = LoopStage {
-            info: u32::try_from((index - source_events) / 2).map_err(|_| Refused::Facts)?,
-            phase: if (index - source_events).is_multiple_of(2) {
-                LoopPhase::Enter
-            } else {
-                LoopPhase::Test
-            },
-        };
-        if draft.steps[index].stage != Some(expected) {
+        if draft.steps[index].stage != Some(stages[index - source_events]) {
             return Err(Refused::Source);
         }
         let step = &draft.steps[index];
@@ -1163,7 +1192,7 @@ fn verify_layout(
             .call_sources
             .iter()
             .zip(draft.calls.iter())
-            .any(|(source, call)| *source != (call.origin.statement, call.origin.pc))
+            .any(|(source, call)| *source != (call.origin.statement, call.origin.pc, call.hook))
     {
         return Err(Refused::Source);
     }
@@ -1441,11 +1470,10 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 }
             }
             for successor in recovery::successors(draft, index) {
-                let live = match &draft.ops[index] {
-                    RegionOp::Checked { kernel, .. } if matches!(kernel.kind(), CheckedKind::Cursor { exhausted, .. } if *exhausted == successor) => {
-                        before
-                    }
-                    _ => &after,
+                let live = if recovery::unaccepted(&draft.ops[index], successor) {
+                    before
+                } else {
+                    &after
                 };
                 match incoming.get(&successor.offset()) {
                     Some(prior) if prior != live => return Err(Refused::Exit),
@@ -1470,7 +1498,23 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 .iter()
                 .position(|step| step.at == *at)
                 .ok_or(Refused::Exit)?;
-            if let Some(live) = incoming.get(&base).cloned() {
+            if let Some(mut live) = incoming.get(&base).cloned() {
+                // A hook raises once its call is entered: what the call
+                // moved into its callee is gone.
+                if let RegionOp::Call { site, .. } = &draft.ops[base]
+                    && draft
+                        .calls
+                        .get(site.offset())
+                        .ok_or(Refused::Exit)?
+                        .hook
+                        .is_some()
+                {
+                    for owner in &draft.steps[base].event.inputs {
+                        if let Some(slot) = resources::role(source, owner).and_then(Role::slot) {
+                            live.remove(&slot);
+                        }
+                    }
+                }
                 incoming.insert(origin, live);
                 queue.push_back(origin);
             }

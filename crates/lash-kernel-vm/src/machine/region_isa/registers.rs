@@ -2,7 +2,7 @@ use super::operands::Operand;
 use super::storage::View;
 use super::{code::Register, *};
 #[derive(Clone, Copy)]
-struct Cell<T> {
+pub(super) struct Cell<T> {
     value: T,
     invocation: u64,
     valid: bool,

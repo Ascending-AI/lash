@@ -131,7 +131,9 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                         return Err(Refused::Retained);
                     }
                 }
-                CheckedKind::Cursor { .. } => {
+                CheckedKind::Cursor { .. }
+                | CheckedKind::Header { .. }
+                | CheckedKind::LoopItem { .. } => {
                     for reg in args {
                         read(&state, reg.offset())?;
                     }

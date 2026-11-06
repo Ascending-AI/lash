@@ -49,6 +49,7 @@ fn values(plan: &CalleePlan, inputs: &[(Slot, Value)]) -> Vec<(String, Value)> {
                         .1,
                 ),
                 Substitution::Absent { parameter } => (parameter.role.slot(), Value::Absent),
+                Substitution::Guard { .. } => unreachable!("a body call takes no guard counts"),
             };
             let name = plan
                 .source()

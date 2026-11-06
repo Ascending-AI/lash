@@ -15,6 +15,11 @@ pub(super) struct LoopState {
     /// A plain `for` over a map or a set: the sequence of the entry it
     /// last took.
     pub(super) last: Option<u64>,
+    /// A protocol `for`'s own cursor over a list, a tuple or a text: how
+    /// many items it has stepped.
+    pub(super) position: u64,
+    /// A protocol `for`'s guard over a map or a set it checks.
+    pub(super) guard: Option<super::call_bind::GuardArguments>,
 }
 #[derive(Clone, Copy)]
 pub(super) struct Edit {
@@ -29,27 +34,43 @@ pub(super) fn bind(
     let mut states = Vec::new();
     while let Some(info) = program.loop_info(states.len() as u32) {
         let mut state = LoopState::default();
-        if let Some((started, last)) = canonical.control.iter().find_map(|control| match control {
-            Control::While { stmt, started } if *stmt == info.statement => Some((*started, None)),
+        if let Some(found) = canonical.control.iter().find_map(|control| match control {
+            Control::While { stmt, started } if *stmt == info.statement => Some(LoopState {
+                active: true,
+                started: *started,
+                ..LoopState::default()
+            }),
             Control::For {
                 stmt,
                 started,
                 cursor,
-                ..
-            } if *stmt == info.statement => Some((
-                *started,
-                match cursor {
+                header,
+                guard,
+            } if *stmt == info.statement => Some(LoopState {
+                active: true,
+                started: *started,
+                last: match cursor {
                     Cursor::Map(_, last) | Cursor::Set(_, last) => last.map(|last| last.0),
                     _ => None,
                 },
-            )),
+                position: match cursor {
+                    Cursor::List(_, position) | Cursor::Tuple(_, position) => *position as u64,
+                    Cursor::Text(text) => text.position(),
+                    _ => 0,
+                },
+                // A guarded loop's `check` runs with an item held, or at
+                // exhaustion.
+                guard: guard
+                    .as_deref()
+                    .map(|guard| super::call_bind::GuardArguments {
+                        size: guard.size,
+                        remaining: guard.remaining,
+                        more: !matches!(header, Header::Exhausted),
+                    }),
+            }),
             _ => None,
         }) {
-            state = LoopState {
-                active: true,
-                started,
-                last,
-            };
+            state = found;
         }
         states
             .try_reserve(1)
@@ -85,7 +106,15 @@ impl Running<'_> {
         branch: Option<u32>,
         looping: Option<&crate::compile::region_isa::LoopDeparture>,
         taken: Option<u64>,
+        staged: Option<(u32, LoopState)>,
     ) -> Result<Option<Edit>, RegionError> {
+        // A protocol `for`'s header row gives the loop's next state.
+        if let Some((index, next)) = staged {
+            return Ok(Some(Edit {
+                index: self.loop_index(index)?,
+                next,
+            }));
+        }
         // A Break's Catch leaves its loop; a Continue's keeps it active.
         if let Some(crate::compile::region_isa::LoopDeparture::End { exits: Some(index) }) = looping
         {
@@ -109,11 +138,12 @@ impl Running<'_> {
                     let next = match stage.phase {
                         LoopPhase::Enter => LoopState {
                             active: true,
-                            started: 0,
-                            last: None,
+                            ..LoopState::default()
                         },
                         LoopPhase::Test if current.active => current,
-                        LoopPhase::Test => return Err(invalid(Refused::Facts)),
+                        // A protocol `for` enters before `open` gives what
+                        // it walks; its Opened row starts the walk.
+                        _ => return Err(invalid(Refused::Facts)),
                     };
                     (stage.info, next)
                 }
@@ -326,7 +356,22 @@ fn place(
                 });
             }
         }
-        Form::For { .. } | Form::Try { .. } if nested.is_some() => {
+        Form::For {
+            body, via: Some(_), ..
+        } => {
+            if let Some((info, state)) = active
+                && (nested.is_none() || nested == Some(*body))
+            {
+                values.push(header_control(
+                    code,
+                    info,
+                    state,
+                    roles,
+                    (nested.is_none() && point.site == statement.site).then_some(point.phase),
+                )?);
+            }
+        }
+        Form::Try { .. } if nested.is_some() => {
             return Err(invalid(Refused::Facts));
         }
         _ => {}
@@ -335,4 +380,82 @@ fn place(
         place(code, loops, roles, nested, point, values)?;
     }
     Ok(())
+}
+
+/// A protocol `for` as the frame records it (`K-ITER-005`): where its header
+/// stands at `phase` of the loop's own statement, or in its body, and what
+/// its cursor walks, which its cursor role holds once `open` has answered.
+fn header_control(
+    code: &super::Code,
+    info: &crate::compile::region_isa::LoopInfo,
+    state: &LoopState,
+    roles: &[(Slot, Value)],
+    phase: Option<crate::compile::room::Phase>,
+) -> Result<Control, RegionError> {
+    use crate::compile::room::Phase;
+    use crate::machine::loops::{Guard, TextCursor};
+    let index = code
+        .program
+        .loop_at(&info.site)
+        .ok_or_else(|| invalid(Refused::Facts))?;
+    let via = info.via.ok_or_else(|| invalid(Refused::Facts))?;
+    let (walked, held) = code
+        .program
+        .loop_header_slots(index)
+        .ok_or_else(|| invalid(Refused::Facts))?;
+    let role = |slot: Slot| {
+        roles
+            .iter()
+            .find_map(|(actual, value)| (*actual == slot).then_some(*value))
+    };
+    let item = || {
+        role(held)
+            .map(Box::new)
+            .ok_or_else(|| invalid(Refused::Facts))
+    };
+    let header = match phase {
+        Some(Phase::Open | Phase::Restore) => Header::Open,
+        Some(Phase::Next | Phase::Fallthrough) => Header::Pull,
+        Some(Phase::Check | Phase::Supersede) => match role(held) {
+            Some(Value::Absent) => Header::Exhausted,
+            Some(value) => Header::Check(Box::new(value)),
+            None => return Err(invalid(Refused::Facts)),
+        },
+        Some(Phase::Item) => Header::Item(item()?),
+        Some(Phase::Test) if via.item => Header::Item(item()?),
+        _ => Header::Body,
+    };
+    if matches!(header, Header::Open) {
+        return Ok(Control::For {
+            stmt: info.statement,
+            cursor: Cursor::Opening,
+            started: state.started,
+            header,
+            guard: None,
+        });
+    }
+    let position = usize::try_from(state.position).map_err(|_| invalid(Refused::Facts))?;
+    let cursor = match role(walked).ok_or_else(|| invalid(Refused::Facts))? {
+        Value::List(id) => Cursor::List(id, position),
+        Value::Tuple(tuple) => Cursor::Tuple(tuple, position),
+        Value::Map(id) => Cursor::Map(id, state.last.map(TableCursor)),
+        Value::Set(id) => Cursor::Set(id, state.last.map(TableCursor)),
+        text @ (Value::Text(_) | Value::LongText(_)) => {
+            Cursor::Text(Box::new(TextCursor::new(text, state.position)))
+        }
+        driver if via.next => Cursor::Driver(Box::new(driver)),
+        _ => return Err(invalid(Refused::Facts)),
+    };
+    Ok(Control::For {
+        stmt: info.statement,
+        cursor,
+        started: state.started,
+        header,
+        guard: state.guard.map(|guard| {
+            Box::new(Guard {
+                size: guard.size,
+                remaining: guard.remaining,
+            })
+        }),
+    })
 }

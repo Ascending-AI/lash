@@ -7,6 +7,7 @@ mod canonical;
 mod charge;
 mod control;
 mod flow;
+mod header;
 mod heap;
 #[cfg(test)]
 mod laws;

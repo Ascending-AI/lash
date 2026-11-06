@@ -84,6 +84,9 @@ impl Running<'_> {
                                 .map_err(RegionError::Heap)
                         })
                         .collect::<Result<_, RegionError>>()?;
+                    if let Some(guard) = self.hook_guard(depth - 1, &parked.code, call)? {
+                        args.extend(guard.values());
+                    }
                     args.resize(code.exe.lib(lib).arity, Value::Absent);
                     Ok::<_, RegionError>(crate::machine::LibraryCall {
                         lib,

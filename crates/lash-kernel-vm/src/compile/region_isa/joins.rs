@@ -73,8 +73,17 @@ fn redirect(op: &mut RegionOp, old: Pc, new: Pc) {
         | RegionOp::Call { next, .. } => replace(next),
         RegionOp::Checked { kernel, next, .. } => {
             replace(next);
-            if let CheckedKind::Cursor { exhausted, .. } = &mut kernel.kind {
-                replace(exhausted);
+            match &mut kernel.kind {
+                CheckedKind::Cursor { exhausted, .. } => replace(exhausted),
+                CheckedKind::Header { driver, ended, .. } => {
+                    if let Some(driver) = driver {
+                        replace(driver);
+                    }
+                    if let Some(ended) = ended {
+                        replace(ended);
+                    }
+                }
+                _ => {}
             }
         }
         RegionOp::Branch { yes, no, .. } => {

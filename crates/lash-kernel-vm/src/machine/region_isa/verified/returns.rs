@@ -108,7 +108,10 @@ impl Running<'_> {
                         .library
                         .as_ref()
                         .ok_or_else(|| invalid(Refused::Facts))?;
-                    for value in library.args.iter().take(call.arguments.len()) {
+                    let guarded = self
+                        .hook_guard(self.parked.len() - 1, &parked.code, call)?
+                        .map_or(0, |_| 3);
+                    for value in library.args.iter().take(call.arguments.len() + guarded) {
                         self.call_values
                             .push(self.view.import(value).map_err(RegionError::Heap)?);
                     }
@@ -120,6 +123,14 @@ impl Running<'_> {
                                 .bind(&mut self.view)
                                 .map_err(RegionError::Heap)?,
                         );
+                    }
+                    if let Some(guard) =
+                        self.hook_guard(self.parked.len() - 1, &parked.code, call)?
+                    {
+                        for value in guard.values() {
+                            self.call_values
+                                .push(self.view.import(&value).map_err(RegionError::Heap)?);
+                        }
                     }
                 }
             }

@@ -259,22 +259,14 @@ impl Running<'_> {
                 next,
             } => {
                 let value = match kernel.kind() {
+                    // A plain `for` is entered once its Enter admitted
+                    // what it walks, a protocol `for` before `open` gives
+                    // what it walks; the loop's state edit is the control's.
                     CheckedKind::LoopControl { stage, .. } => {
-                        let info = self
-                            .code
+                        self.code
                             .program
                             .loop_info(stage.info)
                             .ok_or_else(|| invalid(Refused::Facts))?;
-                        // A plain `for` is entered once its Enter admitted
-                        // what it walks; a protocol loop is not run here.
-                        if !info.while_loop
-                            && !matches!(
-                                self.code.exe.stmt(info.statement).form,
-                                crate::compile::Form::For { via: None, .. }
-                            )
-                        {
-                            return Ok(None);
-                        }
                         return Ok(Some(ScalarAnswer {
                             write: None,
                             next: *next,
