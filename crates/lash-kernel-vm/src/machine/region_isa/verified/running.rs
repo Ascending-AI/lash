@@ -18,10 +18,8 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) departing: Option<super::returns::Departure>,
     /// The origin of a Break/Continue whose scope Leaves are running.
     pub(super) looping: Option<Point>,
-    /// Which root session cells the lease holds, and which it wrote.
+    /// Which session bank cells the lease holds, and which it wrote.
     pub(super) sessions: Box<[SessionState]>,
-    /// The held session values captured when the root frame left.
-    pub(super) closed_sessions: Option<SessionValues>,
     pub(super) returning: Option<super::returns::Incoming>,
     /// The step at this point the machine served, with a native's answer,
     /// taken by that step alone.
@@ -52,7 +50,7 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(in crate::machine::region_isa) faulted: bool,
     pub(in crate::machine::region_isa) canonical: Box<crate::machine::Frame>,
 }
-/// Held root session cells by index, with their current values.
+/// Held session cells by bank cell, with their current values.
 pub(super) type SessionValues = Box<[(usize, operands::Operand<LeaseValue>)]>;
 #[derive(Clone, Copy, Default)]
 pub(super) struct SessionState {
@@ -60,32 +58,18 @@ pub(super) struct SessionState {
     pub(super) written: bool,
 }
 impl<'m> Running<'m> {
-    /// The root frame's code, which alone may own main session cells.
-    pub(super) fn root_code(&self) -> &Arc<Code> {
-        self.parked
-            .first()
-            .map_or(&self.code, |parked| &parked.code)
-    }
-    /// The root frame's current invocation.
-    pub(super) fn root_invocation(&self) -> u64 {
-        self.parked
-            .first()
-            .map_or(self.reached.invocation, |parked| parked.reached.invocation)
-    }
-    /// The held root session cells and their current values.
+    /// The held session cells and their current values, read from the
+    /// lease-wide bank whichever frame stands.
     pub(super) fn session_values(&self) -> Result<SessionValues, RegionError> {
-        if let Some(closed) = &self.closed_sessions {
-            return Ok(closed.clone());
-        }
-        let invocation = self.root_invocation();
-        self.root_code()
-            .sessions
+        self.sessions
             .iter()
-            .zip(&self.sessions)
             .enumerate()
-            .filter(|(_, (_, state))| state.held)
-            .map(|(index, (cell, _))| {
-                Ok((index, self.registers.read(0, invocation, cell.register)?))
+            .filter(|(_, state)| state.held)
+            .map(|(bank, _)| {
+                let register = code::Register::Session(
+                    u32::try_from(bank).map_err(|_| invalid(Refused::Facts))?,
+                );
+                Ok((bank, self.registers.read(0, 0, register)?))
             })
             .collect()
     }
@@ -131,7 +115,8 @@ impl<'m> Running<'m> {
         {
             return Err(invalid(Refused::Facts));
         }
-        let mut registers = registers::Registers::new(programs.registers, 1)?;
+        let mut registers =
+            registers::Registers::new(programs.registers, 1, programs.sessions.len())?;
         for (reg, value) in values {
             registers.write(
                 &mut view,
@@ -188,8 +173,7 @@ impl<'m> Running<'m> {
             canonical_callees: Vec::new(),
             departing: None,
             looping: None,
-            sessions: vec![SessionState::default(); code.sessions.len()].into(),
-            closed_sessions: None,
+            sessions: vec![SessionState::default(); programs.sessions.len()].into(),
             returning: None,
             served: None,
             complete: false,

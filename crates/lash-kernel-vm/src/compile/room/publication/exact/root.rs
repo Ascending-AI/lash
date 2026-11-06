@@ -135,10 +135,7 @@ impl ExactEvent {
                             };
                             activation.value(slot).ok_or(Refused::Facts)?
                         }
-                        None if self.source.site.unit == lash_kernel_value::sites::Unit::Main => {
-                            sessions.value(name, ledger).ok_or(Refused::Facts)?
-                        }
-                        None => return Err(Refused::Source),
+                        None => sessions.value(name, ledger).ok_or(Refused::Facts)?,
                     }
                 }
                 doc::Atom::Literal(literal) => match literal {

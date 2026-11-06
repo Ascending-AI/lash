@@ -8,6 +8,9 @@ pub(super) enum Register {
     Float(u32),
     Bool(u32),
     Value(u32),
+    /// A session cell's lease-wide bank cell: one per digest, shared by
+    /// every frame and outside any frame's bank.
+    Session(u32),
 }
 #[derive(Clone, Copy)]
 pub(super) enum Op {

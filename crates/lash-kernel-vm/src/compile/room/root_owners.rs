@@ -22,7 +22,40 @@ pub(super) fn form(source: &Source, owners: &BTreeSet<Owner>) -> Result<Resoluti
             )
         })
         .collect();
-    let (scopes, aliases) = resolve(source, owners)?;
+    let (scopes, mut aliases) = resolve(source, owners)?;
+    // A name the body only reads names a session cell too: the session
+    // group holds every cell the body names, read or written.
+    let mut pending = vec![(source.site.clone(), doc::Node::Block(&source.body))];
+    while let Some((at, node)) = pending.pop() {
+        let read = match node {
+            doc::Node::Expr(doc::Expr::Variable(name)) => Some(name),
+            doc::Node::Expr(doc::Expr::Act(act)) => match &act.kind {
+                doc::ActKind::Call(doc::Callee::Value(name))
+                | doc::ActKind::Spawn(doc::Callee::Value(name)) => Some(name),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(name) = read
+            && visible(&scopes, &at, name).is_none()
+        {
+            aliases
+                .entry(Owner::Visible {
+                    at: at.clone(),
+                    name: name.clone(),
+                })
+                .or_insert_with(|| Owner::SessionCell {
+                    at: source.site.clone(),
+                    name: name.clone(),
+                });
+        }
+        pending.extend(
+            node.children()
+                .into_iter()
+                .enumerate()
+                .map(|(index, node)| (child(&at, index), node)),
+        );
+    }
     Ok((scopes, aliases, binding_slots))
 }
 fn resolve(source: &Description, owners: &BTreeSet<Owner>) -> Result<(Scopes, Aliases), Refused> {
@@ -55,9 +88,13 @@ fn resolve(source: &Description, owners: &BTreeSet<Owner>) -> Result<(Scopes, Al
             aliases.insert(owner.clone(), Owner::Operand(at.clone()));
         }
         if let Owner::Visible { at, name } = owner {
+            // A name no binding of the unit declares is the session's: main
+            // reads its own cells, and a closure resolves its free names
+            // there once its lexical bindings and captures are excluded
+            // (`Scopes::resolve_in`); a capture is a binding at the body.
             if let Some(binding) = visible(&scopes, at, name) {
                 aliases.insert(owner.clone(), binding.clone());
-            } else if source.site.unit == Unit::Main {
+            } else {
                 aliases.insert(
                     owner.clone(),
                     Owner::SessionCell {
@@ -287,8 +324,11 @@ impl OwnerSlots {
             (Owner::Sessions(_), Owner::SessionCell { .. }) => true,
             _ => false,
         };
+        // A session cell a name resolves to stands only as that name's
+        // alias: it is a member as the slots' own owners are.
         self.slots
             .keys()
+            .chain(self.aliases.values())
             .filter(|owner| included(owner))
             .filter_map(|owner| self.root(owner, TaskId::MAIN, 0))
             .collect::<BTreeSet<_>>()

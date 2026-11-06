@@ -425,6 +425,7 @@ impl Source {
             blocks: &'a [Site],
             choices: &'a BTreeMap<Site, bool>,
             for_sites: &'a std::collections::BTreeSet<Site>,
+            whiles: &'a std::collections::BTreeSet<Site>,
             raised: &'a std::collections::BTreeSet<Site>,
             route: &'a [Selection],
             cursor: usize,
@@ -453,11 +454,18 @@ impl Source {
                     && ((site == self.returning && phase != self.phase)
                         || (phase == Phase::Enter && self.blocks.contains(site))
                         || (phase == Phase::Test && self.choices.contains_key(site))
+                        // A while's setup and repeated-test overhead.
+                        || (matches!(phase, Phase::Enter | Phase::Next)
+                            && self.whiles.contains(site))
                         || (phase == Phase::Catch && self.raised.contains(site))
                         || (self.for_sites.contains(site)
                             && matches!(
                                 phase,
-                                Phase::Open | Phase::Next | Phase::Check | Phase::Item
+                                Phase::Enter
+                                    | Phase::Open
+                                    | Phase::Next
+                                    | Phase::Check
+                                    | Phase::Item
                             )))
                 {
                     return Ok(ExitKind::Normal);
@@ -486,11 +494,17 @@ impl Source {
                 )
             }
         }
+        let whiles: std::collections::BTreeSet<Site> = return_loops
+            .iter()
+            .filter(|site| !for_sites.contains(*site))
+            .cloned()
+            .collect();
         let mut suffix = Suffix {
             returning: &at.site,
             blocks: &blocks,
             choices: &choices,
             for_sites: &for_sites,
+            whiles: &whiles,
             raised: &raised,
             route: &route,
             cursor: 0,
@@ -503,7 +517,8 @@ impl Source {
             route.len()
                 + blocks.len()
                 + choices.len()
-                + 4 * for_sites.len()
+                + 5 * for_sites.len()
+                + 2 * whiles.len()
                 + raised.len()
                 // A raising event's completed earlier phases at its own site.
                 + if raising.is_some() {

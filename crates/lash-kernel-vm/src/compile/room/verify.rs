@@ -257,12 +257,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     Owner::Scope(source.site.clone()),
                     Owner::Operands(source.site.clone()),
                     Owner::Departures(source.site.clone()),
+                    Owner::Sessions(source.site.clone()),
                 ]
-                .into_iter()
-                .chain(
-                    (source.site.unit == Unit::Main).then(|| Owner::Sessions(source.site.clone())),
-                )
-                .collect();
+                .into();
                 if e.owners != owners {
                     return Err(Refused::Exit);
                 }

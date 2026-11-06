@@ -199,9 +199,6 @@ impl Running<'_> {
         if step.at.site != self.code.program.source().site {
             return Err(invalid(Refused::Path));
         }
-        if self.parked.is_empty() {
-            self.closed_sessions = Some(self.session_values()?);
-        }
         self.registers.clear(self.frame_index())?;
         self.counters.depth = self
             .counters

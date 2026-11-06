@@ -16,22 +16,21 @@ pub(in crate::machine::region_isa) struct Code {
     pub(in crate::machine::region_isa) program: Arc<RegionCode>,
     pub(in crate::machine::region_isa) bindings: Arc<[u32]>,
     pub(in crate::machine::region_isa) calls: Box<[Option<Call>]>,
-    /// Durable main session cells, in the order of their verified roles.
-    pub(super) sessions: Box<[SessionCell]>,
+    /// The session cells the code names, by lease-wide bank cell.
+    pub(super) sessions: Box<[(u32, SessionCell)]>,
 }
 
-/// A durable main session cell: its logical owner digest, its name and its register.
+/// A durable session cell: its logical owner digest and its name.
+#[derive(Clone)]
 pub(super) struct SessionCell {
     pub(super) digest: [u8; 32],
     pub(super) name: crate::compile::BindingName,
-    pub(super) register: Register,
 }
 
-/// The position of a session register among the verified session roles.
 /// The ordinal among the region's session roles of the one `register`
 /// holds. Roles are sorted and numbered in order, so a role's register is
 /// its index and the session roles are contiguous.
-pub(super) fn session_index(code: &RegionCode, register: u32) -> Option<usize> {
+fn session_index(code: &RegionCode, register: u32) -> Option<usize> {
     let roles = code.roles();
     let index = usize::try_from(register).ok()?;
     let session = |(role, _): &(Role, _)| matches!(role, Role::Session(_));
@@ -70,7 +69,19 @@ pub(in crate::machine::region_isa) fn physical<T>(
     code: &RegionCode,
     reg: Reg<T>,
 ) -> Result<Register, RegionError> {
-    let index = reg.index();
+    physical_index(code, reg.index())
+}
+
+/// The physical register of `code`'s register `index`: a session role's
+/// lease-wide bank cell, else the frame register of its kind.
+pub(super) fn physical_index(code: &RegionCode, index: u32) -> Result<Register, RegionError> {
+    if let Some(ordinal) = session_index(code, index) {
+        return code
+            .session_banks()
+            .get(ordinal)
+            .map(|&bank| Register::Session(bank))
+            .ok_or_else(|| invalid(Refused::Facts));
+    }
     Ok(
         match code
             .registers()
@@ -271,21 +282,24 @@ impl Code {
         let sessions = program
             .roles()
             .iter()
-            .filter_map(|(role, reg)| match role {
-                Role::Session(digest) => Some((*digest, *reg)),
+            .filter_map(|(role, _)| match role {
+                Role::Session(digest) => Some(*digest),
                 Role::Slot(_) => None,
             })
-            .map(|(digest, reg)| {
-                Ok(SessionCell {
-                    digest,
-                    name: crate::compile::BindingName::new(
-                        slots
-                            .session_name(&digest)
-                            .ok_or_else(|| invalid(Refused::Facts))?
-                            .clone(),
-                    ),
-                    register: physical(program, reg)?,
-                })
+            .zip(program.session_banks())
+            .map(|(digest, &bank)| {
+                Ok((
+                    bank,
+                    SessionCell {
+                        digest,
+                        name: crate::compile::BindingName::new(
+                            slots
+                                .session_name(&digest)
+                                .ok_or_else(|| invalid(Refused::Facts))?
+                                .clone(),
+                        ),
+                    },
+                ))
             })
             .collect::<Result<_, RegionError>>()?;
         Ok(Arc::new(Self {

@@ -133,9 +133,11 @@ impl<'m> RegionLease<'m> {
         {
             inputs.push(Owner::Incoming(task_id));
         }
-        // Main session cells held before entry enter as root registers.
+        // Each held session cell any bound code names enters the lease's
+        // bank once; importing a holding adds none.
         let mut sessions = Vec::new();
-        for (index, cell) in root_code.sessions.iter().enumerate() {
+        for (bank, cell) in programs.sessions.iter().enumerate() {
+            let Some(cell) = cell else { continue };
             let owner = Owner::Session(cell.digest);
             if machine
                 .logical
@@ -155,7 +157,7 @@ impl<'m> RegionLease<'m> {
                 .ok_or_else(|| invalid(Refused::Facts))?;
             inputs.push(owner);
             dependencies.push(value);
-            sessions.push((index, cell.register, value));
+            sessions.push((bank, value));
         }
         dependencies.extend(machine.regs.region_values().map(|(_, value)| value));
         // A step served outside the region enters with its answer, for the
@@ -246,15 +248,15 @@ impl<'m> RegionLease<'m> {
             &mut machine.limiters,
         )?;
         execution.reached = super::resume::reached(&execution.canonical, positions[0].1)?;
-        for (index, register, value) in sessions {
+        for (bank, value) in sessions {
             execution.registers.write(
                 &mut execution.view,
                 0,
                 entry_invocation,
-                register,
+                code::Register::Session(u32::try_from(bank).map_err(|_| invalid(Refused::Facts))?),
                 operands::Operand::Immediate(value),
             )?;
-            execution.sessions[index].held = true;
+            execution.sessions[bank].held = true;
         }
         let mut activation = None;
         for (offset, frame) in stack.into_iter().enumerate() {

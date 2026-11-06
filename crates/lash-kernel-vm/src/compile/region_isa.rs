@@ -60,6 +60,8 @@ pub(crate) struct RegionDraft {
 pub(crate) struct RegionCode {
     draft: Arc<RegionDraft>,
     calls: Arc<[CallPlan]>,
+    /// The lease-wide session bank cell of each session role, in role order.
+    sessions: Arc<[u32]>,
     generic: bool,
 }
 
@@ -546,6 +548,14 @@ impl Executable {
             .is_ok_and(|mut reached| reached.insert((caller, site, target)))
     }
 
+    /// The lease-wide bank cell of session `digest`: every code naming the
+    /// digest shares it.
+    fn session_bank(&self, digest: [u8; 32]) -> Result<u32, Refused> {
+        let mut banks = self.session_banks.lock().map_err(|_| Refused::Source)?;
+        let next = u32::try_from(banks.len()).map_err(|_| Refused::Facts)?;
+        Ok(*banks.entry(digest).or_insert(next))
+    }
+
     /// The targets runs have reached through `caller`'s dynamic call `site`.
     pub(crate) fn dynamic_targets(&self, caller: CodeId, site: u32) -> Vec<CodeId> {
         self.dynamic_targets.lock().map_or_else(
@@ -567,9 +577,18 @@ pub(crate) fn verify_region(
     calls: &[CallPlan],
 ) -> Result<Arc<RegionCode>, Refused> {
     verify::verify(exe, code, &draft, calls)?;
+    let sessions = draft
+        .roles
+        .iter()
+        .filter_map(|(role, _)| match role {
+            Role::Session(digest) => Some(exe.session_bank(*digest)),
+            Role::Slot(_) => None,
+        })
+        .collect::<Result<_, _>>()?;
     Ok(Arc::new(RegionCode {
         draft: Arc::new(draft),
         calls: calls.to_vec().into(),
+        sessions,
         generic: false,
     }))
 }
@@ -601,6 +620,7 @@ impl RegionCode {
         Arc::new(Self {
             draft: Arc::clone(&self.draft),
             calls: Arc::clone(&self.calls),
+            sessions: Arc::clone(&self.sessions),
             generic: true,
         })
     }
@@ -613,6 +633,10 @@ impl RegionCode {
     }
     pub(crate) fn entry(&self) -> Pc {
         self.draft.entry
+    }
+    /// The lease-wide bank cells of the session roles, in role order.
+    pub(crate) fn session_banks(&self) -> &[u32] {
+        &self.sessions
     }
     pub(crate) fn op(&self, pc: Pc) -> Option<&RegionOp> {
         if self.generic {

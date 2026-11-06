@@ -287,17 +287,14 @@ impl Running<'_> {
         };
         let write = dst
             .map(|destination| {
-                if !matches!(
-                    super::bind::physical(&code.program, destination)?,
-                    code::Register::Value(_)
-                ) {
+                // A heap result lands in a frame value register; a session
+                // cell is written only through a priced flow.
+                let register = super::bind::physical(&code.program, destination)?;
+                if !matches!(register, code::Register::Value(_)) {
                     return Err(invalid(Refused::Facts));
                 }
-                self.registers.prepare_dynamic(
-                    self.parked.len(),
-                    self.reached.invocation,
-                    destination.index(),
-                )
+                self.registers
+                    .prepare_dynamic(self.parked.len(), self.reached.invocation, register)
             })
             .transpose()?;
         let ready = phase.reserve().map_err(RegionError::Heap)?;

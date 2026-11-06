@@ -200,16 +200,17 @@ impl<'m> Running<'m> {
         ),
         RegionError,
     > {
-        let code = self.root_code();
         let mut held = Vec::new();
         let mut written = Vec::new();
-        for (index, value) in self.session_values()? {
-            let cell = code
+        for (bank, value) in self.session_values()? {
+            let cell = self
+                .programs
                 .sessions
-                .get(index)
+                .get(bank)
+                .and_then(Option::as_ref)
                 .ok_or_else(|| invalid(Refused::Facts))?;
             held.push((cell.digest, value));
-            if self.sessions[index].written {
+            if self.sessions[bank].written {
                 written.push((
                     cell.name.clone(),
                     value.materialize(graph).map_err(RegionError::Heap)?,

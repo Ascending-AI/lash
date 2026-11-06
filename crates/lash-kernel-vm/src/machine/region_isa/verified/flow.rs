@@ -157,18 +157,16 @@ impl Flow {
                                     let quote = regs
                                         .iter()
                                         .filter_map(|reg| {
-                                            if let Some(index) =
-                                                super::bind::session_index(code, reg.index())
-                                            {
-                                                return Some(
-                                                    super::bind::physical(code, *reg).map(
-                                                        |register| Root {
-                                                            register,
-                                                            capture: false,
-                                                            session: Some(index),
-                                                        },
-                                                    ),
-                                                );
+                                            match super::bind::physical(code, *reg) {
+                                                Ok(register @ Register::Session(bank)) => {
+                                                    return Some(Ok(Root {
+                                                        register,
+                                                        capture: false,
+                                                        session: Some(bank as usize),
+                                                    }));
+                                                }
+                                                Err(error) => return Some(Err(error)),
+                                                Ok(_) => {}
                                             }
                                             held.get(&reg.index())
                                                 .map(|slot| root(*slot, *reg))
@@ -238,16 +236,13 @@ impl Flow {
             },
             _ => None,
         };
-        let session = destination.and_then(|index| super::bind::session_index(code, index));
         let destination = destination
-            .map(|index| match code.registers().get(index as usize) {
-                Some(crate::compile::region_isa::RegisterKind::Value) => Ok(Register::Value(index)),
-                Some(crate::compile::region_isa::RegisterKind::Int) => Ok(Register::Int(index)),
-                Some(crate::compile::region_isa::RegisterKind::Float) => Ok(Register::Float(index)),
-                Some(crate::compile::region_isa::RegisterKind::Bool) => Ok(Register::Bool(index)),
-                None => Err(invalid(Refused::Facts)),
-            })
+            .map(|index| super::bind::physical_index(code, index))
             .transpose()?;
+        let session = match destination {
+            Some(Register::Session(bank)) => Some(bank as usize),
+            _ => None,
+        };
         Ok(Self {
             frame_delta: if matches!(code.op(pc), Some(RegionOp::Exit { .. }))
                 && step.at.site == code.source().site
@@ -333,14 +328,10 @@ fn release_roots(
                     .iter()
                     .find_map(|(role, reg)| (*role == Role::Session(digest)).then_some(*reg))
                     .ok_or_else(|| invalid(Refused::Facts))?;
-                (
-                    reg,
-                    false,
-                    Some(
-                        super::bind::session_index(code, reg.index())
-                            .ok_or_else(|| invalid(Refused::Facts))?,
-                    ),
-                )
+                let Register::Session(bank) = super::bind::physical(code, reg)? else {
+                    return Err(invalid(Refused::Facts));
+                };
+                (reg, false, Some(bank as usize))
             }
             _ => return Err(invalid(Refused::Facts)),
         };

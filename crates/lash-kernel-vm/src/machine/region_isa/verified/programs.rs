@@ -15,6 +15,9 @@ pub(super) struct Programs {
     pub(super) loops: usize,
     pub(super) parameters: usize,
     pub(super) captures: usize,
+    /// The session cells any bound code names, by lease-wide bank cell:
+    /// the lease's one cell per digest.
+    pub(super) sessions: Box<[Option<super::bind::SessionCell>]>,
 }
 
 impl Programs {
@@ -51,8 +54,26 @@ impl Programs {
             loops: 0,
             parameters: 0,
             captures: 0,
+            sessions: Box::new([]),
         };
+        let mut sessions: Vec<Option<super::bind::SessionCell>> = Vec::new();
         while let Some(code) = pending.pop() {
+            for (bank, cell) in &code.sessions {
+                let bank = *bank as usize;
+                if bank >= sessions.len() {
+                    sessions
+                        .try_reserve(bank + 1 - sessions.len())
+                        .map_err(|_| invalid(Refused::Scratch))?;
+                    sessions.resize(bank + 1, None);
+                }
+                match &sessions[bank] {
+                    Some(known) if known.digest != cell.digest => {
+                        return Err(invalid(Refused::Facts));
+                    }
+                    Some(_) => {}
+                    None => sessions[bank] = Some(cell.clone()),
+                }
+            }
             result.registers = result.registers.max(code.program.registers().len());
             result.arguments = result.arguments.max(code.arguments);
             result.captures = result.captures.max(code.captures);
@@ -135,6 +156,7 @@ impl Programs {
                 .unwrap_or(0),
         );
         result.codes = codes.into();
+        result.sessions = sessions.into();
         Ok(Arc::new(result))
     }
 

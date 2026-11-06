@@ -14,8 +14,10 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
             initial[reg.offset()] = Some(RegisterKind::Value);
         }
     }
-    for (slot, reg) in &draft.roles {
-        if slot.capture() {
+    // A capture enters with its frame; a session cell is the lease's and
+    // holds whatever the lease imported or an earlier frame wrote.
+    for (role, reg) in &draft.roles {
+        if role.capture() || matches!(role, Role::Session(_)) {
             initial[reg.offset()] = Some(RegisterKind::Value);
         }
     }

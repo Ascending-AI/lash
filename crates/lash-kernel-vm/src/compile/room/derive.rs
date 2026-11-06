@@ -381,10 +381,9 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                 Owner::Scope(source.clone()),
                 Owner::Operands(source.clone()),
                 Owner::Departures(source.clone()),
+                Owner::Sessions(source.clone()),
             ]
-            .into_iter()
-            .chain((source.unit == Unit::Main).then(|| Owner::Sessions(source.clone())))
-            .collect();
+            .into();
             exits.push(Exit {
                 point: e.point.clone(),
                 charge_prefix: e.point.clone(),

@@ -451,6 +451,9 @@ pub(crate) struct Executable {
     /// The dynamic call targets runs have reached, by caller code, call
     /// site and target code: what a lease binds beside its static calls.
     dynamic_targets: std::sync::Mutex<std::collections::BTreeSet<(CodeId, u32, CodeId)>>,
+    /// Each session cell digest a region names, numbered in the order the
+    /// executable first verified it: one lease-wide bank cell per digest.
+    session_banks: std::sync::Mutex<BTreeMap<[u8; 32], u32>>,
 }
 
 /// Immutable document tables, independent of any run or owning document.

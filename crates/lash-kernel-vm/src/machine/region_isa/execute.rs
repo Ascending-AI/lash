@@ -79,7 +79,7 @@ impl<V: View> Execution<V> {
         {
             return Err(invalid(Refused::Facts));
         }
-        let mut registers = Registers::new(programs.registers, 1)?;
+        let mut registers = Registers::new(programs.registers, 1, 0)?;
         for (reg, value) in &entry.values {
             registers.write(
                 &mut view,

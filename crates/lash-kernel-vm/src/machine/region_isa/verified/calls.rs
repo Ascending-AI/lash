@@ -455,7 +455,9 @@ impl Running<'_> {
             if !charge::fits_memory(self.limiters, &mut self.limits, peak) {
                 return Err(invalid(Refused::Peak));
             }
-            let write = self.registers.prepare_dynamic(frame, invocation, index)?;
+            let write =
+                self.registers
+                    .prepare_dynamic(frame, invocation, code::Register::Value(index))?;
             let ready = phase.reserve().map_err(RegionError::Heap)?;
             let cell = ready.accept();
             if cell.is_none() {

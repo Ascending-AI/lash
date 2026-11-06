@@ -97,9 +97,8 @@ pub(super) fn role(source: &Source, owner: &Owner) -> Option<Role> {
         };
         match crate::compile::room::root_owners::visible(&slots.scopes, at, name) {
             Some(binding) => slots.root(binding, doc::TaskId::MAIN, 0),
-            // Main resolves a name without a lexical binding to its session cell.
-            None => (source.site.unit == lash_kernel_value::sites::Unit::Main)
-                .then(|| Root::session(name)),
+            // A name without a lexical binding is a session cell's.
+            None => Some(Root::session(name)),
         }
     })?;
     root_role(root)

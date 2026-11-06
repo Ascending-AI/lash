@@ -21,10 +21,14 @@ pub(super) struct Registers<V: Copy> {
     floats: Vec<Cell<f64>>,
     bools: Vec<Cell<bool>>,
     values: Vec<Cell<Option<V>>>,
+    /// The lease-wide session bank, by bank cell. Frames neither enter nor
+    /// clear it, and a session cell is valid from its import or first
+    /// write on, whichever invocation reads it.
+    sessions: Vec<Option<V>>,
     width: usize,
 }
 impl<V: Copy> Registers<V> {
-    pub(super) fn new(width: usize, frames: usize) -> Result<Self, RegionError> {
+    pub(super) fn new(width: usize, frames: usize, sessions: usize) -> Result<Self, RegionError> {
         let count = width
             .checked_mul(frames)
             .ok_or_else(|| invalid(Refused::Facts))?;
@@ -41,6 +45,14 @@ impl<V: Copy> Registers<V> {
             floats: bank(count)?,
             bools: bank(count)?,
             values: bank(count)?,
+            sessions: {
+                let mut cells = Vec::new();
+                cells
+                    .try_reserve_exact(sessions)
+                    .map_err(|_| invalid(Refused::Scratch))?;
+                cells.resize(sessions, None);
+                cells
+            },
             width,
         })
     }
@@ -106,6 +118,13 @@ impl<V: Copy> Registers<V> {
             )?)),
             Register::Value(index) => Operand::Dynamic(
                 read(self.values.get(self.at(frame, index)?), invocation)?
+                    .ok_or_else(|| invalid(Refused::Facts))?,
+            ),
+            Register::Session(bank) => Operand::Dynamic(
+                self.sessions
+                    .get(bank as usize)
+                    .copied()
+                    .flatten()
                     .ok_or_else(|| invalid(Refused::Facts))?,
             ),
         })
@@ -194,6 +213,14 @@ impl<V: Copy> Registers<V> {
                 self.values.get(at).ok_or_else(|| invalid(Refused::Facts))?;
                 (at, PreparedValue::Dynamic(value))
             }
+            Register::Session(bank) => {
+                let value = value.bind(view).map_err(RegionError::Heap)?;
+                let at = bank as usize;
+                self.sessions
+                    .get(at)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
+                (at, PreparedValue::Session(value))
+            }
         };
         Ok(PreparedWrite {
             at,
@@ -223,6 +250,7 @@ impl<V: Copy> Registers<V> {
             PreparedValue::Dynamic(value) => {
                 publish(&mut self.values[write.at], write.invocation, Some(value))
             }
+            PreparedValue::Session(value) => self.sessions[write.at] = Some(value),
         }
     }
 
@@ -271,6 +299,7 @@ enum PreparedValue<V: Copy> {
     Float(f64),
     Bool(bool),
     Dynamic(V),
+    Session(V),
 }
 pub(super) struct PreparedWrite<V: Copy> {
     at: usize,
@@ -278,31 +307,53 @@ pub(super) struct PreparedWrite<V: Copy> {
     value: PreparedValue<V>,
 }
 
-pub(super) struct DynamicWrite<'a, V: Copy> {
-    cell: &'a mut Cell<Option<V>>,
-    invocation: u64,
+pub(super) enum DynamicWrite<'a, V: Copy> {
+    Frame {
+        cell: &'a mut Cell<Option<V>>,
+        invocation: u64,
+    },
+    Session(&'a mut Option<V>),
 }
 impl<V: Copy> Registers<V> {
+    /// The dynamic destination `reg` names: a frame value register or a
+    /// session bank cell.
     pub(super) fn prepare_dynamic(
         &mut self,
         frame: usize,
         invocation: u64,
-        index: u32,
+        reg: Register,
     ) -> Result<DynamicWrite<'_, V>, RegionError> {
-        let at = self.at(frame, index)?;
-        let cell = self
-            .values
-            .get_mut(at)
-            .ok_or_else(|| invalid(Refused::Facts))?;
-        Ok(DynamicWrite { cell, invocation })
+        match reg {
+            Register::Value(index) => {
+                let at = self.at(frame, index)?;
+                let cell = self
+                    .values
+                    .get_mut(at)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
+                Ok(DynamicWrite::Frame { cell, invocation })
+            }
+            Register::Session(bank) => self
+                .sessions
+                .get_mut(bank as usize)
+                .map(DynamicWrite::Session)
+                .ok_or_else(|| invalid(Refused::Facts)),
+            Register::Int(_) | Register::Float(_) | Register::Bool(_) => {
+                Err(invalid(Refused::Facts))
+            }
+        }
     }
 }
 impl<V: Copy> DynamicWrite<'_, V> {
     pub(super) fn publish(self, value: Option<V>) {
-        *self.cell = Cell {
-            value,
-            invocation: self.invocation,
-            valid: true,
-        };
+        match self {
+            Self::Frame { cell, invocation } => {
+                *cell = Cell {
+                    value,
+                    invocation,
+                    valid: true,
+                };
+            }
+            Self::Session(cell) => *cell = value,
+        }
     }
 }

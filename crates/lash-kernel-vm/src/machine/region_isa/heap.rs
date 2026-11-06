@@ -150,8 +150,11 @@ impl<V: View> Execution<V> {
         let destination = action
             .destination
             .map(|index| {
-                self.registers
-                    .prepare_dynamic(frame_index, frame.invocation, index)
+                self.registers.prepare_dynamic(
+                    frame_index,
+                    frame.invocation,
+                    code::Register::Value(index),
+                )
             })
             .transpose()?;
         let source = self.source.prepare(&map.counters)?;
