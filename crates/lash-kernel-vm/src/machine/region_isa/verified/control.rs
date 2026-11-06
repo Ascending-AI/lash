@@ -262,12 +262,18 @@ fn place(
         next: index + usize::from(nested.is_some() || active.is_some() || catching),
     });
     match &statement.form {
+        // A cleanup the region runs was entered by its body or its catch
+        // block ending: a departure it suspends crosses the boundary.
         Form::Try {
-            body,
-            catch,
-            finally: None,
+            finally: Some(cleanup),
             ..
-        } if catching || nested.is_some() => {
+        } if nested == Some(*cleanup) => {
+            values.push(Control::Try {
+                stmt: id,
+                phase: TryPhase::Finally(crate::machine::Completion::Normal),
+            });
+        }
+        Form::Try { body, catch, .. } if catching || nested.is_some() => {
             values.push(Control::Try {
                 stmt: id,
                 phase: if nested.is_some() && nested == catch.as_ref().map(|(_, block)| *block) {

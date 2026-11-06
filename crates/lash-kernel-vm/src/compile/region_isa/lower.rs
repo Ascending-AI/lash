@@ -248,6 +248,38 @@ pub(super) fn connect(
                 graph,
             )?
         }
+        // A try with cleanup runs its body, or its catch block after a
+        // caught raise, into its cleanup block, and its cleanup to its
+        // Commit. A departure its cleanup suspends stays at the boundary.
+        doc::Node::Stmt(doc::Stmt::Try(doc::TryStmt {
+            body,
+            catch,
+            finally: Some(finally),
+        })) => {
+            let cleanup = connect(
+                doc::Node::Block(finally),
+                &site.child(if catch.is_some() { 2 } else { 1 }),
+                Some(commit),
+                source,
+                graph,
+            )?;
+            if let Some(catch) = catch {
+                connect(
+                    doc::Node::Block(&catch.body),
+                    &site.child(1),
+                    Some(cleanup.clone()),
+                    source,
+                    graph,
+                )?;
+            }
+            connect(
+                doc::Node::Block(body),
+                &site.child(0),
+                Some(cleanup),
+                source,
+                graph,
+            )?
+        }
         // A raise moves its operand into the departure; its route is
         // appended with the departures and ends at the catching try. A
         // ReturnVia's Commit holds its operand for the machine's policy.
@@ -278,8 +310,6 @@ pub(super) fn connect(
             graph.insert(enter.clone(), Edge::Next(commit));
             enter
         }
-        // These require departure/handler or protocol composition. Each is an
-        // explicit boundary, with no source interpreter embedded in the ISA.
         // Finishing or failing ends the program at its Commit.
         doc::Node::Stmt(doc::Stmt::Finish { value } | doc::Stmt::Fail { value }) => {
             graph.insert(commit.clone(), Edge::Stop);
@@ -291,7 +321,9 @@ pub(super) fn connect(
                 graph,
             )?
         }
-        doc::Node::Stmt(doc::Stmt::Try(_) | doc::Stmt::For { via: Some(_), .. }) => {
+        // A protocol loop requires hook composition: an explicit boundary,
+        // with no source interpreter embedded in the ISA.
+        doc::Node::Stmt(doc::Stmt::For { via: Some(_), .. }) => {
             let first = source.first_event(site)?;
             graph.insert(first.clone(), Edge::Boundary);
             first

@@ -1,8 +1,7 @@
 //! Bind the canonical source stack before taking exclusive graph authority.
 use super::super::*;
 use super::{Code, Running};
-use crate::compile::region_isa::{RegionOp, compile_region, verify_region};
-use crate::compile::room::region::calls::region_isa::compile_calls;
+use crate::compile::region_isa::RegionOp;
 use lash_kernel_state::kernel_internals::logical::{Owner, StateLease};
 
 struct CanonicalPages(Arc<crate::compile::Executable>);

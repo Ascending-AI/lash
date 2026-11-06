@@ -1,7 +1,5 @@
 //! Resume canonical semantic phases through the verified executor.
 use super::*;
-use crate::compile::region_isa::{compile_region, verify_region};
-use crate::compile::room::region::calls::region_isa::compile_calls;
 use crate::machine::{Halt, Incoming, fault};
 use lash_kernel_doc::TaskId;
 

@@ -1,8 +1,6 @@
 //! Compile each reachable callee once. Recursive edges retain code indexes.
 use super::super::*;
 use super::Code;
-use crate::compile::region_isa::{compile_region, verify_region};
-use crate::compile::room::region::calls::region_isa::compile_calls;
 
 pub(super) struct Programs {
     codes: Box<[Option<Arc<Code>>]>,

@@ -2,10 +2,7 @@
 use super::super::*;
 use super::{Code, control};
 use crate::compile::region_isa::Role;
-use crate::compile::region_isa::{
-    LoopPhase, LoopStage, Pc, PrefixId, compile_region, verify_region,
-};
-use crate::compile::room::region::calls::region_isa::compile_calls;
+use crate::compile::region_isa::{LoopPhase, LoopStage, Pc, PrefixId};
 use crate::machine::{Frame, controls::Controls, frames::source::SourceContinuation};
 use lash_kernel_state::{kernel_internals::tree::Access, paged::FrameRecord};
 
@@ -272,7 +269,6 @@ pub(in crate::machine) fn restore_source_controls(
         index += 1;
     }
     if loops.iter().filter(|state| state.active).count() != saved.len()
-        || !record.finally.is_empty()
         || !record.departing.is_empty()
         || record.iterated.len() != walking
     {
@@ -319,10 +315,38 @@ pub(in crate::machine) fn restore_source_controls(
             source.pending.is_some()
         )));
     }
-    Ok((
-        control::controls_for(&code, pc, &loops, &source.roles).map_err(|_| malformed())?,
-        standing(&code, source).map_err(|_| malformed())?,
-    ))
+    let controls =
+        control::controls_for(&code, pc, &loops, &source.roles).map_err(|_| malformed())?;
+    // Each cleanup the point stands in was entered by its body or its catch
+    // block ending, in control order; no other cleanup row is saved.
+    let mut finally = Vec::new();
+    record.finally.visit(access, &mut |_, value| {
+        finally.push(value.clone());
+        true
+    })?;
+    let mut rows = finally.iter();
+    for control in controls.iter() {
+        let crate::machine::Control::Try {
+            stmt,
+            phase: crate::machine::TryPhase::Finally(_),
+        } = control
+        else {
+            continue;
+        };
+        let crate::compile::Form::Try { site, .. } = &exe.stmt(*stmt).form else {
+            return Err(malformed());
+        };
+        let row = rows.next().ok_or_else(malformed)?;
+        if !matches!(row.entered, lash_kernel_state::paged::EnteredRecord::Normal)
+            || row.site.resolve(access)?.as_ref() != site
+        {
+            return Err(malformed());
+        }
+    }
+    if rows.next().is_some() {
+        return Err(malformed());
+    }
+    Ok((controls, standing(&code, source).map_err(|_| malformed())?))
 }
 
 pub(super) fn active(frame: &Frame, stmt: crate::compile::StmtId) -> bool {
