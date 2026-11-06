@@ -869,6 +869,28 @@ impl Lowerer<'_> {
                     Some(span),
                 )
             })?;
+            if matches!(
+                constructor,
+                lash_kernel_dialect::value_constructors::Constructor::Call
+            ) && let Some((target, args)) = args.split_first()
+                && let Some(super::packages::PackageRef::Callable { member, .. }) =
+                    self.package_ref(target)?
+            {
+                // Exact calls retain already adapted operands, without source-call
+                // argument snapshots, packing or an asynchronous result adapter.
+                let ty = Ty::decoded(&member.signature.result);
+                let slot = self.imports.code(
+                    member.name.clone(),
+                    member.signature.clone(),
+                    member.convention,
+                );
+                let args = self.operands(args)?;
+                let value = lash_kernel_doc::Expr::Act(Box::new(lash_kernel_doc::ActExpr {
+                    kind: lash_kernel_doc::ActKind::Call(Callee::Import(slot)),
+                    args: args.iter().map(Operand::expr).collect(),
+                }));
+                return Ok(self.inline(value, ty));
+            }
             let mut operands = self.operands(&args)?;
             if matches!(
                 constructor,

@@ -380,7 +380,7 @@ pub fn materialize_workflow(
                 &setter_names[n],
                 args,
                 matches!(nodes[n].convention, StartConvention::TsArgsList { .. }),
-                matches!(nodes[n].convention, StartConvention::PyArgsList { .. }),
+                false,
                 false,
                 helpers,
                 &mut fresh,

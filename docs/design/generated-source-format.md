@@ -8,6 +8,15 @@ lexical declarations inside the selected entry. Reading executes no guest code
 and publishes no artifacts. The caller retains the original definition while
 loading; the resulting document and text own their content.
 
+`publish_callable` materializes the frozen graph and verifies a complete
+print/readback in its authored dialect under the default generated-source
+limits before it retains or publishes the definition. An unspellable callable,
+a callable without an authored dialect, or a readback mismatch refuses
+publication with the materialization or source error. `inspect_callable` still
+inspects executable reach without imposing this authoring rule. Crossing a
+`$lash_function` value does not itself publish it. A later explicit print may
+still refuse stricter caller-supplied limits or invalid caption overrides.
+
 The host edits the text freely, selects B's entry, and calls `import_workflow`
 with the host's current environment and source policy. It publishes the imported
 DocumentBytes, map and source with `publish_workflow`, then creates and publishes
@@ -47,15 +56,25 @@ Strict text concatenation first tries plain `+`. Its fallback spells the
 operands with erased `as string` assertions, preserving `text.concat` when a
 materialized capture cell initially holds `null`. The assertions introduce no
 runtime conversion or check.
+The conservative bigint form keeps the exact tuple representation and spells
+its input normalization with an `as bigint` assertion, so the normalization
+stays at its original read even when a frozen cell's initializer loses the
+original type fact. Python nested signatures retain `JsonValue` annotations.
 Known-token calls use `callable.invoke_token`; they lower normally and need no
 retained document. `callable.invoke(closure, ...operands)` in either dialect
-calls a bare closure with exactly the supplied operands. It adds no argument
-packing, receiver, exception operand or await adapter. Python's
+calls a bare closure with exactly the supplied operands. A qualified code
+member, such as `callable.invoke(views.heading, digits)`, calls that linked
+Import with exactly those operands. Neither form adds argument snapshots,
+adaptation, packing, a receiver, an exception operand or an await adapter.
+This preserves calls over frozen capture cells even when ordinary package
+call lowering would snapshot a mutable argument. Python's
 `@callable.direct` on a nested function preserves that bare closure ABI and its
 annotated signature. Parameters name positional operands; `= ...` marks an
 optional operand without adding a default-value prologue or a binder. This
 lets lexical factories and captured helpers retain their own calling
 conventions even when the enclosing saved entry uses packed Python tokens.
+Python capture setters use this direct ABI too, preserving captured `Absent`
+as data instead of passing it through the source argument binder.
 Native calls still select the installed helper by name and must reproduce its
 exact identity for printing to succeed. Constructor roots are reserved package
 roots. Bound or opaque function tokens without a faithful source spelling

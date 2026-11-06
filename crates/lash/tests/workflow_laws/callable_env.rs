@@ -258,11 +258,7 @@ async fn saved(
             .map(|ad| ad.publication.key())
             .collect(),
     };
-    let definition = core
-        .host_artifacts()
-        .publish_callable(pin, &function, request, &origin, None)
-        .await
-        .unwrap();
+    let definition = super::support::publish_kernel_callable(core, pin, &function, &origin).await;
     (definition, function)
 }
 
@@ -329,10 +325,7 @@ async fn a_callable_reports_root_and_captured_operation_uses_before_save_and_lin
         linked.operations[&capture_use],
         inspection.operations[&capture_use]
     );
-    let published = artifacts
-        .publish_callable(&pin, &function, &request, &origin, None)
-        .await
-        .unwrap();
+    let published = super::support::publish_kernel_callable(&core, &pin, &function, &origin).await;
     assert_eq!(published, definition);
     let target = lash::process::LinkTarget::Definition(published.id);
     assert_eq!(artifacts.inspect_target(&target).await.unwrap(), inspection);

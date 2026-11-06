@@ -88,7 +88,13 @@ pub(super) fn environment(
         setter_name.to_string(),
         params,
         fill,
-        abi,
+        // Captured Absent is data, not a missing Python argument. Fill cells
+        // through a bare closure instead of Python's packed argument binder.
+        if matches!(abi, source::Abi::Python) {
+            source::Abi::Kernel
+        } else {
+            abi
+        },
         helpers,
         fresh,
     )?;

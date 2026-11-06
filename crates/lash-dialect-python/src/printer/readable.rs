@@ -304,6 +304,22 @@ impl Renderer<'_> {
                     }
                     return;
                 }
+                if let k::Callee::Import(slot) = callee
+                    && let Some(import) = self.document.imports.get(slot)
+                    && matches!(import.kind, lash_kernel_value::ImportKind::Code { .. })
+                {
+                    self.out.write("callable.invoke(");
+                    self.operation_path(&import.name.to_string());
+                    if !act.args.is_empty() {
+                        self.out.write(", ");
+                        self.authored_args(&act.args, true);
+                    }
+                    self.out.write(")");
+                    if grouped {
+                        self.out.write(")");
+                    }
+                    return;
+                }
                 let target = match callee {
                     k::Callee::Local(id) => Some(k::FunctionTarget::Local(*id)),
                     k::Callee::Import(slot) => Some(k::FunctionTarget::Import(*slot)),

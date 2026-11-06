@@ -238,3 +238,27 @@ pub(super) fn source_environment(process_tools: bool) -> lash::process::ProcessE
     }
     builder.build().unwrap()
 }
+
+/// Raw kernel fixtures have no authored dialect. Retain them through the
+/// generic definition API; saved-source publication requires an authored inverse.
+pub(super) async fn publish_kernel_callable(
+    core: &lash::LashCore,
+    pin: &lash::process::HostArtifactPin,
+    function: &lash::workflow::document::FunctionValue,
+    origin: &lash::package::CallableOrigin,
+) -> lash::process::ProcessDefinition {
+    let draft = lash_vm_runtime::process::definition_draft(
+        &lash_vm_runtime::process::KernelProcessDefinition {
+            code: lash_vm_runtime::process::InlineRequest::Callable {
+                link: function.callable.link,
+                function: Box::new(function.clone()),
+                origin: origin.clone(),
+            },
+        },
+    )
+    .unwrap();
+    core.host_artifacts()
+        .publish_definition(pin, &draft)
+        .await
+        .unwrap()
+}

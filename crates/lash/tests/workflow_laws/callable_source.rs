@@ -554,26 +554,21 @@ async fn print_standalone_reopens_both_dialects_without_a_source_definition() {
     }
 }
 
-/// FIG-7660: frozen helper captures in a saved root and named handler retain
-/// their value when printed in either authored dialect and published again.
+/// PRINT-STANDALONE (FIG-7660, FIG-7663): every published callable in the
+/// capture corpus prints, ordinarily imports and retains its frozen behavior.
 #[tokio::test]
-async fn saved_root_and_handler_with_frozen_helpers_print_and_roundtrip() {
+async fn published_callable_capture_corpus_prints_and_roundtrips() {
+    let mut failures = Vec::new();
     for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
-        let core = super::crossing::crossing_core().await;
-        let pin = lash::process::HostArtifactPin::mint();
-        let base = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
-            .component(super::crossing::CAPTURE_TOOLS, &())
-            .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
-            .build()
-            .unwrap();
-        let (packages, request) = namespace(&core, &pin, &base).await;
+        let (core, pin, base, packages, request) = super::packages::capturing_views().await;
         let source = match format {
             SourceFormat::TypeScriptV1 => {
                 r#"
 export async function ships(): Promise<string> {
     let captured = "frozen `template` ${text}";
     const helper = () => captured;
-    const root = async (): Promise<string> => helper();
+    const digits = "3.1415926535897932384";
+    const root = async (): Promise<unknown> => views.card("Pi", [views.heading(digits), views.text("20 digits")]);
     const greet = async (name: string): Promise<string> => helper() + name;
     await tools.capture({value: "frozen-helper-root", nested: {fact: root}});
     await tools.capture({value: "frozen-helper-greet", nested: {fact: greet}});
@@ -588,8 +583,9 @@ async def ships() -> str:
     captured = "frozen `template` ${text}"
     def helper(prefix: str = "") -> str:
         return prefix + captured
-    async def root() -> str:
-        return helper("")
+    digits = "3.1415926535897932384"
+    async def root() -> object:
+        return views.card("Pi", [views.heading(digits), views.text("20 digits")])
     async def greet(name: str) -> str:
         return helper("") + name
     await tools.capture({"value": "frozen-helper-root", "nested": {"fact": root}})
@@ -599,9 +595,59 @@ async def ships() -> str:
 "#
             }
         };
+        // Generate the same capture shapes in each dialect, rather than a
+        // separate host workflow law for every scalar and aggregate kind.
+        let mut extra = String::new();
+        let literal_cases = [
+            ("value.absent()", "value.absent()"),
+            ("null", "None"),
+            ("true", "True"),
+            (
+                "integer.from_decimal(\"12345678901234567890\")",
+                "12345678901234567890",
+            ),
+            ("3.25", "3.25"),
+            ("7n", "7"),
+            ("\"λ `template` ${text}\"", "\"λ `template` ${text}\""),
+            ("bytes.from_hex(\"00ff\")", "bytes.from_hex(\"00ff\")"),
+            ("[1, 2]", "[1, 2]"),
+            ("tuple.of(1, \"two\")", "tuple.of(1, \"two\")"),
+            ("set.of(1, 2)", "set.of(1, 2)"),
+            (
+                "map.from_entries([\"key\", 2])",
+                "map.from_entries([\"key\", 2])",
+            ),
+            ("{key: [1, null]}", "{\"key\": [1, None]}"),
+            (
+                "record.new({key: [1, null]})",
+                "record.new({\"key\": [1, None]})",
+            ),
+            (
+                "timestamp.from_nanoseconds(integer.from_decimal(\"12345678901234567890\"))",
+                "timestamp.from_nanoseconds(12345678901234567890)",
+            ),
+            (
+                "error.new(\"saved\", \"message\", value.absent())",
+                "error.new(\"saved\", \"message\", value.absent())",
+            ),
+        ];
+        for (index, (ts, py)) in literal_cases.iter().enumerate() {
+            match format {
+                SourceFormat::TypeScriptV1 => extra.push_str(&format!(
+                    "    const capture{index} = {ts};\n    const literal{index} = async (): Promise<unknown> => callable.invoke(views.text, value.same(capture{index}, capture{index}));\n    await tools.capture({{value: \"frozen-helper-literal{index}\", nested: {{fact: literal{index}}}}});\n"
+                )),
+                SourceFormat::PythonV1 => extra.push_str(&format!(
+                    "    capture{index} = {py}\n    async def literal{index}() -> object:\n        return callable.invoke(views.text, value.same(capture{index}, capture{index}))\n    await tools.capture({{\"value\": \"frozen-helper-literal{index}\", \"nested\": {{\"fact\": literal{index}}}}})\n"
+                )),
+            }
+        }
+        let source = source.replace(
+            "    captured = \"later\"",
+            &(extra + "    captured = \"later\""),
+        );
         let imported = core
             .host_artifacts()
-            .import_workflow(format.language(), source, &request, None)
+            .import_workflow(format.language(), &source, &request, None)
             .await
             .unwrap();
         let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
@@ -637,16 +683,21 @@ async def ships() -> str:
                 .collect(),
             authored: publication.environment.execution().authored.clone(),
         };
-        for (name, suffix, args) in [
-            ("root", "", serde_json::Map::new()),
+        let mut cases = vec![
+            ("root".to_owned(), "", serde_json::Map::new()),
             (
-                "greet",
+                "greet".to_owned(),
                 " Ada",
                 [("name".into(), serde_json::json!(" Ada"))]
                     .into_iter()
                     .collect(),
             ),
-        ] {
+        ];
+        cases.extend(
+            (0..literal_cases.len())
+                .map(|index| (format!("literal{index}"), "", serde_json::Map::new())),
+        );
+        for (name, suffix, args) in cases {
             let marker = format!("frozen-helper-{name}");
             let shipped = ECHO_CALLS
                 .lock()
@@ -667,11 +718,17 @@ async def ships() -> str:
                 .inspect_callable(&function, &request, &origin)
                 .await
                 .unwrap();
-            let definition = core
+            let definition = match core
                 .host_artifacts()
                 .publish_callable(&pin, &function, &request, &origin, None)
                 .await
-                .unwrap();
+            {
+                Ok(definition) => definition,
+                Err(error) => {
+                    failures.push(format!("{format:?} {name} publication: {error:?}"));
+                    continue;
+                }
+            };
             let printed = core
                 .host_artifacts()
                 .print_workflow(&definition.id, None, format, Default::default())
@@ -695,13 +752,20 @@ async def ships() -> str:
                 .await;
                 assert_eq!(
                     finished(&core, &run).await,
-                    serde_json::json!(format!("frozen `template` ${{text}}{suffix}")),
+                    if name == "root" {
+                        serde_json::json!({"type":"card", "title":"Pi", "children":[{"type":"heading", "text":"3.1415926535897932384"},{"type":"text", "value":"20 digits"}]})
+                    } else if name == "greet" {
+                        serde_json::json!(format!("frozen `template` ${{text}}{suffix}"))
+                    } else {
+                        serde_json::json!({"type":"text", "value":true})
+                    },
                     "{format:?} {name} {kind}",
                 );
             }
         }
         core.shutdown().await.unwrap();
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 async fn publish_source(
@@ -956,7 +1020,7 @@ async fn released_pin_publications_keep_the_typed_artifact_refusal() {
 
 /// VALUE-PRINT-REFUSAL: unspellable bound tokens refuse, while inspection remains available.
 #[tokio::test]
-async fn value_print_refusal_retains_the_typed_token_site() {
+async fn unprintable_callable_refuses_publication_without_retaining_definition() {
     let core = core().await;
     let pin = lash::process::HostArtifactPin::mint();
     let (_, environment, original) = saved(&core, &pin, SourceFormat::TypeScriptV1).await;
@@ -971,26 +1035,26 @@ async fn value_print_refusal_retains_the_typed_token_site() {
             .map(|ad| ad.publication.key())
             .collect(),
     };
-    let opaque = core
+    let (unpublished, _) = core
         .host_artifacts()
-        .publish_callable(&pin, &unprintable, &environment, &origin, None)
+        .inspect_callable(&unprintable, &environment, &origin)
         .await
         .unwrap();
-    let graph = inspect(&core, &opaque).await;
-    assert!(!lash_kernel_doc::print_document(graph.document.document()).is_empty());
     assert!(matches!(
         core.host_artifacts()
-            .print_workflow(
-                &graph.definition.id,
-                None,
-                SourceFormat::TypeScriptV1,
-                Default::default()
-            )
+            .publish_callable(&pin, &unprintable, &environment, &origin, None)
             .await
             .unwrap_err(),
         lash::EmbedError::WorkflowSource(lash_vm_client::service::SourceServiceError::Print(
             lash::dialect::PrintError::Unprintable { .. }
         ))
+    ));
+    assert!(matches!(
+        core.host_artifacts()
+            .definition_graph(&unpublished.id)
+            .await
+            .unwrap(),
+        WorkflowRead::Unavailable(_)
     ));
     core.shutdown().await.unwrap();
 }

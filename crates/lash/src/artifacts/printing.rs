@@ -35,6 +35,15 @@ impl HostArtifacts {
             self.materialized_workflow(definition, captions),
         )
         .await?;
+        self.print_materialized(opened, format, options).await
+    }
+
+    pub(super) async fn print_materialized(
+        &self,
+        opened: lash_kernel_package::MaterializedWorkflow,
+        format: SourceFormat,
+        options: PrintOptions,
+    ) -> Result<PrintedSource> {
         if matches!(
             opened.selector,
             lash_kernel_value::names::StartSelector::Main

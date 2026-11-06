@@ -340,6 +340,7 @@ fn clauses<'a>(
 /// A type as a plain annotation, when it has one.
 pub(super) fn annotation(ty: &Type) -> Option<String> {
     Some(match ty {
+        Type::Json => "JsonValue".into(),
         Type::Bool => "bool".into(),
         Type::Int => "int".into(),
         Type::Float | Type::Number => "float".into(),

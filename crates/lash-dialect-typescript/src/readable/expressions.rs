@@ -39,7 +39,9 @@ impl Lifter<'_> {
                     .collect::<Lift<_>>()?,
             )),
             k::Expr::Tuple(items) | k::Expr::Set(items) => {
-                if let Some(value) = crate::constructs::numbers::bigint_value(expr) {
+                if self.style.operators
+                    && let Some(value) = crate::constructs::numbers::bigint_value(expr)
+                {
                     return Ok(Expr::Number(format!("{value}n")));
                 }
                 if matches!(expr, k::Expr::Tuple(_))
@@ -507,13 +509,22 @@ impl Lifter<'_> {
                 };
                 Ok(Expr::Unary("await ", Box::new(self.expr(value)?)))
             }
-            k::ActKind::Call(k::Callee::Import(slot)) => Ok(Expr::Call(
-                Box::new(self.operation(slot)?),
-                act.args
+            k::ActKind::Call(k::Callee::Import(slot)) => {
+                let callee = self.operation(slot)?;
+                let args = act
+                    .args
                     .iter()
                     .map(|value| self.expr(value))
-                    .collect::<Lift<_>>()?,
-            )),
+                    .collect::<Lift<Vec<_>>>()?;
+                Ok(if self.style.operators {
+                    Expr::Call(Box::new(callee), args)
+                } else {
+                    constructor(
+                        "callable.invoke",
+                        std::iter::once(callee).chain(args).collect(),
+                    )
+                })
+            }
             k::ActKind::Call(k::Callee::Local(id)) => {
                 let Some(name) = self.library(id) else {
                     return refuse("a call of a function the manifest does not list");
@@ -577,7 +588,12 @@ impl Lifter<'_> {
     /// implements.
     fn helper(&mut self, name: &str, args: &[k::Expr]) -> Lift<Expr> {
         if let Some(value) = crate::constructs::numbers::BIGINT_INPUT.named(name, args) {
-            return self.expr(value);
+            let value = self.expr(value)?;
+            return Ok(if self.style.operators {
+                value
+            } else {
+                Expr::As(Box::new(value), source::Type::Word("bigint"))
+            });
         }
         match (name, args) {
             ("ts.abort.start", [work, inputs, options]) => {

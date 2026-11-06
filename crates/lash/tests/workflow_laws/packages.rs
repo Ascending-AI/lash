@@ -95,6 +95,49 @@ struct Packages {
     packages: lash::package::RecordedPackages,
     namespace: lash::vm::WorkflowEnvironmentRequest,
 }
+pub(super) async fn capturing_views() -> (
+    lash::LashCore,
+    lash::process::HostArtifactPin,
+    lash::process::ProcessEnv,
+    lash::package::RecordedPackages,
+    lash::vm::WorkflowEnvironmentRequest,
+) {
+    let core = super::crossing::crossing_core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let base = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .component(super::crossing::CAPTURE_TOOLS, &())
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let (packages, namespace) = namespace(&core, &pin, &base).await;
+    let mut fixture = Packages {
+        core,
+        pin,
+        base,
+        packages,
+        namespace,
+    };
+    let imported = fixture.import(
+        r#"export function text(value: unknown): unknown { return {type:"text",value}; }
+export function heading(text: string): unknown { return {type:"heading",text}; }
+export function card(title: string, children: unknown[]): unknown { return {type:"card",title,children}; }"#,
+        &fixture.namespace,
+    ).await;
+    let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+        panic!("view constructors: {imported:?}");
+    };
+    fixture
+        .code_package("views", document.to_document().unwrap())
+        .await;
+    (
+        fixture.core,
+        fixture.pin,
+        fixture.base,
+        fixture.packages,
+        fixture.namespace,
+    )
+}
+
 impl Packages {
     async fn new(stores: Arc<lash_sqlite_store::SqliteStoreSet>, other: i64, boot: &str) -> Self {
         let core = builder_with_process_tools(stores, false, EchoComponent::Installed)

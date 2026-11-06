@@ -1153,11 +1153,16 @@ async fn a_callable_view_reports_missing_and_corrupt_retained_content() {
         authored: [value.callable.link].into(),
         publications: Default::default(),
     };
-    let definition = core
-        .host_artifacts()
-        .publish_callable(&pin, &value, &environment, &origin, None)
-        .await
-        .unwrap();
+    assert!(matches!(
+        core.host_artifacts()
+            .publish_callable(&pin, &value, &environment, &origin, None)
+            .await
+            .unwrap_err(),
+        lash::EmbedError::WorkflowSource(lash::vm::SourceServiceError::Print(
+            lash::dialect::PrintError::Unprintable { .. }
+        ))
+    ));
+    let definition = super::support::publish_kernel_callable(&core, &pin, &value, &origin).await;
     let document = function_document(lash_kernel_doc::parse_definition(RUN).unwrap(), "run")
         .identity()
         .to_string();

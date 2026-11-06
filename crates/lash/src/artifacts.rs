@@ -687,6 +687,8 @@ impl HostArtifacts {
 
     /// Retain the whole captured callable under the caller's existing pin and
     /// publish its process descriptor. Captures keep their original Links.
+    /// Publication first verifies standalone printing and structural readback
+    /// in the authored dialect under the default generated-source limits.
     /// Retained TypeScript conversion facts are admitted under `limits`;
     /// omitted limits select the default `Refuse` conversion policy.
     #[cfg(feature = "codemode")]
@@ -704,7 +706,7 @@ impl HostArtifacts {
             .as_ref()
             .map(|written| written.language)
             .or_else(|| authored_language(&function.convention));
-        let (request, starts) = diagnostics::phase(
+        let (request, starts) = Box::pin(diagnostics::phase(
             "admit",
             tracing::debug_span!("lash.artifacts.admit"),
             async {
@@ -716,17 +718,19 @@ impl HostArtifacts {
                         .check(&captured.implicit_text_conversions)
                         .map_err(crate::workflow::import::admission_error)?;
                 }
-                let request = lash_vm_runtime::process::InlineRequest::Callable {
+                let code = lash_vm_runtime::process::InlineRequest::Callable {
                     link: function.callable.link,
                     function: Box::new(function.clone()),
                     origin: origin.clone(),
-                }
-                .into_request(
-                    environment.snapshot.clone(),
-                    environment.context.clone(),
-                    environment.attachment.clone(),
-                )
-                .map_err(lash_execution_contracts::PluginError::from)?;
+                };
+                let request = code
+                    .clone()
+                    .into_request(
+                        environment.snapshot.clone(),
+                        environment.context.clone(),
+                        environment.attachment.clone(),
+                    )
+                    .map_err(lash_execution_contracts::PluginError::from)?;
                 let starts = self
                     .engines
                     .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?;
@@ -734,9 +738,46 @@ impl HostArtifacts {
                     .inspect(&request)
                     .await
                     .map_err(|error| workflow_publication_error(pin, error, language))?;
+                let documents = self.documents()?;
+                let content = documents
+                    .authoring_content(&code)
+                    .await
+                    .map_err(lash_execution_contracts::PluginError::from)?;
+                let opened = lash_kernel_package::materialize_workflow(
+                    &content,
+                    &lash_kernel_doc::WorkflowReference::Callable(function.callable),
+                    Some(function),
+                    None,
+                    documents.helpers(),
+                )?;
+                let format = match language {
+                    Some(crate::workflow::document::SourceLanguage::TypeScript) => {
+                        crate::dialect::SourceFormat::TypeScriptV1
+                    }
+                    Some(crate::workflow::document::SourceLanguage::Python) => {
+                        crate::dialect::SourceFormat::PythonV1
+                    }
+                    None => {
+                        return Err(crate::EmbedError::WorkflowSource(
+                            lash_vm_client::service::SourceServiceError::Print(
+                                crate::dialect::PrintError::Unprintable {
+                                    site: lash_kernel_value::sites::Site::new(
+                                        lash_kernel_value::sites::Unit::Main,
+                                        [],
+                                    ),
+                                    reason: crate::dialect::UnprintableReason::Main {
+                                        detail: "callable has no authored dialect".into(),
+                                    },
+                                },
+                            ),
+                        ));
+                    }
+                };
+                self.print_materialized(opened, format, Default::default())
+                    .await?;
                 Ok((request, starts))
             },
-        )
+        ))
         .await?;
         let claim = claim(pin)?;
         for key in &origin.publications {
