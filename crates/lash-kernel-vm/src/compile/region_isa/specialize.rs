@@ -169,7 +169,9 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
                     CheckedKind::Cursor { .. }
                     | CheckedKind::Header { .. }
                     | CheckedKind::LoopItem { .. } => Some((*dst, Some(RegisterKind::Value))),
-                    CheckedKind::Restore { exit, .. } if super::departures::valued(*exit) => {
+                    CheckedKind::Restore { exit, .. } | CheckedKind::Escape { exit, .. }
+                        if super::departures::valued(*exit) =>
+                    {
                         Some((*dst, Some(RegisterKind::Value)))
                     }
                     _ => None,

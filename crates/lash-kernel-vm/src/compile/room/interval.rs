@@ -240,6 +240,31 @@ impl Source {
             Some(exit),
         )
     }
+    /// A restored exit's route when no try of the frame takes it: its
+    /// Restore alone, after which the machine carries the exit out of the
+    /// frame as it carries an uncaught one from its Commit.
+    fn escape(&self, at: &Point, exit: ExitKind) -> Result<Arc<CompiledInterval>, Refused> {
+        let event = self.room.events.get(at).ok_or(Refused::Path)?.clone();
+        let mut variables = 0;
+        let step = Step::compile(self, event, ExitKind::Normal, &mut variables)?;
+        Ok(Arc::new(CompiledInterval {
+            owner: self.owner,
+            source: self.site.clone(),
+            at: at.site.clone(),
+            route: Box::new([Selection::Event {
+                at: at.clone(),
+                exit: ExitKind::Normal,
+            }]),
+            steps: Box::new([step]),
+            variables,
+            exit,
+            whole: false,
+            return_loops: Some(Box::new([])),
+            resume: None,
+            acquires: std::sync::OnceLock::new(),
+            commits: std::sync::OnceLock::new(),
+        }))
+    }
     fn suffix(
         &self,
         at: &Point,
@@ -373,6 +398,9 @@ impl Source {
                     caught = Some(try_site.clone());
                 }
                 (Some((try_site, false)), Some((cleanup_try, _))) if try_site == cleanup_try => {}
+                // A restored raise no try of the frame takes leaves the
+                // frame from its Restore.
+                (None, None) if restoring.is_some() => return self.escape(at, departing),
                 _ => return Err(Refused::Path),
             }
         }

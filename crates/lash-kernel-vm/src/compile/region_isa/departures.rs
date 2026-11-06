@@ -102,6 +102,10 @@ fn shaped(events: &[&Event], exit: ExitKind, restored: bool) -> bool {
     let Some((last, rest)) = events.split_last() else {
         return false;
     };
+    // A restored exit no try of the frame takes stops at its Restore.
+    if restored && rest.is_empty() && last.point.phase == Phase::Restore {
+        return escapes(exit);
+    }
     let rest = match (restored, rest.split_first()) {
         (true, Some((first, rest))) if first.point.phase == Phase::Restore => rest,
         (true, _) => return false,
@@ -134,9 +138,16 @@ fn routed(
         .then_some(segments))
 }
 
+/// Whether a restored exit may leave the frame from its Restore.
+fn escapes(exit: ExitKind) -> bool {
+    exit == ExitKind::Raise
+}
+
 /// Where a segment's last row goes.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum End {
+    /// An Escape stops the region for the machine.
+    Escape,
     /// A Return's frame Leave exits.
     Exit,
     /// A Catch resumes its loop or takes the raise.
@@ -164,6 +175,7 @@ fn end(
     last: &Event,
 ) -> Result<End, Refused> {
     Ok(match last.point.phase {
+        Phase::Restore if escapes(exit) => End::Escape,
         Phase::Suspend => End::Suspend(base(draft, interval.resume().ok_or(Refused::Path)?)?),
         _ if exit == ExitKind::Return => End::Exit,
         _ => End::Resume(resume(draft, exit, interval.resume(), &last.point)?),
@@ -563,7 +575,7 @@ pub(super) fn check_finally(
             }
             (at, Phase::Suspend)
         }
-        CheckedKind::Restore { at, exit } => {
+        CheckedKind::Restore { at, exit } | CheckedKind::Escape { at, exit } => {
             if !routed || !args.is_empty() || Some(dst) != active(draft, *exit)?.or(Some(sink)) {
                 return Err(Refused::Facts);
             }
@@ -657,7 +669,22 @@ fn segment_op(
         next,
     };
     let active = active(draft, exit)?;
-    Ok(if restored && position == 0 {
+    Ok(if end == End::Escape {
+        if !restored || position != 0 || count != 1 {
+            return Err(Refused::Path);
+        }
+        RegionOp::Checked {
+            kernel: CheckedKernel {
+                kind: CheckedKind::Escape {
+                    at: step.at.site.clone(),
+                    exit,
+                },
+            },
+            args: Box::new([]),
+            dst: active.unwrap_or(sink),
+            next: Pc(u32::try_from(row).map_err(|_| Refused::Facts)?),
+        }
+    } else if restored && position == 0 {
         RegionOp::Checked {
             kernel: CheckedKernel {
                 kind: CheckedKind::Restore {
@@ -685,6 +712,7 @@ fn segment_op(
     } else {
         match end {
             End::Exit => RegionOp::Exit { prefix: step.after },
+            End::Escape => return Err(Refused::Path),
             End::Resume(next) if exit == ExitKind::Raise => catch(draft, step, row, next)?,
             End::Resume(next) => phase(next),
             End::Suspend(next) => RegionOp::Checked {
@@ -1013,7 +1041,7 @@ pub(super) fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refuse
             None => {
                 let last = interval.events().last().ok_or(Refused::Path)?;
                 match end(draft, exit, interval, last)? {
-                    End::Exit => None,
+                    End::Exit | End::Escape => None,
                     End::Resume(next) | End::Suspend(next) => Some(next),
                 }
             }

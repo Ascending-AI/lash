@@ -224,7 +224,9 @@ pub(super) fn dynamic(op: &RegionOp) -> bool {
     match op {
         RegionOp::Checked { kernel, .. } => match kernel.kind() {
             super::CheckedKind::Suspend { .. } => true,
-            super::CheckedKind::Restore { exit, .. } => !super::departures::valued(*exit),
+            super::CheckedKind::Restore { exit, .. } | super::CheckedKind::Escape { exit, .. } => {
+                !super::departures::valued(*exit)
+            }
             _ => false,
         },
         _ => false,
@@ -247,6 +249,8 @@ pub(super) fn successors(draft: &RegionDraft, pc: usize) -> Vec<super::Pc> {
         | RegionOp::Call { next, .. } => vec![*next],
         RegionOp::Checked { kernel, next, .. } => match kernel.kind() {
             super::CheckedKind::Cursor { exhausted, .. } => vec![*next, *exhausted],
+            // The machine carries an escaping exit out of the frame.
+            super::CheckedKind::Escape { .. } => vec![],
             super::CheckedKind::Cleanup { at } => std::iter::once(*next)
                 .chain(super::departures::restores_at(draft, at))
                 .collect(),

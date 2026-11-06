@@ -543,6 +543,16 @@ impl Running<'_> {
             if matches!(op, RegionOp::ReturnVia { .. }) {
                 return self.halt(RegionStop::ReturnVia);
             }
+            // An accepted Escape restored an exit no try of the frame takes:
+            // the machine carries it out of the frame.
+            if let RegionOp::Checked { kernel, .. } = op
+                && let crate::compile::region_isa::CheckedKind::Escape { exit, .. } = kernel.kind()
+            {
+                return match exit {
+                    crate::compile::room::ExitKind::Raise => self.halt(RegionStop::Throw),
+                    _ => Err(invalid(Refused::Facts)),
+                };
+            }
             if matches!(op, RegionOp::Exit { .. }) {
                 self.finish_frame()?;
                 if self.complete {

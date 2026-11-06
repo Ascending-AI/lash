@@ -84,6 +84,7 @@ pub(super) fn position(
             &source.at,
             source.progress,
             source.departure.as_ref(),
+            source.suspended.last().map(|(origin, _)| origin),
             &held,
             &source.unpaid,
         )

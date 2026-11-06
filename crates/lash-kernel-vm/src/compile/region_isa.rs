@@ -266,6 +266,13 @@ pub(crate) enum CheckedKind {
     Supersede {
         at: Site,
     },
+    /// A suspended exit no try of the frame takes: the row restores it as
+    /// a Restore does, then the region stops and the machine carries it
+    /// out of the frame.
+    Escape {
+        at: Site,
+        exit: crate::compile::room::ExitKind,
+    },
     UnpackPair {
         inputs: [Reg<LeaseValue>; 2],
         outputs: [Reg<i64>; 2],
@@ -290,6 +297,7 @@ impl CheckedKind {
             self,
             Self::Suspend { .. }
                 | Self::Restore { .. }
+                | Self::Escape { .. }
                 | Self::Supersede { .. }
                 | Self::Cleanup { .. }
         )
@@ -1134,12 +1142,15 @@ impl RegionCode {
         Self::prefix(self.step(pc)?, progress)
     }
     /// The row a continuation resumes at: the reached row itself before it
-    /// is accepted, otherwise the reached row's successor at `unpaid`.
+    /// is accepted, otherwise the reached row's successor at `unpaid`. A
+    /// completed cleanup goes on at the Restore of the route its innermost
+    /// suspended exit, departed from `restoring`, takes.
     pub(crate) fn source_next(
         &self,
         point: &Point,
         progress: u32,
         departure: Option<&Point>,
+        restoring: Option<&Point>,
         held: &[Slot],
         unpaid: &Point,
     ) -> Option<Pc> {
@@ -1149,6 +1160,15 @@ impl RegionCode {
         }
         if let Some(pc) = departure.and_then(|origin| self.departure_at(origin, unpaid)) {
             return Some(pc);
+        }
+        if departure.is_none()
+            && unpaid.phase == Phase::Restore
+            && let Some(pc) = restoring
+                .and_then(|origin| departures::restore_row(&self.draft, &unpaid.site, origin))
+        {
+            return recovery::successors(&self.draft, reached.offset())
+                .contains(&pc)
+                .then_some(pc);
         }
         let rows = self
             .draft

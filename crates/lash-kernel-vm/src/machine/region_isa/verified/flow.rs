@@ -70,6 +70,7 @@ impl Flow {
                         | CheckedKind::LoopControl { .. }
                         | CheckedKind::Suspend { .. }
                         | CheckedKind::Restore { .. }
+                        | CheckedKind::Escape { .. }
                         | CheckedKind::Cleanup { .. }
                         | CheckedKind::Supersede { .. }
                 ) =>
@@ -118,7 +119,10 @@ impl Flow {
         if matches!(
             code.op(pc),
             Some(RegionOp::Checked { kernel, .. })
-                if matches!(kernel.kind(), CheckedKind::Suspend { .. } | CheckedKind::Restore { .. })
+                if matches!(
+                    kernel.kind(),
+                    CheckedKind::Suspend { .. } | CheckedKind::Restore { .. } | CheckedKind::Escape { .. }
+                )
         ) {
             let departure = |root: &Root| {
                 before

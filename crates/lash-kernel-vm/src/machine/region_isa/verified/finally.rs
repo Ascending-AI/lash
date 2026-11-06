@@ -186,7 +186,7 @@ impl Running<'_> {
                 };
                 Ok((none(next), Some(Finally::Suspend(Box::new(suspended)))))
             }
-            CheckedKind::Restore { at, exit } => {
+            CheckedKind::Restore { at, exit } | CheckedKind::Escape { at, exit } => {
                 let top = self
                     .suspended_at(at)
                     .filter(|top| top.exit == *exit)

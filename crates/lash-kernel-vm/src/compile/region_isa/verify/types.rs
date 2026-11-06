@@ -149,7 +149,7 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                         read(&state, reg.offset())?;
                     }
                 }
-                CheckedKind::Restore { exit, .. } => {
+                CheckedKind::Restore { exit, .. } | CheckedKind::Escape { exit, .. } => {
                     if super::super::departures::valued(*exit) {
                         state[dst.offset()] = Some(RegisterKind::Value);
                     }
