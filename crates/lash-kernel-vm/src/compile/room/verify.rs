@@ -236,10 +236,7 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 (doc::Node::Stmt(doc::Stmt::Continue), Phase::Commit) => ExitKind::Continue,
                 _ => ExitKind::Normal,
             };
-            let kinds = if (matches!(node, doc::Node::Expr(_) | doc::Node::Action(_))
-                || hook_raises(node, phase))
-                && kind != ExitKind::Raise
-            {
+            let kinds = if super::raises(node, phase) && kind != ExitKind::Raise {
                 vec![kind, ExitKind::Raise]
             } else {
                 vec![kind]

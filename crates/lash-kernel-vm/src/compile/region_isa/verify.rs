@@ -507,6 +507,28 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 return Err(Refused::Source);
             }
         }
+        // A raise origin row moves the raise, delivered as the task's
+        // Incoming, into the frame's active departure and releases the
+        // raising event's inputs.
+        RegionOp::Move { dst, src, .. }
+            if index >= source.room.events.len()
+                && draft
+                    .departures
+                    .iter()
+                    .any(|route| route.origin.offset() == index) =>
+        {
+            let sink = Reg::new(draft.roles.len())?;
+            let inputs = expected_inputs?;
+            if *src != sink
+                || inputs.last() != Some(&sink)
+                || expected_output != Some(*dst)
+                || step.event.output != Some(Owner::ActiveDeparture(source.site.clone()))
+                || !step.event.entities.is_empty()
+            {
+                return Err(Refused::Facts);
+            }
+            value_reg(*dst)?;
+        }
         // A delivering action's Commit moves its delivered Incoming into its
         // operand and releases its arguments.
         RegionOp::Move { dst, src, .. }

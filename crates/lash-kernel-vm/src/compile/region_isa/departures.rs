@@ -5,7 +5,7 @@
 //! try's Catch, which moves it into the catch binding. Both resume where
 //! source does.
 use super::*;
-use crate::compile::room::{ExitKind, Owner};
+use crate::compile::room::ExitKind;
 use std::collections::BTreeMap;
 
 #[derive(Clone)]
@@ -69,26 +69,17 @@ pub(super) fn uncaught(source: &Source, at: &Point) -> Result<bool, Refused> {
     Ok(true)
 }
 
-/// Whether the event a base row commits raises toward a try of the frame
-/// with its value delivered as the task's Incoming: a delivered action's
-/// Commit or a call's Restore. Its raise departs from a row of its own.
+/// Whether the event a base row commits may raise toward a try of the
+/// frame besides taking its own exit: a delivered action's Commit, a
+/// call's Restore, or a step the machine serves or refuses before it runs.
+/// Its raise departs from a row of its own.
 fn raising(draft: &RegionDraft, index: usize) -> Result<bool, Refused> {
     let Some(step) = draft.steps.get(index) else {
         return Ok(false);
     };
     if index >= draft.source.room.events.len()
         || step.stage.is_some()
-        || !step
-            .event
-            .inputs
-            .iter()
-            .any(|owner| matches!(owner, Owner::Incoming(_)))
-        || !draft
-            .source
-            .room
-            .exits
-            .iter()
-            .any(|exit| exit.point == step.at && exit.kind == ExitKind::Raise)
+        || draft.source.raising(&step.at).is_none()
     {
         return Ok(false);
     }

@@ -379,10 +379,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                 kind,
                 owners: owners.clone(),
             });
-            if (matches!(node, doc::Node::Expr(_) | doc::Node::Action(_))
-                || hook_raises(node, e.point.phase))
-                && kind != ExitKind::Raise
-            {
+            if super::raises(node, e.point.phase) && kind != ExitKind::Raise {
                 exits.push(Exit {
                     point: e.point.clone(),
                     charge_prefix: e.point.clone(),

@@ -262,8 +262,36 @@ pub(crate) struct Event {
 impl Event {
     /// This event as its Raise exit takes it when the raise departs toward
     /// a try: the raised value is published into the frame's active
-    /// departure, not the event's output, and is measured there.
+    /// departure, not the event's output, and is measured there. An event
+    /// that takes no delivered value (a native's answer, a checked call, a
+    /// refused condition or cursor) raises before it runs: the machine
+    /// delivers the raise as the frame's Incoming and the event lets go of
+    /// its inputs, as a delivering action's Commit does.
     pub(crate) fn raised(&self, frame: &Site) -> Option<Self> {
+        if !self
+            .inputs
+            .iter()
+            .any(|owner| matches!(owner, Owner::Incoming(_)))
+        {
+            let delta = if self.inputs.is_empty() {
+                Amount::default()
+            } else {
+                Amount::default().term(release(self.inputs.iter().cloned()), -1)
+            };
+            return Some(Self {
+                point: self.point.clone(),
+                inputs: self
+                    .inputs
+                    .iter()
+                    .cloned()
+                    .chain(std::iter::once(Owner::Incoming(frame.clone())))
+                    .collect(),
+                output: Some(Owner::ActiveDeparture(frame.clone())),
+                entities: Box::new([]),
+                peak: Amount::default(),
+                delta,
+            });
+        }
         let from = self.output.clone()?;
         let to = Owner::ActiveDeparture(frame.clone());
         let rename = |owner: &Owner| {
@@ -811,6 +839,8 @@ impl Source {
             .get_or_init(|| {
                 let mut owners = std::collections::BTreeSet::new();
                 owners.insert(Owner::ActiveDeparture(self.site.clone()));
+                // A raise the machine serves arrives as the frame's Incoming.
+                owners.insert(Owner::Incoming(self.site.clone()));
                 for event in self.room.events.values() {
                     if event.point.phase == Phase::Test && matches!(&event.output, Some(Owner::Binding { declared, .. }) if *declared == child(&event.point.site, 1)) {
                         owners.insert(Owner::LoopCursor(event.point.site.clone()));
@@ -1306,6 +1336,17 @@ fn inputs(site: &Site, node: doc::Node<'_>) -> Box<[Owner]> {
         .filter(|(_, n)| matches!(n, doc::Node::Expr(_) | doc::Node::Action(_)))
         .map(|(i, _)| operand(&child(site, i)))
         .collect()
+}
+/// Whether an event at `node`'s `phase` can raise besides taking its own
+/// exit: an expression or action may raise, a protocol hook's callee may
+/// raise, and a condition may refuse a non-bool.
+fn raises(node: doc::Node<'_>, phase: Phase) -> bool {
+    matches!(node, doc::Node::Expr(_) | doc::Node::Action(_))
+        || hook_raises(node, phase)
+        || (matches!(
+            node,
+            doc::Node::Stmt(doc::Stmt::If { .. } | doc::Stmt::While { .. })
+        ) && phase == Phase::Test)
 }
 fn release(owners: impl IntoIterator<Item = Owner>) -> Measure {
     Measure::Release(owners.into_iter().collect())

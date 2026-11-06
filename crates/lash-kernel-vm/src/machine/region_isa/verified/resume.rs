@@ -154,7 +154,9 @@ pub(in crate::machine) fn standing(
 }
 
 /// The event a raise served to a frame's next step is born at: a standing
-/// action's Commit, or the Restore of the call a suspended frame awaits.
+/// action's Commit, the Restore of the call a suspended frame awaits or a
+/// returned call stands at, or else the step the frame stands before (a
+/// native's answer, a checked call, a refused condition).
 pub(in crate::machine) fn raised_at(
     code: &Code,
     source: &SourceContinuation,
@@ -162,15 +164,22 @@ pub(in crate::machine) fn raised_at(
     if source.departure.is_some() {
         return Ok(None);
     }
-    if source.progress == 3 {
-        return Ok(code
+    Ok(match source.progress {
+        // Before its step, or after the step before it.
+        0 => Some(source.at.clone()),
+        2 => Some(match standing(code, source)? {
+            Some(standing) => standing.resume,
+            None => source.unpaid.clone(),
+        }),
+        3 => code
             .calls
             .iter()
             .flatten()
             .find(|call| call.plan.point() == &source.at)
-            .map(|call| call.plan.resume().clone()));
-    }
-    Ok(standing(code, source)?.map(|standing| standing.resume))
+            .map(|call| call.plan.resume().clone()),
+        4 => Some(source.at.clone()),
+        _ => None,
+    })
 }
 
 pub(super) fn unpaid_pc(

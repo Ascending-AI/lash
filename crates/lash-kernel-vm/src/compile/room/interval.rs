@@ -198,6 +198,16 @@ pub(crate) struct CompiledInterval {
     commits: std::sync::OnceLock<bool>,
 }
 impl Source {
+    /// The event at `at` as its raise departs, when it may raise besides
+    /// taking its own exit: a delivered action's Commit, a call's Restore,
+    /// or a step the machine serves or refuses before it runs.
+    pub(crate) fn raising(&self, at: &Point) -> Option<Event> {
+        let exits = || self.room.exits.iter().filter(|exit| exit.point == *at);
+        (exits().any(|exit| exit.kind == ExitKind::Raise)
+            && exits().any(|exit| exit.kind != ExitKind::Raise))
+        .then(|| self.room.events.get(at)?.raised(&self.site))
+        .flatten()
+    }
     /// An issued Return leaves its entered ordinary blocks, then its Source.
     /// Its authored path proves enclosing if choices; earlier children have
     /// completed. Entered loop bodies carry their actual occurrence; their
@@ -219,22 +229,10 @@ impl Source {
         {
             return Err(Refused::Path);
         }
-        // A raising event that takes the task's Incoming (a delivered
-        // action's Commit, a call's Restore) departs as a Throw does: its
-        // Raise exit publishes the value into the frame's active departure.
-        let raising = self.room.events.get(at).and_then(|event| {
-            (event
-                .inputs
-                .iter()
-                .any(|owner| matches!(owner, Owner::Incoming(_)))
-                && self
-                    .room
-                    .exits
-                    .iter()
-                    .any(|exit| exit.point == *at && exit.kind == ExitKind::Raise))
-            .then(|| event.raised(&self.site))
-            .flatten()
-        });
+        // An event that may raise besides taking its own exit departs as a
+        // Throw does: its Raise exit publishes the raise into the frame's
+        // active departure.
+        let raising = self.raising(at);
         if at.phase != Phase::Commit && raising.is_none() {
             return Err(Refused::Path);
         }

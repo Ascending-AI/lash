@@ -269,7 +269,10 @@ impl<E: Events> Run<'_, E> {
                 if exit != ExitKind::Normal {
                     return Ok(exit);
                 }
-                self.step(site, Phase::Test)?;
+                let exit = self.step(site, Phase::Test)?;
+                if exit != ExitKind::Normal {
+                    return Ok(exit);
+                }
                 let arm = if self.choose(site)? { 1 } else { 2 };
                 let exit = self.child(node, site, arm)?;
                 if exit != ExitKind::Normal {
@@ -281,7 +284,10 @@ impl<E: Events> Run<'_, E> {
                 if exit != ExitKind::Normal {
                     return Ok(exit);
                 }
-                self.step(site, Phase::Test)?;
+                let exit = self.step(site, Phase::Test)?;
+                if exit != ExitKind::Normal {
+                    return Ok(exit);
+                }
                 let exit = self.child(node, site, 1)?;
                 if exit != ExitKind::Normal {
                     return Ok(exit);
@@ -294,7 +300,10 @@ impl<E: Events> Run<'_, E> {
                     if exit != ExitKind::Normal {
                         return Ok(exit);
                     }
-                    self.step(site, Phase::Test)?;
+                    let exit = self.step(site, Phase::Test)?;
+                    if exit != ExitKind::Normal {
+                        return Ok(exit);
+                    }
                     if !self.choose(site)? {
                         break;
                     }

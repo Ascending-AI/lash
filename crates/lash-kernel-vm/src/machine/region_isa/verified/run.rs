@@ -228,6 +228,26 @@ impl Running<'_> {
                 _ if served.is_some() => return Err(invalid(Refused::Facts)),
                 _ => {}
             }
+            if !guarded
+                && answered.is_none()
+                && let Some(guard) = &step.guard
+                && !self.guard(guard)?
+            {
+                // A branch or loop test whose condition is not a bool raises
+                // its source error before the test is billed, as a served
+                // step does; any other failed guard has no meaning.
+                if matches!(
+                    guard.kind(),
+                    crate::compile::region_isa::CheckedKind::Truth { .. }
+                ) && let Some(message) = code.program.condition_error(&step.at.site)
+                {
+                    return self.halt(RegionStop::Refused {
+                        kind: "type_error",
+                        message,
+                    });
+                }
+                return Err(invalid(Refused::Facts));
+            }
             let counters = self.counters;
             let before = charge::billed(self.limiters, &mut self.limits, |limits| {
                 charge::bill(counters, limits, &step.charges, ChargeMoment::Before, None)
@@ -259,25 +279,6 @@ impl Running<'_> {
                 self.refusal = Some(crate::Bound::CallDepth);
                 self.attempted = Some(step.at.clone());
                 return self.halt(RegionStop::Refusal);
-            }
-            if !guarded
-                && answered.is_none()
-                && let Some(guard) = &step.guard
-                && !self.guard(guard)?
-            {
-                // A branch or loop test whose condition is not a bool raises
-                // its source error; any other failed guard has no meaning.
-                if matches!(
-                    guard.kind(),
-                    crate::compile::region_isa::CheckedKind::Truth { .. }
-                ) && let Some(message) = code.program.condition_error(&step.at.site)
-                {
-                    return self.halt(RegionStop::Refused {
-                        kind: "type_error",
-                        message,
-                    });
-                }
-                return Err(invalid(Refused::Facts));
             }
             if let RegionOp::Heap {
                 kernel,
