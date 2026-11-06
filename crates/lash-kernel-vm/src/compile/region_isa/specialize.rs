@@ -46,7 +46,52 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
     }
     loop {
         let mut changed = false;
-        for op in &draft.ops {
+        for (index, op) in draft.ops.iter().enumerate() {
+            // Atom loads, delivered results, returns and departures also
+            // define registers; every definition joins into the kind.
+            let mut extra = Vec::new();
+            let atoms = match op {
+                RegionOp::Call { site, .. } => {
+                    draft.calls.get(site.offset()).map(|call| &call.atoms[..])
+                }
+                RegionOp::Boundary { spec } => spec.action().map(|action| &action.atoms[..]),
+                _ => None,
+            };
+            for load in atoms.into_iter().flatten() {
+                extra.push((load.dst.offset(), Some(RegisterKind::Value)));
+            }
+            let output = draft.steps[index]
+                .event
+                .output
+                .as_ref()
+                .and_then(|owner| lower::reg(&draft.roles, &draft.source, owner).ok());
+            match op {
+                RegionOp::Boundary { spec } => {
+                    if spec.action().is_some() {
+                        extra.push((draft.roles.len(), Some(RegisterKind::Value)));
+                    }
+                    if let Some(output) = output {
+                        extra.push((output.offset(), Some(RegisterKind::Value)));
+                    }
+                }
+                RegionOp::Return { value } => {
+                    if let Some(output) = output {
+                        extra.push((output.offset(), known[value.offset()]));
+                    }
+                }
+                RegionOp::Effect {
+                    value,
+                    departure: Some(departure),
+                    ..
+                } => extra.push((departure.offset(), known[value.offset()])),
+                RegionOp::Raise { dst, src } => extra.push((dst.offset(), known[src.offset()])),
+                _ => {}
+            }
+            for (dst, kind) in extra {
+                if let Some(kind) = kind {
+                    changed |= merge(&mut known[dst], kind);
+                }
+            }
             let rule = match op {
                 RegionOp::Constant { dst, value, .. } => Some((
                     *dst,

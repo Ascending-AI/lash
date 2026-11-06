@@ -12,6 +12,9 @@ pub(super) struct Scratch {
     pub(super) releases: Vec<(LeaseValue, bool)>,
     quote: Vec<(LeaseValue, bool)>,
     quoted: Vec<u64>,
+    /// Long text atoms allocated for the step being taken, each still
+    /// holding its allocation's own occurrence beside its atom role's.
+    pub(super) atoms: Vec<LeaseValue>,
 }
 impl Scratch {
     pub(super) fn new(width: usize, quotes: usize) -> Result<Self, RegionError> {
@@ -26,6 +29,7 @@ impl Scratch {
             releases: bank(width)?,
             quote: bank(width)?,
             quoted: bank(quotes)?,
+            atoms: bank(width)?,
         })
     }
 }
@@ -130,6 +134,7 @@ impl<'s> Running<'s> {
             releases,
             quote,
             quoted,
+            ..
         } = &mut self.scratch;
         holds.clear();
         releases.clear();

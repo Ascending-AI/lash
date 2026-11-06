@@ -1023,7 +1023,22 @@ impl CompiledInterval {
             [(first, -1), (second, 1)] => consumed(first) && retained(second),
             _ => false,
         };
-        event.point.phase == Phase::Commit
+        // A native call act answers at its Enter.
+        let answers = match event.point.phase {
+            Phase::Commit => true,
+            Phase::Enter => matches!(
+                event.peak.terms.as_slice(),
+                [(
+                    Measure::CallPeak {
+                        callee: CallSource::Native(_),
+                        ..
+                    },
+                    1
+                )]
+            ),
+            _ => false,
+        };
+        answers
             && event.point.site != source.site
             && step.selected == ExitKind::Normal
             && step.normal == ExitKind::Normal

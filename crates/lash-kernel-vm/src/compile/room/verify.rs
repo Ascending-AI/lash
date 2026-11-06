@@ -44,7 +44,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     phases.push(Phase::Open);
                 }
                 phases.push(Phase::Enter);
-                if matches!(act.kind, doc::ActKind::Call(_)) {
+                if matches!(act.kind, doc::ActKind::Call(_))
+                    && native_act(node, &source.calls).is_none()
+                {
                     phases.push(Phase::Restore);
                 }
             }
@@ -141,7 +143,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     if delivers(node) {
                         expected_inputs = Box::new([]);
                     }
-                    output = None;
+                    if native_act(node, &source.calls).is_none() {
+                        output = None;
+                    }
                 }
                 (doc::Node::Expr(doc::Expr::Act(_) | doc::Expr::Call { .. }), Phase::Restore) => {
                     expected_inputs = vec![Owner::Incoming(site.clone())].into();
@@ -221,7 +225,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
             }
             check_entities(source, peak, &site, node, phase)?;
             let kind = match (node, phase) {
-                (doc::Node::Expr(doc::Expr::Act(_)) | doc::Node::Action(_), Phase::Enter) => {
+                (doc::Node::Expr(doc::Expr::Act(_)) | doc::Node::Action(_), Phase::Enter)
+                    if native_act(node, &source.calls).is_none() =>
+                {
                     ExitKind::Action
                 }
                 (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Commit) => ExitKind::Action,
@@ -271,6 +277,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
             if matches!(callee, CallSource::Native(_)) {
                 expected_scratch.push((point(&site, Phase::Commit), *function));
             }
+        }
+        if let Some(function) = native_act(node, &source.calls) {
+            expected_scratch.push((point(&site, Phase::Enter), function));
         }
         if let doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) = node {
             for (phase, target) in [
@@ -476,6 +485,27 @@ fn obligations(
                 p = i128::from(Cost::OBJECT) + i128::from(Cost::REFERENCE);
                 d = p;
             }
+        }
+        (doc::Node::Expr(doc::Expr::Act(_)), Phase::Enter)
+            if native_act(node, &source.calls).is_some() =>
+        {
+            let callee = source.calls[&native_act(node, &source.calls)
+                .unwrap_or_else(|| unreachable!("the guard selected a native call act"))];
+            peak.push((
+                Measure::CallPeak {
+                    at: site.clone(),
+                    callee,
+                },
+                1,
+            ));
+            delta.push((
+                Measure::CallDelta {
+                    at: site.clone(),
+                    callee,
+                },
+                1,
+            ));
+            delta.push((consumed(), -1));
         }
         (doc::Node::Action(action), Phase::Enter) => {
             for (index, _) in action_atoms(action).iter().enumerate() {

@@ -446,6 +446,8 @@ pub(crate) struct Executable {
     own: Arc<DocumentCode>,
     admission: Arc<preparation::Admission>,
     origins: Arc<preparation::Origins>,
+    /// Each code's verified region program, compiled once per executable.
+    regions: std::sync::Mutex<BTreeMap<CodeId, Result<Arc<region_isa::RegionCode>, room::Refused>>>,
 }
 
 /// Immutable document tables, independent of any run or owning document.

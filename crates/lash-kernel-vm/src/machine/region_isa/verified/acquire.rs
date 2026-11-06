@@ -46,10 +46,7 @@ impl<'m> RegionLease<'m> {
         let root_code = if code.program.code() == root.code {
             code
         } else {
-            let draft = compile_region(&exe, root.code).map_err(invalid)?;
-            let calls = compile_calls(&exe, &draft).map_err(invalid)?;
-            let program = verify_region(&exe, root.code, draft, &calls).map_err(invalid)?;
-            Code::bind_executable(&exe, &program)?
+            Code::bind_executable(&exe, &exe.region(root.code).map_err(invalid)?)?
         };
         let programs = super::programs::Programs::bind(&root_code)?;
         let mut positions = Vec::new();

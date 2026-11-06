@@ -280,12 +280,18 @@ pub(super) fn connect(
         }
         // These require departure/handler or protocol composition. Each is an
         // explicit boundary, with no source interpreter embedded in the ISA.
-        doc::Node::Stmt(
-            doc::Stmt::Finish { .. }
-            | doc::Stmt::Fail { .. }
-            | doc::Stmt::Try(_)
-            | doc::Stmt::For { via: Some(_), .. },
-        ) => {
+        // Finishing or failing ends the program at its Commit.
+        doc::Node::Stmt(doc::Stmt::Finish { value } | doc::Stmt::Fail { value }) => {
+            graph.insert(commit.clone(), Edge::Stop);
+            connect(
+                doc::Node::Expr(value),
+                &site.child(0),
+                Some(commit),
+                source,
+                graph,
+            )?
+        }
+        doc::Node::Stmt(doc::Stmt::Try(_) | doc::Stmt::For { via: Some(_), .. }) => {
             let first = source.first_event(site)?;
             graph.insert(first.clone(), Edge::Boundary);
             first
@@ -770,6 +776,31 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         next,
                     }
                 }
+                // A native call act answers at its Enter, like a native call.
+                (
+                    doc::Node::Expr(doc::Expr::Act(_)),
+                    Phase::Enter,
+                    Some(next),
+                    Some(dst),
+                    Ok(args),
+                ) if crate::compile::room::native_act(node, &source.calls).is_some() => {
+                    let function = crate::compile::room::native_act(node, &source.calls)
+                        .ok_or(Refused::Source)?;
+                    let lib = exe.library_lib(&function).ok_or(Refused::Source)?;
+                    depth = exe
+                        .lib(lib)
+                        .prepared_depth(exe)
+                        .checked_add(u32::from(exe.lib(lib).operation()))
+                        .ok_or(Refused::Facts)?;
+                    RegionOp::Checked {
+                        kernel: CheckedKernel {
+                            kind: CheckedKind::Native { function, lib },
+                        },
+                        args,
+                        dst,
+                        next,
+                    }
+                }
                 (
                     doc::Node::Expr(doc::Expr::Act(act)),
                     Phase::Enter,
@@ -956,23 +987,32 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         }
                     }
                 }
+                (doc::Node::Stmt(doc::Stmt::Print { .. }), Phase::Commit, next, None, Ok(args))
+                    if args.len() == 1 && event.entities.is_empty() =>
+                {
+                    RegionOp::Effect {
+                        kind: EffectKind::Print,
+                        value: args[0],
+                        departure: None,
+                        next,
+                    }
+                }
+                // Finishing or failing departs the program.
                 (
-                    doc::Node::Stmt(
-                        doc::Stmt::Print { .. } | doc::Stmt::Finish { .. } | doc::Stmt::Fail { .. },
-                    ),
+                    doc::Node::Stmt(doc::Stmt::Finish { .. } | doc::Stmt::Fail { .. }),
                     Phase::Commit,
-                    next,
                     None,
+                    Some(departure),
                     Ok(args),
                 ) if args.len() == 1 && event.entities.is_empty() => RegionOp::Effect {
-                    kind: match node {
-                        doc::Node::Stmt(doc::Stmt::Print { .. }) => EffectKind::Print,
-                        doc::Node::Stmt(doc::Stmt::Finish { .. }) => EffectKind::Finish,
-                        _ => EffectKind::Fail,
+                    kind: if matches!(node, doc::Node::Stmt(doc::Stmt::Finish { .. })) {
+                        EffectKind::Finish
+                    } else {
+                        EffectKind::Fail
                     },
                     value: args[0],
-                    // Finishing or failing halts the program.
-                    next: next.filter(|_| matches!(node, doc::Node::Stmt(doc::Stmt::Print { .. }))),
+                    departure: Some(departure),
+                    next: None,
                 },
                 (doc::Node::Block(_), Phase::Leave, None, _, _) if at.site == source.site => {
                     RegionOp::Exit {
@@ -1305,6 +1345,11 @@ pub(super) fn action_atoms(
                     )
                     .ok()?,
                 ),
+                doc::Atom::Literal(doc::Literal::Text(text))
+                    if doc::arena::ShortText::new(text).is_none() =>
+                {
+                    AtomSource::Text(Arc::from(text.as_str()))
+                }
                 doc::Atom::Literal(value) => AtomSource::Constant(literal(value)?),
             };
             Some(AtomLoad { dst, src })

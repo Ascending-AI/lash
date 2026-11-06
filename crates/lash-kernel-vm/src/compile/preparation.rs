@@ -475,6 +475,7 @@ impl Admission {
             document: Arc::clone(document),
             own: Arc::clone(&code.own),
             admission: Arc::clone(self),
+            regions: std::sync::Mutex::default(),
         }))
     }
 

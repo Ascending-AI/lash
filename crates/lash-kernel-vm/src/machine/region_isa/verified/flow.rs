@@ -68,7 +68,11 @@ impl Flow {
             {
                 Some(dst.index())
             }
-            RegionOp::Heap { dst: Some(dst), .. } => Some(dst.index()),
+            RegionOp::Heap { dst: Some(dst), .. }
+            | RegionOp::Effect {
+                departure: Some(dst),
+                ..
+            } => Some(dst.index()),
             RegionOp::Return { .. } => after
                 .roles
                 .iter()

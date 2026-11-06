@@ -125,6 +125,7 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                     state[dst.offset()] = Some(match exe.lib(*lib).header.signature.result {
                         lash_kernel_value::Type::Bool => RegisterKind::Bool,
                         lash_kernel_value::Type::Int => RegisterKind::Int,
+                        lash_kernel_value::Type::Float => RegisterKind::Float,
                         _ => RegisterKind::Value,
                     });
                     if step.scalar_resources {
@@ -220,8 +221,16 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                 let output = step.event.output.as_ref().ok_or(Refused::Facts)?;
                 state[register(draft, output)?.offset()] = Some(kind);
             }
-            RegionOp::Effect { value, .. } | RegionOp::ReturnVia { value } => {
+            RegionOp::ReturnVia { value } => {
                 read(&state, value.offset())?;
+            }
+            RegionOp::Effect {
+                value, departure, ..
+            } => {
+                let kind = read(&state, value.offset())?;
+                if let Some(departure) = departure {
+                    state[departure.offset()] = Some(kind);
+                }
             }
             RegionOp::Exit { .. } => {}
         }

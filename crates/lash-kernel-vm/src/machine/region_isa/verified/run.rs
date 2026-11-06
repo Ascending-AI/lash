@@ -45,6 +45,7 @@ impl Running<'_> {
     }
 
     fn halt(&mut self, reason: RegionStop) -> Result<RegionStop, RegionError> {
+        self.release_atoms()?;
         self.stop = Some(reason);
         Ok(reason)
     }
@@ -395,6 +396,7 @@ impl Running<'_> {
                 return self.halt(RegionStop::Refusal);
             };
             let counters = resources.accept()?;
+            self.release_atoms()?;
             self.accept_control(control);
             if let Some(write) = write {
                 self.registers.publish_write(write);

@@ -28,13 +28,16 @@ pub(super) fn connect(
         doc::Node::Expr(doc::Expr::Act(_)) => (Phase::Enter, Phase::Commit),
         _ => return Ok(None),
     };
-    let resume = lower::point(site, resume);
     let enter = lower::point(site, enter);
-    graph.insert(
-        resume.clone(),
-        next.map_or(lower::Edge::Stop, lower::Edge::Next),
-    );
-    graph.insert(enter.clone(), lower::Edge::Next(resume));
+    let after = next.map_or(lower::Edge::Stop, lower::Edge::Next);
+    if crate::compile::room::native_act(node, &source.calls).is_some() {
+        // A native call act answers at its Enter: there is no resume point.
+        graph.insert(enter.clone(), after);
+    } else {
+        let resume = lower::point(site, resume);
+        graph.insert(resume.clone(), after);
+        graph.insert(enter.clone(), lower::Edge::Next(resume));
+    }
     let mut entry = enter;
     for (index, child) in node.children().into_iter().enumerate().rev() {
         entry = lower::connect(

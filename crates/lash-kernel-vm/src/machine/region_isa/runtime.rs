@@ -42,10 +42,7 @@ impl KernelMachine {
             let id = frame.code;
             self.active_link = frame.link;
             self.refresh_charging(task)?;
-            let draft = compile_region(&self.exe, id).map_err(|error| halt(invalid(error)))?;
-            let calls = compile_calls(&self.exe, &draft).map_err(|error| halt(invalid(error)))?;
-            let code = verify_region(&self.exe, id, draft, &calls)
-                .map_err(|error| halt(invalid(error)))?;
+            let code = self.exe.region(id).map_err(|error| halt(invalid(error)))?;
             #[cfg(any(test, feature = "testing"))]
             let code = if self.islands.generic_only {
                 code.as_generic()

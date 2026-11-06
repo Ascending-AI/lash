@@ -440,6 +440,9 @@ fn check_atoms(
             (AtomSource::Constant(value), doc::Atom::Literal(literal)) => {
                 super::lower::literal(literal).is_some_and(|expected| expected.same(value))
             }
+            (AtomSource::Text(text), doc::Atom::Literal(doc::Literal::Text(expected))) => {
+                doc::arena::ShortText::new(expected).is_none() && **text == **expected
+            }
             _ => false,
         };
         if load.dst != dst || !loads {
@@ -612,9 +615,10 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                     return Err(Refused::Facts);
                 }
             }
-            let doc::Node::Expr(doc::Expr::Call { function, .. }) = node else {
+            let Some(function) = native_callee(node, source) else {
                 return Err(Refused::Source);
             };
+            let function = &function;
             if *function != kernel.function
                 || exe.library_lib(function) != Some(kernel.lib)
                 || !matches!(source.calls.get(function), Some(CallSource::Native(_)))
@@ -707,12 +711,10 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 rhs,
                 units,
             } => {
-                let doc::Node::Expr(doc::Expr::Call {
-                    function: actual, ..
-                }) = node
-                else {
+                let Some(actual) = native_callee(node, source) else {
                     return Err(Refused::Source);
                 };
+                let actual = &actual;
                 if function != actual
                     || exe.library_lib(function) != Some(*lib)
                     || super::resource_pair(exe.lib(*lib), true).and_then(|pair| pair.floats)
@@ -752,12 +754,10 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 rhs,
                 units,
             } => {
-                let doc::Node::Expr(doc::Expr::Call {
-                    function: actual, ..
-                }) = node
-                else {
+                let Some(actual) = native_callee(node, source) else {
                     return Err(Refused::Source);
                 };
+                let actual = &actual;
                 if function != actual
                     || exe.library_lib(function) != Some(*lib)
                     || super::resource_pair(exe.lib(*lib), true).and_then(|pair| pair.ints)
@@ -786,12 +786,10 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 }
             }
             CheckedKind::Native { function, lib } => {
-                let doc::Node::Expr(doc::Expr::Call {
-                    function: actual, ..
-                }) = node
-                else {
+                let Some(actual) = native_callee(node, source) else {
                     return Err(Refused::Source);
                 };
+                let actual = &actual;
                 if function != actual
                     || exe.library_lib(function) != Some(*lib)
                     || !matches!(source.calls.get(function), Some(CallSource::Native(_)))
@@ -896,8 +894,16 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 check_action(exe, draft, index, node, spec, action)?;
             }
         }
-        RegionOp::Effect { kind, value, .. } => {
+        RegionOp::Effect {
+            kind,
+            value,
+            departure,
+            next,
+        } => {
             value_reg(*value)?;
+            if let Some(departure) = departure {
+                value_reg(*departure)?;
+            }
             let expected = match node {
                 doc::Node::Stmt(doc::Stmt::Print { .. }) => EffectKind::Print,
                 doc::Node::Stmt(doc::Stmt::Finish { .. }) => EffectKind::Finish,
@@ -907,7 +913,9 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
             if *kind != expected
                 || step.at.phase != Phase::Commit
                 || !step.event.entities.is_empty()
-                || expected_output.is_some()
+                || expected_output != *departure
+                || (*kind == EffectKind::Print) != departure.is_none()
+                || (*kind != EffectKind::Print && next.is_some())
                 || expected_inputs.as_deref() != Ok(&[*value])
             {
                 return Err(Refused::Facts);
@@ -1039,7 +1047,10 @@ fn verify_layout(
             return Err(Refused::Scratch);
         }
         let expected_depth = match resources::node(source, &step.at.site)? {
-            doc::Node::Expr(doc::Expr::Call { function, .. }) if step.at.phase == Phase::Commit => {
+            node if native_callee(node, source).is_some()
+                && step.at.phase == native_phase(node) =>
+            {
+                let function = &native_callee(node, source).ok_or(Refused::Source)?;
                 let lib = exe.lib(exe.library_lib(function).ok_or(Refused::Source)?);
                 lib.prepared_depth(exe)
                     .checked_add(u32::from(lib.operation()))
@@ -1470,4 +1481,21 @@ pub(super) fn verify(
     generic.steps = draft.generic_steps.clone();
     generic.registers = draft.generic_registers.clone();
     verify_layout(exe, code, &generic, calls)
+}
+
+/// The library function `node` calls: a call expression's, or a native call
+/// act's, which answers at its Enter instead of its Commit.
+fn native_callee(node: doc::Node<'_>, source: &Source) -> Option<FunctionId> {
+    match node {
+        doc::Node::Expr(doc::Expr::Call { function, .. }) => Some(*function),
+        _ => crate::compile::room::native_act(node, &source.calls),
+    }
+}
+
+/// The phase at which `node`'s library call answers.
+fn native_phase(node: doc::Node<'_>) -> Phase {
+    match node {
+        doc::Node::Expr(doc::Expr::Act(_)) => Phase::Enter,
+        _ => Phase::Commit,
+    }
 }

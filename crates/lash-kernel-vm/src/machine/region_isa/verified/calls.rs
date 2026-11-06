@@ -50,12 +50,7 @@ impl Running<'_> {
         // A statement call loads its atoms, which the caller holds until the
         // call's Commit. A refused entry leaves them outside its prefix.
         for load in &call.atoms {
-            let operand = match &load.src {
-                crate::compile::region_isa::AtomSource::Role(src) => self.read(*src)?,
-                crate::compile::region_isa::AtomSource::Constant(value) => {
-                    Operand::Immediate(*value)
-                }
-            };
+            let operand = self.atom(&load.src)?;
             self.write(load.dst, operand)?;
         }
         self.call_captures.clear();
@@ -310,6 +305,7 @@ impl Running<'_> {
         };
         // All bank writes, allocation and checks precede this affine accept.
         ready.accept();
+        self.release_atoms()?;
         self.parked.push(parked);
         self.invocations.accept(reserved);
         self.code = callee;

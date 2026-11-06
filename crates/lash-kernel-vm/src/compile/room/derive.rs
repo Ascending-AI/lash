@@ -127,29 +127,57 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                             held,
                         ));
                     }
-                    // A call's Enter moves its arguments into the callee. A
-                    // delivering action's arguments stay live until its Commit.
-                    events.push(event(
-                        &site,
-                        Phase::Enter,
-                        if delivers(node) {
-                            Box::new([])
-                        } else {
-                            ins.clone()
-                        },
-                        None,
-                        Amount::default(),
-                        Amount::default(),
-                    ));
-                    if matches!(act.kind, doc::ActKind::Call(_)) {
+                    if let Some(function) = native_act(node, calls) {
+                        // A native call act answers at its Enter, as a
+                        // native expression call does at its Commit.
+                        let callee = CallSource::Native(function);
                         events.push(event(
                             &site,
-                            Phase::Restore,
-                            vec![Owner::Incoming(site.clone())].into(),
+                            Phase::Enter,
+                            ins.clone(),
                             Some(operand(&site)),
+                            Amount::default().term(
+                                Measure::CallPeak {
+                                    at: site.clone(),
+                                    callee,
+                                },
+                                1,
+                            ),
+                            Amount::default()
+                                .term(
+                                    Measure::CallDelta {
+                                        at: site.clone(),
+                                        callee,
+                                    },
+                                    1,
+                                )
+                                .term(release(ins.iter().cloned()), -1),
+                        ));
+                    } else {
+                        // A call's Enter moves its arguments into the callee. A
+                        // delivering action's arguments stay live until its Commit.
+                        events.push(event(
+                            &site,
+                            Phase::Enter,
+                            if delivers(node) {
+                                Box::new([])
+                            } else {
+                                ins.clone()
+                            },
+                            None,
                             Amount::default(),
                             Amount::default(),
                         ));
+                        if matches!(act.kind, doc::ActKind::Call(_)) {
+                            events.push(event(
+                                &site,
+                                Phase::Restore,
+                                vec![Owner::Incoming(site.clone())].into(),
+                                Some(operand(&site)),
+                                Amount::default(),
+                                Amount::default(),
+                            ));
+                        }
                     }
                 }
                 doc::Node::Expr(doc::Expr::Call { function, .. })
@@ -348,7 +376,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
         }
         for mut e in events {
             e.entities = entities(node, &site, e.point.phase, source, params, cells);
-            let kind = exit(node, e.point.phase);
+            let kind = exit(node, e.point.phase, calls);
             let owners: Box<[_]> = vec![
                 Owner::Frame(source.clone()),
                 Owner::Scope(source.clone()),
@@ -572,12 +600,14 @@ fn formula(
         doc::Node::Block(_) => unreachable!("block has entry and release events"),
     }
 }
-fn exit(node: doc::Node<'_>, phase: Phase) -> ExitKind {
+fn exit(node: doc::Node<'_>, phase: Phase, calls: &BTreeMap<FunctionId, CallSource>) -> ExitKind {
+    // A native call act answers inline; every other act suspends at its Enter.
     if phase == Phase::Enter
         && matches!(
             node,
             doc::Node::Action(_) | doc::Node::Expr(doc::Expr::Act(_))
         )
+        && native_act(node, calls).is_none()
     {
         return ExitKind::Action;
     }

@@ -682,6 +682,9 @@ impl Source {
         successor: Successor,
     ) -> Result<Point, Refused> {
         match at.phase {
+            // A native call act answers at its Enter and continues as if
+            // committed; a root action resumes at its own Commit.
+            Phase::Enter if self.answers_at_enter(&at.site) => self.next_after_commit(&at.site),
             Phase::Enter => {
                 self.root_action(at)?;
                 Ok(Point {

@@ -702,7 +702,15 @@ impl Source {
         let mut calls = BTreeMap::new();
         let mut pending = vec![doc::Node::Block(body)];
         while let Some(node) = pending.pop() {
-            if let doc::Node::Expr(doc::Expr::Call { function, .. }) = node {
+            let function = match node {
+                doc::Node::Expr(doc::Expr::Call { function, .. }) => Some(function),
+                doc::Node::Expr(doc::Expr::Act(act)) => match &act.kind {
+                    doc::ActKind::Call(doc::Callee::Local(function)) => Some(function),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(function) = function {
                 let body = catalog.header(function).is_some_and(|h| {
                     matches!(
                         h.implementation,
@@ -1080,6 +1088,20 @@ impl Source {
     /// The first unpaid event after an expression, binding or assignment Commit.
     /// Source syntax and the canonical walker determine the successor. A
     /// required future branch/cursor decision declines instead of inventing it.
+    /// Whether the node at `at` is a native call act, which answers at its Enter.
+    pub(crate) fn answers_at_enter(&self, at: &Site) -> bool {
+        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
+            return false;
+        }
+        let mut node = doc::Node::Block(&self.body);
+        for index in &at.path[self.site.path.len()..] {
+            let Some(child) = node.children().get(*index as usize).copied() else {
+                return false;
+            };
+            node = child;
+        }
+        native_act(node, &self.calls).is_some()
+    }
     pub(crate) fn next_after_commit(&self, at: &Site) -> Result<Point, Refused> {
         self.verify()?;
         if at.unit != self.site.unit
@@ -1201,6 +1223,25 @@ fn child(site: &Site, index: usize) -> Site {
 }
 fn operand(site: &Site) -> Owner {
     Owner::Operand(site.clone())
+}
+/// The library function a call act calls natively. Such an act is a native
+/// call at its Enter, which publishes the answer as its operand: no callee
+/// is entered and no Incoming is delivered.
+pub(crate) fn native_act(
+    node: doc::Node<'_>,
+    calls: &BTreeMap<FunctionId, CallSource>,
+) -> Option<FunctionId> {
+    match node {
+        doc::Node::Expr(doc::Expr::Act(act)) => match &act.kind {
+            doc::ActKind::Call(doc::Callee::Local(function))
+                if matches!(calls.get(function), Some(CallSource::Native(_))) =>
+            {
+                Some(*function)
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 /// An action whose result the machine delivers as the task's Incoming:
 /// every statement action, and every nested one except a call, whose

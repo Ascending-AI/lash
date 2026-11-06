@@ -1,7 +1,7 @@
 //! Installed scalar kernels execute once; admission installs their answer later.
 use super::super::{code::Register, operands::Operand, *};
 use super::Running;
-use crate::compile::region_isa::{AtomSource, CheckedKind, Pc, RegionOp};
+use crate::compile::region_isa::{CheckedKind, Pc, RegionOp};
 use lash_kernel_state::kernel_internals::logical::{LeaseValue, NativeBatch};
 
 pub(super) struct ScalarAnswer {
@@ -165,10 +165,7 @@ impl Running<'_> {
             RegionOp::Boundary { spec } => {
                 let action = spec.action().ok_or_else(|| invalid(Refused::Facts))?;
                 for load in &action.atoms {
-                    let operand = match &load.src {
-                        AtomSource::Role(src) => self.read(*src)?,
-                        AtomSource::Constant(value) => Operand::Immediate(*value),
-                    };
+                    let operand = self.atom(&load.src)?;
                     self.write(load.dst, operand)?;
                 }
                 return Ok(Some(ScalarAnswer {
@@ -179,9 +176,21 @@ impl Running<'_> {
                 }));
             }
             // The machine served the effect before its step was accepted.
-            RegionOp::Effect { next, .. } => {
+            RegionOp::Effect {
+                value,
+                departure,
+                next,
+                ..
+            } => {
                 return Ok(Some(ScalarAnswer {
-                    write: None,
+                    write: departure
+                        .map(|departure| {
+                            Ok::<_, RegionError>((
+                                super::bind::physical(&self.code.program, departure)?,
+                                self.read(*value)?,
+                            ))
+                        })
+                        .transpose()?,
                     next: next.unwrap_or(self.pc),
                     formula: None,
                     native: None,

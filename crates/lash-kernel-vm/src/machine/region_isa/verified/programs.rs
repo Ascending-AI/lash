@@ -65,10 +65,7 @@ impl Programs {
                     if slot.is_some() {
                         continue;
                     }
-                    let draft = compile_region(exe, target.code()).map_err(invalid)?;
-                    let calls = compile_calls(exe, &draft).map_err(invalid)?;
-                    let program =
-                        verify_region(exe, target.code(), draft, &calls).map_err(invalid)?;
+                    let program = exe.region(target.code()).map_err(invalid)?;
                     let bound = Code::bind_executable(exe, &program)?;
                     *slot = Some(Arc::clone(&bound));
                     pending.push(bound);

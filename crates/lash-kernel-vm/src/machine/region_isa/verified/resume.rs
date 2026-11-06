@@ -219,9 +219,7 @@ pub(in crate::machine) fn restore_source_controls(
     record: &FrameRecord,
     access: &Access<'_>,
 ) -> Result<(Controls, Option<Standing>), HeapFault> {
-    let draft = compile_region(exe, id).map_err(|_| malformed())?;
-    let calls = compile_calls(exe, &draft).map_err(|_| malformed())?;
-    let program = verify_region(exe, id, draft, &calls).map_err(|_| malformed())?;
+    let program = exe.region(id).map_err(|_| malformed())?;
     let code = Code::bind_executable(exe, &program).map_err(|_| malformed())?;
     let mut saved = Vec::new();
     record.loops.visit(access, &mut |_, value| {

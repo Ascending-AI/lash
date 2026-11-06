@@ -341,12 +341,15 @@ pub(crate) enum AtomSource {
     /// A visible name's role.
     Role(Reg<LeaseValue>),
     Constant(Value),
+    /// A text literal too long to stand inline, allocated when it loads.
+    Text(Arc<str>),
 }
 impl PartialEq for AtomSource {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Role(a), Self::Role(b)) => a == b,
             (Self::Constant(a), Self::Constant(b)) => a.same(b),
+            (Self::Text(a), Self::Text(b)) => a == b,
             _ => false,
         }
     }
@@ -443,9 +446,12 @@ pub(crate) enum RegionOp {
     /// A statement that hands its operand to the machine: the step is
     /// accepted and billed in the region, which then stops with the value
     /// as the task's Incoming for the machine to print, finish or fail with.
+    /// A finish or fail departs the program: its value moves into the
+    /// departure role and the region has no successor.
     Effect {
         kind: EffectKind,
         value: Reg<LeaseValue>,
+        departure: Option<Reg<LeaseValue>>,
         next: Option<Pc>,
     },
     Exit {
@@ -511,6 +517,26 @@ pub(crate) struct CallSite {
 pub(crate) fn compile_region(exe: &Executable, code: CodeId) -> Result<RegionDraft, Refused> {
     lower::compile(exe, code)
 }
+impl Executable {
+    /// `code`'s verified region program: lowered, its calls planned and the
+    /// whole verified once, then shared by every lease of this executable.
+    pub(crate) fn region(&self, code: CodeId) -> Result<Arc<RegionCode>, Refused> {
+        if let Some(known) = self.regions.lock().map_err(|_| Refused::Source)?.get(&code) {
+            return known.clone();
+        }
+        let verified = compile_region(self, code).and_then(|draft| {
+            let calls =
+                crate::compile::room::region::calls::region_isa::compile_calls(self, &draft)?;
+            verify_region(self, code, draft, &calls)
+        });
+        self.regions
+            .lock()
+            .map_err(|_| Refused::Source)?
+            .insert(code, verified.clone());
+        verified
+    }
+}
+
 pub(crate) fn verify_region(
     exe: &Executable,
     code: CodeId,
