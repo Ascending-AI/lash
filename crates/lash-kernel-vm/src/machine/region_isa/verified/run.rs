@@ -269,6 +269,20 @@ impl Running<'_> {
                 answer.formula,
             )?;
             self.counters = after.counters;
+            // A root frame's own completion is billed as it leaves; a
+            // callee's is billed at its caller's Restore.
+            let after = match op {
+                RegionOp::Exit { .. } if self.parked.is_empty() && after.crossing.is_none() => {
+                    let completion = departure
+                        .as_ref()
+                        .or(self.departing.as_ref())
+                        .map_or(0, |departure| departure.completion);
+                    let payment = charge::export(self.counters, self.limits, completion);
+                    self.counters = payment.counters;
+                    payment
+                }
+                _ => after,
+            };
             if let Some(crossing) = after.crossing {
                 self.refusal = Some(crate::Bound::Charge);
                 self.crossing = Some(crossing);

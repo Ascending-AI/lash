@@ -1242,11 +1242,30 @@ impl Frames {
                         },
                     }
                 }
-                None => row(&self.rows, index, &self.access)?
-                    .statement
-                    .resolve(&self.access)?
-                    .as_ref()
-                    .clone(),
+                None => {
+                    let row = row(&self.rows, index, &self.access)?;
+                    let code = code_of(&row, &self.exe, &self.access)?;
+                    if !self.exe.code(code).charged {
+                        continue;
+                    }
+                    let root = row.statement.resolve(&self.access)?.as_ref().clone();
+                    // A saved canonical frame's statement is its body root;
+                    // it stands in the statement its continuation lies in.
+                    match row
+                        .pending
+                        .as_ref()
+                        .filter(|pending| pending.unpaid.is_some())
+                    {
+                        Some(pending) => {
+                            let mut at = root;
+                            at.path.extend_from_slice(&pending.site);
+                            self.exe
+                                .stmt_within(code, &at)
+                                .ok_or_else(|| malformed("a continuation lies in no statement"))?
+                        }
+                        None => root,
+                    }
+                }
             };
             if self.exe.authored_unit(&statement.unit) {
                 return Ok(Some(statement));

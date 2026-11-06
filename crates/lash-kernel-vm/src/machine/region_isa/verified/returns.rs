@@ -126,6 +126,25 @@ impl Running<'_> {
                 .completion(&mut self.view, &self.call_values, value)
                 .map_err(storage_fault)?
                 .ok_or_else(|| invalid(Refused::Facts))?
+        } else if let Some(library) = self
+            .canonical
+            .library
+            .as_ref()
+            .filter(|_| self.limits.charge_enabled)
+        {
+            // K-CHG-003: a root library frame, a spawned task's, bills its
+            // own formula over its arguments and result when it leaves.
+            let code = Arc::clone(&self.code);
+            let function = code.exe.lib(library.lib);
+            self.call_values.clear();
+            for argument in &library.args {
+                let argument = self.view.import(argument).map_err(RegionError::Heap)?;
+                self.call_values.push(argument);
+            }
+            function
+                .charge
+                .lease(&mut self.view, &self.call_values, value)
+                .map_err(storage_fault)?
         } else {
             0
         };
@@ -144,8 +163,7 @@ impl Running<'_> {
     pub(super) fn finish_frame(&mut self) -> Result<(), RegionError> {
         self.authenticate_activation()?;
         if self.parked.is_empty()
-            && (self.canonical.library.is_some()
-                || self.canonical.cleaning.is_some()
+            && (self.canonical.cleaning.is_some()
                 || self
                     .canonical
                     .public_result

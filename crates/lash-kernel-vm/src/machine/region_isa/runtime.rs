@@ -118,7 +118,15 @@ impl KernelMachine {
                         .regs
                         .take_region_refusal()
                         .ok_or_else(|| fault("a refused region has no bound payload"))?;
-                    exceeded.site = attempted.map(|point| Box::new(point.site));
+                    // The nearest authored statement: the one the attempted
+                    // step lies in when its body is authored; otherwise, or
+                    // at a body's entry, the machine locates it from the
+                    // frames and the task's spawn origin.
+                    let code = self.frame(task)?.code;
+                    exceeded.site = attempted
+                        .filter(|point| self.exe.authored_unit(&point.site.unit))
+                        .and_then(|point| self.exe.stmt_within(code, &point.site))
+                        .map(Box::new);
                     return Err(Halt::Bound(exceeded));
                 }
                 RegionStop::Slice | RegionStop::Handoff | RegionStop::Observer => {}
