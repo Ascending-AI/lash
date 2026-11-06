@@ -118,9 +118,7 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     doc::Stmt::Return { .. }
                     | doc::Stmt::Throw { .. }
                     | doc::Stmt::Finish { .. }
-                    | doc::Stmt::Fail { .. }
-                    | doc::Stmt::Break
-                    | doc::Stmt::Continue,
+                    | doc::Stmt::Fail { .. },
                 ) => Some(Owner::ActiveDeparture(source.site.clone())),
                 _ => None,
             };

@@ -47,10 +47,9 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                 doc::Stmt::Return { .. }
                 | doc::Stmt::Throw { .. }
                 | doc::Stmt::Finish { .. }
-                | doc::Stmt::Fail { .. }
-                | doc::Stmt::Break
-                | doc::Stmt::Continue,
+                | doc::Stmt::Fail { .. },
             ) => Some(Owner::ActiveDeparture(source.clone())),
+            // A loop departure carries no value: its route ends at the loop.
             _ => None,
         };
         let mut events = Vec::new();
