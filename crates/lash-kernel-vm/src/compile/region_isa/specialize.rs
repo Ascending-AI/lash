@@ -16,6 +16,41 @@ fn merge(known: &mut Option<RegisterKind>, incoming: RegisterKind) -> bool {
     }
 }
 
+/// The kind a native call's result has over arguments of `args` kinds: a
+/// scalar pair's comparison or arithmetic over two ints or two floats, or
+/// else what the signature promises. The kind inference and the verifier
+/// both read it, so a register they type agrees.
+pub(super) fn native_result(exe: &Executable, lib: LibId, args: &[RegisterKind]) -> RegisterKind {
+    let function = exe.lib(lib);
+    if args.len() == 2
+        && args.iter().all(|kind| *kind == RegisterKind::Int)
+        && let Some(op) = super::resource_pair(function, true).and_then(|pair| pair.ints)
+    {
+        if op.compares() {
+            return RegisterKind::Bool;
+        }
+        if op != doc::scalar::ScalarOp::Div {
+            return RegisterKind::Int;
+        }
+    }
+    if args.len() == 2
+        && args.iter().all(|kind| *kind == RegisterKind::Float)
+        && let Some(op) = super::resource_pair(function, true).and_then(|pair| pair.floats)
+    {
+        return if op.compares() {
+            RegisterKind::Bool
+        } else {
+            RegisterKind::Float
+        };
+    }
+    match function.header.signature.result {
+        lash_kernel_value::Type::Int => RegisterKind::Int,
+        lash_kernel_value::Type::Bool => RegisterKind::Bool,
+        lash_kernel_value::Type::Float => RegisterKind::Float,
+        _ => RegisterKind::Value,
+    }
+}
+
 fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, Refused> {
     let mut known = vec![None; draft.registers.len()];
     known[draft.roles.len()] = Some(RegisterKind::Value);
@@ -128,38 +163,7 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
                     CheckedKind::Native { lib, .. } => {
                         let types: Option<Vec<_>> =
                             args.iter().map(|reg| known[reg.offset()]).collect();
-                        let result = types.map(|types| {
-                            let function = exe.lib(*lib);
-                            if types.len() == 2
-                                && types.iter().all(|kind| *kind == RegisterKind::Int)
-                                && let Some(op) =
-                                    super::resource_pair(function, true).and_then(|pair| pair.ints)
-                            {
-                                if op.compares() {
-                                    return RegisterKind::Bool;
-                                }
-                                if op != doc::scalar::ScalarOp::Div {
-                                    return RegisterKind::Int;
-                                }
-                            }
-                            if types.len() == 2
-                                && types.iter().all(|kind| *kind == RegisterKind::Float)
-                                && let Some(op) = super::resource_pair(function, true)
-                                    .and_then(|pair| pair.floats)
-                            {
-                                return if op.compares() {
-                                    RegisterKind::Bool
-                                } else {
-                                    RegisterKind::Float
-                                };
-                            }
-                            match function.header.signature.result {
-                                lash_kernel_value::Type::Int => RegisterKind::Int,
-                                lash_kernel_value::Type::Bool => RegisterKind::Bool,
-                                lash_kernel_value::Type::Float => RegisterKind::Float,
-                                _ => RegisterKind::Value,
-                            }
-                        });
+                        let result = types.map(|types| native_result(exe, *lib, &types));
                         Some((*dst, result))
                     }
                     CheckedKind::Cursor { .. } => Some((*dst, Some(RegisterKind::Value))),

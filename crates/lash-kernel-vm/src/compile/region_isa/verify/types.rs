@@ -121,15 +121,12 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                     state[dst.offset()] = Some(RegisterKind::Bool);
                 }
                 CheckedKind::Native { lib, .. } => {
-                    for reg in args {
-                        read(&state, reg.offset())?;
-                    }
-                    state[dst.offset()] = Some(match exe.lib(*lib).header.signature.result {
-                        lash_kernel_value::Type::Bool => RegisterKind::Bool,
-                        lash_kernel_value::Type::Int => RegisterKind::Int,
-                        lash_kernel_value::Type::Float => RegisterKind::Float,
-                        _ => RegisterKind::Value,
-                    });
+                    let kinds = args
+                        .iter()
+                        .map(|reg| read(&state, reg.offset()))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    state[dst.offset()] =
+                        Some(super::super::specialize::native_result(exe, *lib, &kinds));
                     if step.scalar_resources {
                         return Err(Refused::Retained);
                     }

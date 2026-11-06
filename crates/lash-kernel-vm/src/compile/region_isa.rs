@@ -340,6 +340,17 @@ pub(crate) struct AtomLoad {
     pub(crate) dst: Reg<LeaseValue>,
     pub(crate) src: AtomSource,
 }
+/// Where a checked helper call's argument stands before the call's step.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CheckedArgument {
+    /// A role the frame holds.
+    Held(Slot),
+    /// An inline literal the call loads.
+    Constant(Value),
+    /// A long text literal the call allocates when it loads; only its type
+    /// bears on the check.
+    Text,
+}
 #[derive(Clone, Debug)]
 pub(crate) enum AtomSource {
     /// A visible name's role.
@@ -705,18 +716,40 @@ impl RegionCode {
             .collect::<Option<_>>()?;
         Some((lib, slots))
     }
-    /// The checked helper the call at `pc` enters, with the source slots
-    /// holding its arguments, for the machine to check them against its
-    /// signature where the region cannot.
-    pub(crate) fn checked_call(&self, pc: Pc) -> Option<(LibId, Box<[Slot]>)> {
+    /// The checked helper the call at `pc` enters, with where each of its
+    /// arguments stands before the call's step, for the machine to check
+    /// them against its signature where the region cannot. The call loads
+    /// its atoms in its own step, so an atom argument names the role or
+    /// literal it loads from; any other argument is a role the frame holds.
+    pub(crate) fn checked_call(&self, pc: Pc) -> Option<(LibId, Box<[CheckedArgument]>)> {
         let RegionOp::Call { site, .. } = self.op(pc)? else {
             return None;
         };
-        let plan = self.call(*site)?;
-        Some((
-            plan.checked()?,
-            plan.arguments().iter().map(|role| role.slot()).collect(),
-        ))
+        let lib = self.call(*site)?.checked()?;
+        let call = self.draft.calls.get(site.offset())?;
+        let held = |reg: &Reg<LeaseValue>| {
+            self.draft
+                .roles
+                .iter()
+                .find_map(|(role, actual)| (actual == reg).then_some(role.slot()))
+                .flatten()
+                .map(CheckedArgument::Held)
+        };
+        let arguments = call
+            .arguments
+            .iter()
+            .map(
+                |reg| match call.atoms.iter().find(|load| load.dst == *reg) {
+                    Some(load) => match &load.src {
+                        AtomSource::Role(src) => held(src),
+                        AtomSource::Constant(value) => Some(CheckedArgument::Constant(*value)),
+                        AtomSource::Text(_) => Some(CheckedArgument::Text),
+                    },
+                    None => held(reg),
+                },
+            )
+            .collect::<Option<_>>()?;
+        Some((lib, arguments))
     }
     /// The source slot holding the value of the effect at `pc`, for the
     /// machine to copy out before the region takes its step.

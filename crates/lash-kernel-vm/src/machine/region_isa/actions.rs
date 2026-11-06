@@ -228,28 +228,56 @@ impl KernelMachine {
         })
     }
 
-    /// The values `task`'s top frame holds in `slots`, in order.
+    /// The values `task`'s top frame holds in `slots`, in order: a binding
+    /// or capture in its named frame field, any other role in its source
+    /// continuation. A capture reads the cell it shares.
     fn role_values(
         &mut self,
         task: TaskId,
         slots: &[lash_kernel_state::kernel_internals::logical::Slot],
-    ) -> Result<Vec<Value>, Halt> {
-        let source = self
-            .frame(task)?
-            .pending
-            .source
-            .as_ref()
-            .ok_or_else(|| fault("a served step has no source continuation"))?;
-        slots
-            .iter()
-            .map(|slot| {
-                source
+    ) -> Eval<Vec<Value>> {
+        use crate::machine::SlotState;
+        use lash_kernel_state::kernel_internals::logical::{Owner, Slot};
+        let exe = Arc::clone(&self.exe);
+        let mut values = Vec::with_capacity(slots.len());
+        for slot in slots {
+            let frame = self.frame(task)?;
+            let value = if let Slot::Binding(_) | Slot::Capture(_) = slot {
+                let code = exe.code(frame.code);
+                let at = code
+                    .slots_by_at
+                    .iter()
+                    .position(|binding| {
+                        matches!(
+                            code.source_room.binding_root(*binding, task, frame.invocation),
+                            Some(Owner::Value { slot: actual, .. }) if actual == *slot
+                        )
+                    })
+                    .ok_or_else(|| fault("a served step names no frame binding"))?;
+                match *frame.slot(at as u32) {
+                    SlotState::Value(value) => value,
+                    SlotState::Cell(cell) if matches!(slot, Slot::Capture(_)) => {
+                        self.in_arena(|arena| arena.cell(cell))?
+                    }
+                    SlotState::Cell(handle) => Value::ObjectRef(handle),
+                    SlotState::Empty => {
+                        return Err(fault("a served step reads an unbound binding").into());
+                    }
+                }
+            } else {
+                frame
+                    .pending
+                    .source
+                    .as_ref()
+                    .ok_or_else(|| fault("a served step has no source continuation"))?
                     .roles
                     .iter()
                     .find_map(|(saved, value)| (saved == slot).then_some(*value))
-                    .ok_or_else(|| fault("a served step lacks a held operand"))
-            })
-            .collect()
+                    .ok_or_else(|| fault("a served step lacks a held operand"))?
+            };
+            values.push(value);
+        }
+        Ok(values)
     }
 
     /// Answers the native call `task`'s top frame stands before, its checked
@@ -292,9 +320,24 @@ impl KernelMachine {
         task: TaskId,
         at: crate::compile::room::Point,
         lib: crate::compile::LibId,
-        slots: &[lash_kernel_state::kernel_internals::logical::Slot],
+        arguments: &[crate::compile::region_isa::CheckedArgument],
     ) -> Eval<()> {
-        let operands = self.role_values(task, slots)?;
+        use crate::compile::region_isa::CheckedArgument;
+        let mut operands = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            operands.push(match argument {
+                CheckedArgument::Held(slot) => {
+                    self.role_values(task, std::slice::from_ref(slot))?[0]
+                }
+                CheckedArgument::Constant(value) => *value,
+                // Any text has the one public type; the empty text stands
+                // for the literal the call would allocate.
+                CheckedArgument::Text => Value::Text(
+                    lash_kernel_doc::arena::ShortText::new("")
+                        .ok_or_else(|| fault("the empty text is not inline"))?,
+                ),
+            });
+        }
         let exe = Arc::clone(&self.exe);
         let function = exe.lib(lib);
         for (at, value) in operands.iter().enumerate() {
