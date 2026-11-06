@@ -359,6 +359,11 @@ impl Running<'_> {
                 }
                 None => {}
             }
+            // An accepted uncaught raise leaves the region: the machine
+            // carries it out of the frame from its departure role.
+            if matches!(op, RegionOp::Raise { .. }) {
+                return self.halt(RegionStop::Throw);
+            }
             if matches!(op, RegionOp::Exit { .. }) {
                 self.finish_frame()?;
                 if self.complete {

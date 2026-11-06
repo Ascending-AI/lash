@@ -61,9 +61,15 @@ impl KernelMachine {
             };
             if let Some(standing) = standing {
                 match self.task(task)?.take_incoming() {
-                    Some(incoming) => self.deliver_action(task, standing, incoming)?,
+                    Some(incoming) => {
+                        if let Err(raised) = self.deliver_action(task, standing, incoming) {
+                            return self.raise_out(task, host, raised);
+                        }
+                    }
                     None => {
-                        self.perform_action(task, host, standing)?;
+                        if let Err(raised) = self.perform_action(task, host, standing) {
+                            return self.raise_out(task, host, raised);
+                        }
                         return Ok(true);
                     }
                 }
@@ -140,7 +146,10 @@ impl KernelMachine {
                     self.regs.clear();
                     let slot = effect.ok_or_else(|| fault("an effect stop stands at no effect"))?;
                     let at = at.ok_or_else(|| fault("an effect stop has no point"))?;
-                    let datum = self.serve_effect(task, at, slot)?;
+                    let datum = match self.serve_effect(task, at, slot) {
+                        Ok(datum) => datum,
+                        Err(raised) => return self.raise_out(task, host, raised),
+                    };
                     match kind {
                         crate::compile::region_isa::EffectKind::Print => host.print(&datum),
                         crate::compile::region_isa::EffectKind::Finish => {
@@ -162,10 +171,17 @@ impl KernelMachine {
                     let (lib, slots) =
                         native.ok_or_else(|| fault("a native stop stands at no native call"))?;
                     let at = at.ok_or_else(|| fault("a native stop has no point"))?;
-                    self.answer_native(task, at, lib, &slots)?;
+                    if let Err(raised) = self.answer_native(task, at, lib, &slots) {
+                        return self.raise_out(task, host, raised);
+                    }
                     continue;
                 }
-                RegionStop::Boundary | RegionStop::Throw => {
+                // A raise no try of the frame takes leaves the frame.
+                RegionStop::Throw => {
+                    self.regs.clear();
+                    self.raise_from_region(task, host)?;
+                }
+                RegionStop::Boundary => {
                     return Err(fault(&format!(
                         "a canonical region reached an unintegrated boundary at {at:?}"
                     )));

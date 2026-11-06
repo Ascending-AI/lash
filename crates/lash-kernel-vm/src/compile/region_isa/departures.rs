@@ -41,11 +41,32 @@ fn departing(draft: &RegionDraft, index: usize) -> Result<Option<ExitKind>, Refu
         }
         doc::Node::Stmt(doc::Stmt::Break) => Some(ExitKind::Break),
         doc::Node::Stmt(doc::Stmt::Continue) => Some(ExitKind::Continue),
-        doc::Node::Stmt(doc::Stmt::Throw { .. }) => {
-            matches!(draft.ops[index], RegionOp::Move { .. }).then_some(ExitKind::Raise)
-        }
+        doc::Node::Stmt(doc::Stmt::Throw { .. }) => matches!(
+            draft.ops[index],
+            RegionOp::Move { .. } | RegionOp::Raise { .. }
+        )
+        .then_some(ExitKind::Raise),
         _ => None,
     })
+}
+
+/// Whether no try of the frame encloses the statement at `at`, so that a
+/// raise there leaves the frame.
+pub(super) fn uncaught(source: &Source, at: &Point) -> Result<bool, Refused> {
+    if at.site.unit != source.site.unit || !at.site.path.starts_with(&source.site.path) {
+        return Err(Refused::Path);
+    }
+    let mut site = at.site.clone();
+    while site.path.len() > source.site.path.len() {
+        site.path.pop();
+        if matches!(
+            resources::node(source, &site)?,
+            doc::Node::Stmt(doc::Stmt::Try(_))
+        ) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Where a departure resumes after its Catch: a loop's Commit for a Break,
@@ -117,7 +138,14 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
         let Some(exit) = departing(draft, index)? else {
             continue;
         };
-        // A raise no try in this frame takes leaves the frame unrouted.
+        // A raise no try of the frame encloses leaves the frame unrouted.
+        if exit == ExitKind::Raise && uncaught(&draft.source, &steps[index].at)? {
+            let RegionOp::Move { dst, src, .. } = ops[index] else {
+                return Err(Refused::Source);
+            };
+            ops[index] = RegionOp::Raise { dst, src };
+            continue;
+        }
         let interval = match draft.source.compile_departure_suffix(&steps[index].at) {
             Err(Refused::Path) if exit == ExitKind::Raise => None,
             interval => Some(interval?),
@@ -246,7 +274,11 @@ pub(super) fn verify(
         let Some(exit) = departing(draft, index)? else {
             continue;
         };
-        if matches!(draft.ops[index], RegionOp::Boundary { .. }) {
+        // check_op verifies an uncaught raise against its event.
+        if matches!(
+            draft.ops[index],
+            RegionOp::Boundary { .. } | RegionOp::Raise { .. }
+        ) {
             continue;
         }
         let route = routes.next().ok_or(Refused::Path)?;

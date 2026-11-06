@@ -58,7 +58,7 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                     _ => RegisterKind::Value,
                 })
             }
-            RegionOp::Move { dst, src, .. } => {
+            RegionOp::Move { dst, src, .. } | RegionOp::Raise { dst, src } => {
                 state[dst.offset()] = Some(read(&state, src.offset())?)
             }
             RegionOp::IntBinary { lhs, rhs, dst, .. } => {

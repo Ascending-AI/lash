@@ -48,6 +48,7 @@ impl Flow {
         let destination = match code.op(pc).ok_or_else(|| invalid(Refused::Path))? {
             RegionOp::Constant { dst, .. }
             | RegionOp::Move { dst, .. }
+            | RegionOp::Raise { dst, .. }
             | RegionOp::Read { dst, .. } => Some(dst.index()),
             RegionOp::IntBinary { dst, .. } => Some(dst.index()),
             RegionOp::Checked { kernel, dst, .. }

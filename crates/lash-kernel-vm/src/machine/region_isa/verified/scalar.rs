@@ -82,6 +82,8 @@ impl Running<'_> {
                 (Some((*dst, Operand::Immediate(*value))), *next)
             }
             RegionOp::Move { dst, src, next } => (Some((*dst, self.read(*src)?)), *next),
+            // The region stops once an uncaught raise is accepted, at its row.
+            RegionOp::Raise { dst, src } => (Some((*dst, self.read(*src)?)), self.pc),
             RegionOp::IntBinary {
                 kernel,
                 lhs,

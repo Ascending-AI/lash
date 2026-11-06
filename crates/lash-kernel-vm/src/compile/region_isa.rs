@@ -422,6 +422,14 @@ pub(crate) enum RegionOp {
     Return {
         value: Reg<LeaseValue>,
     },
+    /// An uncaught Throw's Commit: no try of the frame encloses it. The
+    /// step moves the operand into the frame's departure and is accepted;
+    /// the region then stops, and the machine carries the raise out of the
+    /// frame from that role.
+    Raise {
+        dst: Reg<LeaseValue>,
+        src: Reg<LeaseValue>,
+    },
     Boundary {
         spec: BoundarySpec,
     },

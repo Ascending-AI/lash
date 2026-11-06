@@ -65,6 +65,13 @@ fn source_next(source: &Source, at: &Point) -> Result<Option<Point>, Refused> {
     {
         return Ok(None);
     }
+    // A raise no try of the frame encloses leaves the frame from its Commit.
+    if at.phase == Phase::Commit
+        && matches!(node, doc::Node::Stmt(doc::Stmt::Throw { .. }))
+        && super::departures::uncaught(source, at)?
+    {
+        return Ok(None);
+    }
     // A compound statement's Commit continues after it in its block.
     if at.phase == Phase::Commit
         && matches!(
@@ -560,6 +567,21 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 _ => return Err(Refused::Source),
             };
             if output != Some(*dst) || !step.event.entities.is_empty() {
+                return Err(Refused::Source);
+            }
+        }
+        // An uncaught raise moves its operand into the frame's departure.
+        RegionOp::Raise { dst, src } => {
+            value_reg(*src)?;
+            value_reg(*dst)?;
+            if step.at.phase != Phase::Commit
+                || !matches!(node, doc::Node::Stmt(doc::Stmt::Throw { .. }))
+                || index >= draft.source.room.events.len()
+                || !super::departures::uncaught(&draft.source, &step.at)?
+                || expected_inputs.as_deref() != Ok(&[*src])
+                || expected_output != Some(*dst)
+                || !step.event.entities.is_empty()
+            {
                 return Err(Refused::Source);
             }
         }

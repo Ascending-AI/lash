@@ -44,11 +44,38 @@ fn document(frame: &Frame, exe: &Executable) -> bool {
 /// Where a raise unwinding through `frame` stands, when it is a document
 /// frame: its statement.
 pub(super) fn unwinding(frame: &Frame, exe: &Executable) -> Option<Coordinate> {
-    document(frame, exe).then(|| statement(frame)).flatten()
+    document(frame, exe)
+        .then(|| statement(frame, exe))
+        .flatten()
 }
 
-/// The statement `frame` runs, waits or unwinds in.
-fn statement(frame: &Frame) -> Option<Coordinate> {
+/// The statement `frame` runs, waits or unwinds in. A canonical frame
+/// stands in the statement its continuation lies in, in the innermost block
+/// of its controls that holds one: its block cursor is not advanced past a
+/// statement it stands in.
+fn statement(frame: &Frame, exe: &Executable) -> Option<Coordinate> {
+    if let Some(source) = &frame.pending.source {
+        let at = &source.at.site;
+        return frame
+            .control
+            .iter()
+            .rev()
+            .find_map(|control| match control {
+                Control::Block { block, .. } => exe
+                    .block(*block)
+                    .stmts
+                    .iter()
+                    .position(|id| {
+                        let site = &exe.stmt(*id).site;
+                        site.unit == at.unit && at.path.starts_with(&site.path)
+                    })
+                    .map(|index| Coordinate::Statement {
+                        block: *block,
+                        index: index as u32,
+                    }),
+                _ => None,
+            });
+    }
     frame
         .control
         .iter()
@@ -89,7 +116,7 @@ fn standing(frame: &Frame, exe: &Executable) -> Option<Coordinate> {
         {
             Some(Coordinate::Action(stmt))
         }
-        _ => statement(frame),
+        _ => statement(frame, exe),
     }
 }
 

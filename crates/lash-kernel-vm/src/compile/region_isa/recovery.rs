@@ -241,7 +241,7 @@ pub(super) fn successors(draft: &RegionDraft, pc: usize) -> Vec<super::Pc> {
             _ => vec![],
         },
         RegionOp::Effect { next, .. } => next.iter().copied().collect(),
-        RegionOp::Return { .. } | RegionOp::Exit { .. } => vec![],
+        RegionOp::Return { .. } | RegionOp::Raise { .. } | RegionOp::Exit { .. } => vec![],
     }
 }
 

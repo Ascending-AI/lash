@@ -11,24 +11,13 @@ use super::verified::Standing;
 use crate::compile::{ActionKind, Executable, Form, NestedKind, StmtId};
 use crate::interface::Host;
 use crate::machine::ops::Flow;
-use crate::machine::{Eval, Halt, Incoming, Interrupt, KernelMachine, fault};
+use crate::machine::{Eval, Halt, Incoming, KernelMachine, fault};
 use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::{JoinMode, TaskId, Value};
 use lash_kernel_value::names::ImportSlot;
 use lash_kernel_value::package::OperationMode;
 use lash_kernel_value::{Type, sites::Site};
 use std::sync::Arc;
-
-/// A raise out of an action is delivered once the region throws; until
-/// then it is refused rather than dropped.
-pub(super) fn answered<T>(eval: Eval<T>) -> Result<T, Halt> {
-    eval.map_err(|interrupt| match interrupt {
-        Interrupt::Halt(halt) => *halt,
-        Interrupt::Raise(_) | Interrupt::Refuse(_) => {
-            fault("a canonical action raised; region raise delivery is not integrated")
-        }
-    })
-}
 
 /// The service an action asks of the machine.
 enum Service<'a> {
@@ -50,7 +39,7 @@ impl KernelMachine {
         task: TaskId,
         host: &mut dyn Host,
         standing: Standing,
-    ) -> Result<(), Halt> {
+    ) -> Eval<()> {
         let exe = Arc::clone(&self.exe);
         let stmt = standing.statement;
         let args = standing.arguments;
@@ -79,13 +68,11 @@ impl KernelMachine {
                     NestedKind::Cancel => Service::Cancel,
                     NestedKind::CancelEffect => Service::CancelEffect,
                     NestedKind::Call(_) | NestedKind::Body(_) => {
-                        return Err(fault("a call is not a delivering action"));
+                        return Err(fault("a call is not a delivering action").into());
                     }
                 };
                 let spawned = match &entry.kind {
-                    NestedKind::Spawn(callee) => {
-                        Some(answered(self.nested_target(&exe, callee, 0))?)
-                    }
+                    NestedKind::Spawn(callee) => Some(self.nested_target(&exe, callee, 0)?),
                     _ => None,
                 };
                 self.frame(task)?.nested = Some(act);
@@ -98,13 +85,12 @@ impl KernelMachine {
             }
             None => {
                 let Form::Action(action) = &exe.statement(stmt).1.form else {
-                    return Err(fault("a standing statement action has no action form"));
+                    return Err(fault("a standing statement action has no action form").into());
                 };
                 let (service, spawned) = match &action.kind {
-                    ActionKind::Spawn { callee, .. } => (
-                        Service::Spawn,
-                        Some((answered(self.callee(task, &exe, callee))?, 0)),
-                    ),
+                    ActionKind::Spawn { callee, .. } => {
+                        (Service::Spawn, Some((self.callee(task, &exe, callee)?, 0)))
+                    }
                     ActionKind::Perform { slot, result, .. } => (
                         Service::Perform {
                             slot: *slot,
@@ -118,7 +104,7 @@ impl KernelMachine {
                     ActionKind::Cancel(_) => (Service::Cancel, None),
                     ActionKind::CancelEffect(_) => (Service::CancelEffect, None),
                     ActionKind::Call { .. } => {
-                        return Err(fault("a call is not a delivering action"));
+                        return Err(fault("a call is not a delivering action").into());
                     }
                 };
                 (
@@ -154,7 +140,7 @@ impl KernelMachine {
         service: Service<'_>,
         spawned: Option<(crate::machine::actions::Target, usize)>,
         args: &[Value],
-    ) -> Result<Option<Value>, Halt> {
+    ) -> Eval<Option<Value>> {
         self.observe_action(exe, site);
         let argument = |at: usize| {
             args.get(at)
@@ -177,7 +163,7 @@ impl KernelMachine {
                     .len()
                     .checked_sub(at)
                     .ok_or_else(|| fault("a spawn lacks its callee"))?;
-                match answered(self.spawn(task, host, exe, stmt, site, target, at, count))? {
+                match self.spawn(task, host, exe, stmt, site, target, at, count)? {
                     Flow::Done => Some(self.take(at)),
                     _ => None,
                 }
@@ -186,25 +172,23 @@ impl KernelMachine {
                 let effect = self.operation(task, slot, &site.unit)?;
                 let mut copied = Vec::with_capacity(args.len());
                 for (at, value) in args.iter().enumerate() {
-                    copied.push(answered(self.copy_out_tool_arg(&effect, at, value))?);
+                    copied.push(self.copy_out_tool_arg(&effect, at, value)?);
                 }
                 if self.effect_mode(&effect)? == OperationMode::Read {
-                    Some(answered(self.perform_read(
-                        task, host, exe, &effect, &copied, site, result,
-                    ))?)
+                    Some(self.perform_read(task, host, exe, &effect, &copied, site, result)?)
                 } else {
                     self.issue_effect(task, stmt, site, effect, copied)?;
                     None
                 }
             }
-            Service::Join => match answered(self.join_one(task, argument(0)?))? {
+            Service::Join => match self.join_one(task, argument(0)?)? {
                 Ok(value) => Some(value),
                 Err(joined) => {
                     self.wait_one(task, stmt, joined)?;
                     None
                 }
             },
-            Service::JoinMany(mode) => match answered(self.join_list(task, mode, &argument(0)?))? {
+            Service::JoinMany(mode) => match self.join_list(task, mode, &argument(0)?)? {
                 Ok(value) => Some(value),
                 Err(members) => {
                     self.wait_list(task, stmt, mode, members)?;
@@ -222,23 +206,20 @@ impl KernelMachine {
             }
             Service::Cancel => {
                 let Value::Task(target) = argument(0)? else {
-                    return answered(crate::machine::raise(
-                        "type_error",
-                        "`cancel` takes a task handle",
-                    ));
+                    return crate::machine::raise("type_error", "`cancel` takes a task handle");
                 };
                 if target == task {
-                    return answered(Err(crate::machine::actions::cancelled_here()));
+                    return Err(crate::machine::actions::cancelled_here());
                 }
                 self.cancel(target)?;
                 Some(Value::Null)
             }
             Service::CancelEffect => {
                 let Value::Task(target) = argument(0)? else {
-                    return answered(crate::machine::raise(
+                    return crate::machine::raise(
                         "type_error",
                         "`cancel_effect` takes a task handle",
-                    ));
+                    );
                 };
                 self.cancel_effect(target)?;
                 Some(Value::Null)
@@ -280,7 +261,7 @@ impl KernelMachine {
         at: crate::compile::room::Point,
         lib: crate::compile::LibId,
         slots: &[lash_kernel_state::kernel_internals::logical::Slot],
-    ) -> Result<(), Halt> {
+    ) -> Eval<()> {
         let arguments = self.role_values(task, slots)?;
         let exe = Arc::clone(&self.exe);
         let used = exe.lib(lib).arity.max(arguments.len()).max(1);
@@ -290,13 +271,13 @@ impl KernelMachine {
         let charging = std::mem::replace(&mut self.charging, false);
         let answer = self.answer(task, &exe, lib, 0, arguments.len(), 0);
         self.charging = charging;
-        let answer = answered(answer);
         let value = match answer {
             Ok(crate::machine::ops::Answer::Done) => Ok(self.take(0)),
             Ok(crate::machine::ops::Answer::Body(_)) => Err(fault(
                 "a declined native's kernel body is not integrated into the region",
-            )),
-            Err(halt) => Err(halt),
+            )
+            .into()),
+            Err(interrupt) => Err(interrupt),
         };
         self.regs.clear_range(0..used);
         self.served = Some(super::Served {
@@ -314,11 +295,11 @@ impl KernelMachine {
         task: TaskId,
         at: crate::compile::room::Point,
         slot: lash_kernel_state::kernel_internals::logical::Slot,
-    ) -> Result<lash_kernel_doc::Datum, Halt> {
+    ) -> Eval<lash_kernel_doc::Datum> {
         let [value] = self.role_values(task, &[slot])?[..] else {
-            return Err(fault("an effect has one operand"));
+            return Err(fault("an effect has one operand").into());
         };
-        let datum = answered(self.copy_datum(&value).map_err(Into::into))?;
+        let datum = self.copy_datum(&value)?;
         self.served = Some(super::Served {
             task,
             at,
@@ -334,9 +315,9 @@ impl KernelMachine {
         task: TaskId,
         standing: Standing,
         incoming: Incoming,
-    ) -> Result<(), Halt> {
+    ) -> Eval<()> {
         let exe = Arc::clone(&self.exe);
-        let value = answered(self.resume(task, &exe, incoming))?;
+        let value = self.resume(task, &exe, incoming)?;
         let charged = self.charged;
         let frame = self.frame(task)?;
         frame.awaiting = None;

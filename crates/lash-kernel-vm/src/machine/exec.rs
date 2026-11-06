@@ -314,6 +314,19 @@ impl KernelMachine {
                 &[],
             )?;
             let frame = self.frame(task)?;
+            // A canonical frame's try takes a raise through its region
+            // route, never through these controls.
+            if matches!(departure, Completion::Throw(_))
+                && frame.pending.source.is_some()
+                && frame
+                    .control
+                    .iter()
+                    .any(|control| matches!(control, Control::Try { .. }))
+            {
+                return Err(fault(
+                    "a raise reached a try of a canonical frame outside its region route",
+                ));
+            }
             frame.awaiting = None;
             frame.nested = None;
             frame.pending.take();
