@@ -97,7 +97,7 @@ impl Step {
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
         }
         let restores_call = match node {
-            doc::Node::Expr(doc::Expr::Act(act)) => matches!(act.kind, doc::ActKind::Call(_)),
+            doc::Node::Expr(doc::Expr::Act(act)) => super::act_calls(act),
             doc::Node::Expr(doc::Expr::Call { function, .. }) => {
                 matches!(source.calls.get(function), Some(CallSource::Body(_)))
             }

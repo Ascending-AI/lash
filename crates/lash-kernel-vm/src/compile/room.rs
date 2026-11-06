@@ -748,10 +748,7 @@ impl Source {
         while let Some(node) = pending.pop() {
             let function = match node {
                 doc::Node::Expr(doc::Expr::Call { function, .. }) => Some(function),
-                doc::Node::Expr(doc::Expr::Act(act)) => match &act.kind {
-                    doc::ActKind::Call(doc::Callee::Local(function)) => Some(function),
-                    _ => None,
-                },
+                doc::Node::Expr(doc::Expr::Act(act)) => act_local_callee(act),
                 _ => None,
             };
             if let Some(function) = function {
@@ -1278,25 +1275,34 @@ pub(crate) fn native_act(
     calls: &BTreeMap<FunctionId, CallSource>,
 ) -> Option<FunctionId> {
     match node {
-        doc::Node::Expr(doc::Expr::Act(act)) => match &act.kind {
-            doc::ActKind::Call(doc::Callee::Local(function))
-                if matches!(calls.get(function), Some(CallSource::Native(_))) =>
-            {
-                Some(*function)
-            }
-            _ => None,
-        },
+        doc::Node::Expr(doc::Expr::Act(act)) => act_local_callee(act)
+            .filter(|function| matches!(calls.get(function), Some(CallSource::Native(_))))
+            .copied(),
+        _ => None,
+    }
+}
+/// Whether an expression act calls a function: a call, or an await, which
+/// calls its policy with the awaited value (`K-TASK-026`).
+pub(crate) fn act_calls(act: &doc::ActExpr) -> bool {
+    matches!(act.kind, doc::ActKind::Call(_) | doc::ActKind::Await(_))
+}
+/// The local function an expression act calls: a call's local callee, or
+/// an await's local policy.
+pub(crate) fn act_local_callee(act: &doc::ActExpr) -> Option<&FunctionId> {
+    match &act.kind {
+        doc::ActKind::Call(doc::Callee::Local(function))
+        | doc::ActKind::Await(doc::FunctionTarget::Local(function)) => Some(function),
         _ => None,
     }
 }
 /// An action whose result the machine delivers as the task's Incoming:
-/// every statement action, and every nested one except a call, whose
-/// callee completion enters a distinct Restore. Its Commit moves that
+/// every statement action, and every nested one except a call or an await,
+/// whose callee completion enters a distinct Restore. Its Commit moves that
 /// Incoming into the action's operand, as Restore does.
 pub(crate) fn delivers(node: doc::Node<'_>) -> bool {
     match node {
         doc::Node::Action(_) => true,
-        doc::Node::Expr(doc::Expr::Act(act)) => !matches!(act.kind, doc::ActKind::Call(_)),
+        doc::Node::Expr(doc::Expr::Act(act)) => !act_calls(act),
         _ => false,
     }
 }

@@ -168,7 +168,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                             Amount::default(),
                             Amount::default(),
                         ));
-                        if matches!(act.kind, doc::ActKind::Call(_)) {
+                        if super::act_calls(act) {
                             events.push(event(
                                 &site,
                                 Phase::Restore,
@@ -497,7 +497,7 @@ fn formula(
                     -1,
                 ),
             ),
-            doc::Expr::Act(act) if matches!(act.kind, doc::ActKind::Call(_)) => {
+            doc::Expr::Act(act) if super::act_calls(act) => {
                 (result(), result().term(consumed(), -1))
             }
             // The delivered Incoming moves into the operand, as at Restore.

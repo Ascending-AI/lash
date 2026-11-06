@@ -717,7 +717,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                 // machine performs it and resumes at its Commit, the result
                 // the task's Incoming in the sink.
                 (doc::Node::Expr(doc::Expr::Act(act)), Phase::Enter, Some(next), None, Ok(_))
-                    if !matches!(act.kind, doc::ActKind::Call(_)) =>
+                    if !crate::compile::room::act_calls(act) =>
                 {
                     let commit = source
                         .room
@@ -798,7 +798,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     Some(next),
                     Some(dst),
                     Ok(_),
-                ) if !matches!(act.kind, doc::ActKind::Call(_)) => RegionOp::Move {
+                ) if !crate::compile::room::act_calls(act) => RegionOp::Move {
                     dst,
                     src: sink,
                     next,
@@ -841,7 +841,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     Some(next),
                     None,
                     Ok(args),
-                ) if matches!(act.kind, doc::ActKind::Call(_)) => {
+                ) if crate::compile::room::act_calls(act) => {
                     let origin = origin.ok_or(Refused::Source)?;
                     let site = CallId(u32::try_from(calls.len()).map_err(|_| Refused::Facts)?);
                     calls.push(CallSite {

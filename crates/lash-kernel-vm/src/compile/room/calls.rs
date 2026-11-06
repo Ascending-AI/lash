@@ -196,12 +196,10 @@ fn resolved_static(
     }
     let (function, count) = match node {
         doc::Node::Expr(doc::Expr::Call { function, args }) => (*function, args.len()),
-        doc::Node::Expr(doc::Expr::Act(act)) => {
-            let doc::ActKind::Call(doc::Callee::Local(function)) = act.kind else {
-                return Err(Refused::Source);
-            };
-            (function, act.args.len())
-        }
+        doc::Node::Expr(doc::Expr::Act(act)) => (
+            *super::act_local_callee(act).ok_or(Refused::Source)?,
+            act.args.len(),
+        ),
         doc::Node::Action(doc::Action::Call {
             callee: doc::Callee::Local(function),
             args,

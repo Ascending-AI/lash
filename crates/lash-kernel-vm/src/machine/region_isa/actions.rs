@@ -274,7 +274,7 @@ impl KernelMachine {
         for (at, value) in operands.iter().enumerate() {
             self.put(at, *value);
         }
-        let batch = self.native_batch(task, &exe, lib, function, &operands);
+        let batch = self.native_batch(task, &exe, lib, function, &operands, &at.site.unit);
         self.regs.clear_range(0..used);
         self.served = Some(super::Served {
             task,
@@ -330,6 +330,7 @@ impl KernelMachine {
         lib: crate::compile::LibId,
         function: &crate::compile::Lib,
         operands: &[Value],
+        unit: &lash_kernel_value::sites::Unit,
     ) -> crate::machine::Eval<NativeBatch> {
         use crate::compile::LibRun;
         use crate::functions::MachineFunction;
@@ -452,6 +453,21 @@ impl KernelMachine {
                 };
                 (value, objects, Some(contract), held)
             }
+            // `brand.built()` answers the library body its call is written
+            // in, and Absent outside one (`K-LIB-010`).
+            LibRun::Machine(MachineFunction::BrandBuilt) => match unit {
+                lash_kernel_value::sites::Unit::Library(body) => {
+                    let arena = self.arena.borrow();
+                    let mut nursery = lash_kernel_doc::Nursery::unaccounted(arena.objects());
+                    let value = nursery.allocate(NewObject::Bytes(Arc::from(&body.as_bytes()[..])));
+                    let held = nursery.held().0;
+                    (value, nursery.detach(), None, held)
+                }
+                lash_kernel_value::sites::Unit::Main
+                | lash_kernel_value::sites::Unit::Function(_) => {
+                    (Value::Absent, Vec::new(), None, 0)
+                }
+            },
             LibRun::Body(_) | LibRun::Declaration | LibRun::Machine(_) => {
                 return Err(fault("a served native call has no native answer").into());
             }

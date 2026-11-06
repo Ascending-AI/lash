@@ -44,9 +44,7 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     phases.push(Phase::Open);
                 }
                 phases.push(Phase::Enter);
-                if matches!(act.kind, doc::ActKind::Call(_))
-                    && native_act(node, &source.calls).is_none()
-                {
+                if super::act_calls(act) && native_act(node, &source.calls).is_none() {
                     phases.push(Phase::Restore);
                 }
             }
@@ -503,7 +501,7 @@ fn obligations(
                 peak.push((value.clone(), 1));
                 delta.push((value, 1));
             }
-            doc::Expr::Act(act) if !matches!(act.kind, doc::ActKind::Call(_)) => {
+            doc::Expr::Act(act) if !super::act_calls(act) => {
                 delta.push((consumed(), -1));
             }
             doc::Expr::Variable(_) | doc::Expr::Member(_) | doc::Expr::Act(_) => {

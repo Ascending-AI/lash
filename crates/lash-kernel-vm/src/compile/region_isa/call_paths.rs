@@ -22,7 +22,7 @@ pub(super) fn connect(
             }
             (Phase::Commit, Phase::Restore)
         }
-        doc::Node::Expr(doc::Expr::Act(act)) if matches!(act.kind, doc::ActKind::Call(_)) => {
+        doc::Node::Expr(doc::Expr::Act(act)) if crate::compile::room::act_calls(act) => {
             (Phase::Enter, Phase::Restore)
         }
         doc::Node::Expr(doc::Expr::Act(_)) => (Phase::Enter, Phase::Commit),
