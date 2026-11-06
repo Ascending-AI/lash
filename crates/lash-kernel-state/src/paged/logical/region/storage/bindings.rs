@@ -639,6 +639,57 @@ impl<'s> StateLease<'s> {
             .member_entry(index, member, &address)?
             .map(|entry| entry.value))
     }
+    /// The first entry of a map or a set whose sequence follows `after`, in
+    /// insertion order: its sequence and its key (`K-ITER-002`). An existing
+    /// table this lease has edited, or a cold chunk, crosses the boundary.
+    pub fn table_next(
+        &mut self,
+        object: LeaseObject,
+        after: Option<u64>,
+    ) -> Result<Option<(u64, LeaseValue)>, LeaseFault> {
+        if self.local.frozen {
+            return Err(invalid("lease graph is frozen").into());
+        }
+        let index = self.local.index(object)?;
+        self.load_head(index)?;
+        let slot = &self.local.slots[index];
+        if !matches!(slot.kind, Kind::Map | Kind::Set) {
+            return Err(NativeError::Decline.into());
+        }
+        if let Some(existing) = &slot.existing {
+            if !existing.overlays.is_empty() {
+                return Err(LeaseFault::BoundaryRequired);
+            }
+            let handle = existing
+                .value
+                .and_then(|value| value.handle())
+                .ok_or(LeaseFault::BoundaryRequired)?;
+            let Some((sequence, key)) = self
+                .arena()
+                .table_after(handle, after)
+                .map_err(local_native)?
+            else {
+                return Ok(None);
+            };
+            return Ok(Some((sequence, self.import(&key)?)));
+        }
+        let Some(LocalBody::Table(table)) = &slot.body else {
+            return Err(NativeError::Decline.into());
+        };
+        let start = after.map_or(0, |after| after.saturating_add(1));
+        table
+            .entries
+            .iter()
+            .filter(|entry| entry.sequence >= start)
+            .min_by_key(|entry| entry.sequence)
+            .map(|entry| match &entry.key {
+                Spelling::Value(key) => Ok((entry.sequence, *key)),
+                Spelling::Field(_) => Err(LeaseFault::from(invalid(
+                    "a map or a set entry is keyed by a field name",
+                ))),
+            })
+            .transpose()
+    }
     /// Exact current length, without saturated charge-size encoding.
     pub fn member_count(&self, object: LeaseObject) -> Result<u64, LeaseFault> {
         if self.local.frozen {

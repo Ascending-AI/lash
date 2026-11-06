@@ -114,6 +114,7 @@ impl Running<'_> {
                 None => None,
             };
             let mut answered = None;
+            let mut taken = None;
             match op {
                 // A plain `for` takes its next item as its Test event. An
                 // exhausted one takes no event: what stands before its Test
@@ -137,16 +138,18 @@ impl Running<'_> {
                         return Err(invalid(Refused::Facts));
                     };
                     let iterable = *args.first().ok_or_else(|| invalid(Refused::Facts))?;
-                    let Some(answer) = self.cursor_answer(at, iterable, *dst, *next, *exhausted)?
+                    let Some((answer, position)) =
+                        self.cursor_answer(at, iterable, *dst, *next, *exhausted)?
                     else {
                         return self.halt(RegionStop::Boundary);
                     };
                     if answer.next == *exhausted {
-                        let edit = self.prepare_control(op, &answer, None, None)?;
+                        let edit = self.prepare_control(op, &answer, None, None, None)?;
                         self.accept_control(edit);
                         self.pc = *exhausted;
                         continue;
                     }
+                    taken = position;
                     answered = Some(answer);
                 }
                 RegionOp::Checked { kernel, .. }
@@ -372,7 +375,8 @@ impl Running<'_> {
                 .and_then(Option::as_ref)
                 .ok_or_else(|| invalid(Refused::Facts))?;
             let looping = code.program.loop_departure(self.pc);
-            let control = self.prepare_control(op, &answer, flow.loop_branch, looping.as_ref())?;
+            let control =
+                self.prepare_control(op, &answer, flow.loop_branch, looping.as_ref(), taken)?;
             let ordinal = self
                 .reached
                 .ordinal

@@ -145,9 +145,10 @@ fn region_fault(error: RegionError) -> LeaseFault {
 }
 
 impl Running<'_> {
-    /// A plain `for` over a list or a tuple takes the item at the count of
-    /// passes it has started, or ends. `None`: the walked value is cold and
-    /// its step crosses the boundary.
+    /// A plain `for` takes its next item, or ends: a list or a tuple the
+    /// item at the count of passes it has started, a map or a set the key
+    /// of the entry after the one it last took, with that entry's sequence.
+    /// `None`: the step crosses the boundary (a cold or edited walked value).
     pub(super) fn cursor_answer(
         &mut self,
         at: &lash_kernel_value::sites::Site,
@@ -155,7 +156,7 @@ impl Running<'_> {
         dst: Reg<LeaseValue>,
         body: Pc,
         exhausted: Pc,
-    ) -> Result<Option<ScalarAnswer>, RegionError> {
+    ) -> Result<Option<(ScalarAnswer, Option<u64>)>, RegionError> {
         let index = self
             .code
             .program
@@ -169,13 +170,24 @@ impl Running<'_> {
             .ok_or_else(|| invalid(Refused::Facts))?;
         let walked = self.value(iterable)?;
         let found = (|| {
-            if !matches!(self.view.kind(walked)?, ValueKind::List | ValueKind::Tuple) {
+            let kind = self.view.kind(walked)?;
+            if !matches!(
+                kind,
+                ValueKind::List | ValueKind::Tuple | ValueKind::Map | ValueKind::Set
+            ) {
                 return Ok(Err(()));
             }
             let object = self.view.object(walked)?;
-            Ok(Ok(self
-                .view
-                .lookup(object, &LeaseMember::List(state.started))?))
+            Ok(Ok(match kind {
+                ValueKind::List | ValueKind::Tuple => self
+                    .view
+                    .lookup(object, &LeaseMember::List(state.started))?
+                    .map(|item| (item, None)),
+                _ => self
+                    .view
+                    .table_next(object, state.last)?
+                    .map(|(sequence, key)| (key, Some(sequence))),
+            }))
         })();
         let found = match found {
             Ok(Ok(found)) => found,
@@ -184,21 +196,27 @@ impl Running<'_> {
             Err(fault) => return Err(storage_fault(fault)),
         };
         Ok(Some(match found {
-            Some(item) => ScalarAnswer {
-                write: Some((
-                    super::bind::physical(&self.code.program, dst)?,
-                    Operand::Dynamic(item),
-                )),
-                next: body,
-                formula: None,
-                native: None,
-            },
-            None => ScalarAnswer {
-                write: None,
-                next: exhausted,
-                formula: None,
-                native: None,
-            },
+            Some((item, position)) => (
+                ScalarAnswer {
+                    write: Some((
+                        super::bind::physical(&self.code.program, dst)?,
+                        Operand::Dynamic(item),
+                    )),
+                    next: body,
+                    formula: None,
+                    native: None,
+                },
+                position,
+            ),
+            None => (
+                ScalarAnswer {
+                    write: None,
+                    next: exhausted,
+                    formula: None,
+                    native: None,
+                },
+                None,
+            ),
         }))
     }
 }

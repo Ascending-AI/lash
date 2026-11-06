@@ -244,12 +244,15 @@ pub(in crate::machine) fn restore_source_controls(
                         && !(plain
                             && row.header == lash_kernel_state::paged::HeaderRecord::Body
                             && row.cursor.is_some_and(|cursor| {
-                                matches!(
-                                    cursor.kind,
-                                    lash_kernel_state::paged::CursorKind::List
-                                        | lash_kernel_state::paged::CursorKind::Tuple
-                                ) && cursor.position == row.started
-                                    && cursor.guard.is_none()
+                                cursor.guard.is_none()
+                                    && match cursor.kind {
+                                        lash_kernel_state::paged::CursorKind::List
+                                        | lash_kernel_state::paged::CursorKind::Tuple => {
+                                            cursor.position == row.started
+                                        }
+                                        lash_kernel_state::paged::CursorKind::Table => true,
+                                        _ => false,
+                                    }
                             })))
                 {
                     return Err(malformed());
@@ -257,6 +260,12 @@ pub(in crate::machine) fn restore_source_controls(
                 walking += u64::from(!info.while_loop);
                 state.active = true;
                 state.started = row.started;
+                // A table cursor saves the sequence it last took, `MAX` for none.
+                state.last = row.cursor.and_then(|cursor| {
+                    (cursor.kind == lash_kernel_state::paged::CursorKind::Table
+                        && cursor.position != u64::MAX)
+                        .then_some(cursor.position)
+                });
             }
         }
         loops.push(state);

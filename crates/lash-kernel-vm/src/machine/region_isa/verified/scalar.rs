@@ -223,8 +223,8 @@ impl Running<'_> {
                             .program
                             .loop_info(stage.info)
                             .ok_or_else(|| invalid(Refused::Facts))?;
-                        // A plain `for` steps a list or a tuple here; it is
-                        // entered once its iterable is known to be one.
+                        // A plain `for` steps a list, a tuple, a map or a set
+                        // here; it is entered once its iterable is one.
                         if !info.while_loop {
                             if !matches!(
                                 self.code.exe.stmt(info.statement).form,
@@ -239,6 +239,8 @@ impl Running<'_> {
                                     self.view.kind(walked).map_err(RegionError::Heap)?,
                                     lash_kernel_doc::ValueKind::List
                                         | lash_kernel_doc::ValueKind::Tuple
+                                        | lash_kernel_doc::ValueKind::Map
+                                        | lash_kernel_doc::ValueKind::Set
                                 ) {
                                     return Ok(None);
                                 }

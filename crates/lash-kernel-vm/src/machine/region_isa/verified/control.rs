@@ -6,11 +6,15 @@ use crate::compile::{BlockId, Form};
 use crate::machine::loops::{Cursor, Header};
 use crate::machine::{Control, TryPhase, controls::Controls};
 use lash_kernel_state::kernel_internals::logical::Slot;
+use lash_kernel_state::paged::TableCursor;
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct LoopState {
     pub(super) active: bool,
     pub(super) started: u64,
+    /// A plain `for` over a map or a set: the sequence of the entry it
+    /// last took.
+    pub(super) last: Option<u64>,
 }
 #[derive(Clone, Copy)]
 pub(super) struct Edit {
@@ -25,17 +29,26 @@ pub(super) fn bind(
     let mut states = Vec::new();
     while let Some(info) = program.loop_info(states.len() as u32) {
         let mut state = LoopState::default();
-        if let Some(started) = canonical.control.iter().find_map(|control| match control {
-            Control::While { stmt, started } | Control::For { stmt, started, .. }
-                if *stmt == info.statement =>
-            {
-                Some(*started)
-            }
+        if let Some((started, last)) = canonical.control.iter().find_map(|control| match control {
+            Control::While { stmt, started } if *stmt == info.statement => Some((*started, None)),
+            Control::For {
+                stmt,
+                started,
+                cursor,
+                ..
+            } if *stmt == info.statement => Some((
+                *started,
+                match cursor {
+                    Cursor::Map(_, last) | Cursor::Set(_, last) => last.map(|last| last.0),
+                    _ => None,
+                },
+            )),
             _ => None,
         }) {
             state = LoopState {
                 active: true,
                 started,
+                last,
             };
         }
         states
@@ -71,6 +84,7 @@ impl Running<'_> {
         answer: &ScalarAnswer,
         branch: Option<u32>,
         looping: Option<&crate::compile::region_isa::LoopDeparture>,
+        taken: Option<u64>,
     ) -> Result<Option<Edit>, RegionError> {
         // A Break's Catch leaves its loop; a Continue's keeps it active.
         if let Some(crate::compile::region_isa::LoopDeparture::End { exits: Some(index) }) = looping
@@ -96,6 +110,7 @@ impl Running<'_> {
                         LoopPhase::Enter => LoopState {
                             active: true,
                             started: 0,
+                            last: None,
                         },
                         LoopPhase::Test if current.active => current,
                         LoopPhase::Test => return Err(invalid(Refused::Facts)),
@@ -122,6 +137,7 @@ impl Running<'_> {
                             .started
                             .checked_add(1)
                             .ok_or_else(|| invalid(Refused::Facts))?;
+                        next.last = taken.or(next.last);
                     }
                     (index, next)
                 }
@@ -291,6 +307,8 @@ fn place(
                 let cursor = match roles.iter().find(|(held, _)| *held == slot) {
                     Some((_, Value::List(id))) => Cursor::List(*id, at),
                     Some((_, Value::Tuple(tuple))) => Cursor::Tuple(*tuple, at),
+                    Some((_, Value::Map(id))) => Cursor::Map(*id, state.last.map(TableCursor)),
+                    Some((_, Value::Set(id))) => Cursor::Set(*id, state.last.map(TableCursor)),
                     _ => return Err(invalid(Refused::Facts)),
                 };
                 values.push(Control::For {
