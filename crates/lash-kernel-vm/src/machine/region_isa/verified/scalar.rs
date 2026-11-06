@@ -13,6 +13,42 @@ pub(super) struct ScalarAnswer {
     pub(super) native: Option<(u64, u64, u64)>,
 }
 impl Running<'_> {
+    /// Whether `op` is a plain `for`'s Enter given what it cannot walk: a
+    /// value other than a list, a tuple, a map or a set (`K-ITER-001`).
+    pub(super) fn unwalkable(&mut self, op: &RegionOp) -> Result<bool, RegionError> {
+        let RegionOp::Checked { kernel, .. } = op else {
+            return Ok(false);
+        };
+        let CheckedKind::LoopControl { stage, iterable } = kernel.kind() else {
+            return Ok(false);
+        };
+        if stage.phase != crate::compile::region_isa::LoopPhase::Enter {
+            return Ok(false);
+        }
+        let info = self
+            .code
+            .program
+            .loop_info(stage.info)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        if info.while_loop
+            || !matches!(
+                self.code.exe.stmt(info.statement).form,
+                crate::compile::Form::For { via: None, .. }
+            )
+        {
+            return Ok(false);
+        }
+        let walked = self.value(iterable.ok_or_else(|| invalid(Refused::Facts))?)?;
+        Ok(!matches!(
+            self.view.kind(walked).map_err(RegionError::Heap)?,
+            lash_kernel_doc::ValueKind::List
+                | lash_kernel_doc::ValueKind::Tuple
+                | lash_kernel_doc::ValueKind::Map
+                | lash_kernel_doc::ValueKind::Set
+        ))
+    }
+}
+impl Running<'_> {
     /// The answer the machine computed for the native call `op` makes: the
     /// graph it built is adopted by the lease, charged by the native's
     /// formula over the actual arguments and answer, as the in-place kernel
@@ -215,7 +251,7 @@ impl Running<'_> {
                 next,
             } => {
                 let value = match kernel.kind() {
-                    CheckedKind::LoopControl { stage, iterable } => {
+                    CheckedKind::LoopControl { stage, .. } => {
                         let info = self
                             .code
                             .program
@@ -230,18 +266,8 @@ impl Running<'_> {
                             ) {
                                 return Ok(None);
                             }
-                            if stage.phase == crate::compile::region_isa::LoopPhase::Enter {
-                                let walked =
-                                    self.value(iterable.ok_or_else(|| invalid(Refused::Facts))?)?;
-                                if !matches!(
-                                    self.view.kind(walked).map_err(RegionError::Heap)?,
-                                    lash_kernel_doc::ValueKind::List
-                                        | lash_kernel_doc::ValueKind::Tuple
-                                        | lash_kernel_doc::ValueKind::Map
-                                        | lash_kernel_doc::ValueKind::Set
-                                ) {
-                                    return Ok(None);
-                                }
+                            if self.unwalkable(op)? {
+                                return Ok(None);
                             }
                         }
                         return Ok(Some(ScalarAnswer {

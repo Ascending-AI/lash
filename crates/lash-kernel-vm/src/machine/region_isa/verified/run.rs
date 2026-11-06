@@ -113,6 +113,17 @@ impl Running<'_> {
                 Some(_) => return Err(invalid(Refused::Facts)),
                 None => None,
             };
+            // A plain `for` given what it cannot walk refuses before its
+            // Enter takes anything, as the source does.
+            if self.unwalkable(op)? {
+                if served.is_some() {
+                    return Err(invalid(Refused::Facts));
+                }
+                return self.halt(RegionStop::Refused {
+                    kind: "type_error",
+                    message: crate::machine::loops::NOT_ITERABLE,
+                });
+            }
             let mut answered = None;
             let mut taken = None;
             let mut guarded = false;

@@ -196,6 +196,14 @@ impl KernelMachine {
                     self.regs.clear();
                     continue;
                 }
+                RegionStop::Refused { kind, message } => {
+                    self.regs.clear();
+                    let refused = crate::machine::Interrupt::refused(kind, message);
+                    if !self.raise_out(task, host, refused)? {
+                        return Ok(true);
+                    }
+                    continue;
+                }
                 // A raise no try of the frame takes leaves the frame.
                 RegionStop::Throw => {
                     self.regs.clear();

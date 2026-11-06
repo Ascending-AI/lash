@@ -126,6 +126,12 @@ pub(crate) enum RegionStop {
     /// The region stands before a dynamic call whose target its lease has
     /// not bound; the machine binds it and the region takes the call.
     Bind,
+    /// The region stands at a step the source refuses with a typed error:
+    /// the machine raises it there, as it raises a native's error.
+    Refused {
+        kind: &'static str,
+        message: &'static str,
+    },
     Refusal,
     Throw,
     /// The region accepted an uncaught ReturnVia, its operand still held:
