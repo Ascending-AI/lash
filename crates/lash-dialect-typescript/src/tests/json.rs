@@ -233,11 +233,16 @@ struct Case {
     tail: Vec<Datum>,
 }
 
+/// The standard kernel document depth (`KernelDataLimits::standard`), past
+/// which `json.boundary` refuses to write.
+const DOCUMENT_DEPTH: usize = 64;
+
 /// What `ts.json.plain` should say, written independently of it: the value
 /// `build` makes holds only lists, records, null, bools, text and finite
 /// numbers; no record has a `toJSON` or `__lash_brand` field or a key that begins
-/// with a digit; no container is more than eight deep. The number of values
-/// is unbounded, counting each place a shared value is held.
+/// with a digit; no container is nested past the writer's document depth
+/// limit, [`DOCUMENT_DEPTH`]. The number of values is unbounded, counting each
+/// place a shared value is held. A cycle is never plain.
 fn plain(case: &Case) -> bool {
     fn walk(value: &Datum, depth: usize) -> bool {
         let members: Vec<&Datum> = match value {
@@ -256,7 +261,7 @@ fn plain(case: &Case) -> bool {
             }
             _ => return false,
         };
-        depth <= 8 && members.iter().all(|member| walk(member, depth + 1))
+        depth <= DOCUMENT_DEPTH && members.iter().all(|member| walk(member, depth + 1))
     }
     let value = match case.mode {
         0 => case.value.clone(),
@@ -453,8 +458,13 @@ fn edges() -> Vec<(Datum, ShapeCoverage)> {
     let all = |value| (value, ShapeCoverage::All);
     let wide = |value| (value, ShapeCoverage::Width);
     vec![
-        all(nested(8, text("deep"))),
-        all(nested(9, text("deep"))),
+        // The writer's depth limit is admitted bare and refused once
+        // wrapped; one past it is refused bare and before a later cycle.
+        wide(nested(DOCUMENT_DEPTH, text("deep"))),
+        (
+            nested(DOCUMENT_DEPTH + 1, text("deep")),
+            ShapeCoverage::Depth,
+        ),
         (nested(70, Datum::Null), ShapeCoverage::Depth),
         wide(flat(127)),
         wide(flat(128)),
@@ -667,6 +677,92 @@ fn plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path() {
         "plain json differential: admitted={admitted} refused={refused} admitted_overhead={admitted_costs:?} refused_overhead={refused_costs:?}"
     );
     assert!(admitted > 400 && refused > 400, "{admitted} {refused}");
+}
+
+/// A tool's JSON schema `levels` objects deep, each with `breadth` properties:
+/// ordinary data that nests far past eight containers.
+fn schema(levels: u32, breadth: u32) -> Datum {
+    let mut fields = vec![
+        ("type".to_owned(), text("object")),
+        (
+            "description".to_owned(),
+            text(&format!("level {levels} of the schema")),
+        ),
+    ];
+    if levels > 0 {
+        let names = (0..breadth).map(|i| format!("field{i}"));
+        fields.push((
+            "properties".to_owned(),
+            Datum::Record(
+                names
+                    .clone()
+                    .map(|name| (name, schema(levels - 1, breadth)))
+                    .collect(),
+            ),
+        ));
+        fields.push((
+            "required".to_owned(),
+            Datum::List(names.map(|name| text(&name)).collect()),
+        ));
+    }
+    Datum::Record(fields)
+}
+
+/// Compact JSON length of records, lists and ASCII text without escapes,
+/// counted from the JSON grammar.
+fn json_bytes(value: &Datum) -> u64 {
+    let separators = |n: usize| 2 + n.saturating_sub(1) as u64;
+    match value {
+        Datum::Text(text) => text.len() as u64 + 2,
+        Datum::List(items) => separators(items.len()) + items.iter().map(json_bytes).sum::<u64>(),
+        Datum::Record(fields) => {
+            separators(fields.len())
+                + fields
+                    .iter()
+                    .map(|(key, value)| key.len() as u64 + 3 + json_bytes(value))
+                    .sum::<u64>()
+        }
+        other => panic!("not schema data: {other:?}"),
+    }
+}
+
+/// FIG-7656: `JSON.stringify` of deeply nested plain data costs its fixed call
+/// overhead plus a constant per input byte, however deep the schema nests.
+/// The plain path's charges are linear in that size. The classifier costs
+/// `2 * work + 2`, where work is one per node and, per field, four key
+/// comparisons of at most `1 + key bytes` each but two of one byte: at most 2
+/// per field byte, so at most 4 per input byte. The boundary costs one plus
+/// the deep sizes of its value (a container one plus its members, a text its
+/// bytes plus one: at most 2 per JSON byte) and of its result (1 per byte).
+/// That is at most 7 per input byte. The fixed overhead is a scalar's
+/// stringify, which no nesting can reach.
+#[test]
+fn deep_plain_json_costs_a_constant_per_input_byte() {
+    let program = program(
+        &lash_kernel_package::LinkedContent::default(),
+        &BTreeSet::new(),
+        machine::prepared().clone(),
+    );
+    let cost = |value: Datum| {
+        let case = Case {
+            value,
+            mode: 0,
+            tail: Vec::new(),
+        };
+        let fast = run(&program, "fast", &case);
+        assert!(fast.end.starts_with("ok "), "{fast:?}");
+        fast.charged - run(&program, "idle", &case).charged
+    };
+    let fixed = cost(Datum::Null);
+    for (levels, breadth) in [(4, 2), (6, 1), (4, 3)] {
+        let value = schema(levels, breadth);
+        let bytes = json_bytes(&value);
+        let charged = cost(value);
+        assert!(
+            charged <= fixed + 8 * bytes,
+            "schema {levels}x{breadth}: {bytes} bytes charged {charged}, fixed {fixed}"
+        );
+    }
 }
 
 /// Use SC8's real program generator and collect the data it prints, including

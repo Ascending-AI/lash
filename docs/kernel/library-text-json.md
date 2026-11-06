@@ -150,14 +150,16 @@ the baseline needs a new definition identity (`K-VER-002`).
   `float`, used only for `number`. Arrays are lists and objects are records.
   The Rust entry point accepts structured `Type` for effect-site signatures.
 
-- **K-LJSON-007.** `json.classify(value, depth, excluded, key_from,
-  key_until, integers)` admits only null, bool, text, finite floats, lists and
+- **K-LJSON-007.** `json.classify(value, excluded, key_from, key_until,
+  integers)` admits only null, bool, text, finite floats, lists and
   records, plus integers when the boolean `integers` policy is true, with no
   excluded own field or key in the lexical interval
   `[key_from, key_until)`. `excluded` is a pair of text field names supplied
-  by the dialect. Container depth is 1..64; out-of-range depths raise
-  `number_range`. There is no node-count cap; shared values count at every
-  occurrence and cycles reach the depth bound. The walk stops at the first
+  by the dialect. It applies the boundary writer's own rules, so an admitted
+  value is one `json.boundary` writes: a container nested past the configured
+  document depth is refused, and so is a container on its own active path.
+  There is no node-count cap; shared acyclic values count at every
+  occurrence, and a cycle is refused on its first return. The walk stops at the first
   refusal and borrows values, with no allocation or reservation. The returned
   integer is `2 * work + admitted`,
   where work counts one per node reached and `1 + min(key bytes, policy bytes)`
@@ -165,6 +167,9 @@ the baseline needs a new definition identity (`K-VER-002`).
   `1 + magnitude(result)`, bounding the actual walk without pricing or reading
   the unvisited input. Key/value contents irrelevant to classification are
   not scanned. Resource-bound errors during rendering remain the renderer's.
+  Native version 1 took a caller depth in 1..64 (out-of-range depths raised
+  `number_range`) and unrolled cycles to it; it stays bound for archived
+  helper releases.
 
 - **K-LJSON-008.** `json.render(value, verbatim_kinds, verbatim_field, layout)`
   writes compact strict JSON directly into one output buffer. The explicit

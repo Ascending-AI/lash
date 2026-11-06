@@ -1,28 +1,36 @@
-//! Allocation-free classification of a depth-bounded JSON graph. Admission policy
-//! (excluded fields, a lexical key interval and integer admission) belongs to the caller.
+//! Allocation-free classification of a JSON graph by the boundary writer's own
+//! limits. Admission policy (excluded fields, a lexical key interval and
+//! integer admission) belongs to the caller.
 
 use super::Selection;
 use std::borrow::Cow;
 
-use lash_kernel_doc::{Args, Formula, NativeCall, NativeError, Operand, Value};
+use lash_kernel_doc::{Args, Formula, NativeCall, NativeError, Operand, Value, arena::ArenaHandle};
 
 use lash_kernel_value::Type;
 
-use super::{Function, arg, count_arg, definition, raise, text_arg};
+use super::{Function, arg, definition, raise, text_arg};
+
+mod v1;
+pub(super) use v1::native as v1;
+
+/// The deepest container nesting any configured document depth allows; the
+/// active path lives in a fixed array of this length.
+const DEPTH_CEILING: usize = 64;
+
 pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
     let mut definition = definition(
         selection,
         "json.classify",
         &[
             ("value", Type::Any),
-            ("depth", Type::Int),
             ("excluded", Type::Tuple(vec![Type::Text, Type::Text])),
             ("key_from", Type::Text),
             ("key_until", Type::Text),
             ("integers", Type::Bool),
         ],
         Type::Int,
-        &["number_range"],
+        &[],
         classify,
     );
     // Work is carried in the result, rather than charging the deep size of
@@ -39,7 +47,11 @@ pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
 
 struct Walk<'a, 'call> {
     args: &'a Args<'call>,
-    depth: usize,
+    /// The writer's nesting limit: a container at a greater depth is refused.
+    limit: usize,
+    /// The containers on the path from the root, so a cycle is refused on
+    /// its first return instead of being unrolled to the depth limit.
+    active: [Option<ArenaHandle>; DEPTH_CEILING],
     excluded: [Cow<'call, str>; 2],
     key_from: Cow<'call, str>,
     key_until: Cow<'call, str>,
@@ -65,6 +77,8 @@ impl Walk<'_, '_> {
         Ok(Self::compare(&mut self.work, &key, &self.key_from).is_lt()
             || !Self::compare(&mut self.work, &key, &self.key_until).is_lt())
     }
+    /// `depth` counts the containers from the root to `value`, `value`
+    /// included, so the root container is at depth 1.
     fn node(&mut self, value: &Value, depth: usize) -> Result<bool, NativeError> {
         self.work += 1;
         let record = match value {
@@ -75,9 +89,14 @@ impl Walk<'_, '_> {
             Value::Record(_) => true,
             _ => return Ok(false),
         };
-        if depth > self.depth {
+        if depth > self.limit {
             return Ok(false);
         }
+        let identity = value.handle();
+        if identity.is_some() && self.active[..depth - 1].contains(&identity) {
+            return Ok(false);
+        }
+        self.active[depth - 1] = identity;
         if record {
             let Some(table) = self.args.table(value)? else {
                 return Err(NativeError::Malformed("a record names another body"));
@@ -111,11 +130,7 @@ fn classify(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
 
 pub(super) fn classify_value(args: Args<'_>) -> Result<Value, NativeError> {
     let args = &args;
-    let depth = count_arg(args, 1)?;
-    if !(1..=64).contains(&depth) {
-        return Err(raise("number_range", "classification needs 1..64 levels"));
-    }
-    let excluded = arg(args.values(), 2)?;
+    let excluded = arg(args.values(), 1)?;
     let names = match args.sequence(excluded)? {
         Some(names) if matches!(excluded, Value::Tuple(_)) && names.len() == 2 => names,
         _ => return Err(raise("type_error", "expected two excluded field names")),
@@ -129,15 +144,16 @@ pub(super) fn classify_value(args: Args<'_>) -> Result<Value, NativeError> {
             None => Err(raise("type_error", "expected two excluded field names")),
         }
     };
-    let Value::Bool(integers) = arg(args.values(), 5)? else {
+    let Value::Bool(integers) = arg(args.values(), 4)? else {
         return Err(raise("type_error", "expected boolean integer policy"));
     };
     let mut walk = Walk {
         args,
-        depth,
+        limit: args.limits().document_depth().min(DEPTH_CEILING),
+        active: [None; DEPTH_CEILING],
         excluded: [name(0)?, name(1)?],
-        key_from: text_arg(args, 3)?,
-        key_until: text_arg(args, 4)?,
+        key_from: text_arg(args, 2)?,
+        key_until: text_arg(args, 3)?,
         integers: *integers,
         work: 0,
     };

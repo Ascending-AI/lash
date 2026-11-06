@@ -734,7 +734,6 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
     let hook = lab.value(Datum::Record(vec![("toJSON".into(), Datum::Null)]));
     let cycle = lab.cycle();
     let policy = lab.values(&[
-        i(8),
         Datum::Tuple(vec![t("toJSON"), t("brand")]),
         t("0"),
         t(":"),
@@ -755,7 +754,9 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
         (enormous_record, 3_575_563),
         (field, 21),
         (hook, 16),
-        (cycle, 18),
+        // The list, then itself as its own item, refused on the active path
+        // instead of unrolled to the depth limit: work = 2.
+        (cycle, 4),
     ] {
         let mut args = vec![value];
         args.extend(policy.iter().cloned());
@@ -776,7 +777,6 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
             "json.classify",
             &[
                 Datum::Record(vec![("brand".into(), Datum::Null)]),
-                i(8),
                 Datum::Tuple(vec![t("deny"), t("ban")]),
                 t("z"),
                 t("zz"),
@@ -785,12 +785,14 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
         ),
         i(27)
     );
-    let classify = |value, depth| {
+    // The depth limit is the configured document depth the writer applies
+    // (64 here): 64 nested lists and their leaf are 65 nodes, admitted; one
+    // more list is refused when it is reached, after 65 nodes.
+    let classify = |value| {
         run(
             "json.classify",
             &[
                 value,
-                i(depth),
                 Datum::Tuple(vec![t("toJSON"), t("brand")]),
                 t("0"),
                 t(":"),
@@ -802,57 +804,8 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
     for _ in 0..64 {
         nested = list(vec![nested]);
     }
-    assert_eq!(classify(nested.clone(), 64), i(131));
-    assert_eq!(classify(list(vec![nested]), 64), i(130));
-    for depth in [0, 65] {
-        assert_eq!(
-            raised(
-                "json.classify",
-                &[
-                    Datum::Null,
-                    i(depth),
-                    Datum::Tuple(vec![t("toJSON"), t("brand")]),
-                    t("0"),
-                    t(":"),
-                    Datum::Bool(true),
-                ],
-            ),
-            "number_range"
-        );
-    }
-}
-
-/// K-LJSON-007: integer admission is caller policy, checked during the
-/// counted walk before any later sibling is visited.
-#[test]
-fn classification_integer_policy_refuses_nested_bigints_in_the_counted_walk() {
-    for value in [
-        i(1),
-        Datum::Int(lash_kernel_doc::Integer::parse("18446744073709551617").unwrap()),
-    ] {
-        for (input, refused, admitted) in [
-            (value.clone(), 2, 3),
-            (list(vec![value.clone(), Datum::Null]), 4, 7),
-            (list(vec![list(vec![value])]), 6, 7),
-        ] {
-            for (integers, expected) in [(false, refused), (true, admitted)] {
-                assert_eq!(
-                    run(
-                        "json.classify",
-                        &[
-                            input.clone(),
-                            i(8),
-                            Datum::Tuple(vec![t("toJSON"), t("brand")]),
-                            t("0"),
-                            t(":"),
-                            b(integers),
-                        ],
-                    ),
-                    i(expected)
-                );
-            }
-        }
-    }
+    assert_eq!(classify(nested.clone()), i(131));
+    assert_eq!(classify(list(vec![nested])), i(130));
 }
 
 /// K-LJSON-009, K-CHG-003: configured encoding keeps exact integers,

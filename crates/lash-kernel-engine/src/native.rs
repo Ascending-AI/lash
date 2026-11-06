@@ -130,7 +130,10 @@ mod tests {
     /// it was before FIG-7637 (0f8721081a^): json.encode version 1 reads a
     /// six-field style, which version 2 refuses; json.render and
     /// json.stringify version 1 refuse without a JSON path, where version 2
-    /// names one (`json $: ...`, `json $[1]: ...`).
+    /// names one (`json $: ...`, `json $[1]: ...`). json.classify version 1
+    /// takes a caller depth (FIG-7656): at depth 8 it visits nine nested
+    /// lists and refuses the ninth, answering `2 * 9 + 0`, where version 2
+    /// takes no depth.
     #[test]
     fn a_retained_native_version_answers_with_its_own_implementation() {
         assert_eq!(
@@ -152,6 +155,14 @@ mod tests {
         assert_eq!(
             run_version_1("json.stringify", "let l = [1, nan]", "l"),
             Err(("json_number".into(), "JSON refuses NaN and infinity".into()))
+        );
+        assert_eq!(
+            run_version_1(
+                "json.classify",
+                "",
+                "[[[[[[[[[1]]]]]]]]], 8, (\"toJSON\", \"__lash_brand\"), \"0\", \":\", false"
+            ),
+            Ok(crate::Datum::Int(18i64.into()))
         );
     }
 }
