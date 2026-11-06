@@ -76,14 +76,17 @@ impl Dispatch {
                 if let Some(entry) = found {
                     return entry.target.clone();
                 }
-                let plan = exe
-                    .closure_at(
-                        &identity.function,
-                        identity.link,
-                        &closure.site.site,
-                        &closure.capture_names,
-                    )
-                    .and_then(|code| self.code(exe, caller, site, code));
+                // A saved closure's creation site can lie in an earlier
+                // cell's main; the machine's resolver reaches it through its
+                // defining Link, as every other closure read does.
+                let plan = crate::machine::project::closure_code(
+                    exe,
+                    identity,
+                    &closure.site.site,
+                    &closure.capture_names,
+                )
+                .ok()
+                .and_then(|code| self.code(exe, caller, site, code));
                 self.closures.entry(key).or_default().push(ClosureEntry {
                     site: closure.site.site.clone(),
                     names: closure.capture_names.as_slice().into(),
