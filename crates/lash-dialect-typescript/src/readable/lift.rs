@@ -22,6 +22,9 @@ pub(super) type Lift<T> = Result<T, String>;
 /// tries the plainest style first and keeps the first one that reads back.
 #[derive(Clone, Copy)]
 pub(super) struct Style {
+    /// Keep a singleton return in a block: lowering an arrow expression can
+    /// introduce an additional scope around nested callable metadata.
+    pub(super) block_bodies: bool,
     /// Captured module functions retain their `const` declaration form.
     pub(super) const_functions: bool,
     /// Front-end temporaries keep their own `const`s instead of being written

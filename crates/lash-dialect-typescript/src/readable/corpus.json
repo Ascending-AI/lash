@@ -261,5 +261,17 @@
     "name": "FIG-7664 cenote exact case 2",
     "cell": true,
     "source": "try {\n const wf = await workflows.create({\n  name:'signups-5124c57a5269',\n  run:async():Promise<unknown>=>{\n   const result=await cenote.readDocument({document:{doc_id:'01a1b06d-c022-7575-8a23-a49e29e1a304'}});\n   if(!result.ok) throw new Error('Could not read signups');\n   const rows=[];\n   for(const item of result.data.items){\n    const text=item.text || '';\n    const parts=text.split(';');\n    for(const part of parts){\n     const start=part.indexOf('Week ');\n     const colon=part.indexOf(':');\n     if(start<0 || colon<0) continue;\n     const week=part.slice(start,colon);\n     const after=part.slice(colon+1).trim();\n     const count=Number(after.split(' ')[0].replace('.',''));\n     rows.push({week:week,signups:count});\n    }\n   }\n   const chart=views.barChart(rows,'week','signups','Weekly signups');\n   const button=views.action('click','Click',{});\n   return views.card('Weekly signups',[chart,button]);\n  },\n  actions:{click:async():Promise<unknown>=>{return {clicked:true};}}\n });\n console.log(JSON.stringify({workflow_id:wf.data.workflow.workflow_id,version:wf.data.version}));\n} catch(e) { console.log(JSON.stringify({code:e.code,message:e.message,details:e.data?.raw?.error?.details})); }"
+  },
+  {
+    "name": "FIG-7664 regex callable cell",
+    "source": "const wf = await workflows.create({\n name:\"regex-callable\",\n run:async ():Promise<unknown> => /Week \\d+/.test(\"Week 12\")\n});\nconsole.log(JSON.stringify({workflow_id:wf.data.workflow.workflow_id,version:wf.data.version}));",
+    "cell": true,
+    "materialize": true
+  },
+  {
+    "name": "FIG-7664 Linear edit run body",
+    "source": "const run = async ():Promise<unknown> => { const result=await integrations.execute({action:'LINEAR_LIST_ISSUES',args:{first:5,order_by:'createdAt',filter:{title:{containsIgnoreCase:'lash'},state:{type:{nin:['completed','canceled']}}}}}); if (!('data' in result)) throw new Error('Unable to load Linear issues'); const rows=result.data.nodes.map(issue=>({identifier:issue.identifier,title:issue.title,status:issue.state.name,createdAt:issue.createdAt,url:issue.url})); return views.card('Newest open tickets with lash in the title',[views.table(rows,[{header:'Issue',field:'identifier'},{header:'Title',field:'title'},{header:'Status',field:'status'},{header:'Created',field:'createdAt'},{header:'Link',field:'url'}])]); };",
+    "materialize": true,
+    "cell": true
   }
 ]

@@ -271,16 +271,7 @@ pub fn materialize_workflow(
         }
         for (old, new) in &ids {
             let mut definition = copied.functions[old].clone();
-            let mut normalized_paths = BTreeMap::new();
-            let parameter_names = definition.signature.params.clone();
             if let Some(body) = definition.body_mut() {
-                if matches!(
-                    node.convention,
-                    StartConvention::TsArgsList { .. } | StartConvention::TsDirect { .. }
-                ) {
-                    normalized_paths =
-                        source::declarations(&mut body.block, &parameter_names, source);
-                }
                 remap(NodeMut::Block(&mut body.block), &ids, &slot);
                 body.imports = std::mem::take(&mut body.imports)
                     .into_iter()
@@ -304,13 +295,7 @@ pub fn materialize_workflow(
             {
                 sites.insert(
                     (n, node.callable.link, site.clone()),
-                    Site::new(
-                        Unit::Library(*new),
-                        normalized_paths
-                            .get(&site.path)
-                            .cloned()
-                            .unwrap_or_else(|| site.path.clone()),
-                    ),
+                    Site::new(Unit::Library(*new), site.path.clone()),
                 );
             }
             // Include non-execution nodes and function-body captions too.

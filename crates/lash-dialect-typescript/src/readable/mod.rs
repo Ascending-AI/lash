@@ -39,13 +39,18 @@ pub fn print(
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
     let mut printed = print_attempt(document, captions, library, options, STYLES[0]);
-    for style in STYLES[1..]
-        .iter()
-        .copied()
-        .chain(STYLES.iter().map(|style| lift::Style {
-            const_functions: true,
-            ..*style
-        }))
+    for style in [false, true]
+        .into_iter()
+        .flat_map(|block_bodies| {
+            [false, true].into_iter().flat_map(move |const_functions| {
+                STYLES.iter().map(move |style| lift::Style {
+                    block_bodies,
+                    const_functions,
+                    ..*style
+                })
+            })
+        })
+        .skip(1)
     {
         if !matches!(printed, Err(PrintError::Unprintable { .. })) {
             break;
@@ -59,21 +64,25 @@ pub fn print(
 /// written where they are read over their own `const`s.
 const STYLES: [lift::Style; 4] = [
     lift::Style {
+        block_bodies: false,
         const_functions: false,
         operators: true,
         preserve_temporaries: false,
     },
     lift::Style {
+        block_bodies: false,
         const_functions: false,
         operators: true,
         preserve_temporaries: true,
     },
     lift::Style {
+        block_bodies: false,
         const_functions: false,
         operators: false,
         preserve_temporaries: false,
     },
     lift::Style {
+        block_bodies: false,
         const_functions: false,
         operators: false,
         preserve_temporaries: true,
@@ -294,6 +303,82 @@ mod tests {
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
+    fn materialize_callable(
+        lowered: &lash_kernel_dialect::Lowered,
+    ) -> lash_kernel_package::MaterializedWorkflow {
+        let (site, written, closure) = lowered
+            .written
+            .iter()
+            .find_map(|(site, written)| {
+                let k::Node::Expr(k::Expr::Closure(closure)) = lowered.document.node(site)? else {
+                    return None;
+                };
+                closure
+                    .presentation
+                    .as_ref()?
+                    .signature
+                    .params
+                    .is_empty()
+                    .then_some((site, written, closure))
+            })
+            .expect("zero-argument callable");
+        let presentation = closure.presentation.as_ref().unwrap();
+        let link = lash_kernel_value::Link {
+            helper_fills: Default::default(),
+            document: lowered.document.identity(),
+            fills: Default::default(),
+        };
+        let function = k::FunctionValue {
+            callable: lash_kernel_value::CallableId {
+                link: link.identity(),
+                function: closure.function,
+            },
+            captures: Default::default(),
+            signature: presentation.signature.clone(),
+            convention: presentation.convention.clone(),
+            representation: presentation.representation.clone(),
+            token: Some(vec![
+                k::Datum::Text("ts.function".into()),
+                k::Datum::Text(String::new()),
+                k::Datum::Text(
+                    written
+                        .signature_origin
+                        .as_ref()
+                        .and_then(|origin| origin.name.clone())
+                        .unwrap_or_default(),
+                ),
+                k::Datum::Float(k::Float::new(0.0)),
+                k::Datum::Null,
+                k::Datum::Record(vec![]),
+            ]),
+            written_signature: Some(k::WrittenSignature {
+                language: written.language,
+                signature: written.signature.clone(),
+            }),
+            signature_origin: written.signature_origin.clone(),
+            implicit_text_conversions: written.implicit_text_conversions.clone(),
+            captions: lowered.captions.clone(),
+            creation: Some(site.clone()),
+        };
+        let content = lash_kernel_package::LinkedContent {
+            documents: [(
+                lowered.document.identity(),
+                std::sync::Arc::clone(lowered.document.shared()),
+            )]
+            .into(),
+            links: [(link.identity(), link)].into(),
+            ..Default::default()
+        };
+        lash_kernel_package::materialize_workflow(
+            &content,
+            &k::WorkflowReference::Callable(function.callable),
+            Some(&function),
+            None,
+            &lash_kernel_releases::helper_release().unwrap().helpers,
+        )
+        .unwrap()
+    }
+
     /// FIG-7474: helpers and const-bound arrows must print without losing
     /// authored function names or changing the complete lowered document.
     #[test]
@@ -304,6 +389,8 @@ mod tests {
             source: String,
             #[serde(default)]
             cell: bool,
+            #[serde(default)]
+            materialize: bool,
             #[serde(default)]
             processes: bool,
             #[serde(default)]
@@ -318,6 +405,8 @@ mod tests {
             ("io", "read_csv"),
             ("inbox", "send_item"),
             ("workflows", "create"),
+            ("integrations", "execute"),
+            ("views", "table"),
             ("cenote", "read_document"),
             ("views", "bar_chart"),
             ("views", "action"),
@@ -338,7 +427,7 @@ mod tests {
                                     params: (0..match (package, member) {
                                         ("views", "bar_chart") => 4,
                                         ("views", "action") => 3,
-                                        ("views", "card") => 2,
+                                        ("views", "card" | "table") => 2,
                                         _ => 1,
                                     })
                                         .map(|index| lash_kernel_value::types::Param {
@@ -367,6 +456,30 @@ mod tests {
         let namespaces =
             lash_kernel_dialect::Namespaces::new(packages, Default::default(), &|_| false).unwrap();
         let mut cases: Vec<Case> = serde_json::from_str(include_str!("corpus.json")).unwrap();
+        for (name, expression) in [
+            ("regex literal receiver", r#"/Week \d+/.test("Week 12")"#),
+            (
+                "regex constructor receiver",
+                r#"new RegExp("Week \\d+").test("Week 12")"#,
+            ),
+            ("object arrow callback", "[1, 2].map(value => ({value}))"),
+        ] {
+            for block in [false, true] {
+                let body = if block {
+                    format!("{{ return {expression}; }}")
+                } else {
+                    expression.into()
+                };
+                cases.push(Case {
+                    name: format!("FIG-7664 {name}, block={block}"),
+                    source: format!("const run = async (): Promise<unknown> => {body};"),
+                    cell: true,
+                    materialize: true,
+                    processes: false,
+                    names: vec![],
+                });
+            }
+        }
         let captions: serde_json::Value = serde_json::from_str(include_str!(
             "../../../lash-kernel-conformance/captions/typescript.json"
         ))
@@ -389,6 +502,66 @@ mod tests {
             };
             let lowered = crate::lower(&case.source, &environment, mode)
                 .unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
+            if case.materialize {
+                let opened = materialize_callable(&lowered);
+                let mut draft = lash_kernel_edit::Draft::open(opened.document.clone()).unwrap();
+                if let Err(error) = draft.apply(
+                    &lash_kernel_edit::Transaction {
+                        base: opened.document.identity(),
+                        edits: vec![],
+                    },
+                    &lash_kernel_check::Environment::new(library),
+                    &[crate::CONVENTIONS],
+                ) {
+                    failures.push(format!(
+                        "{}: saved zero-edit admission: {error:?}",
+                        case.name
+                    ));
+                }
+                // The publication printer checks the complete saved document, allowing
+                // only the existing private-name and import-slot normalization.
+                match print(
+                    &opened.document,
+                    Some(&opened.captions),
+                    library,
+                    PrintOptions {
+                        source_map: true,
+                        ..Default::default()
+                    },
+                ) {
+                    Ok(saved) => {
+                        let read = crate::lower(
+                            &saved.source,
+                            &environment,
+                            lash_kernel_dialect::Mode::Module,
+                        )
+                        .unwrap_or_else(|error| {
+                            panic!("{}: saved ordinary main readback: {error:?}", case.name)
+                        });
+                        let reprinted = print(
+                            &read.document,
+                            Some(&read.captions),
+                            library,
+                            Default::default(),
+                        )
+                        .unwrap();
+                        assert_eq!(
+                            reprinted.source, saved.source,
+                            "{}: saved printing must stabilize",
+                            case.name
+                        );
+                        saved
+                            .source_map
+                            .as_ref()
+                            .unwrap()
+                            .validate(&opened.document, &saved.source)
+                            .unwrap();
+                    }
+                    Err(error) => {
+                        failures.push(format!("{}: saved callable: {error:?}", case.name))
+                    }
+                }
+            }
             let mut draft =
                 lash_kernel_edit::Draft::open(lowered.document.document().clone()).unwrap();
             if let Err(error) = draft.apply(

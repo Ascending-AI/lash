@@ -213,6 +213,7 @@ impl Lifter<'_> {
             _ => None,
         };
         if let Some(value) = returned
+            && !self.style.block_bodies
             && self.site_caption(&site.child(0)).is_none()
         {
             if names.is_empty() {
