@@ -26,6 +26,8 @@ pub mod host_graph {
     pub use crate::executor::host_graph::*;
 }
 mod feedback;
+#[cfg(test)]
+mod guarded_surface_tests;
 mod native;
 mod plugin;
 pub use native::NATIVE_EXECUTE_TOOL_NAME;
