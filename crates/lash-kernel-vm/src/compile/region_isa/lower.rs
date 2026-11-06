@@ -249,8 +249,13 @@ pub(super) fn connect(
             )?
         }
         // A raise moves its operand into the departure; its route is
-        // appended with the departures and ends at the catching try.
-        doc::Node::Stmt(doc::Stmt::Return { value } | doc::Stmt::Throw { value }) => {
+        // appended with the departures and ends at the catching try. A
+        // ReturnVia's Commit holds its operand for the machine's policy.
+        doc::Node::Stmt(
+            doc::Stmt::Return { value }
+            | doc::Stmt::Throw { value }
+            | doc::Stmt::ReturnVia { value, .. },
+        ) => {
             graph.insert(commit.clone(), Edge::Stop);
             connect(
                 doc::Node::Expr(value),
@@ -276,8 +281,7 @@ pub(super) fn connect(
         // These require departure/handler or protocol composition. Each is an
         // explicit boundary, with no source interpreter embedded in the ISA.
         doc::Node::Stmt(
-            doc::Stmt::ReturnVia { .. }
-            | doc::Stmt::Finish { .. }
+            doc::Stmt::Finish { .. }
             | doc::Stmt::Fail { .. }
             | doc::Stmt::Try(_)
             | doc::Stmt::For { via: Some(_), .. },
@@ -599,6 +603,19 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     src: args[0],
                     next: pc(at)?,
                 },
+                // An uncaught ReturnVia stops the region once accepted.
+                (
+                    doc::Node::Stmt(doc::Stmt::ReturnVia { .. }),
+                    Phase::Commit,
+                    None,
+                    None,
+                    Ok(args),
+                ) if args.len() == 1
+                    && event.entities.is_empty()
+                    && super::departures::uncaught(&source, at)? =>
+                {
+                    RegionOp::ReturnVia { value: args[0] }
+                }
                 // The route is appended below; its first Leave replaces `next`.
                 (
                     doc::Node::Stmt(doc::Stmt::Break | doc::Stmt::Continue),

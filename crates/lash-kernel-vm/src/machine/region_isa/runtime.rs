@@ -89,7 +89,7 @@ impl KernelMachine {
             let outcome = lease.run(request);
             // The point the region stopped at, and, standing before a step
             // the machine serves, the slots its frame holds its operands in.
-            let (at, native, effect) = match &lease.execution {
+            let (at, native, effect, returning) = match &lease.execution {
                 Executing::Machine(execution) => (
                     execution
                         .code
@@ -98,9 +98,10 @@ impl KernelMachine {
                         .map(|step| step.at.clone()),
                     execution.code.program.native_arguments(execution.pc),
                     execution.code.program.effect_argument(execution.pc),
+                    execution.code.program.return_via_argument(execution.pc),
                 ),
                 #[cfg(test)]
-                Executing::Fixture(_) => (None, None, None),
+                Executing::Fixture(_) => (None, None, None, None),
             };
             let stop = outcome.map_err(|error| match error {
                 RegionError::Heap(error) => error.into(),
@@ -199,6 +200,15 @@ impl KernelMachine {
                 RegionStop::Throw => {
                     self.regs.clear();
                     self.raise_from_region(task, host)?;
+                }
+                // An uncaught ReturnVia returns the operand its role holds
+                // out of the frame through the statement's policy.
+                RegionStop::ReturnVia => {
+                    self.regs.clear();
+                    let slot =
+                        returning.ok_or_else(|| fault("a ReturnVia stop holds no operand"))?;
+                    let at = at.ok_or_else(|| fault("a ReturnVia stop has no point"))?;
+                    self.return_via_from_region(task, host, &at, slot)?;
                 }
                 RegionStop::Boundary => {
                     return Err(fault(&format!(

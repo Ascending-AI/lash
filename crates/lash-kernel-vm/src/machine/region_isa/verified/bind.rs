@@ -218,7 +218,7 @@ impl Code {
                     }
                 }
                 RegionOp::Effect { next, .. } => pending.extend(*next),
-                RegionOp::Raise { .. } | RegionOp::Exit { .. } => {}
+                RegionOp::Raise { .. } | RegionOp::ReturnVia { .. } | RegionOp::Exit { .. } => {}
             }
         }
         let count = calls.last_key_value().map_or(Ok(0), |(&index, _)| {

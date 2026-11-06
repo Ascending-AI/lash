@@ -125,6 +125,9 @@ pub(crate) enum RegionStop {
     Native,
     Refusal,
     Throw,
+    /// The region accepted an uncaught ReturnVia, its operand still held:
+    /// the machine returns it out of the frame through the policy.
+    ReturnVia,
     Slice,
     Observer,
     Handoff,

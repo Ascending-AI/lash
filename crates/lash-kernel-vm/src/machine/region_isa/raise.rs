@@ -33,6 +33,42 @@ impl KernelMachine {
         self.complete(task, host, &exe, Completion::Throw(Box::new(value)))
     }
 
+    /// An uncaught ReturnVia the region accepted at `at`: its operand is
+    /// still held at `slot`, and the frame returns it through the policy.
+    pub(super) fn return_via_from_region(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn crate::interface::Host,
+        at: &crate::compile::room::Point,
+        slot: Slot,
+    ) -> Result<(), Halt> {
+        let frame = self.frame(task)?;
+        let value = frame
+            .pending
+            .source
+            .as_ref()
+            .ok_or_else(|| fault("an uncaught ReturnVia has no source continuation"))?
+            .roles
+            .iter()
+            .find_map(|(held, value)| (*held == slot).then_some(*value))
+            .ok_or_else(|| fault("an uncaught ReturnVia holds no operand"))?;
+        let code = frame.code;
+        let stmt = self
+            .exe
+            .stmt_at(code, &at.site)
+            .ok_or_else(|| fault("an uncaught ReturnVia is no statement"))?;
+        let exe = Arc::clone(&self.exe);
+        self.complete(
+            task,
+            host,
+            &exe,
+            Completion::ReturnVia {
+                value: Box::new(value),
+                stmt,
+            },
+        )
+    }
+
     /// A step the machine served for `task`'s top frame raised: an action,
     /// its delivery, a native answer or an effect's copy. The raise is born
     /// where the frame stands; `complete` routes it to a try of a canonical

@@ -387,6 +387,11 @@ impl Running<'_> {
             if matches!(op, RegionOp::Raise { .. }) {
                 return self.halt(RegionStop::Throw);
             }
+            // An accepted uncaught ReturnVia leaves through its policy: the
+            // machine returns the operand its role still holds.
+            if matches!(op, RegionOp::ReturnVia { .. }) {
+                return self.halt(RegionStop::ReturnVia);
+            }
             if matches!(op, RegionOp::Exit { .. }) {
                 self.finish_frame()?;
                 if self.complete {

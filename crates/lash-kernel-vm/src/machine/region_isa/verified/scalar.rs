@@ -108,6 +108,8 @@ impl Running<'_> {
             RegionOp::Move { dst, src, next } => (Some((*dst, self.read(*src)?)), *next),
             // The region stops once an uncaught raise is accepted, at its row.
             RegionOp::Raise { dst, src } => (Some((*dst, self.read(*src)?)), self.pc),
+            // An uncaught ReturnVia writes nothing; its operand stays held.
+            RegionOp::ReturnVia { .. } => (None, self.pc),
             RegionOp::IntBinary {
                 kernel,
                 lhs,

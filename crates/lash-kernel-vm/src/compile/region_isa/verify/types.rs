@@ -215,7 +215,7 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                 let output = step.event.output.as_ref().ok_or(Refused::Facts)?;
                 state[register(draft, output)?.offset()] = Some(kind);
             }
-            RegionOp::Effect { value, .. } => {
+            RegionOp::Effect { value, .. } | RegionOp::ReturnVia { value } => {
                 read(&state, value.offset())?;
             }
             RegionOp::Exit { .. } => {}

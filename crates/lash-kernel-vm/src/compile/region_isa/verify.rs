@@ -585,6 +585,21 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 return Err(Refused::Source);
             }
         }
+        // An uncaught ReturnVia's Commit leaves its operand held at its
+        // role for the machine's policy exit; it writes nothing.
+        RegionOp::ReturnVia { value } => {
+            value_reg(*value)?;
+            if step.at.phase != Phase::Commit
+                || !matches!(node, doc::Node::Stmt(doc::Stmt::ReturnVia { .. }))
+                || index >= draft.source.room.events.len()
+                || !super::departures::uncaught(&draft.source, &step.at)?
+                || expected_inputs.as_deref() != Ok(&[*value])
+                || expected_output.is_some()
+                || !step.event.entities.is_empty()
+            {
+                return Err(Refused::Source);
+            }
+        }
         RegionOp::IntBinary {
             kernel,
             lhs,

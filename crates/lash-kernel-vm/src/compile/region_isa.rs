@@ -430,6 +430,13 @@ pub(crate) enum RegionOp {
         dst: Reg<LeaseValue>,
         src: Reg<LeaseValue>,
     },
+    /// An uncaught ReturnVia's Commit: no try of the frame encloses it.
+    /// The step is accepted with its operand still held at its role, as an
+    /// action's atoms are; the region then stops, and the machine returns
+    /// the value out of the frame through the statement's policy.
+    ReturnVia {
+        value: Reg<LeaseValue>,
+    },
     Boundary {
         spec: BoundarySpec,
     },
@@ -611,6 +618,18 @@ impl RegionCode {
     /// machine to copy out before the region takes its step.
     pub(crate) fn effect_argument(&self, pc: Pc) -> Option<Slot> {
         let RegionOp::Effect { value, .. } = self.op(pc)? else {
+            return None;
+        };
+        self.draft
+            .roles
+            .iter()
+            .find_map(|(role, actual)| (actual == value).then_some(role.slot()))
+            .flatten()
+    }
+    /// The source slot holding the value of the ReturnVia at `pc`, which
+    /// the machine returns through the policy once the step is accepted.
+    pub(crate) fn return_via_argument(&self, pc: Pc) -> Option<Slot> {
+        let RegionOp::ReturnVia { value } = self.op(pc)? else {
             return None;
         };
         self.draft
