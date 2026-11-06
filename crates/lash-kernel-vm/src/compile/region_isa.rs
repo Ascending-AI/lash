@@ -13,6 +13,7 @@ use std::{marker::PhantomData, sync::Arc};
 mod call_paths;
 mod departures;
 mod heap;
+mod joins;
 #[cfg(test)]
 mod laws;
 mod lower;
@@ -716,23 +717,91 @@ impl RegionCode {
     pub(crate) fn roles(&self) -> &[(Role, Reg<LeaseValue>)] {
         &self.draft.roles
     }
-    /// Rebuild a recovery entry from its semantic phase and acceptance state.
-    pub(crate) fn source_recovery(
-        &self,
-        point: &Point,
-        progress: u32,
-        departure: Option<&Point>,
-    ) -> Option<PrefixId> {
-        let pc = departure
-            .and_then(|origin| self.departure_at(origin, point))
-            .or_else(|| self.at(point))?;
-        let step = self.step(pc)?;
+    fn prefix(step: &Step, progress: u32) -> Option<PrefixId> {
         match progress {
             0 => Some(step.before),
             1 => Some(step.pending),
             2 => Some(step.after),
             _ => None,
         }
+    }
+    /// The row a continuation stands at. A conditional Commit has one row
+    /// per arm, and they differ in the arm operand they hold: the row is the
+    /// one whose recovery holds every saved role.
+    pub(crate) fn source_row(
+        &self,
+        point: &Point,
+        progress: u32,
+        departure: Option<&Point>,
+        held: &[Slot],
+    ) -> Option<Pc> {
+        if let Some(pc) = departure.and_then(|origin| self.departure_at(origin, point)) {
+            return Some(pc);
+        }
+        let rows: Vec<Pc> = (0..self.draft.steps.len())
+            .filter(|index| {
+                let step = &self.draft.steps[*index];
+                step.reachable && step.at == *point
+            })
+            .filter_map(|index| u32::try_from(index).ok().map(Pc))
+            .collect();
+        if rows.len() < 2 {
+            return rows.first().copied();
+        }
+        let mut matching = rows.into_iter().filter(|pc| {
+            self.step(*pc)
+                .and_then(|step| Self::prefix(step, progress))
+                .and_then(|prefix| self.recovery(prefix))
+                .is_some_and(|map| {
+                    held.iter()
+                        .all(|slot| map.roles.iter().any(|(actual, _)| actual == slot))
+                })
+        });
+        let pc = matching.next()?;
+        matching.next().is_none().then_some(pc)
+    }
+    /// Rebuild a recovery entry from its semantic phase and acceptance state.
+    pub(crate) fn source_recovery(
+        &self,
+        point: &Point,
+        progress: u32,
+        departure: Option<&Point>,
+        held: &[Slot],
+    ) -> Option<PrefixId> {
+        let pc = self.source_row(point, progress, departure, held)?;
+        Self::prefix(self.step(pc)?, progress)
+    }
+    /// The row a continuation resumes at: the reached row itself before it
+    /// is accepted, otherwise the reached row's successor at `unpaid`.
+    pub(crate) fn source_next(
+        &self,
+        point: &Point,
+        progress: u32,
+        departure: Option<&Point>,
+        held: &[Slot],
+        unpaid: &Point,
+    ) -> Option<Pc> {
+        let reached = self.source_row(point, progress, departure, held)?;
+        if progress < 2 {
+            return Some(reached);
+        }
+        if let Some(pc) = departure.and_then(|origin| self.departure_at(origin, unpaid)) {
+            return Some(pc);
+        }
+        let rows = self
+            .draft
+            .steps
+            .iter()
+            .filter(|step| step.reachable && step.at == *unpaid)
+            .count();
+        if rows < 2 {
+            return self.at(unpaid);
+        }
+        let mut next = recovery::successors(&self.draft, reached.offset())
+            .into_iter()
+            .filter(|pc| self.draft.steps[pc.offset()].at == *unpaid);
+        let pc = next.next()?;
+        next.next().is_none().then_some(pc)
     }
     pub(crate) fn source_progress(&self, prefix: PrefixId) -> Option<u32> {
         self.draft.steps.iter().find_map(|step| {
@@ -753,6 +822,7 @@ impl RegionCode {
         point: &Point,
         progress: u32,
         departure: Option<&Point>,
+        held: &[Slot],
         unpaid: &Point,
     ) -> bool {
         if let Some(origin) = departure
@@ -767,10 +837,7 @@ impl RegionCode {
         {
             return false;
         }
-        let Some(pc) = departure
-            .and_then(|origin| self.departure_at(origin, point))
-            .or_else(|| self.at(point))
-        else {
+        let Some(pc) = self.source_row(point, progress, departure, held) else {
             return false;
         };
         match progress {

@@ -312,5 +312,8 @@ pub(super) fn target(draft: &RegionDraft, from: &Point, at: &Point) -> Result<Pc
                 .ok_or(Refused::Path)?;
         }
     }
+    if let Some(pc) = super::joins::target(draft, from, at)? {
+        return Ok(pc);
+    }
     event_pc(draft, at)
 }

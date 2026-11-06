@@ -174,6 +174,58 @@ pub(super) fn connect(
                 graph,
             )?
         }
+        // A conditional expression runs one arm; its Commit joins it.
+        doc::Node::Expr(doc::Expr::If { cond, then, r#else }) => {
+            let yes = connect(
+                doc::Node::Expr(then),
+                &site.child(1),
+                Some(commit.clone()),
+                source,
+                graph,
+            )?;
+            let no = connect(
+                doc::Node::Expr(r#else),
+                &site.child(2),
+                Some(commit),
+                source,
+                graph,
+            )?;
+            let test = point(site, Phase::Test);
+            graph.insert(
+                test.clone(),
+                Edge::Branch {
+                    input: Owner::Operand(site.child(0)),
+                    yes,
+                    no,
+                },
+            );
+            connect(
+                doc::Node::Expr(cond),
+                &site.child(0),
+                Some(test),
+                source,
+                graph,
+            )?
+        }
+        // A let expression binds its value at Test, then runs its body.
+        doc::Node::Expr(doc::Expr::Let { value, body, .. }) => {
+            let body = connect(
+                doc::Node::Expr(body),
+                &site.child(1),
+                Some(commit),
+                source,
+                graph,
+            )?;
+            let test = point(site, Phase::Test);
+            graph.insert(test.clone(), Edge::Next(body));
+            connect(
+                doc::Node::Expr(value),
+                &site.child(0),
+                Some(test),
+                source,
+                graph,
+            )?
+        }
         doc::Node::Stmt(doc::Stmt::Return { value }) => {
             graph.insert(commit.clone(), Edge::Stop);
             connect(
@@ -206,8 +258,7 @@ pub(super) fn connect(
             | doc::Stmt::Fail { .. }
             | doc::Stmt::Try(_)
             | doc::Stmt::For { via: Some(_), .. },
-        )
-        | doc::Node::Expr(doc::Expr::If { .. } | doc::Expr::Let { .. }) => {
+        ) => {
             let first = source.first_event(site)?;
             graph.insert(first.clone(), Edge::Boundary);
             first
@@ -386,7 +437,12 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
     let mut steps = Vec::new();
     let mut calls = Vec::new();
     for at in &points {
-        let event = source.room.events.get(at).ok_or(Refused::Source)?.clone();
+        // A conditional Commit's base row joins its then arm.
+        let event = if super::joins::joined(&source, at)? {
+            super::joins::event(&source, at, 1)?
+        } else {
+            source.room.events.get(at).ok_or(Refused::Source)?.clone()
+        };
         let node = resources::node(&source, &at.site)?;
         let edge = graph.get(at).unwrap_or(&Edge::Stop);
         let next = match edge {
@@ -793,10 +849,15 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         }
                     }
                 }
-                (_, Phase::Commit, Some(next), Some(dst), Ok(args))
+                (_, Phase::Commit | Phase::Test, Some(next), Some(dst), Ok(args))
                     if args.len() == 1
-                        && matches!(node, doc::Node::Stmt(doc::Stmt::Let { .. }))
-                        && event.entities.is_empty() =>
+                        && event.entities.is_empty()
+                        && match node {
+                            doc::Node::Stmt(doc::Stmt::Let { .. })
+                            | doc::Node::Expr(doc::Expr::If { .. }) => at.phase == Phase::Commit,
+                            doc::Node::Expr(doc::Expr::Let { .. }) => true,
+                            _ => false,
+                        } =>
                 {
                     RegionOp::Move {
                         dst,
@@ -992,6 +1053,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
     };
     super::stages::append(&mut draft, sink)?;
     super::departures::append(&mut draft, sink)?;
+    super::joins::append(&mut draft)?;
     draft.generic_ops = draft.ops.clone();
     draft.generic_steps = draft.steps.clone();
     super::specialize::specialize(exe, &mut draft)?;

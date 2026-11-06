@@ -61,23 +61,34 @@ pub(super) fn position(
             },
         ));
     }
+    let held: Vec<_> = source.roles.iter().map(|(slot, _)| *slot).collect();
     if !code.program.source_successor(
         &source.at,
         source.progress,
         source.departure.as_ref(),
+        &held,
         &source.unpaid,
     ) {
         return Err(invalid(Refused::Path));
     }
     let prefix = code
         .program
-        .source_recovery(&source.at, source.progress, source.departure.as_ref())
+        .source_recovery(
+            &source.at,
+            source.progress,
+            source.departure.as_ref(),
+            &held,
+        )
         .ok_or_else(|| invalid(Refused::Exit))?;
-    let pc = source
-        .departure
-        .as_ref()
-        .and_then(|origin| code.program.departure_at(origin, &source.unpaid))
-        .or_else(|| code.program.at(&source.unpaid))
+    let pc = code
+        .program
+        .source_next(
+            &source.at,
+            source.progress,
+            source.departure.as_ref(),
+            &held,
+            &source.unpaid,
+        )
         .ok_or_else(|| invalid(Refused::Path))?;
     Ok((pc, prefix))
 }

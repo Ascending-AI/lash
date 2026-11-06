@@ -520,7 +520,14 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 return Err(Refused::Facts);
             }
             let output = match node {
-                doc::Node::Stmt(doc::Stmt::Let { .. }) => expected_output,
+                doc::Node::Stmt(doc::Stmt::Let { .. }) | doc::Node::Expr(doc::Expr::Let { .. })
+                    if matches!(step.at.phase, Phase::Commit | Phase::Test) =>
+                {
+                    expected_output
+                }
+                doc::Node::Expr(doc::Expr::If { .. }) if step.at.phase == Phase::Commit => {
+                    expected_output
+                }
                 doc::Node::Expr(doc::Expr::Call { .. } | doc::Expr::Act(_))
                     if step.at.phase == Phase::Restore =>
                 {
@@ -883,8 +890,15 @@ fn verify_layout(
     if draft.steps.len() < loop_steps || draft.ops.len() < loop_steps {
         return Err(Refused::Exit);
     }
-    let expected_steps = loop_steps
+    let departed = loop_steps
         .checked_add(super::departures::verify(draft, &canonical_program.events)?)
+        .ok_or(Refused::Facts)?;
+    let expected_steps = departed
+        .checked_add(super::joins::verify(
+            draft,
+            departed,
+            &canonical_program.events,
+        )?)
         .ok_or(Refused::Facts)?;
     if draft.loops.as_ref() != canonical_program.loops.as_ref() {
         return Err(Refused::Source);
@@ -909,6 +923,14 @@ fn verify_layout(
     let expected_charges = canonical_program.events;
     for (index, (at, canonical_event)) in source.room.events.iter().enumerate() {
         let step = &draft.steps[index];
+        // A conditional Commit's base row joins its then arm.
+        let joined;
+        let canonical_event = if super::joins::joined(source, at)? {
+            joined = super::joins::event(source, at, 1)?;
+            &joined
+        } else {
+            canonical_event
+        };
         if step.stage.is_some() || step.at != *at || step.event.point != *at {
             return Err(Refused::Source);
         }
@@ -1119,7 +1141,7 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
         let before_owned = incoming.get(&index).ok_or(Refused::Exit)?.clone();
         let before = &before_owned;
         let step = &draft.steps[index];
-        let event = if step.stage.is_some() {
+        let event = if step.stage.is_some() || super::joins::joined(source, &step.at)? {
             &step.event
         } else {
             source.room.events.get(&step.at).ok_or(Refused::Source)?
