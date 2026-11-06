@@ -554,6 +554,156 @@ async fn print_standalone_reopens_both_dialects_without_a_source_definition() {
     }
 }
 
+/// FIG-7660: frozen helper captures in a saved root and named handler retain
+/// their value when printed in either authored dialect and published again.
+#[tokio::test]
+async fn saved_root_and_handler_with_frozen_helpers_print_and_roundtrip() {
+    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
+        let core = super::crossing::crossing_core().await;
+        let pin = lash::process::HostArtifactPin::mint();
+        let base = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+            .component(super::crossing::CAPTURE_TOOLS, &())
+            .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+            .build()
+            .unwrap();
+        let (packages, request) = namespace(&core, &pin, &base).await;
+        let source = match format {
+            SourceFormat::TypeScriptV1 => {
+                r#"
+export async function ships(): Promise<string> {
+    let captured = "frozen `template` ${text}";
+    const helper = () => captured;
+    const root = async (): Promise<string> => helper();
+    const greet = async (name: string): Promise<string> => helper() + name;
+    await tools.capture({value: "frozen-helper-root", nested: {fact: root}});
+    await tools.capture({value: "frozen-helper-greet", nested: {fact: greet}});
+    captured = "later";
+    return captured;
+}
+"#
+            }
+            SourceFormat::PythonV1 => {
+                r#"
+async def ships() -> str:
+    captured = "frozen `template` ${text}"
+    def helper(prefix: str = "") -> str:
+        return prefix + captured
+    async def root() -> str:
+        return helper("")
+    async def greet(name: str) -> str:
+        return helper("") + name
+    await tools.capture({"value": "frozen-helper-root", "nested": {"fact": root}})
+    await tools.capture({"value": "frozen-helper-greet", "nested": {"fact": greet}})
+    captured = "later"
+    return captured
+"#
+            }
+        };
+        let imported = core
+            .host_artifacts()
+            .import_workflow(format.language(), source, &request, None)
+            .await
+            .unwrap();
+        let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+            panic!("{format:?}: {imported:?}");
+        };
+        let publication = publish_recorded(
+            &core,
+            &pin,
+            &document,
+            &Name::new("ships"),
+            &base,
+            None,
+            (&packages, &request),
+        )
+        .await
+        .unwrap();
+        let run = start_with(
+            &core,
+            &publication.env_ref,
+            &publication.definition,
+            "freeze-helpers",
+            Default::default(),
+        )
+        .await;
+        assert_eq!(finished(&core, &run).await, serde_json::json!("later"));
+        let origin = lash::package::CallableOrigin {
+            publications: publication
+                .environment
+                .execution()
+                .publications
+                .iter()
+                .map(lash::package::PublicationRecord::key)
+                .collect(),
+            authored: publication.environment.execution().authored.clone(),
+        };
+        for (name, suffix, args) in [
+            ("root", "", serde_json::Map::new()),
+            (
+                "greet",
+                " Ada",
+                [("name".into(), serde_json::json!(" Ada"))]
+                    .into_iter()
+                    .collect(),
+            ),
+        ] {
+            let marker = format!("frozen-helper-{name}");
+            let shipped = ECHO_CALLS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .rev()
+                .find(|args| args["value"] == marker)
+                .unwrap()["nested"]["fact"]
+                .clone();
+            let function = FunctionValue::from_transport_json(
+                &shipped,
+                &lash::workflow::document::FunctionRegistry::default(),
+                Default::default(),
+                lash_kernel_value::data_limits::KernelDataLimits::standard(),
+            )
+            .unwrap();
+            core.host_artifacts()
+                .inspect_callable(&function, &request, &origin)
+                .await
+                .unwrap();
+            let definition = core
+                .host_artifacts()
+                .publish_callable(&pin, &function, &request, &origin, None)
+                .await
+                .unwrap();
+            let printed = core
+                .host_artifacts()
+                .print_workflow(&definition.id, None, format, Default::default())
+                .await
+                .unwrap_or_else(|error| panic!("{format:?} {name}: {error:?}"));
+            let roundtrip =
+                publish_source(&core, &pin, &printed.source, format, &request, "run").await;
+            let original_env = publication.env_ref.clone();
+            let roundtrip_env = definition_environment(&core, &pin, &roundtrip, &base).await;
+            for (definition, env, kind) in [
+                (&definition, &original_env, "original"),
+                (&roundtrip, &roundtrip_env, "roundtrip"),
+            ] {
+                let run = start_with(
+                    &core,
+                    env,
+                    definition,
+                    &format!("{name}-{kind}"),
+                    args.clone(),
+                )
+                .await;
+                assert_eq!(
+                    finished(&core, &run).await,
+                    serde_json::json!(format!("frozen `template` ${{text}}{suffix}")),
+                    "{format:?} {name} {kind}",
+                );
+            }
+        }
+        core.shutdown().await.unwrap();
+    }
+}
+
 async fn publish_source(
     core: &lash::LashCore,
     pin: &lash::process::HostArtifactPin,

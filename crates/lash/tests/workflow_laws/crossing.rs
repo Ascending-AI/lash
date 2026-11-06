@@ -6,7 +6,7 @@ use super::*;
 use lash::workflow::document::{FunctionValue, FunctionValueLimits};
 
 /// This tool's one callable slot is nested.fact; every other slot is data.
-const CAPTURE_TOOLS: lash::process::ProcessConfigKey<()> =
+pub(super) const CAPTURE_TOOLS: lash::process::ProcessConfigKey<()> =
     lash::process::ProcessConfigKey::new("workflow-capture", lash::plugins::FormatVersion::ONE);
 
 fn capture_definition() -> lash::tools::ToolDefinition {
@@ -63,7 +63,7 @@ fn capture_component() -> lash::process::StaticProcessComponent {
 }
 
 /// A node whose capture tool explicitly admits a nested function.
-async fn crossing_core() -> lash::LashCore {
+pub(super) async fn crossing_core() -> lash::LashCore {
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await

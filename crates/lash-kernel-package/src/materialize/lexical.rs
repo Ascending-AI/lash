@@ -96,10 +96,23 @@ pub(super) fn environment(
     let raw_name = node
         .token
         .as_ref()
-        .and_then(|token| token.get(2))
+        .and_then(|token| {
+            let name = if matches!(node.convention, StartConvention::PyArgsList { .. }) {
+                3
+            } else {
+                2
+            };
+            token.get(name)
+        })
         .and_then(|v| {
             if let Datum::Text(name) = v {
-                Some(Name::new(name))
+                if matches!(node.convention, StartConvention::PyArgsList { .. })
+                    && name == "<lambda>"
+                {
+                    None
+                } else {
+                    Some(Name::new(name))
+                }
             } else {
                 None
             }

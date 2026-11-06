@@ -345,12 +345,12 @@ impl Renderer<'_> {
                         self.out.write(")");
                     }
                 } else {
-                    if matches!(callee,k::Callee::Value(name) if self.asynchronous.contains(name)) {
-                        self.out.write("await ");
-                    }
+                    self.out.write("callable.invoke(");
                     self.callee(callee);
-                    self.out.write("(");
-                    self.authored_args(&act.args, true);
+                    if !act.args.is_empty() {
+                        self.out.write(", ");
+                        self.authored_args(&act.args, true);
+                    }
                     self.out.write(")");
                 }
             }
@@ -557,6 +557,15 @@ impl Renderer<'_> {
                     self.sync.insert(name.clone());
                 } else if asynchronous {
                     self.asynchronous.insert(name.clone());
+                }
+                if self.authored
+                    && c.presentation.as_ref().is_some_and(|start| {
+                        matches!(start.convention, k::StartConvention::Direct)
+                            && matches!(start.representation, k::FunctionRepresentation::Bare)
+                    })
+                {
+                    self.out.write("@callable.direct\n");
+                    self.padding();
                 }
                 self.out
                     .write(if asynchronous { "async def " } else { "def " });

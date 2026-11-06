@@ -14,10 +14,12 @@ pub enum Constructor {
     Absent,
     Index,
     CallToken,
+    /// Call a closure with exactly the supplied operands, without a dialect token adapter.
+    Call,
     Native(&'static str, usize),
 }
 impl Constructor {
-    const ALL: [(Self, &'static str); 26] = [
+    const ALL: [(Self, &'static str); 28] = [
         (Self::Error, "error.new"),
         (Self::Timestamp, "timestamp.from_nanoseconds"),
         (Self::Integer, "integer.from_decimal"),
@@ -29,6 +31,8 @@ impl Constructor {
         (Self::Absent, "value.absent"),
         (Self::Index, "tuple.at"),
         (Self::CallToken, "callable.invoke_token"),
+        (Self::Call, "callable.invoke"),
+        (Self::Native("same", 2), "value.same"),
         (Self::Native("num.add", 2), "num.add"),
         (Self::Native("num.sub", 2), "num.sub"),
         (Self::Native("num.mul", 2), "num.mul"),
@@ -71,6 +75,16 @@ impl Constructor {
         helper: impl FnOnce(&str) -> Option<lash_kernel_value::FunctionId>,
     ) -> Result<Expr, String> {
         match self {
+            Self::Call => {
+                let mut args = args.into_iter();
+                let Some(Expr::Variable(callee)) = args.next() else {
+                    return Err("callable.invoke requires a bound callable".into());
+                };
+                Ok(Expr::Act(Box::new(k::ActExpr {
+                    kind: k::ActKind::Call(k::Callee::Value(callee)),
+                    args: args.collect(),
+                })))
+            }
             Self::Native(name, arity) => {
                 if args.len() != arity {
                     return Err(format!("{name} requires {arity} arguments"));

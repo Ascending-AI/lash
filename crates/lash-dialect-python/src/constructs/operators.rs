@@ -242,7 +242,7 @@ pub(crate) const COMPARISONS: &[Comparison] = &[
     comparison!(LtE, "le", true, false, false, "<=", ["int.le"]),
     comparison!(Gt, "gt", true, false, false, ">", []),
     comparison!(GtE, "ge", true, false, false, ">=", []),
-    comparison!(Is, "py.same", false, false, false, "is", ["same"]),
+    comparison!(Is, "py.same", false, false, false, "is", []),
     comparison!(IsNot, "py.same", false, false, true, "is not", []),
     comparison!(In, "py.contains", false, true, false, "in", []),
     comparison!(NotIn, "py.contains", false, true, true, "not in", []),

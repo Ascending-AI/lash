@@ -1100,6 +1100,14 @@ impl Lowerer<'_> {
                 "apply decorators to ordinary cell functions; export an undecorated closed entry",
             ));
         }
+        if let [decorator] = def.decorator_list.as_slice()
+            && let PyExpr::Attribute(attribute) = &decorator.expression
+            && attribute.attr.id == "direct"
+            && matches!(attribute.value.as_ref(), PyExpr::Name(name)
+                if name.id == "callable" && self.variable("callable").is_none())
+        {
+            return self.direct_function_def(def);
+        }
         let mut decorators = Vec::new();
         for decorator in &def.decorator_list {
             let value = self.expr(&decorator.expression)?;
@@ -1266,6 +1274,66 @@ impl Lowerer<'_> {
             note.nested_written
                 .push((if bare { vec![0] } else { vec![0, 0] }, written));
         }
+        Ok(())
+    }
+
+    /// `@callable.direct` retains a closure's exact operands and presentation.
+    /// Unlike a Python function token, it adds no binder or exception operand.
+    fn direct_function_def(&mut self, def: &ast::StmtFunctionDef) -> Lowering<()> {
+        if !def.parameters.kwonlyargs.is_empty()
+            || def.parameters.vararg.is_some()
+            || def.parameters.kwarg.is_some()
+            || def
+                .parameters
+                .posonlyargs
+                .iter()
+                .chain(&def.parameters.args)
+                .any(|param| {
+                    param
+                        .default
+                        .as_deref()
+                        .is_some_and(|default| !matches!(default, PyExpr::EllipsisLiteral(_)))
+                })
+        {
+            return Err(diagnostics::unplaced(
+                Code::Syntax,
+                "callable.direct takes positional operands; use `= ...` to mark an optional operand",
+            ));
+        }
+        let name = def.name.id.as_str();
+        self.mark_bound(name);
+        let (params, body) = self.function_body(
+            Some(&def.parameters),
+            Body::Suite(&def.body),
+            def.is_async,
+            &[],
+            None,
+        )?;
+        let start = lash_kernel_doc::CallablePresentation {
+            signature: self.declared_signature(Some(&def.parameters), def.returns.as_deref()),
+            representation: lash_kernel_doc::FunctionRepresentation::Bare,
+            convention: lash_kernel_doc::StartConvention::Direct,
+        };
+        let variable = self.written(name, def.name.range)?;
+        self.span_of(def);
+        let (buf, closure) =
+            self.value_block(|this| Ok(this.emit_closure(params, body, Some(start))))?;
+        let value = self.branch_expression(&buf, closure.expr).ok_or_else(|| {
+            diagnostics::unplaced(
+                Code::InvalidDocument,
+                "direct closure has no expression form",
+            )
+        })?;
+        let value = match value {
+            Expr::Let { name, value, body } if matches!(body.as_ref(), Expr::Variable(read) if read == &name) => {
+                *value
+            }
+            value => value,
+        };
+        self.store(
+            Place::Variable(variable),
+            Operand::inline(value, Ty::Unknown),
+        );
         Ok(())
     }
 

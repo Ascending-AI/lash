@@ -520,6 +520,18 @@ impl Lifter<'_> {
                 };
                 self.helper(&name, &act.args)
             }
+            k::ActKind::Call(k::Callee::Value(name)) => {
+                let callee = self.variable(name)?;
+                let args = act
+                    .args
+                    .iter()
+                    .map(|arg| self.expr(arg))
+                    .collect::<Lift<Vec<_>>>()?;
+                Ok(constructor(
+                    "callable.invoke",
+                    std::iter::once(callee).chain(args).collect(),
+                ))
+            }
             _ => refuse("an action the authored dialect does not lower to"),
         }
     }

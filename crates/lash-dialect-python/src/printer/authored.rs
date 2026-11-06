@@ -244,15 +244,17 @@ impl Renderer<'_> {
                 self.out.write(", ");
             }
             self.name(name);
-            let ty = start
+            let param = start
                 .signature
                 .params
                 .iter()
-                .find(|param| param.name == *name)
-                .map(|param| &param.ty);
-            if let Some(annotation) = ty.and_then(annotation) {
+                .find(|param| param.name == *name);
+            if let Some(annotation) = param.and_then(|param| annotation(&param.ty)) {
                 self.out.write(": ");
                 self.out.write(&annotation);
+            }
+            if param.is_some_and(|param| param.optional) {
+                self.out.write(" = ...");
             }
         }
         self.out.write(")");

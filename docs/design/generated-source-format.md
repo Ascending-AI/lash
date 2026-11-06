@@ -34,7 +34,8 @@ handling rather than a reserved kernel namespace.
 Typed data constructors preserve value kinds: `error.new`,
 `timestamp.from_nanoseconds`, `integer.from_decimal`, `bytes.from_hex`,
 `tuple.of`, `map.from_entries`, `set.of`, `record.new` and `value.absent`.
-`tuple.at` expresses strict kernel indexing. TypeScript prints a strict
+`tuple.at` expresses strict kernel indexing. `value.same` retains exact native
+equality, including default-argument checks, without Python's `is` adapter. TypeScript prints a strict
 numeric operation over checked `number` operands as the operator it lowers
 from (`n < 1`, `n !== 0`): reading the operator lowers its checks again. Where
 that does not read back, it spells the operation by its `num.*` helper, and
@@ -47,7 +48,14 @@ operands with erased `as string` assertions, preserving `text.concat` when a
 materialized capture cell initially holds `null`. The assertions introduce no
 runtime conversion or check.
 Known-token calls use `callable.invoke_token`; they lower normally and need no
-retained document.
+retained document. `callable.invoke(closure, ...operands)` in either dialect
+calls a bare closure with exactly the supplied operands. It adds no argument
+packing, receiver, exception operand or await adapter. Python's
+`@callable.direct` on a nested function preserves that bare closure ABI and its
+annotated signature. Parameters name positional operands; `= ...` marks an
+optional operand without adding a default-value prologue or a binder. This
+lets lexical factories and captured helpers retain their own calling
+conventions even when the enclosing saved entry uses packed Python tokens.
 Native calls still select the installed helper by name and must reproduce its
 exact identity for printing to succeed. Constructor roots are reserved package
 roots. Bound or opaque function tokens without a faithful source spelling

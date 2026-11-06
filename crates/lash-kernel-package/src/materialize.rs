@@ -340,7 +340,9 @@ pub fn materialize_workflow(
         // when one nested body is instantiated beneath different local shadows.
         let ts = matches!(node.convention, StartConvention::TsArgsList { .. });
         let factory_name = fresh(format!("saved_factory_{n}"));
-        factories.insert(factory_name.clone());
+        if matches!(node.convention, StartConvention::PyArgsList { .. }) {
+            factories.insert(factory_name.clone());
+        }
         let factory = lexical::environment(&mut document, n, node, raw, helpers, &mut fresh)?;
         block.push(binding(factory_name.clone(), factory));
         block.push(binding(

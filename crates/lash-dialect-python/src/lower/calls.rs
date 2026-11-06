@@ -356,13 +356,34 @@ impl Lowerer<'_> {
         {
             self.plain_arguments(&call.arguments, "a value constructor")?;
             let args: Vec<_> = call.arguments.args.iter().collect();
-            let operands = self.operands(&args)?;
+            let mut operands = self.operands(&args)?;
+            if matches!(
+                constructor,
+                lash_kernel_dialect::value_constructors::Constructor::Call
+            ) && let Some(callee) = operands.first_mut()
+                && !matches!(callee.expr, Expr::Variable(_))
+            {
+                *callee = self.let_rhs(Rhs::Expr(callee.expr.clone()), callee.ty);
+            }
             let value = constructor
                 .build(operands.into_iter().map(|v| v.expr).collect(), |name| {
                     self.function(name).ok()
                 })
                 .map_err(|message| diagnostics::unplaced(Code::Syntax, message))?;
-            return Ok(Operand::inline(value, Ty::Unknown));
+            // A native Boolean already is a condition. Preserve that fact
+            // so reading exact equality adds no Python truth adapter.
+            let ty = match &value {
+                Expr::Call { function, .. }
+                    if self
+                        .library
+                        .header(function)
+                        .is_some_and(|header| header.signature.result == Type::Bool) =>
+                {
+                    Ty::Bool
+                }
+                _ => Ty::Unknown,
+            };
+            return Ok(Operand::inline(value, ty));
         }
         if self
             .call_path(&call.func)

@@ -869,7 +869,15 @@ impl Lowerer<'_> {
                     Some(span),
                 )
             })?;
-            let operands = self.operands(&args)?;
+            let mut operands = self.operands(&args)?;
+            if matches!(
+                constructor,
+                lash_kernel_dialect::value_constructors::Constructor::Call
+            ) && let Some(callee) = operands.first_mut()
+                && !matches!(callee.expr, Expr::Variable(_))
+            {
+                *callee = self.let_expr(callee.expr(), callee.ty.clone());
+            }
             if matches!(
                 constructor,
                 lash_kernel_dialect::value_constructors::Constructor::CallToken

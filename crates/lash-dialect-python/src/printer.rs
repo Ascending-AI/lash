@@ -301,7 +301,9 @@ impl Renderer<'_> {
                 .refuse(PrintError::Invalid("missing callable source name".into()));
             return;
         };
-        self.out.write(&name);
+        self.out.write(
+            lash_kernel_dialect::value_constructors::Constructor::spelling(&name).unwrap_or(&name),
+        );
     }
     fn padding(&mut self) {
         for _ in 0..self.indent {
