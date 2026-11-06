@@ -132,6 +132,10 @@ pub(crate) enum RegionStop {
         kind: &'static str,
         message: &'static str,
     },
+    /// The region stands before a checked helper's call whose arguments it
+    /// cannot show fit the helper's signature: the machine checks them,
+    /// raising `function_argument`, or the region takes the call.
+    Check,
     Refusal,
     Throw,
     /// The region accepted an uncaught ReturnVia, its operand still held:

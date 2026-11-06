@@ -295,7 +295,6 @@ pub(crate) struct ReadSpec {
     at: Point,
     selector: Selector,
     retained: Option<Slot>,
-    kind: RegisterKind,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Selector {
@@ -308,9 +307,6 @@ impl ReadSpec {
     }
     pub(crate) fn selector(&self) -> &Selector {
         &self.selector
-    }
-    pub(crate) fn result_kind(&self) -> RegisterKind {
-        self.kind
     }
     pub(crate) fn retained_owner(&self) -> Option<Slot> {
         self.retained
@@ -685,6 +681,19 @@ impl RegionCode {
             .collect::<Option<_>>()?;
         Some((lib, slots))
     }
+    /// The checked helper the call at `pc` enters, with the source slots
+    /// holding its arguments, for the machine to check them against its
+    /// signature where the region cannot.
+    pub(crate) fn checked_call(&self, pc: Pc) -> Option<(LibId, Box<[Slot]>)> {
+        let RegionOp::Call { site, .. } = self.op(pc)? else {
+            return None;
+        };
+        let plan = self.call(*site)?;
+        Some((
+            plan.checked()?,
+            plan.arguments().iter().map(|role| role.slot()).collect(),
+        ))
+    }
     /// The source slot holding the value of the effect at `pc`, for the
     /// machine to copy out before the region takes its step.
     pub(crate) fn effect_argument(&self, pc: Pc) -> Option<Slot> {
@@ -849,6 +858,16 @@ impl RegionCode {
     }
     pub(crate) fn source(&self) -> &Arc<Source> {
         &self.draft.source
+    }
+    /// The source error a failed truth guard at `at` raises: a branch
+    /// or loop test whose condition is not a bool. Any other
+    /// truth guard has no source meaning.
+    pub(crate) fn condition_error(&self, at: &Site) -> Option<&'static str> {
+        match resources::node(&self.draft.source, at).ok()? {
+            doc::Node::Stmt(doc::Stmt::If { .. }) => Some("an `if` condition must be a bool"),
+            doc::Node::Stmt(doc::Stmt::While { .. }) => Some("a `while` condition must be a bool"),
+            _ => None,
+        }
     }
     pub(crate) fn code(&self) -> CodeId {
         self.draft.code

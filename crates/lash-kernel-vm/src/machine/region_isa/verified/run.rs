@@ -265,6 +265,18 @@ impl Running<'_> {
                 && let Some(guard) = &step.guard
                 && !self.guard(guard)?
             {
+                // A branch or loop test whose condition is not a bool raises
+                // its source error; any other failed guard has no meaning.
+                if matches!(
+                    guard.kind(),
+                    crate::compile::region_isa::CheckedKind::Truth { .. }
+                ) && let Some(message) = code.program.condition_error(&step.at.site)
+                {
+                    return self.halt(RegionStop::Refused {
+                        kind: "type_error",
+                        message,
+                    });
+                }
                 return Err(invalid(Refused::Facts));
             }
             if let RegionOp::Heap {

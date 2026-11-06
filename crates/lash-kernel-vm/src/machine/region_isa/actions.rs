@@ -284,6 +284,43 @@ impl KernelMachine {
         Ok(())
     }
 
+    /// Checks the arguments of the checked helper call at `at` against the
+    /// helper's signature, as the call's entry would: a misfit raises
+    /// `function_argument`, and a fit lets the region take the call.
+    pub(super) fn check_arguments(
+        &mut self,
+        task: TaskId,
+        at: crate::compile::room::Point,
+        lib: crate::compile::LibId,
+        slots: &[lash_kernel_state::kernel_internals::logical::Slot],
+    ) -> Eval<()> {
+        let operands = self.role_values(task, slots)?;
+        let exe = Arc::clone(&self.exe);
+        let function = exe.lib(lib);
+        for (at, value) in operands.iter().enumerate() {
+            self.put(at, *value);
+        }
+        let checked = self.check_call_arguments(
+            &exe,
+            lash_kernel_value::CallableId {
+                function: function.specialization.function,
+                link: self.current_link(),
+            },
+            &function.header.signature,
+            0,
+            operands.len(),
+            true,
+        );
+        self.regs.clear_range(0..operands.len().max(1));
+        checked?;
+        self.served = Some(super::Served {
+            task,
+            at,
+            answer: None,
+        });
+        Ok(())
+    }
+
     /// Runs `function` over registers `0..` holding `operands`, and binds
     /// what it built and answered to its resource contract.
     fn native_batch(

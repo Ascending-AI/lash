@@ -915,7 +915,6 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                             at: at.clone(),
                             selector,
                             retained,
-                            kind: RegisterKind::Value,
                         },
                         base: args[0],
                         dst,

@@ -164,7 +164,7 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
                     _ => None,
                 },
                 RegionOp::Heap { dst: Some(dst), .. } => Some((*dst, Some(RegisterKind::Value))),
-                RegionOp::Read { dst, spec, .. } => Some((*dst, Some(spec.kind))),
+                RegionOp::Read { dst, .. } => Some((*dst, Some(RegisterKind::Value))),
                 RegionOp::IntBinary { dst, .. } => Some((
                     Reg::<LeaseValue>::new(dst.offset())?,
                     Some(RegisterKind::Int),
@@ -190,43 +190,6 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
 
 pub(super) fn specialize(exe: &Executable, draft: &mut RegionDraft) -> Result<(), Refused> {
     draft.registers = kinds(exe, draft)?;
-    let mut preferred_reads = std::collections::BTreeMap::new();
-    for op in &draft.ops {
-        if let RegionOp::Checked {
-            kernel:
-                CheckedKernel {
-                    kind: CheckedKind::Native { lib, .. },
-                },
-            args,
-            ..
-        } = op
-            && let Some(pair) = super::resource_pair(exe.lib(*lib), true)
-        {
-            let floats = pair.floats.is_some()
-                && (pair.ints.is_none()
-                    || args
-                        .iter()
-                        .any(|reg| draft.registers[reg.offset()] == RegisterKind::Float));
-            for reg in args {
-                preferred_reads.insert(
-                    reg.offset(),
-                    if floats {
-                        RegisterKind::Float
-                    } else {
-                        RegisterKind::Int
-                    },
-                );
-            }
-        }
-    }
-    for op in draft.ops.iter_mut() {
-        if let RegionOp::Read { spec, dst, .. } = op
-            && let Some(kind) = preferred_reads.get(&dst.offset())
-        {
-            spec.kind = *kind;
-        }
-    }
-    draft.registers = kinds(exe, draft)?;
     for index in 0..draft.ops.len() {
         let replacement = if let RegionOp::Checked {
             kernel,
@@ -238,13 +201,32 @@ pub(super) fn specialize(exe: &Executable, draft: &mut RegionDraft) -> Result<()
             if let CheckedKind::Native { lib, function } = kernel.kind() {
                 let native = exe.lib(*lib);
                 let both = super::resource_pair(native, true);
-                let floats = both.and_then(|pair| pair.floats).filter(|_| {
-                    both.is_some_and(|pair| pair.ints.is_none())
-                        || args
-                            .iter()
-                            .any(|reg| draft.registers[reg.offset()] == RegisterKind::Float)
-                });
-                let pair = both.and_then(|pair| pair.ints);
+                // A kernel that unpacks unknown operands falls back to its
+                // native when they are not its kind, so the native's every
+                // answer must land in the kernel's result kind.
+                let guarded = |kind: RegisterKind, operation: doc::scalar::ScalarOp| {
+                    args.iter().all(|reg| draft.registers[reg.offset()] == kind)
+                        || native.header.signature.result
+                            == if operation.compares() {
+                                lash_kernel_value::Type::Bool
+                            } else if kind == RegisterKind::Int {
+                                lash_kernel_value::Type::Int
+                            } else {
+                                lash_kernel_value::Type::Float
+                            }
+                };
+                let floats = both
+                    .and_then(|pair| pair.floats)
+                    .filter(|_| {
+                        both.is_some_and(|pair| pair.ints.is_none())
+                            || args
+                                .iter()
+                                .any(|reg| draft.registers[reg.offset()] == RegisterKind::Float)
+                    })
+                    .filter(|operation| guarded(RegisterKind::Float, *operation));
+                let pair = both
+                    .and_then(|pair| pair.ints)
+                    .filter(|operation| guarded(RegisterKind::Int, *operation));
                 let table = native
                     .specialization
                     .prepared

@@ -40,6 +40,9 @@ pub(in crate::compile::room) struct Resolved {
     occurrence: Option<usize>,
     rooted: bool,
     pub(in crate::compile::room) dynamic: bool,
+    /// A dialect helper whose arguments must fit its signature at the
+    /// call (`function_argument`), as an export's do.
+    pub(in crate::compile::room) checked: bool,
 }
 
 fn caller_span(stmt: &compile::Stmt, pc: u32) -> Result<OpRange, Refused> {
@@ -80,6 +83,7 @@ fn resolved_static(
         .get(pc as usize)
         .and_then(Option::as_deref)
         .ok_or(Refused::Source)?;
+    let mut checked = false;
     let (library, declared, arguments, phase, occurrence) =
         match stream.ops.get(pc as usize).ok_or(Refused::Path)? {
             Op::Nested { act, args } => {
@@ -101,7 +105,13 @@ fn resolved_static(
                     NestedKind::Call(
                         NestedCallee::Library(lib) | NestedCallee::CheckedHelper(lib),
                     ) => (
-                        Some(lib),
+                        {
+                            checked = matches!(
+                                entry.kind,
+                                NestedKind::Call(NestedCallee::CheckedHelper(_))
+                            );
+                            Some(lib)
+                        },
                         None,
                         args.len as usize,
                         Phase::Enter,
@@ -129,7 +139,9 @@ fn resolved_static(
                 };
                 let (library, declared) = match callee {
                     compile::Callee::Declared(code) => (None, Some(*code)),
-                    compile::Callee::Library(lib) | compile::Callee::CheckedHelper(lib) => {
+                    compile::Callee::Library(lib) => (Some(*lib), None),
+                    compile::Callee::CheckedHelper(lib) => {
+                        checked = true;
                         (Some(*lib), None)
                     }
                     _ => return Err(Refused::Source),
@@ -228,6 +240,7 @@ fn resolved_static(
         occurrence,
         rooted: matches!(stream.ops[pc as usize], Op::Act),
         dynamic: false,
+        checked,
     })
 }
 

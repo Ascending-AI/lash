@@ -84,7 +84,7 @@ impl KernelMachine {
             let outcome = lease.run(request);
             // The point the region stopped at, and, standing before a step
             // the machine serves, the slots its frame holds its operands in.
-            let (at, native, effect, returning) = match &lease.execution {
+            let (at, native, effect, returning, checked) = match &lease.execution {
                 Executing::Machine(execution) => (
                     execution
                         .code
@@ -94,9 +94,10 @@ impl KernelMachine {
                     execution.code.program.native_arguments(execution.pc),
                     execution.code.program.effect_argument(execution.pc),
                     execution.code.program.return_via_argument(execution.pc),
+                    execution.code.program.checked_call(execution.pc),
                 ),
                 #[cfg(test)]
-                Executing::Fixture(_) => (None, None, None, None),
+                Executing::Fixture(_) => (None, None, None, None, None),
             };
             let stop = outcome.map_err(|error| match error {
                 RegionError::Heap(error) => error.into(),
@@ -185,6 +186,18 @@ impl KernelMachine {
                         native.ok_or_else(|| fault("a native stop stands at no native call"))?;
                     let at = at.ok_or_else(|| fault("a native stop has no point"))?;
                     if let Err(raised) = self.answer_native(task, at, lib, &slots)
+                        && !self.raise_out(task, host, raised)?
+                    {
+                        return Ok(true);
+                    }
+                    continue;
+                }
+                RegionStop::Check => {
+                    self.regs.clear();
+                    let (lib, slots) =
+                        checked.ok_or_else(|| fault("a check stop stands at no checked call"))?;
+                    let at = at.ok_or_else(|| fault("a check stop has no point"))?;
+                    if let Err(raised) = self.check_arguments(task, at, lib, &slots)
                         && !self.raise_out(task, host, raised)?
                     {
                         return Ok(true);

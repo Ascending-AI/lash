@@ -206,6 +206,7 @@ impl DynamicSite {
             occurrence: self.occurrence,
             rooted: self.rooted,
             dynamic: true,
+            checked: false,
         })
     }
 }

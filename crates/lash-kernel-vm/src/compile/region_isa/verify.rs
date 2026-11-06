@@ -669,7 +669,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 return Err(Refused::Source);
             }
             let retained = resources::retained_read(source, &step.at.site.child(0));
-            if draft.registers.get(dst.offset()) != Some(&spec.kind) {
+            if draft.registers.get(dst.offset()) != Some(&RegisterKind::Value) {
                 return Err(Refused::Facts);
             }
             if retained != spec.retained {

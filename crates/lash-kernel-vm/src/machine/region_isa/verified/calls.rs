@@ -157,6 +157,34 @@ impl Running<'_> {
             .program
             .step(self.pc)
             .ok_or_else(|| invalid(Refused::Path))?;
+        let depth = self.frame_index();
+        target.inputs(
+            &self.registers,
+            depth,
+            self.reached.invocation,
+            &mut self.view,
+            &mut self.call_values,
+        )?;
+        // A checked helper's arguments fit its signature before entry. The
+        // region shows a scalar fit itself; anything else stands unbilled
+        // for the machine, which raises or serves the check.
+        if let Some(lib) = call.plan.checked() {
+            let served = match self.served.take() {
+                Some((at, None)) if at == step.at => true,
+                Some(_) => return Err(invalid(Refused::Facts)),
+                None => false,
+            };
+            if !served
+                && !self.arguments_fit(
+                    &caller.exe.lib(lib).header.signature,
+                    call.plan.arguments().len(),
+                )?
+            {
+                self.call_captures.clear();
+                self.stop = Some(RegionStop::Check);
+                return Ok(None);
+            }
+        }
         let counters = self.counters;
         let payment = charge::billed(self.limiters, &mut self.limits, |limits| {
             charge::bill(counters, limits, &step.charges, ChargeMoment::Before, None)
@@ -178,14 +206,6 @@ impl Running<'_> {
             self.stop = Some(RegionStop::Refusal);
             return Ok(None);
         }
-        let depth = self.frame_index();
-        target.inputs(
-            &self.registers,
-            depth,
-            self.reached.invocation,
-            &mut self.view,
-            &mut self.call_values,
-        )?;
         let reserved = self.invocations.prepare()?;
         // This checks the actual D reservation before reusing a frame bank.
         let identity = self.invocations.next_identity(reserved)?;
@@ -366,6 +386,37 @@ impl Running<'_> {
 }
 
 impl Running<'_> {
+    /// Whether the call's `count` arguments, read into the call values,
+    /// visibly fit `signature`: each typed parameter a scalar of its kind.
+    fn arguments_fit(
+        &mut self,
+        signature: &lash_kernel_value::Signature,
+        count: usize,
+    ) -> Result<bool, RegionError> {
+        use lash_kernel_doc::ValueKind;
+        use lash_kernel_value::Type;
+        if !(signature.required()..=signature.params.len()).contains(&count) {
+            return Ok(false);
+        }
+        for (param, value) in signature.params.iter().zip(&self.call_values).take(count) {
+            if matches!(param.ty, Type::Any) {
+                continue;
+            }
+            let kind = self.view.kind(*value).map_err(RegionError::Heap)?;
+            let fits = match param.ty {
+                Type::Bool => kind == ValueKind::Bool,
+                Type::Int => kind == ValueKind::Int,
+                Type::Float => kind == ValueKind::Float,
+                Type::Number => matches!(kind, ValueKind::Int | ValueKind::Float),
+                Type::Text => kind == ValueKind::Text,
+                _ => false,
+            };
+            if !fits {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
     /// Each shared parameter's argument moves into a fresh cell in one
     /// atomic phase, and the cell becomes the parameter's register. The
     /// call's memory check already covered these cells.

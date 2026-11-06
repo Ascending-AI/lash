@@ -41,6 +41,8 @@ pub(crate) struct CallPlan {
     targets: Targets,
     occurrence: Option<usize>,
     result: CallRole,
+    /// The helper whose signature the arguments must fit before entry.
+    checked: Option<LibId>,
 }
 
 #[derive(Clone)]
@@ -102,9 +104,17 @@ impl CallPlan {
         let source = Arc::clone(&exe.code(caller).source_room);
         source.verify()?;
         let site = target::call_site(exe, caller, statement, pc)?;
-        let (shape, occurrence) = match &site {
-            target::CallSite::Static(resolved) => (resolved.shape(), resolved.occurrence),
-            target::CallSite::Dynamic(site) => (site.shape(), site.occurrence()),
+        let (shape, occurrence, checked) = match &site {
+            target::CallSite::Static(resolved) => (
+                resolved.shape(),
+                resolved.occurrence,
+                resolved
+                    .checked
+                    .then_some(resolved.library)
+                    .map(|library| library.ok_or(Refused::Source))
+                    .transpose()?,
+            ),
+            target::CallSite::Dynamic(site) => (site.shape(), site.occurrence(), None),
         };
         let CallerRoles {
             arguments,
@@ -151,6 +161,7 @@ impl CallPlan {
             result,
             targets,
             occurrence,
+            checked,
         })
     }
 
@@ -172,6 +183,7 @@ impl CallPlan {
             || self.callable_origin != expected.callable_origin
             || self.result != expected.result
             || self.occurrence != expected.occurrence
+            || self.checked != expected.checked
         {
             return Err(Refused::Source);
         }
@@ -237,6 +249,10 @@ impl CallPlan {
     }
     pub(crate) fn callable_origin(&self) -> Option<CallRole> {
         self.callable_origin
+    }
+    /// The helper whose signature this call's arguments must fit.
+    pub(crate) fn checked(&self) -> Option<LibId> {
+        self.checked
     }
     pub(crate) fn occurrence(&self) -> Option<usize> {
         self.occurrence

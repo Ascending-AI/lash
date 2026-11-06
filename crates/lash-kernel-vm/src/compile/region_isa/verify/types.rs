@@ -76,7 +76,7 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                 if let Selector::Index(key) = spec.selector() {
                     read(&state, key.offset())?;
                 }
-                state[dst.offset()] = Some(spec.kind);
+                state[dst.offset()] = Some(RegisterKind::Value);
                 if step.scalar_resources && spec.retained.is_none() {
                     return Err(Refused::Retained);
                 }
