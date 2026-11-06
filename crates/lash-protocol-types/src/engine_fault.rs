@@ -680,6 +680,10 @@ pub enum RunRefusal {
     Undecodable { input: RunInput, detail: Detail },
     #[error("a payload of {size} bytes exceeds the {limit}-byte bound")]
     PayloadTooLarge { limit: u64, size: u64 },
+    #[error("a payload nests deeper than the {limit}-level bound")]
+    PayloadTooDeep { limit: u32 },
+    #[error("a payload holds at least {observed} values, over the {limit}-value bound")]
+    PayloadTooManyNodes { limit: u64, observed: u64 },
     /// The document is not admitted, names a library function the worker
     /// has not registered, or has no such entry.
     #[error("the machine refuses to start the run: {detail}")]
@@ -905,8 +909,8 @@ impl From<BootstrapFault> for ProtocolBreach {
     }
 }
 
-/// A size bound refuses the same payload on every attempt; any other codec
-/// refusal is a broken frame.
+/// A decode resource bound refuses the same payload on every attempt; a
+/// malformed frame or an invalid page exchange is a protocol breach.
 impl From<CodecRefusal> for InfrastructureOutcome {
     fn from(refusal: CodecRefusal) -> Self {
         match refusal {
@@ -920,10 +924,12 @@ impl From<CodecRefusal> for InfrastructureOutcome {
                 size: requested,
             }
             .into(),
+            CodecRefusal::DepthExceeded { limit } => RunRefusal::PayloadTooDeep { limit }.into(),
+            CodecRefusal::NodeLimitExceeded { limit, observed } => {
+                RunRefusal::PayloadTooManyNodes { limit, observed }.into()
+            }
             refusal @ (CodecRefusal::Truncated { .. }
             | CodecRefusal::BadMagic
-            | CodecRefusal::DepthExceeded { .. }
-            | CodecRefusal::NodeLimitExceeded { .. }
             | CodecRefusal::Malformed { .. }
             | CodecRefusal::TrailingBytes { .. }
             | CodecRefusal::PageBatch { .. }) => ProtocolBreach::Frame { refusal }.into(),

@@ -2473,21 +2473,108 @@ fn a_real_sized_catalogue_imports_under_default_decode_bounds() {
     });
 }
 
+/// FIG-7659: refusing a request at the decode bound ends only that request.
+/// Even a one-fault restart window leaves a fresh session able to run.
 #[test]
-fn a_restart_storm_preserves_its_first_codec_refusal() {
+fn a_bounded_request_refusal_never_poisons_the_pool() {
+    use lash_vm_client::service::{Request, Response};
+    HOST_DIALECTS.set("typescript");
+    let mut config = config("normal");
+    config.max_restarts = 1;
+    let limits = config.protocol.decode;
+    let pool = WorkerPool::new(config).expect("pool");
+    let mut deep = vec![0x91; limits.max_depth as usize + 1];
+    deep.push(0xc0);
+    for (payload, refusal) in [
+        (
+            rmp_serde::to_vec(&vec![0u8; limits.max_nodes as usize + 1]).expect("payload"),
+            RunRefusal::PayloadTooManyNodes {
+                limit: limits.max_nodes,
+                observed: limits.max_nodes + 1,
+            },
+        ),
+        (
+            deep,
+            RunRefusal::PayloadTooDeep {
+                limit: limits.max_depth,
+            },
+        ),
+    ] {
+        let error = checkout(&pool)
+            .prepare(VmOwner::new("over-bound-session"), EncodedPayload(payload))
+            .expect_err("the request exceeds a decode bound");
+        assert_eq!(
+            error,
+            PoolError::Infrastructure(InfrastructureOutcome::RunRefused { refusal })
+        );
+        assert!(!error.is_host_verdict());
+        assert!(!pool.stats().restart_storm);
+    }
+
+    let mut worker = checkout(&pool);
+    let request = Request::Lower {
+        dialect: "typescript".into(),
+        source: "console.log('pool alive');".into(),
+        namespaces: Default::default(),
+        bindings: Default::default(),
+        functions: Default::default(),
+    };
+    let response = worker
+        .prepare(
+            VmOwner::new("fresh-session"),
+            EncodedPayload(rmp_serde::to_vec_named(&request).expect("request")),
+        )
+        .expect("a fresh session lowers on the same pool");
+    let Response::Lowered { document, .. } = rmp_serde::from_slice(&response.0).expect("response")
+    else {
+        panic!("the fresh cell lowers")
+    };
+    worker.release().expect("reset");
+    let document = EncodedPayload(document);
+    let identity = lash_kernel_doc::IdentifiedDocument::decode_standard(&document.0)
+        .expect("document")
+        .id()
+        .to_string();
+    let mut parent = Parent::new(&[&document]);
+    let mut worker = checkout(&pool);
+    let mut start = fresh(&document, Target::Main, Vec::new());
+    start.owner = VmOwner::new("fresh-session");
+    worker
+        .start(start, &identity, ExecutionClass::Cell)
+        .expect("start");
+    let end = ended_wire(
+        parent
+            .run(&mut worker, SLICE, false)
+            .expect("the fresh session settles"),
+    );
+    assert!(matches!(end, EndWire::Finished { .. }), "{end:?}");
+    let printed: Vec<Datum> = worker
+        .take_printed()
+        .iter()
+        .flat_map(|payload| {
+            rmp_serde::from_slice::<Vec<serde_bytes::ByteBuf>>(&payload.0)
+                .expect("printed chunk")
+                .into_iter()
+                .map(|value| wire::from_json(PayloadKind::Printed, &value).expect("printed value"))
+        })
+        .collect();
+    assert_eq!(printed, vec![Datum::Text("pool alive".into())]);
+    worker.release().expect("the pool remains healthy");
+    assert!(!pool.stats().restart_storm);
+}
+
+#[test]
+fn a_restart_storm_preserves_its_first_worker_fault() {
     HOST_DIALECTS.set("typescript");
     let mut config = config("normal");
     config.max_restarts = 2;
-    let limit = config.protocol.decode.max_nodes;
     let pool = WorkerPool::new(config).expect("pool");
-    let payload =
-        EncodedPayload(rmp_serde::to_vec(&vec![0u8; limit as usize + 1]).expect("payload"));
-    let mut first = None;
-    for payload in [payload, EncodedPayload(vec![0xc1])] {
+    let mut first_fault = None;
+    for payload in [EncodedPayload(vec![0xc1]), EncodedPayload(vec![0x92])] {
         let error = checkout(&pool)
             .prepare(VmOwner::new("codec-refusal"), payload)
             .expect_err("codec refusal");
-        first.get_or_insert(error.to_string());
+        first_fault.get_or_insert(error.into_outcome());
     }
     let error = pool
         .checkout(1, OwnerEpoch(1), FrameEpoch(1), ExecutionBudget::default())
@@ -2497,7 +2584,7 @@ fn a_restart_storm_preserves_its_first_codec_refusal() {
     assert!(
         error
             .to_string()
-            .contains(first.as_deref().expect("first cause")),
+            .contains(&first_fault.as_ref().expect("first cause").to_string()),
         "{error}"
     );
     let outcome = error.into_outcome();
@@ -2510,15 +2597,16 @@ fn a_restart_storm_preserves_its_first_codec_refusal() {
     else {
         panic!("typed restart storm: {outcome:?}")
     };
-    assert_eq!(
-        *first,
-        InfrastructureOutcome::ProtocolViolation {
-            breach: ProtocolBreach::Frame {
-                refusal: CodecRefusal::NodeLimitExceeded {
-                    limit,
-                    observed: limit + 1
-                }
-            },
-        }
+    assert_eq!(*first, first_fault.expect("first cause"));
+    assert!(
+        matches!(
+            *first,
+            InfrastructureOutcome::ProtocolViolation {
+                breach: ProtocolBreach::Frame {
+                    refusal: CodecRefusal::Malformed { .. }
+                },
+            }
+        ),
+        "{first:?}"
     );
 }

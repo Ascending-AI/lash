@@ -107,8 +107,10 @@ recorded winner.
 Release exchanges `Reset` and `ResetDone` before reuse. The reset drops the
 machine, its host wire, its owner and its CPU ceiling. Dropping an unreleased
 checkout discards it. After an error, a limit, protocol violation, timeout, or
-reset failure, the process cannot return to the idle pool. Repeated failures
-trip a typed restart storm and wake queued work.
+reset failure, the process cannot return to the idle pool. Only worker faults
+count toward the restart window. Reaching its maximum permanently fails that
+pool with a typed restart storm and wakes queued work. A run's own limit or
+input refusal discards and replenishes its worker without spending that window.
 
 Compute, serialization, and response phases have separate absolute deadlines.
 Repeating a phase cannot extend it. The no-response watchdog bounds IPC waits,
@@ -142,7 +144,9 @@ namespace keeps all its members, including exported types and spelling repairs;
 shared operation parameter and result types cross once. The worker bounds the
 expanded signature allocation at 64 MiB before cloning shared types. A restart
 storm retains the first failure in its restart window as a typed cause,
-including a codec node refusal's observed count and configured limit.
+including a malformed frame's codec refusal. Decode byte, allocation, depth
+and node bounds instead return a terminal `RunRefused` to the request that
+exceeded them; they never contribute to a restart storm.
 
 Effect values cross as JSON text with every number carried as written.
 Frames include their eight-byte envelope in the configured cap, and encoding

@@ -276,6 +276,11 @@ release, and a code mode cell saves what it held with each park, so the cap
 holds across page answers, activations and owners. The pool's queue and a
 durable park that released the worker do not count (FIG-6786). The restart
 window counts failed workers, never a run's own typed limit or refusal.
+Decode byte, allocation, depth and node bounds are terminal run refusals,
+including an oversized lowering catalogue (FIG-7659). The worker is discarded
+and replenished without spending the restart window. Reaching the maximum
+with real worker faults permanently fails that pool; hosts replace the pool
+after repairing the cause, rather than repeatedly restarting faulty workers.
 
 Async callers use `ServiceRuntimeOps::request_accounted`, which checkpoints
 worker accounting around a blocking-pool task. Pool saturation is a typed
