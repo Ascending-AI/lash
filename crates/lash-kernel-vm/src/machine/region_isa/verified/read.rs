@@ -131,6 +131,7 @@ impl Running<'_> {
             )),
             next,
             formula: None,
+            native: None,
         })
     }
 }

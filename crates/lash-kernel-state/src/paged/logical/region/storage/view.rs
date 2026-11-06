@@ -97,6 +97,10 @@ impl StateLease<'_> {
                         Kind::Closure => ValueKind::Closure,
                         Kind::Text => ValueKind::Text,
                         Kind::Bytes => ValueKind::Bytes,
+                        Kind::Leaf(Leaf::BigInt) => ValueKind::Int,
+                        Kind::Leaf(Leaf::Timestamp) => ValueKind::Timestamp,
+                        Kind::Leaf(Leaf::Function) => ValueKind::Function,
+                        Kind::Leaf(Leaf::Error) => ValueKind::Error,
                         Kind::Existing => return Err(invalid("local value has no kind")),
                     }
                 }
@@ -230,6 +234,17 @@ impl StateLease<'_> {
                     return Ok(match &slot.body {
                         Some(LocalBody::Text(text)) => (text.len() as u64).saturating_add(1),
                         Some(LocalBody::Bytes(bytes)) => (bytes.len() as u64).saturating_add(1),
+                        Some(LocalBody::Leaf(LeafBody::Integer(integer)))
+                            if slot.kind == Kind::Leaf(Leaf::BigInt) =>
+                        {
+                            integer.bits().div_ceil(64).saturating_add(1)
+                        }
+                        Some(LocalBody::Values(values)) if slot.kind == Kind::Leaf(Leaf::Error) => {
+                            let (kind, message) = (values[0], values[1]);
+                            self.lease_text_len(kind)?
+                                .saturating_add(self.lease_text_len(message)?)
+                                .saturating_add(1)
+                        }
                         _ => 1,
                     });
                 };
@@ -258,6 +273,16 @@ impl StateLease<'_> {
             _ => 0,
         };
         Ok(extent.saturating_add(1))
+    }
+    /// A text's length, local or canonical.
+    fn lease_text_len(&self, value: LeaseValue) -> Result<u64, LeaseFault> {
+        match value.repr {
+            Repr::Scalar(value) | Repr::Object(_, Some(value)) => self.native_text_len(value),
+            Repr::Object(object, None) => match &self.local.slots[self.local.index(object)?].body {
+                Some(LocalBody::Text(text)) => Ok(text.len() as u64),
+                _ => Ok(0),
+            },
+        }
     }
     fn native_text_len(&self, value: Value) -> Result<u64, LeaseFault> {
         Ok(match value {
@@ -360,6 +385,11 @@ impl StateLease<'_> {
             }
         } else {
             match &self.local.slots[index].body {
+                // An error's texts are its own; only its data is a member.
+                Some(LocalBody::Values(values)) if kind == ValueKind::Error => {
+                    capacity(pending, 1)?;
+                    pending.push(values[2]);
+                }
                 Some(LocalBody::Values(values)) => {
                     capacity(pending, values.len())?;
                     pending.extend_from_slice(values);

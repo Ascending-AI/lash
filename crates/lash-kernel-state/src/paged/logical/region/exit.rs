@@ -1,10 +1,11 @@
 //! One affine translation of the current private source graph.
 use super::storage::{
-    Address, Entry, Kind, LeaseObject, LeaseValue, LocalBody, LocalStore, Repr, Spelling, capacity,
+    Address, Entry, Kind, Leaf, LeafBody, LeaseObject, LeaseValue, LocalBody, LocalStore, Repr,
+    Spelling, capacity,
 };
 use super::*;
 use crate::arena::{RegionBodyMetadata, RegionTablePatch};
-use lash_kernel_doc::arena::{Body, Bytes, Chunk, LongText, Sequence, Table};
+use lash_kernel_doc::arena::{Body, Bytes, Chunk, ErrorBody, LongText, Sequence, Table};
 use std::sync::Arc;
 
 struct Mapped {
@@ -196,6 +197,10 @@ impl StateLease<'_> {
             let ledger = self.heap.region_ledger()?;
             self.authenticate(&ledger)?;
         }
+        // A native answer adopted without its phase never joins the graph.
+        if let Some(adopted) = self.local.adopted.take() {
+            self.retire_adopted(&adopted);
+        }
         // Freeze even a failed materialization. No failed header reservation
         // can be used to resume execution against a different identity mapping.
         self.local.frozen = true;
@@ -298,7 +303,16 @@ impl StateLease<'_> {
                             for value in source {
                                 values.push(packet.value(*value)?);
                             }
-                            if slot.kind == Kind::Tuple {
+                            if slot.kind == Kind::Leaf(Leaf::Error) {
+                                let [kind, message, data] = values[..] else {
+                                    return Err(invalid("a fresh error has another shape"));
+                                };
+                                Body::Error(ErrorBody {
+                                    kind,
+                                    message,
+                                    data,
+                                })
+                            } else if slot.kind == Kind::Tuple {
                                 Body::Tuple(Sequence::whole(values))
                             } else {
                                 Body::List(Sequence::whole(values))
@@ -319,6 +333,14 @@ impl StateLease<'_> {
                                 captures: captures.into_boxed_slice(),
                                 code: None,
                             }
+                        }
+                        LocalBody::Leaf(LeafBody::Integer(integer)) => match slot.kind {
+                            Kind::Leaf(Leaf::BigInt) => Body::BigInt(integer.clone()),
+                            Kind::Leaf(Leaf::Timestamp) => Body::Timestamp(integer.clone()),
+                            _ => return Err(invalid("a fresh integer has another kind")),
+                        },
+                        LocalBody::Leaf(LeafBody::Function(callable)) => {
+                            Body::Function(Box::new(*callable))
                         }
                         LocalBody::Text(text) => Body::LongText(LongText {
                             summary: lash_kernel_doc::heap_values::text_summary(text),

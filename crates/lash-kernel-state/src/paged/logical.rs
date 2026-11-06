@@ -45,7 +45,7 @@ pub use region::fixtures as region_fixtures;
 pub use region::{
     LeaseAllocation, LeaseCallable, LeaseFacts, LeaseFault, LeaseGraphExit, LeaseLoader,
     LeaseMeasure, LeaseMember, LeaseObject, LeaseOp, LeaseProjection, LeaseStep, LeaseValue,
-    PreparedStateExit, ReadyLeaseStep, StateExit, StateLease,
+    NativeBatch, PreparedStateExit, ReadyLeaseStep, StateExit, StateLease,
 };
 mod warming;
 pub use warming::WarmFact;

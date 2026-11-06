@@ -5,6 +5,10 @@ impl<'a, 's> LeaseStep<'a, 's> {
         &self.facts
     }
     pub fn reserve(self) -> Result<ReadyLeaseStep<'a, 's>, HeapFault> {
+        if self.lease.local.adopted.is_some() && !matches!(self.candidate.op, LeaseOp::Adopt { .. })
+        {
+            return Err(invalid("an adopted native answer awaits its own phase"));
+        }
         capacity(&mut self.lease.local.free, self.lease.local.touched.len())?;
         let mut list = Vec::new();
         let body = match &self.candidate.op {
@@ -290,6 +294,17 @@ impl ReadyLeaseStep<'_, '_> {
                         }
                     }
                     _ => unreachable!("reserved member kind"),
+                }
+            }
+        }
+        if let LeaseOp::Adopt { .. } = candidate.op
+            && let Some(adopted) = lease.local.adopted.take()
+        {
+            for index in adopted {
+                let slot = &mut lease.local.slots[index as usize];
+                if slot.kind.mutable() {
+                    slot.ordinal = Some(lease.local.ordinal);
+                    lease.local.ordinal += 1;
                 }
             }
         }

@@ -400,7 +400,7 @@ impl<'s> StateLease<'s> {
                 match &slot.body {
                     Some(LocalBody::Text(text)) => Ok(LeaseKey::Canonical(Key::of_text(text))),
                     Some(LocalBody::Cell(_)) => Ok(LeaseKey::Local(object)),
-                    Some(LocalBody::Bytes(_) | LocalBody::Values(_)) => {
+                    Some(LocalBody::Bytes(_) | LocalBody::Values(_) | LocalBody::Leaf(_)) => {
                         let mut out = lash_kernel_value::tokens::TokenWriter::new();
                         if !self.key_tokens(value, &mut out)? {
                             if let Some(LocalBody::Values(values)) = &slot.body
@@ -459,6 +459,25 @@ impl<'s> StateLease<'s> {
                     Some(LocalBody::Bytes(bytes)) => {
                         out.sum(5, 1);
                         out.bytes(bytes);
+                        Ok(true)
+                    }
+                    Some(LocalBody::Leaf(LeafBody::Integer(integer)))
+                        if slot.kind == Kind::Leaf(Leaf::BigInt) =>
+                    {
+                        out.sum(2, 1);
+                        lash_kernel_value::tokens::TokenCodec::encode(integer, out);
+                        Ok(true)
+                    }
+                    Some(LocalBody::Leaf(LeafBody::Integer(integer)))
+                        if slot.kind == Kind::Leaf(Leaf::Timestamp) =>
+                    {
+                        out.sum(6, 1);
+                        lash_kernel_value::tokens::TokenCodec::encode(
+                            &lash_kernel_doc::Timestamp {
+                                nanoseconds: integer.clone(),
+                            },
+                            out,
+                        );
                         Ok(true)
                     }
                     Some(LocalBody::Values(values)) if slot.kind == Kind::Tuple => {

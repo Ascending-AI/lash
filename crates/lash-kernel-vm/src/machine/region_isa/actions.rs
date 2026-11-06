@@ -11,9 +11,10 @@ use super::verified::Standing;
 use crate::compile::{ActionKind, Executable, Form, NestedKind, StmtId};
 use crate::interface::Host;
 use crate::machine::ops::Flow;
-use crate::machine::{Eval, Halt, Incoming, KernelMachine, fault};
+use crate::machine::{Eval, Halt, Incoming, Interrupt, KernelMachine, fault};
 use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::{JoinMode, TaskId, Value};
+use lash_kernel_state::kernel_internals::logical::NativeBatch;
 use lash_kernel_value::names::ImportSlot;
 use lash_kernel_value::package::OperationMode;
 use lash_kernel_value::{Type, sites::Site};
@@ -252,9 +253,12 @@ impl KernelMachine {
     }
 
     /// Answers the native call `task`'s top frame stands before, its checked
-    /// kernel unable to answer in place: the machine's general call runs it
-    /// with the frame's argument values, charging nothing, and the answer
-    /// waits for the region to take that call's step, which charges it.
+    /// kernel unable to answer in place. The native runs with the frame's
+    /// argument values, charging nothing, into a nursery it gives back: what
+    /// it built waits, detached, as one batch with the balances of the
+    /// contract certifying the call, if one does, until the region takes
+    /// that step and adopts it (Ruling 4). Nothing it built is held before
+    /// then.
     pub(super) fn answer_native(
         &mut self,
         task: TaskId,
@@ -262,30 +266,174 @@ impl KernelMachine {
         lib: crate::compile::LibId,
         slots: &[lash_kernel_state::kernel_internals::logical::Slot],
     ) -> Eval<()> {
-        let arguments = self.role_values(task, slots)?;
+        let mut operands = self.role_values(task, slots)?;
         let exe = Arc::clone(&self.exe);
-        let used = exe.lib(lib).arity.max(arguments.len()).max(1);
-        for (at, value) in arguments.iter().enumerate() {
+        let function = exe.lib(lib);
+        operands.resize(function.arity.max(operands.len()), Value::Absent);
+        let used = operands.len().max(1);
+        for (at, value) in operands.iter().enumerate() {
             self.put(at, *value);
         }
-        let charging = std::mem::replace(&mut self.charging, false);
-        let answer = self.answer(task, &exe, lib, 0, arguments.len(), 0);
-        self.charging = charging;
-        let value = match answer {
-            Ok(crate::machine::ops::Answer::Done) => Ok(self.take(0)),
-            Ok(crate::machine::ops::Answer::Body(_)) => Err(fault(
-                "a declined native's kernel body is not integrated into the region",
-            )
-            .into()),
-            Err(interrupt) => Err(interrupt),
-        };
+        let batch = self.native_batch(task, &exe, lib, function, &operands);
         self.regs.clear_range(0..used);
         self.served = Some(super::Served {
             task,
             at,
-            answer: Some(value?),
+            answer: Some(batch?),
         });
         Ok(())
+    }
+
+    /// Runs `function` over registers `0..` holding `operands`, and binds
+    /// what it built and answered to its resource contract.
+    fn native_batch(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        lib: crate::compile::LibId,
+        function: &crate::compile::Lib,
+        operands: &[Value],
+    ) -> crate::machine::Eval<NativeBatch> {
+        use crate::compile::LibRun;
+        use crate::functions::MachineFunction;
+        use lash_kernel_doc::{Args, NativeError, NativeResourceContract, NewObject};
+        let operands_box: Box<[Value]> = operands.into();
+        let malformed = |error: NativeError| -> Interrupt {
+            match error {
+                NativeError::Host(error) => Halt::from(error).into(),
+                error => fault(&error.to_string()).into(),
+            }
+        };
+        let (value, objects, contract, held) = match &function.run {
+            LibRun::Native { native, .. } => {
+                // The contract is a query of the inputs, made before the
+                // call: what the call does cannot certify itself.
+                let certified = loop {
+                    let query = {
+                        let arena = self.arena.borrow();
+                        let semantics = arena.semantics().with_limits(self.limits);
+                        native.resource_contract(Args::new(operands, arena.objects(), &semantics))
+                    };
+                    match query {
+                        Err(NativeError::Retry(lash_kernel_doc::Retry::Cold { object, chunk })) => {
+                            self.warm(object, chunk)?
+                        }
+                        Err(error) => return Err(malformed(error)),
+                        Ok(certified) => break certified,
+                    }
+                };
+                let limit = match &function.limit {
+                    Some(limit) => {
+                        self.warm_formula(limit, 0, None)?;
+                        Some(self.in_formula(lib, false, |machine| {
+                            machine.formula(limit, &machine.regs[0..function.arity], None)
+                        })?)
+                    }
+                    None => None,
+                };
+                if self.observer.is_some() {
+                    self.observe(crate::observe::Event::NativeEnter { task, lib });
+                }
+                let (answer, built, spent) =
+                    self.run_native(exe, lib, function, native, 0, limit, true)?;
+                self.observe(crate::observe::Event::GuardWork(spent));
+                self.observe(crate::observe::Event::NativeExit);
+                let value = match answer {
+                    Ok(value) => value,
+                    Err(NativeError::Raised(error)) => return Err(Interrupt::raised(error)),
+                    Err(NativeError::Refused { kind, message }) => {
+                        return Err(Interrupt::raised(self.error_value(kind, message)));
+                    }
+                    Err(NativeError::Guard(guard)) => {
+                        return Err(crate::machine::bound(
+                            crate::interface::Bound::Guard {
+                                function: function.specialization.function,
+                            },
+                            guard.limit,
+                        )
+                        .into());
+                    }
+                    Err(NativeError::Decline) => {
+                        return Err(fault(
+                            "a declined native's kernel body is not integrated into the region",
+                        )
+                        .into());
+                    }
+                    Err(error) => return Err(malformed(error)),
+                };
+                let (held, objects) = built.unwrap_or_default();
+                (value, objects, certified, held)
+            }
+            LibRun::Machine(MachineFunction::Deref) => {
+                let value = match operands.first() {
+                    Some(Value::TaskRef(task)) => Value::Task(*task),
+                    Some(Value::ObjectRef(object)) => {
+                        match self.in_arena(|arena| arena.object_value(*object))? {
+                            Some(value) => value,
+                            None => {
+                                return Err(Interrupt::raised(
+                                    self.error_value("type_error", "the ref names no object"),
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(Interrupt::raised(
+                            self.error_value("type_error", "`deref` takes a ref"),
+                        ));
+                    }
+                };
+                (value, Vec::new(), None, 0)
+            }
+            LibRun::Machine(MachineFunction::TasksUnfinished) => {
+                let mut unfinished = Vec::new();
+                self.task_table()?.visit(&mut |id, other| {
+                    if id != task
+                        && !matches!(
+                            other.state,
+                            lash_kernel_state::paged::TaskStateRecord::Ended(_)
+                        )
+                    {
+                        unfinished.push(Value::Task(id));
+                    }
+                    true
+                })?;
+                let (value, held, objects) = {
+                    let arena = self.arena.borrow();
+                    let mut nursery = lash_kernel_doc::Nursery::unaccounted(arena.objects());
+                    let value = nursery.allocate(NewObject::List(unfinished.clone()));
+                    (value, nursery.held().0, nursery.detach())
+                };
+                let contract = {
+                    let arena = self.arena.borrow();
+                    let semantics = arena.semantics().with_limits(self.limits);
+                    NativeResourceContract::list(
+                        Args::new(operands, arena.objects(), &semantics),
+                        &unfinished,
+                    )
+                    .map_err(malformed)?
+                };
+                (value, objects, Some(contract), held)
+            }
+            LibRun::Body(_) | LibRun::Declaration | LibRun::Machine(_) => {
+                return Err(fault("a served native call has no native answer").into());
+            }
+        };
+        // An uncertified call is priced by what it built: its adoption.
+        let batch = NativeBatch::new(objects, value, contract.as_ref(), held, operands_box)
+            .map_err(|error| -> Interrupt { fault(&error.to_string()).into() })?;
+        let depth = {
+            let arena = self.arena.borrow();
+            batch.depth(&|value| arena.summary_of(value).depth)
+        };
+        if depth as usize > self.limits.value_depth() {
+            let message = format!(
+                "a value exceeds the configured {}-level value depth",
+                self.limits.value_depth()
+            );
+            return Err(Interrupt::raised(self.error_value("too_deep", message)));
+        }
+        Ok(batch)
     }
 
     /// Copies out the value of the effect `task`'s top frame stands before,

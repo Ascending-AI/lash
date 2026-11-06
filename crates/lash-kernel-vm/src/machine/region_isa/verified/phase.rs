@@ -2,7 +2,7 @@
 use super::super::{code::Register, *};
 use super::{
     Running,
-    flow::{Amount, Fact, Flow, Root},
+    flow::{Amount, Balance, Fact, Flow, Root},
     scalar::ScalarAnswer,
 };
 use lash_kernel_state::kernel_internals::logical::{LeaseMeasure, LeaseOp, LeaseStep, LeaseValue};
@@ -215,6 +215,21 @@ impl<'s> Running<'s> {
                                 .map_err(RegionError::Heap)?;
                             i128::from(self.view.price(value).map_err(RegionError::Heap)?)
                         }
+                        Fact::Native(balance) => match (answer.native, balance) {
+                            (Some((delta, _, _)), Balance::Delta) => i128::from(delta),
+                            (Some((_, peak, _)), Balance::Peak) => i128::from(peak),
+                            (Some((_, _, scratch)), Balance::Scratch) => i128::from(scratch),
+                            (None, Balance::Scratch) => 0,
+                            (None, Balance::Peak | Balance::Delta) => {
+                                let value = answer
+                                    .write
+                                    .ok_or_else(|| invalid(Refused::Facts))?
+                                    .1
+                                    .bind(&mut self.view)
+                                    .map_err(RegionError::Heap)?;
+                                i128::from(self.view.price(value).map_err(RegionError::Heap)?)
+                            }
+                        },
                         Fact::Release(index, headers) => {
                             i128::from(*quoted.get(*index).ok_or_else(|| invalid(Refused::Facts))?)
                                 + i128::from(*headers)
@@ -247,6 +262,7 @@ impl<'s> Running<'s> {
             return Ok(None);
         }
         let transfer = match flow.frame_delta {
+            0 if answer.native.is_some() => LeaseOp::Adopt { holds, releases },
             0 => LeaseOp::Transfer { holds, releases },
             delta if delta == -i128::from(lash_kernel_doc::LogicalHeldV1::FRAME) => {
                 LeaseOp::FrameTransfer {

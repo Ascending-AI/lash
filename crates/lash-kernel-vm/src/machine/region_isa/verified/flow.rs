@@ -14,9 +14,18 @@ pub(super) struct Root {
 pub(super) enum Fact {
     Local(Register),
     Result,
+    /// The native call's contract balance: an adopted answer's own, or for
+    /// an answer in place, the returned value's occurrence.
+    Native(Balance),
     Release(usize, u64),
     Zero,
     Source(Measure),
+}
+#[derive(Clone, Copy)]
+pub(super) enum Balance {
+    Peak,
+    Delta,
+    Scratch,
 }
 pub(super) struct Amount {
     pub(super) fixed: i128,
@@ -171,12 +180,14 @@ impl Flow {
                                 .incoming()
                                 .ok_or_else(|| invalid(Refused::Facts))?,
                         )?),
-                        ResourceInput::SourceFact(Measure::CallPeak { at, callee }
-                            | Measure::CallDelta { at, callee })
+                        ResourceInput::SourceFact(Measure::CallPeak { at, callee })
                             if *at == step.at.site && matches!(callee,
-                                crate::compile::room::CallSource::Native(function) if Some(*function) == native) => Fact::Result,
+                                crate::compile::room::CallSource::Native(function) if Some(*function) == native) => Fact::Native(Balance::Peak),
+                        ResourceInput::SourceFact(Measure::CallDelta { at, callee })
+                            if *at == step.at.site && matches!(callee,
+                                crate::compile::room::CallSource::Native(function) if Some(*function) == native) => Fact::Native(Balance::Delta),
                         ResourceInput::SourceFact(Measure::NativeScratch { at, function })
-                            if *at == step.at.site && Some(*function) == native => Fact::Zero,
+                            if *at == step.at.site && Some(*function) == native => Fact::Native(Balance::Scratch),
                         ResourceInput::SourceFact(Measure::Release(owners)) => {
                             let (roots, headers) = release_roots(code, before, owners)?;
                             let index = quotes.len();

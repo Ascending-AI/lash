@@ -38,6 +38,17 @@ pub(super) enum Kind {
     Closure,
     Text,
     Bytes,
+    /// A fresh immutable body a native built, with no lease constructor.
+    Leaf(Leaf),
+}
+/// The immutable kinds only a native builds into a lease, by adoption.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Leaf {
+    BigInt,
+    Timestamp,
+    Function,
+    /// Its kind, message and data, in that order, as a value body.
+    Error,
 }
 impl Kind {
     fn editable(self) -> bool {
@@ -63,6 +74,10 @@ impl Kind {
             Self::Closure => Value::Closure(handle),
             Self::Text => Value::LongText(handle),
             Self::Bytes => Value::Bytes(handle),
+            Self::Leaf(Leaf::BigInt) => Value::BigInt(handle),
+            Self::Leaf(Leaf::Timestamp) => Value::BigTimestamp(handle),
+            Self::Leaf(Leaf::Function) => Value::Function(handle),
+            Self::Leaf(Leaf::Error) => Value::Error(handle),
             Self::Existing => unreachable!("existing value keeps its kind"),
         }
     }
@@ -173,6 +188,12 @@ pub enum LeaseOp<'a> {
     AllocateMove {
         allocation: LeaseAllocation<'a>,
         releases: &'a [LeaseValue],
+    },
+    /// The source transfer of a native call's step, accepting the graph its
+    /// answer adopted ([`StateLease::adopt`]) in the same phase.
+    Adopt {
+        holds: &'a [(LeaseValue, bool)],
+        releases: &'a [(LeaseValue, bool)],
     },
     Member {
         object: LeaseObject,
@@ -316,6 +337,12 @@ pub(super) enum LocalBody {
     Text(String),
     Bytes(Vec<u8>),
     Closure(LocalClosure),
+    /// A big integer's, timestamp's or function's body.
+    Leaf(LeafBody),
+}
+pub(super) enum LeafBody {
+    Integer(lash_kernel_doc::Integer),
+    Function(lash_kernel_value::names::CallableId),
 }
 pub(super) struct LocalTable {
     pub(super) entries: Vec<Entry>,
@@ -411,6 +438,9 @@ pub(super) struct LocalStore {
     pub(super) frozen: bool,
     pub(super) delta: i128,
     pub(super) peak: i128,
+    /// The slots an adoption added, in batch order, until its phase is
+    /// accepted: no other phase is accepted while one stands.
+    pub(super) adopted: Option<Vec<u32>>,
 }
 fn exhausted() -> HeapFault {
     HeapFault::Exhausted {
@@ -460,6 +490,7 @@ impl LocalStore {
             frozen: false,
             delta: 0,
             peak: 0,
+            adopted: None,
         })
     }
     pub(super) fn object(&self, slot: u32) -> LeaseObject {
@@ -546,6 +577,8 @@ impl LocalStore {
 }
 
 mod accept;
+mod adopt;
+pub use adopt::NativeBatch;
 mod allocation;
 mod bindings;
 mod overlay;
@@ -564,6 +597,7 @@ impl LocalBody {
             }
             Self::Text(text) => text.clear(),
             Self::Bytes(bytes) => bytes.clear(),
+            Self::Leaf(_) => {}
             Self::Cell(value) => {
                 *value = LeaseValue {
                     repr: Repr::Scalar(Value::Absent),

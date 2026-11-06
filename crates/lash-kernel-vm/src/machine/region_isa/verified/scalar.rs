@@ -2,21 +2,25 @@
 use super::super::{code::Register, operands::Operand, *};
 use super::Running;
 use crate::compile::region_isa::{AtomSource, CheckedKind, Pc, RegionOp};
-use lash_kernel_state::kernel_internals::logical::LeaseValue;
+use lash_kernel_state::kernel_internals::logical::{LeaseValue, NativeBatch};
 
 pub(super) struct ScalarAnswer {
     pub(super) write: Option<(Register, Operand<LeaseValue>)>,
     pub(super) next: Pc,
     pub(super) formula: Option<u64>,
+    /// An adopted native answer's contract balances: its retained delta,
+    /// peak and scratch peak. Its step accepts the adopted graph.
+    pub(super) native: Option<(u64, u64, u64)>,
 }
 impl Running<'_> {
     /// The answer the machine computed for the native call `op` makes: the
-    /// value it imports, charged by the native's formula over the actual
-    /// arguments and answer, as the in-place kernel charges it.
+    /// graph it built is adopted by the lease, charged by the native's
+    /// formula over the actual arguments and answer, as the in-place kernel
+    /// charges it, and accepted with the call's own phase.
     pub(super) fn delivered_answer(
         &mut self,
         op: &RegionOp,
-        value: Value,
+        batch: NativeBatch,
     ) -> Result<ScalarAnswer, RegionError> {
         let RegionOp::Checked {
             kernel,
@@ -33,24 +37,43 @@ impl Running<'_> {
         let code = Arc::clone(&self.code);
         let native = code.exe.lib(*lib);
         if native.specialization.function != *function
-            || !crate::compile::import_result_fits(&native.header.signature.result, value)
+            || !answer_kind_fits(&native.header.signature.result, batch.answer())
         {
             return Err(invalid(Refused::Facts));
         }
-        let result = self.view.import(&value).map_err(RegionError::Heap)?;
-        let formula = if self.limits.charge_enabled {
-            self.call_values.clear();
-            for reg in args {
-                let argument = self.value(*reg)?;
-                self.call_values.push(argument);
-            }
-            while self.call_values.len() < native.arity {
-                let absent = self
+        self.call_values.clear();
+        for reg in args {
+            let argument = self.value(*reg)?;
+            self.call_values.push(argument);
+        }
+        while self.call_values.len() < native.arity {
+            let absent = self
+                .view
+                .import(&Value::Absent)
+                .map_err(RegionError::Heap)?;
+            self.call_values.push(absent);
+        }
+        let (certified, held) = (batch.certified(), batch.held());
+        let (result, _, bodies) = self
+            .view
+            .adopt(batch, &self.call_values)
+            .map_err(storage_fault)?;
+        // An uncertified call is priced by what it built: the answer's
+        // occurrence and the bodies adopted, at a peak its nursery's
+        // temporaries raise.
+        let balances = match certified {
+            Some(balances) => balances,
+            None => {
+                let retained = self
                     .view
-                    .import(&Value::Absent)
-                    .map_err(RegionError::Heap)?;
-                self.call_values.push(absent);
+                    .price(result)
+                    .map_err(RegionError::Heap)?
+                    .checked_add(bodies)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
+                (retained, retained.max(held), 0)
             }
+        };
+        let formula = if self.limits.charge_enabled {
             Some(
                 native
                     .charge
@@ -67,6 +90,7 @@ impl Running<'_> {
             )),
             next: *next,
             formula,
+            native: Some(balances),
         })
     }
 
@@ -112,6 +136,7 @@ impl Running<'_> {
                     )),
                     next: *next,
                     formula,
+                    native: None,
                 }));
             }
             RegionOp::Return { value } => {
@@ -130,6 +155,7 @@ impl Running<'_> {
                         .return_successor(self.pc)
                         .ok_or_else(|| invalid(Refused::Path))?,
                     formula: None,
+                    native: None,
                 }));
             }
             // A delivering action's Enter loads its atoms; the machine
@@ -147,6 +173,7 @@ impl Running<'_> {
                     write: None,
                     next: spec.next().ok_or_else(|| invalid(Refused::Facts))?,
                     formula: None,
+                    native: None,
                 }));
             }
             // The machine served the effect before its step was accepted.
@@ -155,6 +182,7 @@ impl Running<'_> {
                     write: None,
                     next: next.unwrap_or(self.pc),
                     formula: None,
+                    native: None,
                 }));
             }
             RegionOp::Exit { .. } => {
@@ -162,6 +190,7 @@ impl Running<'_> {
                     write: None,
                     next: self.pc,
                     formula: None,
+                    native: None,
                 }));
             }
             RegionOp::Branch { test, yes, no } => {
@@ -190,6 +219,7 @@ impl Running<'_> {
                             write: None,
                             next: *next,
                             formula,
+                            native: None,
                         }));
                     }
                     CheckedKind::Phase => {
@@ -197,6 +227,7 @@ impl Running<'_> {
                             write: None,
                             next: *next,
                             formula,
+                            native: None,
                         }));
                     }
                     CheckedKind::Local { slot } => {
@@ -390,6 +421,35 @@ impl Running<'_> {
                 .transpose()?,
             next,
             formula,
+            native: None,
         }))
+    }
+}
+
+/// Whether a native's answer is of the kind its declared result is: the
+/// region's facts are of kinds; what a value holds the native answers for.
+fn answer_kind_fits(ty: &lash_kernel_value::Type, value: Value) -> bool {
+    use lash_kernel_value::Type;
+    match ty {
+        Type::Any | Type::Json => true,
+        Type::Null => matches!(value, Value::Null),
+        Type::Absent => matches!(value, Value::Absent),
+        Type::Bool => matches!(value, Value::Bool(_)),
+        Type::Int => matches!(value, Value::Int(_) | Value::BigInt(_)),
+        Type::Float => matches!(value, Value::Float(_)),
+        Type::Number => matches!(value, Value::Int(_) | Value::BigInt(_) | Value::Float(_)),
+        Type::Text | Type::Enum(_) => matches!(value, Value::Text(_) | Value::LongText(_)),
+        Type::Bytes => matches!(value, Value::Bytes(_)),
+        Type::Timestamp => matches!(value, Value::Timestamp(_) | Value::BigTimestamp(_)),
+        Type::Tuple(_) => matches!(value, Value::Tuple(_)),
+        Type::List(_) => matches!(value, Value::List(_)),
+        Type::Map(_) => matches!(value, Value::Map(_)),
+        Type::Set(_) => matches!(value, Value::Set(_)),
+        Type::Record(_) => matches!(value, Value::Record(_)),
+        Type::Function(_) => matches!(value, Value::Function(_) | Value::Closure(_)),
+        Type::Task(_) => matches!(value, Value::Task(_)),
+        Type::Error => matches!(value, Value::Error(_)),
+        Type::Handle(_) => matches!(value, Value::Handle(_)),
+        Type::Union(members) => members.iter().any(|member| answer_kind_fits(member, value)),
     }
 }

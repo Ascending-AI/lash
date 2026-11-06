@@ -844,6 +844,16 @@ impl<'call> Nursery<'call> {
         self.new
     }
 
+    /// Gives back every slot the call reserved and keeps what it built,
+    /// still named by those slots: a detached batch nothing installs, whose
+    /// names stand only for each other.
+    pub fn detach(self) -> Vec<(ArenaHandle, NewObject)> {
+        for (handle, _) in self.new.iter().rev() {
+            self.objects.unreserve(*handle);
+        }
+        self.new
+    }
+
     /// Gives back every slot the call reserved: its attempt is abandoned.
     pub fn discard(self) {
         for (handle, _) in self.new.iter().rev() {

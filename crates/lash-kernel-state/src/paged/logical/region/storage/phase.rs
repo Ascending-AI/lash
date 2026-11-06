@@ -12,8 +12,34 @@ impl<'s> StateLease<'s> {
             result: None,
         };
         let mut facts = LeaseFacts::default();
+        if let LeaseOp::Adopt { .. } = &candidate.op {
+            // The adopted bodies are retained, and hold what they name, in
+            // the phase that transfers the answer; an adopted slot nothing
+            // holds after it leaves in the same phase.
+            let adopted = self
+                .local
+                .adopted
+                .clone()
+                .ok_or_else(|| invalid("no native answer is adopted"))?;
+            self.local
+                .ordinal
+                .checked_add(count(adopted.len())?)
+                .ok_or_else(|| invalid("lease allocation ordinal overflow"))?;
+            for index in adopted {
+                self.local.change(self.local.object(index), 0)?;
+                let slot = &self.local.slots[index as usize];
+                if slot.kind.mutable() {
+                    facts.delta = facts
+                        .delta
+                        .checked_add(i128::from(slot.bytes))
+                        .ok_or_else(|| invalid("adopted body cost overflow"))?;
+                    self.body_edges(index as usize, 1)?;
+                }
+            }
+        }
         match &candidate.op {
             LeaseOp::Transfer { holds, releases }
+            | LeaseOp::Adopt { holds, releases }
             | LeaseOp::FrameTransfer {
                 holds, releases, ..
             } => {

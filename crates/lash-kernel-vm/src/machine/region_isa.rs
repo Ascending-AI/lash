@@ -134,7 +134,7 @@ pub(crate) enum RegionStop {
 pub(in crate::machine) struct Served {
     task: lash_kernel_doc::TaskId,
     at: Point,
-    answer: Option<Value>,
+    answer: Option<lash_kernel_state::kernel_internals::logical::NativeBatch>,
 }
 
 #[derive(Debug)]

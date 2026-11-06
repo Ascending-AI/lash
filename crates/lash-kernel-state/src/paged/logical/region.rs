@@ -11,7 +11,7 @@ use std::cell::{Cell as Flag, RefMut};
 use storage::LocalStore;
 pub use storage::{
     LeaseAllocation, LeaseCallable, LeaseFacts, LeaseFault, LeaseMeasure, LeaseMember, LeaseObject,
-    LeaseOp, LeaseStep, LeaseValue, ReadyLeaseStep,
+    LeaseOp, LeaseStep, LeaseValue, NativeBatch, ReadyLeaseStep,
 };
 
 #[derive(Debug, Default)]

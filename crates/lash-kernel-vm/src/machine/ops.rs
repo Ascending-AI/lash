@@ -932,70 +932,11 @@ impl KernelMachine {
                     let given = self.regs[args..end].to_vec();
                     self.chill_args(&given)?;
                 }
-                let mut granted = 0u64;
-                let mut spent;
-                let answer = loop {
-                    let room = granted.max(self.capacity_headroom());
-                    let mut counter = WorkCounter::new(limit);
-                    let (answer, built) = {
-                        let arena = self.arena.borrow();
-                        let semantics = arena.semantics().with_limits(self.limits);
-                        let mut nursery = if self.bounds.memory_meter == crate::MemoryMeter::Off {
-                            Nursery::unaccounted(arena.objects())
-                        } else {
-                            Nursery::new(arena.objects(), LogicalBytes(room))
-                        };
-                        let answer = native.call(NativeCall {
-                            args: Args::new(&self.regs[args..end], arena.objects(), &semantics),
-                            new: &mut nursery,
-                            counter: &mut counter,
-                        });
-                        match &answer {
-                            Ok(_) | Err(NativeError::Raised(_)) => {
-                                let held = nursery.held().0;
-                                (answer, Some((held, nursery.into_new())))
-                            }
-                            Err(_) => {
-                                nursery.discard();
-                                (answer, None)
-                            }
-                        }
-                    };
-                    // A call run again does what it did: its last run's work
-                    // is the call's.
-                    spent = counter.spent();
-                    match answer {
-                        Err(NativeError::Retry(Retry::Cold { object, chunk })) => {
-                            #[cfg(test)]
-                            {
-                                self.pins.cold_reads += 1;
-                            }
-                            self.warm(object, chunk)?;
-                        }
-                        Err(NativeError::Retry(Retry::Room { wanted })) => {
-                            if wanted.0 <= granted {
-                                return Err(fault("a native asked again for room it holds").into());
-                            }
-                            if let Err(halt) = self.reserve(wanted.0 - granted) {
-                                return Err(self
-                                    .refused_at_commit(exe, lib, function, args, halt)
-                                    .into());
-                            }
-                            granted = wanted.0;
-                        }
-                        answer => {
-                            if let Some((held, new)) = built {
-                                if let Err(halt) = self.reserve(held.saturating_sub(granted)) {
-                                    return Err(self
-                                        .refused_at_commit(exe, lib, function, args, halt)
-                                        .into());
-                                }
-                                self.install(new)?;
-                            }
-                            break answer;
-                        }
-                    }
-                };
+                let (answer, built, spent) =
+                    self.run_native(exe, lib, function, native, args, limit, false)?;
+                if let Some((_, new)) = built {
+                    self.install(new)?;
+                }
                 self.observe(Event::GuardWork(spent));
                 match answer {
                     Ok(value) => {
@@ -1070,6 +1011,100 @@ impl KernelMachine {
 }
 
 impl KernelMachine {
+    /// Runs `native` over registers `args..`, as often as it asks: a cold
+    /// read warms and runs it again, and room is reserved as it asks for it.
+    /// Its answer comes with the logical bytes its nursery held and what it
+    /// built, uninstalled (`detach` gives the built objects' slots back to
+    /// the arena), and the work it spent.
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    pub(super) fn run_native(
+        &mut self,
+        exe: &Executable,
+        lib: LibId,
+        function: &Lib,
+        native: &std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,
+        args: Reg,
+        limit: Option<u64>,
+        detach: bool,
+    ) -> Eval<(
+        Result<Value, NativeError>,
+        Option<(u64, Vec<(ArenaHandle, NewObject)>)>,
+        u64,
+    )> {
+        let end = args + function.arity;
+        let mut granted = 0u64;
+        loop {
+            let room = granted.max(self.capacity_headroom());
+            let mut counter = WorkCounter::new(limit);
+            let (answer, built) = {
+                let arena = self.arena.borrow();
+                let semantics = arena.semantics().with_limits(self.limits);
+                let mut nursery = if self.bounds.memory_meter == crate::MemoryMeter::Off {
+                    Nursery::unaccounted(arena.objects())
+                } else {
+                    Nursery::new(arena.objects(), LogicalBytes(room))
+                };
+                let answer = native.call(NativeCall {
+                    args: Args::new(&self.regs[args..end], arena.objects(), &semantics),
+                    new: &mut nursery,
+                    counter: &mut counter,
+                });
+                match &answer {
+                    Ok(_) | Err(NativeError::Raised(_)) => {
+                        let held = nursery.held().0;
+                        let new = if detach {
+                            nursery.detach()
+                        } else {
+                            nursery.into_new()
+                        };
+                        (answer, Some((held, new)))
+                    }
+                    Err(_) => {
+                        nursery.discard();
+                        (answer, None)
+                    }
+                }
+            };
+            // A call run again does what it did: its last run's work
+            // is the call's.
+            let spent = counter.spent();
+            match answer {
+                Err(NativeError::Retry(Retry::Cold { object, chunk })) => {
+                    #[cfg(test)]
+                    {
+                        self.pins.cold_reads += 1;
+                    }
+                    self.warm(object, chunk)?;
+                }
+                Err(NativeError::Retry(Retry::Room { wanted })) => {
+                    if wanted.0 <= granted {
+                        return Err(fault("a native asked again for room it holds").into());
+                    }
+                    if let Err(halt) = self.reserve(wanted.0 - granted) {
+                        return Err(self
+                            .refused_at_commit(exe, lib, function, args, halt)
+                            .into());
+                    }
+                    granted = wanted.0;
+                }
+                answer => {
+                    let built = match built {
+                        Some((held, new)) => {
+                            if let Err(halt) = self.reserve(held.saturating_sub(granted)) {
+                                return Err(self
+                                    .refused_at_commit(exe, lib, function, args, halt)
+                                    .into());
+                            }
+                            Some((held, new))
+                        }
+                        None => None,
+                    };
+                    return Ok((answer, built, spent));
+                }
+            }
+        }
+    }
+
     /// Exact source admission is the only memory authority: a native whose
     /// build overflows the memory bound is refused at its own Commit, after
     /// its formula is paid, as its source publication refuses it. A charge

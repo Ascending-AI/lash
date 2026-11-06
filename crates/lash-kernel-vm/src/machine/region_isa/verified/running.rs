@@ -25,7 +25,10 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) returning: Option<super::returns::Incoming>,
     /// The step at this point the machine served, with a native's answer,
     /// taken by that step alone.
-    pub(super) served: Option<(Point, Option<Value>)>,
+    pub(super) served: Option<(
+        Point,
+        Option<lash_kernel_state::kernel_internals::logical::NativeBatch>,
+    )>,
     pub(super) complete: bool,
     pub(super) activation: Option<CallActivation>,
     pub(super) identity: Rc<()>,

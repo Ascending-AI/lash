@@ -168,9 +168,6 @@ impl<'m> RegionLease<'m> {
             .take()
             .filter(|served| served.task == task_id)
             .map(|served| (served.at, served.answer));
-        if let Some((_, Some(value))) = &served {
-            dependencies.push(*value);
-        }
         let top = stack.last().ok_or_else(|| invalid(Refused::Facts))?;
         let top_code = programs.code(top.code)?;
         let (pc, prefix) = *positions.last().ok_or_else(|| invalid(Refused::Facts))?;
