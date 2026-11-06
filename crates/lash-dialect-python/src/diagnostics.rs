@@ -85,7 +85,7 @@ pub(crate) fn diagnostic(code: Code, message: impl Into<String>, range: TextRang
         lash_kernel_dialect::DialectCode::from_static(code.as_str()),
         code.kind(),
         Some(span(range)),
-        message,
+        lash_kernel_dialect::DiagnosticMessage::authored(message),
     )
 }
 
@@ -107,7 +107,7 @@ pub(crate) fn unplaced(code: Code, message: impl Into<String>) -> Diagnostic {
         lash_kernel_dialect::DialectCode::from_static(code.as_str()),
         code.kind(),
         None,
-        message,
+        lash_kernel_dialect::DiagnosticMessage::authored(message),
     )
 }
 

@@ -636,7 +636,7 @@ impl<'a> Lowerer<'a> {
                     }
                     Ok(value)
                 }
-                Some(Err(refused)) => this.fail_type(&refused.message),
+                Some(Err(refused)) => this.fail_type(refused.message.as_str()),
                 None => {
                     this.invoke_do("py.no_attribute", &[receiver.clone(), Operand::text(name)])?;
                     Ok(Operand::none())

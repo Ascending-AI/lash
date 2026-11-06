@@ -80,7 +80,7 @@ impl ModuleRefusal {
     pub fn at(self, message: impl Into<String>, span: Option<Span>) -> ModuleError {
         ModuleError {
             refusal: self,
-            message: message.into(),
+            message: crate::DiagnosticMessage::authored(message),
             span,
         }
     }
@@ -93,7 +93,7 @@ impl ModuleRefusal {
 #[error("{}: {message}", refusal.code())]
 pub struct ModuleError {
     pub refusal: ModuleRefusal,
-    pub message: String,
+    pub message: crate::DiagnosticMessage,
     pub span: Option<Span>,
 }
 
@@ -152,7 +152,9 @@ impl ImplicitTextConversionPolicy {
         if let Some(fact) = facts.iter().find(|fact| fact.refused(self == Self::Strict)) {
             return Err(Diagnostic::new(
                 crate::DiagnosticReason::ImplicitTextConversion(Box::new(fact.clone())),
-                "implicit text conversion refused by source admission policy",
+                crate::DiagnosticMessage::authored(
+                    "implicit text conversion refused by source admission policy",
+                ),
             ));
         }
         Ok(())

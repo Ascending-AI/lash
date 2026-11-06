@@ -469,7 +469,7 @@ pub enum CodeClassification {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
     pub reason: lash_kernel_dialect::DiagnosticReason,
-    pub message: String,
+    pub message: lash_kernel_dialect::DiagnosticMessage,
     pub suggestions: Vec<String>,
 }
 
@@ -493,20 +493,17 @@ impl Diagnostic {
         self.reason.kind()
     }
     pub(crate) fn entry_signature(refusal: lash_kernel_value::EntrySignatureRefusal) -> Self {
-        let reason = match refusal {
-            lash_kernel_value::EntrySignatureRefusal::Required(required) => {
-                lash_kernel_dialect::DiagnosticReason::SignatureRequired(required)
-            }
-            lash_kernel_value::EntrySignatureRefusal::Annotation(refused) => {
-                lash_kernel_dialect::DiagnosticReason::EntryAnnotationRefused(refused)
-            }
-        };
+        let diagnostic = lash_kernel_dialect::Diagnostic::entry_signature(
+            refusal,
+            lash_kernel_doc::SourceLanguage::TypeScript,
+        );
         Self {
-            reason,
-            message: String::new(),
-            suggestions: Vec::new(),
+            reason: diagnostic.reason,
+            message: diagnostic.message,
+            suggestions: diagnostic.repairs,
         }
     }
+
     /// The crate's rejections were authored as `"Unsupported: <refusal>.
     /// <rewrite>"` — one string, two jobs. Splitting here rather than at 34 call
     /// sites keeps the convention in one place and makes the migration total:
@@ -601,7 +598,7 @@ impl Diagnostic {
                 kind,
                 span,
             },
-            message,
+            message: lash_kernel_dialect::DiagnosticMessage::authored(message),
             suggestions,
         }
     }
@@ -635,7 +632,7 @@ impl Diagnostic {
                 kind: kind_from_code(code),
                 span,
             },
-            message: message.into(),
+            message: lash_kernel_dialect::DiagnosticMessage::authored(message),
             suggestions: vec![repair.into()],
         }
     }
@@ -710,6 +707,95 @@ impl From<Diagnostic> for lash_kernel_dialect::Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::DiagnosticCode;
+
+    /// FIG-7665: every reason and code renders an explanation after its token.
+    #[test]
+    fn every_diagnostic_renders_an_explanation() {
+        use lash_kernel_dialect::DiagnosticReason;
+        use lash_kernel_value::{EntrySignatureRefusal, FunctionLocation, SignaturePosition};
+        let function = FunctionLocation {
+            name: Some("run".into()),
+            site: None,
+        };
+        for code in DiagnosticCode::ALL.iter().copied().chain(
+            lash_kernel_dialect::workflow::ModuleRefusal::ALL
+                .into_iter()
+                .map(DiagnosticCode::Module),
+        ) {
+            let diagnostic = match code {
+                DiagnosticCode::SignatureRequired => super::Diagnostic::entry_signature(
+                    EntrySignatureRefusal::Required(Box::new(lash_kernel_doc::SignatureRequired {
+                        function: function.clone(),
+                        position: SignaturePosition::Result,
+                        span: None,
+                    })),
+                ),
+                DiagnosticCode::EntryAnnotationRefused => {
+                    super::Diagnostic::entry_signature(EntrySignatureRefusal::Annotation(Box::new(
+                        lash_kernel_value::EntryAnnotationRefusal {
+                            function: function.clone(),
+                            position: SignaturePosition::Result,
+                            span: None,
+                            reason: lash_kernel_value::AnnotationResolutionReason::Unresolved {
+                                name: "Missing".into(),
+                            },
+                        },
+                    )))
+                }
+                DiagnosticCode::NamespaceShadowedByLocal => super::Diagnostic::namespace_shadowed(
+                    lash_kernel_value::NamespaceShadowing {
+                        binding_name: "host".into(),
+                        binding_origin: None,
+                        namespace: "host".into(),
+                        call_path: "host.echo".into(),
+                    },
+                    lash_kernel_doc::Span { start: 0, end: 4 },
+                ),
+                DiagnosticCode::ImplicitTextConversion => super::Diagnostic {
+                    reason: DiagnosticReason::ImplicitTextConversion(Box::new(
+                        lash_kernel_doc::ImplicitTextConversion {
+                            span: None,
+                            operand_type: lash_kernel_doc::SourceOperandType::Object,
+                        },
+                    )),
+                    message: lash_kernel_dialect::DiagnosticMessage::authored(
+                        "implicit text conversion refused by source admission policy",
+                    ),
+                    suggestions: Vec::new(),
+                },
+                _ => super::Diagnostic::new(
+                    code,
+                    "The submitted source violates this dialect rule",
+                    None,
+                ),
+            };
+            let rendered = diagnostic.to_string();
+            let explanation = rendered
+                .strip_prefix(code.as_str())
+                .unwrap()
+                .trim_start_matches(':')
+                .trim();
+            assert!(!explanation.is_empty(), "{code:?}: {rendered:?}");
+            assert_ne!(explanation, code.as_str());
+            assert!(
+                !diagnostic.message.as_str().trim().is_empty(),
+                "{code:?}: {rendered:?}"
+            );
+            let shared: lash_kernel_dialect::Diagnostic = diagnostic.into();
+            let encoded = serde_json::to_value(&shared).unwrap();
+            let decoded: lash_kernel_dialect::Diagnostic =
+                serde_json::from_value(encoded.clone()).unwrap();
+            assert_eq!(decoded, shared);
+            assert!(!decoded.message.as_str().trim().is_empty());
+            for blank in ["", " \n\t"] {
+                let mut invalid = encoded.clone();
+                invalid["message"] = blank.into();
+                assert!(
+                    serde_json::from_value::<lash_kernel_dialect::Diagnostic>(invalid).is_err()
+                );
+            }
+        }
+    }
 
     /// FIG-5765: a repair preserves the operands the model actually wrote.
     #[test]
@@ -990,7 +1076,7 @@ mod tests {
             assert!(!error.suggestions.is_empty(), "{label}: {error:?}");
             for suggestion in &error.suggestions {
                 assert!(
-                    !error.message.contains(suggestion.as_str()),
+                    !error.message.as_str().contains(suggestion.as_str()),
                     "{label}: `{suggestion}` is in both the message and the hint"
                 );
             }

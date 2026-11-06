@@ -52,7 +52,9 @@ impl Lowerer<'_> {
         }
         Err(Diagnostic {
             reason: lash_kernel_dialect::DiagnosticReason::ImplicitTextConversion(Box::new(fact)),
-            message: "implicit text conversion refused by source admission policy".into(),
+            message: lash_kernel_dialect::DiagnosticMessage::authored(
+                "implicit text conversion refused by source admission policy",
+            ),
             suggestions: Vec::new(),
         })
     }

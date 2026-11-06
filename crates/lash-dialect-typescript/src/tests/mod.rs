@@ -214,7 +214,10 @@ fn a_host_source_policy_allows_a_larger_typescript_cell() {
     let limits = crate::SourceLimits::new(source.len(), 1).unwrap();
     let diagnostic =
         crate::lower_with_limits("const x = ((1));", &environment, cell, limits).unwrap_err();
-    assert!(diagnostic.message.contains("1-level"), "{diagnostic}");
+    assert!(
+        diagnostic.message.as_str().contains("1-level"),
+        "{diagnostic}"
+    );
 }
 
 mod linked;

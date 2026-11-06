@@ -248,16 +248,11 @@ impl Lowerer<'_> {
                 site: None,
             },
         )
-        .map_err(|refusal| match refusal {
-            lash_kernel_value::EntrySignatureRefusal::Required(required) => {
-                lash_kernel_dialect::Diagnostic::from(*required)
-            }
-            lash_kernel_value::EntrySignatureRefusal::Annotation(refused) => {
-                lash_kernel_dialect::Diagnostic::new(
-                    lash_kernel_dialect::DiagnosticReason::EntryAnnotationRefused(refused),
-                    "",
-                )
-            }
+        .map_err(|refusal| {
+            lash_kernel_dialect::Diagnostic::entry_signature(
+                refusal,
+                lash_kernel_doc::SourceLanguage::Python,
+            )
         })?;
         Ok(signature)
     }

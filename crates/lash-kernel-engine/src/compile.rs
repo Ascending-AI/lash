@@ -42,7 +42,7 @@ impl Engine {
                 lash_kernel_dialect::DialectCode::from_static("ENGINE_COMPILE"),
                 lash_kernel_dialect::DiagnosticKind::Refusal,
                 None,
-                message,
+                lash_kernel_dialect::DiagnosticMessage::authored(message),
             )
         };
         if source.len() > self.limits.source_bytes {
@@ -174,7 +174,7 @@ impl Engine {
                 lash_kernel_dialect::DialectCode::from_static("ENGINE_COMPILE"),
                 lash_kernel_dialect::DiagnosticKind::Refusal,
                 None,
-                message,
+                lash_kernel_dialect::DiagnosticMessage::authored(message),
             )
         };
         if source.len() > self.limits.source_bytes {

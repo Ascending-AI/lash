@@ -44,7 +44,7 @@ mod namespaces_laws;
 mod tests;
 
 pub use diagnostic::{
-    Diagnostic, DiagnosticKind, DiagnosticReason, DialectCode, SourceOperandType,
+    Diagnostic, DiagnosticKind, DiagnosticMessage, DiagnosticReason, DialectCode, SourceOperandType,
 };
 pub use dialect::{
     CaptionSupport, CellEnvironment, Dialect, EffectControl, Environment, FrontEnd, Lowered, Mode,

@@ -140,7 +140,7 @@ impl Harness {
             Ok(lowered) => lowered,
             Err(diagnostic) => {
                 assert!(!diagnostic.code().is_empty());
-                assert!(!diagnostic.message.is_empty());
+                assert!(!diagnostic.message.as_str().is_empty());
                 self.counts.source_refusals += 1;
                 return;
             }

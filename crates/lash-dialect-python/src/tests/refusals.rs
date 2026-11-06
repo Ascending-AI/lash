@@ -126,7 +126,10 @@ fn a_missing_helper_is_named() {
     )
     .expect_err("an empty library");
     assert_eq!(diagnostic.code(), Code::LibraryMissing.as_str());
-    assert!(diagnostic.message.contains("py.print_text"), "{diagnostic}");
+    assert!(
+        diagnostic.message.as_str().contains("py.print_text"),
+        "{diagnostic}"
+    );
 }
 
 /// FIG-5777: every accepted idiom offered by the refusal diagnostics has
@@ -291,4 +294,36 @@ fn a_host_source_policy_allows_a_larger_python_cell() {
     assert!(crate::lower(&source, &environment, cell).is_err());
     let limits = crate::SourceLimits::new(source.len(), 96).unwrap();
     crate::lower_with_limits(&source, &environment, cell, limits).unwrap();
+}
+
+/// FIG-7665: each Python code renders prose separately from its token.
+#[test]
+fn every_diagnostic_renders_an_explanation() {
+    for code in Code::ALL {
+        let diagnostic = if *code == Code::NamespaceShadowedByLocal {
+            lash_kernel_dialect::Diagnostic::namespace_shadowed(
+                lash_kernel_value::NamespaceShadowing {
+                    binding_name: "host".into(),
+                    binding_origin: None,
+                    namespace: "host".into(),
+                    call_path: "host.echo".into(),
+                },
+                None,
+            )
+        } else {
+            crate::diagnostics::unplaced(*code, "The submitted source violates this dialect rule")
+        };
+        let rendered = diagnostic.to_string();
+        let explanation = rendered
+            .strip_prefix(code.as_str())
+            .unwrap()
+            .trim_start_matches(':')
+            .trim();
+        assert!(!explanation.is_empty(), "{code:?}: {rendered:?}");
+        assert_ne!(explanation, code.as_str());
+        assert!(
+            !diagnostic.message.as_str().trim().is_empty(),
+            "{code:?}: {rendered:?}"
+        );
+    }
 }

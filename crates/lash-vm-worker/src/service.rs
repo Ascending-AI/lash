@@ -419,7 +419,13 @@ mod tests {
             decoded.reason,
             lash_kernel_dialect::DiagnosticReason::SignatureRequired(Box::new(required))
         );
-        assert!(decoded.message.is_empty());
+        assert!(decoded.message.as_str().contains("parameter `event`"));
+        assert!(
+            decoded
+                .message
+                .as_str()
+                .contains("handle(event: unknown): Promise<unknown>")
+        );
         assert!(decoded.repairs.is_empty());
     }
 

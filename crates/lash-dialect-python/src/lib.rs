@@ -154,7 +154,7 @@ fn lower_with_calls(
                 start: error.location.start().to_usize(),
                 end: error.location.end().to_usize(),
             }),
-            error.error.to_string(),
+            lash_kernel_dialect::DiagnosticMessage::authored(error.error.to_string()),
         )
     })?;
     let spelled = captions::spelled(

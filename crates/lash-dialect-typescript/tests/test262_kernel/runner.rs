@@ -390,7 +390,10 @@ fn prepare(relative: &str) -> Result<(Lowered, Metadata), Observed> {
         let body = source_without_unshimmed(&path, &meta, meta.negative.is_none());
         return Err(match lower(&body) {
             Err(diagnostic) if diagnostic.code() != DiagnosticCode::UnknownBinding => {
-                Observed::Refused(diagnostic.code().as_str().to_string(), diagnostic.message)
+                Observed::Refused(
+                    diagnostic.code().as_str().to_string(),
+                    diagnostic.message.into(),
+                )
             }
             _ => Observed::Harness(include.to_string()),
         });
@@ -409,7 +412,7 @@ fn prepare(relative: &str) -> Result<(Lowered, Metadata), Observed> {
         Err(diagnostic) => {
             return Err(Observed::Refused(
                 diagnostic.code().as_str().to_string(),
-                diagnostic.message,
+                diagnostic.message.into(),
             ));
         }
     };

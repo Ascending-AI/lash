@@ -108,19 +108,64 @@ impl DiagnosticReason {
     }
 }
 
+/// Non-blank diagnostic prose. JSON remains a string; decoding validates it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct DiagnosticMessage(String);
+
+impl TryFrom<String> for DiagnosticMessage {
+    type Error = &'static str;
+
+    fn try_from(message: String) -> Result<Self, Self::Error> {
+        if message.trim().is_empty() {
+            Err("diagnostic message is blank")
+        } else {
+            Ok(Self(message))
+        }
+    }
+}
+impl From<DiagnosticMessage> for String {
+    fn from(message: DiagnosticMessage) -> Self {
+        message.0
+    }
+}
+impl DiagnosticMessage {
+    /// Prose authored by a diagnostic producer, rather than untrusted input.
+    /// Use `TryFrom<String>` when decoding host-supplied text.
+    ///
+    /// # Panics
+    /// Panics if the producer supplies empty or whitespace-only prose.
+    #[expect(
+        clippy::expect_used,
+        reason = "blank authored diagnostic prose is a producer bug"
+    )]
+    pub fn authored(message: impl Into<String>) -> Self {
+        Self::try_from(message.into()).expect("diagnostics must explain the rejection")
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+impl fmt::Display for DiagnosticMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A typed rejection with host-facing prose and repair suggestions.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Diagnostic {
     pub reason: DiagnosticReason,
-    pub message: String,
+    pub message: DiagnosticMessage,
     pub repairs: Vec<String>,
 }
 impl Diagnostic {
-    pub fn new(reason: DiagnosticReason, message: impl Into<String>) -> Self {
+    pub fn new(reason: DiagnosticReason, message: DiagnosticMessage) -> Self {
         Self {
             reason,
-            message: message.into(),
+            message,
             repairs: Vec::new(),
         }
     }
@@ -128,7 +173,7 @@ impl Diagnostic {
         code: DialectCode,
         kind: DiagnosticKind,
         span: Option<Span>,
-        message: impl Into<String>,
+        message: DiagnosticMessage,
     ) -> Self {
         Self::new(DiagnosticReason::Dialect { code, kind, span }, message)
     }
@@ -154,7 +199,7 @@ impl Diagnostic {
                 shadowing: Box::new(shadowing),
                 span,
             },
-            message,
+            DiagnosticMessage::authored(message),
         )
     }
 }
@@ -170,6 +215,76 @@ impl fmt::Display for Diagnostic {
 impl std::error::Error for Diagnostic {}
 impl From<lash_kernel_doc::SignatureRequired> for Diagnostic {
     fn from(required: lash_kernel_doc::SignatureRequired) -> Self {
-        Self::new(DiagnosticReason::SignatureRequired(Box::new(required)), "")
+        signature_diagnostic(
+            lash_kernel_value::EntrySignatureRefusal::Required(Box::new(required)),
+            None,
+        )
     }
+}
+
+impl Diagnostic {
+    /// Explain an entry refusal in the submitted source's language.
+    pub fn entry_signature(
+        refusal: lash_kernel_value::EntrySignatureRefusal,
+        language: lash_kernel_doc::SourceLanguage,
+    ) -> Self {
+        signature_diagnostic(refusal, Some(language))
+    }
+}
+
+fn signature_diagnostic(
+    refusal: lash_kernel_value::EntrySignatureRefusal,
+    language: Option<lash_kernel_doc::SourceLanguage>,
+) -> Diagnostic {
+    use lash_kernel_value::{AnnotationResolutionReason, EntrySignatureRefusal, SignaturePosition};
+    let (function, position, problem) = match &refusal {
+        EntrySignatureRefusal::Required(required) => (
+            &required.function,
+            &required.position,
+            "requires an explicit annotation".to_owned(),
+        ),
+        EntrySignatureRefusal::Annotation(refused) => {
+            let problem = match &refused.reason {
+                AnnotationResolutionReason::Unresolved { name } => {
+                    format!("has an unresolved annotation `{name}`")
+                }
+                AnnotationResolutionReason::Cycle { name } => {
+                    format!("has a cyclic annotation `{name}`")
+                }
+                AnnotationResolutionReason::Unsupported { construct } => {
+                    format!("uses an unsupported annotation ({construct})")
+                }
+                AnnotationResolutionReason::Limit => {
+                    "has an annotation exceeding the resolution limit".to_owned()
+                }
+            };
+            (&refused.function, &refused.position, problem)
+        }
+    };
+    let name = function.name.as_deref().unwrap_or("entry");
+    let (position, ts_params, py_params) = match position {
+        SignaturePosition::Parameter { name, .. } => (
+            format!("parameter `{name}`"),
+            format!("{name}: unknown"),
+            format!("{name}: object"),
+        ),
+        SignaturePosition::Result => ("result".into(), String::new(), String::new()),
+    };
+    let ts = format!("{name}({ts_params}): Promise<unknown>");
+    let py = format!("def {name}({py_params}) -> object:");
+    let accepted = match language {
+        Some(lash_kernel_doc::SourceLanguage::TypeScript) => format!("`{ts}`"),
+        Some(lash_kernel_doc::SourceLanguage::Python) => format!("`{py}`"),
+        None => format!("TypeScript `{ts}` or Python `{py}`"),
+    };
+    let message = DiagnosticMessage::authored(format!(
+        "Entry `{name}` {position} {problem}; accepted signature, for example: {accepted}"
+    ));
+    let reason = match refusal {
+        EntrySignatureRefusal::Required(required) => DiagnosticReason::SignatureRequired(required),
+        EntrySignatureRefusal::Annotation(refused) => {
+            DiagnosticReason::EntryAnnotationRefused(refused)
+        }
+    };
+    Diagnostic::new(reason, message)
 }

@@ -803,6 +803,22 @@ fn entry_annotations_distinguish_written_any_from_missing() {
         ),
     ] {
         let diagnostic = module(source).unwrap_err();
+        assert!(
+            diagnostic
+                .message
+                .as_str()
+                .contains("requires an explicit annotation"),
+            "{diagnostic}"
+        );
+        let accepted = if parameter {
+            "handle(event: unknown): Promise<unknown>"
+        } else {
+            "handle(): Promise<unknown>"
+        };
+        assert!(
+            diagnostic.message.as_str().contains(accepted),
+            "{diagnostic}"
+        );
         let lash_kernel_dialect::DiagnosticReason::SignatureRequired(required) = &diagnostic.reason
         else {
             panic!("typed missing annotation: {diagnostic:?}");
@@ -898,6 +914,17 @@ fn entry_annotations_distinguish_written_any_from_missing() {
             "{declaration} export function handle(event: {annotation}): any {{ return event; }}"
         );
         let diagnostic = module(&source).unwrap_err();
+        assert!(
+            diagnostic.message.as_str().contains("annotation"),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic
+                .message
+                .as_str()
+                .contains("handle(event: unknown): Promise<unknown>"),
+            "{diagnostic}"
+        );
         let lash_kernel_dialect::DiagnosticReason::EntryAnnotationRefused(refused) =
             &diagnostic.reason
         else {
@@ -1618,5 +1645,29 @@ fn host_entry_integers_follow_the_declared_javascript_kinds() {
         )
         .1,
         Datum::Text("RangeError".into())
+    );
+}
+
+/// FIG-7665: Cenote must receive the missing type and a signature it can submit.
+#[test]
+fn cenote_signature_refusal_explains_the_accepted_signature() {
+    let source = r#"export async function run() {
+  const result = await integrations.execute({action: "LINEAR_LIST_ISSUES", args: {first: 5, order_by: "createdAt", filter: {title: {containsIgnoreCase: "lash"}, state: {type: {nin: ["completed", "canceled"]}}}}});
+  if (!result.data) return views.callout("Unable to load Linear tickets. Check the Linear connection.", "warning");
+  const rows = result.data.nodes.map((issue) => ({ticket: issue.identifier, title: issue.title, status: issue.state.name, created: issue.createdAt, url: issue.url}));
+  return views.table(rows, [{header: "Ticket", field: "ticket"}, {header: "Title", field: "title"}, {header: "Status", field: "status"}, {header: "Created", field: "created"}, {header: "URL", field: "url"}], "5 newest open tickets with lash in the title");
+}"#;
+    let diagnostic = module(source).expect_err("an unannotated module entry");
+    assert_eq!(diagnostic.code(), DiagnosticCode::SignatureRequired);
+    assert!(
+        diagnostic.message.as_str().contains("result"),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic
+            .message
+            .as_str()
+            .contains("run(): Promise<unknown>"),
+        "{diagnostic}"
     );
 }

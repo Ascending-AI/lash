@@ -395,6 +395,19 @@ fn entry_promotion_requires_written_annotations_at_the_missing_position() {
         machine::lower(source).expect("an ordinary function remains free");
         let error = module(source).expect_err("an entry needs a written signature");
         assert_eq!(error.code(), "SIGNATURE_REQUIRED");
+        assert!(
+            error
+                .message
+                .as_str()
+                .contains("requires an explicit annotation"),
+            "{error}"
+        );
+        let accepted = if missing == "event" {
+            "def handle(event: object) -> object:"
+        } else {
+            "def handle() -> object:"
+        };
+        assert!(error.message.as_str().contains(accepted), "{error}");
         let lash_kernel_dialect::DiagnosticReason::SignatureRequired(required) = &error.reason
         else {
             panic!("a typed missing annotation: {error:?}");
@@ -561,7 +574,8 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
     ] {
         let error = module(source).expect_err("unrepresentable entry annotation");
         assert_eq!(error.code(), "ENTRY_ANNOTATION_REFUSED");
-        assert!(error.message.is_empty());
+        assert!(error.message.as_str().contains("annotation"), "{error}");
+        assert!(error.message.as_str().contains("def handle("), "{error}");
         let lash_kernel_dialect::DiagnosticReason::EntryAnnotationRefused(refused) = &error.reason
         else {
             panic!("typed resolution fact")

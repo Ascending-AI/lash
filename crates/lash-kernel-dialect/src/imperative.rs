@@ -165,7 +165,7 @@ impl From<PrintError> for crate::Diagnostic {
             }),
             crate::DiagnosticKind::Refusal,
             None,
-            error.to_string(),
+            crate::DiagnosticMessage::authored(error.to_string()),
         )
     }
 }
