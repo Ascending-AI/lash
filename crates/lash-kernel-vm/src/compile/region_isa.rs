@@ -26,7 +26,7 @@ mod verify;
 use super::room::charges::region_isa::CanonicalClose;
 pub(crate) use super::room::charges::region_isa::LoopInfo;
 pub(crate) use recovery::{GraphRecovery, RecoveryMap, Role};
-pub(crate) use resources::{IndexedAmount, ResourceInput};
+pub(crate) use resources::{IndexedAmount, ResourceInput, role as owner_role};
 
 fn resource_pair(lib: &super::Lib, charged: bool) -> Option<doc::scalar::Pair> {
     if lib.specialization.native.immediate_resources {

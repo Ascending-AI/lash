@@ -89,7 +89,7 @@ impl IndexedAmount {
     }
 }
 
-pub(super) fn role(source: &Source, owner: &Owner) -> Option<Role> {
+pub(crate) fn role(source: &Source, owner: &Owner) -> Option<Role> {
     let slots = source.owner_slots().ok()?;
     let root = slots.root(owner, doc::TaskId::MAIN, 0).or_else(|| {
         let Owner::Visible { at, name } = owner else {

@@ -22,6 +22,7 @@ use super::super::charges::{
 };
 use super::super::*;
 use super::{BoundScalarRegion, Origin, ScalarInput, ScalarRegion};
+use crate::compile::region_isa::Role;
 use crate::compile::{self, CodeId, Executable, LibId, LibRun, NestedCallee, NestedKind, StmtId};
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::Value;
@@ -245,7 +246,9 @@ fn resolved_static(
 struct CallerRoles {
     arguments: Box<[Slot]>,
     recovery: Box<[Slot]>,
-    callable: Option<Slot>,
+    /// The callee's role: a statement call's named slot or session cell,
+    /// an expression call's operand.
+    callable: Option<Role>,
 }
 /// The caller-side facts of a call site, which never name its target.
 #[derive(Clone, Copy)]
@@ -288,7 +291,7 @@ fn caller_roles(source: &Source, target: Shape<'_>) -> Result<CallerRoles, Refus
             arguments,
             recovery: Box::new([]),
             callable: if target.dynamic {
-                Some(target::root_slot(source, target.at)?)
+                Some(target::root_role(source, target.at)?)
             } else {
                 None
             },
@@ -303,7 +306,7 @@ fn caller_roles(source: &Source, target: Shape<'_>) -> Result<CallerRoles, Refus
         if arguments.is_empty() {
             return Err(Refused::Source);
         }
-        Some(arguments.remove(0))
+        Some(Role::Slot(arguments.remove(0)))
     } else {
         None
     };
@@ -509,6 +512,10 @@ impl VerifiedCall {
             recovery,
             callable,
         } = caller_roles(&caller_source, target.shape())?;
+        // This statement-executor plan reads callees from frame slots only.
+        let callable = callable
+            .map(|role| role.slot().ok_or(Refused::Source))
+            .transpose()?;
         let root_atoms = if target.rooted {
             Some(root_arguments(&caller_source, &target.at)?)
         } else {
@@ -581,6 +588,10 @@ impl VerifiedCall {
             recovery,
             callable,
         } = caller_roles(&self.caller_source, target.shape())?;
+        // This statement-executor plan reads callees from frame slots only.
+        let callable = callable
+            .map(|role| role.slot().ok_or(Refused::Source))
+            .transpose()?;
         if target.rooted {
             let expected = root_arguments(&self.caller_source, &target.at)?;
             if self.root_atoms.as_ref().is_none_or(|actual| {

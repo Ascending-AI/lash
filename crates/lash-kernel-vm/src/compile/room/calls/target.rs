@@ -108,30 +108,60 @@ pub(in crate::compile::room) fn call_site(
         }
         _ => return Err(Refused::Source),
     };
-    let origin = root_slot(
+    let origin = root_role(
         source,
         &Point {
             site: site.clone(),
             phase: Phase::Enter,
         },
     )?;
-    let placement = super::super::super::placement::BindingPlacement::compile(exe, caller)?;
-    let physical = placement.physical(origin).ok_or(Refused::Source)?;
+    // The callee is read from the frame slot or the session cell its name
+    // resolves to, and from nowhere else.
+    let physical = match origin {
+        Role::Slot(slot) => Some(
+            super::super::super::placement::BindingPlacement::compile(exe, caller)?
+                .physical(slot)
+                .ok_or(Refused::Source)?,
+        ),
+        Role::Session(_) => None,
+    };
+    let local_read = |at, slot| {
+        physical == Some(at) && exe.code(caller).slots_by_at.get(at as usize) == Some(&slot)
+    };
+    let session_read = |name: &lash_kernel_value::Name| matches!(origin, Role::Session(digest) if logical::Owner::session(name) == logical::Owner::Session(digest));
     let valid_read = match op {
         Op::Nested { args, .. } => (span.start..pc)
             .rev()
             .find_map(|read| {
                 let op = &stream.ops[read as usize];
                 (op.writes() == Some(args.start)).then(|| {
-                    matches!(op,
-                        Op::Local { local, .. } if local.at == physical && exe.code(caller).slots_by_at.get(physical as usize) == Some(&local.slot)
-                    ) && stream.source_sites[read as usize].as_deref() == Some(site)
+                    let reads = match op {
+                        Op::Local { local, .. } => local_read(local.at, local.slot),
+                        Op::Session { name, .. } => stream
+                            .names
+                            .get(name.0 as usize)
+                            .is_some_and(|binding| session_read(&binding.name)),
+                        _ => false,
+                    };
+                    reads && stream.source_sites[read as usize].as_deref() == Some(site)
                 })
             })
             .unwrap_or(false),
-        Op::Act => matches!(&stmt.form, compile::Form::Action(compile::Action {
-            kind: compile::ActionKind::Call { callee: compile::Callee::Value(compile::Var::Local(local)), .. }, ..
-        }) if local.at == physical && exe.code(caller).slots_by_at.get(physical as usize) == Some(&local.slot)),
+        Op::Act => match &stmt.form {
+            compile::Form::Action(compile::Action {
+                kind:
+                    compile::ActionKind::Call {
+                        callee: compile::Callee::Value(var),
+                        ..
+                    },
+                ..
+            }) => match var {
+                compile::Var::Local(local) => local_read(local.at, local.slot),
+                compile::Var::Session(binding) => session_read(&binding.name),
+                compile::Var::Unbound(_) => false,
+            },
+            _ => false,
+        },
         _ => false,
     };
     if !valid_read {
@@ -222,7 +252,9 @@ fn node<'a>(source: &'a Source, at: &Site) -> Result<doc::Node<'a>, Refused> {
     Ok(node)
 }
 
-pub(super) fn root_slot(source: &Source, at: &Point) -> Result<Slot, Refused> {
+/// The role a dynamic call reads its callee from: the frame slot of its
+/// name's lexical binding, or the session cell a free name resolves to.
+pub(super) fn root_role(source: &Source, at: &Point) -> Result<Role, Refused> {
     let name = match node(source, &at.site)? {
         doc::Node::Action(doc::Action::Call {
             callee: doc::Callee::Value(name),
@@ -236,9 +268,19 @@ pub(super) fn root_slot(source: &Source, at: &Point) -> Result<Slot, Refused> {
         }
         _ => return Err(Refused::Source),
     };
-    let slots = source.owner_slots()?;
-    let owner = root_owners::visible(&slots.scopes, &at.site, name).ok_or(Refused::Source)?;
-    slot(source, owner)
+    crate::compile::region_isa::owner_role(
+        source,
+        &Owner::Visible {
+            at: at.site.clone(),
+            name: name.clone(),
+        },
+    )
+    .ok_or(Refused::Source)
+}
+
+/// The frame slot a dynamic call reads its callee from.
+pub(super) fn root_slot(source: &Source, at: &Point) -> Result<Slot, Refused> {
+    root_role(source, at)?.slot().ok_or(Refused::Source)
 }
 
 pub(super) struct CallableSnapshot {

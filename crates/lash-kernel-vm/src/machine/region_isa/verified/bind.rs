@@ -180,14 +180,15 @@ impl Code {
                     {
                         return Err(invalid(Refused::Source));
                     }
-                    let role = |slot: Slot| -> Result<Register, RegionError> {
+                    let register = |role: Role| -> Result<Register, RegionError> {
                         let reg = program
                             .roles()
                             .iter()
-                            .find_map(|(actual, reg)| (*actual == Role::Slot(slot)).then_some(*reg))
+                            .find_map(|(actual, reg)| (*actual == role).then_some(*reg))
                             .ok_or_else(|| invalid(Refused::Facts))?;
                         physical(program, reg)
                     };
+                    let role = |slot: Slot| register(Role::Slot(slot));
                     let call = Call {
                         plan: plan.clone(),
                         counter: match plan.occurrence() {
@@ -212,14 +213,8 @@ impl Code {
                             .ok_or_else(|| invalid(Refused::Source))?
                             .into(),
                         saved: saved_roles(exe, program, plan)?,
-                        callable: plan
-                            .callable()
-                            .map(|input| role(input.slot()))
-                            .transpose()?,
-                        callable_origin: plan
-                            .callable_origin()
-                            .map(|input| role(input.slot()))
-                            .transpose()?,
+                        callable: plan.callable().map(register).transpose()?,
+                        callable_origin: plan.callable_origin().map(register).transpose()?,
                         next: *next,
                     };
                     arguments = arguments.max(call.arguments.len());

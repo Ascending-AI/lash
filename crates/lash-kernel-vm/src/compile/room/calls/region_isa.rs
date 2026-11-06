@@ -36,8 +36,10 @@ pub(crate) struct CallPlan {
     resume: Point,
     arguments: Box<[CallRole]>,
     saved: Box<[CallRole]>,
-    callable: Option<CallRole>,
-    callable_origin: Option<CallRole>,
+    /// The roles a dynamic call reads its callee from: a slot, or the
+    /// session cell its name resolves to.
+    callable: Option<Role>,
+    callable_origin: Option<Role>,
     targets: Targets,
     occurrence: Option<usize>,
     result: CallRole,
@@ -123,9 +125,8 @@ impl CallPlan {
         } = caller_roles(&source, shape)?;
         let callable_origin = shape
             .dynamic
-            .then(|| target::root_slot(&source, shape.at))
-            .transpose()?
-            .map(CallRole::new);
+            .then(|| target::root_role(&source, shape.at))
+            .transpose()?;
         let result = CallRole::new(slot(&source, &Owner::Operand(shape.at.site.clone()))?);
         let resume = Point {
             site: shape.at.site.clone(),
@@ -156,7 +157,7 @@ impl CallPlan {
             resume,
             arguments: arguments.iter().copied().map(CallRole::new).collect(),
             saved: saved.iter().copied().map(CallRole::new).collect(),
-            callable: callable.map(CallRole::new),
+            callable,
             callable_origin,
             result,
             targets,
@@ -244,10 +245,10 @@ impl CallPlan {
     pub(crate) fn saved_roles(&self) -> &[CallRole] {
         &self.saved
     }
-    pub(crate) fn callable(&self) -> Option<CallRole> {
+    pub(crate) fn callable(&self) -> Option<Role> {
         self.callable
     }
-    pub(crate) fn callable_origin(&self) -> Option<CallRole> {
+    pub(crate) fn callable_origin(&self) -> Option<Role> {
         self.callable_origin
     }
     /// The helper whose signature this call's arguments must fit.
