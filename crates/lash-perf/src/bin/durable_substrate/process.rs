@@ -121,10 +121,10 @@ fn pin(index: u64) -> EngineAction {
     }
 }
 
-fn ended(text: &str) -> EngineAction {
-    EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::success(
-        json!({ "ended": text }),
-    )))
+fn ended(text: &str) -> lash_execution_contracts::process::EngineTransition {
+    lash_execution_contracts::process::EngineTransition::Terminal(ProcessOutcome::from_tool_output(
+        ToolCallOutput::success(json!({ "ended": text })),
+    ))
 }
 
 #[async_trait::async_trait]
@@ -241,7 +241,7 @@ impl ProcessEngine for BenchEngine {
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<lash_execution_contracts::process::EngineTransition, ProcessInfraError> {
         let mut script: Value = match &event {
             EngineEvent::Started { payload } => {
                 json!({ "token": payload["token"], "waits": payload["waits"], "mode": payload["mode"], "done": 0 })
@@ -269,7 +269,7 @@ impl ProcessEngine for BenchEngine {
                     .report(&token, Seen::StepSettled(Instant::now(), step.0));
                 script["done"] = json!(done + 1);
                 if done + 1 == waits {
-                    ended("fanout done")
+                    return Ok(ended("fanout done"));
                 } else {
                     EngineAction::Idle
                 }
@@ -282,7 +282,7 @@ impl ProcessEngine for BenchEngine {
                 if done + 1 < waits {
                     probe_step(done + 1)?
                 } else {
-                    ended("steps done")
+                    return Ok(ended("steps done"));
                 }
             }
             EngineEvent::Started { .. } | EngineEvent::Woke if mode == Mode::Timers => {
@@ -291,7 +291,7 @@ impl ProcessEngine for BenchEngine {
                 }
                 script["done"] = json!(done + 1);
                 if done >= waits {
-                    ended("timers done")
+                    return Ok(ended("timers done"));
                 } else {
                     let due = Instant::now() + Duration::from_millis(100);
                     self.board.report(&token, Seen::TimerDue(due));
@@ -317,29 +317,35 @@ impl ProcessEngine for BenchEngine {
                 if done < waits {
                     pin(done)
                 } else {
-                    ended("resolved")
+                    return Ok(ended("resolved"));
                 }
             }
-            EngineEvent::ExternalTimedOut { .. } => ended("timed out"),
+            EngineEvent::ExternalTimedOut { .. } => return Ok(ended("timed out")),
             EngineEvent::Cancelled { origin, .. } => {
-                EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
-                    ToolCancellation::runtime("the bench engine answered its cancel")
-                        .with_origin(origin),
-                )))
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
+                            ToolCancellation::runtime("the bench engine answered its cancel")
+                                .with_origin(origin),
+                        )),
+                    ),
+                );
             }
             _ => EngineAction::Idle,
         };
         let bytes = serde_json::to_vec(&script).map_err(infra)?;
-        Ok((
-            EngineState {
-                staged: Vec::new(),
-                format: self.state_format(),
-                bytes,
-                pages: None,
-                requirements: Default::default(),
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Continue {
+                state: EngineState {
+                    staged: Vec::new(),
+                    format: self.state_format(),
+                    bytes,
+                    pages: None,
+                    requirements: Default::default(),
+                },
+                action,
             },
-            action,
-        ))
+        )
     }
 
     fn start_artifacts(

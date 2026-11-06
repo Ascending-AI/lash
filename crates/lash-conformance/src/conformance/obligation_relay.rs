@@ -168,7 +168,7 @@ impl crate::ProcessEngine for MissingCarryEngine {
         &self,
         _state: crate::EngineState,
         _event: crate::EngineEvent,
-    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+    ) -> Result<crate::EngineTransition, crate::ProcessInfraError> {
         unreachable!("the law delivers cleanup without advancing a process")
     }
 

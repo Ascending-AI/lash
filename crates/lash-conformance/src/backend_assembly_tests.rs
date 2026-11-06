@@ -195,25 +195,21 @@ impl lash_execution_contracts::process::ProcessEngine for MismatchedEngine {
 
     fn advance(
         &self,
-        state: lash_execution_contracts::process::EngineState,
+        _state: lash_execution_contracts::process::EngineState,
         _event: lash_execution_contracts::process::EngineEvent,
     ) -> Result<
-        (
-            lash_execution_contracts::process::EngineState,
-            lash_execution_contracts::process::EngineAction,
-        ),
+        lash_execution_contracts::process::EngineTransition,
         lash_execution_contracts::process::ProcessInfraError,
     > {
-        Ok((
-            state,
-            lash_execution_contracts::process::EngineAction::Terminal(
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Terminal(
                 lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
                     lash_core::ToolCallOutput::success(
                         serde_json::json!({ "fixture": "complete" }),
                     ),
                 ),
             ),
-        ))
+        )
     }
 
     async fn resolve(

@@ -1001,7 +1001,7 @@ impl ProcessEngine for SleepEngine {
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<lash_execution_contracts::process::EngineTransition, ProcessInfraError> {
         let script: Value = match &event {
             EngineEvent::Started { payload } => payload.clone(),
             _ => serde_json::from_slice(&state.bytes).map_err(infra)?,
@@ -1011,27 +1011,39 @@ impl ProcessEngine for SleepEngine {
                 until: DurableInstant(script["until_ms"].as_i64().unwrap_or_default()),
                 site: None,
             },
-            EngineEvent::Woke => EngineAction::Terminal(ProcessOutcome::from_tool_output(
-                ToolCallOutput::success(json!({ "slept": true })),
-            )),
+            EngineEvent::Woke => {
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        ProcessOutcome::from_tool_output(ToolCallOutput::success(
+                            json!({ "slept": true }),
+                        )),
+                    ),
+                );
+            }
             EngineEvent::Cancelled { origin, .. } => {
-                EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
-                    ToolCancellation::runtime("the sleep engine answered its cancel")
-                        .with_origin(origin),
-                )))
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
+                            ToolCancellation::runtime("the sleep engine answered its cancel")
+                                .with_origin(origin),
+                        )),
+                    ),
+                );
             }
             _ => EngineAction::Idle,
         };
-        Ok((
-            EngineState {
-                staged: Vec::new(),
-                format: self.state_format(),
-                bytes: serde_json::to_vec(&script).map_err(infra)?,
-                pages: None,
-                requirements: Default::default(),
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Continue {
+                state: EngineState {
+                    staged: Vec::new(),
+                    format: self.state_format(),
+                    bytes: serde_json::to_vec(&script).map_err(infra)?,
+                    pages: None,
+                    requirements: Default::default(),
+                },
+                action,
             },
-            action,
-        ))
+        )
     }
 
     fn start_artifacts(

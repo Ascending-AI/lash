@@ -561,10 +561,7 @@ impl lash_execution_contracts::process::ProcessEngine for Engine {
         _state: lash_execution_contracts::process::EngineState,
         _event: lash_execution_contracts::process::EngineEvent,
     ) -> Result<
-        (
-            lash_execution_contracts::process::EngineState,
-            lash_execution_contracts::process::EngineAction,
-        ),
+        lash_execution_contracts::process::EngineTransition,
         lash_execution_contracts::process::ProcessInfraError,
     > {
         unreachable!("cleanup never advances a process")

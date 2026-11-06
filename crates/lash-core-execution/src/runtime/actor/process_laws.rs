@@ -390,10 +390,10 @@ fn settled_name(outcome: &SettledOutput) -> &'static str {
     }
 }
 
-fn ended(value: Value) -> EngineAction {
-    EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::success(
-        value,
-    )))
+fn ended(value: Value) -> lash_execution_contracts::process::EngineTransition {
+    lash_execution_contracts::process::EngineTransition::Terminal(ProcessOutcome::from_tool_output(
+        ToolCallOutput::success(value),
+    ))
 }
 
 #[async_trait::async_trait]
@@ -507,7 +507,7 @@ impl ProcessEngine for LawEngine {
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<lash_execution_contracts::process::EngineTransition, ProcessInfraError> {
         let mut script: Value = match &event {
             EngineEvent::Started { payload } => payload.clone(),
             _ => serde_json::from_slice(&state.bytes).map_err(infra)?,
@@ -535,7 +535,7 @@ impl ProcessEngine for LawEngine {
                     name: KeyName(PEER_KEY.to_owned()),
                     bound: lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd,
                 },
-                "complete" => ended(json!({"real_terminal": true})),
+                "complete" => return Ok(ended(json!({"real_terminal": true}))),
                 "retry" => law_step("flaky", LAW_FLAKY),
                 "park" => law_step("park", LAW_PARK),
                 "park_two" => EngineAction::Steps {
@@ -574,10 +574,10 @@ impl ProcessEngine for LawEngine {
                 _ => EngineAction::Idle,
             },
             EngineEvent::StepSettled { outcome, .. } if act == "retry" || act == "park" => {
-                ended(json!({
+                return Ok(ended(json!({
                     "settled": settled_name(&outcome),
                     "payload": outcome.payload(),
-                }))
+                })));
             }
             EngineEvent::StepSettled { .. }
                 if act == "fan" || act == "chain" || act == "paged_chain" =>
@@ -588,7 +588,7 @@ impl ProcessEngine for LawEngine {
                     act.as_str(),
                     settled < script["steps"].as_u64().unwrap_or(0),
                 ) {
-                    (_, false) => ended(json!({ "settled": settled })),
+                    (_, false) => return Ok(ended(json!({ "settled": settled }))),
                     ("chain" | "paged_chain", true) => EngineAction::Steps {
                         steps: vec![chain_link(&act, settled)],
                         wake: None,
@@ -602,7 +602,7 @@ impl ProcessEngine for LawEngine {
             EngineEvent::ExternalResolved {
                 resolution: Resolution::Ok(value),
                 ..
-            } if act == "key" => ended(json!({ "resolved": value })),
+            } if act == "key" => return Ok(ended(json!({ "resolved": value }))),
             EngineEvent::ExternalResolved {
                 resolution: Resolution::Ok(peer),
                 ..
@@ -613,38 +613,44 @@ impl ProcessEngine for LawEngine {
             }
             EngineEvent::Cancelled { .. } if act == "stuck" => EngineAction::Idle,
             EngineEvent::Cancelled { origin, .. } => {
-                EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
-                    ToolCancellation::runtime("the law engine answered its cancel")
-                        .with_origin(origin),
-                )))
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
+                            ToolCancellation::runtime("the law engine answered its cancel")
+                                .with_origin(origin),
+                        )),
+                    ),
+                );
             }
             EngineEvent::ProcessWaitTimedOut { process } => {
-                ended(json!({ "timed_out": process.as_str() }))
+                return Ok(ended(json!({ "timed_out": process.as_str() })));
             }
             EngineEvent::ProcessEnded { process, .. } => {
-                ended(json!({ "ended": process.as_str() }))
+                return Ok(ended(json!({ "ended": process.as_str() })));
             }
-            EngineEvent::Woke if act == "flap" => ended(json!({ "woke": true })),
+            EngineEvent::Woke if act == "flap" => return Ok(ended(json!({ "woke": true }))),
             _ => EngineAction::Idle,
         };
         let bytes = serde_json::to_vec(&script).map_err(infra)?;
-        Ok((
-            EngineState {
-                staged: Vec::new(),
-                format: if act == "wrong_format" {
-                    EngineStateFormat {
-                        kind: "another-engine".into(),
-                        version: 99,
-                    }
-                } else {
-                    self.state_format()
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Continue {
+                state: EngineState {
+                    staged: Vec::new(),
+                    format: if act == "wrong_format" {
+                        EngineStateFormat {
+                            kind: "another-engine".into(),
+                            version: 99,
+                        }
+                    } else {
+                        self.state_format()
+                    },
+                    bytes,
+                    pages: None,
+                    requirements: Default::default(),
                 },
-                bytes,
-                pages: None,
-                requirements: Default::default(),
+                action,
             },
-            action,
-        ))
+        )
     }
 
     fn start_artifacts(

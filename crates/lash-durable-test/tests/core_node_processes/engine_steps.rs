@@ -10,17 +10,22 @@ use super::*;
 fn engine_step_advance(
     _state: &mut serde_json::Value,
     event: lash_execution_contracts::process::EngineEvent,
-) -> lash_execution_contracts::process::EngineAction {
+) -> std::ops::ControlFlow<
+    lash_execution_contracts::process::ProcessOutcome,
+    lash_execution_contracts::process::EngineAction,
+> {
     match event {
         lash_execution_contracts::process::EngineEvent::Started { payload } => {
-            lash_execution_contracts::process::EngineAction::Steps {
-                steps: vec![lash_execution_contracts::process::StepRequest::Engine {
-                    step: lash_execution_contracts::process::StepName("double".to_owned()),
-                    kind: lash_execution_contracts::process::EngineStepKind::new(DOUBLE),
-                    input: payload,
-                }],
-                wake: None,
-            }
+            std::ops::ControlFlow::Continue(
+                lash_execution_contracts::process::EngineAction::Steps {
+                    steps: vec![lash_execution_contracts::process::StepRequest::Engine {
+                        step: lash_execution_contracts::process::StepName("double".to_owned()),
+                        kind: lash_execution_contracts::process::EngineStepKind::new(DOUBLE),
+                        input: payload,
+                    }],
+                    wake: None,
+                },
+            )
         }
         lash_execution_contracts::process::EngineEvent::StepSettled { outcome, .. } => {
             answer(serde_json::json!({ "step": settled(&outcome) }))
@@ -28,7 +33,7 @@ fn engine_step_advance(
         lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
             cancelled(origin)
         }
-        _ => lash_execution_contracts::process::EngineAction::Idle,
+        _ => std::ops::ControlFlow::Continue(lash_execution_contracts::process::EngineAction::Idle),
     }
 }
 
@@ -292,17 +297,22 @@ impl lash_execution_contracts::process::EngineSteps for Flaky {
 fn flaky_advance(
     _state: &mut serde_json::Value,
     event: lash_execution_contracts::process::EngineEvent,
-) -> lash_execution_contracts::process::EngineAction {
+) -> std::ops::ControlFlow<
+    lash_execution_contracts::process::ProcessOutcome,
+    lash_execution_contracts::process::EngineAction,
+> {
     match event {
         lash_execution_contracts::process::EngineEvent::Started { .. } => {
-            lash_execution_contracts::process::EngineAction::Steps {
-                steps: vec![lash_execution_contracts::process::StepRequest::Engine {
-                    step: lash_execution_contracts::process::StepName("flaky".to_owned()),
-                    kind: lash_execution_contracts::process::EngineStepKind::new(FLAKY),
-                    input: serde_json::Value::Null,
-                }],
-                wake: None,
-            }
+            std::ops::ControlFlow::Continue(
+                lash_execution_contracts::process::EngineAction::Steps {
+                    steps: vec![lash_execution_contracts::process::StepRequest::Engine {
+                        step: lash_execution_contracts::process::StepName("flaky".to_owned()),
+                        kind: lash_execution_contracts::process::EngineStepKind::new(FLAKY),
+                        input: serde_json::Value::Null,
+                    }],
+                    wake: None,
+                },
+            )
         }
         lash_execution_contracts::process::EngineEvent::StepSettled { outcome, .. } => {
             answer(serde_json::json!({ "step": settled(&outcome) }))
@@ -310,7 +320,7 @@ fn flaky_advance(
         lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
             cancelled(origin)
         }
-        _ => lash_execution_contracts::process::EngineAction::Idle,
+        _ => std::ops::ControlFlow::Continue(lash_execution_contracts::process::EngineAction::Idle),
     }
 }
 
@@ -546,7 +556,10 @@ on_every_tier!(a_missing_engine_step_registration_ends_failed_with_its_typed_rea
 fn failed_step_advance(
     state: &mut serde_json::Value,
     event: lash_execution_contracts::process::EngineEvent,
-) -> lash_execution_contracts::process::EngineAction {
+) -> std::ops::ControlFlow<
+    lash_execution_contracts::process::ProcessOutcome,
+    lash_execution_contracts::process::EngineAction,
+> {
     if let lash_execution_contracts::process::EngineEvent::StepSettled {
         outcome: lash_core_store::tool_run::SettledOutput::Failed(failure),
         ..
@@ -554,7 +567,7 @@ fn failed_step_advance(
     {
         let output =
             serde_json::from_str(failure.payload()).expect("a failed body retains its output");
-        return lash_execution_contracts::process::EngineAction::Terminal(
+        return std::ops::ControlFlow::Break(
             lash_execution_contracts::process::ProcessOutcome::from_tool_output(output),
         );
     }

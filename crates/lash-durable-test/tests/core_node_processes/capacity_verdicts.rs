@@ -116,17 +116,22 @@ impl lash_execution_contracts::process::EngineSteps for Saturating {
 fn saturating_advance(
     _state: &mut serde_json::Value,
     event: lash_execution_contracts::process::EngineEvent,
-) -> lash_execution_contracts::process::EngineAction {
+) -> std::ops::ControlFlow<
+    lash_execution_contracts::process::ProcessOutcome,
+    lash_execution_contracts::process::EngineAction,
+> {
     match event {
         lash_execution_contracts::process::EngineEvent::Started { .. } => {
-            lash_execution_contracts::process::EngineAction::Steps {
-                steps: vec![lash_execution_contracts::process::StepRequest::Engine {
-                    step: lash_execution_contracts::process::StepName(SATURATING.to_owned()),
-                    kind: lash_execution_contracts::process::EngineStepKind::new(SATURATING),
-                    input: serde_json::Value::Null,
-                }],
-                wake: None,
-            }
+            std::ops::ControlFlow::Continue(
+                lash_execution_contracts::process::EngineAction::Steps {
+                    steps: vec![lash_execution_contracts::process::StepRequest::Engine {
+                        step: lash_execution_contracts::process::StepName(SATURATING.to_owned()),
+                        kind: lash_execution_contracts::process::EngineStepKind::new(SATURATING),
+                        input: serde_json::Value::Null,
+                    }],
+                    wake: None,
+                },
+            )
         }
         lash_execution_contracts::process::EngineEvent::StepSettled { outcome, .. } => {
             answer(serde_json::json!({ "step": settled(&outcome) }))
@@ -134,7 +139,7 @@ fn saturating_advance(
         lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
             cancelled(origin)
         }
-        _ => lash_execution_contracts::process::EngineAction::Idle,
+        _ => std::ops::ControlFlow::Continue(lash_execution_contracts::process::EngineAction::Idle),
     }
 }
 

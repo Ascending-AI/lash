@@ -248,7 +248,7 @@ impl ProcessEngine for ProofEngine {
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<lash_execution_contracts::process::EngineTransition, ProcessInfraError> {
         let mut script: Value = match &event {
             EngineEvent::Started { payload } => payload.clone(),
             _ => serde_json::from_slice(&state.bytes).map_err(infra)?,
@@ -283,29 +283,39 @@ impl ProcessEngine for ProofEngine {
                 }
             }
             EngineEvent::ProcessWaitTimedOut { .. } if root => {
-                EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::success(
-                    json!({ "timed_out": true }),
-                )))
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        ProcessOutcome::from_tool_output(ToolCallOutput::success(
+                            json!({ "timed_out": true }),
+                        )),
+                    ),
+                );
             }
             EngineEvent::Cancelled { origin, .. } => {
-                EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
-                    ToolCancellation::runtime("the proof engine answered its cancel")
-                        .with_origin(origin),
-                )))
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
+                            ToolCancellation::runtime("the proof engine answered its cancel")
+                                .with_origin(origin),
+                        )),
+                    ),
+                );
             }
             _ => EngineAction::Idle,
         };
         let bytes = serde_json::to_vec(&script).map_err(infra)?;
-        Ok((
-            EngineState {
-                staged: Vec::new(),
-                format: self.state_format(),
-                bytes,
-                pages: None,
-                requirements: Default::default(),
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Continue {
+                state: EngineState {
+                    staged: Vec::new(),
+                    format: self.state_format(),
+                    bytes,
+                    pages: None,
+                    requirements: Default::default(),
+                },
+                action,
             },
-            action,
-        ))
+        )
     }
 
     fn start_artifacts(

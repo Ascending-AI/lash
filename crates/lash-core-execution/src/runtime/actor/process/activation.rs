@@ -1069,13 +1069,27 @@ impl ProcessActivation {
             return Ok(Pass::Again);
         }
         let ending = Ending::of(&event);
-        let (next, action) = match engine.advance(Arc::unwrap_or_clone(state), event) {
+        let transition = match engine.advance(Arc::unwrap_or_clone(state), event) {
             Ok(transition) => transition,
             Err(error) => {
                 let reason = ProcessParkReason::AdvanceRefused {
                     message: error.into_plugin_error().to_string(),
                 };
                 return self.park(owned, tx, &reason).await;
+            }
+        };
+        let (next, action) = match transition {
+            lash_execution_contracts::process::EngineTransition::Continue { state, action } => {
+                (state, action)
+            }
+            lash_execution_contracts::process::EngineTransition::Terminal(outcome) => {
+                super::waiting::end(&mut tx, process, &record, ending);
+                record_omitted_effects(&mut tx, process, &driver, self.fleet());
+                record_terminal(&mut tx, process, &outcome)?;
+                tx.ack_seen();
+                let nodes = nodes.and(NodeCloses::open(&record, &fold, &driver));
+                self.commit_terminal(owned, tx, process, nodes).await?;
+                return Ok(Pass::Again);
             }
         };
         let declared = engine.state_format();

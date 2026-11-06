@@ -140,21 +140,20 @@ impl ProcessEngine for ReceiverEngine {
         &self,
         state: lash::plugins::EngineState,
         event: lash::plugins::EngineEvent,
-    ) -> std::result::Result<
-        (lash::plugins::EngineState, lash::plugins::EngineAction),
-        ProcessInfraError,
-    > {
+    ) -> std::result::Result<lash::plugins::EngineTransition, ProcessInfraError> {
         // The receiver runs until it is cancelled, and then answers its
         // cancellation.
         let action = match event {
-            lash::plugins::EngineEvent::Cancelled { .. } => lash::plugins::EngineAction::Terminal(
-                ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::cancelled(
-                    lash::tools::ToolCancellation::runtime("the receiver was cancelled"),
-                )),
-            ),
+            lash::plugins::EngineEvent::Cancelled { .. } => {
+                return Ok(lash::plugins::EngineTransition::Terminal(
+                    ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::cancelled(
+                        lash::tools::ToolCancellation::runtime("the receiver was cancelled"),
+                    )),
+                ));
+            }
             _ => lash::plugins::EngineAction::Idle,
         };
-        Ok((state, action))
+        Ok(lash::plugins::EngineTransition::Continue { state, action })
     }
 
     async fn resolve(
@@ -299,13 +298,12 @@ impl ProcessEngine for SourceEngine {
         &self,
         state: lash::plugins::EngineState,
         event: lash::plugins::EngineEvent,
-    ) -> std::result::Result<
-        (lash::plugins::EngineState, lash::plugins::EngineAction),
-        ProcessInfraError,
-    > {
+    ) -> std::result::Result<lash::plugins::EngineTransition, ProcessInfraError> {
         use lash::plugins::{EngineAction, EngineEvent, KeyName};
         let name = || KeyName(SOURCE_KEY_NAME.to_owned());
-        let output = |output| EngineAction::Terminal(ProcessAwaitOutput::from_tool_output(output));
+        let output = |output| {
+            lash::plugins::EngineTransition::Terminal(ProcessAwaitOutput::from_tool_output(output))
+        };
         let action = match event {
             EngineEvent::Started { .. } => EngineAction::PinKey {
                 name: name(),
@@ -314,19 +312,25 @@ impl ProcessEngine for SourceEngine {
             },
             EngineEvent::KeyPinned { name, .. } => EngineAction::AwaitExternal { name, site: None },
             EngineEvent::ExternalResolved { resolution, .. } => match resolution {
-                lash::Resolution::Ok(value) => output(lash::tools::ToolCallOutput::success(value)),
-                other => output(lash::tools::ToolCallOutput::cancelled(
-                    lash::tools::ToolCancellation::runtime(format!(
-                        "the source resolved {other:?}"
-                    )),
-                )),
+                lash::Resolution::Ok(value) => {
+                    return Ok(output(lash::tools::ToolCallOutput::success(value)));
+                }
+                other => {
+                    return Ok(output(lash::tools::ToolCallOutput::cancelled(
+                        lash::tools::ToolCancellation::runtime(format!(
+                            "the source resolved {other:?}"
+                        )),
+                    )));
+                }
             },
-            EngineEvent::Cancelled { .. } => output(lash::tools::ToolCallOutput::cancelled(
-                lash::tools::ToolCancellation::runtime("the source was cancelled"),
-            )),
+            EngineEvent::Cancelled { .. } => {
+                return Ok(output(lash::tools::ToolCallOutput::cancelled(
+                    lash::tools::ToolCancellation::runtime("the source was cancelled"),
+                )));
+            }
             _ => EngineAction::Idle,
         };
-        Ok((state, action))
+        Ok(lash::plugins::EngineTransition::Continue { state, action })
     }
 
     async fn resolve(
@@ -467,12 +471,11 @@ impl ProcessEngine for SleeperEngine {
         &self,
         state: lash::plugins::EngineState,
         event: lash::plugins::EngineEvent,
-    ) -> std::result::Result<
-        (lash::plugins::EngineState, lash::plugins::EngineAction),
-        ProcessInfraError,
-    > {
+    ) -> std::result::Result<lash::plugins::EngineTransition, ProcessInfraError> {
         use lash::plugins::{EngineAction, EngineEvent};
-        let output = |output| EngineAction::Terminal(ProcessAwaitOutput::from_tool_output(output));
+        let output = |output| {
+            lash::plugins::EngineTransition::Terminal(ProcessAwaitOutput::from_tool_output(output))
+        };
         let action = match event {
             EngineEvent::Started { payload } => EngineAction::Sleep {
                 until: lash::durable::DurableInstant(
@@ -480,15 +483,19 @@ impl ProcessEngine for SleeperEngine {
                 ),
                 site: None,
             },
-            EngineEvent::Woke => output(lash::tools::ToolCallOutput::success(
-                serde_json::json!({"slept": true}),
-            )),
-            EngineEvent::Cancelled { .. } => output(lash::tools::ToolCallOutput::cancelled(
-                lash::tools::ToolCancellation::runtime("the sleeper was cancelled"),
-            )),
+            EngineEvent::Woke => {
+                return Ok(output(lash::tools::ToolCallOutput::success(
+                    serde_json::json!({"slept": true}),
+                )));
+            }
+            EngineEvent::Cancelled { .. } => {
+                return Ok(output(lash::tools::ToolCallOutput::cancelled(
+                    lash::tools::ToolCancellation::runtime("the sleeper was cancelled"),
+                )));
+            }
             _ => EngineAction::Idle,
         };
-        Ok((state, action))
+        Ok(lash::plugins::EngineTransition::Continue { state, action })
     }
 
     async fn resolve(

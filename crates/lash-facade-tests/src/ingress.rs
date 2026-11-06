@@ -205,13 +205,10 @@ impl lash_execution_contracts::process::ProcessEngine for IngressAdmissionEngine
 
     fn advance(
         &self,
-        state: lash_execution_contracts::process::EngineState,
+        _state: lash_execution_contracts::process::EngineState,
         event: lash_execution_contracts::process::EngineEvent,
     ) -> std::result::Result<
-        (
-            lash_execution_contracts::process::EngineState,
-            lash_execution_contracts::process::EngineAction,
-        ),
+        lash_execution_contracts::process::EngineTransition,
         lash_execution_contracts::process::ProcessInfraError,
     > {
         // The `refuse` program's first transition is refused: its process parks.
@@ -224,16 +221,15 @@ impl lash_execution_contracts::process::ProcessEngine for IngressAdmissionEngine
                 ),
             ));
         }
-        Ok((
-            state,
-            lash_execution_contracts::process::EngineAction::Terminal(
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Terminal(
                 lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
                     lash_core::ToolCallOutput::success(
                         serde_json::json!({"ingress_engine": "ran"}),
                     ),
                 ),
             ),
-        ))
+        )
     }
 
     async fn resolve(

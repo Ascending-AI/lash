@@ -193,7 +193,7 @@ impl ProcessEngine for WorkerEngine {
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<lash_execution_contracts::process::EngineTransition, ProcessInfraError> {
         let mut script: Value = match &event {
             EngineEvent::Started { payload } => json!({ "wait_ms": payload["wait_ms"], "n": 0 }),
             _ => serde_json::from_slice(&state.bytes).map_err(infra)?,
@@ -227,35 +227,41 @@ impl ProcessEngine for WorkerEngine {
                     wake: None,
                 },
             ),
-            EngineEvent::StepSettled { .. } if phase == "step-after" => (
-                "ended",
-                EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::success(
-                    json!({ "transitions": script["n"] }),
-                ))),
-            ),
-            EngineEvent::Cancelled { origin, .. } => (
-                "ended",
-                EngineAction::Terminal(ProcessOutcome::from_tool_output(
-                    ToolCallOutput::cancelled(
-                        ToolCancellation::runtime("the runbook engine answered its cancel")
-                            .with_origin(origin),
+            EngineEvent::StepSettled { .. } if phase == "step-after" => {
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        ProcessOutcome::from_tool_output(ToolCallOutput::success(
+                            json!({ "transitions": script["n"] }),
+                        )),
                     ),
-                )),
-            ),
+                );
+            }
+            EngineEvent::Cancelled { origin, .. } => {
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
+                            ToolCancellation::runtime("the runbook engine answered its cancel")
+                                .with_origin(origin),
+                        )),
+                    ),
+                );
+            }
             _ => (phase.as_str(), EngineAction::Idle),
         };
         script["phase"] = json!(next);
         let bytes = serde_json::to_vec(&script).map_err(infra)?;
-        Ok((
-            EngineState {
-                staged: Vec::new(),
-                format: self.state_format(),
-                bytes,
-                pages: None,
-                requirements: Default::default(),
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Continue {
+                state: EngineState {
+                    staged: Vec::new(),
+                    format: self.state_format(),
+                    bytes,
+                    pages: None,
+                    requirements: Default::default(),
+                },
+                action,
             },
-            action,
-        ))
+        )
     }
 
     fn start_artifacts(

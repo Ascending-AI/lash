@@ -86,10 +86,10 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
     )
 }
 
-fn success(value: Value) -> EngineAction {
-    EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::success(
-        value,
-    )))
+fn success(value: Value) -> lash_execution_contracts::process::EngineTransition {
+    lash_execution_contracts::process::EngineTransition::Terminal(ProcessOutcome::from_tool_output(
+        ToolCallOutput::success(value),
+    ))
 }
 
 fn event_name(event: &EngineEvent) -> String {
@@ -218,7 +218,7 @@ impl ProcessEngine for LawEngine {
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<lash_execution_contracts::process::EngineTransition, ProcessInfraError> {
         let script: Value = match &event {
             EngineEvent::Started { payload } => payload.clone(),
             _ => serde_json::from_slice(&state.bytes).map_err(infra)?,
@@ -228,16 +228,20 @@ impl ProcessEngine for LawEngine {
         let act = script["act"].as_str().unwrap_or_default().to_owned();
         let action = match (act.as_str(), event) {
             (_, EngineEvent::Cancelled { origin, .. }) => {
-                EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
-                    ToolCancellation::runtime("the law engine answered its cancel")
-                        .with_origin(origin),
-                )))
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
+                            ToolCancellation::runtime("the law engine answered its cancel")
+                                .with_origin(origin),
+                        )),
+                    ),
+                );
             }
             ("sleep", EngineEvent::Started { .. }) => EngineAction::Sleep {
                 site: None,
                 until: DurableInstant(script["until_ms"].as_i64().unwrap_or_default()),
             },
-            ("sleep", EngineEvent::Woke) => success(json!({ "slept": true })),
+            ("sleep", EngineEvent::Woke) => return Ok(success(json!({ "slept": true }))),
             ("await", EngineEvent::Started { .. }) => EngineAction::AwaitProcess {
                 site: None,
                 process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
@@ -248,11 +252,13 @@ impl ProcessEngine for LawEngine {
                         .map_or(LONG, Duration::from_millis),
                 ),
             },
-            ("await", EngineEvent::ProcessEnded { outcome, .. }) => success(json!({
-                "ended": serde_json::to_value(lash_protocol_types::Durable(&outcome)).map_err(infra)?,
-            })),
+            ("await", EngineEvent::ProcessEnded { outcome, .. }) => {
+                return Ok(success(json!({
+                    "ended": serde_json::to_value(lash_protocol_types::Durable(&outcome)).map_err(infra)?,
+                })));
+            }
             ("await", EngineEvent::ProcessWaitTimedOut { .. }) => {
-                success(json!({ "timed_out": true }))
+                return Ok(success(json!({ "timed_out": true })));
             }
             ("refused_step", EngineEvent::Started { .. }) => EngineAction::Steps {
                 steps: vec![StepRequest::Engine {
@@ -262,21 +268,25 @@ impl ProcessEngine for LawEngine {
                 }],
                 wake: None,
             },
-            ("refused_step", EngineEvent::StepSettled { .. }) => success(json!({ "ran": true })),
-            ("flaky", EngineEvent::Started { .. }) => success(json!({ "ran": true })),
+            ("refused_step", EngineEvent::StepSettled { .. }) => {
+                return Ok(success(json!({ "ran": true })));
+            }
+            ("flaky", EngineEvent::Started { .. }) => return Ok(success(json!({ "ran": true }))),
             _ => EngineAction::Idle,
         };
         let bytes = serde_json::to_vec(&script).map_err(infra)?;
-        Ok((
-            EngineState {
-                staged: Vec::new(),
-                format: self.state_format(),
-                bytes,
-                pages: None,
-                requirements: Default::default(),
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Continue {
+                state: EngineState {
+                    staged: Vec::new(),
+                    format: self.state_format(),
+                    bytes,
+                    pages: None,
+                    requirements: Default::default(),
+                },
+                action,
             },
-            action,
-        ))
+        )
     }
 
     fn start_artifacts(

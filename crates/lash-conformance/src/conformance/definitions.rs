@@ -204,15 +204,16 @@ impl crate::ProcessEngine for ModuleDefinitionEngine {
 
     fn advance(
         &self,
-        state: crate::EngineState,
+        _state: crate::EngineState,
         _event: crate::EngineEvent,
-    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
-        Ok((
-            state,
-            crate::EngineAction::Terminal(crate::ProcessAwaitOutput::from_tool_output(
-                crate::ToolCallOutput::success(serde_json::Value::Null),
-            )),
-        ))
+    ) -> Result<crate::EngineTransition, crate::ProcessInfraError> {
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Terminal(
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::Value::Null,
+                )),
+            ),
+        )
     }
 }
 

@@ -354,25 +354,24 @@ impl lash_execution_contracts::process::ProcessEngine for HeldProcessEngine {
         state: lash_execution_contracts::process::EngineState,
         event: lash_execution_contracts::process::EngineEvent,
     ) -> Result<
-        (
-            lash_execution_contracts::process::EngineState,
-            lash_execution_contracts::process::EngineAction,
-        ),
+        lash_execution_contracts::process::EngineTransition,
         lash_execution_contracts::process::ProcessInfraError,
     > {
         let action = match event {
             lash_execution_contracts::process::EngineEvent::Cancelled { .. } => {
-                lash_execution_contracts::process::EngineAction::Terminal(
-                    lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
-                        crate::ToolCallOutput::cancelled(crate::ToolCancellation::runtime(
-                            "the held process was cancelled",
-                        )),
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                            crate::ToolCallOutput::cancelled(crate::ToolCancellation::runtime(
+                                "the held process was cancelled",
+                            )),
+                        ),
                     ),
-                )
+                );
             }
             _ => lash_execution_contracts::process::EngineAction::Idle,
         };
-        Ok((state, action))
+        Ok(lash_execution_contracts::process::EngineTransition::Continue { state, action })
     }
 
     async fn resolve(
@@ -537,23 +536,19 @@ impl lash_execution_contracts::process::ProcessEngine for FixtureProcessEngine {
 
     fn advance(
         &self,
-        state: lash_execution_contracts::process::EngineState,
+        _state: lash_execution_contracts::process::EngineState,
         _event: lash_execution_contracts::process::EngineEvent,
     ) -> Result<
-        (
-            lash_execution_contracts::process::EngineState,
-            lash_execution_contracts::process::EngineAction,
-        ),
+        lash_execution_contracts::process::EngineTransition,
         lash_execution_contracts::process::ProcessInfraError,
     > {
-        Ok((
-            state,
-            lash_execution_contracts::process::EngineAction::Terminal(
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Terminal(
                 lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
                     crate::ToolCallOutput::success(serde_json::json!({ "fixture": "complete" })),
                 ),
             ),
-        ))
+        )
     }
 
     async fn resolve(

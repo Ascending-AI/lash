@@ -2,8 +2,9 @@
 //!
 //! An engine never performs an effect. Lash calls
 //! [`ProcessEngine::advance`](super::ProcessEngine::advance) with the
-//! process's committed state and one event; the engine answers its next state
-//! and one action. The new state and the admission of the action (started
+//! process's committed state and one event; the engine answers a continuing
+//! transition with its next state and action, or a terminal with no state.
+//! The new state and the admission of the action (started
 //! step rows, a wait row, a timer) commit in one `process.advance`
 //! transaction before the action runs, so an uncommitted transition is
 //! recomputed by calling `advance` again with the same state and event.
@@ -11,7 +12,7 @@
 //! **Cancel.** A running or waiting process receives
 //! [`EngineEvent::Cancelled`] once, within its grace; the engine may answer
 //! with best-effort [`EngineAction::Steps`], which run within the grace, or
-//! with [`EngineAction::Terminal`]. At `grace_until` lash commits a forced
+//! with [`EngineTransition::Terminal`]. At `grace_until` lash commits a forced
 //! cancellation without calling `advance` again. A parked process, or one
 //! whose state this node cannot decode, ends engine-free: its claimer commits
 //! the terminal from registry state and calls nothing.
@@ -453,7 +454,23 @@ pub struct EngineWake {
     pub site: Option<lash_kernel_value::sites::EffectId>,
 }
 
-/// What an engine asks lash to do next.
+/// The result of advancing a process. Only a continuing process has a next state.
+#[derive(Clone, Debug, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "continuing transitions keep the previous state/action pair inline without a new allocation"
+)]
+pub enum EngineTransition {
+    /// Commit the next state and admit its action in the same transaction.
+    Continue {
+        state: EngineState,
+        action: EngineAction,
+    },
+    /// End the process and delete its previous engine state.
+    Terminal(ProcessOutcome),
+}
+
+/// What a continuing engine asks lash to do next.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EngineAction {
     /// Request cancellation of owned admitted tool steps, then apply `next`.
@@ -511,8 +528,6 @@ pub enum EngineAction {
     /// mailbox event (`Cancelled`, a resolved wait or a settled step)
     /// reaches `advance`.
     Idle,
-    /// End the process.
-    Terminal(ProcessOutcome),
 }
 
 /// What happened to a process since its last transition.

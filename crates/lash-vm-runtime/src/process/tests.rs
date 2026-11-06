@@ -4,6 +4,7 @@ use lash_core_store::tool_run::SettledOutput;
 use lash_execution_contracts::process::EngineAction;
 use lash_execution_contracts::process::EngineEvent;
 use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::EngineTransition;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
 use lash_kernel_value::names::DocumentId;
@@ -125,11 +126,7 @@ fn effect(wait: u64, identity: EffectId) -> Issued {
     }
 }
 
-fn settle(
-    state: EngineState,
-    step: &StepName,
-    outcome: SettledOutput,
-) -> (EngineState, EngineAction) {
+fn settle(state: EngineState, step: &StepName, outcome: SettledOutput) -> EngineTransition {
     advance(
         KernelVersion::NEWEST,
         state,
@@ -167,7 +164,7 @@ fn run_of(action: &EngineAction) -> (StepName, KernelRunInput, Vec<StepRequest>)
 }
 
 fn started() -> (EngineState, StepName) {
-    let (state, action) = advance(
+    let EngineTransition::Continue { state, action } = advance(
         KernelVersion::NEWEST,
         EngineState::empty(state_format(KernelVersion::NEWEST)),
         EngineEvent::Started {
@@ -177,7 +174,9 @@ fn started() -> (EngineState, StepName) {
             }),
         },
     )
-    .expect("a start advances");
+    .expect("a start advances") else {
+        panic!("the process continues");
+    };
     let (run, input, effects) = run_of(&action);
     assert!(input.parked.is_none() && input.deliver.is_empty() && effects.is_empty());
     (state, run)
@@ -190,18 +189,28 @@ fn started() -> (EngineState, StepName) {
 #[test]
 fn a_state_missing_the_origin_of_its_page_admission_or_outcome_is_refused() {
     let (state, run0) = started();
-    let (state, action) = settle(
+    let EngineTransition::Continue { state, action } = settle(
         state,
         &run0,
         parked(vec![effect(10, element(0)), effect(11, element(1))], vec![]),
-    );
+    ) else {
+        panic!("the process continues");
+    };
     let EngineAction::Steps { steps, .. } = &action else {
         panic!("a park on two effects asks for two steps, found {action:?}");
     };
     let (first, second) = (steps[0].step().clone(), steps[1].step().clone());
-    let (state, _) = settle(state, &second, completed("\"b\"".to_owned()));
+    let EngineTransition::Continue { state, .. } =
+        settle(state, &second, completed("\"b\"".to_owned()))
+    else {
+        panic!("the process continues");
+    };
     // Settles while that run is in flight: the state holds its outcome.
-    let (state, _) = settle(state, &first, completed("\"a\"".to_owned()));
+    let EngineTransition::Continue { state, .. } =
+        settle(state, &first, completed("\"a\"".to_owned()))
+    else {
+        panic!("the process continues");
+    };
     let (written, _) = decode(KernelVersion::NEWEST, &state).expect("a written state decodes");
     assert!(
         written.progress.park().is_some()
@@ -259,11 +268,13 @@ fn a_state_missing_the_origin_of_its_page_admission_or_outcome_is_refused() {
 fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order() {
     for observes_cancel in [false, true] {
         let (state, run0) = started();
-        let (state, action) = settle(
+        let EngineTransition::Continue { state, action } = settle(
             state,
             &run0,
             parked(vec![effect(10, element(0)), effect(11, element(1))], vec![]),
-        );
+        ) else {
+            panic!("the process continues");
+        };
         let EngineAction::Steps { steps, wake: None } = &action else {
             panic!("a park on two effects asks for two steps, found {action:?}");
         };
@@ -280,7 +291,11 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         let (first, second) = (steps[0].step().clone(), steps[1].step().clone());
 
         // The second element settles first: the machine runs with it alone.
-        let (state, action) = settle(state, &second, completed("\"b\"".to_owned()));
+        let EngineTransition::Continue { state, action } =
+            settle(state, &second, completed("\"b\"".to_owned()))
+        else {
+            panic!("the process continues");
+        };
         let (run1, input, effects) = run_of(&action);
         assert!(effects.is_empty());
         assert_eq!(
@@ -304,7 +319,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         // Signal cancellation retains the owned wait. A final that won still
         // reaches the machine once, through the same admission and wait identity.
         let (state, run1) = if observes_cancel {
-            let (state, action) = settle(
+            let EngineTransition::Continue { state, action } = settle(
                 state,
                 &run1,
                 parked_with_cancellations(
@@ -313,7 +328,9 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
                         lash_kernel_value::sites::testkit::wait_id(10),
                     )],
                 ),
-            );
+            ) else {
+                panic!("the process continues");
+            };
             let EngineAction::CancelCalls {
                 steps,
                 cancellation,
@@ -336,12 +353,20 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         };
 
         // The first settles while that run is in flight: nothing new is asked.
-        let (state, action) = settle(state, &first, completed("\"a\"".to_owned()));
+        let EngineTransition::Continue { state, action } =
+            settle(state, &first, completed("\"a\"".to_owned()))
+        else {
+            panic!("the process continues");
+        };
         assert_eq!(action, EngineAction::Idle);
 
         // The run parks having asked for nothing: the queued outcome runs it
         // again, and it is the only one delivered.
-        let (state, action) = settle(state, &run1, parked(vec![], vec![]));
+        let EngineTransition::Continue { state, action } =
+            settle(state, &run1, parked(vec![], vec![]))
+        else {
+            panic!("the process continues");
+        };
         let (run2, input, _) = run_of(&action);
         assert_eq!(
             input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
@@ -360,7 +385,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         let outcome = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
             lash_core::ToolCallOutput::success(serde_json::json!(["a", "b"])),
         );
-        let (_, action) = settle(
+        let terminal = settle(
             state,
             &run2,
             completed(
@@ -375,7 +400,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
                 .expect("a run output serializes"),
             ),
         );
-        assert_eq!(action, EngineAction::Terminal(outcome));
+        assert_eq!(terminal, EngineTransition::Terminal(outcome));
     }
 }
 

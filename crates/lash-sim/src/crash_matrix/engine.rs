@@ -91,10 +91,10 @@ pub fn ends_at_once(tag: &str) -> Value {
     json!({ "tag": tag, "act": "ends_at_once" })
 }
 
-fn ended(value: Value) -> EngineAction {
-    EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::success(
-        value,
-    )))
+fn ended(value: Value) -> lash_execution_contracts::process::EngineTransition {
+    lash_execution_contracts::process::EngineTransition::Terminal(ProcessOutcome::from_tool_output(
+        ToolCallOutput::success(value),
+    ))
 }
 
 /// The deployment's process engine.
@@ -215,7 +215,7 @@ impl ProcessEngine for SimProcessEngine {
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<lash_execution_contracts::process::EngineTransition, ProcessInfraError> {
         let mut script: Value = match &event {
             EngineEvent::Started { payload } => payload.clone(),
             _ => serde_json::from_slice(&state.bytes).map_err(infra)?,
@@ -224,13 +224,17 @@ impl ProcessEngine for SimProcessEngine {
         let root = script["act"] == "root";
         let action = match event {
             EngineEvent::Cancelled { origin, .. } => {
-                EngineAction::Terminal(ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
-                    ToolCancellation::runtime("the simulator's engine answered its cancel")
-                        .with_origin(origin),
-                )))
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        ProcessOutcome::from_tool_output(ToolCallOutput::cancelled(
+                            ToolCancellation::runtime("the simulator's engine answered its cancel")
+                                .with_origin(origin),
+                        )),
+                    ),
+                );
             }
             EngineEvent::Started { .. } if script["act"] == "ends_at_once" => {
-                ended(json!({ "ended": true, "tag": script["tag"] }))
+                return Ok(ended(json!({ "ended": true, "tag": script["tag"] })));
             }
             EngineEvent::Started { .. } if root => EngineAction::Steps {
                 steps: vec![step("once", ONCE), step("again", AGAIN)],
@@ -266,24 +270,26 @@ impl ProcessEngine for SimProcessEngine {
                 }
             }
             EngineEvent::ProcessWaitTimedOut { .. } if root => {
-                ended(json!({ "timed_out": true, "key": script["key"] }))
+                return Ok(ended(json!({ "timed_out": true, "key": script["key"] })));
             }
             EngineEvent::ProcessEnded { .. } if root => {
-                ended(json!({ "timed_out": false, "key": script["key"] }))
+                return Ok(ended(json!({ "timed_out": false, "key": script["key"] })));
             }
             _ => EngineAction::Idle,
         };
         let bytes = serde_json::to_vec(&script).map_err(infra)?;
-        Ok((
-            EngineState {
-                staged: Vec::new(),
-                format: self.state_format(),
-                bytes,
-                pages: None,
-                requirements: Default::default(),
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Continue {
+                state: EngineState {
+                    staged: Vec::new(),
+                    format: self.state_format(),
+                    bytes,
+                    pages: None,
+                    requirements: Default::default(),
+                },
+                action,
             },
-            action,
-        ))
+        )
     }
 
     fn start_artifacts(

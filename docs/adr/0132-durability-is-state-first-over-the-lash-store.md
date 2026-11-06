@@ -402,7 +402,12 @@ A host `ProcessEngine` is an explicit state machine:
 
 ```rust
 fn advance(&self, state: EngineState, event: EngineEvent)
-    -> Result<(EngineState, EngineAction), ProcessInfraError>;
+    -> Result<EngineTransition, ProcessInfraError>;
+
+enum EngineTransition {
+    Continue { state: EngineState, action: EngineAction },
+    Terminal(ProcessOutcome),
+}
 
 enum EngineAction {
     Steps(Vec<StepRequest>),                         // admitted executions of catalog tools
@@ -411,7 +416,6 @@ enum EngineAction {
     AwaitProcess { process: ProcessId, bound: ParkBound },
     Sleep { until: DurableInstant },
     Idle,                                            // until the next mailbox event
-    Terminal(ProcessOutcome),
 }
 ```
 

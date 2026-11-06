@@ -330,7 +330,7 @@ impl ProcessEngine for Integrator {
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<lash::plugins::EngineTransition, ProcessInfraError> {
         unreachable!("external signature witness")
     }
     fn start_artifacts(

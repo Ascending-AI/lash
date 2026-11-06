@@ -416,6 +416,7 @@ pub use lash_execution_contracts::process::EngineSteps;
 /// How a host process engine carries a process onto a successor pair its
 /// host names (FIG-6121, D2).
 pub use lash_execution_contracts::process::EngineSuccession;
+pub use lash_execution_contracts::process::EngineTransition;
 pub use lash_execution_contracts::process::EngineWake;
 pub use lash_execution_contracts::process::InlineDefinition;
 pub use lash_execution_contracts::process::InlineStarts;

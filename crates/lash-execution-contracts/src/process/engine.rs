@@ -269,8 +269,8 @@ pub enum ProcessDocumentRefRead {
 use crate::ArtifactStoreError;
 use crate::PluginError;
 use crate::process::{
-    ArgsMismatch, ArgsMode, EngineAction, EngineEvent, EngineSettings, EngineState,
-    EngineStateFormat, EngineStepKind, ProcessDefinitionDraft, ProcessDefinitionError,
+    ArgsMismatch, ArgsMode, EngineEvent, EngineSettings, EngineState, EngineStateFormat,
+    EngineStepKind, EngineTransition, ProcessDefinitionDraft, ProcessDefinitionError,
     ProcessDefinitionRef, ProcessDefinitionResolution, ProcessSignature,
 };
 use lash_core_store::artifact_referrer::{ArtifactName, ReferrerClaim, ResolvedArtifactCleanup};
@@ -300,11 +300,12 @@ pub trait ProcessEngine: Send + Sync {
         payload: &serde_json::Value,
     ) -> Result<Option<EngineSettings>, PluginError>;
     fn settled_ran(&self, kind: &EngineStepKind, output: &SettledOutput) -> SettledRan;
+    /// Return the next state and action, or a terminal outcome with no state.
     fn advance(
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError>;
+    ) -> Result<EngineTransition, ProcessInfraError>;
     fn start_artifacts(
         &self,
         payload: &serde_json::Value,

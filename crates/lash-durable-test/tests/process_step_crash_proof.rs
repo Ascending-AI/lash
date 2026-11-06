@@ -249,7 +249,7 @@ impl ProcessEngine for WriteEngine {
         &self,
         _state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<lash_execution_contracts::process::EngineTransition, ProcessInfraError> {
         let action = match event {
             EngineEvent::Started { payload } => {
                 let step = lash_execution_contracts::process::StepName("write".to_owned());
@@ -263,21 +263,29 @@ impl ProcessEngine for WriteEngine {
                     wake: None,
                 }
             }
-            EngineEvent::StepSettled { outcome, .. } => EngineAction::Terminal(
-                lash_execution_contracts::process::ProcessOutcome::from_tool_output(
-                    lash_core_execution::ToolCallOutput::success(serde_json::json!({
-                        "step": outcome.payload().unwrap_or("interrupted"),
-                    })),
-                ),
-            ),
-            EngineEvent::Cancelled { origin, .. } => EngineAction::Terminal(
-                lash_execution_contracts::process::ProcessOutcome::from_tool_output(
-                    lash_core_execution::ToolCallOutput::cancelled(
-                        lash_core_execution::ToolCancellation::runtime("cancelled")
-                            .with_origin(origin),
+            EngineEvent::StepSettled { outcome, .. } => {
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        lash_execution_contracts::process::ProcessOutcome::from_tool_output(
+                            lash_core_execution::ToolCallOutput::success(serde_json::json!({
+                                "step": outcome.payload().unwrap_or("interrupted"),
+                            })),
+                        ),
                     ),
-                ),
-            ),
+                );
+            }
+            EngineEvent::Cancelled { origin, .. } => {
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        lash_execution_contracts::process::ProcessOutcome::from_tool_output(
+                            lash_core_execution::ToolCallOutput::cancelled(
+                                lash_core_execution::ToolCancellation::runtime("cancelled")
+                                    .with_origin(origin),
+                            ),
+                        ),
+                    ),
+                );
+            }
             _ => EngineAction::Idle,
         };
         let state = EngineState {
@@ -287,7 +295,7 @@ impl ProcessEngine for WriteEngine {
             pages: None,
             requirements: Default::default(),
         };
-        Ok((state, action))
+        Ok(lash_execution_contracts::process::EngineTransition::Continue { state, action })
     }
 
     fn start_artifacts(

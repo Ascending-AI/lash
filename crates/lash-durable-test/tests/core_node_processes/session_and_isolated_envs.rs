@@ -291,18 +291,23 @@ const B_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey
 fn explicit_engine_advance(
     _state: &mut serde_json::Value,
     event: lash_execution_contracts::process::EngineEvent,
-) -> lash_execution_contracts::process::EngineAction {
+) -> std::ops::ControlFlow<
+    lash_execution_contracts::process::ProcessOutcome,
+    lash_execution_contracts::process::EngineAction,
+> {
     match event {
         lash_execution_contracts::process::EngineEvent::Started { payload } => {
-            lash_execution_contracts::process::EngineAction::Steps {
-                steps: vec![lash_execution_contracts::process::StepRequest::Tool {
-                    step: lash_execution_contracts::process::StepName("b".to_owned()),
-                    use_: operations::use_for(&b_runs()[0]),
-                    input: payload,
-                    site: None,
-                }],
-                wake: None,
-            }
+            std::ops::ControlFlow::Continue(
+                lash_execution_contracts::process::EngineAction::Steps {
+                    steps: vec![lash_execution_contracts::process::StepRequest::Tool {
+                        step: lash_execution_contracts::process::StepName("b".to_owned()),
+                        use_: operations::use_for(&b_runs()[0]),
+                        input: payload,
+                        site: None,
+                    }],
+                    wake: None,
+                },
+            )
         }
         lash_execution_contracts::process::EngineEvent::StepSettled { outcome, .. } => {
             answer(serde_json::json!({ "step": settled(&outcome) }))
@@ -310,7 +315,7 @@ fn explicit_engine_advance(
         lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
             cancelled(origin)
         }
-        _ => lash_execution_contracts::process::EngineAction::Idle,
+        _ => std::ops::ControlFlow::Continue(lash_execution_contracts::process::EngineAction::Idle),
     }
 }
 

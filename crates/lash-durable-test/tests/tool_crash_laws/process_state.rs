@@ -177,7 +177,7 @@ impl lash_execution_contracts::process::ProcessEngine for StateEngine {
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<lash_execution_contracts::process::EngineTransition, ProcessInfraError> {
         let mut settled: BTreeMap<String, serde_json::Value> = if state.bytes.is_empty() {
             BTreeMap::new()
         } else {
@@ -201,25 +201,35 @@ impl lash_execution_contracts::process::ProcessEngine for StateEngine {
                         steps: vec![tool_step("observe", STATE_OBSERVE, "Q")],
                         wake: None,
                     },
-                    _ if settled.len() == 2 => EngineAction::Terminal(
-                        lash_execution_contracts::process::ProcessOutcome::from_tool_output(
-                            lash_core_execution::ToolCallOutput::success(serde_json::json!({
-                                "set": settled.get("set").and_then(|answer| find_text(answer, "value")),
-                                "seen": settled.get("observe").and_then(|answer| find_text(answer, "seen")),
-                            })),
-                        ),
-                    ),
+                    _ if settled.len() == 2 => {
+                        return Ok(
+                            lash_execution_contracts::process::EngineTransition::Terminal(
+                                lash_execution_contracts::process::ProcessOutcome::from_tool_output(
+                                    lash_core_execution::ToolCallOutput::success(
+                                        serde_json::json!({
+                                            "set": settled.get("set").and_then(|answer| find_text(answer, "value")),
+                                            "seen": settled.get("observe").and_then(|answer| find_text(answer, "seen")),
+                                        }),
+                                    ),
+                                ),
+                            ),
+                        );
+                    }
                     _ => EngineAction::Idle,
                 }
             }
-            EngineEvent::Cancelled { origin, .. } => EngineAction::Terminal(
-                lash_execution_contracts::process::ProcessOutcome::from_tool_output(
-                    lash_core_execution::ToolCallOutput::cancelled(
-                        lash_core_execution::ToolCancellation::runtime("cancelled")
-                            .with_origin(origin),
+            EngineEvent::Cancelled { origin, .. } => {
+                return Ok(
+                    lash_execution_contracts::process::EngineTransition::Terminal(
+                        lash_execution_contracts::process::ProcessOutcome::from_tool_output(
+                            lash_core_execution::ToolCallOutput::cancelled(
+                                lash_core_execution::ToolCancellation::runtime("cancelled")
+                                    .with_origin(origin),
+                            ),
+                        ),
                     ),
-                ),
-            ),
+                );
+            }
             _ => EngineAction::Idle,
         };
         let state = EngineState {
@@ -229,7 +239,7 @@ impl lash_execution_contracts::process::ProcessEngine for StateEngine {
             pages: None,
             requirements: Default::default(),
         };
-        Ok((state, action))
+        Ok(lash_execution_contracts::process::EngineTransition::Continue { state, action })
     }
 
     fn start_artifacts(

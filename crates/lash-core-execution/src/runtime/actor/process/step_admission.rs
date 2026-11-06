@@ -681,7 +681,6 @@ impl ProcessActivation {
                 });
             }
             EngineAction::Idle => driver.blocked = Some(Blocked::Idle),
-            EngineAction::Terminal(outcome) => return Ok(Some(outcome)),
         }
         super::waiting::settle(tx, process, record, driver, ending);
         Ok(None)

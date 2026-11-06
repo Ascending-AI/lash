@@ -211,7 +211,7 @@ impl ProcessEngine for DrainEngine {
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<lash_execution_contracts::process::EngineTransition, ProcessInfraError> {
         let mut settled = match &event {
             EngineEvent::Started { .. } => 0,
             _ => serde_json::from_slice::<u64>(&state.bytes).map_err(infra)?,
@@ -229,23 +229,29 @@ impl ProcessEngine for DrainEngine {
                         wake: None,
                     }
                 } else {
-                    EngineAction::Terminal(ProcessOutcome::from_tool_output(
-                        ToolCallOutput::success(json!({ "drained": true })),
-                    ))
+                    return Ok(
+                        lash_execution_contracts::process::EngineTransition::Terminal(
+                            ProcessOutcome::from_tool_output(ToolCallOutput::success(
+                                json!({ "drained": true }),
+                            )),
+                        ),
+                    );
                 }
             }
             _ => EngineAction::Idle,
         };
-        Ok((
-            EngineState {
-                staged: Vec::new(),
-                format: self.state_format(),
-                bytes: serde_json::to_vec(&settled).map_err(infra)?,
-                pages: None,
-                requirements: Default::default(),
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Continue {
+                state: EngineState {
+                    staged: Vec::new(),
+                    format: self.state_format(),
+                    bytes: serde_json::to_vec(&settled).map_err(infra)?,
+                    pages: None,
+                    requirements: Default::default(),
+                },
+                action,
             },
-            action,
-        ))
+        )
     }
 
     fn start_artifacts(

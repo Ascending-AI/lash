@@ -503,9 +503,10 @@ A host `ProcessEngine` (`lash::plugins::ProcessEngine`) is an explicit state
 machine
 ([ADR 0132 §10](../adr/0132-durability-is-state-first-over-the-lash-store.md#10-host-process-engines-are-state-machines)).
 Lash calls `advance(state, event)` with the process's committed state and one
-event. The engine answers its next state and one action. The new state and
-the action's admission commit in one `process.advance` transaction before the
-action runs.
+event. The engine returns `EngineTransition::Continue` with its next state and
+action, or `EngineTransition::Terminal` with only its outcome. A continuing
+state and the action's admission commit in one `process.advance` transaction
+before the action runs. A terminal transaction deletes the previous state.
 
 ### Running through the facade
 
@@ -540,7 +541,9 @@ sessions and its processes.
   replay.
 - **There is no `run`.** There is no opaque run method, no `await_terminal`
   and no re-entry from the top. No trait method has a default body.
-- **Effects are actions.** `EngineAction` has seven variants:
+- **Effects are actions.** `EngineTransition::Continue` carries the next state and an
+  `EngineAction`; `EngineTransition::Terminal` carries only the outcome.
+  Continuing actions are:
 
   | Action | Lash does | `advance` next receives |
   | --- | --- | --- |
@@ -550,7 +553,6 @@ sessions and its processes.
   | `AwaitProcess { process, bound }` | Waits on another process's terminal. | `ProcessEnded { process, outcome }` or `ProcessWaitTimedOut { process }` |
   | `Sleep { until }` | Sets a durable due time. | `Woke` |
   | `Idle` | Nothing, with no deadline. | The next mailbox event |
-  | `Terminal(ProcessOutcome)` | Ends the process. | Nothing |
 
   `Cancelled { origin, grace_until }` can arrive whenever the process is waiting. `Started { payload }` is the first event.
 - **Steps.** `StepRequest::Tool { step, tool, input }` names a catalog tool.
@@ -663,7 +665,7 @@ before CI called back, reads it again with `Completions::pinned_keys(P)`.
 use lash::tools::ParkBound;
 use std::time::Duration;
 use lash::plugins::{
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, KeyName,
+    EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineTransition, KeyName,
     ProcessEngine, ProcessInfraError, StepName, StepRequest,
 };
 use lash::process::ProcessOutcome;
@@ -700,7 +702,7 @@ impl ProcessEngine for CiEngine {
         &self,
         state: EngineState,
         event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+    ) -> Result<EngineTransition, ProcessInfraError> {
         let ci: Ci = if state.bytes.is_empty() {
             Ci::New
         } else {
@@ -734,14 +736,18 @@ impl ProcessEngine for CiEngine {
                 } else {
                     // Interrupted (a crash during submit), failed or timed
                     // out: report it; never resubmit a Once step.
-                    (Ci::Waiting, failed("the CI submission did not complete; nothing was relaunched"))
+                    return Ok(EngineTransition::Terminal(failed(
+                        "the CI submission did not complete; nothing was relaunched",
+                    )));
                 }
             }
             (Ci::Waiting, EngineEvent::ExternalResolved { resolution, .. }) => {
-                (Ci::Waiting, from_resolution(resolution))
+                return Ok(EngineTransition::Terminal(from_resolution(resolution)));
             }
             (Ci::Waiting, EngineEvent::ExternalTimedOut { .. }) => {
-                (Ci::Waiting, failed("CI did not answer within 45 minutes; the job may still be running"))
+                return Ok(EngineTransition::Terminal(failed(
+                    "CI did not answer within 45 minutes; the job may still be running",
+                )));
             }
             (_, EngineEvent::Cancelled { .. }) => (
                 Ci::Cancelling,
@@ -753,10 +759,15 @@ impl ProcessEngine for CiEngine {
                     input: serde_json::json!({}),
                 }]),
             ),
-            (Ci::Cancelling, EngineEvent::StepSettled { .. }) => (Ci::Cancelling, cancelled()),
+            (Ci::Cancelling, EngineEvent::StepSettled { .. }) => {
+                return Ok(EngineTransition::Terminal(cancelled()));
+            }
             (ci, _) => (ci, EngineAction::Idle),
         };
-        Ok((self.state(&next)?, action))
+        Ok(EngineTransition::Continue {
+            state: self.state(&next)?,
+            action,
+        })
     }
 
     // program_identity, check_settings, default_settings, start_artifacts,

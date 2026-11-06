@@ -1485,10 +1485,7 @@ impl lash_execution_contracts::process::ProcessEngine for LawEngine {
         state: lash_execution_contracts::process::EngineState,
         event: lash_execution_contracts::process::EngineEvent,
     ) -> Result<
-        (
-            lash_execution_contracts::process::EngineState,
-            lash_execution_contracts::process::EngineAction,
-        ),
+        lash_execution_contracts::process::EngineTransition,
         lash_execution_contracts::process::ProcessInfraError,
     > {
         self.advances.fetch_add(1, Ordering::SeqCst);
@@ -1503,39 +1500,49 @@ impl lash_execution_contracts::process::ProcessEngine for LawEngine {
             (
                 LawEngineMode::SleepUntilCancelled,
                 lash_execution_contracts::process::EngineEvent::Started { .. },
-            ) => Ok((
-                state,
-                lash_execution_contracts::process::EngineAction::Sleep {
-                    until: DurableInstant(i64::MAX / 2),
-                    site: None,
+            ) => Ok(
+                lash_execution_contracts::process::EngineTransition::Continue {
+                    state,
+                    action: lash_execution_contracts::process::EngineAction::Sleep {
+                        until: DurableInstant(i64::MAX / 2),
+                        site: None,
+                    },
                 },
-            )),
+            ),
             (
                 LawEngineMode::RunForever,
                 lash_execution_contracts::process::EngineEvent::Started { .. },
-            ) => Ok((
-                state,
-                lash_execution_contracts::process::EngineAction::Steps {
-                    steps: vec![lash_execution_contracts::process::StepRequest::Engine {
-                        step: lash_execution_contracts::process::StepName("forever".into()),
-                        kind: lash_execution_contracts::process::EngineStepKind::new(HANGING_TOOL),
-                        input: serde_json::Value::Null,
-                    }],
-                    wake: None,
+            ) => Ok(
+                lash_execution_contracts::process::EngineTransition::Continue {
+                    state,
+                    action: lash_execution_contracts::process::EngineAction::Steps {
+                        steps: vec![lash_execution_contracts::process::StepRequest::Engine {
+                            step: lash_execution_contracts::process::StepName("forever".into()),
+                            kind: lash_execution_contracts::process::EngineStepKind::new(
+                                HANGING_TOOL,
+                            ),
+                            input: serde_json::Value::Null,
+                        }],
+                        wake: None,
+                    },
                 },
-            )),
+            ),
             // It ignores its cancel: only lash's forced terminal, at its
             // grace, ends it.
             (
                 LawEngineMode::RunForever,
                 lash_execution_contracts::process::EngineEvent::Cancelled { .. },
-            ) => Ok((state, lash_execution_contracts::process::EngineAction::Idle)),
-            (_, lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. }) => Ok((
-                state,
-                lash_execution_contracts::process::EngineAction::Terminal(process::cancelled(
+            ) => Ok(
+                lash_execution_contracts::process::EngineTransition::Continue {
+                    state,
+                    action: lash_execution_contracts::process::EngineAction::Idle,
+                },
+            ),
+            (_, lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. }) => Ok(
+                lash_execution_contracts::process::EngineTransition::Terminal(process::cancelled(
                     origin, false,
                 )),
-            )),
+            ),
             (_, event) => Err(lash_execution_contracts::process::ProcessInfraError::new(
                 lash_execution_contracts::plugin_error::PluginError::Session(format!(
                     "the law's engine did not expect {event:?}"

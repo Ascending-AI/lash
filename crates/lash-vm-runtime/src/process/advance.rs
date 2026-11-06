@@ -12,6 +12,8 @@
 //! against a recorded outcome: only `kernel_run`, an effect-free stretch of
 //! guest code, is ever run again.
 
+use std::ops::ControlFlow;
+
 use lash_core_store::checkpoint_graph::{GraphRefusal, NodeKind};
 use lash_core_store::tool_run::SettledOutput;
 use lash_execution_contracts::process::EngineAction;
@@ -140,7 +142,7 @@ pub(crate) fn advance(
     writes: KernelVersion,
     state: EngineState,
     event: EngineEvent,
-) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+) -> Result<lash_execution_contracts::process::EngineTransition, ProcessInfraError> {
     if let EngineEvent::Started { payload } = event {
         if !state.bytes.is_empty() {
             return Err(infra("a started process already has state"));
@@ -168,29 +170,42 @@ pub(crate) fn advance(
             steps: vec![request],
             wake: None,
         };
-        return Ok((encode(&state, writes)?, action));
+        return Ok(
+            lash_execution_contracts::process::EngineTransition::Continue {
+                state: encode(&state, writes)?,
+                action,
+            },
+        );
     }
     let (mut decoded, written) = decode(writes, &state)?;
     match transition(&mut decoded, event)? {
-        // An ended process has no state: its terminal transaction deletes
-        // the one it stood on, so the transition hands that back untouched.
-        terminal @ EngineAction::Terminal(_) => Ok((state, terminal)),
-        action => Ok((encode(&decoded, written)?, action)),
+        ControlFlow::Break(outcome) => {
+            Ok(lash_execution_contracts::process::EngineTransition::Terminal(outcome))
+        }
+        ControlFlow::Continue(action) => Ok(
+            lash_execution_contracts::process::EngineTransition::Continue {
+                state: encode(&decoded, written)?,
+                action,
+            },
+        ),
     }
 }
 
 fn transition(
     state: &mut KernelEngineState,
     event: EngineEvent,
-) -> Result<EngineAction, ProcessInfraError> {
+) -> Result<
+    ControlFlow<lash_execution_contracts::process::ProcessOutcome, EngineAction>,
+    ProcessInfraError,
+> {
     match event {
         EngineEvent::Started { .. } => Err(infra("a process started twice")),
-        EngineEvent::Cancelled { origin, .. } => Ok(EngineAction::Terminal(cancelled(origin))),
+        EngineEvent::Cancelled { origin, .. } => Ok(ControlFlow::Break(cancelled(origin))),
         EngineEvent::StepSettled { step, outcome, .. } => step_settled(state, &step, outcome),
-        EngineEvent::Woke => Ok(EngineAction::Idle),
+        EngineEvent::Woke => Ok(ControlFlow::Continue(EngineAction::Idle)),
         // A process is awaited through the await effect, which is a step.
         EngineEvent::ProcessEnded { .. } | EngineEvent::ProcessWaitTimedOut { .. } => {
-            Ok(standing(state))
+            Ok(ControlFlow::Continue(standing(state)))
         }
         EngineEvent::KeyPinned { .. }
         | EngineEvent::ExternalResolved { .. }
@@ -204,7 +219,10 @@ fn step_settled(
     state: &mut KernelEngineState,
     step: &StepName,
     outcome: SettledOutput,
-) -> Result<EngineAction, ProcessInfraError> {
+) -> Result<
+    ControlFlow<lash_execution_contracts::process::ProcessOutcome, EngineAction>,
+    ProcessInfraError,
+> {
     if matches!(&state.progress, Progress::Running { step: running, .. } if running == step) {
         return run_settled(state, outcome);
     }
@@ -215,11 +233,11 @@ fn step_settled(
         .map(|(wait, _)| *wait)
     else {
         // A step the saved run no longer waits on: its owning task cancelled its call.
-        return Ok(standing(state));
+        return Ok(ControlFlow::Continue(standing(state)));
     };
     let Some(outcome) = effect_outcome(&outcome) else {
         // Not final: the step parked on its own wait and settles later.
-        return Ok(standing(state));
+        return Ok(ControlFlow::Continue(standing(state)));
     };
     if let Some(Wait::Step { identity, .. }) = state.waits.remove(&wait) {
         state.settled.push(Delivery {
@@ -229,7 +247,7 @@ fn step_settled(
             source: DeliverySource::Step { step: step.clone() },
         });
     }
-    resume(state, Vec::new())
+    resume(state, Vec::new()).map(ControlFlow::Continue)
 }
 
 /// The outcome a `perform` is answered with for its tool step's record;
@@ -300,7 +318,10 @@ fn resume(
 fn run_settled(
     state: &mut KernelEngineState,
     settled: SettledOutput,
-) -> Result<EngineAction, ProcessInfraError> {
+) -> Result<
+    ControlFlow<lash_execution_contracts::process::ProcessOutcome, EngineAction>,
+    ProcessInfraError,
+> {
     let output = match settled {
         SettledOutput::Completed(output) => {
             serde_json::from_str::<KernelRunOutput>(output.payload())
@@ -309,12 +330,12 @@ fn run_settled(
         SettledOutput::Failed(material) => {
             let output = serde_json::from_str::<lash_core::ToolCallOutput>(material.payload())
                 .map_err(|error| infra(format!("kernel_run failure answered {error}")))?;
-            return Ok(EngineAction::Terminal(
+            return Ok(ControlFlow::Break(
                 lash_execution_contracts::process::ProcessOutcome::from_tool_output(output),
             ));
         }
         SettledOutput::TimedOut { cause, .. } => {
-            return Ok(EngineAction::Terminal(failure(
+            return Ok(ControlFlow::Break(failure(
                 KernelProcessFailureCode::BoundExceeded,
                 format!("the run passed its limit ({cause:?}) before it parked"),
                 None,
@@ -323,7 +344,7 @@ fn run_settled(
         // An interrupted or stopped run reached no park, after every retry
         // its step kind's policy allowed: the process ends.
         unsettled => {
-            return Ok(EngineAction::Terminal(failure(
+            return Ok(ControlFlow::Break(failure(
                 KernelProcessFailureCode::RunUnsettled,
                 format!(
                     "the run reached no park: its step settled {:?}",
@@ -334,7 +355,7 @@ fn run_settled(
         }
     };
     match output {
-        KernelRunOutput::Ended { outcome, .. } => Ok(EngineAction::Terminal(*outcome)),
+        KernelRunOutput::Ended { outcome, .. } => Ok(ControlFlow::Break(*outcome)),
         KernelRunOutput::Parked {
             read_count,
             state: parked,
@@ -426,32 +447,32 @@ fn run_settled(
             state.admissions.retain(|wait, _| held.contains(wait));
             if explicit_cancel {
                 let next = run(state, Some(park), steps)?;
-                return Ok(EngineAction::CancelCalls {
+                return Ok(ControlFlow::Continue(EngineAction::CancelCalls {
                     steps: cancelled,
                     cancellation: lash_protocol_types::ToolCancellation::runtime(
                         "the guest task cancelled its call",
                     )
                     .with_origin(lash_protocol_types::CancelOrigin::ModelRequested),
                     next: Box::new(next),
-                });
+                }));
             }
             if !state.settled.is_empty() {
-                return run(state, Some(park), steps);
+                return run(state, Some(park), steps).map(ControlFlow::Continue);
             }
             if state.waits.is_empty() {
                 // The machine parks only on a wait it asked for.
-                return Ok(EngineAction::Terminal(failure(
+                return Ok(ControlFlow::Break(failure(
                     KernelProcessFailureCode::RunUnsettled,
                     "the run parked on no wait",
                     None,
                 )));
             }
             state.progress = Progress::Parked(park);
-            Ok(if steps.is_empty() {
+            Ok(ControlFlow::Continue(if steps.is_empty() {
                 standing(state)
             } else {
                 EngineAction::Steps { steps, wake: None }
-            })
+            }))
         }
     }
 }

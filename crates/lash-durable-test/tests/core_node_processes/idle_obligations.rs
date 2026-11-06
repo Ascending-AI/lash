@@ -20,22 +20,29 @@ const IDLE_ENGINE: &str = "core-node-idle-engine";
 fn idle_engine_advance(
     state: &mut serde_json::Value,
     event: lash_execution_contracts::process::EngineEvent,
-) -> lash_execution_contracts::process::EngineAction {
+) -> std::ops::ControlFlow<
+    lash_execution_contracts::process::ProcessOutcome,
+    lash_execution_contracts::process::EngineAction,
+> {
     match event {
         lash_execution_contracts::process::EngineEvent::Started { payload } => {
             *state = payload;
-            lash_execution_contracts::process::EngineAction::Steps {
-                steps: vec![write_step("write", 1)],
-                wake: None,
-            }
+            std::ops::ControlFlow::Continue(
+                lash_execution_contracts::process::EngineAction::Steps {
+                    steps: vec![write_step("write", 1)],
+                    wake: None,
+                },
+            )
         }
         lash_execution_contracts::process::EngineEvent::StepSettled { .. } => {
-            lash_execution_contracts::process::EngineAction::Sleep {
-                until: lash_core::durable_port::DurableInstant(
-                    state["until_ms"].as_i64().unwrap_or_default(),
-                ),
-                site: None,
-            }
+            std::ops::ControlFlow::Continue(
+                lash_execution_contracts::process::EngineAction::Sleep {
+                    until: lash_core::durable_port::DurableInstant(
+                        state["until_ms"].as_i64().unwrap_or_default(),
+                    ),
+                    site: None,
+                },
+            )
         }
         lash_execution_contracts::process::EngineEvent::Woke => {
             answer(serde_json::json!({ "woke": true }))
@@ -43,7 +50,7 @@ fn idle_engine_advance(
         lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
             cancelled(origin)
         }
-        _ => lash_execution_contracts::process::EngineAction::Idle,
+        _ => std::ops::ControlFlow::Continue(lash_execution_contracts::process::EngineAction::Idle),
     }
 }
 

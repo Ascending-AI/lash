@@ -1008,7 +1008,10 @@ on_every_tier!(a_childs_model_usage_stays_on_the_childs_own_turn: sqlite_memory)
 type Advance = fn(
     &mut serde_json::Value,
     lash_execution_contracts::process::EngineEvent,
-) -> lash_execution_contracts::process::EngineAction;
+) -> std::ops::ControlFlow<
+    lash_execution_contracts::process::ProcessOutcome,
+    lash_execution_contracts::process::EngineAction,
+>;
 
 /// A host process engine of `kind` whose transitions `advance` scripts.
 struct ScriptEngine {
@@ -1023,8 +1026,13 @@ fn infra(error: impl std::fmt::Display) -> lash_execution_contracts::process::Pr
 }
 
 /// The terminal that carries `value` as the process's answer.
-fn answer(value: serde_json::Value) -> lash_execution_contracts::process::EngineAction {
-    lash_execution_contracts::process::EngineAction::Terminal(
+fn answer(
+    value: serde_json::Value,
+) -> std::ops::ControlFlow<
+    lash_execution_contracts::process::ProcessOutcome,
+    lash_execution_contracts::process::EngineAction,
+> {
+    std::ops::ControlFlow::Break(
         lash_execution_contracts::process::ProcessOutcome::from_tool_output(
             lash_core::ToolCallOutput::success(value),
         ),
@@ -1152,10 +1160,7 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
         state: lash_execution_contracts::process::EngineState,
         event: lash_execution_contracts::process::EngineEvent,
     ) -> Result<
-        (
-            lash_execution_contracts::process::EngineState,
-            lash_execution_contracts::process::EngineAction,
-        ),
+        lash_execution_contracts::process::EngineTransition,
         lash_execution_contracts::process::ProcessInfraError,
     > {
         let mut script = if state.bytes.is_empty() {
@@ -1163,17 +1168,24 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
         } else {
             serde_json::from_slice(&state.bytes).map_err(infra)?
         };
-        let action = (self.advance)(&mut script, event);
-        Ok((
-            lash_execution_contracts::process::EngineState {
-                staged: Vec::new(),
-                format: self.state_format(),
-                bytes: serde_json::to_vec(&script).map_err(infra)?,
-                pages: None,
-                requirements: Default::default(),
+        let action = match (self.advance)(&mut script, event) {
+            std::ops::ControlFlow::Continue(action) => action,
+            std::ops::ControlFlow::Break(outcome) => {
+                return Ok(lash_execution_contracts::process::EngineTransition::Terminal(outcome));
+            }
+        };
+        Ok(
+            lash_execution_contracts::process::EngineTransition::Continue {
+                state: lash_execution_contracts::process::EngineState {
+                    staged: Vec::new(),
+                    format: self.state_format(),
+                    bytes: serde_json::to_vec(&script).map_err(infra)?,
+                    pages: None,
+                    requirements: Default::default(),
+                },
+                action,
             },
-            action,
-        ))
+        )
     }
 
     fn start_artifacts(
@@ -1221,8 +1233,11 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
 /// A cancel answered at once: what every scripted engine does with one.
 fn cancelled(
     origin: lash_protocol_types::CancelOrigin,
-) -> lash_execution_contracts::process::EngineAction {
-    lash_execution_contracts::process::EngineAction::Terminal(
+) -> std::ops::ControlFlow<
+    lash_execution_contracts::process::ProcessOutcome,
+    lash_execution_contracts::process::EngineAction,
+> {
+    std::ops::ControlFlow::Break(
         lash_execution_contracts::process::ProcessOutcome::from_tool_output(
             lash_core::ToolCallOutput::cancelled(
                 lash_core::ToolCancellation::runtime("the scripted engine answered its cancel")
@@ -1589,10 +1604,13 @@ const HOLD_ENGINE: &str = "core-node-hold-engine";
 fn holding_engine_advance(
     _state: &mut serde_json::Value,
     event: lash_execution_contracts::process::EngineEvent,
-) -> lash_execution_contracts::process::EngineAction {
+) -> std::ops::ControlFlow<
+    lash_execution_contracts::process::ProcessOutcome,
+    lash_execution_contracts::process::EngineAction,
+> {
     match event {
         lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
-            lash_execution_contracts::process::EngineAction::Terminal(
+            std::ops::ControlFlow::Break(
                 lash_execution_contracts::process::ProcessOutcome::from_tool_output(
                     lash_core::ToolCallOutput::cancelled(
                         lash_core::ToolCancellation::runtime("host cancelled").with_origin(origin),
@@ -1600,7 +1618,7 @@ fn holding_engine_advance(
                 ),
             )
         }
-        _ => lash_execution_contracts::process::EngineAction::Idle,
+        _ => std::ops::ControlFlow::Continue(lash_execution_contracts::process::EngineAction::Idle),
     }
 }
 
@@ -1726,7 +1744,10 @@ const ISOLATED_TOOL: &str = "iso.run";
 fn isolated_engine_advance(
     _state: &mut serde_json::Value,
     event: lash_execution_contracts::process::EngineEvent,
-) -> lash_execution_contracts::process::EngineAction {
+) -> std::ops::ControlFlow<
+    lash_execution_contracts::process::ProcessOutcome,
+    lash_execution_contracts::process::EngineAction,
+> {
     match event {
         lash_execution_contracts::process::EngineEvent::Started { payload } => {
             answer(serde_json::json!({ "isolated": payload }))
@@ -1734,7 +1755,7 @@ fn isolated_engine_advance(
         lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
             cancelled(origin)
         }
-        _ => lash_execution_contracts::process::EngineAction::Idle,
+        _ => std::ops::ControlFlow::Continue(lash_execution_contracts::process::EngineAction::Idle),
     }
 }
 
@@ -2066,7 +2087,10 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
     fn advance(
         _: &mut serde_json::Value,
         event: lash_execution_contracts::process::EngineEvent,
-    ) -> lash_execution_contracts::process::EngineAction {
+    ) -> std::ops::ControlFlow<
+        lash_execution_contracts::process::ProcessOutcome,
+        lash_execution_contracts::process::EngineAction,
+    > {
         let lash_execution_contracts::process::EngineEvent::Started { payload } = event else {
             panic!("the engine completes at its start");
         };
@@ -2084,7 +2108,7 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
         } else {
             lash_core::ToolCallOutput::success(serde_json::json!({"answer": 42}))
         };
-        lash_execution_contracts::process::EngineAction::Terminal(
+        std::ops::ControlFlow::Break(
             lash_execution_contracts::process::ProcessOutcome::from_tool_output(output),
         )
     }
