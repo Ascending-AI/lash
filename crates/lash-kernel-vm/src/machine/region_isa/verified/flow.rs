@@ -130,6 +130,14 @@ impl Flow {
             },
             _ => None,
         };
+        // The slot each register of the step's before state holds, the
+        // first role naming it winning.
+        let held: std::collections::HashMap<u32, Slot> = before
+            .roles
+            .iter()
+            .rev()
+            .map(|(slot, reg)| (reg.index(), *slot))
+            .collect();
         let mut groups = Vec::new();
         let mut quotes = Vec::new();
         let mut amount = |amount: &IndexedAmount| -> Result<Amount, RegionError> {
@@ -162,9 +170,8 @@ impl Flow {
                                                     ),
                                                 );
                                             }
-                                            before.roles.iter().find_map(|(slot, actual)| {
-                                                (actual == reg).then(|| root(*slot, *reg))
-                                            })
+                                            held.get(&reg.index())
+                                                .map(|slot| root(*slot, *reg))
                                         })
                                         .collect::<Result<_, RegionError>>()?;
                                     let index = groups.len();

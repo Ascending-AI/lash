@@ -2,8 +2,6 @@
 //! served to a frame's next step re-enters the region at the route of the
 //! event it is born at.
 use super::*;
-use crate::compile::region_isa::{compile_region, verify_region};
-use crate::compile::room::region::calls::region_isa::compile_calls;
 use crate::machine::{Completion, Control, Halt, Interrupt, TryPhase, fault};
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_state::kernel_internals::logical::Slot;
@@ -114,9 +112,7 @@ impl KernelMachine {
         }
         let id = frame.code;
         let refused = |error| fault(&format!("canonical region admission refused: {error:?}"));
-        let draft = compile_region(&self.exe, id).map_err(refused)?;
-        let calls = compile_calls(&self.exe, &draft).map_err(refused)?;
-        let code = verify_region(&self.exe, id, draft, &calls).map_err(refused)?;
+        let code = self.exe.region(id).map_err(refused)?;
         let tables = verified::Code::bind(self, &code).map_err(|error| match error {
             RegionError::Heap(error) => error.into(),
             RegionError::Invalid(reason) => refused(reason),

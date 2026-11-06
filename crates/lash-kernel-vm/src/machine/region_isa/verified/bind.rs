@@ -28,11 +28,23 @@ pub(super) struct SessionCell {
 }
 
 /// The position of a session register among the verified session roles.
+/// The ordinal among the region's session roles of the one `register`
+/// holds. Roles are sorted and numbered in order, so a role's register is
+/// its index and the session roles are contiguous.
 pub(super) fn session_index(code: &RegionCode, register: u32) -> Option<usize> {
-    code.roles()
-        .iter()
-        .filter(|(role, _)| matches!(role, Role::Session(_)))
-        .position(|(_, reg)| reg.index() == register)
+    let roles = code.roles();
+    let index = usize::try_from(register).ok()?;
+    let session = |(role, _): &(Role, _)| matches!(role, Role::Session(_));
+    match roles.get(index) {
+        Some(entry @ (_, reg)) if session(entry) && reg.index() == register => Some(
+            roles[..index]
+                .iter()
+                .rev()
+                .take_while(|entry| session(entry))
+                .count(),
+        ),
+        _ => None,
+    }
 }
 
 pub(super) struct SavedRole {

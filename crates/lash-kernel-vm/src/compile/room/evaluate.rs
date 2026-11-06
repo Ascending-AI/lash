@@ -261,7 +261,10 @@ impl<E: Events> Run<'_, E> {
         }
         if matches!(node, doc::Node::Expr(doc::Expr::Act(act)) if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_)) | doc::ActKind::Spawn(doc::Callee::Value(_))))
         {
-            self.step(site, Phase::Open)?;
+            let exit = self.step(site, Phase::Open)?;
+            if exit != ExitKind::Normal {
+                return Ok(exit);
+            }
         }
         match node {
             doc::Node::Expr(doc::Expr::If { .. }) | doc::Node::Stmt(doc::Stmt::If { .. }) => {
@@ -373,7 +376,10 @@ impl<E: Events> Run<'_, E> {
                             return Ok(exit);
                         }
                     }
-                    self.step(site, Phase::Test)?;
+                    let exit = self.step(site, Phase::Test)?;
+                    if exit != ExitKind::Normal {
+                        return Ok(exit);
+                    }
                     match self.child(node, site, 1)? {
                         ExitKind::Normal => {}
                         // A selected Catch ends a suffix carrying its departure.

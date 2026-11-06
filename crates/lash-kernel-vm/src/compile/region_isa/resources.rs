@@ -35,12 +35,12 @@ impl IndexedAmount {
         output: Option<&Owner>,
     ) -> Result<Self, Refused> {
         let slots = source.owner_slots()?;
+        // The region's roles are sorted by role, as `roles` builds them.
         let register = |role: Role| {
             roles
-                .iter()
-                .find(|(candidate, _)| *candidate == role)
-                .map(|(_, reg)| *reg)
-                .ok_or(Refused::Facts)
+                .binary_search_by(|(candidate, _)| candidate.cmp(&role))
+                .map(|index| roles[index].1)
+                .map_err(|_| Refused::Facts)
         };
         let terms = terms(amount)
             .iter()
@@ -160,12 +160,17 @@ pub(super) fn node<'a>(source: &'a Source, at: &Site) -> Result<doc::Node<'a>, R
 pub(super) type RoleRegisters = Box<[(Role, Reg<LeaseValue>)]>;
 
 pub(super) fn roles(source: &Source) -> Result<RoleRegisters, Refused> {
+    // Many exits share their owners: each distinct owner expands once.
+    let owners: std::collections::BTreeSet<&Owner> = source
+        .room
+        .exits
+        .iter()
+        .flat_map(|exit| exit.owners.iter())
+        .collect();
     let mut roles = std::collections::BTreeSet::new();
-    for exit in &source.room.exits {
-        for owner in &exit.owners {
-            for root in owner_roots(source, owner)? {
-                roles.extend(root_role(root));
-            }
+    for owner in owners {
+        for root in owner_roots(source, owner)? {
+            roles.extend(root_role(root));
         }
     }
     roles
