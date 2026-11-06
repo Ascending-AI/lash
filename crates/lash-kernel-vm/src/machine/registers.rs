@@ -285,6 +285,7 @@ impl Registers {
         self.window(registers as usize);
     }
 
+    #[cfg(any(test, feature = "testing"))]
     /// Releases the prepared set at every exit of its statement's step.
     #[inline]
     pub(super) fn kill_statement(&mut self) {

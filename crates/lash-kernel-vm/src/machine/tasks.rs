@@ -491,6 +491,7 @@ impl Tasks {
                 .as_ref()
                 .is_some_and(|(_, task)| task.frames.cursor_is_fresh())
     }
+    #[cfg(any(test, feature = "testing"))]
     /// The running statement may have consumed its incoming state before it
     /// finishes reading another task. Its frame must remain resident until
     /// the step completes: Ready alone cannot restore that in-flight resume.

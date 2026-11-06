@@ -800,6 +800,7 @@ impl KernelMachine {
         Ok(top)
     }
 
+    #[cfg(any(test, feature = "testing"))]
     pub(in crate::machine) fn advance_active(
         &mut self,
         task: TaskId,
@@ -871,6 +872,7 @@ impl KernelMachine {
         self.resumed(task, exe, (stmt, ran))
     }
 
+    #[cfg(any(test, feature = "testing"))]
     /// A restored or already resident admitted function re-enters the same
     /// loop at its semantic block/statement boundary. Its existing frame
     /// remains the root owner until the loop returns or materializes it.

@@ -1118,9 +1118,44 @@ impl KernelMachine {
 
     /// Runs one statement of `task`, or resumes the one it waits in.
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
+        if let Some(observer) = self.observer.as_deref() {
+            #[cfg(any(test, feature = "perf-witness"))]
+            if observer.work_witness {
+                crate::perf_witness::step();
+            }
+            #[cfg(not(any(test, feature = "perf-witness")))]
+            let _ = observer;
+            self.observe_step(task, exe);
+        }
+        if self.task(task)?.take_requeue() {
+            // The one more turn a `then yield` wait takes once its outcome
+            // is in, as `yield` takes it (`K-TASK-005`, `K-TASK-006`): it
+            // charges nothing and runs no statement.
+            self.ready.push_back(task)?;
+            self.current = None;
+            return Ok(());
+        }
         if self.resume_source_continuation(task, host)? {
             return Ok(());
         }
+        #[cfg(not(any(test, feature = "testing")))]
+        {
+            let _ = exe;
+            Err(fault("a frame stood outside the region"))
+        }
+        #[cfg(any(test, feature = "testing"))]
+        self.step_source(task, host, exe)
+    }
+
+    /// The source oracle: runs one statement of `task` through the
+    /// statement executor, as laws compare the region against.
+    #[cfg(any(test, feature = "testing"))]
+    fn step_source(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+    ) -> Result<(), Halt> {
         let (link, program) = {
             let frame = self.frame(task)?;
             let program = exe
@@ -1146,6 +1181,7 @@ impl KernelMachine {
         result
     }
 
+    #[cfg(any(test, feature = "testing"))]
     fn step_protected(
         &mut self,
         task: TaskId,
@@ -1160,25 +1196,8 @@ impl KernelMachine {
         // refinement refuses rather than trace them (FIG-6318).
         self.heap.execution_roots_moved();
         self.raised = None;
-        if let Some(observer) = self.observer.as_deref() {
-            #[cfg(any(test, feature = "perf-witness"))]
-            if observer.work_witness {
-                crate::perf_witness::step();
-            }
-            #[cfg(not(any(test, feature = "perf-witness")))]
-            let _ = observer;
-            self.observe_step(task, exe);
-        }
         if self.bounds.memory_meter != crate::MemoryMeter::Off {
             self.pins.clear();
-        }
-        if self.task(task)?.take_requeue() {
-            // The one more turn a `then yield` wait takes once its outcome
-            // is in, as `yield` takes it (`K-TASK-005`, `K-TASK-006`): it
-            // charges nothing and runs no statement.
-            self.ready.push_back(task)?;
-            self.current = None;
-            return Ok(());
         }
         let outcome = match self.task(task)?.take_incoming() {
             Some(incoming) => {
@@ -1190,6 +1209,7 @@ impl KernelMachine {
         self.settle(task, host, exe, outcome)
     }
 
+    #[cfg(any(test, feature = "testing"))]
     /// The statement the top frame waits in continues with its delivered
     /// value at the same semantic coordinate.
     fn delivered(
