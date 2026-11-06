@@ -468,7 +468,7 @@ impl KernelMachine {
                     (Value::Absent, Vec::new(), None, 0)
                 }
             },
-            LibRun::Body(_) | LibRun::Declaration | LibRun::Machine(_) => {
+            LibRun::Body(_) | LibRun::Declaration => {
                 return Err(fault("a served native call has no native answer").into());
             }
         };
