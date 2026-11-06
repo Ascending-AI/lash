@@ -112,15 +112,49 @@ impl Running<'_> {
                 Some(_) => return Err(invalid(Refused::Facts)),
                 None => None,
             };
-            let mut native = None;
+            let mut answered = None;
             match op {
+                // A plain `for` takes its next item as its Test event. An
+                // exhausted one takes no event: what stands before its Test
+                // stands at the event after the loop.
+                RegionOp::Checked {
+                    kernel,
+                    args,
+                    dst,
+                    next,
+                } if matches!(
+                    kernel.kind(),
+                    crate::compile::region_isa::CheckedKind::Cursor { .. }
+                ) =>
+                {
+                    if served.is_some() {
+                        return Err(invalid(Refused::Facts));
+                    }
+                    let crate::compile::region_isa::CheckedKind::Cursor { at, exhausted } =
+                        kernel.kind()
+                    else {
+                        return Err(invalid(Refused::Facts));
+                    };
+                    let iterable = *args.first().ok_or_else(|| invalid(Refused::Facts))?;
+                    let Some(answer) = self.cursor_answer(at, iterable, *dst, *next, *exhausted)?
+                    else {
+                        return self.halt(RegionStop::Boundary);
+                    };
+                    if answer.next == *exhausted {
+                        let edit = self.prepare_control(op, &answer, None, None)?;
+                        self.accept_control(edit);
+                        self.pc = *exhausted;
+                        continue;
+                    }
+                    answered = Some(answer);
+                }
                 RegionOp::Checked { kernel, .. }
                     if matches!(
                         kernel.kind(),
                         crate::compile::region_isa::CheckedKind::Native { .. }
                     ) =>
                 {
-                    native = match served {
+                    answered = match served {
                         Some(Some(value)) => Some(self.delivered_answer(op, value)?),
                         Some(None) => return Err(invalid(Refused::Facts)),
                         None => match self.scalar_answer(op)? {
@@ -230,7 +264,7 @@ impl Running<'_> {
                     }
                     Err(fault) => return Err(storage_fault(fault)),
                 },
-                _ => match native {
+                _ => match answered {
                     Some(answer) => answer,
                     None => self
                         .scalar_answer(op)?

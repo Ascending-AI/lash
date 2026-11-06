@@ -3,7 +3,9 @@ use super::super::*;
 use super::{Running, scalar::ScalarAnswer};
 use crate::compile::region_isa::{LoopPhase, Pc, RegionOp};
 use crate::compile::{BlockId, Form};
+use crate::machine::loops::{Cursor, Header};
 use crate::machine::{Control, TryPhase, controls::Controls};
+use lash_kernel_state::kernel_internals::logical::Slot;
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct LoopState {
@@ -100,6 +102,29 @@ impl Running<'_> {
                     };
                     (stage.info, next)
                 }
+                // A plain `for` starts a pass per item taken; exhausted, it
+                // leaves its loop.
+                crate::compile::region_isa::CheckedKind::Cursor { at, exhausted } => {
+                    let index = self
+                        .code
+                        .program
+                        .loop_at(at)
+                        .ok_or_else(|| invalid(Refused::Facts))?;
+                    let mut next = *self
+                        .loops
+                        .get(self.loop_index(index)?)
+                        .filter(|state| state.active)
+                        .ok_or_else(|| invalid(Refused::Facts))?;
+                    if answer.next == *exhausted {
+                        next.active = false;
+                    } else {
+                        next.started = next
+                            .started
+                            .checked_add(1)
+                            .ok_or_else(|| invalid(Refused::Facts))?;
+                    }
+                    (index, next)
+                }
                 _ => return Ok(None),
             },
             RegionOp::Branch { yes, .. } if branch.is_some() => {
@@ -133,28 +158,29 @@ impl Running<'_> {
         }
     }
 
-    pub(super) fn controls(&self) -> Result<Controls, RegionError> {
-        self.controls_for(&self.code, self.pc, self.frame_index())
-    }
-
     pub(super) fn controls_for(
         &self,
         code: &super::Code,
         pc: Pc,
         frame: usize,
+        roles: &[(Slot, Value)],
     ) -> Result<Controls, RegionError> {
         controls_for(
             code,
             pc,
             &self.loops[frame * self.programs.loops..(frame + 1) * self.programs.loops],
+            roles,
         )
     }
 }
 
+/// The frame's controls at `pc`. A plain `for` walks the value its cursor
+/// role holds in `roles`.
 pub(super) fn controls_for(
     code: &super::Code,
     pc: Pc,
     loops: &[LoopState],
+    roles: &[(Slot, Value)],
 ) -> Result<Controls, RegionError> {
     let point = &code
         .program
@@ -165,6 +191,7 @@ pub(super) fn controls_for(
     place(
         code,
         loops,
+        roles,
         code.exe.code(code.program.code()).body,
         point,
         &mut values,
@@ -175,6 +202,7 @@ pub(super) fn controls_for(
 fn place(
     code: &super::Code,
     loops: &[LoopState],
+    roles: &[(Slot, Value)],
     block: BlockId,
     point: &Point,
     values: &mut Vec<Control>,
@@ -245,13 +273,42 @@ fn place(
                 });
             }
         }
+        Form::For {
+            body, via: None, ..
+        } => {
+            if let Some((info, state)) = active
+                && (nested.is_none() || nested == Some(*body))
+            {
+                let index = code
+                    .program
+                    .loop_at(&info.site)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
+                let slot = code
+                    .program
+                    .loop_cursor_slot(index)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
+                let at = usize::try_from(state.started).map_err(|_| invalid(Refused::Facts))?;
+                let cursor = match roles.iter().find(|(held, _)| *held == slot) {
+                    Some((_, Value::List(id))) => Cursor::List(*id, at),
+                    Some((_, Value::Tuple(tuple))) => Cursor::Tuple(*tuple, at),
+                    _ => return Err(invalid(Refused::Facts)),
+                };
+                values.push(Control::For {
+                    stmt: info.statement,
+                    cursor,
+                    started: state.started,
+                    header: Header::Body,
+                    guard: None,
+                });
+            }
+        }
         Form::For { .. } | Form::Try { .. } if nested.is_some() => {
             return Err(invalid(Refused::Facts));
         }
         _ => {}
     }
     if let Some(nested) = nested {
-        place(code, loops, nested, point, values)?;
+        place(code, loops, roles, nested, point, values)?;
     }
     Ok(())
 }

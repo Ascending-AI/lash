@@ -188,7 +188,12 @@ pub(super) fn unpaid_pc(
         .at;
     let mut index = 0;
     while let Some(info) = code.program.loop_info(index) {
-        if info.while_loop && *unpaid == info.entry {
+        let stepped = info.while_loop
+            || matches!(
+                code.exe.stmt(info.statement).form,
+                crate::compile::Form::For { via: None, .. }
+            );
+        if stepped && *unpaid == info.entry {
             pc = code
                 .program
                 .stage(LoopStage {
@@ -224,14 +229,34 @@ pub(in crate::machine) fn restore_source_controls(
         true
     })?;
     let mut loops = Vec::new();
+    // A plain `for` stands in its body over a list or a tuple, at the
+    // index of the passes it started; what it walks is its one iterated row.
+    let mut walking = 0;
     let mut index = 0;
     while let Some(info) = program.loop_info(index) {
         let mut state = control::LoopState::default();
         for row in &saved {
             if row.site.resolve(access)?.as_ref() == &info.site {
-                if !info.while_loop || state.active {
+                let plain = matches!(
+                    exe.stmt(info.statement).form,
+                    crate::compile::Form::For { via: None, .. }
+                );
+                if state.active
+                    || (!info.while_loop
+                        && !(plain
+                            && row.header == lash_kernel_state::paged::HeaderRecord::Body
+                            && row.cursor.is_some_and(|cursor| {
+                                matches!(
+                                    cursor.kind,
+                                    lash_kernel_state::paged::CursorKind::List
+                                        | lash_kernel_state::paged::CursorKind::Tuple
+                                ) && cursor.position == row.started
+                                    && cursor.guard.is_none()
+                            })))
+                {
                     return Err(malformed());
                 }
+                walking += u64::from(!info.while_loop);
                 state.active = true;
                 state.started = row.started;
             }
@@ -242,7 +267,7 @@ pub(in crate::machine) fn restore_source_controls(
     if loops.iter().filter(|state| state.active).count() != saved.len()
         || !record.finally.is_empty()
         || !record.departing.is_empty()
-        || !record.iterated.is_empty()
+        || record.iterated.len() != walking
     {
         return Err(malformed());
     }
@@ -288,7 +313,7 @@ pub(in crate::machine) fn restore_source_controls(
         )));
     }
     Ok((
-        control::controls_for(&code, pc, &loops).map_err(|_| malformed())?,
+        control::controls_for(&code, pc, &loops, &source.roles).map_err(|_| malformed())?,
         standing(&code, source).map_err(|_| malformed())?,
     ))
 }

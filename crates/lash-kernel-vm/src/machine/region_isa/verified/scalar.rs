@@ -208,14 +208,32 @@ impl Running<'_> {
                 next,
             } => {
                 let value = match kernel.kind() {
-                    CheckedKind::LoopControl { stage, .. } => {
-                        if !self
+                    CheckedKind::LoopControl { stage, iterable } => {
+                        let info = self
                             .code
                             .program
                             .loop_info(stage.info)
-                            .is_some_and(|info| info.while_loop)
-                        {
-                            return Ok(None);
+                            .ok_or_else(|| invalid(Refused::Facts))?;
+                        // A plain `for` steps a list or a tuple here; it is
+                        // entered once its iterable is known to be one.
+                        if !info.while_loop {
+                            if !matches!(
+                                self.code.exe.stmt(info.statement).form,
+                                crate::compile::Form::For { via: None, .. }
+                            ) {
+                                return Ok(None);
+                            }
+                            if stage.phase == crate::compile::region_isa::LoopPhase::Enter {
+                                let walked =
+                                    self.value(iterable.ok_or_else(|| invalid(Refused::Facts))?)?;
+                                if !matches!(
+                                    self.view.kind(walked).map_err(RegionError::Heap)?,
+                                    lash_kernel_doc::ValueKind::List
+                                        | lash_kernel_doc::ValueKind::Tuple
+                                ) {
+                                    return Ok(None);
+                                }
+                            }
                         }
                         return Ok(Some(ScalarAnswer {
                             write: None,

@@ -143,3 +143,62 @@ fn region_fault(error: RegionError) -> LeaseFault {
         )),
     }
 }
+
+impl Running<'_> {
+    /// A plain `for` over a list or a tuple takes the item at the count of
+    /// passes it has started, or ends. `None`: the walked value is cold and
+    /// its step crosses the boundary.
+    pub(super) fn cursor_answer(
+        &mut self,
+        at: &lash_kernel_value::sites::Site,
+        iterable: Reg<LeaseValue>,
+        dst: Reg<LeaseValue>,
+        body: Pc,
+        exhausted: Pc,
+    ) -> Result<Option<ScalarAnswer>, RegionError> {
+        let index = self
+            .code
+            .program
+            .loop_at(at)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        let state = self
+            .loops
+            .get(self.loop_index(index)?)
+            .copied()
+            .filter(|state| state.active)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        let walked = self.value(iterable)?;
+        let found = (|| {
+            if !matches!(self.view.kind(walked)?, ValueKind::List | ValueKind::Tuple) {
+                return Ok(Err(()));
+            }
+            let object = self.view.object(walked)?;
+            Ok(Ok(self
+                .view
+                .lookup(object, &LeaseMember::List(state.started))?))
+        })();
+        let found = match found {
+            Ok(Ok(found)) => found,
+            Ok(Err(())) => return Err(invalid(Refused::Facts)),
+            Err(LeaseFault::BoundaryRequired) => return Ok(None),
+            Err(fault) => return Err(storage_fault(fault)),
+        };
+        Ok(Some(match found {
+            Some(item) => ScalarAnswer {
+                write: Some((
+                    super::bind::physical(&self.code.program, dst)?,
+                    Operand::Dynamic(item),
+                )),
+                next: body,
+                formula: None,
+                native: None,
+            },
+            None => ScalarAnswer {
+                write: None,
+                next: exhausted,
+                formula: None,
+                native: None,
+            },
+        }))
+    }
+}

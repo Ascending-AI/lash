@@ -563,7 +563,8 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                             exhausted: pc(done)?,
                         },
                     },
-                    args: Box::new([]),
+                    // The loop's held iterable is the cursor's only input.
+                    args: Box::new([reg(&roles, &source, &Owner::Operand(at.site.child(0)))?]),
                     dst,
                     next: pc(body)?,
                 }
@@ -1002,6 +1003,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                                     | doc::Stmt::If { .. }
                                     | doc::Stmt::While { .. }
                                     | doc::Stmt::Try(_)
+                                    | doc::Stmt::For { via: None, .. }
                             )
                         ) =>
                 {

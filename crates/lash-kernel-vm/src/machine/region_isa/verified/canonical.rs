@@ -126,7 +126,7 @@ impl Running<'_> {
                 owned: false,
             })
         };
-        frame.control = self.controls_for(code, pc, depth)?;
+        frame.control = self.controls_for(code, pc, depth, &image.roles)?;
         for (index, binding) in code.bindings.iter().enumerate() {
             let Owner::Value { slot, .. } = code
                 .program

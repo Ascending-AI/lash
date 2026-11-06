@@ -131,7 +131,12 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                         return Err(Refused::Retained);
                     }
                 }
-                CheckedKind::Cursor { .. } => state[dst.offset()] = Some(RegisterKind::Value),
+                CheckedKind::Cursor { .. } => {
+                    for reg in args {
+                        read(&state, reg.offset())?;
+                    }
+                    state[dst.offset()] = Some(RegisterKind::Value);
+                }
                 CheckedKind::LoopControl { iterable, .. } => {
                     if let Some(reg) = iterable {
                         read(&state, reg.offset())?;

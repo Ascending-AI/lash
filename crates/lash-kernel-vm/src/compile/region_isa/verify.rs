@@ -803,8 +803,12 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                     return Err(Refused::Facts);
                 }
             }
-            CheckedKind::Cursor { .. } => {
-                if Some(*dst) != expected_output || !args.is_empty() {
+            CheckedKind::Cursor { at, .. } => {
+                // It reads the loop's held iterable, the operand aliased to
+                // its cursor role, and writes the bound item.
+                let iterable =
+                    super::lower::reg(&draft.roles, source, &Owner::Operand(at.child(0)))?;
+                if Some(*dst) != expected_output || args.as_ref() != [iterable] {
                     return Err(Refused::Facts);
                 }
             }
@@ -827,7 +831,12 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                     ) && !(step.at.phase == Phase::Catch
                         && matches!(node, doc::Node::Stmt(doc::Stmt::For { via: None, .. })))
                         && !(step.at.phase == Phase::Commit
-                            && matches!(node, doc::Node::Stmt(doc::Stmt::Try(_))))
+                            && matches!(
+                                node,
+                                doc::Node::Stmt(
+                                    doc::Stmt::Try(_) | doc::Stmt::For { via: None, .. }
+                                )
+                            ))
                 {
                     return Err(Refused::Source);
                 }

@@ -638,6 +638,38 @@ impl RegionCode {
             .find_map(|(role, actual)| (actual == value).then_some(role.slot()))
             .flatten()
     }
+    /// The loop of the statement at `site`.
+    pub(crate) fn loop_at(&self, site: &Site) -> Option<u32> {
+        let index = self
+            .draft
+            .loops
+            .iter()
+            .position(|info| info.site == *site)?;
+        u32::try_from(index).ok()
+    }
+    /// The source slot holding what the plain `for` of loop `index` walks:
+    /// the iterable its Enter stage takes, held at the loop's cursor role.
+    pub(crate) fn loop_cursor_slot(&self, index: u32) -> Option<Slot> {
+        let pc = self.stage(LoopStage {
+            info: index,
+            phase: LoopPhase::Enter,
+        })?;
+        let RegionOp::Checked { kernel, .. } = self.op(pc)? else {
+            return None;
+        };
+        let CheckedKind::LoopControl {
+            iterable: Some(iterable),
+            ..
+        } = kernel.kind()
+        else {
+            return None;
+        };
+        self.draft
+            .roles
+            .iter()
+            .find_map(|(role, actual)| (actual == iterable).then_some(role.slot()))
+            .flatten()
+    }
     /// The atoms a statement call loads at its Enter.
     pub(crate) fn call_atoms(&self, site: CallId) -> Option<&[AtomLoad]> {
         Some(&self.draft.calls.get(site.offset())?.atoms)
