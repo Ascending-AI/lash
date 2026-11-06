@@ -10016,6 +10016,56 @@
         },
         {
           "additionalProperties": false,
+          "properties": {
+            "payload_too_deep": {
+              "properties": {
+                "limit": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "limit"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "payload_too_deep"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "payload_too_many_nodes": {
+              "properties": {
+                "limit": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "observed": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "limit",
+                "observed"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "payload_too_many_nodes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "The document is not admitted, names a library function the worker\nhas not registered, or has no such entry.",
           "properties": {
             "start": {

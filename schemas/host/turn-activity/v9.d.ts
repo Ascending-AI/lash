@@ -3079,6 +3079,17 @@ export type RunRefusal = ({
     [key: string]: unknown;
   };
 } | {
+  "payload_too_deep": {
+    "limit": number;
+    [key: string]: unknown;
+  };
+} | {
+  "payload_too_many_nodes": {
+    "limit": number;
+    "observed": number;
+    [key: string]: unknown;
+  };
+} | {
   "start": {
     "detail": Detail;
     [key: string]: unknown;
