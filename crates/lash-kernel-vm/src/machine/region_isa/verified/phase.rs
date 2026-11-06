@@ -93,7 +93,7 @@ impl<'s> Running<'s> {
             .ok_or_else(|| invalid(Refused::Peak))?
             .max(balance)
             .max(self.counters.peak);
-        if peak > self.limits.memory {
+        if !super::charge::fits_memory(self.limiters, &mut self.limits, peak) {
             return Ok(None);
         }
         let Scratch {
@@ -312,7 +312,7 @@ impl<'s> Running<'s> {
             .ok_or_else(|| invalid(Refused::Peak))?
             .max(balance)
             .max(self.counters.peak);
-        if peak > self.limits.memory {
+        if !super::charge::fits_memory(self.limiters, &mut self.limits, peak) {
             return Ok(None);
         }
         let transfer = match flow.frame_delta {

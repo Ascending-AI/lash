@@ -18,6 +18,46 @@ impl Crossing {
         self.bound == bound && self.charged == charged && charged > bound
     }
 }
+type Limiters = crate::machine::limits::Limiters;
+
+/// Bills under the run's charge limit. At a crossing the charge limiter
+/// decides (FIG-6768), asked at the exact unit that crossed; a grown limit
+/// bills the same events again under it.
+pub(super) fn billed(
+    limiters: &mut Limiters,
+    limits: &mut Limits,
+    bill: impl Fn(Limits) -> Result<Payment, RegionError>,
+) -> Result<Payment, RegionError> {
+    loop {
+        let payment = bill(*limits)?;
+        let Some(crossing) = &payment.crossing else {
+            return Ok(payment);
+        };
+        let mut limit = limits.charge;
+        if limiters
+            .charge_reached(crossing.charged, &mut limit)
+            .is_err()
+        {
+            return Ok(payment);
+        }
+        limits.charge = limit;
+    }
+}
+
+/// Whether a phase reaching `peak` fits the memory bound, the memory limiter
+/// deciding where it does not.
+pub(super) fn fits_memory(limiters: &mut Limiters, limits: &mut Limits, peak: u64) -> bool {
+    if peak <= limits.memory {
+        return true;
+    }
+    let mut limit = limits.memory;
+    if limiters.memory_reached(peak, &mut limit).is_err() {
+        return false;
+    }
+    limits.memory = limit;
+    true
+}
+
 pub(super) struct Payment {
     pub(super) counters: execute::Counters,
     pub(super) crossing: Option<Crossing>,

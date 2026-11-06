@@ -246,6 +246,7 @@ impl<'m> RegionLease<'m> {
             invocations,
             lease,
             root,
+            &mut machine.limiters,
         )?;
         execution.reached = super::resume::reached(&execution.canonical, positions[0].1)?;
         for (index, register, value) in sessions {

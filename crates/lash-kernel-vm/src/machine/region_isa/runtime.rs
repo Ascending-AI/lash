@@ -105,6 +105,7 @@ impl KernelMachine {
                 )),
             })?;
             let prefix = lease.materialize().map_err(halt)?;
+            let (charge_limit, memory) = prefix.limits();
             let attempted = prefix.reconstruction().attempted.clone();
             let result = prefix.reconstruction().payload;
             prefix
@@ -112,6 +113,13 @@ impl KernelMachine {
                 .map_err(halt)?
                 .commit()
                 .map_err(halt)?;
+            // A limiter grew the limits in the run; the machine keeps them.
+            if !matches!(self.bounds.charge, crate::Charge::Off) {
+                self.bounds.charge_limit = charge_limit;
+            }
+            if self.bounds.memory_meter != crate::MemoryMeter::Off {
+                self.bounds.memory = memory;
+            }
             match stop {
                 RegionStop::Complete => {
                     self.end_task(

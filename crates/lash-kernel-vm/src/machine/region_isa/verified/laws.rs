@@ -924,6 +924,7 @@ fn member_operand_peak() {
         // K-LIM-002: base, index and RHS remain live while canonical member
         // scratch borrows another occurrence of each. Overwrite grows no body.
         let peak = before.balance + 3 * Cost::REFERENCE + 1;
+        let entry = execution.limits.memory;
         execution.limits.memory = u64::try_from(i128::from(peak) + offset).unwrap();
         assert_eq!(
             lease.run(StopAt::NextLegalPrefix).unwrap(),
@@ -944,6 +945,11 @@ fn member_operand_peak() {
                 before.peak.max(peak)
             }
         );
+        // Publication takes the limits the lease entered under, or grown.
+        let Executing::Machine(execution) = &mut lease.execution else {
+            unreachable!()
+        };
+        execution.limits.memory = entry;
         lease
             .materialize()
             .unwrap()

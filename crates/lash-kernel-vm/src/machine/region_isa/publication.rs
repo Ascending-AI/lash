@@ -67,14 +67,19 @@ impl<'m> Authority<'m> {
             .canonical
             .take()
             .ok_or_else(|| invalid(Refused::Exit))?;
+        // A limiter only grows the limits the run entered under.
+        let limits = image.limits;
+        if limits.charge < self.limits.charge || limits.memory < self.limits.memory {
+            return Err(invalid(Refused::Facts));
+        }
         if canonical.frames.len() != image.frames.len()
             || publications.frames.len() != image.frames.len()
-            || (image.counters.charge > self.limits.charge
+            || (image.counters.charge > limits.charge
                 && !(image.stop == RegionStop::Refusal
                     && canonical.crossing.as_ref().is_some_and(|crossing| {
-                        crossing.authenticates(self.limits.charge, image.counters.charge)
+                        crossing.authenticates(limits.charge, image.counters.charge)
                     })))
-            || image.counters.peak > self.limits.memory
+            || image.counters.peak > limits.memory
             || image.counters.depth > self.limits.depth
         {
             return Err(invalid(Refused::Facts));
@@ -173,7 +178,7 @@ impl<'m> Authority<'m> {
                     delta: i128::from(image.counters.balance)
                         - i128::from(self.limits.entry_balance),
                 },
-                self.limits.memory,
+                limits.memory,
             )
             .map_err(RegionError::Heap)?;
         Ok(Prepared {

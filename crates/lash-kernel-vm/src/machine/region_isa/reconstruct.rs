@@ -124,6 +124,7 @@ impl<V: View> Execution<V> {
             pending,
             attempted: self.attempted,
             counters: self.counters,
+            limits: self.limits,
             stop,
             payload: self
                 .payload

@@ -43,6 +43,8 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(in crate::machine::region_isa) reached: ReachedPrefix,
     pub(in crate::machine::region_isa) counters: execute::Counters,
     pub(in crate::machine::region_isa) limits: Limits,
+    /// The segment's limiters, asked where a bound is reached in the run.
+    pub(super) limiters: &'m mut crate::machine::limits::Limiters,
     pub(in crate::machine::region_isa) source: source_counters::SourceCounters,
     pub(in crate::machine::region_isa) invocations: invocations::Invocations,
     pub(in crate::machine::region_isa) attempted: Option<Point>,
@@ -116,6 +118,7 @@ impl<'m> Running<'m> {
         invocations: invocations::Invocations,
         mut view: StateLease<'m>,
         canonical: Box<crate::machine::Frame>,
+        limiters: &'m mut crate::machine::limits::Limiters,
     ) -> Result<Self, RegionError> {
         if invocation == 0
             || !invocations.follows(invocation)
@@ -179,6 +182,7 @@ impl<'m> Running<'m> {
             .try_reserve_exact(programs.captures)
             .map_err(|_| invalid(Refused::Scratch))?;
         Ok(Self {
+            limiters,
             call_captures,
             parked: Vec::new(),
             canonical_callees: Vec::new(),

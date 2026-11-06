@@ -73,6 +73,8 @@ pub(crate) struct Reconstruction {
     pending: Option<Value>,
     attempted: Option<Point>,
     counters: execute::Counters,
+    /// The limits the run ended under, grown where a limiter grew them.
+    limits: Limits,
     stop: RegionStop,
     payload: Option<Value>,
     returning: Option<returns::ReturnImage<Value>>,
@@ -174,6 +176,14 @@ impl<'m> RegionLease<'m> {
 impl<'m> MaterializedPrefix<'m> {
     pub(crate) fn reconstruction(&self) -> &Reconstruction {
         &self.reconstruction
+    }
+    /// The charge and memory limits the run ended under, grown where a
+    /// limiter grew them.
+    pub(crate) fn limits(&self) -> (u64, u64) {
+        (
+            self.reconstruction.limits.charge,
+            self.reconstruction.limits.memory,
+        )
     }
     pub(crate) fn prepare_exit(self) -> Result<PreparedRegionExit<'m>, RegionError> {
         let mut reconstruction = self.reconstruction;

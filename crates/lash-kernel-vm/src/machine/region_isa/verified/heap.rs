@@ -12,7 +12,8 @@ fn counters(
     before: execute::Counters,
     delta: i128,
     peak: u64,
-    limit: u64,
+    limiters: &mut crate::machine::limits::Limiters,
+    limits: &mut Limits,
 ) -> Result<Option<execute::Counters>, RegionError> {
     let balance = i128::from(before.balance)
         .checked_add(delta)
@@ -24,11 +25,13 @@ fn counters(
         .ok_or_else(|| invalid(Refused::Peak))?
         .max(balance)
         .max(before.peak);
-    Ok((peak <= limit).then_some(execute::Counters {
-        balance,
-        peak,
-        ..before
-    }))
+    Ok(
+        charge::fits_memory(limiters, limits, peak).then_some(execute::Counters {
+            balance,
+            peak,
+            ..before
+        }),
+    )
 }
 
 impl Running<'_> {
@@ -247,13 +250,10 @@ impl Running<'_> {
                 }
             }
         };
-        let payment = charge::bill(
-            self.counters,
-            self.limits,
-            &step.charges,
-            ChargeMoment::After,
-            None,
-        )?;
+        let entry = self.counters;
+        let payment = charge::billed(self.limiters, &mut self.limits, |limits| {
+            charge::bill(entry, limits, &step.charges, ChargeMoment::After, None)
+        })?;
         self.counters = payment.counters;
         if let Some(crossing) = payment.crossing {
             self.refusal = Some(crate::Bound::Charge);
@@ -276,7 +276,8 @@ impl Running<'_> {
             scratch
                 .checked_add(phase.facts().peak())
                 .ok_or_else(|| invalid(Refused::Peak))?,
-            self.limits.memory,
+            self.limiters,
+            &mut self.limits,
         )?
         else {
             self.refusal = Some(crate::Bound::Memory);
@@ -320,7 +321,8 @@ impl Running<'_> {
                 self.counters,
                 phase.facts().delta(),
                 phase.facts().peak(),
-                self.limits.memory,
+                self.limiters,
+                &mut self.limits,
             )?
             .ok_or_else(|| invalid(Refused::Peak))?;
             phase.reserve().map_err(RegionError::Heap)?.accept();

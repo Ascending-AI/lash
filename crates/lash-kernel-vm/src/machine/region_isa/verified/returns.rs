@@ -62,7 +62,10 @@ impl Running<'_> {
             .view
             .measure(value, lash_kernel_doc::Measure::DeepSize)
             .map_err(storage_fault)?;
-        let payment = charge::export(self.counters, self.limits, size);
+        let counters = self.counters;
+        let payment = charge::billed(self.limiters, &mut self.limits, |limits| {
+            Ok(charge::export(counters, limits, size))
+        })?;
         self.counters = payment.counters;
         if let Some(crossing) = payment.crossing {
             self.refusal = Some(crate::Bound::Charge);
@@ -257,13 +260,17 @@ impl Running<'_> {
                 .program
                 .step(self.pc)
                 .ok_or_else(|| invalid(Refused::Path))?;
-            let payment = charge::bill(
-                self.counters,
-                self.limits,
-                &step.charges,
-                crate::compile::room::charges::region_isa::ChargeMoment::After,
-                Some(incoming.completion),
-            )?;
+            let counters = self.counters;
+            let completion = incoming.completion;
+            let payment = charge::billed(self.limiters, &mut self.limits, |limits| {
+                charge::bill(
+                    counters,
+                    limits,
+                    &step.charges,
+                    crate::compile::room::charges::region_isa::ChargeMoment::After,
+                    Some(completion),
+                )
+            })?;
             self.counters = payment.counters;
             if let Some(crossing) = payment.crossing {
                 self.refusal = Some(crate::Bound::Charge);

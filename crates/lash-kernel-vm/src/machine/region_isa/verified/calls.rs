@@ -145,13 +145,10 @@ impl Running<'_> {
             .program
             .step(self.pc)
             .ok_or_else(|| invalid(Refused::Path))?;
-        let payment = charge::bill(
-            self.counters,
-            self.limits,
-            &step.charges,
-            ChargeMoment::Before,
-            None,
-        )?;
+        let counters = self.counters;
+        let payment = charge::billed(self.limiters, &mut self.limits, |limits| {
+            charge::bill(counters, limits, &step.charges, ChargeMoment::Before, None)
+        })?;
         self.counters = payment.counters;
         if let Some(crossing) = payment.crossing {
             self.refusal = Some(crate::Bound::Charge);
@@ -270,7 +267,7 @@ impl Running<'_> {
             .ok_or_else(|| invalid(Refused::Peak))?
             .max(balance)
             .max(self.counters.peak);
-        if peak > self.limits.memory {
+        if !charge::fits_memory(self.limiters, &mut self.limits, peak) {
             drop(phase);
             self.refusal = Some(crate::Bound::Memory);
             self.attempted = Some(step.at.clone());

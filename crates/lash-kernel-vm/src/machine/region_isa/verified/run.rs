@@ -39,7 +39,9 @@ impl Running<'_> {
             .view
             .measure(value, lash_kernel_doc::Measure::DeepSize)
             .map_err(storage_fault)?;
-        Ok(charge::export(counters, self.limits, size))
+        charge::billed(self.limiters, &mut self.limits, |limits| {
+            Ok(charge::export(counters, limits, size))
+        })
     }
 
     fn halt(&mut self, reason: RegionStop) -> Result<RegionStop, RegionError> {
@@ -132,33 +134,39 @@ impl Running<'_> {
                     Some(Some(_)) => return Err(invalid(Refused::Facts)),
                     // A charge that would not fit refuses below, unserved.
                     None => {
-                        let before = charge::bill(
-                            self.counters,
-                            self.limits,
-                            &step.charges,
-                            ChargeMoment::Before,
-                            None,
-                        )?;
-                        if before.crossing.is_none()
-                            && self
-                                .copy_charge(before.counters, *value)?
-                                .crossing
-                                .is_none()
-                        {
+                        let counters = self.counters;
+                        let before = charge::billed(self.limiters, &mut self.limits, |limits| {
+                            charge::bill(
+                                counters,
+                                limits,
+                                &step.charges,
+                                ChargeMoment::Before,
+                                None,
+                            )
+                        })?;
+                        // The limiter, asked once at a crossing here, is
+                        // not asked again by the step's own billing.
+                        let paid = match before.crossing {
+                            Some(_) => before,
+                            None => self.copy_charge(before.counters, *value)?,
+                        };
+                        let Some(crossing) = paid.crossing else {
                             return self.halt(RegionStop::Effect(*kind));
-                        }
+                        };
+                        self.counters = paid.counters;
+                        self.refusal = Some(crate::Bound::Charge);
+                        self.crossing = Some(crossing);
+                        self.attempted = Some(step.at.clone());
+                        return self.halt(RegionStop::Refusal);
                     }
                 },
                 _ if served.is_some() => return Err(invalid(Refused::Facts)),
                 _ => {}
             }
-            let before = charge::bill(
-                self.counters,
-                self.limits,
-                &step.charges,
-                ChargeMoment::Before,
-                None,
-            )?;
+            let counters = self.counters;
+            let before = charge::billed(self.limiters, &mut self.limits, |limits| {
+                charge::bill(counters, limits, &step.charges, ChargeMoment::Before, None)
+            })?;
             self.counters = before.counters;
             if let Some(crossing) = before.crossing {
                 self.refusal = Some(crate::Bound::Charge);
@@ -261,13 +269,17 @@ impl Running<'_> {
             } else {
                 None
             };
-            let after = charge::bill(
-                self.counters,
-                self.limits,
-                &step.charges,
-                ChargeMoment::After,
-                answer.formula,
-            )?;
+            let counters = self.counters;
+            let formula = answer.formula;
+            let after = charge::billed(self.limiters, &mut self.limits, |limits| {
+                charge::bill(
+                    counters,
+                    limits,
+                    &step.charges,
+                    ChargeMoment::After,
+                    formula,
+                )
+            })?;
             self.counters = after.counters;
             // A root frame's own completion is billed as it leaves; a
             // callee's is billed at its caller's Restore.
@@ -277,7 +289,10 @@ impl Running<'_> {
                         .as_ref()
                         .or(self.departing.as_ref())
                         .map_or(0, |departure| departure.completion);
-                    let payment = charge::export(self.counters, self.limits, completion);
+                    let counters = self.counters;
+                    let payment = charge::billed(self.limiters, &mut self.limits, |limits| {
+                        Ok(charge::export(counters, limits, completion))
+                    })?;
                     self.counters = payment.counters;
                     payment
                 }
