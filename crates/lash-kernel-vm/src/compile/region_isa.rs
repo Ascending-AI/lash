@@ -261,6 +261,11 @@ pub(crate) enum CheckedKind {
     Cleanup {
         at: Site,
     },
+    /// A departure leaves a try's cleanup: it releases the exit the try
+    /// suspended, if any, exactly once; otherwise it goes on unaccepted.
+    Supersede {
+        at: Site,
+    },
     UnpackPair {
         inputs: [Reg<LeaseValue>; 2],
         outputs: [Reg<i64>; 2],
@@ -275,6 +280,20 @@ pub(crate) enum CheckedKind {
     PackInt {
         input: Reg<i64>,
     },
+}
+
+impl CheckedKind {
+    /// A row of a try with cleanup: it suspends, restores or supersedes the
+    /// frame's exit, or completes the cleanup.
+    pub(crate) fn finally(&self) -> bool {
+        matches!(
+            self,
+            Self::Suspend { .. }
+                | Self::Restore { .. }
+                | Self::Supersede { .. }
+                | Self::Cleanup { .. }
+        )
+    }
 }
 impl CheckedKernel {
     pub(crate) fn kind(&self) -> &CheckedKind {

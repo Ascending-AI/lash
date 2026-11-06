@@ -154,7 +154,9 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                         state[dst.offset()] = Some(RegisterKind::Value);
                     }
                 }
-                CheckedKind::Phase | CheckedKind::Cleanup { .. } => {}
+                CheckedKind::Phase
+                | CheckedKind::Cleanup { .. }
+                | CheckedKind::Supersede { .. } => {}
                 _ => return Err(Refused::Facts),
             },
             RegionOp::Branch { test, .. } => {

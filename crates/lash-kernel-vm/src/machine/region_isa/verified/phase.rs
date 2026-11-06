@@ -129,6 +129,7 @@ impl<'s> Running<'s> {
     ) -> Result<Option<PreparedResources<'a, 's>>, RegionError> {
         let invocation = self.reached.invocation;
         let frame = self.frame_index();
+        let superseded = flow.supersede.and_then(|_| self.superseded());
         let Scratch {
             holds,
             releases,
@@ -162,6 +163,10 @@ impl<'s> Running<'s> {
                 None,
             )?;
             releases.push((value, root.capture));
+        }
+        // The exit a superseded try suspended is released once, here.
+        if let Some(value) = superseded {
+            releases.push((value, false));
         }
         if let Some(index) = flow.session {
             let register = flow.destination.ok_or_else(|| invalid(Refused::Facts))?;
@@ -198,10 +203,21 @@ impl<'s> Running<'s> {
             )?;
             holds.push((value, false));
         }
-        for group in &flow.quotes {
+        for (index, group) in flow.quotes.iter().enumerate() {
             quote.clear();
             let mut price = 0_u64;
             let mut cascade = false;
+            if flow.supersede == Some(index)
+                && let Some(value) = superseded
+            {
+                price = self.view.price(value).map_err(RegionError::Heap)?;
+                cascade = self
+                    .view
+                    .inline(value)
+                    .map_err(RegionError::Heap)?
+                    .is_none();
+                quote.push((value, false));
+            }
             for &root in group {
                 if root
                     .session

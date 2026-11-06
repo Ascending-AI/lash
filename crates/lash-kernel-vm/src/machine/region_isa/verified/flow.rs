@@ -44,6 +44,9 @@ pub(super) struct Flow {
     /// The session cell this step writes: it releases the cell's held value
     /// and holds the written one.
     pub(super) session: Option<usize>,
+    /// A Supersede's release quote: the exit its try suspended joins it and
+    /// the step's releases.
+    pub(super) supersede: Option<usize>,
 }
 impl Flow {
     pub(super) fn bind(code: &RegionCode, pc: Pc) -> Result<Self, RegionError> {
@@ -68,6 +71,7 @@ impl Flow {
                         | CheckedKind::Suspend { .. }
                         | CheckedKind::Restore { .. }
                         | CheckedKind::Cleanup { .. }
+                        | CheckedKind::Supersede { .. }
                 ) =>
             {
                 Some(dst.index())
@@ -249,6 +253,21 @@ impl Flow {
         };
         let peak = amount(&step.peak)?;
         let delta = amount(&step.delta)?;
+        let supersede = match code.op(pc) {
+            Some(RegionOp::Checked { kernel, .. })
+                if matches!(kernel.kind(), CheckedKind::Supersede { .. }) =>
+            {
+                let mut released = delta.terms.iter().filter_map(|(fact, _)| match fact {
+                    Fact::Release(index, 0) => Some(*index),
+                    _ => None,
+                });
+                match (released.next(), released.next()) {
+                    (Some(index), None) => Some(index),
+                    _ => return Err(invalid(Refused::Facts)),
+                }
+            }
+            _ => None,
+        };
         let local = match code.op(pc) {
             Some(RegionOp::Checked { kernel, .. }) => match kernel.kind() {
                 CheckedKind::Local { slot, .. } => Some(super::bind::physical(
@@ -287,16 +306,18 @@ impl Flow {
             local,
             destination,
             session,
+            supersede,
         })
     }
     pub(super) fn width(&self) -> usize {
         let session = usize::from(self.session.is_some());
+        let supersede = usize::from(self.supersede.is_some());
         (self.holds.len() + session)
-            .max(self.releases.len() + session)
+            .max(self.releases.len() + session + supersede)
             .max(
                 self.quotes
                     .iter()
-                    .map(|quote| quote.len())
+                    .map(|quote| quote.len() + supersede)
                     .max()
                     .unwrap_or(0),
             )

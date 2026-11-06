@@ -290,6 +290,9 @@ impl Source {
         let mut for_sites = std::collections::BTreeSet::new();
         let mut raised = std::collections::BTreeSet::new();
         let mut suspend: Option<(Site, Site)> = None;
+        // Each try whose cleanup the departure leaves, with that cleanup:
+        // the departure supersedes what the try suspended, if anything.
+        let mut superseding: Vec<(Site, Site)> = Vec::new();
         let mut target: Option<Site> = None;
         let mut target_while = false;
         // The innermost try a raise reaches takes it: true by its catch.
@@ -329,8 +332,12 @@ impl Source {
                         suspend = Some((path.clone(), cleanup));
                     }
                 }
+                doc::Node::Stmt(doc::Stmt::Try(t))
+                    if t.finally.is_some() && *index == if t.catch.is_some() { 2 } else { 1 } =>
+                {
+                    superseding.push((path.clone(), path.child(*index)));
+                }
                 _ if transparent(&path, node, *index) => {}
-                // A return inside cleanup supersedes its pending departure.
                 _ => return Err(Refused::Path),
             }
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
@@ -432,12 +439,22 @@ impl Source {
                 .iter()
                 .rev()
                 .take_while(|site| bound.is_none_or(|bound| site.path.len() > bound.path.len()))
-                .map(|site| Selection::Event {
-                    at: Point {
-                        site: site.clone(),
-                        phase: Phase::Leave,
-                    },
-                    exit: ExitKind::Normal,
+                .flat_map(|site| {
+                    // Leaving a cleanup supersedes its try's suspended exit.
+                    let superseded = superseding.iter().find(|(_, cleanup)| cleanup == site).map(
+                        |(try_site, _)| Selection::Event {
+                            at: point(try_site, Phase::Supersede),
+                            exit: ExitKind::Normal,
+                        },
+                    );
+                    std::iter::once(Selection::Event {
+                        at: Point {
+                            site: site.clone(),
+                            phase: Phase::Leave,
+                        },
+                        exit: ExitKind::Normal,
+                    })
+                    .chain(superseded)
                 }),
         )
         .chain(bound.is_some().then(|| Selection::Event {
@@ -462,6 +479,9 @@ impl Source {
             /// The exit a restored try's body or catch block took, and
             /// whether the try catches.
             restoring: Option<(ExitKind, bool)>,
+            /// The tries whose cleanups the departure leaves: each body
+            /// departed, so its cleanup holds a suspended exit to supersede.
+            superseding: &'a [(Site, Site)],
             blocks: &'a [Site],
             choices: &'a BTreeMap<Site, bool>,
             for_sites: &'a std::collections::BTreeSet<Site>,
@@ -489,6 +509,16 @@ impl Source {
                         _ => ExitKind::Normal,
                     });
                 }
+                // A superseding try's body departed; which exit does not
+                // matter to the cleanup it suspended.
+                if let Some((0, parent)) = site.path.split_last()
+                    && self
+                        .superseding
+                        .iter()
+                        .any(|(try_site, _)| try_site.unit == site.unit && try_site.path == parent)
+                {
+                    return Some(ExitKind::Return);
+                }
                 // The body of an entered catch has already raised.
                 Some(match site.path.split_last() {
                     Some((0, parent))
@@ -511,6 +541,9 @@ impl Source {
                         || (matches!(phase, Phase::Enter | Phase::Next)
                             && self.whiles.contains(site))
                         || (phase == Phase::Catch && self.raised.contains(site))
+                        // A superseding try suspended before the departure.
+                        || (phase == Phase::Suspend
+                            && self.superseding.iter().any(|(try_site, _)| try_site == site))
                         || (self.for_sites.contains(site)
                             && matches!(
                                 phase,
@@ -574,6 +607,7 @@ impl Source {
         let mut suffix = Suffix {
             returning: &at.site,
             restoring: restoring.map(|exit| (exit, catches)),
+            superseding: &superseding,
             blocks: &blocks,
             choices: &choices,
             for_sites: &for_sites,
@@ -595,6 +629,8 @@ impl Source {
                 + raised.len()
                 // A restored try's Catch and Suspend.
                 + 2 * usize::from(restoring.is_some())
+                // A superseding try's Suspend and Supersede.
+                + 2 * superseding.len()
                 // A raising event's completed earlier phases at its own site.
                 + if raising.is_some() {
                     self.room.events.keys().filter(|p| p.site == at.site).count()

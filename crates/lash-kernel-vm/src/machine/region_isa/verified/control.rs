@@ -302,9 +302,10 @@ fn place(
     let catching = point.site == statement.site
         && point.phase == Phase::Catch
         && matches!(statement.form, Form::Try { .. });
-    // A suspended exit stands at its try's Restore until it is restored.
+    // A suspended exit stands at its try's Restore until it is restored,
+    // or at its Supersede until a departure from its cleanup drops it.
     let restoring = point.site == statement.site
-        && point.phase == Phase::Restore
+        && matches!(point.phase, Phase::Restore | Phase::Supersede)
         && matches!(
             statement.form,
             Form::Try {

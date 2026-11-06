@@ -211,15 +211,14 @@ impl Running<'_> {
                     args,
                     dst,
                     next,
-                } if matches!(
-                    kernel.kind(),
-                    crate::compile::region_isa::CheckedKind::Suspend { .. }
-                        | crate::compile::region_isa::CheckedKind::Restore { .. }
-                        | crate::compile::region_isa::CheckedKind::Cleanup { .. }
-                ) =>
-                {
+                } if kernel.kind().finally() => {
                     if served.is_some() {
                         return Err(invalid(Refused::Facts));
+                    }
+                    // A cleanup entered normally has nothing to supersede.
+                    if self.passes(kernel.kind()) {
+                        self.pc = *next;
+                        continue;
                     }
                     let (answer, change) = self.finally_answer(kernel.kind(), args, *dst, *next)?;
                     finally = change;

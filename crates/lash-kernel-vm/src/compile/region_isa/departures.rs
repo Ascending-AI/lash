@@ -67,6 +67,7 @@ fn segments(
     first: Arc<CompiledInterval>,
 ) -> Result<Vec<Arc<CompiledInterval>>, Refused> {
     let mut segments = vec![first];
+    let mut enclosing: Option<Site> = None;
     loop {
         let Some(at) = segments
             .last()
@@ -77,10 +78,15 @@ fn segments(
             return Ok(segments);
         };
         // Each restore leaves a try strictly enclosing the one before.
-        if segments.len() > at.path.len() {
+        if enclosing.as_ref().is_some_and(|inner| {
+            inner.unit != at.unit
+                || inner.path.len() <= at.path.len()
+                || !inner.path.starts_with(&at.path)
+        }) {
             return Err(Refused::Path);
         }
         segments.push(source.compile_restore_suffix(&at, exit)?);
+        enclosing = Some(at);
     }
 }
 
@@ -101,7 +107,8 @@ fn shaped(events: &[&Event], exit: ExitKind, restored: bool) -> bool {
         (true, _) => return false,
         (false, _) => rest,
     };
-    rest.iter().all(|event| event.point.phase == Phase::Leave)
+    rest.iter()
+        .all(|event| matches!(event.point.phase, Phase::Leave | Phase::Supersede))
         && match last.point.phase {
             Phase::Suspend => true,
             Phase::Leave => exit == ExitKind::Return,
@@ -445,7 +452,10 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
             let first = segments[0].events().next().ok_or(Refused::Path)?;
             let row = steps.len();
             let origin = Pc(u32::try_from(row).map_err(|_| Refused::Facts)?);
-            let step = route_step(draft, &draft.steps[index], first, row)?;
+            let mut step = route_step(draft, &draft.steps[index], first, row)?;
+            // The machine billed the raising step before it delivered the
+            // raise here.
+            step.charges = Default::default();
             ops.push(RegionOp::Move {
                 dst: lower::reg(
                     &draft.roles,
@@ -493,8 +503,6 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
             Some(_) => return Err(Refused::Path),
             None => None,
         };
-        // A cleanup that departs itself supersedes what it suspended; that
-        // route is not yet the region's.
         let Some(segments) = segments else {
             ops[index] = boundary(&steps[index].at);
             continue;
@@ -560,6 +568,12 @@ pub(super) fn check_finally(
                 return Err(Refused::Facts);
             }
             (at, Phase::Restore)
+        }
+        CheckedKind::Supersede { at } => {
+            if !routed || !args.is_empty() || dst != sink {
+                return Err(Refused::Facts);
+            }
+            (at, Phase::Supersede)
         }
         CheckedKind::Cleanup { at } => {
             if routed || !args.is_empty() || dst != sink || !step.event.entities.is_empty() {
@@ -655,6 +669,17 @@ fn segment_op(
             dst: active.unwrap_or(sink),
             next: following,
         }
+    } else if position + 1 < count && step.at.phase == Phase::Supersede {
+        RegionOp::Checked {
+            kernel: CheckedKernel {
+                kind: CheckedKind::Supersede {
+                    at: step.at.site.clone(),
+                },
+            },
+            args: Box::new([]),
+            dst: sink,
+            next: following,
+        }
     } else if position + 1 < count {
         phase(following)
     } else {
@@ -742,7 +767,8 @@ pub(super) fn verify(
                 return Err(Refused::Path);
             }
             let step = draft.steps.get(cursor).ok_or(Refused::Exit)?;
-            check_route_step(draft, charges, step, first, cursor)?;
+            // The origin row bills nothing: the raising step was billed.
+            check_route_step(draft, &BTreeMap::new(), step, first, cursor)?;
             // check_op verifies the delivered move against its event.
             if !matches!(
                 draft.ops[cursor],

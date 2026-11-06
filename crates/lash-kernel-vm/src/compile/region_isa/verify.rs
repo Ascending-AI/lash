@@ -889,9 +889,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
             CheckedKind::LoopControl { .. } | CheckedKind::Header { .. } => {
                 return Err(Refused::Source);
             }
-            kind @ (CheckedKind::Suspend { .. }
-            | CheckedKind::Restore { .. }
-            | CheckedKind::Cleanup { .. }) => {
+            kind if kind.finally() => {
                 super::departures::check_finally(draft, index, kind, args, *dst)?;
             }
             // A plain `for`'s Enter reads only what it walks.

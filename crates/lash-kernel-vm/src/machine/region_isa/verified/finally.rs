@@ -28,6 +28,9 @@ pub(super) struct Suspended {
 /// What a finally row changes once its step is accepted.
 pub(super) enum Finally {
     Suspend(Box<Suspended>),
+    /// The departure leaving a cleanup drops what its try suspended; its
+    /// value's root is released by the step.
+    Supersede,
     Restore,
 }
 
@@ -130,6 +133,21 @@ impl Running<'_> {
             .filter(|top| top.frame == self.frame_index() && top.at == *at)
     }
 
+    /// Whether a Supersede row goes on unaccepted: its try suspended
+    /// nothing.
+    pub(super) fn passes(&self, kind: &CheckedKind) -> bool {
+        matches!(kind, CheckedKind::Supersede { at } if self.suspended_at(at).is_none())
+    }
+
+    /// The value a Supersede row releases.
+    pub(super) fn superseded(&self) -> Option<LeaseValue> {
+        self.suspended
+            .last()
+            .filter(|top| top.frame == self.frame_index())
+            .and_then(|top| top.value)
+            .map(|(_, value)| value)
+    }
+
     pub(super) fn finally_answer(
         &mut self,
         kind: &CheckedKind,
@@ -198,6 +216,12 @@ impl Running<'_> {
                     Some(Finally::Restore),
                 ))
             }
+            CheckedKind::Supersede { at } => {
+                if self.suspended_at(at).is_none() {
+                    return Err(invalid(Refused::Facts));
+                }
+                Ok((none(next), Some(Finally::Supersede)))
+            }
             // A cleanup completes to the Restore of what it suspended.
             CheckedKind::Cleanup { at } => {
                 let next = match self.suspended_at(at) {
@@ -225,6 +249,11 @@ impl Running<'_> {
                     .try_reserve(1)
                     .map_err(|_| invalid(Refused::Scratch))?;
                 self.suspended.push(*suspended);
+            }
+            Finally::Supersede => {
+                self.suspended
+                    .pop()
+                    .ok_or_else(|| invalid(Refused::Facts))?;
             }
             Finally::Restore => {
                 let top = self
