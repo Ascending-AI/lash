@@ -39,6 +39,18 @@ pub(crate) enum TransferTarget {
     NativeInput,
 }
 
+/// What a `for … via` walks once its `open` has answered (`K-ITER-005`):
+/// a list, a tuple, or a map or a set it does not check, by its own cursor;
+/// a text by code point; a map or a set its protocol checks; or a driver
+/// its `next` steps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Walk {
+    Collection,
+    Text,
+    Guarded,
+    Driver,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Phase {
     Enter,
@@ -221,6 +233,10 @@ pub(crate) trait Execution {
     fn event(&mut self, point: &Point) -> Option<Box<dyn Facts + '_>>;
     /// Selected from the source condition/cursor, not a plan's trip count.
     fn choose(&mut self, site: &Site) -> Option<bool>;
+    /// What the `for … via` at `site` walks, from what its `open` gave.
+    fn walked(&mut self, _: &Site) -> Option<Walk> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1314,6 +1330,31 @@ pub(crate) fn action_atoms(action: &doc::Action) -> &[doc::Atom] {
         doc::Action::Await { value, .. } => std::slice::from_ref(value),
         doc::Action::Yield => &[],
     }
+}
+
+/// Whether a raise of a protocol hook's callee is born at `phase` of the
+/// `for` at `node`: at the hook's call, or, for `item`, at the Test that
+/// takes its result.
+pub(crate) fn hook_raises(node: doc::Node<'_>, phase: Phase) -> bool {
+    let doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) = node else {
+        return false;
+    };
+    match phase {
+        Phase::Test => via.item.is_some(),
+        phase => hooks(via).any(|(hook, _)| hook == phase),
+    }
+}
+
+/// A protocol's declared hooks, each with the header phase it is called at.
+pub(crate) fn hooks(via: &doc::Protocol) -> impl Iterator<Item = (Phase, &doc::FunctionTarget)> {
+    [
+        (Phase::Open, Some(&via.open)),
+        (Phase::Next, via.next.as_ref()),
+        (Phase::Check, via.check.as_ref()),
+        (Phase::Item, via.item.as_ref()),
+    ]
+    .into_iter()
+    .filter_map(|(phase, target)| Some((phase, target?)))
 }
 
 fn hook(target: &doc::FunctionTarget, calls: &BTreeMap<FunctionId, CallSource>) -> CallSource {

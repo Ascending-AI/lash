@@ -358,7 +358,7 @@ impl Running<'_> {
         };
         // All bank writes, allocation and checks precede this affine accept.
         ready.accept();
-        let (balance, peak) = self.enter_cells(&target, frame, reserved.id, balance, peak)?;
+        let (balance, peak) = self.enter_cells(target, frame, reserved.id, balance, peak)?;
         self.release_atoms()?;
         self.parked.push(parked);
         self.invocations.accept(reserved);

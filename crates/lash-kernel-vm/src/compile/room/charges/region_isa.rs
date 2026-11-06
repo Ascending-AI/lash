@@ -142,13 +142,11 @@ pub(crate) fn program(exe: &Executable, code: CodeId) -> Result<Program, Refused
                                 super::super::Phase::Test
                             },
                         };
+                        // A pass is charged before any of its hooks, at the
+                        // test stage that dispatches it (K-ITER-005).
                         let test_at = Point {
                             site: stmt.site.clone(),
-                            phase: if via.as_ref().is_some_and(|via| via.next.is_some()) {
-                                super::super::Phase::Next
-                            } else {
-                                super::super::Phase::Test
-                            },
+                            phase: super::super::Phase::Test,
                         };
                         (entry, test_at, enter_pc)
                     };

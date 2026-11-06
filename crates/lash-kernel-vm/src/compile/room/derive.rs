@@ -235,70 +235,38 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                     ));
                 }
                 doc::Node::Stmt(doc::Stmt::For { binding, via, .. }) => {
+                    // Each protocol hook is a call (`K-ITER-005`). `open`
+                    // moves the iterated value into its callee; `next`,
+                    // `check` and `item` read what the loop walks and the
+                    // item it holds, which the loop keeps.
                     if let Some(via) = via {
-                        let hooks = [
-                            (Phase::Open, Some(&via.open), 1),
-                            (Phase::Next, via.next.as_ref(), 1),
-                            (Phase::Check, via.check.as_ref(), 4),
-                            (Phase::Item, via.item.as_ref(), 2),
-                        ];
-                        for (phase, target, count) in hooks {
-                            if let Some(target) = target {
-                                let args: Box<[_]> = (0..count)
-                                    .map(|index| Owner::HookArgument {
-                                        at: site.clone(),
-                                        phase,
-                                        index,
-                                    })
-                                    .collect();
-                                let callee = hook(target, calls);
-                                let base = args
-                                    .iter()
-                                    .cloned()
-                                    .fold(Amount::default(), |a, o| a.term(Measure::Local(o), 1));
-                                let peak = base.clone().term(
-                                    Measure::CallPeak {
-                                        at: site.clone(),
-                                        callee,
-                                    },
-                                    1,
-                                );
-                                let mut delta = base.term(
-                                    Measure::CallDelta {
-                                        at: site.clone(),
-                                        callee,
-                                    },
-                                    1,
-                                );
-                                if matches!(callee, CallSource::Native(_) | CallSource::Dynamic) {
-                                    delta = delta.term(
-                                        Measure::NativeRelease {
-                                            at: site.clone(),
-                                            callee,
-                                            owners: args.clone(),
-                                        },
-                                        -1,
-                                    );
-                                }
-                                delta = delta.term(
-                                    release([Owner::HookResult {
-                                        at: site.clone(),
-                                        phase,
-                                    }]),
-                                    -1,
-                                );
-                                events.push(event(
-                                    &site,
-                                    phase,
-                                    args,
-                                    Some(Owner::HookResult {
-                                        at: site.clone(),
-                                        phase,
-                                    }),
-                                    peak,
-                                    delta,
-                                ));
+                        for (phase, target) in hooks(via) {
+                            let callee = hook(target, calls);
+                            let args: Box<[_]> = if phase == Phase::Open {
+                                Box::new([operand(&child(&site, 0))])
+                            } else {
+                                Box::new([])
+                            };
+                            let peak = Amount::default().term(
+                                Measure::CallPeak {
+                                    at: site.clone(),
+                                    callee,
+                                },
+                                1,
+                            );
+                            let mut delta = Amount::default().term(
+                                Measure::CallDelta {
+                                    at: site.clone(),
+                                    callee,
+                                },
+                                1,
+                            );
+                            if !args.is_empty()
+                                && matches!(callee, CallSource::Native(_) | CallSource::Dynamic)
+                            {
+                                delta = delta.term(release(args.iter().cloned()), -1);
                             }
+                            events.push(event(&site, phase, args, None, peak, delta));
                         }
                     }
                     let at = child(&site, 1);
@@ -306,16 +274,35 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                         declared: at.clone(),
                         name: binding.clone(),
                     };
-                    let mut delta = Amount::fixed(shared(cells, &at, binding));
-                    if via.as_ref().is_none_or(|v| v.item.is_none()) {
-                        delta = delta.term(Measure::Local(binding_owner.clone()), 1);
-                    }
+                    let shared = Amount::fixed(shared(cells, &at, binding));
+                    // A plain `for` roots the item it takes; a protocol's
+                    // item moves from the header, or `item`'s result does
+                    // and the header lets the raw item go.
+                    let (inputs, peak, delta): (Box<[_]>, _, _) = match via {
+                        None => {
+                            let n = shared.term(Measure::Local(binding_owner.clone()), 1);
+                            (Box::new([]), n.clone(), n)
+                        }
+                        Some(via) if via.item.is_some() => (
+                            Box::new([
+                                Owner::Incoming(site.clone()),
+                                Owner::LoopHeader(site.clone()),
+                            ]),
+                            shared.clone(),
+                            shared.term(release([Owner::LoopHeader(site.clone())]), -1),
+                        ),
+                        Some(_) => (
+                            Box::new([Owner::LoopHeader(site.clone())]),
+                            shared.clone(),
+                            shared,
+                        ),
+                    };
                     events.push(event(
                         &site,
                         Phase::Test,
-                        Box::new([]),
+                        inputs,
                         Some(binding_owner),
-                        delta.clone(),
+                        peak,
                         delta,
                     ));
                 }
@@ -393,10 +380,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                 owners: owners.clone(),
             });
             if (matches!(node, doc::Node::Expr(_) | doc::Node::Action(_))
-                || matches!(
-                    e.point.phase,
-                    Phase::Open | Phase::Next | Phase::Check | Phase::Item
-                ))
+                || hook_raises(node, e.point.phase))
                 && kind != ExitKind::Raise
             {
                 exits.push(Exit {

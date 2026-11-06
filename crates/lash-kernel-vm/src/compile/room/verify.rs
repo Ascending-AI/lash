@@ -186,8 +186,15 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                         name: name.clone(),
                     });
                 }
-                (doc::Node::Stmt(doc::Stmt::For { binding, .. }), Phase::Test) => {
-                    expected_inputs = Box::new([]);
+                (doc::Node::Stmt(doc::Stmt::For { binding, via, .. }), Phase::Test) => {
+                    expected_inputs = match via {
+                        None => Box::new([]),
+                        Some(via) if via.item.is_some() => Box::new([
+                            Owner::Incoming(site.clone()),
+                            Owner::LoopHeader(site.clone()),
+                        ]),
+                        Some(_) => Box::new([Owner::LoopHeader(site.clone())]),
+                    };
                     output = Some(Owner::Binding {
                         declared: child(&site, 1),
                         name: binding.clone(),
@@ -201,22 +208,12 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     doc::Node::Stmt(doc::Stmt::For { .. }),
                     Phase::Open | Phase::Next | Phase::Item | Phase::Check,
                 ) => {
-                    let count = match phase {
-                        Phase::Check => 4,
-                        Phase::Item => 2,
-                        _ => 1,
+                    expected_inputs = if phase == Phase::Open {
+                        Box::new([operand(&child(&site, 0))])
+                    } else {
+                        Box::new([])
                     };
-                    expected_inputs = (0..count)
-                        .map(|index| Owner::HookArgument {
-                            at: site.clone(),
-                            phase,
-                            index,
-                        })
-                        .collect();
-                    output = Some(Owner::HookResult {
-                        at: site.clone(),
-                        phase,
-                    });
+                    output = None;
                 }
                 _ => {}
             }
@@ -240,10 +237,7 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 _ => ExitKind::Normal,
             };
             let kinds = if (matches!(node, doc::Node::Expr(_) | doc::Node::Action(_))
-                || matches!(
-                    phase,
-                    Phase::Open | Phase::Next | Phase::Check | Phase::Item
-                ))
+                || hook_raises(node, phase))
                 && kind != ExitKind::Raise
             {
                 vec![kind, ExitKind::Raise]
@@ -398,39 +392,32 @@ fn obligations(
                 p = i128::from(Cost::OBJECT) + i128::from(Cost::REFERENCE);
                 d = p;
             }
-            let local = Measure::Local(Owner::Binding {
-                declared: at,
-                name: binding.clone(),
-            });
-            if via.as_ref().is_none_or(|v| v.item.is_none()) {
-                peak.push((local.clone(), 1));
-                delta.push((local, 1));
+            match via {
+                None => {
+                    let local = Measure::Local(Owner::Binding {
+                        declared: at,
+                        name: binding.clone(),
+                    });
+                    peak.push((local.clone(), 1));
+                    delta.push((local, 1));
+                }
+                Some(via) if via.item.is_some() => {
+                    delta.push((release([Owner::LoopHeader(site.clone())]), -1));
+                }
+                Some(_) => {}
             }
         }
         (
             doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }),
             Phase::Open | Phase::Next | Phase::Item | Phase::Check,
         ) => {
-            let (target, count) = match (phase, &via.next, &via.check, &via.item) {
-                (Phase::Open, _, _, _) => (&via.open, 1),
-                (Phase::Next, Some(next), _, _) => (next, 1),
-                (Phase::Check, _, Some(check), _) => (check, 4),
-                (Phase::Item, _, _, Some(item)) => (item, 2),
-                _ => unreachable!("source phases select only declared protocol hooks"),
-            };
+            let target = hooks(via)
+                .find_map(|(hook, target)| (hook == phase).then_some(target))
+                .unwrap_or_else(|| unreachable!("source phases select only declared hooks"));
             let callee = match target {
                 doc::FunctionTarget::Local(f) => source.calls[f],
                 doc::FunctionTarget::Import(_) => CallSource::Dynamic,
             };
-            let args: Box<[_]> = (0..count)
-                .map(|index| Owner::HookArgument {
-                    at: site.clone(),
-                    phase,
-                    index,
-                })
-                .collect();
-            peak.extend(args.iter().cloned().map(|o| (Measure::Local(o), 1)));
-            delta = peak.clone();
             peak.push((
                 Measure::CallPeak {
                     at: site.clone(),
@@ -445,23 +432,10 @@ fn obligations(
                 },
                 1,
             ));
-            if matches!(callee, CallSource::Native(_) | CallSource::Dynamic) {
-                delta.push((
-                    Measure::NativeRelease {
-                        at: site.clone(),
-                        callee,
-                        owners: args,
-                    },
-                    -1,
-                ));
+            if phase == Phase::Open && matches!(callee, CallSource::Native(_) | CallSource::Dynamic)
+            {
+                delta.push((release([operand(&child(site, 0))]), -1));
             }
-            delta.push((
-                release([Owner::HookResult {
-                    at: site.clone(),
-                    phase,
-                }]),
-                -1,
-            ));
         }
         (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Supersede) => {
             delta.push((release([Owner::PendingDeparture(site.clone())]), -1));

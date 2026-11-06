@@ -10,6 +10,11 @@ pub(super) trait Events {
     }
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused>;
     fn choose(&mut self, site: &Site) -> Result<bool, Refused>;
+    /// What the `for … via` at `site` walks, from what its `open` gave. A
+    /// route that cannot know it cannot know which hooks run.
+    fn walked(&mut self, _: &Site) -> Result<Walk, Refused> {
+        Err(Refused::Facts)
+    }
     /// Only a descriptor issued from an actual VerifiedCall may bridge a
     /// call. Ordinary source evaluation keeps its genuine action departure.
     fn resume_call(
@@ -174,6 +179,9 @@ impl<E: Execution> Events for Prices<'_, E> {
     fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
         self.execution.choose(site).ok_or(Refused::Facts)
     }
+    fn walked(&mut self, site: &Site) -> Result<Walk, Refused> {
+        self.execution.walked(site).ok_or(Refused::Facts)
+    }
 }
 struct Run<'a, E> {
     source: &'a Source,
@@ -319,27 +327,36 @@ impl<E: Events> Run<'_, E> {
                     return Ok(exit);
                 }
                 let mut broken = false;
-                if via.is_some() {
-                    let exit = self.step(site, Phase::Open)?;
-                    if exit != ExitKind::Normal {
-                        return Ok(exit);
+                // K-ITER-005: `open` takes the value to what the loop walks;
+                // each pass then steps a driver through `next`, any other
+                // walk by its own cursor, and a checked map or set runs
+                // `check` after each step, at exhaustion too.
+                let walk = match via {
+                    Some(_) => {
+                        let exit = self.step(site, Phase::Open)?;
+                        if exit != ExitKind::Normal {
+                            return Ok(exit);
+                        }
+                        Some(self.events.walked(site)?)
                     }
-                }
+                    None => None,
+                };
                 loop {
-                    if via.as_ref().is_some_and(|v| v.next.is_some()) {
+                    if walk == Some(Walk::Driver) {
                         let exit = self.step(site, Phase::Next)?;
                         if exit != ExitKind::Normal {
                             return Ok(exit);
                         }
                     }
-                    if !self.choose(site)? {
-                        break;
-                    }
-                    if via.as_ref().is_some_and(|v| v.check.is_some()) {
+                    let more = self.choose(site)?;
+                    if walk == Some(Walk::Guarded) {
                         let exit = self.step(site, Phase::Check)?;
                         if exit != ExitKind::Normal {
                             return Ok(exit);
                         }
+                    }
+                    if !more {
+                        break;
                     }
                     if via.as_ref().is_some_and(|v| v.item.is_some()) {
                         let exit = self.step(site, Phase::Item)?;
