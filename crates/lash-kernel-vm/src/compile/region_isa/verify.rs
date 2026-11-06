@@ -1250,24 +1250,23 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
         };
         let pending = if super::lower::delivers(&draft.ops[index]) {
             Some(sink)
-        } else if matches!(draft.ops[index], RegionOp::Heap { .. }) {
-            match &draft.ops[index] {
-                RegionOp::Heap { kernel, .. } if kernel.atomic_move() => None,
-                RegionOp::Heap { .. } => event
-                    .output
-                    .as_ref()
-                    .map(|owner| {
-                        let reg = register(draft, owner)?;
-                        if let Role::Slot(slot) =
-                            resources::role(source, owner).ok_or(Refused::Facts)?
-                        {
-                            pending_roles.insert(slot);
-                        }
-                        Ok::<_, Refused>(reg)
-                    })
-                    .transpose()?,
-                _ => return Err(Refused::Source),
-            }
+        } else if matches!(&draft.ops[index], RegionOp::Heap { kernel, .. } if kernel.atomic_move())
+        {
+            None
+        } else if super::lower::pending_at_output(&draft.generic_ops[index]) {
+            event
+                .output
+                .as_ref()
+                .map(|owner| {
+                    let reg = register(draft, owner)?;
+                    if let Role::Slot(slot) =
+                        resources::role(source, owner).ok_or(Refused::Facts)?
+                    {
+                        pending_roles.insert(slot);
+                    }
+                    Ok::<_, Refused>(reg)
+                })
+                .transpose()?
         } else {
             event
                 .output

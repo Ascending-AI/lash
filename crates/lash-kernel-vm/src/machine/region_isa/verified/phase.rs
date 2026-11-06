@@ -64,6 +64,60 @@ impl PreparedResources<'_, '_> {
     }
 }
 impl<'s> Running<'s> {
+    /// A native result that stops at its pending-result phase is accepted
+    /// there at its output role, beside the still live operands, so the
+    /// phase a reopen persists repeats no allocation (Ruling 4). An adopted
+    /// answer is balanced by its contract or measure; another is held at its
+    /// price. `None` when the result does not fit the memory bound.
+    pub(super) fn hold_pending(
+        &mut self,
+        result: LeaseValue,
+        native: Option<(u64, u64, u64)>,
+    ) -> Result<Option<execute::Counters>, RegionError> {
+        let (retained, peak) = match native {
+            Some((retained, peak, _)) => (retained, peak),
+            None => {
+                let price = self.view.price(result).map_err(RegionError::Heap)?;
+                (price, price)
+            }
+        };
+        let balance = self
+            .counters
+            .balance
+            .checked_add(retained)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        let peak = self
+            .counters
+            .balance
+            .checked_add(peak)
+            .ok_or_else(|| invalid(Refused::Peak))?
+            .max(balance)
+            .max(self.counters.peak);
+        if peak > self.limits.memory {
+            return Ok(None);
+        }
+        let Scratch {
+            holds, releases, ..
+        } = &mut self.scratch;
+        holds.clear();
+        releases.clear();
+        holds.push((result, false));
+        let op = if native.is_some() {
+            LeaseOp::Adopt { holds, releases }
+        } else {
+            LeaseOp::Transfer { holds, releases }
+        };
+        let step = self.view.stage(op).map_err(storage_fault)?;
+        if step.facts().delta() != i128::from(retained) {
+            return Err(invalid(Refused::Facts));
+        }
+        step.reserve().map_err(RegionError::Heap)?.accept();
+        Ok(Some(execute::Counters {
+            balance,
+            peak,
+            ..self.counters
+        }))
+    }
     pub(super) fn resources<'a>(
         &'a mut self,
         flow: &Flow,

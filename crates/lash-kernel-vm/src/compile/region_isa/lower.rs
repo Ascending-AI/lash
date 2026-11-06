@@ -1171,7 +1171,9 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
         let pending = match &draft.ops[index] {
             op if delivers(op) => Some(sink),
             RegionOp::Heap { kernel, .. } if kernel.atomic_move() => None,
-            RegionOp::Heap { .. } => draft.steps[index]
+            // An accepted allocation, or an adopted native answer, stands
+            // pending at its output role.
+            _ if pending_at_output(&draft.generic_ops[index]) => draft.steps[index]
                 .event
                 .output
                 .as_ref()
@@ -1231,6 +1233,18 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
     }
     draft.recovery = maps.into();
     Ok(draft)
+}
+
+/// Whether the step's pending result is held at its output role: an
+/// allocation whose acceptance precedes its release, or a native answer whose
+/// adoption is accepted at the pending-result phase (Ruling 4). Read from the
+/// generic op, since the specialized and generic layouts share recovery maps.
+pub(super) fn pending_at_output(op: &RegionOp) -> bool {
+    match op {
+        RegionOp::Heap { kernel, .. } => !kernel.atomic_move(),
+        RegionOp::Checked { kernel, .. } => matches!(kernel.kind(), CheckedKind::Native { .. }),
+        _ => false,
+    }
 }
 
 /// Whether the step's completion is delivered into the sink as the task's

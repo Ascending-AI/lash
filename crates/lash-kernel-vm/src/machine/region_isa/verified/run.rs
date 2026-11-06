@@ -287,16 +287,24 @@ impl Running<'_> {
                 self.refusal = Some(crate::Bound::Charge);
                 self.crossing = Some(crossing);
                 self.attempted = Some(step.at.clone());
-                if let Some(pending) = code
+                let map = code
                     .program
                     .recovery(step.pending)
-                    .ok_or_else(|| invalid(Refused::Exit))?
-                    .pending
-                {
-                    self.write(
-                        pending,
-                        answer.write.ok_or_else(|| invalid(Refused::Facts))?.1,
-                    )?;
+                    .ok_or_else(|| invalid(Refused::Exit))?;
+                if let Some(pending) = map.pending {
+                    let value = answer.write.ok_or_else(|| invalid(Refused::Facts))?.1;
+                    // A result pending at its output role is held there; an
+                    // adopted answer is held wherever it is pending.
+                    if answer.native.is_some() || map.roles.iter().any(|(_, reg)| *reg == pending) {
+                        let result = value.bind(&mut self.view).map_err(RegionError::Heap)?;
+                        let Some(counters) = self.hold_pending(result, answer.native)? else {
+                            self.refusal = Some(crate::Bound::Memory);
+                            self.crossing = None;
+                            return self.halt(RegionStop::Refusal);
+                        };
+                        self.counters = counters;
+                    }
+                    self.write(pending, value)?;
                 }
                 self.reached.ordinal = self
                     .reached
