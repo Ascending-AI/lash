@@ -65,9 +65,16 @@ pub(super) fn parse_with_identifiers(
     let mut text = Cow::Borrowed(source);
     let mut respellings = BTreeMap::new();
     let mut module_errors = None;
+    let mut respelled_awaits = BTreeSet::new();
     if first == Goal::Module {
         loop {
-            match parse_goal(&text, Goal::Module, comments, capture_names) {
+            match parse_goal(
+                &text,
+                Goal::Module,
+                comments,
+                capture_names,
+                &respelled_awaits,
+            ) {
                 Ok((items, collected, identifiers)) => {
                     let comments = collect(&text, collected);
                     return Ok(Parsed {
@@ -88,9 +95,14 @@ pub(super) fn parse_with_identifiers(
             }
         }
     }
-    let mut respelled_awaits = BTreeSet::new();
     loop {
-        match parse_goal(&text, Goal::Script, comments, capture_names) {
+        match parse_goal(
+            &text,
+            Goal::Script,
+            comments,
+            capture_names,
+            &respelled_awaits,
+        ) {
             Ok((items, collected, identifiers)) => {
                 let comments = collect(&text, collected);
                 return Ok(Parsed {
@@ -137,7 +149,13 @@ fn collect(text: &str, comments: Option<SingleThreadedComments>) -> SourceCommen
     })
 }
 
-fn parse_goal(text: &str, goal: Goal, comments: bool, capture_names: bool) -> GoalResult {
+fn parse_goal(
+    text: &str,
+    goal: Goal,
+    comments: bool,
+    capture_names: bool,
+    respelled_awaits: &BTreeSet<u32>,
+) -> GoalResult {
     let end = u32::try_from(text.len()).unwrap_or(u32::MAX);
     let collected = comments.then(SingleThreadedComments::default);
     let mut lexer = Lexer::new(
@@ -169,6 +187,9 @@ fn parse_goal(text: &str, goal: Goal, comments: bool, capture_names: bool) -> Go
             .filter_map(|token| {
                 if !token.token.is_word() {
                     return None;
+                }
+                if respelled_awaits.contains(&token.span.lo.0) {
+                    return Some("await".to_owned());
                 }
                 let word = &text[token.span.lo.0 as usize..token.span.hi.0 as usize];
                 let mut lexer = Lexer::new(

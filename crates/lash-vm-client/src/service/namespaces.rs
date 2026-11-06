@@ -374,6 +374,11 @@ mod tests {
             assert!(selected.deferred().is_empty(), "{language:?}: {source}");
         }
         let processes = PackagePath::parse("processes")?;
+        assert_eq!(
+            lash_dialect_typescript::source_identifiers("await.read()")?,
+            ["await".to_owned(), "read".to_owned()].into(),
+            "Script-goal spelling repairs must not leak placeholder identifiers"
+        );
         for (source, implicit) in [("await value;", true), ("console.log('await …');", false)] {
             let mut request = Request::Lower {
                 dialect: "typescript".into(),
