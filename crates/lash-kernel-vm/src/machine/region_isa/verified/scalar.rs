@@ -254,6 +254,16 @@ impl Running<'_> {
                         }));
                     }
                     CheckedKind::Phase => {
+                        // Only the call entering a frame allocates its
+                        // parameter cells; no region runs that Enter itself.
+                        if self
+                            .code
+                            .program
+                            .step(self.pc)
+                            .is_none_or(|step| !step.event.entities.is_empty())
+                        {
+                            return Err(invalid(Refused::Source));
+                        }
                         return Ok(Some(ScalarAnswer {
                             write: None,
                             next: *next,

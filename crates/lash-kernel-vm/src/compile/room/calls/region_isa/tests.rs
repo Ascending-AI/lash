@@ -196,13 +196,17 @@ fn substitutions_preserve_source_arguments_and_saved_operands() {
         }
         // A forged same-priced source argument must fail call-plan validation.
         let mut forged = fixtures::plan(&exe, caller, site.0, site.1).unwrap();
-        forged.targets[0].corrupt_substitution_for_law();
+        forged
+            .static_target_for_law()
+            .corrupt_substitution_for_law();
         assert!(forged.verify(&exe).is_err());
         if native {
             // A zero-cost completion formula in place of the declared charge
             // must fail validation instead of undercharging the call.
             let mut forged = fixtures::plan(&exe, caller, site.0, site.1).unwrap();
-            forged.targets[0].corrupt_completion_for_law(&exe);
+            forged
+                .static_target_for_law()
+                .corrupt_completion_for_law(&exe);
             assert!(forged.verify(&exe).is_err());
         }
     }
@@ -351,22 +355,17 @@ fn captures_keep_cell_order_instead_of_sorted_identity_names() {
     let pc = (stmt.ops.start..stmt.ops.end())
         .rfind(|pc| matches!(stream.ops[*pc as usize], Op::Act | Op::Nested { .. }))
         .unwrap();
-    let callback = crate::compile::room::publication::sort::CallbackProgram::compile(
-        &exe, caller, statement, pc,
-    )
-    .unwrap();
-    let plan = callback.call();
+    let plan = fixtures::plan(&exe, caller, statement, pc).unwrap();
     let draft = drafts::calls(&exe, caller, &[(statement, pc)]).unwrap();
     let RegionOp::Call { site, .. } = draft.ops()[0] else {
         unreachable!()
     };
-    callback.verify_region(&exe, &draft, site).unwrap();
-    let target = plan
-        .targets()
-        .iter()
-        .find(|target| exe.code(target.code()).captures.len() == 2)
+    plan.verify_region(&exe, &draft, site).unwrap();
+    let made = (0..exe.code_count())
+        .map(|index| CodeId(index as u32))
+        .find(|code| exe.code(*code).created.is_some() && exe.code(*code).captures.len() == 2)
         .unwrap();
-    let body = exe.code(target.code());
+    let body = exe.code(made);
     let at = body.created.as_ref().unwrap();
     let origin = doc::snapshot::closure_at(
         &program.document,
@@ -381,11 +380,7 @@ fn captures_keep_cell_order_instead_of_sorted_identity_names() {
     let canonical = exe
         .closure_at(&origin.function, program.link, at, &body.capture_names)
         .unwrap();
-    let target = plan
-        .targets()
-        .iter()
-        .find(|target| target.code() == canonical)
-        .unwrap();
+    let target = plan.target(&exe, canonical).unwrap();
     let body = exe.code(canonical);
     let at = body.created.as_ref().unwrap();
     let actual_names = body
@@ -421,15 +416,11 @@ fn captures_keep_cell_order_instead_of_sorted_identity_names() {
             LeaseAllocation::closure(identity(program.link), &cells),
         );
         let bound_roles = {
-            let classified = callback
-                .classify(&exe, lease, Some(actual))
+            let bound = plan
+                .bind_callable(&exe, lease, actual)
                 .unwrap_or_else(|_| panic!("local callable view"))
                 .unwrap();
-            assert_eq!(classified.plan().code(), target.code());
-            let crate::compile::room::publication::sort::CallbackTarget::Value(bound) = classified
-            else {
-                panic!("source callback is dynamic");
-            };
+            assert_eq!(bound.plan().code(), target.code());
             bound.capture_roles().collect::<Vec<_>>()
         };
         for (role, cell) in &bound_roles {
@@ -493,8 +484,7 @@ fn captures_keep_cell_order_instead_of_sorted_identity_names() {
             ),
         );
         assert!(
-            callback
-                .classify(&exe, lease, Some(foreign))
+            plan.bind_callable(&exe, lease, foreign)
                 .unwrap_or_else(|_| panic!("foreign callable classification"))
                 .is_none()
         );

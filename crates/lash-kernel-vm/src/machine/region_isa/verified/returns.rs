@@ -95,9 +95,7 @@ impl Running<'_> {
                 .ok_or_else(|| invalid(Refused::Facts))?;
             let plan = call
                 .plan
-                .targets()
-                .iter()
-                .find(|plan| plan.code() == parked.target)
+                .target(&parked.code.exe, parked.target)
                 .ok_or_else(|| invalid(Refused::Facts))?;
             self.call_values.clear();
             if plan.debt().needs_arguments() {

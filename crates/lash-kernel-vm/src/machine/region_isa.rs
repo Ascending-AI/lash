@@ -123,6 +123,9 @@ pub(crate) enum RegionStop {
     /// The region stands before a native call its checked kernel cannot
     /// answer in place; the machine answers it and the region takes it.
     Native,
+    /// The region stands before a dynamic call whose target its lease has
+    /// not bound; the machine binds it and the region takes the call.
+    Bind,
     Refusal,
     Throw,
     /// The region accepted an uncaught ReturnVia, its operand still held:

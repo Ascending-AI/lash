@@ -476,6 +476,7 @@ impl Admission {
             own: Arc::clone(&code.own),
             admission: Arc::clone(self),
             regions: std::sync::Mutex::default(),
+            dynamic_targets: std::sync::Mutex::default(),
         }))
     }
 

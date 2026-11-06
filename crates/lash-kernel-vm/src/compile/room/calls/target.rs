@@ -8,6 +8,38 @@ pub(in crate::compile::room) fn resolve(
     pc: u32,
     selected: Option<CodeId>,
 ) -> Result<Resolved, Refused> {
+    match call_site(exe, caller, statement, pc)? {
+        CallSite::Static(target) => {
+            if selected.is_none_or(|code| code == target.code) {
+                Ok(target)
+            } else {
+                Err(Refused::Source)
+            }
+        }
+        CallSite::Dynamic(site) => site.admit(exe, selected.ok_or(Refused::Source)?),
+    }
+}
+
+/// A call site's facts. A static site names its one target; a dynamic one
+/// names only what the caller holds, and admits each target by its code.
+pub(in crate::compile::room) enum CallSite {
+    Static(Resolved),
+    Dynamic(DynamicSite),
+}
+
+pub(in crate::compile::room) struct DynamicSite {
+    at: Point,
+    arguments: usize,
+    occurrence: Option<usize>,
+    rooted: bool,
+}
+
+pub(in crate::compile::room) fn call_site(
+    exe: &Executable,
+    caller: CodeId,
+    statement: StmtId,
+    pc: u32,
+) -> Result<CallSite, Refused> {
     let (stream, stmt, _) = exe.statement(statement);
     let span = caller_span(stmt, pc)?;
     if exe.stmt_at(caller, &stmt.site) != Some(statement) {
@@ -32,16 +64,7 @@ pub(in crate::compile::room) fn resolve(
         _ => false,
     };
     if !dynamic {
-        let target = resolved_static(exe, caller, statement, pc)?;
-        return if selected.is_none_or(|code| code == target.code) {
-            Ok(target)
-        } else {
-            Err(Refused::Source)
-        };
-    }
-    let code = selected.ok_or(Refused::Source)?;
-    if code.0 as usize >= exe.code_count() {
-        return Err(Refused::Source);
+        return resolved_static(exe, caller, statement, pc).map(CallSite::Static);
     }
     let site = stream
         .source_sites
@@ -114,28 +137,7 @@ pub(in crate::compile::room) fn resolve(
     if !valid_read {
         return Err(Refused::Source);
     }
-    let library = match exe.code(code).source_room.owner {
-        doc::constant_pool::PoolOwner::Function(function) => exe.library_lib(&function).filter(|lib| {
-            matches!(exe.lib(*lib).run, LibRun::Body(actual) | LibRun::Native { body: Some(actual), .. } if actual == code)
-        }),
-        doc::constant_pool::PoolOwner::Document(_) => None,
-    };
-    if arguments > exe.code(code).params.len() {
-        return Err(Refused::Source);
-    }
-    if let Some(lib) = library {
-        let function = exe.lib(lib);
-        if !function.body_arity(arguments)
-            || function.limit.is_some()
-            || function.specialization.resource
-                != CallSource::Body(function.specialization.function)
-        {
-            return Err(Refused::Source);
-        }
-    }
-    Ok(Resolved {
-        code,
-        library,
+    Ok(CallSite::Dynamic(DynamicSite {
         at: Point {
             site: site.clone(),
             phase: Phase::Enter,
@@ -143,8 +145,69 @@ pub(in crate::compile::room) fn resolve(
         arguments,
         occurrence,
         rooted,
-        dynamic: true,
-    })
+    }))
+}
+
+impl DynamicSite {
+    pub(in crate::compile::room) fn at(&self) -> &Point {
+        &self.at
+    }
+    pub(in crate::compile::room) fn rooted(&self) -> bool {
+        self.rooted
+    }
+    pub(in crate::compile::room) fn occurrence(&self) -> Option<usize> {
+        self.occurrence
+    }
+    pub(in crate::compile::room) fn shape(&self) -> Shape<'_> {
+        Shape {
+            at: &self.at,
+            arguments: self.arguments,
+            rooted: self.rooted,
+            dynamic: true,
+        }
+    }
+
+    /// Admits `code` as this site's target: a body-backed library takes the
+    /// site's arguments within its arity, and no code takes more arguments
+    /// than it has parameters.
+    pub(in crate::compile::room) fn admit(
+        &self,
+        exe: &Executable,
+        code: CodeId,
+    ) -> Result<Resolved, Refused> {
+        if code.0 as usize >= exe.code_count() {
+            return Err(Refused::Source);
+        }
+        let arguments = self.arguments;
+        let library = match exe.code(code).source_room.owner {
+            doc::constant_pool::PoolOwner::Function(function) => exe.library_lib(&function).filter(|lib| {
+                matches!(exe.lib(*lib).run, LibRun::Body(actual) | LibRun::Native { body: Some(actual), .. } if actual == code)
+            }),
+            doc::constant_pool::PoolOwner::Document(_) => None,
+        };
+        if arguments > exe.code(code).params.len() {
+            return Err(Refused::Source);
+        }
+        if let Some(lib) = library {
+            let function = exe.lib(lib);
+            if !function.body_arity(arguments)
+                || function.limit.is_some()
+                || function.specialization.resource
+                    != CallSource::Body(function.specialization.function)
+            {
+                return Err(Refused::Source);
+            }
+        }
+        Ok(Resolved {
+            code,
+            library,
+            at: self.at.clone(),
+            arguments,
+            occurrence: self.occurrence,
+            rooted: self.rooted,
+            dynamic: true,
+        })
+    }
 }
 
 fn node<'a>(source: &'a Source, at: &Site) -> Result<doc::Node<'a>, Refused> {

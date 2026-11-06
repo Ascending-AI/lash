@@ -47,7 +47,8 @@ impl<'m> RegionLease<'m> {
         } else {
             Code::bind_executable(&exe, &exe.region(root.code).map_err(invalid)?)?
         };
-        let programs = super::programs::Programs::bind(&root_code)?;
+        let codes: Vec<CodeId> = stack.iter().map(|frame| frame.code).collect();
+        let programs = super::programs::Programs::bind(&root_code, &codes)?;
         let mut positions = Vec::new();
         let mut dependencies = Vec::new();
         let mut inputs = Vec::new();
@@ -267,12 +268,7 @@ impl<'m> RegionLease<'m> {
                 return Err(invalid(Refused::Path));
             };
             let call = caller.call(*site)?;
-            if !call
-                .plan
-                .targets()
-                .iter()
-                .any(|target| target.code() == frame.code)
-            {
+            if call.plan.target(&caller.exe, frame.code).is_none() {
                 return Err(invalid(Refused::Source));
             }
             let callee = frame

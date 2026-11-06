@@ -236,8 +236,26 @@ struct CallerRoles {
     recovery: Box<[Slot]>,
     callable: Option<Slot>,
 }
-fn caller_roles(source: &Source, target: &Resolved) -> Result<CallerRoles, Refused> {
-    let event = source.room.events.get(&target.at).ok_or(Refused::Source)?;
+/// The caller-side facts of a call site, which never name its target.
+#[derive(Clone, Copy)]
+pub(in crate::compile::room) struct Shape<'a> {
+    at: &'a Point,
+    arguments: usize,
+    rooted: bool,
+    dynamic: bool,
+}
+impl Resolved {
+    fn shape(&self) -> Shape<'_> {
+        Shape {
+            at: &self.at,
+            arguments: self.arguments,
+            rooted: self.rooted,
+            dynamic: self.dynamic,
+        }
+    }
+}
+fn caller_roles(source: &Source, target: Shape<'_>) -> Result<CallerRoles, Refused> {
+    let event = source.room.events.get(target.at).ok_or(Refused::Source)?;
     if target.rooted {
         // Root actions evaluate ordered atoms at their own Enter. They have
         // no enclosing expression operands to park across the call.
@@ -259,7 +277,7 @@ fn caller_roles(source: &Source, target: &Resolved) -> Result<CallerRoles, Refus
             arguments,
             recovery: Box::new([]),
             callable: if target.dynamic {
-                Some(target::root_slot(source, &target.at)?)
+                Some(target::root_slot(source, target.at)?)
             } else {
                 None
             },
@@ -479,7 +497,7 @@ impl VerifiedCall {
             arguments: argument_slots,
             recovery,
             callable,
-        } = caller_roles(&caller_source, &target)?;
+        } = caller_roles(&caller_source, target.shape())?;
         let root_atoms = if target.rooted {
             Some(root_arguments(&caller_source, &target.at)?)
         } else {
@@ -551,7 +569,7 @@ impl VerifiedCall {
             arguments: expected,
             recovery,
             callable,
-        } = caller_roles(&self.caller_source, &target)?;
+        } = caller_roles(&self.caller_source, target.shape())?;
         if target.rooted {
             let expected = root_arguments(&self.caller_source, &target.at)?;
             if self.root_atoms.as_ref().is_none_or(|actual| {

@@ -448,6 +448,9 @@ pub(crate) struct Executable {
     origins: Arc<preparation::Origins>,
     /// Each code's verified region program, compiled once per executable.
     regions: std::sync::Mutex<BTreeMap<CodeId, Result<Arc<region_isa::RegionCode>, room::Refused>>>,
+    /// The dynamic call targets runs have reached, by caller code, call
+    /// site and target code: what a lease binds beside its static calls.
+    dynamic_targets: std::sync::Mutex<std::collections::BTreeSet<(CodeId, u32, CodeId)>>,
 }
 
 /// Immutable document tables, independent of any run or owning document.

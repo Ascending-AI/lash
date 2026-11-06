@@ -2,6 +2,7 @@
 use super::super::{code::Register, *};
 use super::Code;
 use crate::compile::region_isa::Role;
+use crate::compile::room::region::calls::region_isa::CalleePlan;
 use crate::compile::room::region::calls::region_isa::callee::Substitution;
 use lash_kernel_state::kernel_internals::logical::Slot;
 use lash_kernel_state::kernel_internals::logical::{LeaseValue, StateLease};
@@ -77,17 +78,19 @@ impl Calls {
             .max()
             .unwrap_or(0)
     }
-    pub(super) fn bind(caller: &Code, codes: &[Option<Arc<Code>>]) -> Result<Self, RegionError> {
-        let sites = caller
-            .calls
+    /// `targets` holds, by call site, the plans the lease binds there.
+    pub(super) fn bind(
+        caller: &Code,
+        targets: &[Vec<Arc<CalleePlan>>],
+        codes: &[Option<Arc<Code>>],
+    ) -> Result<Self, RegionError> {
+        if targets.len() != caller.calls.len() {
+            return Err(invalid(Refused::Source));
+        }
+        let sites = targets
             .iter()
-            .map(|call| {
-                let Some(call) = call else {
-                    return Ok(Box::new([]) as Box<[Target]>);
-                };
-                let mut targets = call
-                    .plan
-                    .targets()
+            .map(|plans| {
+                let mut targets = plans
                     .iter()
                     .map(|plan| {
                         let callee = codes

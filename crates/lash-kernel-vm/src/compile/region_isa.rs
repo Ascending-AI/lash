@@ -535,6 +535,27 @@ impl Executable {
             .insert(code, verified.clone());
         verified
     }
+
+    /// Records that a run reached `target` through `caller`'s dynamic call
+    /// `site`; false when it was already recorded.
+    pub(crate) fn reach_dynamic_target(&self, caller: CodeId, site: u32, target: CodeId) -> bool {
+        self.dynamic_targets
+            .lock()
+            .is_ok_and(|mut reached| reached.insert((caller, site, target)))
+    }
+
+    /// The targets runs have reached through `caller`'s dynamic call `site`.
+    pub(crate) fn dynamic_targets(&self, caller: CodeId, site: u32) -> Vec<CodeId> {
+        self.dynamic_targets.lock().map_or_else(
+            |_| Vec::new(),
+            |reached| {
+                reached
+                    .range((caller, site, CodeId(0))..=(caller, site, CodeId(u32::MAX)))
+                    .map(|&(_, _, target)| target)
+                    .collect()
+            },
+        )
+    }
 }
 
 pub(crate) fn verify_region(

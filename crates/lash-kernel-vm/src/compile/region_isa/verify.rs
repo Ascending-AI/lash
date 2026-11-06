@@ -816,6 +816,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                     return Err(Refused::Facts);
                 }
                 if !step.event.entities.is_empty()
+                    && !super::lower::parameter_cells(source, &step.at, &step.event)
                     || !matches!(
                         node,
                         doc::Node::Block(_)

@@ -1054,9 +1054,9 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     }
                 }
                 (doc::Node::Block(_), Phase::Enter | Phase::Leave, Some(next), _, _)
-                    if event.entities.is_empty() =>
+                    if event.entities.is_empty() || parameter_cells(&source, at, &event) =>
                 {
-                    scalar_resources = true;
+                    scalar_resources = event.entities.is_empty();
                     RegionOp::Checked {
                         kernel: CheckedKernel {
                             kind: CheckedKind::Phase,
@@ -1387,4 +1387,22 @@ pub(super) fn action_atoms(
             Some(AtomLoad { dst, src })
         })
         .collect()
+}
+
+/// A body's Enter allocates the cell of each parameter a closure shares;
+/// the call that enters the frame moves each argument into its cell.
+pub(super) fn parameter_cells(
+    source: &Source,
+    at: &Point,
+    event: &crate::compile::room::Event,
+) -> bool {
+    at.site == source.site
+        && at.phase == Phase::Enter
+        && !event.entities.is_empty()
+        && event.entities.iter().all(|entity| {
+            matches!(entity, Owner::Cell { declared, name }
+                if *declared == source.site
+                    && source.params.contains(name)
+                    && source.shared.get(&(declared.clone(), name.clone())) == Some(&true))
+        })
 }

@@ -22,8 +22,9 @@ mod tests;
 pub(crate) use callee::CalleePlan;
 pub(crate) use debt::CallDebt;
 
-/// A source call edge and its possible admitted targets. Dynamic dispatch
-/// selects by the actual callable's CodeId, never by evaluating candidate paths.
+/// A source call edge and its admitted targets. Dynamic dispatch selects by
+/// the actual callable's CodeId, never by evaluating candidate paths, and
+/// compiles a target's plan the first time a run reaches it.
 #[derive(Clone)]
 pub(crate) struct CallPlan {
     executable: u64,
@@ -37,10 +38,18 @@ pub(crate) struct CallPlan {
     saved: Box<[CallRole]>,
     callable: Option<CallRole>,
     callable_origin: Option<CallRole>,
-    targets: Box<[CalleePlan]>,
+    targets: Targets,
     occurrence: Option<usize>,
     result: CallRole,
-    dispatch: dispatch::Dispatch,
+}
+
+#[derive(Clone)]
+enum Targets {
+    Static(Arc<CalleePlan>),
+    Dynamic {
+        site: Arc<target::DynamicSite>,
+        dispatch: Arc<std::sync::Mutex<dispatch::Dispatch>>,
+    },
 }
 
 pub(crate) fn compile_calls(
@@ -92,69 +101,56 @@ impl CallPlan {
         }
         let source = Arc::clone(&exe.code(caller).source_room);
         source.verify()?;
-        let static_target = target::resolve(exe, caller, statement, pc, None);
-        let (resolved, targets) = match static_target {
-            Ok(resolved) => {
-                let callee = CalleePlan::compile(exe, caller, &resolved)?;
-                (resolved, vec![callee])
-            }
-            Err(_) => {
-                let mut targets = Vec::new();
-                let mut selected = None;
-                for index in 0..exe.code_count() {
-                    let code = CodeId(u32::try_from(index).map_err(|_| Refused::Path)?);
-                    let Ok(resolved) = target::resolve(exe, caller, statement, pc, Some(code))
-                    else {
-                        continue;
-                    };
-                    if !resolved.dynamic {
-                        return Err(Refused::Source);
-                    }
-                    if let Ok(callee) = CalleePlan::compile(exe, caller, &resolved) {
-                        selected = Some(resolved);
-                        targets.push(callee);
-                    }
-                }
-                (selected.ok_or(Refused::Source)?, targets)
-            }
+        let site = target::call_site(exe, caller, statement, pc)?;
+        let (shape, occurrence) = match &site {
+            target::CallSite::Static(resolved) => (resolved.shape(), resolved.occurrence),
+            target::CallSite::Dynamic(site) => (site.shape(), site.occurrence()),
         };
         let CallerRoles {
             arguments,
             recovery: saved,
             callable,
-        } = caller_roles(&source, &resolved)?;
-        let callable_origin = resolved
+        } = caller_roles(&source, shape)?;
+        let callable_origin = shape
             .dynamic
-            .then(|| target::root_slot(&source, &resolved.at))
+            .then(|| target::root_slot(&source, shape.at))
             .transpose()?
             .map(CallRole::new);
-        let result = CallRole::new(slot(&source, &Owner::Operand(resolved.at.site.clone()))?);
+        let result = CallRole::new(slot(&source, &Owner::Operand(shape.at.site.clone()))?);
         let resume = Point {
-            site: resolved.at.site.clone(),
-            phase: if resolved.rooted {
+            site: shape.at.site.clone(),
+            phase: if shape.rooted {
                 Phase::Commit
             } else {
                 Phase::Restore
             },
         };
         source.compile_event(&resume, ExitKind::Normal)?;
-        let dispatch = dispatch::Dispatch::compile(exe, &targets)?;
+        let at = shape.at.clone();
+        let targets = match site {
+            target::CallSite::Static(resolved) => {
+                Targets::Static(Arc::new(CalleePlan::compile(exe, caller, &resolved)?))
+            }
+            target::CallSite::Dynamic(site) => Targets::Dynamic {
+                site: Arc::new(site),
+                dispatch: Arc::default(),
+            },
+        };
         Ok(Self {
             executable: exe.local(),
             caller,
             source,
             statement,
             pc,
-            at: resolved.at,
+            at,
             resume,
             arguments: arguments.iter().copied().map(CallRole::new).collect(),
             saved: saved.iter().copied().map(CallRole::new).collect(),
             callable: callable.map(CallRole::new),
             callable_origin,
             result,
-            dispatch,
-            targets: targets.into(),
-            occurrence: resolved.occurrence,
+            targets,
+            occurrence,
         })
     }
 
@@ -175,16 +171,18 @@ impl CallPlan {
             || self.callable != expected.callable
             || self.callable_origin != expected.callable_origin
             || self.result != expected.result
-            || self.dispatch != expected.dispatch
             || self.occurrence != expected.occurrence
-            || self.targets.len() != expected.targets.len()
         {
             return Err(Refused::Source);
         }
-        for (actual, expected) in self.targets.iter().zip(&expected.targets) {
-            actual.verify_placement(expected)?;
+        match (&self.targets, &expected.targets) {
+            (Targets::Static(actual), Targets::Static(expected)) => {
+                actual.verify_placement(expected)
+            }
+            // A dynamic site's targets are compiled from source on demand.
+            (Targets::Dynamic { .. }, Targets::Dynamic { .. }) => Ok(()),
+            _ => Err(Refused::Source),
         }
-        Ok(())
     }
     pub(crate) fn verify_region(
         &self,
@@ -203,6 +201,13 @@ impl CallPlan {
             return Err(Refused::Source);
         }
         self.verify(exe)
+    }
+    #[cfg(test)]
+    fn static_target_for_law(&mut self) -> &mut CalleePlan {
+        match &mut self.targets {
+            Targets::Static(plan) => Arc::make_mut(plan),
+            Targets::Dynamic { .. } => panic!("law needs a static call"),
+        }
     }
     pub(crate) fn belongs_to(&self, exe: &Executable) -> bool {
         self.executable == exe.local()
@@ -236,14 +241,28 @@ impl CallPlan {
     pub(crate) fn occurrence(&self) -> Option<usize> {
         self.occurrence
     }
-    pub(crate) fn targets(&self) -> &[CalleePlan] {
-        &self.targets
+    /// The static target, which a call without a callable value enters.
+    pub(crate) fn static_target(&self) -> Option<&Arc<CalleePlan>> {
+        match &self.targets {
+            Targets::Static(plan) if self.callable.is_none() => Some(plan),
+            _ => None,
+        }
     }
-    pub(crate) fn static_target(&self) -> Option<&CalleePlan> {
-        if self.callable.is_none() {
-            self.targets.first()
-        } else {
-            None
+    /// Whether the site selects its target by the actual callable.
+    pub(crate) fn dynamic(&self) -> bool {
+        matches!(self.targets, Targets::Dynamic { .. })
+    }
+    /// The plan for `code` as this site's target, or None when the site
+    /// does not admit it.
+    pub(crate) fn target(&self, exe: &Executable, code: CodeId) -> Option<Arc<CalleePlan>> {
+        match &self.targets {
+            Targets::Static(plan) => (plan.code() == code).then(|| Arc::clone(plan)),
+            Targets::Dynamic { site, dispatch } => {
+                if self.executable != exe.local() {
+                    return None;
+                }
+                dispatch.lock().ok()?.code(exe, self.caller, site, code)
+            }
         }
     }
     pub(crate) fn result_role(&self) -> CallRole {
@@ -251,20 +270,24 @@ impl CallPlan {
     }
     /// Bind actual lease-local or imported callable identities before entry.
     /// Unsupported/opaque callbacks end the lease before invocation.
-    pub(crate) fn bind_callable<'plan, 'lease>(
-        &'plan self,
+    pub(crate) fn bind_callable<'lease>(
+        &self,
         exe: &Executable,
         lease: &'lease mut StateLease<'_>,
         value: LeaseValue,
-    ) -> Result<Option<CallBinding<'plan, 'lease>>, LeaseFault> {
+    ) -> Result<Option<CallBinding<'lease>>, LeaseFault> {
+        let Targets::Dynamic { site, dispatch } = &self.targets else {
+            return Ok(None);
+        };
         if self.callable.is_none() || self.executable != exe.local() {
             return Ok(None);
         }
         let view = lease.callable(value)?;
-        let Some(index) = self.dispatch.target(exe, view.identity(), view.closure()) else {
+        let Some(plan) = dispatch.lock().ok().and_then(|mut dispatch| {
+            dispatch.callable(exe, self.caller, site, view.identity(), view.closure())
+        }) else {
             return Ok(None);
         };
-        let plan = &self.targets[index];
         if view.captures().len() != plan.captures().len() {
             return Ok(None);
         }

@@ -1,6 +1,9 @@
-//! Compile each reachable callee once. Recursive edges retain code indexes.
+//! Bind each reachable callee once: every static target, and each dynamic
+//! target a run has reached or the lease's stack stands in. Recursive edges
+//! retain code indexes.
 use super::super::*;
 use super::Code;
+use crate::compile::room::region::calls::region_isa::CalleePlan;
 
 pub(super) struct Programs {
     codes: Box<[Option<Arc<Code>>]>,
@@ -15,7 +18,9 @@ pub(super) struct Programs {
 }
 
 impl Programs {
-    pub(super) fn bind(entry: &Arc<Code>) -> Result<Arc<Self>, RegionError> {
+    /// `stack` holds the codes of the lease's frames, outermost first: a
+    /// parked call enters the next frame's code.
+    pub(super) fn bind(entry: &Arc<Code>, stack: &[CodeId]) -> Result<Arc<Self>, RegionError> {
         let exe = &entry.exe;
         let mut codes = Vec::new();
         codes
@@ -31,6 +36,11 @@ impl Programs {
             .try_reserve_exact(exe.code_count())
             .map_err(|_| invalid(Refused::Scratch))?;
         pending.push(Arc::clone(entry));
+        let mut targets: Vec<Vec<Vec<Arc<CalleePlan>>>> = Vec::new();
+        targets
+            .try_reserve_exact(exe.code_count())
+            .map_err(|_| invalid(Refused::Scratch))?;
+        targets.resize_with(exe.code_count(), Vec::new);
         let mut result = Self {
             codes: Box::new([]),
             calls: Box::new([]),
@@ -55,26 +65,56 @@ impl Programs {
                     .ok_or_else(|| invalid(Refused::Facts))?;
             }
             result.loops = result.loops.max(loops as usize);
-            for call in code.calls.iter().flatten() {
-                for target in call.plan.targets() {
+            let caller = code.program.code();
+            let mut sites = Vec::with_capacity(code.calls.len());
+            for (site, call) in code.calls.iter().enumerate() {
+                let Some(call) = call else {
+                    sites.push(Vec::new());
+                    continue;
+                };
+                let mut plans = Vec::new();
+                if call.plan.dynamic() {
+                    let site = u32::try_from(site).map_err(|_| invalid(Refused::Path))?;
+                    let parked = stack
+                        .windows(2)
+                        .filter(|pair| pair[0] == caller)
+                        .map(|pair| pair[1]);
+                    let mut reached = exe.dynamic_targets(caller, site);
+                    reached.extend(parked);
+                    reached.sort_unstable();
+                    reached.dedup();
+                    plans.extend(
+                        reached
+                            .into_iter()
+                            .filter_map(|target| call.plan.target(exe, target)),
+                    );
+                } else if let Some(plan) = call.plan.static_target() {
+                    plans.push(Arc::clone(plan));
+                }
+                for plan in &plans {
                     let slot = codes
-                        .get_mut(target.code().0 as usize)
+                        .get_mut(plan.code().0 as usize)
                         .ok_or_else(|| invalid(Refused::Source))?;
                     if slot.is_some() {
                         continue;
                     }
-                    let program = exe.region(target.code()).map_err(invalid)?;
+                    let program = exe.region(plan.code()).map_err(invalid)?;
                     let bound = Code::bind_executable(exe, &program)?;
                     *slot = Some(Arc::clone(&bound));
                     pending.push(bound);
                 }
+                sites.push(plans);
             }
+            *targets
+                .get_mut(caller.0 as usize)
+                .ok_or_else(|| invalid(Refused::Source))? = sites;
         }
         result.calls = codes
             .iter()
-            .map(|code| {
+            .zip(&targets)
+            .map(|(code, targets)| {
                 code.as_ref()
-                    .map(|code| super::call_bind::Calls::bind(code, &codes))
+                    .map(|code| super::call_bind::Calls::bind(code, targets, &codes))
                     .transpose()
             })
             .collect::<Result<_, RegionError>>()?;
@@ -116,5 +156,13 @@ impl Programs {
             .and_then(Option::as_ref)
             .ok_or_else(|| invalid(Refused::Source))?
             .target(site, target)
+    }
+
+    /// Whether the lease bound `target` at `caller`'s call `site`.
+    pub(super) fn binds(&self, caller: CodeId, site: u32, target: CodeId) -> bool {
+        self.calls
+            .get(caller.0 as usize)
+            .and_then(Option::as_ref)
+            .is_some_and(|calls| calls.target(site, target).is_ok())
     }
 }

@@ -43,6 +43,8 @@ pub(crate) struct CalleePlan {
     enter: Point,
     leave: Point,
     frame_price: u64,
+    /// The frame header and the cell of each parameter a closure shares.
+    entry_price: u64,
     debt: CallDebt,
     library: Option<LibId>,
 }
@@ -80,7 +82,7 @@ impl CalleePlan {
             return Err(Refused::Source);
         }
         let caller_source = &exe.code(caller).source_room;
-        let roles = caller_roles(caller_source, target)?;
+        let roles = caller_roles(caller_source, target.shape())?;
         let substitutions = source
             .params
             .iter()
@@ -201,6 +203,7 @@ impl CalleePlan {
             enter,
             leave,
             frame_price: doc::LogicalHeldV1::FRAME,
+            entry_price: entry_fixed,
             debt,
             library: target.library,
         })
@@ -211,6 +214,7 @@ impl CalleePlan {
             || self.enter != expected.enter
             || self.leave != expected.leave
             || self.frame_price != expected.frame_price
+            || self.entry_price != expected.entry_price
             || self.library != expected.library
             || self.captures != expected.captures
             || self.substitutions != expected.substitutions
@@ -256,6 +260,9 @@ impl CalleePlan {
     }
     pub(crate) fn frame_price(&self) -> u64 {
         self.frame_price
+    }
+    pub(crate) fn entry_price(&self) -> u64 {
+        self.entry_price
     }
     pub(crate) fn debt(&self) -> &CallDebt {
         &self.debt

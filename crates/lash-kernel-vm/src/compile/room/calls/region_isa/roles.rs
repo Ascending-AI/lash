@@ -34,14 +34,14 @@ pub(crate) struct ParameterBinding {
 
 /// Actual callable bindings borrow D's view. They grant no invocation or
 /// semantic authority and snapshot no mutable capture contents.
-pub(crate) struct CallBinding<'plan, 'lease> {
-    pub(super) plan: &'plan CalleePlan,
+pub(crate) struct CallBinding<'lease> {
+    pub(super) plan: Arc<CalleePlan>,
     pub(super) callable: LeaseValue,
     pub(super) view: LeaseCallable<'lease>,
 }
-impl<'plan> CallBinding<'plan, '_> {
-    pub(crate) fn plan(&self) -> &'plan CalleePlan {
-        self.plan
+impl CallBinding<'_> {
+    pub(crate) fn plan(&self) -> &Arc<CalleePlan> {
+        &self.plan
     }
     pub(crate) fn identity(&self) -> lash_kernel_value::CallableId {
         *self.view.identity()

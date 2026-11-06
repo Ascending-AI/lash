@@ -191,6 +191,11 @@ impl KernelMachine {
                     }
                     continue;
                 }
+                // The next lease binds the dynamic target the call reached.
+                RegionStop::Bind => {
+                    self.regs.clear();
+                    continue;
+                }
                 // A raise no try of the frame takes leaves the frame.
                 RegionStop::Throw => {
                     self.regs.clear();

@@ -3,7 +3,7 @@ use super::super::{operands::Operand, *};
 use super::{Code, Running, charge};
 use crate::compile::region_isa::{CheckedKind, Pc, PrefixId, RegionOp};
 use crate::compile::room::charges::region_isa::ChargeMoment;
-use lash_kernel_state::kernel_internals::logical::{LeaseMember, LeaseOp};
+use lash_kernel_state::kernel_internals::logical::{LeaseAllocation, LeaseMember, LeaseOp};
 
 pub(super) struct Parked {
     pub(super) callee: lash_kernel_state::kernel_internals::logical::Invocation,
@@ -102,18 +102,35 @@ impl Running<'_> {
             };
             self.call_captures
                 .extend(binding.capture_roles().map(|(_, value)| value));
-            binding.plan()
+            let plan = Arc::clone(binding.plan());
+            // A dynamic target this lease has not bound stops before the
+            // call, unbilled: the machine binds it beside the lease's
+            // others and runs on from here.
+            if !self
+                .programs
+                .binds(caller.program.code(), site, plan.code())
+            {
+                if !caller
+                    .exe
+                    .reach_dynamic_target(caller.program.code(), site, plan.code())
+                {
+                    return Err(invalid(Refused::Facts));
+                }
+                self.call_captures.clear();
+                self.stop = Some(RegionStop::Bind);
+                return Ok(None);
+            }
+            plan
         } else {
-            call.plan
-                .static_target()
-                .ok_or_else(|| invalid(Refused::Facts))?
+            Arc::clone(
+                call.plan
+                    .static_target()
+                    .ok_or_else(|| invalid(Refused::Facts))?,
+            )
         };
-        let target = self
-            .programs
-            .target(caller.program.code(), site, plan.code())?;
-        if target.parameters.iter().any(|parameter| parameter.shared)
-            || target.captures.len() != self.call_captures.len()
-        {
+        let programs = Arc::clone(&self.programs);
+        let target = programs.target(caller.program.code(), site, plan.code())?;
+        if target.captures.len() != self.call_captures.len() {
             return Err(invalid(Refused::Facts));
         }
         let callee = Arc::clone(self.programs.code(plan.code())?);
@@ -127,8 +144,8 @@ impl Running<'_> {
         };
         if !matches!(kernel.kind(), CheckedKind::Phase)
             || &entry.at != plan.enter()
-            || entry.peak.fixed != i128::from(plan.frame_price())
-            || entry.delta.fixed != i128::from(plan.frame_price())
+            || entry.peak.fixed != i128::from(plan.entry_price())
+            || entry.delta.fixed != i128::from(plan.entry_price())
             || !entry.peak.terms.is_empty()
             || !entry.delta.terms.is_empty()
             || !entry.charges.is_empty()
@@ -196,6 +213,14 @@ impl Running<'_> {
         self.loops[loop_start..loop_start + self.programs.loops]
             .fill(super::control::LoopState::default());
         for (parameter, value) in target.parameters.iter().zip(&self.call_values) {
+            // A shared parameter's register takes its cell once the frame
+            // is entered; it must be a value register.
+            if parameter.shared {
+                if !matches!(parameter.output, code::Register::Value(_)) {
+                    return Err(invalid(Refused::Facts));
+                }
+                continue;
+            }
             self.registers.write(
                 &mut self.view,
                 frame,
@@ -250,6 +275,11 @@ impl Running<'_> {
         if plan.frame_price() != lash_kernel_doc::LogicalHeldV1::FRAME {
             return Err(invalid(Refused::Facts));
         }
+        // The shared parameters' cells, allocated right after the frame.
+        let cells = plan
+            .entry_price()
+            .checked_sub(plan.frame_price())
+            .ok_or_else(|| invalid(Refused::Facts))?;
         let delta = phase.facts().delta();
         let balance = i128::from(self.counters.balance)
             .checked_add(delta)
@@ -262,7 +292,10 @@ impl Running<'_> {
             .ok_or_else(|| invalid(Refused::Peak))?
             .max(balance)
             .max(self.counters.peak);
-        if !charge::fits_memory(self.limiters, &mut self.limits, peak) {
+        let entered = balance
+            .checked_add(cells)
+            .ok_or_else(|| invalid(Refused::Peak))?;
+        if !charge::fits_memory(self.limiters, &mut self.limits, peak.max(entered)) {
             drop(phase);
             self.refusal = Some(crate::Bound::Memory);
             self.attempted = Some(step.at.clone());
@@ -305,6 +338,7 @@ impl Running<'_> {
         };
         // All bank writes, allocation and checks precede this affine accept.
         ready.accept();
+        let (balance, peak) = self.enter_cells(&target, frame, reserved.id, balance, peak)?;
         self.release_atoms()?;
         self.parked.push(parked);
         self.invocations.accept(reserved);
@@ -328,5 +362,57 @@ impl Running<'_> {
         };
         self.stop = None;
         Ok(Some(activation))
+    }
+}
+
+impl Running<'_> {
+    /// Each shared parameter's argument moves into a fresh cell in one
+    /// atomic phase, and the cell becomes the parameter's register. The
+    /// call's memory check already covered these cells.
+    fn enter_cells(
+        &mut self,
+        target: &super::call_bind::Target,
+        frame: usize,
+        invocation: u64,
+        mut balance: u64,
+        mut peak: u64,
+    ) -> Result<(u64, u64), RegionError> {
+        for (parameter, value) in target.parameters.iter().zip(&self.call_values) {
+            if !parameter.shared {
+                continue;
+            }
+            let code::Register::Value(index) = parameter.output else {
+                return Err(invalid(Refused::Facts));
+            };
+            let releases = std::slice::from_ref(value);
+            let phase = self
+                .view
+                .stage(LeaseOp::AllocateMove {
+                    allocation: LeaseAllocation::cell(value),
+                    releases,
+                })
+                .map_err(storage_fault)?;
+            let after = i128::from(balance)
+                .checked_add(phase.facts().delta())
+                .and_then(|balance| u64::try_from(balance).ok())
+                .ok_or_else(|| invalid(Refused::Facts))?;
+            peak = balance
+                .checked_add(phase.facts().peak())
+                .ok_or_else(|| invalid(Refused::Peak))?
+                .max(after)
+                .max(peak);
+            if !charge::fits_memory(self.limiters, &mut self.limits, peak) {
+                return Err(invalid(Refused::Peak));
+            }
+            let write = self.registers.prepare_dynamic(frame, invocation, index)?;
+            let ready = phase.reserve().map_err(RegionError::Heap)?;
+            let cell = ready.accept();
+            if cell.is_none() {
+                return Err(invalid(Refused::Facts));
+            }
+            write.publish(cell);
+            balance = after;
+        }
+        Ok((balance, peak))
     }
 }
