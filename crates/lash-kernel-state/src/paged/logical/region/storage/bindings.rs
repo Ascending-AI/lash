@@ -530,6 +530,28 @@ impl<'s> StateLease<'s> {
     ) -> Result<Option<Entry>, LeaseFault> {
         self.load_head(index)?;
         let slot = &self.local.slots[index];
+        // An error is immutable: its three fields are read from its body,
+        // and any other name reads as absent.
+        if let LeaseMember::Field(name) = member
+            && let Some(Value::Error(handle)) = slot.existing.as_ref().and_then(|e| e.value)
+        {
+            let Body::Error(error) = self.arena().body(handle).map_err(local_native)? else {
+                return Err(invalid("an error handle names another body").into());
+            };
+            let value = match &**name {
+                "kind" => error.kind,
+                "message" => error.message,
+                "data" => error.data,
+                _ => return Ok(None),
+            };
+            return Ok(Some(Entry {
+                key: Spelling::Value(LeaseValue {
+                    repr: Repr::Scalar(Value::Absent),
+                }),
+                value: self.import(&value)?,
+                sequence: 0,
+            }));
+        }
         if matches!(member, LeaseMember::Field(_)) && slot.kind != Kind::Record {
             return Err(NativeError::Decline.into());
         }

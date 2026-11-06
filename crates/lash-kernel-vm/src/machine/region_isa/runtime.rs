@@ -62,13 +62,17 @@ impl KernelMachine {
             if let Some(standing) = standing {
                 match self.task(task)?.take_incoming() {
                     Some(incoming) => {
-                        if let Err(raised) = self.deliver_action(task, standing, incoming) {
-                            return self.raise_out(task, host, raised);
+                        if let Err(raised) = self.deliver_action(task, standing, incoming)
+                            && !self.raise_out(task, host, raised)?
+                        {
+                            return Ok(true);
                         }
                     }
                     None => {
-                        if let Err(raised) = self.perform_action(task, host, standing) {
-                            return self.raise_out(task, host, raised);
+                        if let Err(raised) = self.perform_action(task, host, standing)
+                            && self.raise_out(task, host, raised)?
+                        {
+                            continue;
                         }
                         return Ok(true);
                     }
@@ -156,7 +160,12 @@ impl KernelMachine {
                     let at = at.ok_or_else(|| fault("an effect stop has no point"))?;
                     let datum = match self.serve_effect(task, at, slot) {
                         Ok(datum) => datum,
-                        Err(raised) => return self.raise_out(task, host, raised),
+                        Err(raised) => {
+                            if self.raise_out(task, host, raised)? {
+                                continue;
+                            }
+                            return Ok(true);
+                        }
                     };
                     match kind {
                         crate::compile::region_isa::EffectKind::Print => host.print(&datum),
@@ -179,8 +188,10 @@ impl KernelMachine {
                     let (lib, slots) =
                         native.ok_or_else(|| fault("a native stop stands at no native call"))?;
                     let at = at.ok_or_else(|| fault("a native stop has no point"))?;
-                    if let Err(raised) = self.answer_native(task, at, lib, &slots) {
-                        return self.raise_out(task, host, raised);
+                    if let Err(raised) = self.answer_native(task, at, lib, &slots)
+                        && !self.raise_out(task, host, raised)?
+                    {
+                        return Ok(true);
                     }
                     continue;
                 }

@@ -23,6 +23,11 @@ pub(super) trait Events {
     fn selected_end(&self) -> bool {
         false
     }
+    /// A selected suffix that starts where a delivered action or a call
+    /// resumes: the point it resumes at after the event at `at`.
+    fn resumed(&mut self, _: &Point) -> Option<Point> {
+        None
+    }
 }
 
 enum Stop {
@@ -194,6 +199,12 @@ impl<E: Events> Run<'_, E> {
     }
     fn call(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Stop> {
         let exit = self.step(site, phase)?;
+        if let Some(resume) = self.events.resumed(&point(site, phase)) {
+            if resume.site != *site {
+                return Err(Refused::Source.into());
+            }
+            return self.step(&resume.site, resume.phase);
+        }
         let Some(completion) = self
             .events
             .resume_call(self.source, &point(site, phase), exit)?

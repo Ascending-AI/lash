@@ -96,7 +96,9 @@ impl Code {
         let mut captures = 0;
         let mut calls = BTreeMap::new();
         let mut visited = BTreeSet::new();
-        let mut pending = vec![program.entry()];
+        let mut pending = std::iter::once(program.entry())
+            .chain(program.raise_origins())
+            .collect::<Vec<_>>();
         while let Some(pc) = pending.pop() {
             if !visited.insert(pc.index()) {
                 continue;

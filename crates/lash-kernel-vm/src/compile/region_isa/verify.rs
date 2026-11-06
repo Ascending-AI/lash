@@ -1175,203 +1175,232 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
     );
     let mut incoming = BTreeMap::from([(draft.entry.offset(), initial)]);
     let mut queue = VecDeque::from([draft.entry.offset()]);
-    while let Some(index) = queue.pop_front() {
-        let before_owned = incoming.get(&index).ok_or(Refused::Exit)?.clone();
-        let before = &before_owned;
-        let step = &draft.steps[index];
-        let event = if step.stage.is_some() || super::joins::joined(source, &step.at)? {
-            &step.event
-        } else {
-            source.room.events.get(&step.at).ok_or(Refused::Source)?
-        };
-        let mut after = before.clone();
-        for owner in &event.inputs {
-            if let Some(slot) = resources::role(source, owner).and_then(Role::slot) {
-                after.remove(&slot);
+    loop {
+        while let Some(index) = queue.pop_front() {
+            let before_owned = incoming.get(&index).ok_or(Refused::Exit)?.clone();
+            let before = &before_owned;
+            let step = &draft.steps[index];
+            let origin = index >= source.room.events.len()
+                && draft
+                    .departures
+                    .iter()
+                    .any(|route| route.origin.offset() == index);
+            let event = if origin || step.stage.is_some() || super::joins::joined(source, &step.at)?
+            {
+                &step.event
+            } else {
+                source.room.events.get(&step.at).ok_or(Refused::Source)?
+            };
+            let mut after = before.clone();
+            for owner in &event.inputs {
+                if let Some(slot) = resources::role(source, owner).and_then(Role::slot) {
+                    after.remove(&slot);
+                }
             }
-        }
-        for measure in event.delta.measures() {
-            if let Measure::Release(owners) = measure {
-                for owner in owners {
-                    for root in resources::owner_roots(source, owner)? {
-                        if let Root::Value { slot, .. } = root {
-                            after.remove(&slot);
+            for measure in event.delta.measures() {
+                if let Measure::Release(owners) = measure {
+                    for owner in owners {
+                        for root in resources::owner_roots(source, owner)? {
+                            if let Root::Value { slot, .. } = root {
+                                after.remove(&slot);
+                            }
                         }
                     }
                 }
             }
-        }
-        // A statement action's Enter holds its atoms until its Commit.
-        for (measure, coefficient) in canonical::terms(&event.delta) {
-            if *coefficient > 0
-                && let Measure::Local(owner @ Owner::Atom { .. }) = measure
-                && let Some(slot) = resources::role(source, owner).and_then(Role::slot)
+            // A statement action's Enter holds its atoms until its Commit.
+            for (measure, coefficient) in canonical::terms(&event.delta) {
+                if *coefficient > 0
+                    && let Measure::Local(owner @ Owner::Atom { .. }) = measure
+                    && let Some(slot) = resources::role(source, owner).and_then(Role::slot)
+                {
+                    after.insert(slot);
+                }
+            }
+            if !matches!(draft.ops[index], RegionOp::Call { .. })
+                && let Some(slot) = event
+                    .output
+                    .as_ref()
+                    .and_then(|owner| resources::role(source, owner))
+                    .and_then(Role::slot)
             {
                 after.insert(slot);
             }
-        }
-        if !matches!(draft.ops[index], RegionOp::Call { .. })
-            && let Some(slot) = event
-                .output
-                .as_ref()
-                .and_then(|owner| resources::role(source, owner))
+            if step.stage.is_none()
+                && step.at.phase == Phase::Commit
+                && let doc::Node::Stmt(doc::Stmt::Assign {
+                    place: doc::Place::Variable(name),
+                    ..
+                }) = resources::node(source, &step.at.site)?
+                && let Some(slot) = resources::role(
+                    source,
+                    &Owner::Visible {
+                        at: step.at.site.clone(),
+                        name: name.clone(),
+                    },
+                )
                 .and_then(Role::slot)
-        {
-            after.insert(slot);
-        }
-        if step.stage.is_none()
-            && step.at.phase == Phase::Commit
-            && let doc::Node::Stmt(doc::Stmt::Assign {
-                place: doc::Place::Variable(name),
-                ..
-            }) = resources::node(source, &step.at.site)?
-            && let Some(slot) = resources::role(
-                source,
-                &Owner::Visible {
-                    at: step.at.site.clone(),
-                    name: name.clone(),
-                },
-            )
-            .and_then(Role::slot)
-        {
-            after.insert(slot);
-        }
-        let sink = Reg::new(draft.roles.len())?;
-        let incoming_before = event
-            .inputs
-            .iter()
-            .any(|owner| matches!(owner, Owner::Incoming(_)))
-            .then_some(sink);
-        let incoming_after = super::lower::delivers(&draft.ops[index]).then_some(sink);
-        let mut pending_roles = if incoming_after.is_some() {
-            after.clone()
-        } else {
-            before.clone()
-        };
-        let pending = if super::lower::delivers(&draft.ops[index]) {
-            Some(sink)
-        } else if matches!(&draft.ops[index], RegionOp::Heap { kernel, .. } if kernel.atomic_move())
-        {
-            None
-        } else if super::lower::pending_at_output(&draft.generic_ops[index]) {
-            event
-                .output
-                .as_ref()
-                .map(|owner| {
-                    let reg = register(draft, owner)?;
-                    if let Role::Slot(slot) =
-                        resources::role(source, owner).ok_or(Refused::Facts)?
-                    {
-                        pending_roles.insert(slot);
-                    }
-                    Ok::<_, Refused>(reg)
-                })
-                .transpose()?
-        } else {
-            event
-                .output
-                .as_ref()
-                .map(|_| Reg::new(draft.roles.len()))
-                .transpose()?
-        };
-        for (prefix, expected, pending, incoming) in [
-            (step.before, before, incoming_before, incoming_before),
-            (
-                step.pending,
-                &pending_roles,
-                pending,
-                incoming_after.or(incoming_before),
-            ),
-            (step.after, &after, incoming_after, incoming_after),
-        ] {
-            let map = draft.recovery.get(prefix.offset()).ok_or(Refused::Exit)?;
-            let expected_roles: Vec<_> = draft
-                .roles
-                .iter()
-                .filter_map(|(role, reg)| {
-                    role.slot()
-                        .filter(|slot| expected.contains(slot))
-                        .map(|slot| (slot, *reg))
-                })
-                .collect();
-            if !map.graph.check(
-                &step.at,
-                &expected_roles,
-                map.pending,
-                (prefix.offset() % 3) as u32,
-                incoming,
-            ) || map.roles.as_ref() != expected_roles.as_slice()
-                || map.continuation != step.at
-                || map.pending != pending
             {
-                return Err(Refused::Exit);
+                after.insert(slot);
             }
-            let operands: Vec<_> = expected_roles
+            let sink = Reg::new(draft.roles.len())?;
+            let incoming_before = event
+                .inputs
                 .iter()
-                .filter(|(slot, _)| {
-                    matches!(
-                        slot,
-                        Slot::Operand(_) | Slot::Continuation(_) | Slot::Argument(_)
-                    )
-                })
-                .map(|(_, reg)| *reg)
-                .collect();
-            if map.operands.as_ref() != operands.as_slice() {
-                return Err(Refused::Exit);
+                .any(|owner| matches!(owner, Owner::Incoming(_)))
+                .then_some(sink);
+            let incoming_after = super::lower::delivers(&draft.ops[index]).then_some(sink);
+            let mut pending_roles = if incoming_after.is_some() {
+                after.clone()
+            } else {
+                before.clone()
+            };
+            let pending = if super::lower::delivers(&draft.ops[index]) {
+                Some(sink)
+            } else if matches!(&draft.ops[index], RegionOp::Heap { kernel, .. } if kernel.atomic_move())
+            {
+                None
+            } else if super::lower::pending_at_output(&draft.generic_ops[index]) {
+                event
+                    .output
+                    .as_ref()
+                    .map(|owner| {
+                        let reg = register(draft, owner)?;
+                        if let Role::Slot(slot) =
+                            resources::role(source, owner).ok_or(Refused::Facts)?
+                        {
+                            pending_roles.insert(slot);
+                        }
+                        Ok::<_, Refused>(reg)
+                    })
+                    .transpose()?
+            } else {
+                event
+                    .output
+                    .as_ref()
+                    .map(|_| Reg::new(draft.roles.len()))
+                    .transpose()?
+            };
+            for (prefix, expected, pending, incoming) in [
+                (step.before, before, incoming_before, incoming_before),
+                (
+                    step.pending,
+                    &pending_roles,
+                    pending,
+                    incoming_after.or(incoming_before),
+                ),
+                (step.after, &after, incoming_after, incoming_after),
+            ] {
+                let map = draft.recovery.get(prefix.offset()).ok_or(Refused::Exit)?;
+                let expected_roles: Vec<_> = draft
+                    .roles
+                    .iter()
+                    .filter_map(|(role, reg)| {
+                        role.slot()
+                            .filter(|slot| expected.contains(slot))
+                            .map(|slot| (slot, *reg))
+                    })
+                    .collect();
+                if !map.graph.check(
+                    &step.at,
+                    &expected_roles,
+                    map.pending,
+                    (prefix.offset() % 3) as u32,
+                    incoming,
+                ) || map.roles.as_ref() != expected_roles.as_slice()
+                    || map.continuation != step.at
+                    || map.pending != pending
+                {
+                    return Err(Refused::Exit);
+                }
+                let operands: Vec<_> = expected_roles
+                    .iter()
+                    .filter(|(slot, _)| {
+                        matches!(
+                            slot,
+                            Slot::Operand(_) | Slot::Continuation(_) | Slot::Argument(_)
+                        )
+                    })
+                    .map(|(_, reg)| *reg)
+                    .collect();
+                if map.operands.as_ref() != operands.as_slice() {
+                    return Err(Refused::Exit);
+                }
             }
-        }
-        if step.scalar_resources {
-            if let RegionOp::Read { spec, .. } = &draft.ops[index] {
-                let retained = spec.retained.ok_or(Refused::Retained)?;
-                if !before.contains(&retained) || !after.contains(&retained) {
+            if step.scalar_resources {
+                if let RegionOp::Read { spec, .. } = &draft.ops[index] {
+                    let retained = spec.retained.ok_or(Refused::Retained)?;
+                    if !before.contains(&retained) || !after.contains(&retained) {
+                        return Err(Refused::Retained);
+                    }
+                }
+
+                if step
+                    .peak
+                    .terms
+                    .iter()
+                    .chain(step.delta.terms.iter())
+                    .any(|(input, _)| {
+                        matches!(
+                            input,
+                            ResourceInput::SourceFact(
+                                Measure::Members(_)
+                                    | Measure::MemberDelta(_)
+                                    | Measure::MemberGrowth(_)
+                                    | Measure::CaptureEdges(_)
+                            )
+                        )
+                    })
+                {
+                    return Err(Refused::Retained);
+                }
+                if !event.entities.is_empty() {
+                    return Err(Refused::Retained);
+                }
+                if matches!(
+                    draft.ops[index],
+                    RegionOp::Boundary { .. } | RegionOp::Call { .. }
+                ) {
                     return Err(Refused::Retained);
                 }
             }
-
-            if step
-                .peak
-                .terms
-                .iter()
-                .chain(step.delta.terms.iter())
-                .any(|(input, _)| {
-                    matches!(
-                        input,
-                        ResourceInput::SourceFact(
-                            Measure::Members(_)
-                                | Measure::MemberDelta(_)
-                                | Measure::MemberGrowth(_)
-                                | Measure::CaptureEdges(_)
-                        )
-                    )
-                })
-            {
-                return Err(Refused::Retained);
-            }
-            if !event.entities.is_empty() {
-                return Err(Refused::Retained);
-            }
-            if matches!(
-                draft.ops[index],
-                RegionOp::Boundary { .. } | RegionOp::Call { .. }
-            ) {
-                return Err(Refused::Retained);
+            for successor in recovery::successors(draft, index) {
+                let live = match &draft.ops[index] {
+                    RegionOp::Checked { kernel, .. } if matches!(kernel.kind(), CheckedKind::Cursor { exhausted, .. } if *exhausted == successor) => {
+                        before
+                    }
+                    _ => &after,
+                };
+                match incoming.get(&successor.offset()) {
+                    Some(prior) if prior != live => return Err(Refused::Exit),
+                    Some(_) => {}
+                    None => {
+                        incoming.insert(successor.offset(), live.clone());
+                        queue.push_back(successor.offset());
+                    }
+                }
             }
         }
-        for successor in recovery::successors(draft, index) {
-            let live = match &draft.ops[index] {
-                RegionOp::Checked { kernel, .. } if matches!(kernel.kind(), CheckedKind::Cursor { exhausted, .. } if *exhausted == successor) => {
-                    before
-                }
-                _ => &after,
-            };
-            match incoming.get(&successor.offset()) {
-                Some(prior) if prior != live => return Err(Refused::Exit),
-                Some(_) => {}
-                None => {
-                    incoming.insert(successor.offset(), live.clone());
-                    queue.push_back(successor.offset());
-                }
+        // A raising event's own origin row is entered where the event's
+        // base row stands, holding what it holds.
+        let events = source.room.events.len();
+        for route in draft.departures.iter() {
+            let origin = route.origin.offset();
+            if origin < events || incoming.contains_key(&origin) {
+                continue;
             }
+            let at = &draft.steps[origin].at;
+            let base = draft.steps[..events]
+                .iter()
+                .position(|step| step.at == *at)
+                .ok_or(Refused::Exit)?;
+            if let Some(live) = incoming.get(&base).cloned() {
+                incoming.insert(origin, live);
+                queue.push_back(origin);
+            }
+        }
+        if queue.is_empty() {
+            break;
         }
     }
     if draft

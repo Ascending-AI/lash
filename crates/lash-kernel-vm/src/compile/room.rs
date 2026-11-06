@@ -243,6 +243,52 @@ pub(crate) struct Event {
     pub(crate) peak: Amount,
     pub(crate) delta: Amount,
 }
+impl Event {
+    /// This event as its Raise exit takes it when the raise departs toward
+    /// a try: the raised value is published into the frame's active
+    /// departure, not the event's output, and is measured there.
+    pub(crate) fn raised(&self, frame: &Site) -> Option<Self> {
+        let from = self.output.clone()?;
+        let to = Owner::ActiveDeparture(frame.clone());
+        let rename = |owner: &Owner| {
+            if *owner == from {
+                to.clone()
+            } else {
+                owner.clone()
+            }
+        };
+        let amount = |amount: &Amount| Amount {
+            fixed: amount.fixed,
+            terms: amount
+                .terms
+                .iter()
+                .map(|(measure, coefficient)| {
+                    let measure = match measure {
+                        Measure::Local(owner) => Measure::Local(rename(owner)),
+                        Measure::Release(owners) => {
+                            Measure::Release(owners.iter().map(rename).collect())
+                        }
+                        Measure::NativeRelease { at, callee, owners } => Measure::NativeRelease {
+                            at: at.clone(),
+                            callee: *callee,
+                            owners: owners.iter().map(rename).collect(),
+                        },
+                        other => other.clone(),
+                    };
+                    (measure, *coefficient)
+                })
+                .collect(),
+        };
+        Some(Self {
+            point: self.point.clone(),
+            inputs: self.inputs.clone(),
+            output: Some(to.clone()),
+            entities: self.entities.iter().map(rename).collect(),
+            peak: amount(&self.peak),
+            delta: amount(&self.delta),
+        })
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Exit {
     pub(crate) point: Point,

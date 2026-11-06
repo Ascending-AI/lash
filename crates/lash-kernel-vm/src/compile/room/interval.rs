@@ -213,13 +213,52 @@ impl Source {
         at: &Point,
     ) -> Result<Arc<CompiledInterval>, Refused> {
         self.verify()?;
-        if at.phase != Phase::Commit
-            || at.site.unit != self.site.unit
+        if at.site.unit != self.site.unit
             || !at.site.path.starts_with(&self.site.path)
             || at.site.path.len() <= self.site.path.len()
         {
             return Err(Refused::Path);
         }
+        // A raising event that takes the task's Incoming (a delivered
+        // action's Commit, a call's Restore) departs as a Throw does: its
+        // Raise exit publishes the value into the frame's active departure.
+        let raising = self.room.events.get(at).and_then(|event| {
+            (event
+                .inputs
+                .iter()
+                .any(|owner| matches!(owner, Owner::Incoming(_)))
+                && self
+                    .room
+                    .exits
+                    .iter()
+                    .any(|exit| exit.point == *at && exit.kind == ExitKind::Raise))
+            .then(|| event.raised(&self.site))
+            .flatten()
+        });
+        if at.phase != Phase::Commit && raising.is_none() {
+            return Err(Refused::Path);
+        }
+        // Its other ancestors hold no event before it: each has only a
+        // Commit, or is a condition's choice still untaken.
+        let transparent = |site: &Site, node: doc::Node<'_>, index: u32| {
+            raising.is_some()
+                && !matches!(node, doc::Node::Block(_))
+                && self
+                    .room
+                    .events
+                    .keys()
+                    .filter(|point| point.site == *site)
+                    .all(|point| {
+                        point.phase == Phase::Commit
+                            || (index == 0
+                                && point.phase == Phase::Test
+                                && matches!(
+                                    node,
+                                    doc::Node::Stmt(doc::Stmt::If { .. })
+                                        | doc::Node::Expr(doc::Expr::If { .. })
+                                ))
+                    })
+        };
         let mut node = doc::Node::Block(&self.body);
         let mut path = self.site.clone();
         let mut blocks = Vec::new();
@@ -267,6 +306,7 @@ impl Source {
                         suspend = Some((path.clone(), cleanup));
                     }
                 }
+                _ if transparent(&path, node, *index) => {}
                 // A return inside cleanup supersedes its pending departure.
                 _ => return Err(Refused::Path),
             }
@@ -274,6 +314,7 @@ impl Source {
             path = path.child(*index);
         }
         let departing = match node {
+            _ if raising.is_some() => ExitKind::Raise,
             doc::Node::Stmt(doc::Stmt::Return { .. }) => ExitKind::Return,
             doc::Node::Stmt(doc::Stmt::Break) => ExitKind::Break,
             doc::Node::Stmt(doc::Stmt::Continue) => ExitKind::Continue,
@@ -389,6 +430,7 @@ impl Source {
             raised: &'a std::collections::BTreeSet<Site>,
             route: &'a [Selection],
             cursor: usize,
+            phase: Phase,
         }
         impl evaluate::Events for Suffix<'_> {
             fn completed(&mut self, site: &Site) -> Option<ExitKind> {
@@ -409,7 +451,9 @@ impl Source {
             }
             fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
                 if self.cursor == 0
-                    && ((phase == Phase::Enter && self.blocks.contains(site))
+                    // A raising event's earlier phases have completed.
+                    && ((site == self.returning && phase != self.phase)
+                        || (phase == Phase::Enter && self.blocks.contains(site))
                         || (phase == Phase::Test && self.choices.contains_key(site))
                         || (phase == Phase::Catch && self.raised.contains(site))
                         || (self.for_sites.contains(site)
@@ -435,6 +479,14 @@ impl Source {
             fn selected_end(&self) -> bool {
                 self.cursor == self.route.len()
             }
+            fn resumed(&mut self, at: &Point) -> Option<Point> {
+                (self.cursor == 0 && at.site == *self.returning && at.phase != self.phase).then(
+                    || Point {
+                        site: self.returning.clone(),
+                        phase: self.phase,
+                    },
+                )
+            }
         }
         let mut suffix = Suffix {
             returning: &at.site,
@@ -444,12 +496,23 @@ impl Source {
             raised: &raised,
             route: &route,
             cursor: 0,
+            phase: at.phase,
         };
         let exit = evaluate::walk_to(
             self,
             &self.site,
             &mut suffix,
-            route.len() + blocks.len() + choices.len() + 4 * for_sites.len() + raised.len(),
+            route.len()
+                + blocks.len()
+                + choices.len()
+                + 4 * for_sites.len()
+                + raised.len()
+                // A raising event's completed earlier phases at its own site.
+                + if raising.is_some() {
+                    self.room.events.keys().filter(|p| p.site == at.site).count()
+                } else {
+                    0
+                },
         )?;
         if exit != departing || suffix.cursor != route.len() {
             return Err(Refused::Path);
@@ -457,16 +520,16 @@ impl Source {
         let mut variables = 0;
         let steps = route
             .iter()
-            .map(|selection| {
+            .enumerate()
+            .map(|(position, selection)| {
                 let Selection::Event { at, exit } = selection else {
                     return Err(Refused::Path);
                 };
-                Step::compile(
-                    self,
-                    self.room.events.get(at).ok_or(Refused::Path)?.clone(),
-                    *exit,
-                    &mut variables,
-                )
+                let event = match (&raising, position) {
+                    (Some(raising), 0) => raising.clone(),
+                    _ => self.room.events.get(at).ok_or(Refused::Path)?.clone(),
+                };
+                Step::compile(self, event, *exit, &mut variables)
             })
             .collect::<Result<Box<[_]>, Refused>>()?;
         let interval = Arc::new(CompiledInterval {

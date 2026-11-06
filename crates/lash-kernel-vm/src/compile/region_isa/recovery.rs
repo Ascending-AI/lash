@@ -272,30 +272,52 @@ pub(super) fn liveness(draft: &RegionDraft) -> Result<Vec<Option<BTreeSet<Slot>>
         .ok_or(Refused::Path)?
         .replace(initial);
     let mut queue = std::collections::VecDeque::from([draft.entry.offset()]);
-    while let Some(pc) = queue.pop_front() {
-        let Some(live) = states[pc].clone() else {
-            return Err(Refused::Exit);
-        };
-        let next = transfer(draft, pc, &live)?;
-        for successor in successors(draft, pc) {
-            let state = states.get_mut(successor.offset()).ok_or(Refused::Path)?;
-            let next = match &draft.ops[pc] {
-                RegionOp::Checked { kernel, .. } if matches!(kernel.kind(), super::CheckedKind::Cursor { exhausted, .. } if *exhausted == successor) => {
-                    &live
-                }
-                _ => &next,
+    let events = draft.source.room.events.len();
+    loop {
+        while let Some(pc) = queue.pop_front() {
+            let Some(live) = states[pc].clone() else {
+                return Err(Refused::Exit);
             };
-            match state {
-                None => {
-                    *state = Some(next.clone());
-                    queue.push_back(successor.offset());
+            let next = transfer(draft, pc, &live)?;
+            for successor in successors(draft, pc) {
+                let state = states.get_mut(successor.offset()).ok_or(Refused::Path)?;
+                let next = match &draft.ops[pc] {
+                    RegionOp::Checked { kernel, .. } if matches!(kernel.kind(), super::CheckedKind::Cursor { exhausted, .. } if *exhausted == successor) => {
+                        &live
+                    }
+                    _ => &next,
+                };
+                match state {
+                    None => {
+                        *state = Some(next.clone());
+                        queue.push_back(successor.offset());
+                    }
+                    Some(existing) if existing != next => {
+                        return Err(Refused::Exit);
+                    }
+                    Some(_) => {}
                 }
-                Some(existing) if existing != next => {
-                    return Err(Refused::Exit);
-                }
-                Some(_) => {}
             }
         }
+        // A raising event's own origin row is entered where the event's
+        // base row stands, holding what it holds.
+        for route in draft.departures.iter() {
+            let origin = route.origin.offset();
+            if origin < events || states.get(origin).ok_or(Refused::Path)?.is_some() {
+                continue;
+            }
+            let at = &draft.steps[origin].at;
+            let base = draft.steps[..events]
+                .iter()
+                .position(|step| step.at == *at)
+                .ok_or(Refused::Path)?;
+            if let Some(live) = states[base].clone() {
+                states[origin] = Some(live);
+                queue.push_back(origin);
+            }
+        }
+        if queue.is_empty() {
+            return Ok(states);
+        }
     }
-    Ok(states)
 }

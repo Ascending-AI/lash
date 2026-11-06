@@ -641,6 +641,14 @@ impl RegionCode {
             .iter()
             .find(|route| route.origin == pc || route.leaves.last() == Some(&pc))?;
         let origin = &self.draft.steps[route.origin.offset()].at;
+        // A raising event's route is carried as a Throw's.
+        if route.origin.offset() >= self.draft.source.room.events.len() {
+            return Some(if route.origin == pc {
+                LoopDeparture::Origin(origin.clone())
+            } else {
+                LoopDeparture::End { exits: None }
+            });
+        }
         let breaks = match lower::node_at(&self.draft.source, origin)? {
             doc::Node::Stmt(doc::Stmt::Break) => true,
             doc::Node::Stmt(doc::Stmt::Continue) => false,
@@ -684,11 +692,25 @@ impl RegionCode {
             .departures
             .iter()
             .find(|route| self.draft.steps[route.origin.offset()].at == *origin)?;
-        route
-            .leaves
-            .iter()
-            .copied()
+        std::iter::once(route.origin)
+            .chain(route.leaves.iter().copied())
             .find(|pc| self.draft.steps[pc.offset()].at == *at)
+    }
+    /// Whether a raise of the event at `at` has a route of its own to the
+    /// try of the frame that takes it.
+    pub(crate) fn raise_route(&self, at: &Point) -> bool {
+        self.raise_origins()
+            .any(|origin| self.draft.steps[origin.offset()].at == *at)
+    }
+    /// The rows a raise re-enters the region at: one per raising event with
+    /// a route, entered only from a continuation, never by a branch.
+    pub(crate) fn raise_origins(&self) -> impl Iterator<Item = Pc> + '_ {
+        let events = self.draft.source.room.events.len();
+        self.draft
+            .departures
+            .iter()
+            .map(|route| route.origin)
+            .filter(move |origin| origin.offset() >= events)
     }
     pub(crate) fn recovery(&self, prefix: PrefixId) -> Option<&RecoveryMap> {
         self.draft.recovery.get(prefix.offset())
@@ -755,10 +777,7 @@ impl RegionCode {
             return Some(pc);
         }
         let rows: Vec<Pc> = (0..self.draft.steps.len())
-            .filter(|index| {
-                let step = &self.draft.steps[*index];
-                step.reachable && step.at == *point
-            })
+            .filter(|index| self.ordinary(*index) && self.draft.steps[*index].at == *point)
             .filter_map(|index| u32::try_from(index).ok().map(Pc))
             .collect();
         if rows.len() < 2 {
@@ -808,7 +827,8 @@ impl RegionCode {
             .draft
             .steps
             .iter()
-            .filter(|step| step.reachable && step.at == *unpaid)
+            .enumerate()
+            .filter(|(index, step)| self.ordinary(*index) && step.at == *unpaid)
             .count();
         if rows < 2 {
             return self.at(unpaid);
@@ -864,11 +884,16 @@ impl RegionCode {
             _ => false,
         }
     }
+    /// A reachable row a continuation names by its point alone: a raise
+    /// origin is named only through its departure.
+    fn ordinary(&self, index: usize) -> bool {
+        self.draft.steps[index].reachable
+            && (index < self.draft.source.room.events.len()
+                || !self.raise_origins().any(|origin| origin.offset() == index))
+    }
     pub(crate) fn at(&self, point: &Point) -> Option<Pc> {
-        self.draft
-            .steps
-            .iter()
-            .position(|step| step.reachable && step.at == *point)
+        (0..self.draft.steps.len())
+            .position(|index| self.ordinary(index) && self.draft.steps[index].at == *point)
             .and_then(|index| u32::try_from(index).ok())
             .map(Pc)
     }

@@ -275,6 +275,12 @@ impl KernelMachine {
         mut departure: Completion,
     ) -> Result<(), Halt> {
         loop {
+            // A canonical frame's try takes a raise through its region route.
+            if let Completion::Throw(value) = &departure
+                && self.catch_in_region(task, **value)?
+            {
+                return Ok(());
+            }
             self.logical_departure(task, super::controls::Departed::of(&departure))?;
             match &departure {
                 Completion::Normal => return Ok(()),
@@ -314,19 +320,48 @@ impl KernelMachine {
                 &[],
             )?;
             let frame = self.frame(task)?;
-            // A canonical frame's try takes a raise through its region
-            // route, never through these controls.
-            if matches!(departure, Completion::Throw(_))
+            // A canonical frame's try takes a raise only through its region
+            // route: one its body holds that no route took has no meaning.
+            // Its catch blocks the raise leaves let go of what they took.
+            if let Completion::Throw(value) = &departure
                 && frame.pending.source.is_some()
-                && frame
+            {
+                if frame.control.iter().any(|control| {
+                    matches!(
+                        control,
+                        Control::Try {
+                            phase: TryPhase::Body,
+                            ..
+                        }
+                    )
+                }) {
+                    return Err(fault(
+                        "a raise reached a try of a canonical frame outside its region route",
+                    ));
+                }
+                let value = **value;
+                let left: Vec<usize> = frame
                     .control
                     .iter()
-                    .any(|control| matches!(control, Control::Try { .. }))
-            {
-                return Err(fault(
-                    "a raise reached a try of a canonical frame outside its region route",
-                ));
+                    .enumerate()
+                    .filter(|(_, control)| {
+                        matches!(
+                            control,
+                            Control::Try {
+                                phase: TryPhase::Catch,
+                                ..
+                            }
+                        )
+                    })
+                    .map(|(index, _)| index)
+                    .rev()
+                    .collect();
+                for index in left {
+                    self.catch_left(task, index, Some(&value))?;
+                }
+                self.frame(task)?.control.clear();
             }
+            let frame = self.frame(task)?;
             frame.awaiting = None;
             frame.nested = None;
             frame.pending.take();
