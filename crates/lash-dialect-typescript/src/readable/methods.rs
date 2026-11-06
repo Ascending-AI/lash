@@ -311,23 +311,15 @@ impl Lifter<'_> {
             },
             k::Stmt::Let {
                 name,
-                value: k::Rhs::Expr(body @ k::Expr::Act(act)),
+                value: k::Rhs::Expr(body @ k::Expr::Act(_)),
             },
             ..,
         ] = block
         else {
             return Ok(None);
         };
-        let Some(k::Expr::Variable(receiver)) = act.args.first() else {
-            return Ok(None);
-        };
-        let scoped = k::Expr::Let {
-            name: callback.clone(),
-            value: Box::new(value.clone()),
-            body: Box::new(body.clone()),
-        };
         Ok(self
-            .array_callback_expression(receiver, &k::Expr::Variable(receiver.clone()), &scoped)?
+            .array_callback_expression(callback, value, body)?
             .map(|value| (name.clone(), value)))
     }
 
@@ -335,25 +327,20 @@ impl Lifter<'_> {
     /// still proves the complete closure, temporary ordering and Imports.
     pub(super) fn array_callback_expression(
         &mut self,
-        receiver: &Name,
-        value: &k::Expr,
+        name: &Name,
+        callback: &k::Expr,
         body: &k::Expr,
     ) -> Lift<Option<Expr>> {
-        let k::Expr::Let {
-            name,
-            value: callback,
-            body,
-        } = body
-        else {
-            return Ok(None);
-        };
-        let k::Expr::Closure(closure) = &**callback else {
+        let k::Expr::Closure(closure) = callback else {
             return Ok(None);
         };
         if closure.presentation.is_some() {
             return Ok(None);
         }
-        let k::Expr::Act(call) = &**body else {
+        let k::Expr::Act(call) = body else {
+            return Ok(None);
+        };
+        let Some(receiver) = call.args.first() else {
             return Ok(None);
         };
         let k::ActKind::Call(k::Callee::Local(slot)) = &call.kind else {
@@ -367,15 +354,13 @@ impl Lifter<'_> {
         };
         let (context, callable) = match call.args.as_slice() {
             [target, k::Expr::Act(length), context, callable]
-                if *target == k::Expr::Variable(receiver.clone())
-                    && matches!(&length.kind, k::ActKind::Call(k::Callee::Local(slot)) if self.is(slot, "ts.array.length"))
+                if matches!(&length.kind, k::ActKind::Call(k::Callee::Local(slot)) if self.is(slot, "ts.array.length"))
                     && length.args.as_slice() == [target.clone()] =>
             {
                 (Some(context), callable)
             }
             [target, k::Expr::Act(length), callable]
                 if method == "sort"
-                    && *target == k::Expr::Variable(receiver.clone())
                     && matches!(&length.kind, k::ActKind::Call(k::Callee::Local(slot)) if self.is(slot, "ts.array.length"))
                     && length.args.as_slice() == [target.clone()] =>
             {
@@ -426,6 +411,7 @@ impl Lifter<'_> {
                     caption: None,
                     name: inner.binding(&param.name)?,
                     optional: false,
+                    default: None,
                     ty: {
                         let mut nodes = vec![k::Node::Block(body)];
                         let mut text = false;
@@ -463,7 +449,10 @@ impl Lifter<'_> {
             args.push(self.expr(context)?);
         }
         Ok(Some(Expr::Call(
-            Box::new(Expr::Field(Box::new(self.expr(value)?), method.to_owned())),
+            Box::new(Expr::Field(
+                Box::new(self.expr(receiver)?),
+                method.to_owned(),
+            )),
             args,
         )))
     }

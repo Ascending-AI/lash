@@ -456,22 +456,51 @@ mod tests {
         let namespaces =
             lash_kernel_dialect::Namespaces::new(packages, Default::default(), &|_| false).unwrap();
         let mut cases: Vec<Case> = serde_json::from_str(include_str!("corpus.json")).unwrap();
-        for (name, expression) in [
-            ("regex literal receiver", r#"/Week \d+/.test("Week 12")"#),
+        let mut expressions = vec![
             (
-                "regex constructor receiver",
-                r#"new RegExp("Week \\d+").test("Week 12")"#,
+                "regex constructor receiver".to_owned(),
+                r#"new RegExp("Week \\d+").test("Week 12")"#.to_owned(),
             ),
-            ("object arrow callback", "[1, 2].map(value => ({value}))"),
-        ] {
-            for block in [false, true] {
-                let body = if block {
-                    format!("{{ return {expression}; }}")
-                } else {
-                    expression.into()
+            (
+                "object arrow callback".to_owned(),
+                "[1, 2].map(value => ({value}))".to_owned(),
+            ),
+        ];
+        for literal in [r"/Week \d+/g", r"/\//", r"/[a-z/]+/gi"] {
+            for (position, context) in [
+                ("receiver", r#"REGEX.test("Week 12")"#),
+                ("argument", r#"("Week 12" as any).matchAll(REGEX)"#),
+                ("spread", r#"[...("Week 12" as any).matchAll(REGEX)]"#),
+                (
+                    "bound array callback",
+                    r#"(() => { const found = [...("Week 12" as any).matchAll(REGEX)]; return found.map(m => m[0]); })()"#,
+                ),
+                ("array", "[0, REGEX, 1]"),
+                ("object value", "({pattern: REGEX})"),
+                (
+                    "binding default",
+                    "(() => { const {pattern = REGEX} = {}; return pattern; })()",
+                ),
+                ("parameter default", "((pattern = REGEX) => pattern)()"),
+                ("return", "REGEX"),
+                ("conditional", "true ? REGEX : null"),
+                ("template", "`pattern ${REGEX}`"),
+            ] {
+                expressions.push((
+                    format!("regex literal {literal} in {position}"),
+                    context.replace("REGEX", literal),
+                ));
+            }
+        }
+        for (name, expression) in expressions {
+            for form in ["expression", "return", "binding"] {
+                let body = match form {
+                    "return" => format!("{{ return {expression}; }}"),
+                    "binding" => format!("{{ const value = {expression}; return value; }}"),
+                    _ => expression.clone(),
                 };
                 cases.push(Case {
-                    name: format!("FIG-7664 {name}, block={block}"),
+                    name: format!("FIG-7664 {name}, form={form}"),
                     source: format!("const run = async (): Promise<unknown> => {body};"),
                     cell: true,
                     materialize: true,

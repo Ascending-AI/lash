@@ -35,6 +35,21 @@ impl Lifter<'_> {
         let mut index = 1;
         let mut rest = None;
         while index < block.len() {
+            if let k::Stmt::Let {
+                name,
+                value: k::Rhs::Expr(k::Expr::Member(member)),
+            } = &block[index]
+                && let k::Member::Field { target, field } = &**member
+                && target == value
+            {
+                let (pattern, taken) = match self.default_pattern(&block[index + 1..], name)? {
+                    Some((pattern, taken)) => (pattern, taken + 1),
+                    None => (Pattern::Name(self.binding(name)?), 1),
+                };
+                fields.push((field.clone(), pattern));
+                index += taken;
+                continue;
+            }
             if let Some((temporary, read, count)) = self.read_ladder(&block[index..])? {
                 let Expr::Field(_, field) = read else {
                     return Ok(None);
@@ -181,8 +196,18 @@ impl Lifter<'_> {
         if read != input {
             return Ok(None);
         }
+        if let Some((pattern, taken)) = self.default_pattern(&block[1..], name)? {
+            return Ok(Some((pattern, taken + 1)));
+        }
+        Ok(Some((Pattern::Name(self.binding(name)?), 1)))
+    }
+
+    pub(super) fn default_pattern(
+        &mut self,
+        block: &[k::Stmt],
+        name: &lash_kernel_value::Name,
+    ) -> Lift<Option<(Pattern, usize)>> {
         if let [
-            _,
             k::Stmt::If {
                 condition: k::Expr::Call { function, args },
                 then_block,
@@ -203,6 +228,7 @@ impl Lifter<'_> {
             && else_block.is_empty()
             && result == name
             && let [
+                prelude @ ..,
                 k::Stmt::Assign {
                     place: k::Place::Variable(target),
                     value,
@@ -212,11 +238,37 @@ impl Lifter<'_> {
             && target == name
         {
             let pattern = Pattern::Name(self.binding(binding)?);
-            return Ok(Some((
-                Pattern::Default(Box::new(pattern), self.rhs(value)?),
-                3,
-            )));
+            let value = self.default_value(prelude, value)?;
+            return Ok(Some((Pattern::Default(Box::new(pattern), value), 2)));
         }
-        Ok(Some((Pattern::Name(self.binding(name)?), 1)))
+        Ok(None)
+    }
+
+    /// A default's bindings run only in the absent branch. Keep them scoped
+    /// around its value so syntax temporaries are consumed in that branch.
+    fn default_value(&mut self, prelude: &[k::Stmt], value: &k::Rhs) -> Lift<Expr> {
+        let mut value = match value {
+            k::Rhs::Expr(value) => value.clone(),
+            k::Rhs::Action(action) => k::Expr::Act(Box::new(super::statements::act_of(action))),
+        };
+        for statement in prelude.iter().rev() {
+            let k::Stmt::Let {
+                name,
+                value: binding,
+            } = statement
+            else {
+                return super::lift::refuse("a statement in a binding default");
+            };
+            let binding = match binding {
+                k::Rhs::Expr(value) => value.clone(),
+                k::Rhs::Action(action) => k::Expr::Act(Box::new(super::statements::act_of(action))),
+            };
+            value = k::Expr::Let {
+                name: name.clone(),
+                value: Box::new(binding),
+                body: Box::new(value),
+            };
+        }
+        self.expr(&value)
     }
 }

@@ -406,6 +406,7 @@ impl<'a> Lifter<'a> {
                 name: param.name.as_str().to_owned(),
                 optional: false,
                 ty,
+                default: None,
             });
         }
         let result = self.annotation(

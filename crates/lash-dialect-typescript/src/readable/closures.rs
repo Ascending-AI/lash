@@ -84,9 +84,6 @@ impl Lifter<'_> {
             return refuse("a function value started another way");
         }
         let arity = start.signature.params.len();
-        if declared.get() != arity as f64 {
-            return refuse("a function value whose arity is not its parameters'");
-        }
         let definition = self
             .document
             .functions
@@ -107,6 +104,7 @@ impl Lifter<'_> {
                 caption: None,
                 name: self.binding(&param.name)?,
                 optional: param.optional,
+                default: None,
                 ty: self.callable_annotation(&param.ty)?,
             });
         }
@@ -180,12 +178,19 @@ impl Lifter<'_> {
             return refuse("a function body outside its defining unit");
         };
         let mut inner = self.in_function(*body_function);
-        let body = inner.function_body(is_async, args, &names, body, &site);
+        let body = inner.function_body(is_async, args, &names, &mut params, body, &site)?;
+        let length = params
+            .iter()
+            .position(|param| param.default.is_some())
+            .unwrap_or(arity);
+        if declared.get() != length as f64 {
+            return refuse("a function value whose arity is not its parameters'");
+        }
         Ok(Some(Function {
             is_async,
             result: self.callable_annotation(&start.signature.result)?,
             params,
-            body: body?,
+            body,
         }))
     }
 
@@ -196,6 +201,7 @@ impl Lifter<'_> {
         is_async: bool,
         args: &Name,
         names: &[&Name],
+        params: &mut [Param],
         body: &[k::Stmt],
         site: &Site,
     ) -> Lift<Body> {
@@ -227,7 +233,7 @@ impl Lifter<'_> {
         let skip = if names.is_empty() {
             0
         } else {
-            arguments_before(self, args, names, body)
+            arguments_before(self, args, names, params, body)
                 .ok_or_else(|| "a function value's arguments are bound another way".to_owned())?
         };
         let mut statements = &body[skip..];
@@ -355,6 +361,7 @@ fn arguments_before(
     lifter: &mut Lifter<'_>,
     args: &Name,
     names: &[&Name],
+    params: &mut [Param],
     body: &[k::Stmt],
 ) -> Option<usize> {
     let [
@@ -371,6 +378,7 @@ fn arguments_before(
         return None;
     }
     let mut consumed = 0;
+    let mut defaults = Vec::new();
     let mut bindings = Vec::with_capacity(names.len());
     for (index, name) in names.iter().enumerate() {
         let k::Stmt::Let {
@@ -385,6 +393,16 @@ fn arguments_before(
         }
         consumed += 1;
         let mut parameter = bound;
+        if let Some((super::source::Pattern::Default(_, value), taken)) =
+            lifter.default_pattern(&rest[consumed..], bound).ok()?
+        {
+            consumed += taken;
+            let k::Stmt::Let { name, .. } = &rest[consumed - 1] else {
+                return None;
+            };
+            parameter = name;
+            defaults.push((index, value));
+        }
         if let Some(k::Stmt::Let {
             name: authored,
             value,
@@ -405,6 +423,10 @@ fn arguments_before(
     // callable presentation keeps the source name, which also names every
     // use in the printed body. Publish aliases only after the full prelude fits.
     lifter.bindings.extend(bindings);
+    for (index, value) in defaults {
+        params[index].default = Some(value);
+        params[index].optional = false;
+    }
     Some(1 + consumed)
 }
 

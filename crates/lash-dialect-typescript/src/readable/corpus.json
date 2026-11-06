@@ -273,5 +273,10 @@
     "source": "const run = async ():Promise<unknown> => { const result=await integrations.execute({action:'LINEAR_LIST_ISSUES',args:{first:5,order_by:'createdAt',filter:{title:{containsIgnoreCase:'lash'},state:{type:{nin:['completed','canceled']}}}}}); if (!('data' in result)) throw new Error('Unable to load Linear issues'); const rows=result.data.nodes.map(issue=>({identifier:issue.identifier,title:issue.title,status:issue.state.name,createdAt:issue.createdAt,url:issue.url})); return views.card('Newest open tickets with lash in the title',[views.table(rows,[{header:'Issue',field:'identifier'},{header:'Title',field:'title'},{header:'Status',field:'status'},{header:'Created',field:'createdAt'},{header:'Link',field:'url'}])]); };",
     "materialize": true,
     "cell": true
+  },
+  {
+    "name": "FIG-7664 cenote exact matchAll refusal cell",
+    "source": "const smoke_read_f61778e453e6_1 = await cenote.readDocument({\"document\": {\"doc_id\": \"01a1b10e-296d-779b-b0ba-e1c3197d1de9\"}}); console.log(JSON.stringify(smoke_read_f61778e453e6_1.ok ? {ok:true,data:{document:smoke_read_f61778e453e6_1.data.document,items:smoke_read_f61778e453e6_1.data.items.filter(i=>i.text).map(i=>({text:i.text}))}} : smoke_read_f61778e453e6_1));\nconst docForChart = smoke_read_f61778e453e6_1.data.document; try { const created = await workflows.create({name:'signups-f61778e453e6',run:async ():Promise<unknown>=>{const page=await cenote.readDocument({document:docForChart}); const text=page.data.items.map(i=>i.text||'').join(' '); const found=[...text.matchAll(/Week\\s+(\\d+):\\s*(\\d+)/g)]; return views.card('Weekly signups',[views.barChart(found.map(m=>({week:'Week '+m[1],signups:Number(m[2])})),'week','signups','Weekly signups'),views.action('click','Click',{})]);},actions:{click:async ():Promise<unknown>=>({clicked:true})}}); console.log(JSON.stringify({workflow_id:created.data.workflow.workflow_id,version:created.data.version})); } catch(e) { console.log(JSON.stringify({code:e.code,details:e.data?.raw?.error?.details,message:e.message})); }",
+    "cell": true
   }
 ]

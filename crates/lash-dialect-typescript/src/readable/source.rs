@@ -81,6 +81,7 @@ pub(super) struct Param {
     pub(super) name: String,
     pub(super) optional: bool,
     pub(super) ty: Option<Type>,
+    pub(super) default: Option<Expr>,
 }
 
 /// A type annotation an entry's signature is written with.
@@ -314,6 +315,10 @@ impl Writer {
         if let Some(ty) = &param.ty {
             self.out.push_str(if param.optional { "?: " } else { ": " });
             self.ty(ty);
+        }
+        if let Some(default) = &param.default {
+            self.out.push_str(" = ");
+            self.expr(default, 2);
         }
     }
 
