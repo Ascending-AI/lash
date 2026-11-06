@@ -1525,3 +1525,30 @@ fn convert_assign_op(op: swc::AssignOp) -> AssignOp {
         S::NullishAssign => AssignOp::Logical(LogicalOp::Nullish),
     }
 }
+
+/// The parser drives context-sensitive lexing, including regexes and template
+/// continuations, under the same spelling repairs and stack policy as lowering.
+pub(crate) fn source_identifiers(source: &str) -> Result<BTreeSet<String>, Diagnostic> {
+    guard_source_size(
+        source,
+        SourceLimits::new(SourceLimits::HARD_MAX_BYTES, MAX_SOURCE_NESTING_DEPTH)?,
+    )?;
+    guard_source_nesting(source, MAX_SOURCE_NESTING_DEPTH)?;
+    parser_stack::on_source_stack(source, || {
+        goal::parse_with_identifiers(source, Goal::Module, false, true)
+            .map(|parsed| {
+                let mut identifiers = parsed.identifiers;
+                // Import module strings name packages even when every imported
+                // binding has a local alias with a different root spelling.
+                for item in parsed.items {
+                    if let swc::ModuleItem::ModuleDecl(swc::ModuleDecl::Import(import)) = item
+                        && let Some(root) = import.src.value.to_string_lossy().split('.').next()
+                    {
+                        identifiers.insert(root.to_owned());
+                    }
+                }
+                identifiers
+            })
+            .map_err(parser_diagnostic)
+    })
+}

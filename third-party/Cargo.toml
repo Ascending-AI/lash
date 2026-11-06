@@ -2166,7 +2166,7 @@ features = ["default"]
 package = "swc_ecma_parser"
 version = "=44.0.0"
 default-features = false
-features = ["typescript"]
+features = ["typescript", "unstable"]
 
 [dependencies.p0360]
 package = "swc_eq_ignore_macros"

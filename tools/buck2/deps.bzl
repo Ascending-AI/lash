@@ -1379,6 +1379,7 @@ PACKAGE_DEPS = {
             "async_trait": "//third-party/rust:p0016",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
@@ -1392,13 +1393,16 @@ PACKAGE_DEPS = {
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "libc": "//third-party/rust:p0186",
             "rmp_serde": "//third-party/rust:p0283",
+            "ruff_python_ast": "//third-party/rust:p0284",
+            "ruff_python_parser": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0305",
             "serde": "//third-party/rust:p0313",
             "serde_bytes": "//third-party/rust:p0315",
             "serde_json": "//third-party/rust:p0319",
             "thiserror": "//third-party/rust:p0369",
             "tokio": "//third-party/rust:p0375",
-            "tracing": "//third-party/rust:p0387"
+            "tracing": "//third-party/rust:p0387",
+            "unicode_normalization": "//third-party/rust:p0401"
         }
     },
     "lash-internal-vm-protocol": {

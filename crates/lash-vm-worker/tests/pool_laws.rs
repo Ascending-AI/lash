@@ -2399,7 +2399,14 @@ fn host_catalogue() -> lash_kernel_dialect::Namespaces {
                                 ty: Type::Text,
                                 optional: false,
                             }],
-                            result: result.clone(),
+                            result: Type::Record(RecordType {
+                                fields: vec![RecordTypeField {
+                                    name: format!("result_{i}"),
+                                    ty: result.clone(),
+                                    optional: false,
+                                }],
+                                rest: Default::default(),
+                            }),
                         },
                         controls: Default::default(),
                         mode: lash_kernel_value::OperationMode::Read,
@@ -2457,9 +2464,23 @@ fn a_real_sized_catalogue_imports_under_default_decode_bounds() {
                 language: lash_kernel_doc::SourceLanguage::TypeScript,
                 source: source.to_owned(), namespaces: namespaces.clone(), limits: None,
             }).expect("shared request");
+            assert_eq!(wire["import_workflow"]["namespaces"]["types"].as_array().expect("type DAG").len(), 26,
+                "Text, the repeated record, and 24 distinct enclosing records");
+            assert!(value_count(&wire) < 20_000, "nested records must be shipped once");
             eprintln!("catalogue values before={before} shared_request={}", value_count(&wire));
         }
         use service::runtime_ops::ServiceRuntimeOps as _;
+        for source in [
+            "console.log('Unicode …');",
+            r"console.log('\n');",
+            r"await \u0063atalogue.readRecorda('key');",
+        ] {
+            let response = workers.request_accounted(service::Request::Lower {
+                dialect: "typescript".into(), source: source.into(),
+                namespaces: namespaces.clone(), bindings: Default::default(), functions: Default::default(),
+            }).await.expect("Unicode and escaped cells fit the unchanged bound");
+            assert!(matches!(response, service::Response::Lowered { .. }), "{response:?}");
+        }
         let response = workers.request_accounted(service::Request::Lower {
             dialect: "typescript".into(), source: "await catalogue.readRecorda(\"key\");".into(),
             namespaces: namespaces.clone(), bindings: Default::default(), functions: Default::default(),

@@ -4,6 +4,11 @@ use lash_protocol_types::engine_fault::ProtocolVersionRefusal;
 /// A changed wire witness requires matching parent and worker binaries.
 ///
 /// version_guard(
+///     roots(path = "crates/lash-vm-client/src/service.rs", Request),
+///     shapes(path = "crates/lash-vm-client/src/service/namespaces.rs", cover(Wire, Member, Parameter)),
+///     shapes(path = "crates/lash-vm-client/src/service/namespaces/types.rs", cover(TypeNode)),
+///     shapes(path = "crates/lash-vm-client/src/service/namespaces/exports.rs", cover(Export)),
+///     items(path = "crates/lash-vm-client/src/service/namespaces.rs", serialize, deserialize),
 ///     shapes(
 ///         path = "crates/lash-vm-protocol/src/*.rs",
 ///         cover(

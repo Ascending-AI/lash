@@ -3207,6 +3207,7 @@ name = "lash-internal-vm-client"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "lash-dialect-typescript",
  "lash-internal-core-execution",
  "lash-internal-core-store",
  "lash-internal-protocol-types",
@@ -3223,6 +3224,8 @@ dependencies = [
  "lash-kernel-vm",
  "libc",
  "rmp-serde",
+ "ruff_python_ast",
+ "ruff_python_parser",
  "schemars",
  "serde",
  "serde_bytes",
@@ -3230,6 +3233,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "unicode-normalization",
 ]
 
 [[package]]

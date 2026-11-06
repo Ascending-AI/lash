@@ -46,19 +46,29 @@ pub(super) struct Parsed<'a> {
     /// A respelling keeps every byte offset and touches no comment, so
     /// their offsets index the submitted source too.
     pub(super) comments: SourceComments,
+    pub(super) identifiers: BTreeSet<String>,
 }
 
 /// Parses `source` under the first goal, from `first` on, that it satisfies,
 /// collecting its comments when `comments` asks. The error is the first
 /// goal's, when none does.
 pub(super) fn parse(source: &str, first: Goal, comments: bool) -> Result<Parsed<'_>, Error> {
+    parse_with_identifiers(source, first, comments, false)
+}
+
+pub(super) fn parse_with_identifiers(
+    source: &str,
+    first: Goal,
+    comments: bool,
+    capture_names: bool,
+) -> Result<Parsed<'_>, Error> {
     let mut text = Cow::Borrowed(source);
     let mut respellings = BTreeMap::new();
     let mut module_errors = None;
     if first == Goal::Module {
         loop {
-            match parse_goal(&text, Goal::Module, comments) {
-                Ok((items, collected)) => {
+            match parse_goal(&text, Goal::Module, comments, capture_names) {
+                Ok((items, collected, identifiers)) => {
                     let comments = collect(&text, collected);
                     return Ok(Parsed {
                         goal: Goal::Module,
@@ -67,6 +77,7 @@ pub(super) fn parse(source: &str, first: Goal, comments: bool) -> Result<Parsed<
                         respellings,
                         items,
                         comments,
+                        identifiers,
                     });
                 }
                 Err(errors) if respell_escaped_keywords(&mut text, &errors, &mut respellings) => {}
@@ -79,8 +90,8 @@ pub(super) fn parse(source: &str, first: Goal, comments: bool) -> Result<Parsed<
     }
     let mut respelled_awaits = BTreeSet::new();
     loop {
-        match parse_goal(&text, Goal::Script, comments) {
-            Ok((items, collected)) => {
+        match parse_goal(&text, Goal::Script, comments, capture_names) {
+            Ok((items, collected, identifiers)) => {
                 let comments = collect(&text, collected);
                 return Ok(Parsed {
                     goal: Goal::Script,
@@ -89,6 +100,7 @@ pub(super) fn parse(source: &str, first: Goal, comments: bool) -> Result<Parsed<
                     respellings,
                     items,
                     comments,
+                    identifiers,
                 });
             }
             Err(errors)
@@ -110,7 +122,14 @@ pub(super) fn parse(source: &str, first: Goal, comments: bool) -> Result<Parsed<
     }
 }
 
-type GoalResult = Result<(Vec<swc::ModuleItem>, Option<SingleThreadedComments>), Vec<Error>>;
+type GoalResult = Result<
+    (
+        Vec<swc::ModuleItem>,
+        Option<SingleThreadedComments>,
+        BTreeSet<String>,
+    ),
+    Vec<Error>,
+>;
 
 fn collect(text: &str, comments: Option<SingleThreadedComments>) -> SourceComments {
     comments.map_or_else(SourceComments::default, |comments| {
@@ -118,7 +137,7 @@ fn collect(text: &str, comments: Option<SingleThreadedComments>) -> SourceCommen
     })
 }
 
-fn parse_goal(text: &str, goal: Goal, comments: bool) -> GoalResult {
+fn parse_goal(text: &str, goal: Goal, comments: bool, capture_names: bool) -> GoalResult {
     let end = u32::try_from(text.len()).unwrap_or(u32::MAX);
     let collected = comments.then(SingleThreadedComments::default);
     let mut lexer = Lexer::new(
@@ -138,22 +157,58 @@ fn parse_goal(text: &str, goal: Goal, comments: bool) -> GoalResult {
         let strict = lexer.ctx() | Context::Strict;
         lexer.set_ctx(strict);
     }
-    let mut parser = Parser::new_from(lexer);
-    let body = match goal {
-        Goal::Module => parser.parse_module().map(|module| module.body),
-        Goal::Script => parser
-            .parse_script()
-            .map(|script| script.body.into_iter().map(swc::ModuleItem::Stmt).collect()),
+    let (body, mut errors, identifiers) = if capture_names {
+        let mut parser = Parser::new_from(swc_ecma_parser::unstable::Capturing::new(lexer));
+        let body = parse_body(&mut parser, goal);
+        let errors = parser.take_errors();
+        let identifiers = parser
+            .input_mut()
+            .iter
+            .take()
+            .into_iter()
+            .filter_map(|token| {
+                if !token.token.is_word() {
+                    return None;
+                }
+                let word = &text[token.span.lo.0 as usize..token.span.hi.0 as usize];
+                let mut lexer = Lexer::new(
+                    Syntax::Typescript(TsSyntax::default()),
+                    Default::default(),
+                    StringInput::new(word, BytePos(0), BytePos(word.len() as u32)),
+                    None,
+                );
+                lexer.next()?;
+                Some(match lexer.take_token_value() {
+                    Some(swc_ecma_parser::unstable::TokenValue::Word(name)) => name.to_string(),
+                    _ => word.to_owned(),
+                })
+            })
+            .collect();
+        (body, errors, identifiers)
+    } else {
+        let mut parser = Parser::new_from(lexer);
+        let body = parse_body(&mut parser, goal);
+        (body, parser.take_errors(), BTreeSet::new())
     };
-    let mut errors = parser.take_errors();
-    drop(parser);
     match body {
-        Ok(items) if errors.is_empty() => Ok((items, collected)),
+        Ok(items) if errors.is_empty() => Ok((items, collected, identifiers)),
         Ok(_) => Err(errors),
         Err(error) => {
             errors.insert(0, error);
             Err(errors)
         }
+    }
+}
+
+fn parse_body<I: Tokens>(
+    parser: &mut Parser<I>,
+    goal: Goal,
+) -> Result<Vec<swc::ModuleItem>, Error> {
+    match goal {
+        Goal::Module => parser.parse_module().map(|module| module.body),
+        Goal::Script => parser
+            .parse_script()
+            .map(|script| script.body.into_iter().map(swc::ModuleItem::Stmt).collect()),
     }
 }
 

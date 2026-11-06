@@ -1,15 +1,20 @@
 //! Source requests carry referenced namespaces and share repeated operation types.
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{NamespaceKind, NamespaceMember, Namespaces, OperationSignature};
 use lash_kernel_value::names::{Name, PackagePath, Segment};
-use lash_kernel_value::types::{Param, Signature, Type};
+use lash_kernel_value::types::{Param, Signature};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::Request;
 
+mod exports;
+mod source;
+mod types;
+use types::{TypeNode, TypeTable};
+
 impl Request {
-    pub(super) fn restrict_namespaces(&mut self) {
+    pub(super) fn restrict_namespaces(&mut self) -> Result<(), lash_kernel_dialect::Diagnostic> {
         let (source, namespaces, typescript) = match self {
             Self::Lower {
                 dialect,
@@ -35,21 +40,15 @@ impl Request {
                 namespaces,
                 matches!(language, lash_kernel_doc::SourceLanguage::TypeScript),
             ),
-            _ => return,
+            _ => return Ok(()),
         };
-        // Path roots have identical verbatim spellings in both dialects. Keep
-        // whole namespaces, including exports and misspelling diagnostics. An
-        // escape or Python NFKC normalization may spell a root without its
-        // literal bytes, so retain all for escaped or non-ASCII source.
-        if source.contains('\\') || !source.is_ascii() {
-            return;
-        }
+        let identifiers = source::identifiers(source, typescript)?;
         // An ordinary TypeScript await also awaits durable process handles.
         // Its implicit processes.await call need not appear in the source.
-        let process_await = typescript && source.contains("await");
+        let process_await = typescript && identifiers.contains("await");
         let reached = |path: &PackagePath| {
             let root = path.as_slice()[0].as_str();
-            source.contains(root) || process_await && root == "processes"
+            identifiers.contains(root) || process_await && root == "processes"
         };
         let packages = namespaces
             .packages()
@@ -67,13 +66,14 @@ impl Request {
         if let Ok(selected) = Namespaces::new(packages, deferred, &|_| false) {
             *namespaces = selected;
         }
+        Ok(())
     }
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Wire {
-    types: Vec<Type>,
+    types: Vec<TypeNode>,
     packages: BTreeMap<PackagePath, BTreeMap<Segment, Member>>,
     deferred: BTreeSet<PackagePath>,
 }
@@ -88,10 +88,10 @@ enum Member {
         controls: lash_kernel_value::TurnControls,
         mode: lash_kernel_value::OperationMode,
     },
-    Export(NamespaceMember),
+    Export(exports::Export),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Parameter {
     name: Name,
@@ -103,21 +103,7 @@ pub(super) fn serialize<S: Serializer>(
     namespaces: &Namespaces,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    let mut types = Vec::new();
-    let mut indices = HashMap::<&Type, usize>::new();
-    fn intern<'a>(
-        ty: &'a Type,
-        types: &mut Vec<Type>,
-        indices: &mut HashMap<&'a Type, usize>,
-    ) -> usize {
-        if let Some(index) = indices.get(ty) {
-            return *index;
-        }
-        let index = types.len();
-        types.push(ty.clone());
-        indices.insert(ty, index);
-        index
-    }
+    let mut types = TypeTable::default();
     let packages = namespaces
         .packages()
         .iter()
@@ -134,15 +120,18 @@ pub(super) fn serialize<S: Serializer>(
                                 .iter()
                                 .map(|p| Parameter {
                                     name: p.name.clone(),
-                                    ty: intern(&p.ty, &mut types, &mut indices),
+                                    ty: types.intern(&p.ty),
                                     optional: p.optional,
                                 })
                                 .collect(),
-                            result: intern(&operation.signature.result, &mut types, &mut indices),
+                            result: types.intern(&operation.signature.result),
                             controls: operation.controls.clone(),
                             mode: operation.mode,
                         },
-                        _ => Member::Export(member.clone()),
+                        _ => Member::Export(
+                            exports::Export::new(member, &mut types)
+                                .unwrap_or_else(|| unreachable!("operations are encoded above")),
+                        ),
                     };
                     (name.clone(), member)
                 })
@@ -152,7 +141,7 @@ pub(super) fn serialize<S: Serializer>(
         .collect();
     let deferred = namespaces.deferred().clone();
     Wire {
-        types,
+        types: types.nodes,
         packages,
         deferred,
     }
@@ -164,36 +153,24 @@ pub(super) fn deserialize<'de, D: Deserializer<'de>>(
 ) -> Result<Namespaces, D::Error> {
     use serde::de::Error as _;
     let wire = Wire::deserialize(deserializer)?;
-    // Interning must not turn a bounded wire into unbounded cloned types.
-    // Charge every expanded JSON value as a container element, plus strings.
-    fn charge(value: &serde_json::Value) -> u64 {
-        128 + match value {
-            serde_json::Value::String(s) => s.len() as u64,
-            serde_json::Value::Array(v) => v.iter().map(charge).sum(),
-            serde_json::Value::Object(v) => v
-                .iter()
-                .map(|(k, v)| 128 + k.len() as u64 + charge(v))
-                .sum(),
-            _ => 0,
-        }
-    }
-    let charges = wire
-        .types
-        .iter()
-        .map(|ty| serde_json::to_value(ty).map(|v| charge(&v)))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(D::Error::custom)?;
     let mut remaining = lash_vm_protocol::DecodeLimits::standard().max_allocation_bytes;
+    let (types, charges) = types::expand::<D::Error>(wire.types, &mut remaining)?;
     for member in wire.packages.values().flat_map(|members| members.values()) {
-        if let Member::Operation { params, result, .. } = member {
-            for index in params.iter().map(|p| p.ty).chain(std::iter::once(*result)) {
-                let size = charges
-                    .get(index)
-                    .ok_or_else(|| D::Error::custom("unknown shared signature type"))?;
-                remaining = remaining
-                    .checked_sub(*size)
-                    .ok_or_else(|| D::Error::custom("expanded signatures exceed 64 MiB"))?;
-            }
+        let indices: Vec<_> = match member {
+            Member::Operation { params, result, .. } => params
+                .iter()
+                .map(|p| p.ty)
+                .chain(std::iter::once(*result))
+                .collect(),
+            Member::Export(export) => export.indices(),
+        };
+        for index in indices {
+            let size = charges
+                .get(index)
+                .ok_or_else(|| D::Error::custom("unknown shared signature type"))?;
+            remaining = remaining
+                .checked_sub(*size)
+                .ok_or_else(|| D::Error::custom("expanded signatures exceed 64 MiB"))?;
         }
     }
     let packages = wire
@@ -218,17 +195,17 @@ pub(super) fn deserialize<'de, D: Deserializer<'de>>(
                                         .into_iter()
                                         .map(|p| Param {
                                             name: p.name,
-                                            ty: wire.types[p.ty].clone(),
+                                            ty: types[p.ty].clone(),
                                             optional: p.optional,
                                         })
                                         .collect(),
-                                    result: wire.types[result].clone(),
+                                    result: types[result].clone(),
                                 },
                                 controls,
                                 mode,
                             }),
                         },
-                        Member::Export(member) => member,
+                        Member::Export(member) => member.expand(&types),
                     };
                     (name, member)
                 })
@@ -242,6 +219,7 @@ pub(super) fn deserialize<'de, D: Deserializer<'de>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_kernel_value::Type;
 
     /// Source pruning preserves offered/deferred resolution and escaped roots.
     #[test]
@@ -266,7 +244,7 @@ mod tests {
             bindings: Default::default(),
             functions: Default::default(),
         };
-        request.restrict_namespaces();
+        request.restrict_namespaces()?;
         let bytes = rmp_serde::to_vec_named(&request)?;
         let request = rmp_serde::from_slice::<Request>(&bytes)?;
         let Request::Lower {
@@ -281,14 +259,100 @@ mod tests {
             vec![catalogue]
         );
         assert_eq!(selected.deferred(), &[deferred].into());
-        for source in [r"\u0063atalogue.read();", "\u{ff43}atalogue.read();"] {
+        for (language, source, referenced) in [
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                r#"import { read as fetch } from "\u0063atalogue"; fetch();"#,
+                true,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                r#"import * as sdk from "catalogue.nested"; sdk.read();"#,
+                true,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                "console.log(`${1} ${catalogue.read()}`);",
+                true,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                "console.log(`catalogue ${1}`);",
+                false,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                "const r = /'catalogue/; catalogue.read();",
+                true,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                "const r = /catalogue/;",
+                false,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                "const λ = 1; catalogue.read(λ);",
+                true,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::Python,
+                "print(f'{1} {ｃatalogue.read()}')",
+                true,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::Python,
+                "print(f'catalogue {1}')",
+                false,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                r"\u0063atalogue.read();",
+                true,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                "catalogue.read('Unicode …');",
+                true,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                r"catalogue.read('\n');",
+                true,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                "console.log('Unicode … catalogue');",
+                false,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::TypeScript,
+                "// catalogue\nconsole.log('ok');",
+                false,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::Python,
+                "ｃatalogue.read('Unicode …')",
+                true,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::Python,
+                r"print('catalogue\n')",
+                false,
+            ),
+            (
+                lash_kernel_doc::SourceLanguage::Python,
+                "# catalogue\nprint('Unicode …')",
+                false,
+            ),
+        ] {
             let mut escaped = Request::ImportWorkflow {
-                language: lash_kernel_doc::SourceLanguage::TypeScript,
+                language,
                 source: source.into(),
                 namespaces: namespaces.clone(),
                 limits: None,
             };
-            escaped.restrict_namespaces();
+            escaped.restrict_namespaces()?;
             let Request::ImportWorkflow {
                 namespaces: selected,
                 ..
@@ -296,7 +360,41 @@ mod tests {
             else {
                 unreachable!()
             };
-            assert_eq!(selected, namespaces);
+            assert_eq!(
+                selected
+                    .packages()
+                    .contains_key(&PackagePath::parse("catalogue")?),
+                referenced,
+                "{language:?}: {source}"
+            );
+            assert!(
+                !selected.packages().contains_key(&unrelated),
+                "{language:?}: {source}"
+            );
+            assert!(selected.deferred().is_empty(), "{language:?}: {source}");
+        }
+        let processes = PackagePath::parse("processes")?;
+        for (source, implicit) in [("await value;", true), ("console.log('await …');", false)] {
+            let mut request = Request::Lower {
+                dialect: "typescript".into(),
+                source: source.into(),
+                namespaces: Namespaces::new(
+                    [(processes.clone(), BTreeMap::new())].into(),
+                    Default::default(),
+                    &|_| false,
+                )?,
+                bindings: Default::default(),
+                functions: Default::default(),
+            };
+            request.restrict_namespaces()?;
+            let Request::Lower { namespaces, .. } = request else {
+                unreachable!()
+            };
+            assert_eq!(
+                namespaces.packages().contains_key(&processes),
+                implicit,
+                "{source}"
+            );
         }
         Ok(())
     }
@@ -305,6 +403,146 @@ mod tests {
     #[test]
     fn shared_signature_references_cannot_amplify_the_decode_bound()
     -> Result<(), Box<dyn std::error::Error>> {
+        use lash_kernel_dialect::{FunctionMember, TypeMember, ValueType};
+        use lash_kernel_value::{MapType, RecordRest, RecordType, RecordTypeField};
+        let repeated = Type::Record(RecordType {
+            fields: vec![RecordTypeField {
+                name: "shared".into(),
+                ty: Type::Enum(vec!["a".into(), "b".into()]),
+                optional: true,
+            }],
+            rest: RecordRest::Keep(Box::new(Type::Json)),
+        });
+        let signature = Signature {
+            params: vec![Param {
+                name: Name::new("input"),
+                optional: false,
+                ty: Type::Tuple(vec![
+                    repeated.clone(),
+                    Type::List(Box::new(repeated.clone())),
+                    Type::Set(Box::new(repeated.clone())),
+                    Type::Map(Box::new(MapType {
+                        key: Type::Text,
+                        value: repeated.clone(),
+                    })),
+                    Type::Task(Box::new(repeated.clone())),
+                    Type::Union(vec![repeated.clone(), Type::Null]),
+                ]),
+            }],
+            result: Type::Function(Box::new(Signature {
+                params: vec![Param {
+                    name: Name::new("value"),
+                    ty: repeated.clone(),
+                    optional: true,
+                }],
+                result: repeated.clone(),
+            })),
+        };
+        let path = PackagePath::parse("catalogue")?;
+        let function = FunctionMember {
+            name: lash_kernel_value::QualifiedName {
+                package: path.clone(),
+                member: Segment::new("function")?,
+                type_member: None,
+            },
+            convention: lash_kernel_value::Convention::Direct,
+            signature: signature.clone(),
+            asynchronous: true,
+            rest: false,
+        };
+        let visible = |kind| NamespaceMember {
+            visibility: lash_kernel_value::Visibility::Public,
+            kind,
+        };
+        let namespaces = Namespaces::new(
+            [(
+                path,
+                [
+                    (
+                        Segment::new("operation")?,
+                        visible(NamespaceKind::Operation(OperationSignature {
+                            signature,
+                            controls: Default::default(),
+                            mode: lash_kernel_value::OperationMode::Read,
+                        })),
+                    ),
+                    (
+                        Segment::new("function")?,
+                        visible(NamespaceKind::Function(function.clone())),
+                    ),
+                    (
+                        Segment::new("value")?,
+                        visible(NamespaceKind::Type(ValueType {
+                            representation: repeated,
+                            members: [
+                                (
+                                    Segment::new("static")?,
+                                    TypeMember::Static(function.clone()),
+                                ),
+                                (
+                                    Segment::new("method")?,
+                                    TypeMember::Method(function.clone()),
+                                ),
+                                (Segment::new("property")?, TypeMember::Property(function)),
+                            ]
+                            .into(),
+                        })),
+                    ),
+                    (Segment::new("error")?, visible(NamespaceKind::Error)),
+                ]
+                .into(),
+            )]
+            .into(),
+            Default::default(),
+            &|_| false,
+        )?;
+        let original = Request::ImportWorkflow {
+            language: lash_kernel_doc::SourceLanguage::TypeScript,
+            source: String::new(),
+            namespaces: namespaces.clone(),
+            limits: None,
+        };
+        let values = serde_json::to_value(&original)?;
+        assert_eq!(
+            values["import_workflow"]["namespaces"]["types"]
+                .as_array()
+                .ok_or("type table")?
+                .len(),
+            12,
+            "all 12 distinct types, across operation and export signatures, are shipped once"
+        );
+        let Request::ImportWorkflow {
+            namespaces: restored,
+            ..
+        } = rmp_serde::from_slice(&rmp_serde::to_vec_named(&original)?)?
+        else {
+            unreachable!()
+        };
+        assert_eq!(restored, namespaces);
+        let mut amplified = vec![TypeNode::Leaf(Type::Text)];
+        for index in 0..30 {
+            amplified.push(TypeNode::Tuple(vec![index, index]));
+        }
+        let mut remaining = lash_vm_protocol::DecodeLimits::standard().max_allocation_bytes;
+        let error = types::expand::<serde::de::value::Error>(amplified, &mut remaining)
+            .err()
+            .ok_or("nested amplification was accepted")?;
+        assert!(
+            error
+                .to_string()
+                .contains("expanded signatures exceed 64 MiB"),
+            "{error}"
+        );
+        for node in [TypeNode::List(0), TypeNode::Tuple(vec![1])] {
+            let mut remaining = lash_vm_protocol::DecodeLimits::standard().max_allocation_bytes;
+            let error = types::expand::<serde::de::value::Error>(vec![node], &mut remaining)
+                .err()
+                .ok_or("cyclic or unknown reference was accepted")?;
+            assert!(
+                error.to_string().contains("forward shared signature type"),
+                "{error}"
+            );
+        }
         let mut request = serde_json::to_value(Request::ImportWorkflow {
             language: lash_kernel_doc::SourceLanguage::TypeScript,
             source: String::new(),
@@ -330,7 +568,7 @@ mod tests {
             })
             .collect::<Result<_, lash_kernel_value::names::InvalidSegment>>()?;
         request["import_workflow"]["namespaces"] = serde_json::to_value(Wire {
-            types: vec![Type::Enum(vec!["x".repeat(1024 * 1024)])],
+            types: vec![TypeNode::Leaf(Type::Enum(vec!["x".repeat(1024 * 1024)]))],
             packages: [(PackagePath::parse("catalogue")?, members)].into(),
             deferred: Default::default(),
         })?;

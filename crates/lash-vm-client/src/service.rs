@@ -816,7 +816,9 @@ pub mod runtime_ops {
                     },
                 ));
             }
-            request.restrict_namespaces();
+            if let Err(diagnostic) = request.restrict_namespaces() {
+                return Ok(Response::DialectRefused(diagnostic));
+            }
             let bytes =
                 rmp_serde::to_vec_named(&lash_kernel_value::json_number::MessagePack(&request))
                     .map_err(|error| {
