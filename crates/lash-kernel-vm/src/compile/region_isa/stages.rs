@@ -46,6 +46,12 @@ pub(super) fn event_pc(draft: &RegionDraft, point: &Point) -> Result<Pc, Refused
         .ok_or(Refused::Path)?
 }
 
+/// Whether `from` is a plain `for`'s Enter event, which admits what the
+/// loop walks before the loop is entered.
+fn entered(info: &LoopInfo, from: &Point) -> bool {
+    !info.while_loop && from.site == info.site && from.phase == Phase::Enter
+}
+
 fn point(info: &LoopInfo, phase: LoopPhase) -> Point {
     Point {
         site: info.site.clone(),
@@ -94,6 +100,7 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
             } else {
                 if from.site.path.starts_with(&info.site.child(0).path)
                     && from.site.unit == info.site.unit
+                    || entered(info, from)
                 {
                     redirect(&mut ops[i], entry_event, enter);
                 }
@@ -287,8 +294,9 @@ pub(super) fn target(draft: &RegionDraft, from: &Point, at: &Point) -> Result<Pc
             })
         } else if !info.while_loop
             && *at == info.entry
-            && from.site.unit == info.site.unit
-            && from.site.path.starts_with(&info.site.child(0).path)
+            && (from.site.unit == info.site.unit
+                && from.site.path.starts_with(&info.site.child(0).path)
+                || entered(info, from))
         {
             Some(LoopPhase::Enter)
         } else if !info.while_loop

@@ -130,10 +130,13 @@ pub(super) fn connect(
                     done,
                 },
             );
+            // Its Enter admits what it walks, then the loop is entered.
+            let enter = point(site, Phase::Enter);
+            graph.insert(enter.clone(), Edge::Next(test));
             connect(
                 doc::Node::Expr(iterable),
                 &site.child(0),
-                Some(test),
+                Some(enter),
                 source,
                 graph,
             )?
@@ -1055,6 +1058,25 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         prefix: PrefixId(
                             u32::try_from(steps.len() * 3 + 2).map_err(|_| Refused::Facts)?,
                         ),
+                    }
+                }
+                // A plain `for`'s Enter reads what it walks and refuses a
+                // value it cannot walk; it takes nothing.
+                (
+                    doc::Node::Stmt(doc::Stmt::For { via: None, .. }),
+                    Phase::Enter,
+                    Some(next),
+                    None,
+                    Ok(args),
+                ) if args.is_empty() && event.entities.is_empty() => {
+                    scalar_resources = true;
+                    RegionOp::Checked {
+                        kernel: CheckedKernel {
+                            kind: CheckedKind::Phase,
+                        },
+                        args: Box::new([reg(&roles, &source, &Owner::Operand(at.site.child(0)))?]),
+                        dst: sink,
+                        next,
                     }
                 }
                 (doc::Node::Block(_), Phase::Enter | Phase::Leave, Some(next), _, _)

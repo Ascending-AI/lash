@@ -143,7 +143,7 @@ fn source_next(source: &Source, at: &Point) -> Result<Option<Point>, Refused> {
         {
             return Ok(Some(Point {
                 site: parent,
-                phase: Phase::Test,
+                phase: Phase::Enter,
             }));
         }
     }
@@ -834,6 +834,23 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 }
             }
             CheckedKind::LoopControl { .. } => return Err(Refused::Source),
+            // A plain `for`'s Enter reads only what it walks.
+            CheckedKind::Phase
+                if step.at.phase == Phase::Enter
+                    && matches!(node, doc::Node::Stmt(doc::Stmt::For { via: None, .. })) =>
+            {
+                let iterable = super::lower::reg(
+                    &draft.roles,
+                    source,
+                    &Owner::Operand(step.at.site.child(0)),
+                )?;
+                if dst.offset() != draft.roles.len()
+                    || args.as_ref() != [iterable]
+                    || !step.event.entities.is_empty()
+                {
+                    return Err(Refused::Facts);
+                }
+            }
             CheckedKind::Phase => {
                 if dst.offset() != draft.roles.len() {
                     return Err(Refused::Facts);

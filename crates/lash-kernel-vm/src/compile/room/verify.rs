@@ -68,6 +68,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
             }
             _ => {}
         }
+        if let doc::Node::Stmt(doc::Stmt::For { via: None, .. }) = node {
+            phases.push(Phase::Enter);
+        }
         if let doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) = node {
             phases.push(Phase::Open);
             if via.next.is_some() {
@@ -200,6 +203,10 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 }
                 (_, Phase::Test) => {
                     expected_inputs = vec![operand(&child(&site, 0))].into();
+                    output = None;
+                }
+                (doc::Node::Stmt(doc::Stmt::For { via: None, .. }), Phase::Enter) => {
+                    expected_inputs = Box::new([]);
                     output = None;
                 }
                 (

@@ -685,6 +685,18 @@ impl Source {
             // A native call act answers at its Enter and continues as if
             // committed; a root action resumes at its own Commit.
             Phase::Enter if self.answers_at_enter(&at.site) => self.next_after_commit(&at.site),
+            // A plain `for` that admits what it walks is entered at its Test.
+            Phase::Enter
+                if matches!(
+                    self.node_at(&at.site),
+                    Some(doc::Node::Stmt(doc::Stmt::For { via: None, .. }))
+                ) =>
+            {
+                Ok(Point {
+                    site: at.site.clone(),
+                    phase: Phase::Test,
+                })
+            }
             Phase::Enter => {
                 self.root_action(at)?;
                 Ok(Point {

@@ -1132,6 +1132,17 @@ impl Source {
     /// Source syntax and the canonical walker determine the successor. A
     /// required future branch/cursor decision declines instead of inventing it.
     /// Whether the node at `at` is a native call act, which answers at its Enter.
+    /// The source node at `at`, a site of this source.
+    pub(crate) fn node_at(&self, at: &Site) -> Option<doc::Node<'_>> {
+        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
+            return None;
+        }
+        let mut node = doc::Node::Block(&self.body);
+        for index in &at.path[self.site.path.len()..] {
+            node = *node.children().get(*index as usize)?;
+        }
+        Some(node)
+    }
     pub(crate) fn answers_at_enter(&self, at: &Site) -> bool {
         if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
             return false;
@@ -1345,10 +1356,13 @@ fn inputs(site: &Site, node: doc::Node<'_>) -> Box<[Owner]> {
 }
 /// Whether an event at `node`'s `phase` can raise besides taking its own
 /// exit: an expression or action may raise, a protocol hook's callee may
-/// raise, and a condition may refuse a non-bool.
+/// raise, a plain `for` may refuse what it cannot walk, and a condition may
+/// refuse a non-bool.
 fn raises(node: doc::Node<'_>, phase: Phase) -> bool {
     matches!(node, doc::Node::Expr(_) | doc::Node::Action(_))
         || hook_raises(node, phase)
+        || (matches!(node, doc::Node::Stmt(doc::Stmt::For { via: None, .. }))
+            && phase == Phase::Enter)
         || (matches!(
             node,
             doc::Node::Stmt(doc::Stmt::If { .. } | doc::Stmt::While { .. })

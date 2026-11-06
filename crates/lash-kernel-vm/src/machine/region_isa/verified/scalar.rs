@@ -16,20 +16,28 @@ impl Running<'_> {
     /// Whether `op` is a plain `for`'s Enter given what it cannot walk: a
     /// value other than a list, a tuple, a map or a set (`K-ITER-001`).
     pub(super) fn unwalkable(&mut self, op: &RegionOp) -> Result<bool, RegionError> {
-        let RegionOp::Checked { kernel, .. } = op else {
+        let RegionOp::Checked { kernel, args, .. } = op else {
             return Ok(false);
         };
-        let CheckedKind::LoopControl { stage, iterable } = kernel.kind() else {
-            return Ok(false);
-        };
-        if stage.phase != crate::compile::region_isa::LoopPhase::Enter {
+        if !matches!(kernel.kind(), CheckedKind::Phase) {
             return Ok(false);
         }
-        let info = self
+        let step = self
             .code
             .program
-            .loop_info(stage.info)
-            .ok_or_else(|| invalid(Refused::Facts))?;
+            .step(self.pc)
+            .ok_or_else(|| invalid(Refused::Path))?;
+        if step.at.phase != crate::compile::room::Phase::Enter {
+            return Ok(false);
+        }
+        let Some(info) = self
+            .code
+            .program
+            .loop_at(&step.at.site)
+            .and_then(|index| self.code.program.loop_info(index))
+        else {
+            return Ok(false);
+        };
         if info.while_loop
             || !matches!(
                 self.code.exe.stmt(info.statement).form,
@@ -38,7 +46,7 @@ impl Running<'_> {
         {
             return Ok(false);
         }
-        let walked = self.value(iterable.ok_or_else(|| invalid(Refused::Facts))?)?;
+        let walked = self.value(*args.first().ok_or_else(|| invalid(Refused::Facts))?)?;
         Ok(!matches!(
             self.view.kind(walked).map_err(RegionError::Heap)?,
             lash_kernel_doc::ValueKind::List
@@ -257,18 +265,15 @@ impl Running<'_> {
                             .program
                             .loop_info(stage.info)
                             .ok_or_else(|| invalid(Refused::Facts))?;
-                        // A plain `for` steps a list, a tuple, a map or a set
-                        // here; it is entered once its iterable is one.
-                        if !info.while_loop {
-                            if !matches!(
+                        // A plain `for` is entered once its Enter admitted
+                        // what it walks; a protocol loop is not run here.
+                        if !info.while_loop
+                            && !matches!(
                                 self.code.exe.stmt(info.statement).form,
                                 crate::compile::Form::For { via: None, .. }
-                            ) {
-                                return Ok(None);
-                            }
-                            if self.unwalkable(op)? {
-                                return Ok(None);
-                            }
+                            )
+                        {
+                            return Ok(None);
                         }
                         return Ok(Some(ScalarAnswer {
                             write: None,

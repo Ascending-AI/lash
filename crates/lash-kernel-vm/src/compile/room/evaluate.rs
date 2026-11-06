@@ -351,7 +351,13 @@ impl<E: Events> Run<'_, E> {
                         }
                         Some(self.events.walked(site)?)
                     }
-                    None => None,
+                    None => {
+                        let exit = self.step(site, Phase::Enter)?;
+                        if exit != ExitKind::Normal {
+                            return Ok(exit);
+                        }
+                        None
+                    }
                 };
                 loop {
                     if walk == Some(Walk::Driver) {

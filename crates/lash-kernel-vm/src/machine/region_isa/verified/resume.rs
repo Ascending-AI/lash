@@ -75,6 +75,7 @@ pub(super) fn position(
             source.progress,
             source.departure.as_ref(),
             &held,
+            &source.unpaid,
         )
         .ok_or_else(|| invalid(Refused::Exit))?;
     let pc = code

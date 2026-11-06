@@ -238,7 +238,19 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                     // Each protocol hook is a call (`K-ITER-005`). `open`
                     // moves the iterated value into its callee; `next`,
                     // `check` and `item` read what the loop walks and the
-                    // item it holds, which the loop keeps.
+                    // item it holds, which the loop keeps. A plain `for`
+                    // enters once its iterable is a value it can walk, and
+                    // raises there when it is not (`K-ITER-001`).
+                    if via.is_none() {
+                        events.push(event(
+                            &site,
+                            Phase::Enter,
+                            Box::new([]),
+                            None,
+                            Amount::default(),
+                            Amount::default(),
+                        ));
+                    }
                     if let Some(via) = via {
                         for (phase, target) in hooks(via) {
                             let callee = hook(target, calls);
