@@ -355,6 +355,8 @@ pub(crate) struct AtomLoad {
 pub(crate) enum CheckedArgument {
     /// A role the frame holds.
     Held(Slot),
+    /// The content of the cell a role the frame holds.
+    Cell(Slot),
     /// An inline literal the call loads.
     Constant(Value),
     /// A long text literal the call allocates when it loads; only its type
@@ -363,8 +365,12 @@ pub(crate) enum CheckedArgument {
 }
 #[derive(Clone, Debug)]
 pub(crate) enum AtomSource {
-    /// A visible name's role.
-    Role(Reg<LeaseValue>),
+    /// A visible name's role; a name that holds a cell (a capture, or a
+    /// binding a closure shares) loads the cell's content, as a read does.
+    Role {
+        src: Reg<LeaseValue>,
+        cell: bool,
+    },
     Constant(Value),
     /// A text literal too long to stand inline, allocated when it loads.
     Text(Arc<str>),
@@ -372,7 +378,7 @@ pub(crate) enum AtomSource {
 impl PartialEq for AtomSource {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Role(a), Self::Role(b)) => a == b,
+            (Self::Role { src: a, cell: x }, Self::Role { src: b, cell: y }) => a == b && x == y,
             (Self::Constant(a), Self::Constant(b)) => a.same(b),
             (Self::Text(a), Self::Text(b)) => a == b,
             _ => false,
@@ -749,21 +755,24 @@ impl RegionCode {
         };
         let lib = self.call(*site)?.checked()?;
         let call = self.draft.calls.get(site.offset())?;
-        let held = |reg: &Reg<LeaseValue>| {
+        let slot = |reg: &Reg<LeaseValue>| {
             self.draft
                 .roles
                 .iter()
                 .find_map(|(role, actual)| (actual == reg).then_some(role.slot()))
                 .flatten()
-                .map(CheckedArgument::Held)
         };
+        let held = |reg: &Reg<LeaseValue>| slot(reg).map(CheckedArgument::Held);
         let arguments = call
             .arguments
             .iter()
             .map(
                 |reg| match call.atoms.iter().find(|load| load.dst == *reg) {
                     Some(load) => match &load.src {
-                        AtomSource::Role(src) => held(src),
+                        AtomSource::Role { src, cell: false } => held(src),
+                        AtomSource::Role { src, cell: true } => {
+                            slot(src).map(CheckedArgument::Cell)
+                        }
                         AtomSource::Constant(value) => Some(CheckedArgument::Constant(*value)),
                         AtomSource::Text(_) => Some(CheckedArgument::Text),
                     },
@@ -933,11 +942,15 @@ impl RegionCode {
     /// a route, entered only from a continuation, never by a branch.
     pub(crate) fn raise_origins(&self) -> impl Iterator<Item = Pc> + '_ {
         let events = self.draft.source.room.events.len();
+        // An origin row whose raising event no path reaches is never
+        // entered: no raise is born there.
         self.draft
             .departures
             .iter()
             .map(|route| route.origin)
-            .filter(move |origin| origin.offset() >= events)
+            .filter(move |origin| {
+                origin.offset() >= events && self.draft.steps[origin.offset()].reachable
+            })
     }
     pub(crate) fn recovery(&self, prefix: PrefixId) -> Option<&RecoveryMap> {
         self.draft.recovery.get(prefix.offset())

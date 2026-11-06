@@ -40,7 +40,22 @@ impl Running<'_> {
     ) -> Result<Operand<LeaseValue>, RegionError> {
         use crate::compile::region_isa::AtomSource;
         match src {
-            AtomSource::Role(src) => self.read(*src),
+            AtomSource::Role { src, cell: false } => self.read(*src),
+            AtomSource::Role { src, cell: true } => {
+                let value = self
+                    .read(*src)?
+                    .bind(&mut self.view)
+                    .map_err(RegionError::Heap)?;
+                let cell = self.view.object(value).map_err(RegionError::Heap)?;
+                Ok(Operand::Dynamic(
+                    self.view
+                        .read(
+                            cell,
+                            &lash_kernel_state::kernel_internals::logical::LeaseMember::Variable,
+                        )
+                        .map_err(storage_fault)?,
+                ))
+            }
             AtomSource::Constant(value) => Ok(Operand::Immediate(*value)),
             AtomSource::Text(text) => {
                 let phase = self

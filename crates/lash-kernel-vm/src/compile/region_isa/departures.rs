@@ -50,20 +50,24 @@ fn departing(draft: &RegionDraft, index: usize) -> Result<Option<ExitKind>, Refu
     })
 }
 
-/// Whether no try of the frame encloses the statement at `at`, so that a
-/// raise there leaves the frame.
+/// Whether no try of the frame takes or cleans up after a raise of the
+/// statement at `at`, so that the raise leaves the frame.
 pub(super) fn uncaught(source: &Source, at: &Point) -> Result<bool, Refused> {
     if at.site.unit != source.site.unit || !at.site.path.starts_with(&source.site.path) {
         return Err(Refused::Path);
     }
     let mut site = at.site.clone();
     while site.path.len() > source.site.path.len() {
-        site.path.pop();
-        if matches!(
-            resources::node(source, &site)?,
-            doc::Node::Stmt(doc::Stmt::Try(_))
-        ) {
-            return Ok(false);
+        let child = site.path.pop().ok_or(Refused::Path)?;
+        // A try takes a raise of its body; a raise of its catch body or
+        // its finally passes it by, unless a finally still runs after it.
+        if let doc::Node::Stmt(doc::Stmt::Try(scope)) = resources::node(source, &site)? {
+            let catch_body = scope.catch.is_some() && child == 1;
+            let finally_body =
+                scope.finally.is_some() && child == 1 + u32::from(scope.catch.is_some());
+            if !finally_body && !(catch_body && scope.finally.is_none()) {
+                return Ok(false);
+            }
         }
     }
     Ok(true)

@@ -450,7 +450,7 @@ fn check_atoms(
             },
         )?;
         let loads = match (&load.src, atom) {
-            (AtomSource::Role(src), doc::Atom::Variable(name)) => {
+            (AtomSource::Role { src, cell }, doc::Atom::Variable(name)) => {
                 let role = resources::role(
                     &draft.source,
                     &Owner::Visible {
@@ -459,10 +459,11 @@ fn check_atoms(
                     },
                 )
                 .ok_or(Refused::Facts)?;
-                draft
-                    .roles
-                    .iter()
-                    .any(|(actual, reg)| *actual == role && reg == src)
+                *cell == resources::cell(&draft.source, &step.at.site, name, role)
+                    && draft
+                        .roles
+                        .iter()
+                        .any(|(actual, reg)| *actual == role && reg == src)
             }
             (AtomSource::Constant(value), doc::Atom::Literal(literal)) => {
                 super::lower::literal(literal).is_some_and(|expected| expected.same(value))

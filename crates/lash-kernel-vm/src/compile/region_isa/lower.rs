@@ -1498,17 +1498,16 @@ pub(super) fn action_atoms(
             )
             .ok()?;
             let src = match atom {
-                doc::Atom::Variable(name) => AtomSource::Role(
-                    reg(
-                        roles,
-                        source,
-                        &Owner::Visible {
-                            at: site.clone(),
-                            name: name.clone(),
-                        },
-                    )
-                    .ok()?,
-                ),
+                doc::Atom::Variable(name) => {
+                    let owner = Owner::Visible {
+                        at: site.clone(),
+                        name: name.clone(),
+                    };
+                    AtomSource::Role {
+                        src: reg(roles, source, &owner).ok()?,
+                        cell: resources::cell(source, site, name, resources::role(source, &owner)?),
+                    }
+                }
                 doc::Atom::Literal(doc::Literal::Text(text))
                     if doc::arena::ShortText::new(text).is_none() =>
                 {

@@ -329,6 +329,21 @@ impl KernelMachine {
                 CheckedArgument::Held(slot) => {
                     self.role_values(task, std::slice::from_ref(slot))?[0]
                 }
+                // A captured cell is read through already; a shared
+                // binding's role holds its cell.
+                CheckedArgument::Cell(slot) => {
+                    match self.role_values(task, std::slice::from_ref(slot))?[0] {
+                        Value::ObjectRef(cell)
+                            if matches!(
+                                slot,
+                                lash_kernel_state::kernel_internals::logical::Slot::Binding(_)
+                            ) =>
+                        {
+                            self.in_arena(|arena| arena.cell(cell))?
+                        }
+                        value => value,
+                    }
+                }
                 CheckedArgument::Constant(value) => *value,
                 // Any text has the one public type; the empty text stands
                 // for the literal the call would allocate.

@@ -158,7 +158,7 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                     read(&state, register(draft, owner)?.offset())?;
                 }
                 for load in &call.atoms {
-                    if let AtomSource::Role(src) = load.src {
+                    if let AtomSource::Role { src, .. } = load.src {
                         read(&state, src.offset())?;
                     }
                     state[load.dst.offset()] = Some(RegisterKind::Value);
@@ -198,7 +198,7 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                 // the sink before its Commit.
                 if let Some(action) = spec.action() {
                     for load in &action.atoms {
-                        if let AtomSource::Role(src) = load.src {
+                        if let AtomSource::Role { src, .. } = load.src {
                             read(&state, src.offset())?;
                         }
                         state[load.dst.offset()] = Some(RegisterKind::Value);
