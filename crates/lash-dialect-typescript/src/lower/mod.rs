@@ -27,6 +27,9 @@ use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 use lash_ext_ts_helpers::builtins::{self, Table};
 use lash_kernel_dialect::Spelling;
 
+#[cfg(test)]
+pub(crate) mod inventory;
+
 mod async_fn;
 mod calls;
 mod captions;
@@ -1033,6 +1036,8 @@ impl Lowerer<'_> {
                 self.span,
             )
         })?;
+        #[cfg(test)]
+        inventory::record(name, function);
         if let Ok(qualified) = FunctionName::new(name) {
             self.used.insert(function, qualified);
         }

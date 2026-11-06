@@ -18,6 +18,9 @@ enum Clause<'a> {
 
 impl Renderer<'_> {
     pub(super) fn authored_statement(&mut self, stmt: &k::Stmt) -> bool {
+        if self.syntax_statement(stmt) {
+            return true;
+        }
         match stmt {
             // An awaited terminal operation keeps its perform inside Finish;
             // the discarded reply and null result have no authored spelling.
@@ -383,6 +386,8 @@ pub(super) fn authored_awaits(body: &k::Block, sync: &BTreeSet<Name>) -> bool {
 #[derive(Clone)]
 pub(super) struct Comprehension {
     element: k::Expr,
+    key: Option<k::Expr>,
+    collection: crate::constructs::collections::Collection,
     binding: Name,
     source_binding: Name,
     iterable: k::Expr,
@@ -403,11 +408,35 @@ impl Renderer<'_> {
     ) {
         let substitutions = self.substitutions.clone();
         let comprehensions = self.comprehensions.clone();
+        let displays = self.displays.clone();
         let direct = self.direct.clone();
         let mut pending_caption = None;
         let mut index = range.start;
         while index < range.end {
             let statement = &block[index];
+            let structured = self.structured_statements(&block[index..range.end]);
+            if structured > 0 {
+                for _ in 0..structured {
+                    self.implicit();
+                }
+                index += structured;
+                continue;
+            }
+            let unpacked = self.unpack(&block[index..range.end]);
+            if unpacked > 0 {
+                index += unpacked;
+                continue;
+            }
+            if let Some((name, display, taken)) = self.lift_display(&block[index..range.end]) {
+                pending_caption = self.hoist_caption(pending_caption);
+                for _ in 0..taken {
+                    self.implicit();
+                }
+                self.displays.insert(name, display);
+                index += taken;
+                continue;
+            }
+
             let direct = self.direct_definition(&block[index..range.end]);
             if direct > 0 {
                 index += direct;
@@ -481,6 +510,7 @@ impl Renderer<'_> {
         }
         self.substitutions = substitutions;
         self.comprehensions = comprehensions;
+        self.displays = displays;
         self.direct = direct;
     }
 
@@ -576,6 +606,8 @@ impl Renderer<'_> {
             iterable,
             via,
             value,
+            key,
+            collection,
             rest,
         } = found;
         if !temporary_name(name) || reads(rest, name) != 1 || assigned(rest, name) {
@@ -589,6 +621,8 @@ impl Renderer<'_> {
             name.clone(),
             Comprehension {
                 element,
+                key: key.cloned(),
+                collection,
                 binding: binding.clone(),
                 source_binding,
                 iterable: iterable.clone(),
@@ -602,8 +636,22 @@ impl Renderer<'_> {
             comprehension.binding.clone(),
             k::Expr::Variable(comprehension.source_binding.clone()),
         );
-        self.out.write("[");
-        self.inline_expr(&comprehension.element);
+        use crate::constructs::collections::Collection;
+        self.out
+            .write(if matches!(comprehension.collection, Collection::List) {
+                "["
+            } else {
+                "{"
+            });
+        if let Some(key) = &comprehension.key {
+            self.inline_expr(key);
+            if matches!(comprehension.collection, Collection::Dict) {
+                self.out.write(": ");
+                self.inline_expr(&comprehension.element);
+            }
+        } else {
+            self.inline_expr(&comprehension.element);
+        }
         self.out.write(" for ");
         self.name(&comprehension.source_binding);
         self.out.write(" in ");
@@ -620,7 +668,12 @@ impl Renderer<'_> {
             self.out.write(view);
             self.out.write("()");
         }
-        self.out.write("]");
+        self.out
+            .write(if matches!(comprehension.collection, Collection::List) {
+                "]"
+            } else {
+                "}"
+            });
     }
 
     pub(super) fn name_check(&mut self, target: &k::FunctionTarget, args: &[k::Expr]) -> bool {
@@ -695,7 +748,7 @@ impl Renderer<'_> {
     }
 }
 
-fn temporary_name(name: &Name) -> bool {
+pub(super) fn temporary_name(name: &Name) -> bool {
     name.as_str().strip_prefix('t').is_some_and(|suffix| {
         !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
     })

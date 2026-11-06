@@ -8,9 +8,14 @@ use lash_kernel_doc::Caption;
 /// An expression, as a model would write it.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Expr {
+    Update(Box<Expr>, &'static str),
     /// A number literal, already spelled.
     Number(String),
     Text(String),
+    RegExp {
+        pattern: String,
+        flags: String,
+    },
     Bool(bool),
     Null,
     Undefined,
@@ -27,10 +32,23 @@ pub(super) enum Expr {
     /// An erased assertion retaining the operand facts of a native operation.
     As(Box<Expr>, Type),
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
+    Optional(Box<Expr>),
+    Spread(Box<Expr>),
+    Hole,
     Array(Vec<Expr>),
+    BuiltObject(Vec<ObjectPart>),
     Object(Vec<(String, Expr)>),
     Template(Vec<Part>),
+    TemplateObject(Vec<String>),
+    Tagged(Box<Expr>, Vec<String>, Vec<Expr>),
     Arrow(Box<Function>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum ObjectPart {
+    Field(String, Expr),
+    Computed(Expr, Expr),
+    Spread(Expr),
 }
 
 /// A piece of a template literal.
@@ -95,6 +113,7 @@ pub(super) struct Stmt {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum StmtKind {
+    Pattern(Pattern, Expr),
     Const(String, Expr),
     Let(String, Option<Expr>),
     /// `place op value`: `=`, or a compound operator.
@@ -124,6 +143,14 @@ pub(super) enum StmtKind {
         catch: Option<(Arm, Option<String>)>,
         finally: Option<Arm>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum Pattern {
+    Default(Box<Pattern>, Expr),
+    Name(String),
+    Object(Vec<(String, Pattern)>, Option<Box<Pattern>>),
+    Array(Vec<Option<Pattern>>, Option<Box<Pattern>>),
 }
 
 /// A clause arm: `else`, `catch` or `finally`, with its caption.
@@ -389,8 +416,66 @@ impl Writer {
         self.out.push('\n');
     }
 
+    fn pattern(&mut self, pattern: &Pattern) {
+        match pattern {
+            Pattern::Default(pattern, value) => {
+                self.pattern(pattern);
+                self.out.push_str(" = ");
+                self.expr(value, ASSIGN);
+            }
+            Pattern::Name(name) => self.out.push_str(name),
+            Pattern::Object(fields, rest) => {
+                self.out.push('{');
+                for (index, (field, value)) in fields.iter().enumerate() {
+                    if index > 0 {
+                        self.out.push_str(", ");
+                    }
+                    self.out.push_str(&property_key(field));
+                    self.out.push_str(": ");
+                    self.pattern(value);
+                }
+                if let Some(rest) = rest {
+                    if !fields.is_empty() {
+                        self.out.push_str(", ");
+                    }
+                    self.out.push_str("...");
+                    self.pattern(rest);
+                }
+                self.out.push('}');
+            }
+            Pattern::Array(elements, rest) => {
+                self.out.push('[');
+                for (index, element) in elements.iter().enumerate() {
+                    if index > 0 {
+                        self.out.push_str(", ");
+                    }
+                    if let Some(element) = element {
+                        self.pattern(element);
+                    }
+                }
+                if let Some(rest) = rest {
+                    if !elements.is_empty() {
+                        self.out.push_str(", ");
+                    }
+                    self.out.push_str("...");
+                    self.pattern(rest);
+                } else if matches!(elements.last(), Some(None)) {
+                    self.out.push(',');
+                }
+                self.out.push(']');
+            }
+        }
+    }
+
     fn statement_kind(&mut self, kind: &StmtKind) {
         match kind {
+            StmtKind::Pattern(pattern, value) => {
+                self.out.push_str("const ");
+                self.pattern(pattern);
+                self.out.push_str(" = ");
+                self.expr(value, ASSIGN);
+                self.out.push(';');
+            }
             StmtKind::Const(name, value) => {
                 self.out.push_str("const ");
                 self.out.push_str(name);
@@ -550,7 +635,49 @@ impl Writer {
 
     fn expr_inner(&mut self, expr: &Expr) {
         match expr {
+            Expr::Update(value, op) => {
+                self.expr(value, POSTFIX);
+                self.out.push_str(op);
+            }
+            Expr::Optional(value) => self.expr(value, POSTFIX),
+            Expr::Spread(value) => {
+                self.out.push_str("...");
+                self.expr(value, ASSIGN);
+            }
+            Expr::Hole => {}
+            Expr::BuiltObject(parts) => {
+                self.out.push('{');
+                for (i, part) in parts.iter().enumerate() {
+                    if i > 0 {
+                        self.out.push_str(", ");
+                    }
+                    match part {
+                        ObjectPart::Field(name, value) => {
+                            self.out.push_str(&property_key(name));
+                            self.out.push_str(": ");
+                            self.expr(value, ASSIGN);
+                        }
+                        ObjectPart::Computed(key, value) => {
+                            self.out.push('[');
+                            self.expr(key, 0);
+                            self.out.push_str("]: ");
+                            self.expr(value, ASSIGN);
+                        }
+                        ObjectPart::Spread(value) => {
+                            self.out.push_str("...");
+                            self.expr(value, ASSIGN);
+                        }
+                    }
+                }
+                self.out.push('}');
+            }
             Expr::Number(text) => self.out.push_str(text),
+            Expr::RegExp { pattern, flags } => {
+                self.out.push('/');
+                self.out.push_str(pattern);
+                self.out.push('/');
+                self.out.push_str(flags);
+            }
             Expr::Text(text) => self.out.push_str(&text_literal(text)),
             Expr::Bool(value) => self.out.push_str(if *value { "true" } else { "false" }),
             Expr::Null => self.out.push_str("null"),
@@ -559,9 +686,17 @@ impl Writer {
             Expr::Field(target, field) => {
                 self.member_target(target);
                 if crate::printer::property_identifier(field) {
-                    self.out.push('.');
+                    self.out
+                        .push_str(if matches!(target.as_ref(), Expr::Optional(_)) {
+                            "?."
+                        } else {
+                            "."
+                        });
                     self.out.push_str(field);
                 } else {
+                    if matches!(target.as_ref(), Expr::Optional(_)) {
+                        self.out.push_str("?.");
+                    }
                     self.out.push('[');
                     self.out.push_str(&text_literal(field));
                     self.out.push(']');
@@ -569,12 +704,18 @@ impl Writer {
             }
             Expr::Index(target, index) => {
                 self.member_target(target);
+                if matches!(target.as_ref(), Expr::Optional(_)) {
+                    self.out.push_str("?.");
+                }
                 self.out.push('[');
                 self.expr(index, 0);
                 self.out.push(']');
             }
             Expr::Call(callee, args) => {
                 self.member_target(callee);
+                if matches!(callee.as_ref(), Expr::Optional(_)) {
+                    self.out.push_str("?.");
+                }
                 self.arguments(args);
             }
             Expr::New(callee, args) => {
@@ -627,6 +768,9 @@ impl Writer {
                     }
                     self.expr(item, ASSIGN);
                 }
+                if matches!(items.last(), Some(Expr::Hole)) {
+                    self.out.push(',');
+                }
                 self.out.push(']');
             }
             Expr::Object(entries) => {
@@ -648,6 +792,29 @@ impl Writer {
                     self.expr(value, ASSIGN);
                 }
                 self.out.push_str(" }");
+            }
+            Expr::TemplateObject(raw) => {
+                self.out.push('[');
+                for (index, text) in raw.iter().enumerate() {
+                    if index > 0 {
+                        self.out.push_str(", ");
+                    }
+                    self.out.push_str(&text_literal(text));
+                }
+                self.out.push(']');
+            }
+            Expr::Tagged(tag, raw, expressions) => {
+                self.member_target(tag);
+                self.out.push('`');
+                for (index, text) in raw.iter().enumerate() {
+                    self.out.push_str(text);
+                    if let Some(value) = expressions.get(index) {
+                        self.out.push_str("${");
+                        self.expr(value, 0);
+                        self.out.push('}');
+                    }
+                }
+                self.out.push('`');
             }
             Expr::Template(parts) => {
                 self.out.push('`');
@@ -777,14 +944,14 @@ fn precedence(expr: &Expr) -> u8 {
         Expr::Binary(op, ..) => binary_precedence(op),
         Expr::Unary(..) => UNARY,
         Expr::Number(text) if text.starts_with('-') => UNARY,
-        Expr::Call(..) | Expr::New(..) => POSTFIX,
+        Expr::Call(..) | Expr::New(..) | Expr::Update(..) => POSTFIX,
         _ => 20,
     }
 }
 
 fn starts_ambiguously(expr: &Expr) -> bool {
     match expr {
-        Expr::Object(_) | Expr::Arrow(_) => true,
+        Expr::Object(_) | Expr::BuiltObject(_) | Expr::Arrow(_) => true,
         Expr::Field(target, _) | Expr::Index(target, _) | Expr::Call(target, _) => {
             starts_ambiguously(target)
         }

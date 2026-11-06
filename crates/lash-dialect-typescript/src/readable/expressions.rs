@@ -105,6 +105,12 @@ impl Lifter<'_> {
 
     /// A temporary the source wrote in place, or a variable.
     fn variable(&mut self, name: &Name) -> Lift<Expr> {
+        if let Some(value) = self.substitutions.get(name) {
+            return Ok(value.clone());
+        }
+        if let Some(raw) = self.templates.get(name) {
+            return Ok(Expr::TemplateObject(raw.clone()));
+        }
         if let Some(value) = self.take_pending(name) {
             return Ok(value);
         }
@@ -164,6 +170,42 @@ impl Lifter<'_> {
         let Some(name) = self.library(function) else {
             return refuse("a call of a function the manifest does not list");
         };
+        if lash_ext_ts_helpers::builtins::table()
+            .constructors
+            .get("RegExp")
+            .is_some_and(|helper| *helper == name)
+        {
+            return self.regexp(args);
+        }
+        if name == "ts.to_property_key"
+            && let [value] = args
+        {
+            return self.expr(value);
+        }
+        if name == "ts.spread"
+            && let [parts] = args
+        {
+            let Expr::Array(parts) = self.expr(parts)? else {
+                return refuse("spread parts");
+            };
+            let mut items = Vec::new();
+            for part in parts {
+                match part {
+                    Expr::Array(values) => {
+                        items.extend(values.into_iter().map(|value| {
+                            if value == constructor("tuple.of", vec![]) {
+                                Expr::Hole
+                            } else {
+                                value
+                            }
+                        }));
+                    }
+                    Expr::Spread(_) => items.push(part),
+                    _ => return refuse("an array spread part"),
+                }
+            }
+            return Ok(Expr::Array(items));
+        }
         if name == "num.to_float"
             && let [k::Expr::Call { function, args }] = args
             && self.is(function, "list.len")
@@ -173,6 +215,11 @@ impl Lifter<'_> {
                 Box::new(self.expr(target)?),
                 "length".to_owned(),
             ));
+        }
+        if let [value] = args
+            && let Some((token, _)) = crate::constructs::operators::unary_inverse(&name, false)
+        {
+            return Ok(Expr::Unary(token, Box::new(self.expr(value)?)));
         }
         if let Some(method) = self.primitive_method(function, args)? {
             return Ok(method);
@@ -240,6 +287,33 @@ impl Lifter<'_> {
             },
             (name, _) => refuse(format!("`{name}` has no source spelling")),
         }
+    }
+
+    fn regexp(&mut self, args: &[k::Expr]) -> Lift<Expr> {
+        let [receiver, arguments] = args else {
+            return refuse("a regular expression constructor's arguments");
+        };
+        if !matches!(receiver, k::Expr::Literal(k::Literal::Absent)) {
+            return refuse("a regular expression constructor's receiver");
+        }
+        let literal =
+            matches!(arguments, k::Expr::Variable(name) if self.pending_at(name).is_some());
+        let arguments = self.expr(arguments)?;
+        let Expr::Array(arguments) = arguments else {
+            return refuse("a regular expression constructor's argument list");
+        };
+        if let [Expr::Text(pattern), Expr::Text(flags)] = arguments.as_slice()
+            && literal
+            && crate::regex::validate_literal(pattern, flags, None).is_ok()
+            && !pattern.is_empty()
+            && regex_literal_pattern(pattern)
+        {
+            return Ok(Expr::RegExp {
+                pattern: pattern.clone(),
+                flags: flags.clone(),
+            });
+        }
+        Ok(Expr::New(Box::new(Expr::Ident("RegExp".into())), arguments))
     }
 
     /// The operator a numeric or text native lowers from, over operands
@@ -372,7 +446,8 @@ impl Lifter<'_> {
             ));
         }
         if let k::Expr::If { cond, then, r#else } = body
-            && **cond == bound
+            && (**cond == bound
+                || matches!(cond.as_ref(), k::Expr::Call { function, args } if self.is(function, "ts.to_boolean") && args.as_slice() == [bound.clone()]))
         {
             // `a && b` and `a || b` test `a` once.
             if **r#else == bound {
@@ -422,16 +497,18 @@ impl Lifter<'_> {
 
     /// `f(args)` of a function value: `let(f' = f, let(a = [args],
     /// let(c = f'[4], apply c(absent, a))))`.
-    fn call(&mut self, callee: &Name, value: &k::Expr, body: &k::Expr) -> Lift<Option<Expr>> {
+    pub(super) fn call(
+        &mut self,
+        callee: &Name,
+        value: &k::Expr,
+        body: &k::Expr,
+    ) -> Lift<Option<Expr>> {
         let k::Expr::Let {
             name: list,
             value: args,
             body: inner,
         } = body
         else {
-            return Ok(None);
-        };
-        let k::Expr::List(args) = &**args else {
             return Ok(None);
         };
         let k::Expr::Let {
@@ -444,6 +521,7 @@ impl Lifter<'_> {
         };
         let held = k::Expr::Variable(callee.clone());
         let direct = matches!(&**selected, k::Expr::Member(_));
+        let mut receiver = k::Expr::Literal(k::Literal::Absent);
         let selects = match &**selected {
             k::Expr::Member(member) => matches!(&**member, k::Member::Index { target, index }
             if *target == held
@@ -453,37 +531,52 @@ impl Lifter<'_> {
             k::Expr::Call { function, args } => {
                 self.is(function, "ts.callable") && args.as_slice() == [held.clone()]
             }
-            k::Expr::Act(act) => {
-                matches!(&act.kind, k::ActKind::Call(k::Callee::Local(function))
-                    if self.is(function, "ts.callable"))
-                    && act.args.as_slice() == [held.clone()]
-            }
+            k::Expr::Act(act) => match &act.kind {
+                k::ActKind::Call(k::Callee::Local(function))
+                    if self.is(function, "ts.callable") =>
+                {
+                    act.args.as_slice() == [held.clone()]
+                }
+                k::ActKind::Call(k::Callee::Local(function))
+                    if self.is(function, "ts.method_callable") =>
+                {
+                    if let [callee, target, _] = act.args.as_slice() {
+                        receiver = target.clone();
+                        *callee == held
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            },
             _ => false,
         };
         let k::Expr::Act(act) = &**applied else {
             return Ok(None);
         };
         let applies = matches!(&act.kind, k::ActKind::Call(k::Callee::Value(value)) if value == callable)
-            && act.args.as_slice()
-                == [
-                    k::Expr::Literal(k::Literal::Absent),
-                    k::Expr::Variable(list.clone()),
-                ];
+            && act.args.as_slice() == [receiver, k::Expr::Variable(list.clone())];
         if !selects || !applies {
             return Ok(None);
         }
         let callee = self.expr(value)?;
-        let args = args.iter().map(|arg| self.expr(arg)).collect::<Lift<_>>()?;
+        let Expr::Array(args) = self.expr(args)? else {
+            return refuse("a call's argument list");
+        };
         let authored =
             matches!(value, k::Expr::Variable(name) if self.module_helpers.contains(name));
-        Ok(Some(if direct && !authored {
-            constructor(
-                "callable.invoke_token",
-                std::iter::once(callee).chain(args).collect(),
-            )
-        } else {
-            Expr::Call(Box::new(callee), args)
-        }))
+        Ok(Some(
+            if matches!(args.first(), Some(Expr::TemplateObject(_))) {
+                authored_call(callee, args)
+            } else if direct && !authored {
+                constructor(
+                    "callable.invoke_token",
+                    std::iter::once(callee).chain(args).collect(),
+                )
+            } else {
+                authored_call(callee, args)
+            },
+        ))
     }
 
     pub(super) fn act(&mut self, act: &k::ActExpr) -> Lift<Expr> {
@@ -587,6 +680,14 @@ impl Lifter<'_> {
     /// A dialect helper's call, as the source operator or built-in it
     /// implements.
     fn helper(&mut self, name: &str, args: &[k::Expr]) -> Lift<Expr> {
+        if lash_ext_ts_helpers::builtins::table()
+            .constructors
+            .get("RegExp")
+            .is_some_and(|helper| *helper == name)
+        {
+            return self.regexp(args);
+        }
+
         if let Some(value) = crate::constructs::numbers::BIGINT_INPUT.named(name, args) {
             let value = self.expr(value)?;
             return Ok(if self.style.operators {
@@ -595,7 +696,35 @@ impl Lifter<'_> {
                 Expr::As(Box::new(value), source::Type::Word("bigint"))
             });
         }
+        if let [value] = args
+            && let Some((class, _)) = lash_ext_ts_helpers::builtins::table()
+                .instance_tests
+                .iter()
+                .find(|(_, helper)| **helper == name)
+        {
+            return Ok(Expr::Binary(
+                "instanceof",
+                Box::new(self.expr(value)?),
+                Box::new(Expr::Ident((*class).into())),
+            ));
+        }
         match (name, args) {
+            ("ts.to_property_key", [value]) => self.expr(value),
+            ("ts.construct", [callee, args]) => {
+                let callee = self.expr(callee)?;
+                let Expr::Array(args) = self.expr(args)? else {
+                    return refuse("a constructor's arguments");
+                };
+                Ok(Expr::New(Box::new(callee), args))
+            }
+            ("ts.array.spread", [value]) => Ok(Expr::Spread(Box::new(self.expr(value)?))),
+            ("ts.delete", [target, key]) => Ok(Expr::Unary(
+                "delete ",
+                Box::new(Expr::Index(
+                    Box::new(self.expr(target)?),
+                    Box::new(self.expr(key)?),
+                )),
+            )),
             ("ts.abort.start", [work, inputs, options]) => {
                 let call = self.helper(
                     "ts.promise.start",
@@ -665,20 +794,24 @@ impl Lifter<'_> {
                 else {
                     return refuse("pending tool wrapper perform");
                 };
-                let [k::Expr::Act(boundary)] = performed.args.as_slice() else {
-                    return refuse("pending tool wrapper input");
-                };
-                if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Local(id)) if self.is(id, crate::constructs::conventions::ARGUMENT_COPY))
-                {
-                    return refuse("pending tool wrapper boundary");
+                if inputs.len() != performed.args.len() {
+                    return refuse("pending tool wrapper arity");
                 }
-                let [k::Expr::Member(member), _factory] = boundary.args.as_slice() else {
-                    return refuse("pending tool wrapper operand");
-                };
-                if !matches!(&**member, k::Member::Index { target: k::Expr::Variable(name), index: k::Expr::Literal(k::Literal::Float(index)) } if *name == params.name && index.get() == 0.0)
-                    || inputs.len() != 1
-                {
-                    return refuse("pending tool wrapper argument position");
+                for (index, input) in performed.args.iter().enumerate() {
+                    let k::Expr::Act(boundary) = input else {
+                        return refuse("pending tool wrapper input");
+                    };
+                    if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Local(id)) if self.is(id, crate::constructs::conventions::ARGUMENT_COPY))
+                    {
+                        return refuse("pending tool wrapper boundary");
+                    }
+                    let [k::Expr::Member(member), _factory] = boundary.args.as_slice() else {
+                        return refuse("pending tool wrapper operand");
+                    };
+                    if !matches!(&**member, k::Member::Index { target: k::Expr::Variable(name), index: k::Expr::Literal(k::Literal::Float(position)) } if *name == params.name && position.get() == index as f64)
+                    {
+                        return refuse("pending tool wrapper argument position");
+                    }
                 }
                 let callee = self.in_function(work.function).operation(&slot)?;
                 let args = inputs
@@ -859,4 +992,67 @@ pub(super) fn literal_of(literal: &k::Literal) -> Lift<Expr> {
 
 fn constructor(name: &str, args: Vec<Expr>) -> Expr {
     Expr::Call(Box::new(Expr::Ident(name.into())), args)
+}
+
+/// A literal retains the lowerer's raw pattern bytes. Constructor patterns
+/// needing new escapes must use `new RegExp` to preserve that identity.
+fn regex_literal_pattern(pattern: &str) -> bool {
+    let mut escaped = false;
+    let mut class = false;
+    for ch in pattern.chars() {
+        if matches!(ch, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
+            return false;
+        }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '[' => class = true,
+            ']' => class = false,
+            '/' if !class => return false,
+            _ => {}
+        }
+    }
+    !escaped
+}
+
+pub(super) fn template_object(value: &k::Expr) -> Option<Vec<String>> {
+    let k::Expr::Record(fields) = value else {
+        return None;
+    };
+    let brand = fields.iter().find(|field| field.field == "__lash_brand")?;
+    if brand.value
+        != k::Expr::Tuple(vec![
+            k::Expr::Literal(k::Literal::Text("typescript".into())),
+            k::Expr::Literal(k::Literal::Text("template".into())),
+        ])
+    {
+        return None;
+    }
+    let k::Expr::Record(raw) = &fields.iter().find(|field| field.field == "raw")?.value else {
+        return None;
+    };
+    let k::Expr::List(items) = &raw.iter().find(|field| field.field == "items")?.value else {
+        return None;
+    };
+    items
+        .iter()
+        .map(|item| match item {
+            k::Expr::Literal(k::Literal::Text(text)) => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn authored_call(callee: Expr, mut args: Vec<Expr>) -> Expr {
+    if matches!(args.first(), Some(Expr::TemplateObject(_))) {
+        let Expr::TemplateObject(raw) = args.remove(0) else {
+            unreachable!()
+        };
+        Expr::Tagged(Box::new(callee), raw, args)
+    } else {
+        Expr::Call(Box::new(callee), args)
+    }
 }

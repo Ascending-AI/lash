@@ -152,6 +152,8 @@ pub(super) struct Lifter<'a> {
     /// The temporaries lifted and not yet read, in the order they were
     /// bound: the order the source evaluated them.
     pending: Vec<Pending>,
+    pub(super) substitutions: BTreeMap<Name, source::Expr>,
+    pub(super) templates: BTreeMap<Name, Vec<String>>,
     pub(super) style: Style,
     /// The captions of the temporaries the statement being lifted read.
     taken_captions: Vec<Caption>,
@@ -198,6 +200,36 @@ impl<'a> Lifter<'a> {
             }
         }
         let mut bindings = BTreeMap::new();
+        if matches!(unit, Unit::Main)
+            && let Some(body) = body
+        {
+            // Main's nested lexical bindings acquire a fresh suffix on lowering.
+            // Recover the input name so readback does not suffix it a second time.
+            let mut pending = vec![(k::Node::Block(body), 0)];
+            while let Some((node, depth)) = pending.pop() {
+                let names: Vec<&Name> = match node {
+                    k::Node::Stmt(k::Stmt::Let { name, .. }) if depth > 0 => vec![name],
+                    k::Node::Stmt(k::Stmt::For { binding, .. }) => vec![binding],
+                    k::Node::Stmt(k::Stmt::Try(scope)) => {
+                        scope.catch.iter().map(|catch| &catch.binding).collect()
+                    }
+                    _ => Vec::new(),
+                };
+                for name in names {
+                    if let Some((original, suffix)) = name.as_str().rsplit_once('_')
+                        && !suffix.is_empty()
+                        && suffix.bytes().all(|byte| byte.is_ascii_digit())
+                        && source::identifier(original)
+                    {
+                        bindings.insert(name.clone(), original.to_owned());
+                    }
+                }
+                pending.extend(node.children().into_iter().map(|child| {
+                    let nested = usize::from(matches!(child, k::Node::Block(_)));
+                    (child, depth + nested)
+                }));
+            }
+        }
         if let Some(body) = body {
             let mut pending = vec![k::Node::Block(body)];
             while let Some(node) = pending.pop() {
@@ -236,6 +268,8 @@ impl<'a> Lifter<'a> {
             imports,
             captions,
             pending: Vec::new(),
+            substitutions: BTreeMap::new(),
+            templates: BTreeMap::new(),
             style,
             taken_captions: Vec::new(),
             assigned,
@@ -250,6 +284,14 @@ impl<'a> Lifter<'a> {
                     && let Some(name) = lifter.process_await_name(then, r#else).cloned()
                 {
                     lifter.process_awaits.insert(name);
+                }
+                if let k::Node::Stmt(k::Stmt::Let {
+                    name,
+                    value: k::Rhs::Expr(value),
+                }) = node
+                    && let Some(raw) = super::expressions::template_object(value)
+                {
+                    lifter.templates.insert(name.clone(), raw);
                 }
                 pending.extend(node.children());
             }
@@ -285,6 +327,7 @@ impl<'a> Lifter<'a> {
         );
         inner.bindings.extend(self.bindings.clone());
         inner.module_helpers.extend(self.module_helpers.clone());
+        inner.templates.extend(self.templates.clone());
         inner
     }
 
@@ -323,7 +366,10 @@ impl<'a> Lifter<'a> {
             self.library,
             self.style,
         );
-        if !matches!(&entry.convention, k::StartConvention::TsDirect { await_fn }
+        let packed = matches!(&entry.convention, k::StartConvention::TsArgsList { await_fn, same_fn }
+            if export_scope.is(await_fn, "ts.entry_result") && export_scope.is(same_fn, "same"));
+        if !packed
+            && !matches!(&entry.convention, k::StartConvention::TsDirect { await_fn }
             if export_scope.is(await_fn, "ts.entry_result"))
         {
             return refuse("an entry the dialect starts directly");
@@ -331,13 +377,14 @@ impl<'a> Lifter<'a> {
         if !source::identifier(name.as_str()) {
             return refuse("an entry name TypeScript cannot spell");
         }
-        if entry.signature.params.len() != function.signature.params.len()
-            || entry
-                .signature
-                .params
-                .iter()
-                .zip(function.signature.params.iter().map(|param| &param.name))
-                .any(|(param, name)| param.name != *name)
+        if !packed
+            && (entry.signature.params.len() != function.signature.params.len()
+                || entry
+                    .signature
+                    .params
+                    .iter()
+                    .zip(function.signature.params.iter().map(|param| &param.name))
+                    .any(|(param, name)| param.name != *name))
         {
             return refuse("an entry's parameters are its signature's");
         }
@@ -384,13 +431,34 @@ impl<'a> Lifter<'a> {
         // that scope, including its original closure and binding identities.
         let skip = statements
             .iter()
-            .take_while(|statement| self.module_capture(statement))
+            .take_while(|statement| self.module_capture(statement) || matches!(statement, k::Stmt::Let { name, .. } if self.templates.contains_key(name)))
             .count();
         for statement in &statements[..skip] {
             if let k::Stmt::Let { name, .. } = statement
                 && self.document.exports.contains_key(name)
             {
                 self.module_helpers.insert(name.clone());
+            }
+        }
+        let mut skip = skip;
+        if packed {
+            // The entry binder pads its supplied list, then binds each source parameter.
+            if !matches!(
+                statements.get(skip),
+                Some(k::Stmt::Let {
+                    value: k::Rhs::Expr(k::Expr::If { .. }),
+                    ..
+                })
+            ) {
+                return refuse("a packed entry's parameter binder");
+            }
+            skip += 1 + entry.signature.params.len();
+            if let Some(k::Stmt::Let { name, value }) = statements.get(skip)
+                && self.helper_read(value, "ts.arguments").is_some()
+            {
+                self.substitutions
+                    .insert(name.clone(), source::Expr::Ident("arguments".into()));
+                skip += 1;
             }
         }
         let body = self.block_at(&statements[skip..], &site, skip)?;
@@ -593,6 +661,154 @@ impl<'a> Lifter<'a> {
                 .cloned()
         };
         let caption = caption_at(0);
+        if let Some((name, value)) = self.array_callback_statement(block)? {
+            self.pending.push(Pending {
+                name,
+                value,
+                caption,
+            });
+            return Ok(2);
+        }
+        if let Some((name, value, taken)) = self.optional_reference(block, site, at)? {
+            self.pending.push(Pending {
+                name,
+                value,
+                caption,
+            });
+            return Ok(taken);
+        }
+
+        if let [
+            k::Stmt::Let {
+                name: snapshot,
+                value:
+                    k::Rhs::Expr(k::Expr::Call {
+                        function: convert,
+                        args,
+                    }),
+            },
+            k::Stmt::Assign {
+                place: k::Place::Variable(target),
+                value:
+                    k::Rhs::Expr(k::Expr::Call {
+                        function: step,
+                        args: step_args,
+                    }),
+                ..
+            },
+            ..,
+        ] = block
+            && self.is(convert, crate::constructs::operators::UPDATE.conversion)
+            && self.is(step, crate::constructs::operators::UPDATE.general)
+            && args.as_slice() == [k::Expr::Variable(target.clone())]
+            && let [
+                k::Expr::Variable(old),
+                k::Expr::Literal(k::Literal::Float(delta)),
+            ] = step_args.as_slice()
+            && old == snapshot
+            && matches!(delta.get(), 1.0 | -1.0)
+        {
+            self.pending.push(Pending {
+                name: snapshot.clone(),
+                value: source::Expr::Update(
+                    Box::new(source::Expr::Ident(self.binding(target)?)),
+                    if delta.get() == 1.0 { "++" } else { "--" },
+                ),
+                caption,
+            });
+            return Ok(2);
+        }
+        if let k::Stmt::If {
+            then_block,
+            else_block,
+            ..
+        } = &block[0]
+            && let [
+                k::Stmt::If {
+                    then_block: direct, ..
+                },
+            ] = then_block.as_slice()
+            && let [
+                k::Stmt::Assign {
+                    place:
+                        k::Place::Member(k::Member::Index {
+                            target: k::Expr::Variable(name),
+                            index: key,
+                        }),
+                    value,
+                    ..
+                },
+            ] = direct.as_slice()
+            && let Some(at) = self.pending_at(name)
+            && matches!(self.pending[at].value, source::Expr::BuiltObject(_))
+            && matches!(else_block.as_slice(), [k::Stmt::Do { value: k::Expr::Act(act) }] if matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if self.is(id, "ts.set")))
+        {
+            let key = self.expr(key)?;
+            let value = self.rhs(value)?;
+            if let source::Expr::BuiltObject(parts) = &mut self.pending[at].value {
+                parts.push(source::ObjectPart::Computed(key, value));
+            }
+            self.taken_captions.extend(caption);
+            return Ok(1);
+        }
+        if let k::Stmt::Let {
+            name,
+            value: k::Rhs::Expr(k::Expr::Record(fields)),
+        } = &block[0]
+            && fields.is_empty()
+            && temporary(name)
+        {
+            self.pending.push(Pending {
+                name: name.clone(),
+                value: source::Expr::BuiltObject(Vec::new()),
+                caption,
+            });
+            return Ok(1);
+        }
+        if let k::Stmt::Assign {
+            place:
+                k::Place::Member(k::Member::Field {
+                    target: k::Expr::Variable(name),
+                    field,
+                }),
+            value,
+            ..
+        } = &block[0]
+            && let Some(at) = self.pending_at(name)
+            && matches!(self.pending[at].value, source::Expr::BuiltObject(_))
+        {
+            let value = self.rhs(value)?;
+            if let source::Expr::BuiltObject(parts) = &mut self.pending[at].value {
+                parts.push(source::ObjectPart::Field(field.clone(), value));
+            }
+            self.taken_captions.extend(caption);
+            return Ok(1);
+        }
+        if let k::Stmt::Do { .. } = &block[0] {
+            let act = match &block[0] {
+                k::Stmt::Do {
+                    value: k::Expr::Act(act),
+                } => Some((**act).clone()),
+                _ => None,
+            };
+            if let Some(k::ActExpr {
+                kind: k::ActKind::Call(k::Callee::Local(id)),
+                args,
+            }) = act
+                && self.is(&id, "ts.assign")
+                && let [k::Expr::Variable(name), value] = args.as_slice()
+                && let Some(at) = self.pending_at(name)
+                && matches!(self.pending[at].value, source::Expr::BuiltObject(_))
+            {
+                let value = self.expr(value)?;
+                if let source::Expr::BuiltObject(parts) = &mut self.pending[at].value {
+                    parts.push(source::ObjectPart::Spread(value));
+                }
+                self.taken_captions.extend(caption);
+                return Ok(1);
+            }
+        }
+
         if let k::Stmt::Assign {
             place: k::Place::Variable(name),
             value,
@@ -731,6 +947,29 @@ impl<'a> Lifter<'a> {
                 .captions
                 .and_then(|captions| captions.at(&here))
                 .cloned();
+            if let k::Stmt::Let { name, .. } = &block[index]
+                && self.templates.contains_key(name)
+            {
+                index += 1;
+                continue;
+            }
+
+            if let [_, k::Stmt::Let { name, .. }, ..] = &block[index..]
+                && !temporary(name)
+                && let Some((name, value)) = self.array_callback_statement(&block[index..])?
+            {
+                let name = self.binding(&name)?;
+                out.push(Stmt {
+                    caption,
+                    kind: if self.reassigned(&name) {
+                        source::StmtKind::Let(name, Some(value))
+                    } else {
+                        source::StmtKind::Const(name, value)
+                    },
+                });
+                index += 2;
+                continue;
+            }
             if let Some(update) = crate::constructs::operators::UPDATE
                 .recognize(&block[index..], |id, helper| self.is(id, helper))
                 && temporary(update.snapshot)
@@ -754,6 +993,14 @@ impl<'a> Lifter<'a> {
                     )),
                 });
                 index += 2;
+                continue;
+            }
+            if let Some((pattern, value, taken)) = self.binding_pattern(&block[index..])? {
+                out.push(Stmt {
+                    caption,
+                    kind: source::StmtKind::Pattern(pattern, value),
+                });
+                index += taken;
                 continue;
             }
             let pended = self.pend(&block[index..], site, first + index)?;
@@ -909,7 +1156,7 @@ impl Reference for k::FunctionTarget {
     }
 }
 
-fn reads_name(node: k::Node<'_>, name: &Name) -> bool {
+pub(super) fn reads_name(node: k::Node<'_>, name: &Name) -> bool {
     match node {
         k::Node::Expr(k::Expr::Variable(value)) => value == name,
         k::Node::Action(action) => {

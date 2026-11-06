@@ -206,6 +206,7 @@ pub(crate) fn bound(
     let length = |value: &Expr| {
         TEXT_LENGTH
             .recognize(value, is)
+            .or_else(|| LIST_LENGTH.recognize(value, is))
             .is_some_and(|args| args.as_slice() == [receiver])
     };
     if *value == Expr::Literal(k::Literal::Int(0_i64.into())) {

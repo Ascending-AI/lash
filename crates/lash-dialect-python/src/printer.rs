@@ -6,6 +6,8 @@ mod names;
 mod packed;
 mod readable;
 mod signature;
+mod structured;
+mod syntax;
 mod task;
 use lash_kernel_dialect::{
     NamePlan, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,
@@ -50,6 +52,7 @@ pub(crate) fn print_regions(
         substitutions: BTreeMap::new(),
         direct: BTreeMap::new(),
         comprehensions: BTreeMap::new(),
+        displays: BTreeMap::new(),
         expression_depth: 0,
         max_depth: options.limits.max_depth.min(k::MAX_NESTING_DEPTH),
     };
@@ -129,6 +132,7 @@ struct Renderer<'a> {
     substitutions: BTreeMap<Name, k::Expr>,
     direct: BTreeMap<Name, (Name, lash_kernel_value::FunctionId)>,
     comprehensions: BTreeMap<Name, authored::Comprehension>,
+    displays: BTreeMap<Name, syntax::Display>,
     expression_depth: usize,
     max_depth: usize,
 }

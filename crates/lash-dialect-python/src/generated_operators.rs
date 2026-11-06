@@ -175,7 +175,7 @@ impl Operators {
     /// kernel's own loop (`via` none).
     pub(crate) fn native_loop(&self, via: Option<&k::Protocol>) -> Option<Option<&'static str>> {
         match (self.for_in(None).is_some(), via) {
-            (true, Some(via)) => crate::constructs::conventions::ITERATIONS
+            (_, Some(via)) => crate::constructs::conventions::ITERATIONS
                 .iter()
                 .map(|(view, _)| *view)
                 .find(|view| self.for_in(*view).as_ref() == Some(via)),

@@ -229,7 +229,7 @@ pub(crate) struct Unary {
 }
 macro_rules! unary_declarations {
     ($(($source:ident, $token:literal, $call:expr, $native:expr)),* $(,)?) => {
-        const UNARY: &[Unary] = &[$(Unary { token: $token, call: $call, native: $native }),*];
+        pub(crate) const UNARY: &[Unary] = &[$(Unary { token: $token, call: $call, native: $native }),*];
         pub(crate) fn unary(op: crate::adapter::UnaryOp) -> &'static Unary {
             match op { $(crate::adapter::UnaryOp::$source => &Unary { token: $token, call: $call, native: $native }),* }
         }

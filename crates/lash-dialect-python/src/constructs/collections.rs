@@ -37,6 +37,8 @@ pub(crate) struct Comprehension<'a> {
     pub iterable: &'a Expr,
     pub via: Option<&'a k::Protocol>,
     pub value: &'a Rhs,
+    pub key: Option<&'a Expr>,
+    pub collection: Collection,
     pub rest: &'a [Stmt],
 }
 impl ComprehensionRecipe {
@@ -51,7 +53,7 @@ impl ComprehensionRecipe {
         let [
             Stmt::Let {
                 name,
-                value: Rhs::Expr(Expr::List(empty)),
+                value: Rhs::Expr(allocation),
             },
             Stmt::For {
                 binding,
@@ -66,9 +68,36 @@ impl ComprehensionRecipe {
         else {
             return None;
         };
-        if !empty.is_empty() || !else_block.is_empty() {
+        let collection = match allocation {
+            Expr::List(empty) if empty.is_empty() => Collection::List,
+            Expr::Set(empty) if empty.is_empty() => Collection::Set,
+            Expr::Map(empty) if empty.is_empty() => Collection::Dict,
+            _ => return None,
+        };
+        if !else_block.is_empty() {
             return None;
         }
+        let (key, body) = match (collection, body.as_slice()) {
+            (Collection::List, body) => (None, body),
+            (
+                _,
+                [
+                    Stmt::Let {
+                        name: held,
+                        value: Rhs::Expr(key),
+                    },
+                    assignment @ Stmt::Assign {
+                        place:
+                            k::Place::Member(k::Member::Index {
+                                index: Expr::Variable(index),
+                                ..
+                            }),
+                        ..
+                    },
+                ],
+            ) if held == index => (Some(key), std::slice::from_ref(assignment)),
+            _ => return None,
+        };
         let [
             Stmt::Assign {
                 place:
@@ -79,12 +108,14 @@ impl ComprehensionRecipe {
                 value,
                 order: k::AssignOrder::ValueFirst,
             },
-        ] = body.as_slice()
+        ] = body
         else {
             return None;
         };
         if target != name
-            || self.append_index.recognize(index, is)?.as_slice() != [&Expr::Variable(name.clone())]
+            || (matches!(collection, Collection::List)
+                && self.append_index.recognize(index, is)?.as_slice()
+                    != [&Expr::Variable(name.clone())])
         {
             return None;
         }
@@ -99,6 +130,8 @@ impl ComprehensionRecipe {
             iterable,
             via: via.as_ref(),
             value,
+            key,
+            collection,
             rest,
         })
     }

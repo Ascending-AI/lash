@@ -176,5 +176,90 @@
   {
     "name": "FIG-7550 shadowed BigInt block parameter",
     "source": "export function run(value: bigint): bigint { const echo = (value: bigint): bigint => { return value; }; return echo(value); }"
+  },
+  {
+    "name": "FIG-7664 regex escaped delimiter",
+    "source": "export function demo(x: any): any { return /\\//; }"
+  },
+  {
+    "name": "FIG-7664 regex classes",
+    "source": "export function demo(x: any): any { return /[a-z/\\\\\\]]+/gi; }"
+  },
+  {
+    "name": "FIG-7664 regex unicode sticky",
+    "source": "export function demo(x: any): any { return /\\u{1F600}/uy; }"
+  },
+  {
+    "name": "FIG-7664 regex all flags",
+    "source": "export function demo(x: any): any { return /[\\r\\n\\u2028\\u2029]/dgimsuy; }"
+  },
+  {
+    "name": "FIG-7664 template",
+    "source": "export function demo(x: any): any { return `hello ${x}!`; }"
+  },
+  {
+    "name": "FIG-7664 tagged template",
+    "source": "function tag(s: any, x: any): any { return s; } export function demo(x: any): any { return tag`hello ${x}!`; }"
+  },
+  {
+    "name": "FIG-7664 bigint",
+    "source": "export function demo(x: any): any { return 12345678901234567890n; }"
+  },
+  {
+    "name": "FIG-7664 array spread",
+    "source": "export function demo(x: any): any { return [0, ...x, 1]; }"
+  },
+  {
+    "name": "FIG-7664 object spread",
+    "source": "export function demo(x: any): any { return {first: 1, ...x, last: 2}; }"
+  },
+  {
+    "name": "FIG-7664 call spread",
+    "source": "export function demo(x: any): any { return x(...[1, 2]); }"
+  },
+  {
+    "name": "FIG-7664 optional chaining",
+    "source": "export function demo(x: any): any { return x?.a?.(1); }"
+  },
+  {
+    "name": "FIG-7664 object rest",
+    "source": "export function demo(x: any): any { const {a, ...rest} = x; return rest; }"
+  },
+  {
+    "name": "FIG-7664 array rest",
+    "source": "export function demo(x: any): any { const [a, ...rest] = x; return rest; }"
+  },
+  {
+    "name": "FIG-7664 delete",
+    "source": "export function demo(x: any): any { return delete x.a; }"
+  },
+  {
+    "name": "FIG-7664 in operator",
+    "source": "export function demo(x: any): any { return \"a\" in x; }"
+  },
+  {
+    "name": "FIG-7664 instanceof",
+    "source": "export function demo(x: any): any { return x instanceof RegExp; }"
+  },
+  {
+    "name": "FIG-7664 new constructor",
+    "source": "export function demo(x: any): any { return new RegExp(\"a\", \"g\"); }"
+  },
+  {
+    "name": "FIG-7664 split and slice",
+    "source": "export function demo(x: string): any { return x.split(\":\").slice(1); }"
+  },
+  {
+    "name": "FIG-7664 Number after split",
+    "source": "export function demo(x: string): any { return Number(x.split(\":\")[1]); }"
+  },
+  {
+    "name": "FIG-7664 chart parser",
+    "source": "export function demo(lines: string[]): any { const values = lines.slice(0, 3).map((line: string) => { const parts = line.split(\":\"); return {week: parts[0], signups: Number(parts[1])}; }); return {type: \"bar\", data: values}; }"
+  },
+  {
+    "name": "FIG-7664 cenote exact case 2",
+    "cell": true,
+    "source": "try {\n const wf = await workflows.create({\n  name:'signups-5124c57a5269',\n  run:async():Promise<unknown>=>{\n   const result=await cenote.readDocument({document:{doc_id:'01a1b06d-c022-7575-8a23-a49e29e1a304'}});\n   if(!result.ok) throw new Error('Could not read signups');\n   const rows=[];\n   for(const item of result.data.items){\n    const text=item.text || '';\n    const parts=text.split(';');\n    for(const part of parts){\n     const start=part.indexOf('Week ');\n     const colon=part.indexOf(':');\n     if(start<0 || colon<0) continue;\n     const week=part.slice(start,colon);\n     const after=part.slice(colon+1).trim();\n     const count=Number(after.split(' ')[0].replace('.',''));\n     rows.push({week:week,signups:count});\n    }\n   }\n   const chart=views.barChart(rows,'week','signups','Weekly signups');\n   const button=views.action('click','Click',{});\n   return views.card('Weekly signups',[chart,button]);\n  },\n  actions:{click:async():Promise<unknown>=>{return {clicked:true};}}\n });\n console.log(JSON.stringify({workflow_id:wf.data.workflow.workflow_id,version:wf.data.version}));\n} catch(e) { console.log(JSON.stringify({code:e.code,message:e.message,details:e.data?.raw?.error?.details})); }"
   }
 ]

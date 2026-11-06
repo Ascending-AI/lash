@@ -554,10 +554,38 @@ impl Renderer<'_> {
         let [callee, positional, keywords, ..] = args else {
             return false;
         };
-        let Some(k::Expr::List(positional)) = self.resolved(positional).cloned() else {
-            return false;
-        };
-        let Some(k::Expr::Map(keywords)) = self.resolved(keywords).cloned() else {
+        let positional = match positional {
+            k::Expr::Variable(name) if self.displays.contains_key(name) => {
+                self.displays.get(name).cloned()
+            }
+            _ => None,
+        }
+        .or_else(|| match self.resolved(positional)? {
+            k::Expr::List(items) => Some(super::syntax::Display::List(
+                items.iter().cloned().map(|value| (false, value)).collect(),
+            )),
+            _ => None,
+        });
+        let keywords = match keywords {
+            k::Expr::Variable(name) if self.displays.contains_key(name) => {
+                self.displays.get(name).cloned()
+            }
+            _ => None,
+        }
+        .or_else(|| match self.resolved(keywords)? {
+            k::Expr::Map(items) => Some(super::syntax::Display::Dict(
+                items
+                    .iter()
+                    .map(|entry| (Some(entry.key.clone()), entry.value.clone()))
+                    .collect(),
+            )),
+            _ => None,
+        });
+        let (
+            Some(super::syntax::Display::List(positional)),
+            Some(super::syntax::Display::Dict(keywords)),
+        ) = (positional, keywords)
+        else {
             return false;
         };
         if awaited
@@ -567,9 +595,12 @@ impl Renderer<'_> {
         }
         self.inline_expr(callee);
         self.out.write("(");
-        for (i, value) in positional.iter().enumerate() {
+        for (i, (spread, value)) in positional.iter().enumerate() {
             if i > 0 {
                 self.out.write(", ");
+            }
+            if *spread {
+                self.out.write("*");
             }
             self.inline_expr(value);
         }
@@ -577,12 +608,15 @@ impl Renderer<'_> {
             if !positional.is_empty() || i > 0 {
                 self.out.write(", ");
             }
-            let k::Expr::Literal(k::Literal::Text(name)) = &entry.key else {
-                return false;
-            };
-            self.out.write(name);
-            self.out.write("=");
-            self.inline_expr(&entry.value);
+            match &entry.0 {
+                Some(k::Expr::Literal(k::Literal::Text(name))) => {
+                    self.out.write(name);
+                    self.out.write("=");
+                }
+                None => self.out.write("**"),
+                _ => return false,
+            }
+            self.inline_expr(&entry.1);
         }
         self.out.write(")");
         true

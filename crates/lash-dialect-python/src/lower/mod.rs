@@ -6,6 +6,9 @@
 //! dominates every use and capture; forward captures and recursion retain
 //! their absent slot at the scope root.
 
+#[cfg(test)]
+pub(crate) mod inventory;
+
 mod builtin_values;
 mod callables;
 mod calls;
@@ -961,6 +964,8 @@ impl Lowerer<'_> {
                 format!("the library function `{name}` is not installed"),
             ));
         };
+        #[cfg(test)]
+        inventory::record(name, function);
         let listed = FunctionName::new(name).map_err(|error| {
             diagnostics::unplaced(Code::LibraryMissing, format!("`{name}`: {error}"))
         })?;

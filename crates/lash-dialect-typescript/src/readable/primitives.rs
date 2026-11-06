@@ -17,6 +17,7 @@ impl Lifter<'_> {
     /// (`do text.len(receiver)`). The method read lowers it again.
     pub(super) fn receiver_check(&self, statement: &k::Stmt) -> bool {
         matches!(statement, k::Stmt::Do { value } if methods::TEXT_RECEIVER_CHECK.recognize(value, &|id, name| self.is(id, name)).is_some())
+            || matches!(statement, k::Stmt::If { condition, then_block, else_block } if methods::SLICE_TOO_LARGE.recognize(condition, &|id, name| self.is(id, name)).is_some() && else_block.is_empty() && matches!(then_block.as_slice(), [k::Stmt::Throw { value }] if methods::SLICE_ERROR.recognize(value, &|id, name| self.is(id, name)).is_some()))
     }
 
     /// `let start = …; let end = …;` ahead of the `ts.string.slice_units`
@@ -133,6 +134,18 @@ impl Lifter<'_> {
             function: *function,
             args: args.to_vec(),
         };
+        if let Some(values) = methods::LIST_SLICE.recognize(&value, &|id, name| self.is(id, name))
+            && let [receiver, start, end] = values.as_slice()
+            && let Some(Some(start)) = self.position(start, receiver)
+            && let Some(end) = self.position(end, receiver)
+        {
+            let mut args = vec![start];
+            args.extend(end);
+            return Ok(Some(Expr::Call(
+                Box::new(Expr::Field(Box::new(self.expr(receiver)?), "slice".into())),
+                args,
+            )));
+        }
         for declaration in methods::METHODS {
             let Some(recipe) = declaration.expression() else {
                 continue;

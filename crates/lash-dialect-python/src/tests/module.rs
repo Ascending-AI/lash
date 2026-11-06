@@ -1018,3 +1018,63 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
     )
     .expect("materialized callable has an exact authored Python readback");
 }
+
+/// FIG-7664: syntax helpers must retain an authored spelling and exact readback.
+#[test]
+fn syntax_lowered_helpers_have_source_spellings() {
+    let mut failures = Vec::new();
+    let forms = crate::lower::inventory::forms();
+    let mut inventory = BTreeMap::new();
+    for (index, (name, source)) in forms.iter().enumerate() {
+        let (lowered, emitted) = crate::lower::inventory::collect(|| module(source));
+        let lowered = lowered.unwrap_or_else(|error| panic!("{name}: {error}"));
+        for (helper, identity) in emitted {
+            inventory.entry(helper).or_insert((identity, index));
+        }
+        match crate::print(
+            &lowered.document,
+            None,
+            machine::library(),
+            Default::default(),
+        ) {
+            Ok(printed) => {
+                let read = module(&printed.source).unwrap_or_else(|error| {
+                    panic!(
+                        "{name}: ordinary lowering at main: {error}\n{}",
+                        printed.source
+                    )
+                });
+                assert_eq!(
+                    read.document.canonical_bytes(),
+                    lowered.document.canonical_bytes(),
+                    "{name}: {}",
+                    printed.source
+                );
+            }
+            Err(error) => failures.push(format!(
+                "{name}: {error}\n{}",
+                lash_kernel_doc::print_document(&lowered.document)
+            )),
+        }
+    }
+    for (helper, (identity, index)) in &inventory {
+        let (name, source) = &forms[*index];
+        let lowered = module(source).unwrap();
+        if let Ok(printed) = crate::print(
+            &lowered.document,
+            None,
+            machine::library(),
+            Default::default(),
+        ) {
+            let (_, emitted) =
+                crate::lower::inventory::collect(|| module(&printed.source).unwrap());
+            assert_eq!(
+                emitted.get(helper),
+                Some(identity),
+                "{helper}, lowered by {name}, must retain its exact spelling"
+            );
+        }
+    }
+    println!("{} emitted syntax helpers checked", inventory.len());
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

@@ -127,6 +127,9 @@ impl Renderer<'_> {
         self.expression_depth -= 1;
     }
     pub(super) fn inline_body(&mut self, expr: &k::Expr) {
+        if self.syntax_expression(expr) {
+            return;
+        }
         if self.packed_value(expr) {
             return;
         }
@@ -140,6 +143,13 @@ impl Renderer<'_> {
                 } else if let Some(comprehension) = self.comprehensions.remove(n) {
                     self.comprehension(&comprehension);
                     self.comprehensions.insert(n.clone(), comprehension);
+                } else if let Some(display) = self.displays.remove(n) {
+                    let delimiters = match &display {
+                        super::syntax::Display::List(_) => ("[", "]"),
+                        super::syntax::Display::Dict(_) => ("{", "}"),
+                    };
+                    self.display(&display, delimiters);
+                    self.displays.insert(n.clone(), display);
                 } else {
                     self.name(n);
                 }
@@ -291,6 +301,9 @@ impl Renderer<'_> {
         }
     }
     pub(super) fn nested_action(&mut self, act: &k::ActExpr, grouped: bool) {
+        if self.syntax_expression(&k::Expr::Act(Box::new(act.clone()))) {
+            return;
+        }
         if grouped {
             self.out.write("(");
         }
@@ -476,7 +489,7 @@ impl Renderer<'_> {
     pub(super) fn readable_block(&mut self, block: &k::Block) {
         self.readable_block_from(block, 0);
     }
-    fn readable_block_from(&mut self, block: &k::Block, prefix: usize) {
+    pub(super) fn readable_block_from(&mut self, block: &k::Block, prefix: usize) {
         self.out.begin_node(None);
         self.indent += 1;
         for _ in 0..prefix {
@@ -711,8 +724,14 @@ impl Renderer<'_> {
                     _ => (binding, 0),
                 };
                 self.out.write("for ");
-                self.name(binding);
-                self.scope.introduce(binding);
+                let prefix = match self.unpacked_loop(binding, body) {
+                    Some(count) => count,
+                    None => {
+                        self.name(binding);
+                        self.scope.introduce(binding);
+                        prefix
+                    }
+                };
                 self.out.write(" in ");
                 self.inline_expr(iterable);
                 if let Some(Some(view)) = self.operators.native_loop(via.as_ref()) {

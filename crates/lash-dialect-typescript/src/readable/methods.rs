@@ -207,6 +207,9 @@ impl Lifter<'_> {
         let k::Expr::Variable(member) = value else {
             return Ok(None);
         };
+        if self.substitutions.contains_key(member) {
+            return Ok(None);
+        }
         let k::Expr::Let {
             body: selecting, ..
         } = body
@@ -297,6 +300,37 @@ impl Lifter<'_> {
 }
 
 impl Lifter<'_> {
+    pub(super) fn array_callback_statement(
+        &mut self,
+        block: &[k::Stmt],
+    ) -> Lift<Option<(Name, Expr)>> {
+        let [
+            k::Stmt::Let {
+                name: callback,
+                value: k::Rhs::Expr(value @ k::Expr::Closure(_)),
+            },
+            k::Stmt::Let {
+                name,
+                value: k::Rhs::Expr(body @ k::Expr::Act(act)),
+            },
+            ..,
+        ] = block
+        else {
+            return Ok(None);
+        };
+        let Some(k::Expr::Variable(receiver)) = act.args.first() else {
+            return Ok(None);
+        };
+        let scoped = k::Expr::Let {
+            name: callback.clone(),
+            value: Box::new(value.clone()),
+            body: Box::new(body.clone()),
+        };
+        Ok(self
+            .array_callback_expression(receiver, &k::Expr::Variable(receiver.clone()), &scoped)?
+            .map(|value| (name.clone(), value)))
+    }
+
     /// Invert call_array_callback's positional ABI. The final read-back
     /// still proves the complete closure, temporary ordering and Imports.
     pub(super) fn array_callback_expression(
@@ -375,14 +409,37 @@ impl Lifter<'_> {
             pending.extend(node.children());
         }
         let mut inner = self.in_function(closure.function);
-        let parameters = params
+        let mut source_params = params;
+        while let Some(last) = source_params.last() {
+            if last.name.as_str().starts_with("unused")
+                && !super::lift::reads_name(k::Node::Block(body), &last.name)
+            {
+                source_params = &source_params[..source_params.len() - 1];
+            } else {
+                break;
+            }
+        }
+        let parameters = source_params
             .iter()
             .map(|param| {
                 Ok(super::source::Param {
                     caption: None,
                     name: inner.binding(&param.name)?,
                     optional: false,
-                    ty: None,
+                    ty: {
+                        let mut nodes = vec![k::Node::Block(body)];
+                        let mut text = false;
+                        while let Some(node) = nodes.pop() {
+                            if let k::Node::Expr(k::Expr::Call { function, args }) = node
+                                && inner.is(function, "text.len")
+                                && args.as_slice() == [k::Expr::Variable(param.name.clone())]
+                            {
+                                text = true;
+                            }
+                            nodes.extend(node.children());
+                        }
+                        text.then_some(super::source::Type::Word("string"))
+                    },
                 })
             })
             .collect::<Lift<Vec<_>>>()?;

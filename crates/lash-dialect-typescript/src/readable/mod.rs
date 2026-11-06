@@ -9,6 +9,8 @@ mod expressions;
 mod lift;
 mod methods;
 mod mixed;
+mod optional;
+mod patterns;
 mod primitives;
 mod source;
 mod statements;
@@ -232,6 +234,66 @@ impl Printer for crate::TypeScript {
 mod tests {
     use super::*;
 
+    /// FIG-7664: every helper emitted by syntax lowering needs an exact
+    /// authored spelling, including native constructors such as RegExp.
+    #[test]
+    fn syntax_lowered_helpers_have_source_spellings() {
+        let library = crate::tests::library();
+        let namespaces = Default::default();
+        let environment = Environment::new(library, &namespaces);
+        let forms = crate::lower::inventory::forms();
+        let mut inventory = BTreeMap::new();
+        let mut failures = Vec::new();
+        for (index, (name, source)) in forms.iter().enumerate() {
+            let (lowered, emitted) = crate::lower::inventory::collect(|| {
+                crate::lower(source, &environment, lash_kernel_dialect::Mode::Module)
+            });
+            let lowered = lowered.unwrap_or_else(|error| panic!("{name}: {error}"));
+            for (helper, identity) in emitted {
+                inventory.entry(helper).or_insert((identity, index));
+            }
+            match print(&lowered.document, None, library, Default::default()) {
+                Ok(printed) => {
+                    let read = crate::lower(
+                        &printed.source,
+                        &environment,
+                        lash_kernel_dialect::Mode::Module,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        read.document.canonical_bytes(),
+                        lowered.document.canonical_bytes(),
+                        "{name}: {}",
+                        printed.source
+                    );
+                }
+                Err(error) => failures.push(format!("{name}: {error}")),
+            }
+        }
+        for (helper, (identity, index)) in &inventory {
+            let (name, source) = &forms[*index];
+            let lowered =
+                crate::lower(source, &environment, lash_kernel_dialect::Mode::Module).unwrap();
+            if let Ok(printed) = print(&lowered.document, None, library, Default::default()) {
+                let (_, emitted) = crate::lower::inventory::collect(|| {
+                    crate::lower(
+                        &printed.source,
+                        &environment,
+                        lash_kernel_dialect::Mode::Module,
+                    )
+                    .unwrap()
+                });
+                assert_eq!(
+                    emitted.get(helper),
+                    Some(identity),
+                    "{helper}, lowered by {name}, must retain its exact spelling"
+                );
+            }
+        }
+        println!("{} emitted syntax helpers checked", inventory.len());
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
     /// FIG-7474: helpers and const-bound arrows must print without losing
     /// authored function names or changing the complete lowered document.
     #[test]
@@ -256,6 +318,10 @@ mod tests {
             ("io", "read_csv"),
             ("inbox", "send_item"),
             ("workflows", "create"),
+            ("cenote", "read_document"),
+            ("views", "bar_chart"),
+            ("views", "action"),
+            ("views", "card"),
             ("corpus", "echo"),
             ("processes", "await"),
         ] {
@@ -269,11 +335,18 @@ mod tests {
                         kind: lash_kernel_dialect::NamespaceKind::Operation(
                             lash_kernel_dialect::OperationSignature {
                                 signature: lash_kernel_value::Signature {
-                                    params: vec![lash_kernel_value::types::Param {
-                                        name: Name::new("input"),
-                                        ty: lash_kernel_value::types::Type::Any,
-                                        optional: false,
-                                    }],
+                                    params: (0..match (package, member) {
+                                        ("views", "bar_chart") => 4,
+                                        ("views", "action") => 3,
+                                        ("views", "card") => 2,
+                                        _ => 1,
+                                    })
+                                        .map(|index| lash_kernel_value::types::Param {
+                                            name: Name::new(format!("input{index}")),
+                                            ty: lash_kernel_value::types::Type::Any,
+                                            optional: false,
+                                        })
+                                        .collect(),
                                     result: if package == "io" {
                                         lash_kernel_value::types::Type::Text
                                     } else {
