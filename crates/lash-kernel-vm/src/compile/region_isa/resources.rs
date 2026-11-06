@@ -105,6 +105,19 @@ pub(super) fn role(source: &Source, owner: &Owner) -> Option<Role> {
     root_role(root)
 }
 
+/// A name read at `at` holds a cell: a capture, or a binding a closure
+/// shares in its own scope.
+pub(super) fn cell(source: &Source, at: &Site, name: &lash_kernel_value::Name, role: Role) -> bool {
+    role.capture()
+        || source.owner_slots().is_ok_and(|slots| {
+            matches!(
+                crate::compile::room::root_owners::visible(&slots.scopes, at, name),
+                Some(Owner::Binding { declared, name })
+                    if source.shared.get(&(declared.clone(), name.clone())) == Some(&true)
+            )
+        })
+}
+
 /// The verified register role of an actual source root, if it has one.
 pub(super) fn root_role(root: Root) -> Option<Role> {
     match root {

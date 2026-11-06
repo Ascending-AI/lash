@@ -679,7 +679,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
         RegionOp::Checked {
             kernel, args, dst, ..
         } => match kernel.kind() {
-            CheckedKind::Local { slot } => {
+            CheckedKind::Local { slot, cell } => {
                 let name = match (node, step.at.phase) {
                     (doc::Node::Expr(doc::Expr::Variable(name)), Phase::Commit) => name,
                     (doc::Node::Expr(doc::Expr::Act(act)), Phase::Open) => match &act.kind {
@@ -697,6 +697,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                             name: name.clone(),
                         },
                     )
+                    || *cell != resources::cell(source, &step.at.site, name, *slot)
                     || Some(*dst) != expected_output
                     || !args.is_empty()
                 {

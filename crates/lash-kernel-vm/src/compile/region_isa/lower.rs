@@ -693,17 +693,19 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     else {
                         return Err(Refused::Source);
                     };
+                    let slot = resources::role(
+                        &source,
+                        &Owner::Visible {
+                            at: at.site.clone(),
+                            name: name.clone(),
+                        },
+                    )
+                    .ok_or(Refused::Facts)?;
                     RegionOp::Checked {
                         kernel: CheckedKernel {
                             kind: CheckedKind::Local {
-                                slot: resources::role(
-                                    &source,
-                                    &Owner::Visible {
-                                        at: at.site.clone(),
-                                        name: name.clone(),
-                                    },
-                                )
-                                .ok_or(Refused::Facts)?,
+                                slot,
+                                cell: resources::cell(&source, &at.site, name, slot),
                             },
                         },
                         args: Box::new([]),
@@ -872,7 +874,10 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     ) {
                         RegionOp::Checked {
                             kernel: CheckedKernel {
-                                kind: CheckedKind::Local { slot },
+                                kind: CheckedKind::Local {
+                                    slot,
+                                    cell: resources::cell(&source, &at.site, name, slot),
+                                },
                             },
                             args: Box::new([]),
                             dst,

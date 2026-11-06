@@ -115,6 +115,7 @@ impl Running<'_> {
             };
             let mut answered = None;
             let mut taken = None;
+            let mut guarded = false;
             match op {
                 // A plain `for` takes its next item as its Test event. An
                 // exhausted one takes no event: what stands before its Test
@@ -167,6 +168,21 @@ impl Running<'_> {
                         },
                     };
                 }
+                // A scalar kernel specialized from a native whose operands
+                // its guard cannot unpack stands before that native, unbilled;
+                // the machine answers it and the step takes the answer.
+                _ if code.program.native_operands(self.pc).is_some() => match served {
+                    Some(Some(value)) => answered = Some(self.delivered_answer(op, value)?),
+                    Some(None) => return Err(invalid(Refused::Facts)),
+                    None => {
+                        if let Some(guard) = &step.guard
+                            && !self.guard(guard)?
+                        {
+                            return self.halt(RegionStop::Native);
+                        }
+                        guarded = true;
+                    }
+                },
                 RegionOp::Effect { kind, value, .. } => match served {
                     Some(None) => {}
                     Some(Some(_)) => return Err(invalid(Refused::Facts)),
@@ -233,7 +249,9 @@ impl Running<'_> {
                 self.attempted = Some(step.at.clone());
                 return self.halt(RegionStop::Refusal);
             }
-            if let Some(guard) = &step.guard
+            if !guarded
+                && answered.is_none()
+                && let Some(guard) = &step.guard
                 && !self.guard(guard)?
             {
                 return Err(invalid(Refused::Facts));

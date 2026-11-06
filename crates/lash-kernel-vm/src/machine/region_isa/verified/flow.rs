@@ -220,7 +220,7 @@ impl Flow {
         let delta = amount(&step.delta)?;
         let local = match code.op(pc) {
             Some(RegionOp::Checked { kernel, .. }) => match kernel.kind() {
-                CheckedKind::Local { slot } => Some(super::bind::physical(
+                CheckedKind::Local { slot, .. } => Some(super::bind::physical(
                     code,
                     code.roles()
                         .iter()

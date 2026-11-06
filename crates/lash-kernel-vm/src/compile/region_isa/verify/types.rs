@@ -84,7 +84,7 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
             RegionOp::Checked {
                 kernel, args, dst, ..
             } => match kernel.kind() {
-                CheckedKind::Local { slot } => {
+                CheckedKind::Local { slot, .. } => {
                     let reg = draft
                         .roles
                         .iter()

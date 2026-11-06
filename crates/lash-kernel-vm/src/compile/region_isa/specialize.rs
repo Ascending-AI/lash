@@ -106,7 +106,7 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
                 RegionOp::Checked {
                     kernel, args, dst, ..
                 } => match kernel.kind() {
-                    CheckedKind::Local { slot } => {
+                    CheckedKind::Local { slot, .. } => {
                         let input = draft
                             .roles
                             .iter()

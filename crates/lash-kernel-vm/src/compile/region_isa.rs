@@ -158,6 +158,9 @@ impl IntKernel {
     pub(crate) fn operation(&self) -> doc::scalar::ScalarOp {
         self.op
     }
+    pub(crate) fn lib(&self) -> LibId {
+        self.lib
+    }
     pub(crate) fn depth(&self) -> u32 {
         self.depth
     }
@@ -183,8 +186,11 @@ pub(crate) enum CheckedKind {
         stage: LoopStage,
         iterable: Option<Reg<LeaseValue>>,
     },
+    /// A binding's read; a cell binding (a capture, or a binding a closure
+    /// shares) reads its cell's value.
     Local {
         slot: Role,
+        cell: bool,
     },
     Native {
         function: FunctionId,
@@ -642,13 +648,31 @@ impl RegionCode {
     /// The library a native call at `pc` calls and the source slots of its
     /// arguments, for the machine to answer it when its checked kernel
     /// cannot in place.
+    /// The native a step calls and the value registers of its operands: a
+    /// native call, or a scalar kernel specialized from one, whose guard's
+    /// inputs are the operands it unpacked.
+    pub(crate) fn native_operands(
+        &self,
+        pc: Pc,
+    ) -> Option<(LibId, FunctionId, &[Reg<LeaseValue>])> {
+        match self.op(pc)? {
+            RegionOp::Checked { kernel, args, .. } => match kernel.kind() {
+                CheckedKind::Native { lib, function }
+                | CheckedKind::IntTruth { lib, function, .. }
+                | CheckedKind::FloatBinary { lib, function, .. } => Some((*lib, *function, args)),
+                _ => None,
+            },
+            RegionOp::IntBinary { kernel, .. } => match self.step(pc)?.guard.as_ref()?.kind() {
+                CheckedKind::UnpackPair { inputs, .. } => {
+                    Some((kernel.lib(), kernel.function(), inputs))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
     pub(crate) fn native_arguments(&self, pc: Pc) -> Option<(LibId, Box<[Slot]>)> {
-        let RegionOp::Checked { kernel, args, .. } = self.op(pc)? else {
-            return None;
-        };
-        let CheckedKind::Native { lib, .. } = kernel.kind() else {
-            return None;
-        };
+        let (lib, _, args) = self.native_operands(pc)?;
         let slots = args
             .iter()
             .map(|reg| {
@@ -659,7 +683,7 @@ impl RegionCode {
                     .flatten()
             })
             .collect::<Option<_>>()?;
-        Some((*lib, slots))
+        Some((lib, slots))
     }
     /// The source slot holding the value of the effect at `pc`, for the
     /// machine to copy out before the region takes its step.

@@ -509,7 +509,7 @@ pub(super) fn warm_next(
             needed.extend(call.callable_origin);
         }
         RegionOp::Checked { kernel, .. } => {
-            if let CheckedKind::Local { slot } = kernel.kind()
+            if let CheckedKind::Local { slot, .. } = kernel.kind()
                 && let Some((_, reg)) = code
                     .program
                     .roles()

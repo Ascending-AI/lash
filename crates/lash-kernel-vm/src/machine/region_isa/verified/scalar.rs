@@ -22,21 +22,22 @@ impl Running<'_> {
         op: &RegionOp,
         batch: NativeBatch,
     ) -> Result<ScalarAnswer, RegionError> {
-        let RegionOp::Checked {
-            kernel,
-            args,
-            dst,
-            next,
-        } = op
-        else {
-            return Err(invalid(Refused::Facts));
-        };
-        let CheckedKind::Native { lib, function } = kernel.kind() else {
-            return Err(invalid(Refused::Facts));
-        };
         let code = Arc::clone(&self.code);
-        let native = code.exe.lib(*lib);
-        if native.specialization.function != *function
+        let (lib, function, args) = code
+            .program
+            .native_operands(self.pc)
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        let (dst, next) = match op {
+            RegionOp::Checked { dst, next, .. } => {
+                (super::bind::physical(&code.program, *dst)?, *next)
+            }
+            RegionOp::IntBinary { dst, next, .. } => {
+                (super::bind::physical(&code.program, *dst)?, *next)
+            }
+            _ => return Err(invalid(Refused::Facts)),
+        };
+        let native = code.exe.lib(lib);
+        if native.specialization.function != function
             || !answer_kind_fits(&native.header.signature.result, batch.answer())
         {
             return Err(invalid(Refused::Facts));
@@ -84,11 +85,8 @@ impl Running<'_> {
             None
         };
         Ok(ScalarAnswer {
-            write: Some((
-                super::bind::physical(&self.code.program, *dst)?,
-                Operand::Dynamic(result),
-            )),
-            next: *next,
+            write: Some((dst, Operand::Dynamic(result))),
+            next,
             formula,
             native: Some(balances),
         })
@@ -271,7 +269,7 @@ impl Running<'_> {
                             native: None,
                         }));
                     }
-                    CheckedKind::Local { slot } => {
+                    CheckedKind::Local { cell, .. } => {
                         let register = self
                             .code
                             .flows
@@ -284,7 +282,7 @@ impl Running<'_> {
                             self.reached.invocation,
                             register,
                         )?;
-                        if slot.capture() {
+                        if *cell {
                             let value = value.bind(&mut self.view).map_err(RegionError::Heap)?;
                             let cell = self.view.object(value).map_err(RegionError::Heap)?;
                             Operand::Dynamic(self.view.read(cell,

@@ -507,7 +507,7 @@ fn run_fixture(exe: &Executable, code: &RegionCode) -> (Value, u64) {
                 next,
             } => {
                 match kernel.kind() {
-                    CheckedKind::Local { slot } => {
+                    CheckedKind::Local { slot, .. } => {
                         let (_, source) = code
                             .roles()
                             .iter()
