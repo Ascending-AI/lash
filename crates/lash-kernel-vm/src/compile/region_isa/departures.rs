@@ -5,13 +5,175 @@
 //! try's Catch, which moves it into the catch binding. Both resume where
 //! source does.
 use super::*;
-use crate::compile::room::ExitKind;
+use crate::compile::room::{CompiledInterval, ExitKind, Owner};
 use std::collections::BTreeMap;
 
 #[derive(Clone)]
 pub(super) struct Departure {
     pub(super) origin: Pc,
     pub(super) leaves: Box<[Pc]>,
+    /// Each cleanup that suspends the departure, in route order: its try
+    /// and its restore rows, a Restore and then the Leaves that go on from
+    /// the try (`K-FORM-017`).
+    pub(super) restores: Box<[(Site, Box<[Pc]>)]>,
+}
+impl Departure {
+    /// Every row after the origin, in route order.
+    pub(super) fn rows(&self) -> impl Iterator<Item = Pc> + '_ {
+        self.leaves.iter().copied().chain(
+            self.restores
+                .iter()
+                .flat_map(|(_, rows)| rows.iter().copied()),
+        )
+    }
+}
+
+/// Whether an exit carries a value in the frame's active departure.
+pub(super) fn valued(exit: ExitKind) -> bool {
+    matches!(exit, ExitKind::Return | ExitKind::Raise)
+}
+
+/// The rows that restore an exit suspended at the try at `at`.
+pub(super) fn restores_at<'d>(
+    draft: &'d RegionDraft,
+    at: &'d Site,
+) -> impl Iterator<Item = Pc> + 'd {
+    draft.departures.iter().flat_map(move |route| {
+        route
+            .restores
+            .iter()
+            .filter(move |(site, _)| site == at)
+            .filter_map(|(_, rows)| rows.first().copied())
+    })
+}
+
+/// The restore row of the route departing from `origin` at the try at `at`.
+pub(super) fn restore_row(draft: &RegionDraft, at: &Site, origin: &Point) -> Option<Pc> {
+    draft
+        .departures
+        .iter()
+        .filter(|route| draft.steps[route.origin.offset()].at == *origin)
+        .flat_map(|route| route.restores.iter())
+        .find(|(site, _)| site == at)
+        .and_then(|(_, rows)| rows.first().copied())
+}
+
+/// A departure's route: its own suffix, then the restore suffix of each
+/// cleanup that suspends it, each but the last ending at that try's
+/// Suspend.
+fn segments(
+    source: &Source,
+    exit: ExitKind,
+    first: Arc<CompiledInterval>,
+) -> Result<Vec<Arc<CompiledInterval>>, Refused> {
+    let mut segments = vec![first];
+    loop {
+        let Some(at) = segments
+            .last()
+            .and_then(|interval| interval.events().last())
+            .filter(|event| event.point.phase == Phase::Suspend)
+            .map(|event| event.point.site.clone())
+        else {
+            return Ok(segments);
+        };
+        // Each restore leaves a try strictly enclosing the one before.
+        if segments.len() > at.path.len() {
+            return Err(Refused::Path);
+        }
+        segments.push(source.compile_restore_suffix(&at, exit)?);
+    }
+}
+
+/// A segment's events: a restore's from its Restore, the departure's own
+/// after its origin.
+fn segment_events(interval: &CompiledInterval, position: usize) -> Vec<&Event> {
+    interval.events().skip(usize::from(position == 0)).collect()
+}
+
+/// Whether a segment's rows are Leaves, after a restore's Restore, ending
+/// where its exit goes: a Suspend, a Return's frame Leave, or a Catch.
+fn shaped(events: &[&Event], exit: ExitKind, restored: bool) -> bool {
+    let Some((last, rest)) = events.split_last() else {
+        return false;
+    };
+    let rest = match (restored, rest.split_first()) {
+        (true, Some((first, rest))) if first.point.phase == Phase::Restore => rest,
+        (true, _) => return false,
+        (false, _) => rest,
+    };
+    rest.iter().all(|event| event.point.phase == Phase::Leave)
+        && match last.point.phase {
+            Phase::Suspend => true,
+            Phase::Leave => exit == ExitKind::Return,
+            Phase::Catch => exit != ExitKind::Return,
+            _ => false,
+        }
+}
+
+/// A route's segments when every one is shaped, or `None`.
+fn routed(
+    source: &Source,
+    exit: ExitKind,
+    first: Arc<CompiledInterval>,
+) -> Result<Option<Vec<Arc<CompiledInterval>>>, Refused> {
+    let segments = match segments(source, exit, first) {
+        Err(Refused::Path) => return Ok(None),
+        segments => segments?,
+    };
+    Ok(segments
+        .iter()
+        .enumerate()
+        .all(|(position, interval)| shaped(&segment_events(interval, position), exit, position > 0))
+        .then_some(segments))
+}
+
+/// Where a segment's last row goes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum End {
+    /// A Return's frame Leave exits.
+    Exit,
+    /// A Catch resumes its loop or takes the raise.
+    Resume(Pc),
+    /// A Suspend runs its cleanup, from the cleanup's first row.
+    Suspend(Pc),
+}
+
+/// The base row at `point`.
+fn base(draft: &RegionDraft, point: &Point) -> Result<Pc, Refused> {
+    let index = draft
+        .source
+        .room
+        .events
+        .keys()
+        .position(|at| at == point)
+        .ok_or(Refused::Path)?;
+    Ok(Pc(u32::try_from(index).map_err(|_| Refused::Facts)?))
+}
+
+fn end(
+    draft: &RegionDraft,
+    exit: ExitKind,
+    interval: &CompiledInterval,
+    last: &Event,
+) -> Result<End, Refused> {
+    Ok(match last.point.phase {
+        Phase::Suspend => End::Suspend(base(draft, interval.resume().ok_or(Refused::Path)?)?),
+        _ if exit == ExitKind::Return => End::Exit,
+        _ => End::Resume(resume(draft, exit, interval.resume(), &last.point)?),
+    })
+}
+
+/// The frame's active departure register, for a valued exit.
+fn active(draft: &RegionDraft, exit: ExitKind) -> Result<Option<Reg<LeaseValue>>, Refused> {
+    valued(exit)
+        .then(|| {
+            lower::reg(
+                &draft.roles,
+                &draft.source,
+                &Owner::ActiveDeparture(draft.source.site.clone()),
+            )
+        })
+        .transpose()
 }
 
 pub(super) fn successor(draft: &RegionDraft, pc: Pc) -> Option<Pc> {
@@ -24,9 +186,10 @@ pub(super) fn successor(draft: &RegionDraft, pc: Pc) -> Option<Pc> {
         .copied()
 }
 pub(super) fn contains(draft: &RegionDraft, index: usize) -> bool {
-    draft.departures.iter().any(|route| {
-        route.origin.offset() == index || route.leaves.iter().any(|pc| pc.offset() == index)
-    })
+    draft
+        .departures
+        .iter()
+        .any(|route| route.origin.offset() == index || route.rows().any(|pc| pc.offset() == index))
 }
 
 /// The departing statement a source event row commits, by admitted syntax.
@@ -91,24 +254,20 @@ fn raising(draft: &RegionDraft, index: usize) -> Result<bool, Refused> {
 }
 
 /// A raising event's route: its suffix through Leaves to the catching
-/// try's Catch, or `None` when the raise has no such route (a cleanup
-/// suspends it, or its path is refused) and leaves through the machine.
+/// try's Catch or a cleanup's Suspend, and on through each restore, or
+/// `None` when the raise has no such route and leaves through the machine.
 fn raise_suffix(
     draft: &RegionDraft,
     at: &Point,
-) -> Result<Option<Arc<crate::compile::room::CompiledInterval>>, Refused> {
+) -> Result<Option<Vec<Arc<CompiledInterval>>>, Refused> {
     let interval = match draft.source.compile_departure_suffix(at) {
         Err(Refused::Path) => return Ok(None),
         interval => interval?,
     };
-    let events: Vec<_> = interval.events().skip(1).collect();
-    let routed = match events.split_last() {
-        Some((last, rest)) => {
-            last.point.phase == Phase::Catch && rest.iter().all(|e| e.point.phase == Phase::Leave)
-        }
-        None => false,
-    };
-    Ok(routed.then_some(interval))
+    if interval.events().len() < 2 {
+        return Ok(None);
+    }
+    routed(&draft.source, ExitKind::Raise, interval)
 }
 
 /// The exit a route departs with: its origin row's statement, or a raise
@@ -268,17 +427,22 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
     let mut ops = draft.ops.to_vec();
     let mut steps = draft.steps.to_vec();
     let mut routes = Vec::new();
+    let boundary = |at: &Point| RegionOp::Boundary {
+        spec: BoundarySpec {
+            action: None,
+            at: at.clone(),
+            origin: None,
+            next: None,
+        },
+    };
     for index in 0..draft.source.room.events.len() {
         // A raising event's own origin row moves its delivered value into
         // the departure, then leaves as a Throw would.
         if raising(draft, index)? {
-            let Some(interval) = raise_suffix(draft, &steps[index].at)? else {
+            let Some(segments) = raise_suffix(draft, &steps[index].at)? else {
                 continue;
             };
-            let events: Vec<_> = interval.events().collect();
-            let (first, rest) = events.split_first().ok_or(Refused::Path)?;
-            let last = rest.last().ok_or(Refused::Path)?;
-            let resumed = resume(draft, ExitKind::Raise, interval.resume(), &last.point)?;
+            let first = segments[0].events().next().ok_or(Refused::Path)?;
             let row = steps.len();
             let origin = Pc(u32::try_from(row).map_err(|_| Refused::Facts)?);
             let step = route_step(draft, &draft.steps[index], first, row)?;
@@ -292,18 +456,18 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
                 next: Pc(origin.0.checked_add(1).ok_or(Refused::Facts)?),
             });
             steps.push(step);
-            let leaves = leave_rows(
+            let (leaves, restores) = route_rows(
                 draft,
                 &mut ops,
                 &mut steps,
-                rest,
+                &segments,
                 ExitKind::Raise,
-                Some(resumed),
                 sink,
             )?;
             routes.push(Departure {
                 origin,
-                leaves: leaves.into(),
+                leaves,
+                restores,
             });
             continue;
         }
@@ -322,50 +486,48 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
             Err(Refused::Path) if exit == ExitKind::Raise => None,
             interval => Some(interval?),
         };
-        let Some(interval) = interval else {
-            ops[index] = RegionOp::Boundary {
-                spec: BoundarySpec {
-                    action: None,
-                    at: steps[index].at.clone(),
-                    origin: None,
-                    next: None,
-                },
-            };
+        let segments = match interval {
+            Some(interval) if interval.events().len() >= 2 => {
+                routed(&draft.source, exit, interval)?
+            }
+            Some(_) => return Err(Refused::Path),
+            None => None,
+        };
+        // A cleanup that departs itself supersedes what it suspended; that
+        // route is not yet the region's.
+        let Some(segments) = segments else {
+            ops[index] = boundary(&steps[index].at);
             continue;
         };
-        let events: Vec<_> = interval.events().skip(1).collect();
-        let (last, leaves_only) = match events.split_last() {
-            Some((last, rest)) => (last, rest.iter().all(|e| e.point.phase == Phase::Leave)),
-            None => return Err(Refused::Path),
-        };
-        let ends = match exit {
-            ExitKind::Return => last.point.phase == Phase::Leave,
-            _ => last.point.phase == Phase::Catch,
-        };
-        if !leaves_only || !ends {
-            // Cleanup needs its own verified continuation before it can execute.
-            ops[index] = RegionOp::Boundary {
-                spec: BoundarySpec {
-                    action: None,
-                    at: steps[index].at.clone(),
-                    origin: None,
-                    next: None,
-                },
-            };
-            continue;
-        }
         let first = Pc(u32::try_from(steps.len()).map_err(|_| Refused::Facts)?);
-        let resumed = (exit != ExitKind::Return)
-            .then(|| resume(draft, exit, interval.resume(), &last.point))
-            .transpose()?;
-        let leaves = leave_rows(draft, &mut ops, &mut steps, &events, exit, resumed, sink)?;
+        let (leaves, restores) = route_rows(draft, &mut ops, &mut steps, &segments, exit, sink)?;
         if let RegionOp::Checked { next, .. } | RegionOp::Move { next, .. } = &mut ops[index] {
             *next = first;
         }
         routes.push(Departure {
             origin: Pc(u32::try_from(index).map_err(|_| Refused::Facts)?),
-            leaves: leaves.into(),
+            leaves,
+            restores,
         });
+    }
+    // A cleanup whose try suspends an exit completes to that exit's
+    // Restore when one is pending.
+    for route in &routes {
+        for (at, _) in route.restores.iter() {
+            let leave = base(draft, &cleanup_leave(&draft.source, at)?)?;
+            match &mut ops[leave.offset()] {
+                RegionOp::Checked { kernel, args, .. }
+                    if args.is_empty()
+                        && matches!(
+                            kernel.kind,
+                            CheckedKind::Phase | CheckedKind::Cleanup { .. }
+                        ) =>
+                {
+                    kernel.kind = CheckedKind::Cleanup { at: at.clone() };
+                }
+                _ => return Err(Refused::Source),
+            }
+        }
     }
     draft.ops = ops.into();
     draft.steps = steps.into();
@@ -373,49 +535,184 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
     Ok(())
 }
 
-/// A route's Leave rows and its last row: a Return's frame Leave exits, a
-/// catching Catch takes the departure, any other Catch resumes its loop.
+/// A finally row stands where its kind names: a Suspend reads the exit's
+/// value, a Restore writes it back, and a cleanup's Leave reads nothing.
+/// Which route a row is on, and where it goes, `verify` checks.
+pub(super) fn check_finally(
+    draft: &RegionDraft,
+    index: usize,
+    kind: &CheckedKind,
+    args: &[Reg<LeaseValue>],
+    dst: Reg<LeaseValue>,
+) -> Result<(), Refused> {
+    let step = &draft.steps[index];
+    let sink = Reg::new(draft.roles.len())?;
+    let routed = index >= draft.source.room.events.len();
+    let (at, phase) = match kind {
+        CheckedKind::Suspend { at, exit } => {
+            if !routed || args != active(draft, *exit)?.as_slice() || dst != sink {
+                return Err(Refused::Facts);
+            }
+            (at, Phase::Suspend)
+        }
+        CheckedKind::Restore { at, exit } => {
+            if !routed || !args.is_empty() || Some(dst) != active(draft, *exit)?.or(Some(sink)) {
+                return Err(Refused::Facts);
+            }
+            (at, Phase::Restore)
+        }
+        CheckedKind::Cleanup { at } => {
+            if routed || !args.is_empty() || dst != sink || !step.event.entities.is_empty() {
+                return Err(Refused::Facts);
+            }
+            if step.at != cleanup_leave(&draft.source, at)? {
+                return Err(Refused::Source);
+            }
+            return Ok(());
+        }
+        _ => return Err(Refused::Source),
+    };
+    if step.at.site != *at || step.at.phase != phase {
+        return Err(Refused::Source);
+    }
+    cleanup_leave(&draft.source, at).map(|_| ())
+}
+
+/// The Leave of the cleanup block of the try at `at`.
+pub(super) fn cleanup_leave(source: &Source, at: &Site) -> Result<Point, Refused> {
+    let doc::Node::Stmt(doc::Stmt::Try(t)) = resources::node(source, at)? else {
+        return Err(Refused::Source);
+    };
+    if t.finally.is_none() {
+        return Err(Refused::Source);
+    }
+    Ok(Point {
+        site: at.child(if t.catch.is_some() { 2 } else { 1 }),
+        phase: Phase::Leave,
+    })
+}
+
+/// A route's rows after its origin: the departure's own Leaves, then each
+/// restore's.
+#[expect(clippy::type_complexity, reason = "a route's two row tables")]
+fn route_rows(
+    draft: &RegionDraft,
+    ops: &mut Vec<RegionOp>,
+    steps: &mut Vec<Step>,
+    segments: &[Arc<CompiledInterval>],
+    exit: ExitKind,
+    sink: Reg<LeaseValue>,
+) -> Result<(Box<[Pc]>, Box<[(Site, Box<[Pc]>)]>), Refused> {
+    let mut leaves = Vec::new();
+    let mut restores = Vec::new();
+    for (position, interval) in segments.iter().enumerate() {
+        let events = segment_events(interval, position);
+        let last = events.last().ok_or(Refused::Path)?;
+        let end = end(draft, exit, interval, last)?;
+        let rows = leave_rows(draft, ops, steps, &events, exit, end, position > 0, sink)?;
+        if position == 0 {
+            leaves = rows;
+        } else {
+            restores.push((events[0].point.site.clone(), rows.into()));
+        }
+    }
+    Ok((leaves.into(), restores.into()))
+}
+
+/// The op of a segment's row: a restore's Restore, a Leave, or its last
+/// row, which exits, takes the departure, resumes its loop or suspends.
+#[expect(clippy::too_many_arguments, reason = "one row's coordinates")]
+fn segment_op(
+    draft: &RegionDraft,
+    step: &Step,
+    row: usize,
+    position: usize,
+    count: usize,
+    exit: ExitKind,
+    end: End,
+    restored: bool,
+    sink: Reg<LeaseValue>,
+) -> Result<RegionOp, Refused> {
+    let following = Pc(u32::try_from(row + 1).map_err(|_| Refused::Facts)?);
+    let phase = |next| RegionOp::Checked {
+        kernel: CheckedKernel {
+            kind: CheckedKind::Phase,
+        },
+        args: Box::new([]),
+        dst: sink,
+        next,
+    };
+    let active = active(draft, exit)?;
+    Ok(if restored && position == 0 {
+        RegionOp::Checked {
+            kernel: CheckedKernel {
+                kind: CheckedKind::Restore {
+                    at: step.at.site.clone(),
+                    exit,
+                },
+            },
+            args: Box::new([]),
+            dst: active.unwrap_or(sink),
+            next: following,
+        }
+    } else if position + 1 < count {
+        phase(following)
+    } else {
+        match end {
+            End::Exit => RegionOp::Exit { prefix: step.after },
+            End::Resume(next) if exit == ExitKind::Raise => catch(draft, step, row, next)?,
+            End::Resume(next) => phase(next),
+            End::Suspend(next) => RegionOp::Checked {
+                kernel: CheckedKernel {
+                    kind: CheckedKind::Suspend {
+                        at: step.at.site.clone(),
+                        exit,
+                    },
+                },
+                args: active.into_iter().collect(),
+                dst: sink,
+                next,
+            },
+        }
+    })
+}
+
+/// A segment's rows, from the next free row on.
+#[expect(clippy::too_many_arguments, reason = "one segment's coordinates")]
 fn leave_rows(
     draft: &RegionDraft,
     ops: &mut Vec<RegionOp>,
     steps: &mut Vec<Step>,
     events: &[&Event],
     exit: ExitKind,
-    resumed: Option<Pc>,
+    end: End,
+    restored: bool,
     sink: Reg<LeaseValue>,
 ) -> Result<Vec<Pc>, Refused> {
-    let mut leaves = Vec::new();
+    let mut rows = Vec::new();
     for (position, event) in events.iter().enumerate() {
         let row = steps.len();
-        let pc = Pc(u32::try_from(row).map_err(|_| Refused::Facts)?);
         let template = draft
             .steps
             .iter()
             .find(|step| step.stage.is_none() && step.at == event.point)
             .ok_or(Refused::Source)?;
         let step = route_step(draft, template, event, row)?;
-        let next = if position + 1 == events.len() {
-            resumed
-        } else {
-            Some(Pc(pc.0.checked_add(1).ok_or(Refused::Facts)?))
-        };
-        let catches = exit == ExitKind::Raise && position + 1 == events.len();
-        ops.push(match next {
-            None => RegionOp::Exit { prefix: step.after },
-            Some(next) if catches => catch(draft, &step, row, next)?,
-            Some(next) => RegionOp::Checked {
-                kernel: CheckedKernel {
-                    kind: CheckedKind::Phase,
-                },
-                args: Box::new([]),
-                dst: sink,
-                next,
-            },
-        });
+        ops.push(segment_op(
+            draft,
+            &step,
+            row,
+            position,
+            events.len(),
+            exit,
+            end,
+            restored,
+            sink,
+        )?);
         steps.push(step);
-        leaves.push(pc);
+        rows.push(Pc(u32::try_from(row).map_err(|_| Refused::Facts)?));
     }
-    Ok(leaves)
+    Ok(rows)
 }
 
 /// Check the exact row order against canonical syntax, including unreachable
@@ -424,25 +721,24 @@ pub(super) fn verify(
     draft: &RegionDraft,
     charges: &BTreeMap<Point, Vec<CanonicalClose>>,
 ) -> Result<usize, Refused> {
-    let base = draft
+    let base_rows = draft
         .source
         .room
         .events
         .len()
         .checked_add(super::stages::layout(&draft.loops)?.len())
         .ok_or(Refused::Facts)?;
-    let mut cursor = base;
+    let mut cursor = base_rows;
     let mut routes = draft.departures.iter();
     let sink = Reg::new(draft.roles.len())?;
     for index in 0..draft.source.room.events.len() {
         if raising(draft, index)? {
-            let Some(interval) = raise_suffix(draft, &draft.steps[index].at)? else {
+            let Some(segments) = raise_suffix(draft, &draft.steps[index].at)? else {
                 continue;
             };
             let route = routes.next().ok_or(Refused::Path)?;
-            let events: Vec<_> = interval.events().collect();
-            let (first, rest) = events.split_first().ok_or(Refused::Path)?;
-            if route.origin.offset() != cursor || route.leaves.len() != rest.len() {
+            let first = segments[0].events().next().ok_or(Refused::Path)?;
+            if route.origin.offset() != cursor {
                 return Err(Refused::Path);
             }
             let step = draft.steps.get(cursor).ok_or(Refused::Exit)?;
@@ -456,13 +752,12 @@ pub(super) fn verify(
                 return Err(Refused::Source);
             }
             cursor += 1;
-            check_leaves(
+            check_route(
                 draft,
                 charges,
                 route,
-                rest,
+                &segments,
                 ExitKind::Raise,
-                &interval,
                 &mut cursor,
             )?;
             continue;
@@ -484,13 +779,10 @@ pub(super) fn verify(
         let interval = draft
             .source
             .compile_departure_suffix(&draft.steps[index].at)?;
-        let mut events = interval.events();
-        if events.next() != Some(&draft.steps[index].event)
-            || route.leaves.len() != events.len()
-            || route.leaves.is_empty()
-        {
+        if interval.events().next() != Some(&draft.steps[index].event) {
             return Err(Refused::Source);
         }
+        let segments = routed(&draft.source, exit, interval)?.ok_or(Refused::Path)?;
         if exit == ExitKind::Raise && !matches!(draft.ops[index], RegionOp::Move { .. }) {
             return Err(Refused::Source);
         }
@@ -507,9 +799,8 @@ pub(super) fn verify(
         {
             return Err(Refused::Source);
         }
-        let events: Vec<_> = events.collect();
-        check_leaves(draft, charges, route, &events, exit, &interval, &mut cursor)?;
-        let last = route.leaves.last().ok_or(Refused::Exit)?;
+        check_route(draft, charges, route, &segments, exit, &mut cursor)?;
+        let last = route.rows().last().ok_or(Refused::Exit)?;
         if exit == ExitKind::Return
             && draft.steps[last.offset()].at
                 != (Point {
@@ -523,51 +814,120 @@ pub(super) fn verify(
     if routes.next().is_some() {
         return Err(Refused::Path);
     }
-    cursor.checked_sub(base).ok_or(Refused::Facts)
+    // Exactly the cleanups that suspend an exit complete to its Restore.
+    for (index, at) in draft.source.room.events.keys().enumerate() {
+        let RegionOp::Checked { kernel, .. } = &draft.ops[index] else {
+            continue;
+        };
+        let suspends = |site: &Site| {
+            draft
+                .departures
+                .iter()
+                .any(|route| route.restores.iter().any(|(restored, _)| restored == site))
+        };
+        match kernel.kind() {
+            CheckedKind::Cleanup { at: site } => {
+                if cleanup_leave(&draft.source, site)? != *at || !suspends(site) {
+                    return Err(Refused::Path);
+                }
+            }
+            _ if at.phase == Phase::Leave
+                && at.site.path.len() > draft.source.site.path.len()
+                && {
+                    let mut parent = at.site.clone();
+                    parent.path.pop();
+                    suspends(&parent) && cleanup_leave(&draft.source, &parent).as_ref() == Ok(at)
+                } =>
+            {
+                return Err(Refused::Path);
+            }
+            _ => {}
+        }
+    }
+    cursor.checked_sub(base_rows).ok_or(Refused::Facts)
 }
 
-/// Check a route's Leave rows and its last row, from `cursor` on.
-fn check_leaves(
+/// Check a route's rows from `cursor` on: each segment in order, a
+/// restore's at the try its last segment suspended at.
+fn check_route(
     draft: &RegionDraft,
     charges: &BTreeMap<Point, Vec<CanonicalClose>>,
     route: &Departure,
-    events: &[&Event],
+    segments: &[Arc<CompiledInterval>],
     exit: ExitKind,
-    interval: &crate::compile::room::CompiledInterval,
     cursor: &mut usize,
 ) -> Result<(), Refused> {
-    let count = route.leaves.len();
-    if count != events.len() {
+    if route.restores.len() + 1 != segments.len() {
+        return Err(Refused::Path);
+    }
+    for (position, interval) in segments.iter().enumerate() {
+        let events = segment_events(interval, position);
+        let rows: &[Pc] = match position.checked_sub(1) {
+            None => &route.leaves,
+            Some(restore) => {
+                let (at, rows) = &route.restores[restore];
+                if events.first().map(|event| &event.point.site) != Some(at) {
+                    return Err(Refused::Path);
+                }
+                rows
+            }
+        };
+        let last = events.last().ok_or(Refused::Path)?;
+        let end = end(draft, exit, interval, last)?;
+        check_rows(
+            draft,
+            charges,
+            rows,
+            &events,
+            exit,
+            end,
+            position > 0,
+            cursor,
+        )?;
+    }
+    Ok(())
+}
+
+/// Check a segment's rows and their ops, from `cursor` on.
+#[expect(clippy::too_many_arguments, reason = "one segment's coordinates")]
+fn check_rows(
+    draft: &RegionDraft,
+    charges: &BTreeMap<Point, Vec<CanonicalClose>>,
+    rows: &[Pc],
+    events: &[&Event],
+    exit: ExitKind,
+    end: End,
+    restored: bool,
+    cursor: &mut usize,
+) -> Result<(), Refused> {
+    if rows.len() != events.len() || !shaped(events, exit, restored) {
         return Err(Refused::Source);
     }
-    for (position, (pc, event)) in route.leaves.iter().zip(events).enumerate() {
+    let sink = Reg::new(draft.roles.len())?;
+    for (position, (pc, event)) in rows.iter().zip(events).enumerate() {
         if pc.offset() != *cursor {
             return Err(Refused::Path);
         }
         let step = draft.steps.get(*cursor).ok_or(Refused::Exit)?;
-        let last = position + 1 == count;
-        let phase = if last && exit != ExitKind::Return {
-            Phase::Catch
-        } else {
-            Phase::Leave
-        };
-        if event.point.phase != phase {
-            return Err(Refused::Source);
-        }
         check_route_step(draft, charges, step, event, *cursor)?;
-        let expected = match (last, exit) {
-            (true, ExitKind::Return) => None,
-            (true, _) => Some(resume(draft, exit, interval.resume(), &step.at)?),
-            (false, _) => Some(Pc(u32::try_from(*cursor + 1).map_err(|_| Refused::Facts)?)),
-        };
-        let shaped = match (&draft.ops[*cursor], expected) {
-            (RegionOp::Exit { prefix }, None) => *prefix == step.after,
+        let expected = segment_op(
+            draft,
+            step,
+            *cursor,
+            position,
+            events.len(),
+            exit,
+            end,
+            restored,
+            sink,
+        )?;
+        let shaped = match (&draft.ops[*cursor], &expected) {
             // check_op verifies the catch's move against its event.
-            (RegionOp::Move { next, .. } | RegionOp::Heap { next, .. }, Some(expected))
-                if last && exit == ExitKind::Raise =>
-            {
-                *next == expected
-            }
+            (
+                RegionOp::Move { next, .. } | RegionOp::Heap { next, .. },
+                RegionOp::Move { next: expected, .. } | RegionOp::Heap { next: expected, .. },
+            ) => next == expected,
+            (RegionOp::Exit { prefix }, RegionOp::Exit { prefix: expected }) => prefix == expected,
             (
                 RegionOp::Checked {
                     kernel,
@@ -575,12 +935,17 @@ fn check_leaves(
                     dst,
                     next,
                 },
-                Some(expected),
+                RegionOp::Checked {
+                    kernel: expected_kernel,
+                    args: expected_args,
+                    dst: expected_dst,
+                    next: expected_next,
+                },
             ) => {
-                kernel.kind == CheckedKind::Phase
-                    && args.is_empty()
-                    && dst.offset() == draft.roles.len()
-                    && *next == expected
+                kernel.kind == expected_kernel.kind
+                    && args == expected_args
+                    && dst == expected_dst
+                    && next == expected_next
             }
             _ => false,
         };
@@ -596,35 +961,36 @@ pub(super) fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refuse
     let route = draft
         .departures
         .iter()
-        .find(|route| {
-            route.origin.offset() == index || route.leaves.iter().any(|pc| pc.offset() == index)
-        })
+        .find(|route| route.origin.offset() == index || route.rows().any(|pc| pc.offset() == index))
         .ok_or(Refused::Path)?;
     let expected = if route.origin.offset() == index {
         route.leaves.first().copied()
     } else {
-        let position = route
-            .leaves
+        let exit = route_exit(draft, route)?;
+        let interval = draft
+            .source
+            .compile_departure_suffix(&draft.steps[route.origin.offset()].at)?;
+        let segments = routed(&draft.source, exit, interval)?.ok_or(Refused::Path)?;
+        let rows = std::iter::once(&route.leaves[..])
+            .chain(route.restores.iter().map(|(_, rows)| &rows[..]));
+        let (interval, rows) = segments
+            .iter()
+            .zip(rows)
+            .find(|(_, rows)| rows.iter().any(|pc| pc.offset() == index))
+            .ok_or(Refused::Path)?;
+        let position = rows
             .iter()
             .position(|pc| pc.offset() == index)
             .ok_or(Refused::Path)?;
-        match route.leaves.get(position + 1) {
+        match rows.get(position + 1) {
             Some(next) => Some(*next),
-            // A loop route resumes at its loop; a Return route exits.
-            None => match route_exit(draft, route)? {
-                ExitKind::Return => None,
-                exit => {
-                    let interval = draft
-                        .source
-                        .compile_departure_suffix(&draft.steps[route.origin.offset()].at)?;
-                    Some(resume(
-                        draft,
-                        exit,
-                        interval.resume(),
-                        &draft.steps[index].at,
-                    )?)
+            None => {
+                let last = interval.events().last().ok_or(Refused::Path)?;
+                match end(draft, exit, interval, last)? {
+                    End::Exit => None,
+                    End::Resume(next) | End::Suspend(next) => Some(next),
                 }
-            },
+            }
         }
     };
     if recovery::successors(draft, index).as_slice() != expected.as_slice() {

@@ -245,6 +245,7 @@ pub(in crate::machine) fn restore_source_controls(
     id: CodeId,
     source: &SourceContinuation,
     record: &FrameRecord,
+    departing: &[Value],
     access: &Access<'_>,
 ) -> Result<(Controls, Option<Standing>), HeapFault> {
     let program = exe.region(id).map_err(|_| malformed())?;
@@ -289,9 +290,38 @@ pub(in crate::machine) fn restore_source_controls(
         loops.push(state);
         index += 1;
     }
-    if loops.iter().filter(|state| state.active).count() != saved.len()
-        || !record.departing.is_empty()
-    {
+    if loops.iter().filter(|state| state.active).count() != saved.len() {
+        return Err(malformed());
+    }
+    // Each cleanup row a body or a catch did not enter by ending holds the
+    // exit its cleanup suspended, outermost first, with the value it took.
+    let mut finally = Vec::new();
+    record.finally.visit(access, &mut |_, value| {
+        finally.push(value.clone());
+        true
+    })?;
+    let mut values = departing.iter();
+    let mut suspensions = Vec::new();
+    for row in &finally {
+        use crate::machine::Completion;
+        use lash_kernel_state::paged::EnteredRecord;
+        let mut value = || {
+            values
+                .next()
+                .map(|value| Box::new(*value))
+                .ok_or_else(malformed)
+        };
+        let completion = match &row.entered {
+            EnteredRecord::Normal => continue,
+            EnteredRecord::Break => Completion::Break,
+            EnteredRecord::Continue => Completion::Continue,
+            EnteredRecord::Return => Completion::Return(value()?),
+            EnteredRecord::Throw => Completion::Throw(value()?),
+            EnteredRecord::ReturnVia(_) => return Err(malformed()),
+        };
+        suspensions.push((row.site.resolve(access)?.as_ref().clone(), completion));
+    }
+    if values.next().is_some() || suspensions.len() != source.suspended.len() {
         return Err(malformed());
     }
     let (pc, prefix) = position(&code, source).map_err(|_| malformed())?;
@@ -335,8 +365,8 @@ pub(in crate::machine) fn restore_source_controls(
             source.pending.is_some()
         )));
     }
-    let controls =
-        control::controls_for(&code, pc, &loops, &source.roles).map_err(|_| malformed())?;
+    let controls = control::controls_for(&code, pc, &loops, &source.roles, &suspensions)
+        .map_err(|_| malformed())?;
     // The frame records each loop as the point stands in it: what it walks
     // and the item its header holds are its iterated rows.
     let mut rows = saved.iter();
@@ -380,17 +410,13 @@ pub(in crate::machine) fn restore_source_controls(
         return Err(malformed());
     }
     // Each cleanup the point stands in was entered by its body or its catch
-    // block ending, in control order; no other cleanup row is saved.
-    let mut finally = Vec::new();
-    record.finally.visit(access, &mut |_, value| {
-        finally.push(value.clone());
-        true
-    })?;
+    // block ending or holds the exit it suspended, in control order; no
+    // other cleanup row is saved.
     let mut rows = finally.iter();
     for control in controls.iter() {
         let crate::machine::Control::Try {
             stmt,
-            phase: crate::machine::TryPhase::Finally(_),
+            phase: crate::machine::TryPhase::Finally(completion),
         } = control
         else {
             continue;
@@ -399,8 +425,16 @@ pub(in crate::machine) fn restore_source_controls(
             return Err(malformed());
         };
         let row = rows.next().ok_or_else(malformed)?;
-        if !matches!(row.entered, lash_kernel_state::paged::EnteredRecord::Normal)
-            || row.site.resolve(access)?.as_ref() != site
+        use crate::machine::Completion;
+        use lash_kernel_state::paged::EnteredRecord;
+        if !matches!(
+            (&row.entered, completion),
+            (EnteredRecord::Normal, Completion::Normal)
+                | (EnteredRecord::Break, Completion::Break)
+                | (EnteredRecord::Continue, Completion::Continue)
+                | (EnteredRecord::Return, Completion::Return(_))
+                | (EnteredRecord::Throw, Completion::Throw(_))
+        ) || row.site.resolve(access)?.as_ref() != site
         {
             return Err(malformed());
         }

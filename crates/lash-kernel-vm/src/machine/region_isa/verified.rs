@@ -6,6 +6,7 @@ mod calls;
 mod canonical;
 mod charge;
 mod control;
+mod finally;
 mod flow;
 mod header;
 mod heap;

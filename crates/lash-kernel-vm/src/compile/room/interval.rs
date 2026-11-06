@@ -222,6 +222,29 @@ impl Source {
         &self,
         at: &Point,
     ) -> Result<Arc<CompiledInterval>, Refused> {
+        self.suffix(at, None)
+    }
+    /// A suspended exit's route once its cleanup completes normally: from
+    /// the try's Restore, which makes it the frame's active departure
+    /// again, outward as it would have departed from the try itself.
+    pub(crate) fn compile_restore_suffix(
+        &self,
+        at: &Site,
+        exit: ExitKind,
+    ) -> Result<Arc<CompiledInterval>, Refused> {
+        self.suffix(
+            &Point {
+                site: at.clone(),
+                phase: Phase::Restore,
+            },
+            Some(exit),
+        )
+    }
+    fn suffix(
+        &self,
+        at: &Point,
+        restoring: Option<ExitKind>,
+    ) -> Result<Arc<CompiledInterval>, Refused> {
         self.verify()?;
         if at.site.unit != self.site.unit
             || !at.site.path.starts_with(&self.site.path)
@@ -232,8 +255,10 @@ impl Source {
         // An event that may raise besides taking its own exit departs as a
         // Throw does: its Raise exit publishes the raise into the frame's
         // active departure.
-        let raising = self.raising(at);
-        if at.phase != Phase::Commit && raising.is_none() {
+        let raising = restoring.is_none().then(|| self.raising(at)).flatten();
+        if restoring.is_some() != (at.phase == Phase::Restore)
+            || (at.phase != Phase::Commit && restoring.is_none() && raising.is_none())
+        {
             return Err(Refused::Path);
         }
         // Its other ancestors hold no event before it: each has only a
@@ -312,6 +337,18 @@ impl Source {
             path = path.child(*index);
         }
         let departing = match node {
+            doc::Node::Stmt(doc::Stmt::Try(t)) if restoring.is_some() && t.finally.is_some() => {
+                match restoring {
+                    Some(
+                        exit @ (ExitKind::Return
+                        | ExitKind::Raise
+                        | ExitKind::Break
+                        | ExitKind::Continue),
+                    ) => exit,
+                    _ => return Err(Refused::Path),
+                }
+            }
+            _ if restoring.is_some() => return Err(Refused::Path),
             _ if raising.is_some() => ExitKind::Raise,
             doc::Node::Stmt(doc::Stmt::Return { .. }) => ExitKind::Return,
             doc::Node::Stmt(doc::Stmt::Break) => ExitKind::Break,
@@ -422,6 +459,9 @@ impl Source {
         }
         struct Suffix<'a> {
             returning: &'a Site,
+            /// The exit a restored try's body or catch block took, and
+            /// whether the try catches.
+            restoring: Option<(ExitKind, bool)>,
             blocks: &'a [Site],
             choices: &'a BTreeMap<Site, bool>,
             for_sites: &'a std::collections::BTreeSet<Site>,
@@ -435,6 +475,19 @@ impl Source {
             fn completed(&mut self, site: &Site) -> Option<ExitKind> {
                 if self.returning.path.starts_with(&site.path) {
                     return None;
+                }
+                // A restored try's body or catch block took its exit; its
+                // cleanup completed.
+                if let Some((exit, catches)) = self.restoring
+                    && site.unit == self.returning.unit
+                    && let Some((index, parent)) = site.path.split_last()
+                    && parent == self.returning.path.as_slice()
+                {
+                    return Some(match (index, catches) {
+                        (0, true) if exit == ExitKind::Raise => ExitKind::Raise,
+                        (0, _) | (1, true) => exit,
+                        _ => ExitKind::Normal,
+                    });
                 }
                 // The body of an entered catch has already raised.
                 Some(match site.path.split_last() {
@@ -517,8 +570,10 @@ impl Source {
             .filter(|site| !for_sites.contains(*site))
             .cloned()
             .collect();
+        let catches = matches!(node, doc::Node::Stmt(doc::Stmt::Try(t)) if t.catch.is_some());
         let mut suffix = Suffix {
             returning: &at.site,
+            restoring: restoring.map(|exit| (exit, catches)),
             blocks: &blocks,
             choices: &choices,
             for_sites: &for_sites,
@@ -538,6 +593,8 @@ impl Source {
                 + 5 * for_sites.len()
                 + 2 * whiles.len()
                 + raised.len()
+                // A restored try's Catch and Suspend.
+                + 2 * usize::from(restoring.is_some())
                 // A raising event's completed earlier phases at its own site.
                 + if raising.is_some() {
                     self.room.events.keys().filter(|p| p.site == at.site).count()

@@ -105,8 +105,16 @@ pub(super) fn frame(
         None
     };
     if let Some(source) = &source {
+        let mut values = Vec::new();
+        for index in 0..record.departing.len() {
+            values.push(admit(
+                arena,
+                access,
+                &row(&record.departing, index, access)?,
+            )?);
+        }
         let (controls, standing) = crate::machine::region_isa::restore_source_controls(
-            exe, code_id, source, record, access,
+            exe, code_id, source, record, &values, access,
         )?;
         control = controls.iter().cloned().collect();
         // A frame standing at a delivering action waits in it.

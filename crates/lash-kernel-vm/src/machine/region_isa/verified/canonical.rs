@@ -127,7 +127,13 @@ impl Running<'_> {
                 owned: false,
             })
         };
-        frame.control = self.controls_for(code, pc, depth, &image.roles)?;
+        let suspensions = self.suspensions(depth, &image.roles)?;
+        frame.control = self.controls_for(code, pc, depth, &image.roles, &suspensions)?;
+        // A suspended exit's value is its cleanup's, recorded with it.
+        let dynamic: Vec<_> = self
+            .suspended_in(depth)
+            .filter_map(|entry| entry.value.map(|(slot, _)| slot))
+            .collect();
         for (index, binding) in code.bindings.iter().enumerate() {
             let Owner::Value { slot, .. } = code
                 .program
@@ -199,7 +205,7 @@ impl Running<'_> {
                         slot,
                         lash_kernel_state::kernel_internals::logical::Slot::Binding(_)
                             | lash_kernel_state::kernel_internals::logical::Slot::Capture(_)
-                    )
+                    ) && !dynamic.contains(slot)
                 })
                 .copied()
                 .collect(),
@@ -214,6 +220,18 @@ impl Running<'_> {
                         .then(|| self.looping.clone())
                         .flatten()
                 }),
+            suspended: self
+                .suspended_in(depth)
+                .map(|entry| {
+                    (
+                        entry.origin.clone(),
+                        entry
+                            .departure
+                            .as_ref()
+                            .map_or(0, |departure| departure.completion),
+                    )
+                })
+                .collect(),
             ordinal: reached.ordinal,
             debt: lash_kernel_state::paged::ChargeDebtRecord {
                 cursor: reached.debt,

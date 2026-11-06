@@ -242,6 +242,25 @@ pub(crate) enum CheckedKind {
     LoopItem {
         at: Site,
     },
+    /// A try's cleanup suspends the frame's active departure (`K-FORM-017`):
+    /// a valued exit's value leaves the departure for the frame's pending
+    /// exits, its occurrence held, and the cleanup runs.
+    Suspend {
+        at: Site,
+        exit: crate::compile::room::ExitKind,
+    },
+    /// The exit a try's cleanup suspended departs again once the cleanup
+    /// completes normally, from its actual origin, its quoted completion
+    /// kept.
+    Restore {
+        at: Site,
+        exit: crate::compile::room::ExitKind,
+    },
+    /// A try's cleanup completes: to the try's Commit when it suspended
+    /// nothing, otherwise to the Restore of the exit it suspended.
+    Cleanup {
+        at: Site,
+    },
     UnpackPair {
         inputs: [Reg<LeaseValue>; 2],
         outputs: [Reg<i64>; 2],
@@ -868,6 +887,15 @@ impl RegionCode {
     pub(crate) fn return_successor(&self, pc: Pc) -> Option<Pc> {
         departures::successor(&self.draft, pc)
     }
+    /// The Restore that resumes the exit departing from `origin` once the
+    /// cleanup of the try at `at` completes normally.
+    pub(crate) fn restore_row(&self, at: &Site, origin: &Point) -> Option<Pc> {
+        departures::restore_row(&self.draft, at, origin)
+    }
+    /// Every Restore the cleanup of the try at `at` may complete to.
+    pub(crate) fn restores<'a>(&'a self, at: &'a Site) -> impl Iterator<Item = Pc> + 'a {
+        departures::restores_at(&self.draft, at)
+    }
     /// A Break/Continue route row: its origin, or its final Catch together
     /// with the loop a Break leaves. Return routes are not loop departures.
     pub(crate) fn loop_departure(&self, pc: Pc) -> Option<LoopDeparture> {
@@ -875,7 +903,7 @@ impl RegionCode {
             .draft
             .departures
             .iter()
-            .find(|route| route.origin == pc || route.leaves.last() == Some(&pc))?;
+            .find(|route| route.origin == pc || route.rows().last() == Some(pc))?;
         let origin = &self.draft.steps[route.origin.offset()].at;
         // A raising event's route is carried as a Throw's.
         if route.origin.offset() >= self.draft.source.room.events.len() {
@@ -929,7 +957,7 @@ impl RegionCode {
             .iter()
             .find(|route| self.draft.steps[route.origin.offset()].at == *origin)?;
         std::iter::once(route.origin)
-            .chain(route.leaves.iter().copied())
+            .chain(route.rows())
             .find(|pc| self.draft.steps[pc.offset()].at == *at)
     }
     /// Whether a raise of the event at `at` has a route of its own to the
@@ -1146,8 +1174,7 @@ impl RegionCode {
                 self.draft.steps[route.origin.offset()].at == *origin
                     && (origin == point
                         || route
-                            .leaves
-                            .iter()
+                            .rows()
                             .any(|pc| self.draft.steps[pc.offset()].at == *point))
             })
         {

@@ -248,6 +248,8 @@ impl<'m> RegionLease<'m> {
             &mut machine.limiters,
         )?;
         execution.reached = super::resume::reached(&execution.canonical, positions[0].1)?;
+        let reopened = super::finally::reopened(&execution.code, &execution.canonical)?;
+        execution.reopen_suspended(0, reopened)?;
         for (bank, value) in sessions {
             execution.registers.write(
                 &mut execution.view,
@@ -320,6 +322,8 @@ impl<'m> RegionLease<'m> {
             execution.pc = pc;
             execution.prefix = prefix;
             execution.reached = super::resume::reached(&frame, prefix)?;
+            let reopened = super::finally::reopened(&execution.code, &frame)?;
+            execution.reopen_suspended(depth, reopened)?;
             execution.canonical_callees.push(frame);
             activation = Some(next_activation);
         }

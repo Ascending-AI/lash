@@ -127,6 +127,7 @@ impl Running<'_> {
             let mut answered = None;
             let mut taken = None;
             let mut staged = None;
+            let mut finally = None;
             let mut guarded = false;
             match op {
                 // A plain `for` takes its next item as its Test event. An
@@ -202,6 +203,27 @@ impl Running<'_> {
                             return self.halt(RegionStop::Boundary);
                         }
                     }
+                }
+                // A finally row suspends or restores the frame's exit, or
+                // completes a cleanup to the Restore of what it suspended.
+                RegionOp::Checked {
+                    kernel,
+                    args,
+                    dst,
+                    next,
+                } if matches!(
+                    kernel.kind(),
+                    crate::compile::region_isa::CheckedKind::Suspend { .. }
+                        | crate::compile::region_isa::CheckedKind::Restore { .. }
+                        | crate::compile::region_isa::CheckedKind::Cleanup { .. }
+                ) =>
+                {
+                    if served.is_some() {
+                        return Err(invalid(Refused::Facts));
+                    }
+                    let (answer, change) = self.finally_answer(kernel.kind(), args, *dst, *next)?;
+                    finally = change;
+                    answered = Some(answer);
                 }
                 RegionOp::Checked { kernel, .. }
                     if matches!(
@@ -499,6 +521,9 @@ impl Running<'_> {
             self.reached.debt = counters.debt;
             if let Some(departure) = departure {
                 self.departing = Some(departure);
+            }
+            if let Some(change) = finally {
+                self.accept_finally(change)?;
             }
             match looping {
                 Some(crate::compile::region_isa::LoopDeparture::Origin(origin)) => {

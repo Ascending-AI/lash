@@ -628,15 +628,19 @@ impl Executable {
         }
         let mut depth = code.site.path.len();
         let mut block = code.body;
+        let within = |end: usize| Site {
+            unit: site.unit.clone(),
+            path: site.path[..end].to_vec(),
+        };
         loop {
+            // A block's own site lies in the statement that owns it.
+            if depth == site.path.len() {
+                return (depth > code.site.path.len()).then(|| within(depth - 1));
+            }
             let stmt = *self
                 .block(block)
                 .stmts
                 .get(*site.path.get(depth)? as usize)?;
-            let within = |end: usize| Site {
-                unit: site.unit.clone(),
-                path: site.path[..end].to_vec(),
-            };
             let Some(inner) = site.path.get(..depth + 2) else {
                 return Some(within(depth + 1));
             };

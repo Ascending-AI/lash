@@ -63,7 +63,11 @@ impl Flow {
             RegionOp::Checked { kernel, dst, .. }
                 if !matches!(
                     kernel.kind(),
-                    CheckedKind::Phase | CheckedKind::LoopControl { .. }
+                    CheckedKind::Phase
+                        | CheckedKind::LoopControl { .. }
+                        | CheckedKind::Suspend { .. }
+                        | CheckedKind::Restore { .. }
+                        | CheckedKind::Cleanup { .. }
                 ) =>
             {
                 Some(dst.index())
@@ -104,6 +108,28 @@ impl Flow {
             })
             .map(|(slot, reg)| root(*slot, *reg))
             .collect::<Result<_, RegionError>>()?;
+        // A Suspend moves its exit's value into the frame's control record
+        // and a Restore moves it back: its root moves, it is neither
+        // released nor held again.
+        if matches!(
+            code.op(pc),
+            Some(RegionOp::Checked { kernel, .. })
+                if matches!(kernel.kind(), CheckedKind::Suspend { .. } | CheckedKind::Restore { .. })
+        ) {
+            let departure = |root: &Root| {
+                before
+                    .roles
+                    .iter()
+                    .chain(after.roles.iter())
+                    .any(|(slot, reg)| {
+                        matches!(slot, Slot::Departure(_))
+                            && super::bind::physical(code, *reg)
+                                .is_ok_and(|actual| actual == root.register)
+                    })
+            };
+            releases.retain(|root| !departure(root));
+            holds.retain(|root| !departure(root));
+        }
         if before.graph.incoming() != after.graph.incoming() {
             if let Some(reg) = before.graph.incoming() {
                 releases.push(Root {

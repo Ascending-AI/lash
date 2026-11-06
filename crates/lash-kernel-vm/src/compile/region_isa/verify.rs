@@ -267,6 +267,25 @@ fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refused> {
                 return Err(Refused::Path);
             }
         }
+        // A cleanup goes on as source does, or to the Restore of what it
+        // suspended.
+        RegionOp::Checked { kernel, .. } if let CheckedKind::Cleanup { at } = kernel.kind() => {
+            let expected = source_next(source, &step.at)?.ok_or(Refused::Path)?;
+            let successors = recovery::successors(draft, index);
+            let Some((normal, restores)) = successors.split_first() else {
+                return Err(Refused::Path);
+            };
+            if target(*normal)? != &expected
+                || *normal != super::stages::target(draft, &step.at, &expected)?
+                || restores.is_empty()
+                || !restores
+                    .iter()
+                    .copied()
+                    .eq(super::departures::restores_at(draft, at))
+            {
+                return Err(Refused::Path);
+            }
+        }
         _ => {
             let expected = source_next(source, &step.at)?;
             let successors = recovery::successors(draft, index);
@@ -870,6 +889,11 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
             CheckedKind::LoopControl { .. } | CheckedKind::Header { .. } => {
                 return Err(Refused::Source);
             }
+            kind @ (CheckedKind::Suspend { .. }
+            | CheckedKind::Restore { .. }
+            | CheckedKind::Cleanup { .. }) => {
+                super::departures::check_finally(draft, index, kind, args, *dst)?;
+            }
             // A plain `for`'s Enter reads only what it walks.
             CheckedKind::Phase
                 if step.at.phase == Phase::Enter
@@ -1324,6 +1348,7 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 }
             }
             if !matches!(draft.ops[index], RegionOp::Call { .. })
+                && !recovery::dynamic(&draft.ops[index])
                 && let Some(slot) = event
                     .output
                     .as_ref()

@@ -210,23 +210,31 @@ impl Running<'_> {
         pc: Pc,
         frame: usize,
         roles: &[(Slot, Value)],
+        suspended: &[Suspension],
     ) -> Result<Controls, RegionError> {
         controls_for(
             code,
             pc,
             &self.loops[frame * self.programs.loops..(frame + 1) * self.programs.loops],
             roles,
+            suspended,
         )
     }
 }
 
+/// An exit the cleanup of the try at a site suspended, as the frame records
+/// it.
+pub(super) type Suspension = (lash_kernel_value::sites::Site, crate::machine::Completion);
+
 /// The frame's controls at `pc`. A plain `for` walks the value its cursor
-/// role holds in `roles`.
+/// role holds in `roles`; a cleanup runs with the exit its try suspended,
+/// innermost last in `suspended`.
 pub(super) fn controls_for(
     code: &super::Code,
     pc: Pc,
     loops: &[LoopState],
     roles: &[(Slot, Value)],
+    suspended: &[Suspension],
 ) -> Result<Controls, RegionError> {
     let point = &code
         .program
@@ -234,14 +242,20 @@ pub(super) fn controls_for(
         .ok_or_else(|| invalid(Refused::Path))?
         .at;
     let mut values = Vec::new();
+    let mut taken = 0;
     place(
         code,
         loops,
         roles,
+        (suspended, &mut taken),
         code.exe.code(code.program.code()).body,
         point,
         &mut values,
     )?;
+    // Each suspended exit stands at a cleanup the point is in, in order.
+    if taken != suspended.len() {
+        return Err(invalid(Refused::Facts));
+    }
     Ok(values.into())
 }
 
@@ -249,6 +263,7 @@ fn place(
     code: &super::Code,
     loops: &[LoopState],
     roles: &[(Slot, Value)],
+    (suspended, taken): (&[Suspension], &mut usize),
     block: BlockId,
     point: &Point,
     values: &mut Vec<Control>,
@@ -287,20 +302,40 @@ fn place(
     let catching = point.site == statement.site
         && point.phase == Phase::Catch
         && matches!(statement.form, Form::Try { .. });
+    // A suspended exit stands at its try's Restore until it is restored.
+    let restoring = point.site == statement.site
+        && point.phase == Phase::Restore
+        && matches!(
+            statement.form,
+            Form::Try {
+                finally: Some(_),
+                ..
+            }
+        )
+        && suspended
+            .get(*taken)
+            .is_some_and(|(site, _)| *site == statement.site);
     values.push(Control::Block {
         block,
-        next: index + usize::from(nested.is_some() || active.is_some() || catching),
+        next: index + usize::from(nested.is_some() || active.is_some() || catching || restoring),
     });
     match &statement.form {
-        // A cleanup the region runs was entered by its body or its catch
-        // block ending: a departure it suspends crosses the boundary.
+        // A cleanup runs with the exit its try suspended, or after its body
+        // or its catch block ended normally.
         Form::Try {
             finally: Some(cleanup),
             ..
-        } if nested == Some(*cleanup) => {
+        } if nested == Some(*cleanup) || restoring => {
+            let completion = match suspended.get(*taken) {
+                Some((site, completion)) if *site == statement.site => {
+                    *taken += 1;
+                    completion.clone()
+                }
+                _ => crate::machine::Completion::Normal,
+            };
             values.push(Control::Try {
                 stmt: id,
-                phase: TryPhase::Finally(crate::machine::Completion::Normal),
+                phase: TryPhase::Finally(completion),
             });
         }
         Form::Try { body, catch, .. } if catching || nested.is_some() => {
@@ -377,7 +412,15 @@ fn place(
         _ => {}
     }
     if let Some(nested) = nested {
-        place(code, loops, roles, nested, point, values)?;
+        place(
+            code,
+            loops,
+            roles,
+            (suspended, taken),
+            nested,
+            point,
+            values,
+        )?;
     }
     Ok(())
 }

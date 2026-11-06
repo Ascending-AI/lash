@@ -32,6 +32,10 @@ pub struct ContinuationRecord {
     pub pending: Option<PageValue>,
     /// Return origin retained while its scope Leaves run.
     pub departure: Option<(Vec<u32>, u32)>,
+    /// Each exit a running cleanup suspended, outermost first: its actual
+    /// departure origin and its quoted completion debt. Its value is the
+    /// frame's `finally` record's.
+    pub suspended: Vec<((Vec<u32>, u32), u64)>,
     /// Reached source occurrence and ordered charge progress.
     pub ordinal: u64,
     pub debt: ChargeDebtRecord,
@@ -125,6 +129,7 @@ impl ContinuationRecord {
             unpaid: None,
             pending: None,
             departure: None,
+            suspended: Vec::new(),
             ordinal: 0,
             debt: ChargeDebtRecord::default(),
             refusal: None,
@@ -265,6 +270,7 @@ impl Cell for ContinuationRecord {
                 _ => false,
             }
             && self.departure == other.departure
+            && self.suspended == other.suspended
             && self.ordinal == other.ordinal
             && self.debt == other.debt
             && self.refusal == other.refusal
@@ -480,7 +486,7 @@ impl TokenCodec for RolesRecord {
 
 impl TokenCodec for ContinuationRecord {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(11);
+        out.seq(12);
         self.site.encode(out);
         self.phase.encode(out);
         self.occurrence.encode(out);
@@ -489,12 +495,13 @@ impl TokenCodec for ContinuationRecord {
         self.unpaid.encode(out);
         self.pending.encode(out);
         self.departure.encode(out);
+        self.suspended.encode(out);
         self.ordinal.encode(out);
         self.debt.encode(out);
         self.refusal.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(11)?;
+        input.expect_struct(12)?;
         Ok(Self {
             site: <Vec<u32>>::decode(input)?,
             phase: <ContinuationPhase>::decode(input)?,
@@ -504,6 +511,7 @@ impl TokenCodec for ContinuationRecord {
             unpaid: Option::<(Vec<u32>, u32)>::decode(input)?,
             pending: Option::<PageValue>::decode(input)?,
             departure: Option::<(Vec<u32>, u32)>::decode(input)?,
+            suspended: <Vec<((Vec<u32>, u32), u64)>>::decode(input)?,
             ordinal: u64::decode(input)?,
             debt: ChargeDebtRecord::decode(input)?,
             refusal: Option::<u32>::decode(input)?,

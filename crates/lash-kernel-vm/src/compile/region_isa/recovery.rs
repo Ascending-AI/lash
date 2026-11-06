@@ -185,7 +185,11 @@ pub(super) fn transfer(
             next.insert(slot);
         }
     }
+    // A suspended exit is the frame control record's own dynamic root, so a
+    // cleanup holds the same slots however it was entered; a restored exit
+    // holds its value again only if it has one.
     if !matches!(draft.ops[pc], RegionOp::Call { .. })
+        && !dynamic(&draft.ops[pc])
         && let Some(output) = event
             .output
             .as_ref()
@@ -213,6 +217,20 @@ pub(super) fn transfer(
     Ok(next)
 }
 
+/// Whether `op`'s event output is a dynamic root of the frame's control
+/// record rather than a slot: a suspended exit, or a restored one with no
+/// value.
+pub(super) fn dynamic(op: &RegionOp) -> bool {
+    match op {
+        RegionOp::Checked { kernel, .. } => match kernel.kind() {
+            super::CheckedKind::Suspend { .. } => true,
+            super::CheckedKind::Restore { exit, .. } => !super::departures::valued(*exit),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 pub(super) fn successors(draft: &RegionDraft, pc: usize) -> Vec<super::Pc> {
     let op = &draft.ops[pc];
     if matches!(op, RegionOp::Return { .. }) {
@@ -229,6 +247,9 @@ pub(super) fn successors(draft: &RegionDraft, pc: usize) -> Vec<super::Pc> {
         | RegionOp::Call { next, .. } => vec![*next],
         RegionOp::Checked { kernel, next, .. } => match kernel.kind() {
             super::CheckedKind::Cursor { exhausted, .. } => vec![*next, *exhausted],
+            super::CheckedKind::Cleanup { at } => std::iter::once(*next)
+                .chain(super::departures::restores_at(draft, at))
+                .collect(),
             super::CheckedKind::Header { driver, ended, .. } => std::iter::once(*next)
                 .chain(*driver)
                 .chain(*ended)

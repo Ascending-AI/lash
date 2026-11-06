@@ -12,6 +12,9 @@ pub(in crate::machine) struct SourceContinuation {
     pub(in crate::machine) roles: Vec<(Slot, Value)>,
     pub(in crate::machine) pending: Option<Value>,
     pub(in crate::machine) departure: Option<Point>,
+    /// Each exit a running cleanup suspended, outermost first: its actual
+    /// origin and its quoted completion debt.
+    pub(in crate::machine) suspended: Vec<(Point, u64)>,
     pub(in crate::machine) ordinal: u64,
     pub(in crate::machine) debt: ChargeDebtRecord,
     pub(in crate::machine) root: Site,
@@ -98,6 +101,13 @@ impl SourceContinuation {
             .as_ref()
             .map(|point| Ok::<_, HeapFault>((self.suffix(point)?, point.phase as u32)))
             .transpose()?;
+        record.suspended = self
+            .suspended
+            .iter()
+            .map(|(origin, completion)| {
+                Ok::<_, HeapFault>(((self.suffix(origin)?, origin.phase as u32), *completion))
+            })
+            .collect::<Result<_, _>>()?;
         record.ordinal = self.ordinal;
         record.debt = self.debt;
         record.refusal = self.refusal;
@@ -167,6 +177,11 @@ impl SourceContinuation {
                 .as_ref()
                 .map(|(path, tag)| point(path, *tag))
                 .transpose()?,
+            suspended: record
+                .suspended
+                .iter()
+                .map(|((path, tag), completion)| Ok((point(path, *tag)?, *completion)))
+                .collect::<Result<_, HeapFault>>()?,
             ordinal: record.ordinal,
             debt: record.debt,
             root: root.clone(),

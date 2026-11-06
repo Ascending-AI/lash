@@ -18,6 +18,9 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) departing: Option<super::returns::Departure>,
     /// The origin of a Break/Continue whose scope Leaves are running.
     pub(super) looping: Option<Point>,
+    /// The exits suspended while their cleanups run, innermost last, each
+    /// owning its value as a root of its frame's control record.
+    pub(super) suspended: Vec<super::finally::Suspended>,
     /// Which session bank cells the lease holds, and which it wrote.
     pub(super) sessions: Box<[SessionState]>,
     pub(super) returning: Option<super::returns::Incoming>,
@@ -173,6 +176,7 @@ impl<'m> Running<'m> {
             canonical_callees: Vec::new(),
             departing: None,
             looping: None,
+            suspended: Vec::new(),
             sessions: vec![SessionState::default(); programs.sessions.len()].into(),
             returning: None,
             served: None,

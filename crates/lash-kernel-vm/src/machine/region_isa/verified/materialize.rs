@@ -81,6 +81,11 @@ impl<'m> Running<'m> {
                         };
                         Ok((slot, read(*reg)?))
                     })
+                    .chain(self.suspended_in(depth).filter_map(|entry| {
+                        entry
+                            .value
+                            .map(|(slot, value)| Ok((slot, operands::Operand::Dynamic(value))))
+                    }))
                     .collect::<Result<_, RegionError>>()?,
                 operands: map
                     .operands
