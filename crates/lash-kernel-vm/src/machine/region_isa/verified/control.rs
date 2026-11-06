@@ -3,7 +3,7 @@ use super::super::*;
 use super::{Running, scalar::ScalarAnswer};
 use crate::compile::region_isa::{LoopPhase, Pc, RegionOp};
 use crate::compile::{BlockId, Form};
-use crate::machine::{Control, controls::Controls};
+use crate::machine::{Control, TryPhase, controls::Controls};
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct LoopState {
@@ -190,7 +190,7 @@ fn place(
         }
         return Ok(());
     }
-    let (index, statement) = source
+    let (index, id, statement) = source
         .stmts
         .iter()
         .enumerate()
@@ -198,7 +198,7 @@ fn place(
             let statement = code.exe.stmt(*id);
             (point.site.unit == statement.site.unit
                 && point.site.path.starts_with(&statement.site.path))
-            .then_some((index, statement))
+            .then_some((index, *id, statement))
         })
         .ok_or_else(|| invalid(Refused::Path))?;
     let nested = statement.form.blocks().into_iter().find(|child| {
@@ -209,11 +209,32 @@ fn place(
         let info = code.program.loop_info(index as u32)?;
         (info.site == statement.site && state.active).then_some((info, state))
     });
+    // A try stands open in its body, at its Catch and in its catch block.
+    let catching = point.site == statement.site
+        && point.phase == Phase::Catch
+        && matches!(statement.form, Form::Try { .. });
     values.push(Control::Block {
         block,
-        next: index + usize::from(nested.is_some() || active.is_some()),
+        next: index + usize::from(nested.is_some() || active.is_some() || catching),
     });
     match &statement.form {
+        Form::Try {
+            body,
+            catch,
+            finally: None,
+            ..
+        } if catching || nested.is_some() => {
+            values.push(Control::Try {
+                stmt: id,
+                phase: if nested.is_some() && nested == catch.as_ref().map(|(_, block)| *block) {
+                    TryPhase::Catch
+                } else if catching || nested == Some(*body) {
+                    TryPhase::Body
+                } else {
+                    return Err(invalid(Refused::Facts));
+                },
+            });
+        }
         Form::While { body, .. } => {
             if let Some((info, state)) = active
                 && (nested.is_none() || nested == Some(*body))

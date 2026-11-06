@@ -1,7 +1,9 @@
-//! A Return, Break or Continue transfers its operand (if any) before leaving
-//! entered scopes. Each departure owns its Leave rows because normal and
-//! departing successors differ. A Return ends at the frame Leave; a loop
-//! departure ends at its target loop's Catch and resumes where source does.
+//! A Return, Break, Continue or Throw transfers its operand (if any) before
+//! leaving entered scopes. Each departure owns its Leave rows because normal
+//! and departing successors differ. A Return ends at the frame Leave; a loop
+//! departure ends at its target loop's Catch, and a raise at its catching
+//! try's Catch, which moves it into the catch binding. Both resume where
+//! source does.
 use super::*;
 use crate::compile::room::ExitKind;
 use std::collections::BTreeMap;
@@ -39,12 +41,15 @@ fn departing(draft: &RegionDraft, index: usize) -> Result<Option<ExitKind>, Refu
         }
         doc::Node::Stmt(doc::Stmt::Break) => Some(ExitKind::Break),
         doc::Node::Stmt(doc::Stmt::Continue) => Some(ExitKind::Continue),
+        doc::Node::Stmt(doc::Stmt::Throw { .. }) => {
+            matches!(draft.ops[index], RegionOp::Move { .. }).then_some(ExitKind::Raise)
+        }
         _ => None,
     })
 }
 
-/// Where a loop departure resumes after its target loop's Catch: the loop's
-/// Commit for a Break, otherwise the loop's repeated test.
+/// Where a departure resumes after its Catch: a loop's Commit for a Break,
+/// the loop's repeated test for a Continue, the catch block for a raise.
 fn resume(
     draft: &RegionDraft,
     exit: ExitKind,
@@ -63,7 +68,7 @@ fn resume(
             }
             at.clone()
         }
-        (ExitKind::Continue, Some(at)) => at.clone(),
+        (ExitKind::Continue | ExitKind::Raise, Some(at)) => at.clone(),
         (ExitKind::Continue, None) => Point {
             site: catch.site.clone(),
             phase: Phase::Test,
@@ -71,6 +76,37 @@ fn resume(
         _ => return Err(Refused::Path),
     };
     super::stages::target(draft, catch, &expected)
+}
+
+/// A catching Catch moves the departure into its binding, or a shared
+/// binding's fresh cell.
+fn catch(draft: &RegionDraft, step: &Step, row: usize, next: Pc) -> Result<RegionOp, Refused> {
+    let event = &step.event;
+    let [input] = event.inputs.as_ref() else {
+        return Err(Refused::Source);
+    };
+    let src = lower::reg(&draft.roles, &draft.source, input)?;
+    let dst = lower::reg(
+        &draft.roles,
+        &draft.source,
+        event.output.as_ref().ok_or(Refused::Source)?,
+    )?;
+    Ok(if event.entities.is_empty() {
+        RegionOp::Move { dst, src, next }
+    } else {
+        RegionOp::Heap {
+            kernel: HeapKernel::compile(
+                &draft.source,
+                &draft.roles,
+                event,
+                row,
+                super::heap::HeapKind::Cell,
+            )?,
+            args: Box::new([src]),
+            dst: Some(dst),
+            next,
+        }
+    })
 }
 
 pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(), Refused> {
@@ -81,7 +117,22 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
         let Some(exit) = departing(draft, index)? else {
             continue;
         };
-        let interval = draft.source.compile_departure_suffix(&steps[index].at)?;
+        // A raise no try in this frame takes leaves the frame unrouted.
+        let interval = match draft.source.compile_departure_suffix(&steps[index].at) {
+            Err(Refused::Path) if exit == ExitKind::Raise => None,
+            interval => Some(interval?),
+        };
+        let Some(interval) = interval else {
+            ops[index] = RegionOp::Boundary {
+                spec: BoundarySpec {
+                    action: None,
+                    at: steps[index].at.clone(),
+                    origin: None,
+                    next: None,
+                },
+            };
+            continue;
+        };
         let events: Vec<_> = interval.events().skip(1).collect();
         let (last, leaves_only) = match events.split_last() {
             Some((last, rest)) => (last, rest.iter().all(|e| e.point.phase == Phase::Leave)),
@@ -146,8 +197,10 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
             } else {
                 Some(Pc(pc.0.checked_add(1).ok_or(Refused::Facts)?))
             };
+            let catches = exit == ExitKind::Raise && position + 1 == events.len();
             ops.push(match next {
                 None => RegionOp::Exit { prefix: step.after },
+                Some(next) if catches => catch(draft, &step, row, next)?,
                 Some(next) => RegionOp::Checked {
                     kernel: CheckedKernel {
                         kind: CheckedKind::Phase,
@@ -160,7 +213,7 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
             steps.push(step);
             leaves.push(pc);
         }
-        if let RegionOp::Checked { next, .. } = &mut ops[index] {
+        if let RegionOp::Checked { next, .. } | RegionOp::Move { next, .. } = &mut ops[index] {
             *next = first;
         }
         routes.push(Departure {
@@ -210,7 +263,10 @@ pub(super) fn verify(
         {
             return Err(Refused::Source);
         }
-        if exit != ExitKind::Return
+        if exit == ExitKind::Raise && !matches!(draft.ops[index], RegionOp::Move { .. }) {
+            return Err(Refused::Source);
+        }
+        if !matches!(exit, ExitKind::Return | ExitKind::Raise)
             && !matches!(
                 &draft.ops[index],
                 RegionOp::Checked { kernel, args, dst, .. }
@@ -281,6 +337,12 @@ pub(super) fn verify(
             };
             let shaped = match (&draft.ops[cursor], expected) {
                 (RegionOp::Exit { prefix }, None) => *prefix == step.after,
+                // check_op verifies the catch's move against its event.
+                (RegionOp::Move { next, .. } | RegionOp::Heap { next, .. }, Some(expected))
+                    if last && exit == ExitKind::Raise =>
+                {
+                    *next == expected
+                }
                 (
                     RegionOp::Checked {
                         kernel,

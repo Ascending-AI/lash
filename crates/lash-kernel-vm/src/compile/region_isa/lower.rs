@@ -226,7 +226,31 @@ pub(super) fn connect(
                 graph,
             )?
         }
-        doc::Node::Stmt(doc::Stmt::Return { value }) => {
+        // A try without cleanup runs its body to its Commit. Its catch block
+        // is entered only by a raise route resuming at the block's Enter.
+        doc::Node::Stmt(doc::Stmt::Try(doc::TryStmt {
+            body,
+            catch: Some(catch),
+            finally: None,
+        })) => {
+            connect(
+                doc::Node::Block(&catch.body),
+                &site.child(1),
+                Some(commit.clone()),
+                source,
+                graph,
+            )?;
+            connect(
+                doc::Node::Block(body),
+                &site.child(0),
+                Some(commit),
+                source,
+                graph,
+            )?
+        }
+        // A raise moves its operand into the departure; its route is
+        // appended with the departures and ends at the catching try.
+        doc::Node::Stmt(doc::Stmt::Return { value } | doc::Stmt::Throw { value }) => {
             graph.insert(commit.clone(), Edge::Stop);
             connect(
                 doc::Node::Expr(value),
@@ -253,7 +277,6 @@ pub(super) fn connect(
         // explicit boundary, with no source interpreter embedded in the ISA.
         doc::Node::Stmt(
             doc::Stmt::ReturnVia { .. }
-            | doc::Stmt::Throw { .. }
             | doc::Stmt::Finish { .. }
             | doc::Stmt::Fail { .. }
             | doc::Stmt::Try(_)
@@ -563,6 +586,19 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                 {
                     RegionOp::Return { value: args[0] }
                 }
+                // The raise route is appended below; its first Leave
+                // replaces `next`.
+                (
+                    doc::Node::Stmt(doc::Stmt::Throw { .. }),
+                    Phase::Commit,
+                    None,
+                    Some(dst),
+                    Ok(args),
+                ) if args.len() == 1 && event.entities.is_empty() => RegionOp::Move {
+                    dst,
+                    src: args[0],
+                    next: pc(at)?,
+                },
                 // The route is appended below; its first Leave replaces `next`.
                 (
                     doc::Node::Stmt(doc::Stmt::Break | doc::Stmt::Continue),
@@ -948,6 +984,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                                 doc::Stmt::Do { .. }
                                     | doc::Stmt::If { .. }
                                     | doc::Stmt::While { .. }
+                                    | doc::Stmt::Try(_)
                             )
                         ) =>
                 {

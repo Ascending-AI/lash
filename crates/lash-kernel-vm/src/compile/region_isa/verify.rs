@@ -65,7 +65,13 @@ fn source_next(source: &Source, at: &Point) -> Result<Option<Point>, Refused> {
     {
         return Ok(None);
     }
-    if at.phase == Phase::Commit && matches!(node, doc::Node::Stmt(doc::Stmt::If { .. })) {
+    // A compound statement's Commit continues after it in its block.
+    if at.phase == Phase::Commit
+        && matches!(
+            node,
+            doc::Node::Stmt(doc::Stmt::If { .. } | doc::Stmt::Try(_))
+        )
+    {
         let mut parent = at.site.clone();
         let index = parent.path.pop().ok_or(Refused::Path)? as usize;
         let doc::Node::Block(body) = resources::node(source, &parent)? else {
@@ -528,6 +534,14 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 doc::Node::Expr(doc::Expr::If { .. }) if step.at.phase == Phase::Commit => {
                     expected_output
                 }
+                // A raise moves its operand into the departure, and the
+                // catching try's Catch moves the departure into its binding.
+                doc::Node::Stmt(doc::Stmt::Throw { .. }) if step.at.phase == Phase::Commit => {
+                    expected_output
+                }
+                doc::Node::Stmt(doc::Stmt::Try(_)) if step.at.phase == Phase::Catch => {
+                    expected_output
+                }
                 doc::Node::Expr(doc::Expr::Call { .. } | doc::Expr::Act(_))
                     if step.at.phase == Phase::Restore =>
                 {
@@ -775,6 +789,8 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                             )
                     ) && !(step.at.phase == Phase::Catch
                         && matches!(node, doc::Node::Stmt(doc::Stmt::For { via: None, .. })))
+                        && !(step.at.phase == Phase::Commit
+                            && matches!(node, doc::Node::Stmt(doc::Stmt::Try(_))))
                 {
                     return Err(Refused::Source);
                 }

@@ -636,6 +636,14 @@ impl RegionCode {
         let breaks = match lower::node_at(&self.draft.source, origin)? {
             doc::Node::Stmt(doc::Stmt::Break) => true,
             doc::Node::Stmt(doc::Stmt::Continue) => false,
+            // A raise is carried like a loop departure; its value stays
+            // in the departure role until its Catch takes it.
+            doc::Node::Stmt(doc::Stmt::Throw { .. }) if route.origin == pc => {
+                return Some(LoopDeparture::Origin(origin.clone()));
+            }
+            doc::Node::Stmt(doc::Stmt::Throw { .. }) => {
+                return Some(LoopDeparture::End { exits: None });
+            }
             _ => return None,
         };
         if route.origin == pc {
@@ -651,7 +659,7 @@ impl RegionCode {
             exits: breaks.then_some(u32::try_from(index).ok()?),
         })
     }
-    /// Whether a carried departure origin is a Break or Continue.
+    /// Whether a carried departure origin is a Break, Continue or Throw.
     pub(crate) fn loop_origin(&self, origin: &Point) -> bool {
         self.draft.departures.iter().any(|route| {
             self.draft.steps[route.origin.offset()].at == *origin

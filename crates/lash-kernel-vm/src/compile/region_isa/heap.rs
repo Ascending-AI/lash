@@ -25,13 +25,25 @@ pub(super) fn source_kind(
     at: &Point,
 ) -> Result<Option<HeapKind>, Refused> {
     let node = resources::node(source, &at.site)?;
-    // A let expression binds its value at its Test.
+    // A let expression binds its value at its Test, a catch at its Catch.
     if at.phase != Phase::Commit
         && !(at.phase == Phase::Test && matches!(node, doc::Node::Expr(doc::Expr::Let { .. })))
+        && !(at.phase == Phase::Catch && matches!(node, doc::Node::Stmt(doc::Stmt::Try(_))))
     {
         return Ok(None);
     }
     let kind = match node {
+        doc::Node::Stmt(doc::Stmt::Try(doc::TryStmt {
+            catch: Some(catch), ..
+        })) if at.phase == Phase::Catch
+            && source
+                .shared
+                .get(&(at.site.child(1), catch.binding.clone()))
+                == Some(&true) =>
+        {
+            HeapKind::Cell
+        }
+        doc::Node::Stmt(doc::Stmt::Try(_)) if at.phase == Phase::Catch => return Ok(None),
         doc::Node::Expr(doc::Expr::Let { name, .. })
             if at.phase == Phase::Test
                 && source.shared.get(&(at.site.clone(), name.clone())) == Some(&true) =>
