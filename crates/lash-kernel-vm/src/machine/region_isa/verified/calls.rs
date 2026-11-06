@@ -54,32 +54,29 @@ impl Running<'_> {
             self.write(load.dst, operand)?;
         }
         self.call_captures.clear();
-        let callable = call
-            .callable
-            .map(|register| {
-                self.registers
-                    .read(self.frame_index(), self.reached.invocation, register)?
-                    .bind(&mut self.view)
-                    .map_err(RegionError::Heap)
-            })
-            .transpose()?;
-        let plan = if let Some(callable) = callable {
-            let origin = call
-                .callable_origin
-                .ok_or_else(|| invalid(Refused::Facts))?;
-            let mut origin = self
+        // A callee read from a captured variable's own register reads its
+        // cell; the call takes the function the cell holds.
+        let mut current = |register| -> Result<_, RegionError> {
+            let value = self
                 .registers
-                .read(self.frame_index(), self.reached.invocation, origin)?
+                .read(self.frame_index(), self.reached.invocation, register)?
                 .bind(&mut self.view)
                 .map_err(RegionError::Heap)?;
-            if self.view.kind(origin).map_err(RegionError::Heap)? == lash_kernel_doc::ValueKind::Ref
+            if self.view.kind(value).map_err(RegionError::Heap)? != lash_kernel_doc::ValueKind::Ref
             {
-                let object = self.view.object(origin).map_err(RegionError::Heap)?;
-                origin = self
-                    .view
-                    .read(object, &LeaseMember::Variable)
-                    .map_err(storage_fault)?;
+                return Ok(value);
             }
+            let object = self.view.object(value).map_err(RegionError::Heap)?;
+            self.view
+                .read(object, &LeaseMember::Variable)
+                .map_err(storage_fault)
+        };
+        let callable = call.callable.map(&mut current).transpose()?;
+        let plan = if let Some(callable) = callable {
+            let origin = current(
+                call.callable_origin
+                    .ok_or_else(|| invalid(Refused::Facts))?,
+            )?;
             let same = match (self.view.inline(origin), self.view.inline(callable)) {
                 (Ok(Some(a)), Ok(Some(b))) => a.same(&b),
                 (Ok(None), Ok(None)) => {

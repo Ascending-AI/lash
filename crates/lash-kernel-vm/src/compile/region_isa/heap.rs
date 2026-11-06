@@ -60,9 +60,26 @@ pub(super) fn source_kind(
             HeapKind::Bytes(Arc::from(bytes.as_slice()))
         }
         doc::Node::Expr(doc::Expr::Closure(_)) => {
+            // One lifted body compiles once per set of names its enclosing
+            // code shares with it: the parent's compilation is the one whose
+            // every capture names a variable of the parent, with the most.
+            let outer = exe.code(parent);
             let code = exe
                 .closure_entries()
-                .find_map(|(_, site, _, code)| (site == &at.site).then_some(code))
+                .filter(|(_, site, _, _)| *site == &at.site)
+                .map(|(_, _, _, code)| code)
+                .filter(|code| {
+                    let inner = exe.code(*code);
+                    inner.captures.iter().all(|capture| {
+                        outer
+                            .slots_by_at
+                            .get(capture.outer_at as usize)
+                            .and_then(|slot| outer.slots.get(*slot as usize))
+                            .zip(inner.slots.get(capture.inner as usize))
+                            .is_some_and(|(outer, inner)| outer.name == inner.name)
+                    })
+                })
+                .max_by_key(|code| exe.code(*code).captures.len())
                 .ok_or(Refused::Source)?;
             let captures = exe
                 .code(code)

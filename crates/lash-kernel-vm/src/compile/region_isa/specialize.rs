@@ -39,8 +39,10 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
             known[reg.offset()] = Some(RegisterKind::Value);
         }
     }
-    for (slot, reg) in &draft.roles {
-        if slot.capture() {
+    // A session cell holds whatever the lease imported or another frame
+    // wrote, so its kind is never narrowed by this region's own writes.
+    for (role, reg) in &draft.roles {
+        if role.capture() || matches!(role, Role::Session(_)) {
             known[reg.offset()] = Some(RegisterKind::Value);
         }
     }
