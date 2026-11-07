@@ -1,6 +1,11 @@
 //! Statement and source-note ownership for dialect lowering.
+use std::collections::BTreeMap;
+
 use crate::Note;
-use lash_kernel_doc::{Block, Expr, Node, Rhs, Stmt};
+use lash_kernel_doc::{
+    Block, CallablePresentation, Closure, Expr, FunctionDefinition, Node, Place, Rhs, Stmt,
+};
+use lash_kernel_value::{FunctionId, Name};
 
 /// A kernel block under construction: each statement with the note of
 /// its source layers, so a move, removal or fold carries both.
@@ -226,6 +231,102 @@ pub enum Branches<T> {
         then_branch: (BlockBuilder, T),
         else_branch: (BlockBuilder, T),
     },
+}
+
+impl<T> Choice<T> {
+    /// Finish a choice through the dialect's operand, store and emission rules.
+    pub fn finish<S, U>(
+        self,
+        state: &mut S,
+        facts: U,
+        expression: impl FnOnce(&mut S, Expr, Note, U) -> T,
+        result: impl FnOnce(&mut S, U) -> (Place, T),
+        mut store: impl FnMut(&mut S, (BlockBuilder, T), Place) -> BlockBuilder,
+        emit: impl FnOnce(&mut S, Expr, BlockBuilder, BlockBuilder),
+    ) -> T {
+        match self.branches {
+            Branches::Expression { value } => expression(state, value, self.note, facts),
+            Branches::Statements {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let (place, value) = result(state, facts);
+                let then = store(state, then_branch, place.clone());
+                let otherwise = store(state, else_branch, place);
+                emit(state, condition, then, otherwise);
+                value
+            }
+        }
+    }
+}
+
+/// Keep folded closure and written notes on a binding when an inline value
+/// has no statement to own them.
+pub fn finish_expression<S, T, U>(
+    state: &mut S,
+    value: Expr,
+    note: Note,
+    facts: U,
+    inline: impl FnOnce(&mut S, Expr, U) -> T,
+    bind: impl FnOnce(&mut S, Expr, U) -> T,
+    buffer: impl Fn(&mut S) -> &mut BlockBuilder,
+) -> T {
+    if note.blocks.is_empty() && note.nested_written.is_empty() {
+        return inline(state, value, facts);
+    }
+    let result = bind(state, value, facts);
+    if let Some(placed) = buffer(state).last_note_mut() {
+        placed.blocks = note.blocks;
+        placed.nested_written = note.nested_written;
+    }
+    result
+}
+
+/// Commit operand regions in source order. An unstable operand is pinned
+/// before any later region's statements can change its value (K-EVAL-001).
+pub fn ordered<S, T>(
+    state: &mut S,
+    parts: Vec<(BlockBuilder, T)>,
+    stable: impl Fn(&T) -> bool,
+    mut append: impl FnMut(&mut S, BlockBuilder),
+    mut pin: impl FnMut(&mut S, T) -> T,
+) -> Vec<T> {
+    let mut pins = vec![false; parts.len()];
+    let mut later = false;
+    for (index, (buf, operand)) in parts.iter().enumerate().rev() {
+        pins[index] = later && !stable(operand);
+        later |= !buf.is_empty();
+    }
+    parts
+        .into_iter()
+        .zip(pins)
+        .map(|((buf, operand), pinned)| {
+            append(state, buf);
+            if pinned { pin(state, operand) } else { operand }
+        })
+        .collect()
+}
+
+/// Store a finished local function and its source notes before binding its closure.
+pub fn closure_binding(
+    name: Name,
+    definition: FunctionDefinition,
+    notes: Vec<Note>,
+    presentation: Option<CallablePresentation>,
+    functions: &mut BTreeMap<FunctionId, FunctionDefinition>,
+    local_notes: &mut BTreeMap<FunctionId, Vec<Note>>,
+) -> Stmt {
+    let function = definition.identity();
+    functions.insert(function, definition);
+    local_notes.insert(function, notes);
+    Stmt::Let {
+        name,
+        value: Rhs::Expr(Expr::Closure(Box::new(Closure {
+            function,
+            presentation,
+        }))),
+    }
 }
 
 /// Join lazy regions. Source type joins and statement-only stores remain with the dialect.

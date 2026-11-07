@@ -15,8 +15,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use lash_kernel_dialect::{CellEnvironment, Environment, Library, Lowered, Mode, workflow};
 use lash_kernel_doc::{
-    AssignOrder, Block, Callee, Catch, Closure, Document, Expr, Float, Literal, Member,
-    NumberPolicy, Place, Rhs, Stmt, TryStmt,
+    AssignOrder, Block, Callee, Catch, Document, Expr, Float, Literal, Member, NumberPolicy, Place,
+    Rhs, Stmt, TryStmt,
 };
 
 use {lash_kernel_value::FunctionId, lash_kernel_value::FunctionName, lash_kernel_value::Name};
@@ -975,16 +975,15 @@ impl Lowerer<'_> {
         if implicit_return {
             definition.projection = lash_kernel_doc::ProjectionRole::ImplicitReturn;
         }
-        let function = definition.identity();
-        self.local_functions.insert(function, definition);
-        self.local_notes.insert(function, notes);
-        self.emit(Stmt::Let {
-            name: name.clone(),
-            value: Rhs::Expr(Expr::Closure(Box::new(Closure {
-                function,
-                presentation: start,
-            }))),
-        });
+        let binding = lash_kernel_dialect::builder::closure_binding(
+            name.clone(),
+            definition,
+            notes,
+            start,
+            &mut self.local_functions,
+            &mut self.local_notes,
+        );
+        self.emit(binding);
         self.note_written();
         Operand::temp(name, Ty::Unknown)
     }
@@ -1303,20 +1302,13 @@ impl Lowerer<'_> {
 
     /// Commit operand buffers in source order, pinning only before later statements.
     fn ordered(&mut self, parts: Vec<(Buf, Operand)>) -> Vec<Operand> {
-        let mut pins = vec![false; parts.len()];
-        let mut later = false;
-        for (index, (buf, operand)) in parts.iter().enumerate().rev() {
-            pins[index] = later && !operand.stable;
-            later |= !buf.is_empty();
-        }
-        parts
-            .into_iter()
-            .zip(pins)
-            .map(|((buf, operand), pin)| {
-                self.append(buf);
-                if pin { self.pin(operand) } else { operand }
-            })
-            .collect()
+        lash_kernel_dialect::builder::ordered(
+            self,
+            parts,
+            |operand| operand.stable,
+            Self::append,
+            Self::pin,
+        )
     }
 
     pub(crate) fn operands(&mut self, exprs: &[&ast::Expr]) -> Lowering<Vec<Operand>> {

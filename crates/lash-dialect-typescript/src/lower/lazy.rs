@@ -77,34 +77,19 @@ impl Lowerer<'_> {
             self.kernel_depth,
             Operand::expr,
         );
-        let note = choice.note;
-        let (condition, then_branch, else_branch) = match choice.branches {
-            lash_kernel_dialect::builder::Branches::Expression { value } => {
-                if note.blocks.is_empty() && note.nested_written.is_empty() {
-                    return self.inline(value, ty);
-                }
-                let result = self.let_expr(value, ty);
-                if let Some(placed) = self.buf.last_note_mut() {
-                    placed.blocks = note.blocks;
-                    placed.nested_written = note.nested_written;
-                }
-                return result;
-            }
-            lash_kernel_dialect::builder::Branches::Statements {
-                condition,
-                then_branch,
-                else_branch,
-            } => (condition, then_branch, else_branch),
-        };
-        let (mut then_buf, then_value) = then_branch;
-        let (mut else_buf, else_value) = else_branch;
-        let result = self.temp();
-        let recipe = &crate::constructs::conditional::CONDITIONAL;
-        self.emit(recipe.binding(result.clone()));
-        then_buf = self.store_branch((then_buf, then_value), recipe.destination(&result));
-        else_buf = self.store_branch((else_buf, else_value), recipe.destination(&result));
-        self.emit_if(condition, then_buf, else_buf);
-        Operand::variable(result, ty)
+        choice.finish(
+            self,
+            ty,
+            Self::folded_value,
+            |this, ty| {
+                let result = this.temp();
+                let recipe = &crate::constructs::conditional::CONDITIONAL;
+                this.emit(recipe.binding(result.clone()));
+                (recipe.destination(&result), Operand::variable(result, ty))
+            },
+            Self::store_branch,
+            Self::emit_if,
+        )
     }
 
     /// Gives a statement-only branch its result store without evaluating it early.
@@ -118,23 +103,25 @@ impl Lowerer<'_> {
         )
     }
 
+    fn folded_value(&mut self, value: Expr, note: super::Note, ty: super::Ty) -> Operand {
+        lash_kernel_dialect::builder::finish_expression(
+            self,
+            value,
+            note,
+            ty,
+            Self::inline,
+            Self::let_expr,
+            |this| &mut this.buf,
+        )
+    }
+
     pub(super) fn expression_block(
         &mut self,
         lower: impl FnOnce(&mut Self) -> Lowering<Operand>,
     ) -> Lowering<Operand> {
         let (buf, value) = self.value_block(lower)?;
         match buf.folded(value.expr(), self.kernel_depth, &[0]) {
-            Ok((expr, note)) => {
-                if note.blocks.is_empty() && note.nested_written.is_empty() {
-                    return Ok(self.inline(expr, value.ty));
-                }
-                let result = self.let_expr(expr, value.ty);
-                if let Some(placed) = self.buf.last_note_mut() {
-                    placed.blocks = note.blocks;
-                    placed.nested_written = note.nested_written;
-                }
-                Ok(result)
-            }
+            Ok((expr, note)) => Ok(self.folded_value(expr, note, value.ty)),
             Err(buf) => {
                 self.append(buf);
                 Ok(value)

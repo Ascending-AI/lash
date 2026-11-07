@@ -924,16 +924,15 @@ impl Lowerer<'_> {
             self.library,
             &self.local_functions,
         );
-        let function = definition.identity();
-        self.local_functions.insert(function, definition);
-        self.local_notes.insert(function, notes);
-        self.emit(Stmt::Let {
-            name: name.clone(),
-            value: Rhs::Expr(Expr::Closure(Box::new(Closure {
-                function,
-                presentation: start,
-            }))),
-        });
+        let binding = lash_kernel_dialect::builder::closure_binding(
+            name.clone(),
+            definition,
+            notes,
+            start,
+            &mut self.local_functions,
+            &mut self.local_notes,
+        );
+        self.emit(binding);
         Operand::temp(name, Ty::Unknown)
     }
 
@@ -1134,18 +1133,13 @@ impl Lowerer<'_> {
     }
 
     fn ordered(&mut self, parts: Vec<(Buf, Operand)>) -> Vec<Operand> {
-        let mut pins = vec![false; parts.len()];
-        let mut later = false;
-        for (index, (buf, operand)) in parts.iter().enumerate().rev() {
-            pins[index] = later && !operand.stable;
-            later |= !buf.is_empty();
-        }
-        let mut out = Vec::with_capacity(parts.len());
-        for ((buf, operand), pinned) in parts.into_iter().zip(pins) {
-            self.append(buf);
-            out.push(if pinned { self.pin(operand) } else { operand });
-        }
-        out
+        lash_kernel_dialect::builder::ordered(
+            self,
+            parts,
+            |operand| operand.stable,
+            Self::append,
+            Self::pin,
+        )
     }
 
     /// A Python value as the bool its truth is.
