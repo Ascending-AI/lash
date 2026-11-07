@@ -11,7 +11,6 @@ pub(super) enum Edge {
     Branch { input: Owner, yes: Point, no: Point },
     Cursor { body: Point, done: Point },
     Stop,
-    Boundary,
 }
 pub(super) fn point(site: &Site, phase: Phase) -> Point {
     Point {
@@ -569,14 +568,6 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
         let mut depth = 0;
         let mut scalar_resources = false;
         let op = match edge {
-            Edge::Boundary => RegionOp::Boundary {
-                spec: BoundarySpec {
-                    action: None,
-                    at: at.clone(),
-                    origin,
-                    next: None,
-                },
-            },
             Edge::Branch { input, yes, no } => {
                 let input = reg(&roles, &source, input)?;
                 // Branch itself performs the canonical checked unpack at Test.

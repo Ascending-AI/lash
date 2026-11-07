@@ -179,12 +179,6 @@ pub(in crate::compile::room) fn call_site(
 }
 
 impl DynamicSite {
-    pub(in crate::compile::room) fn at(&self) -> &Point {
-        &self.at
-    }
-    pub(in crate::compile::room) fn rooted(&self) -> bool {
-        self.rooted
-    }
     pub(in crate::compile::room) fn occurrence(&self) -> Option<usize> {
         self.occurrence
     }
@@ -276,9 +270,4 @@ pub(super) fn root_role(source: &Source, at: &Point) -> Result<Role, Refused> {
         },
     )
     .ok_or(Refused::Source)
-}
-
-/// The frame slot a dynamic call reads its callee from.
-pub(super) fn root_slot(source: &Source, at: &Point) -> Result<Slot, Refused> {
-    root_role(source, at)?.slot().ok_or(Refused::Source)
 }

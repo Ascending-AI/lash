@@ -50,43 +50,7 @@ pub(crate) struct PreparedExactPrefix<'a> {
     bound: Bound,
     journal: PreparedProgram<'a>,
 }
-impl<'a> PreparedExactPrefix<'a> {
-    /// The exact journal's peak: the run's logical holdings at its verdict point.
-    pub(crate) fn peak(&self) -> u64 {
-        self.journal.peak()
-    }
-    /// The peak without what the ledger already held unreachable.
-    pub(crate) fn collect(mut self, ledger: &Ledger, heap: &PagedHeap) -> Result<Self, HeapFault> {
-        self.journal = self.journal.collect(ledger, heap.pages())?;
-        Ok(self)
-    }
-    pub(crate) fn admit_exact<'r>(
-        mut self,
-        frontier: &Frontier,
-        ledger: &Ledger,
-        resources: SourceResources<'r>,
-        allowance: &Allowance,
-        memory_bound: u64,
-    ) -> Result<Option<SourceAccepted<'r, PreparedPrefix<'a>>>, HeapFault> {
-        if !self.bound.current(frontier)
-            || !self.journal.is_current(ledger)
-            || &self.bound.allowance != allowance
-            || self.journal.peak() > memory_bound
-        {
-            return Ok(None);
-        }
-        let facts = self.bound.resources.clone();
-        resources.admit_interval(
-            &facts,
-            allowance,
-            PreparedPrefix {
-                bound: self.bound,
-                journal: self.journal,
-                memory_bound,
-            },
-        )
-    }
-}
+impl<'a> PreparedExactPrefix<'a> {}
 
 pub(crate) struct CommittedPrefix {
     pub(crate) position: Position,
@@ -312,17 +276,6 @@ impl<'a> SourceAccepted<'_, PreparedPrefix<'a>> {
     ) -> Result<CommittedPrefix, PublicationError> {
         self.publish_with(frontier, ledger, |accepted, ledger| {
             accepted.publish(ledger, semantic)
-        })
-    }
-
-    pub(crate) fn publish_materialized(
-        self,
-        frontier: &mut Frontier,
-        ledger: &mut Ledger,
-        semantic: impl FnOnce(&mut Arena, Vec<MemberEdit>, Vec<logical::VirtualEntity>),
-    ) -> Result<CommittedPrefix, PublicationError> {
-        self.publish_with(frontier, ledger, |accepted, ledger| {
-            accepted.publish_materialized(ledger, semantic)
         })
     }
 

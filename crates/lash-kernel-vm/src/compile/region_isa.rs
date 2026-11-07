@@ -1,5 +1,4 @@
 //! Ephemeral region ISA. Source and canonical definitions seal every table.
-#![allow(dead_code, reason = "region execution is integrated by lane C")]
 
 use super::room::region::calls::region_isa::CallPlan;
 use super::room::{Event, Phase, Point, Refused, Source};
@@ -123,10 +122,6 @@ impl PrefixId {
     }
 }
 impl CallId {
-    #[cfg(test)]
-    pub(crate) fn fixture(index: u32) -> Self {
-        Self(index)
-    }
     pub(crate) fn index(self) -> u32 {
         self.0
     }
@@ -157,14 +152,8 @@ impl IntKernel {
     pub(crate) fn function(&self) -> FunctionId {
         self.function
     }
-    pub(crate) fn operation(&self) -> doc::scalar::ScalarOp {
-        self.op
-    }
     pub(crate) fn lib(&self) -> LibId {
         self.lib
-    }
-    pub(crate) fn depth(&self) -> u32 {
-        self.depth
     }
     #[inline]
     pub(crate) fn apply(&self, lhs: i64, rhs: i64) -> Option<i64> {
@@ -280,10 +269,6 @@ pub(crate) enum CheckedKind {
     PackBool {
         input: Reg<bool>,
     },
-    UnpackInt {
-        input: Reg<LeaseValue>,
-        output: Reg<i64>,
-    },
     PackInt {
         input: Reg<i64>,
     },
@@ -343,8 +328,6 @@ pub(crate) enum HeapPhaseKind {
     Allocate,
     AllocateMove,
     Member,
-    Grow,
-    Hold,
     Release,
 }
 
@@ -360,14 +343,8 @@ pub(crate) enum Selector {
     Index(Reg<LeaseValue>),
 }
 impl ReadSpec {
-    pub(crate) fn point(&self) -> &Point {
-        &self.at
-    }
     pub(crate) fn selector(&self) -> &Selector {
         &self.selector
-    }
-    pub(crate) fn retained_owner(&self) -> Option<Slot> {
-        self.retained
     }
 }
 
@@ -439,9 +416,6 @@ pub(crate) struct KirOrigin {
     pub(crate) op: Op,
 }
 impl BoundarySpec {
-    pub(crate) fn point(&self) -> &Point {
-        &self.at
-    }
     pub(crate) fn action(&self) -> Option<&ActionBoundary> {
         self.action.as_ref()
     }
@@ -678,14 +652,6 @@ impl RegionDraft {
     pub(crate) fn call_sources(&self) -> &[(StmtId, u32, Option<Phase>)] {
         &self.call_sources
     }
-    pub(crate) fn has_calls(&self) -> bool {
-        self.ops
-            .iter()
-            .any(|op| matches!(op, RegionOp::Call { .. }))
-    }
-    pub(crate) fn call_sites(&self) -> &[CallSite] {
-        &self.calls
-    }
     pub(crate) fn code(&self) -> CodeId {
         self.code
     }
@@ -701,13 +667,6 @@ impl RegionCode {
             sessions: Arc::clone(&self.sessions),
             generic: true,
         })
-    }
-    pub(crate) fn packing(&self, reg: Reg<LeaseValue>) -> Option<&CheckedKernel> {
-        if self.generic {
-            None
-        } else {
-            self.draft.packing.get(reg.offset())?.as_ref()
-        }
     }
     pub(crate) fn entry(&self) -> Pc {
         self.draft.entry
@@ -1228,12 +1187,9 @@ impl RegionCode {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 pub(crate) mod fixtures {
     use super::*;
-    pub(crate) fn draft(exe: &Executable, code: CodeId) -> Result<RegionDraft, Refused> {
-        compile_region(exe, code)
-    }
     fn raw(exe: &Executable, code: CodeId) -> Result<RegionDraft, Refused> {
         if code.0 as usize >= exe.code_count() {
             return Err(Refused::Source);
@@ -1276,43 +1232,6 @@ pub(crate) mod fixtures {
             .iter()
             .map(|&(statement, pc)| (statement, pc, None))
             .collect();
-        Ok(draft)
-    }
-    pub(crate) fn exit(
-        exe: &Executable,
-        code: CodeId,
-        continuation: Point,
-    ) -> Result<RegionDraft, Refused> {
-        let mut draft = raw(exe, code)?;
-        draft.ops = Box::new([RegionOp::Exit {
-            prefix: PrefixId(0),
-        }]);
-        draft.recovery = Box::new([RecoveryMap {
-            roles: Box::new([]),
-            operands: Box::new([]),
-            pending: None,
-            graph: GraphRecovery::fixture(&continuation),
-            continuation,
-        }]);
-        Ok(draft)
-    }
-    pub(crate) fn heap(
-        exe: &Executable,
-        code: CodeId,
-        continuation: Point,
-    ) -> Result<RegionDraft, Refused> {
-        let mut draft = exit(exe, code, continuation.clone())?;
-        draft.ops = Box::new([RegionOp::Heap {
-            kernel: HeapKernel {
-                source: continuation,
-                phases: Box::new([]),
-                kind: HeapKind::List,
-                moves: Box::new([]),
-            },
-            args: Box::new([]),
-            dst: None,
-            next: Pc(0),
-        }]);
         Ok(draft)
     }
 }

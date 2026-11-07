@@ -10,7 +10,6 @@ use lash_kernel_state::kernel_internals::logical::{
 pub(super) struct Live<V: Copy> {
     pub(super) frames: Box<[FrameImage<Operand<V>>]>,
     pub(super) payload: Option<V>,
-    pub(super) returning: Option<returns::ReturnImage<V>>,
     /// Held main session cells by logical owner digest.
     pub(super) sessions: Box<[([u8; 32], Operand<V>)]>,
 }
@@ -19,15 +18,12 @@ pub(super) struct PublishedFrame {
     pub(super) program: CodeId,
     pub(super) invocation: u64,
     pub(super) roles: Box<[(Slot, PublicationValue)]>,
-    // Physical aliases are deliberately separate from source-owned roles.
-    pub(super) operands: Box<[PublicationValue]>,
     pub(super) pending: Option<PublicationValue>,
     pub(super) incoming: bool,
 }
 pub(super) struct Published {
     pub(super) frames: Box<[PublishedFrame]>,
     pub(super) payload: Option<PublicationValue>,
-    pub(super) returning: Option<PublicationValue>,
     pub(super) sessions: Box<[([u8; 32], PublicationValue)]>,
 }
 
@@ -103,11 +99,6 @@ impl Live<LeaseValue> {
                                 ))
                             })
                             .collect::<Result<_, RegionError>>()?,
-                        operands: frame
-                            .operands
-                            .iter()
-                            .map(|value| publication(graph, *value, false))
-                            .collect::<Result<_, _>>()?,
                         incoming: frame.incoming,
                         pending: frame
                             .pending
@@ -119,11 +110,6 @@ impl Live<LeaseValue> {
             payload: self
                 .payload
                 .map(|value| publication(graph, Operand::Dynamic(value), false))
-                .transpose()?,
-            returning: self
-                .returning
-                .as_ref()
-                .map(|image| publication(graph, Operand::Dynamic(image.value), false))
                 .transpose()?,
             sessions: self
                 .sessions

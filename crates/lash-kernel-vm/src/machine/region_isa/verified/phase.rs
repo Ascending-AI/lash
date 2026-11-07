@@ -50,11 +50,11 @@ fn read(
 }
 pub(super) struct PreparedResources<'a, 's> {
     step: Option<LeaseStep<'a, 's>>,
-    counters: execute::Counters,
+    counters: Counters,
     session: Option<&'a mut super::running::SessionState>,
 }
 impl PreparedResources<'_, '_> {
-    pub(super) fn accept(self) -> Result<execute::Counters, RegionError> {
+    pub(super) fn accept(self) -> Result<Counters, RegionError> {
         if let Some(step) = self.step {
             step.reserve().map_err(RegionError::Heap)?.accept();
         }
@@ -77,7 +77,7 @@ impl<'s> Running<'s> {
         &mut self,
         result: LeaseValue,
         native: Option<(u64, u64, u64)>,
-    ) -> Result<Option<execute::Counters>, RegionError> {
+    ) -> Result<Option<Counters>, RegionError> {
         let (retained, peak) = match native {
             Some((retained, peak, _)) => (retained, peak),
             None => {
@@ -116,7 +116,7 @@ impl<'s> Running<'s> {
             return Err(invalid(Refused::Facts));
         }
         step.reserve().map_err(RegionError::Heap)?.accept();
-        Ok(Some(execute::Counters {
+        Ok(Some(Counters {
             balance,
             peak,
             ..self.counters
@@ -309,8 +309,7 @@ impl<'s> Running<'s> {
                             i128::from(*quoted.get(*index).ok_or_else(|| invalid(Refused::Facts))?)
                                 + i128::from(*headers)
                         }
-                        Fact::Zero => 0,
-                        Fact::Source(_) => return Err(invalid(Refused::Facts)),
+                        Fact::Source => return Err(invalid(Refused::Facts)),
                     };
                     sum.checked_add(
                         value
@@ -368,7 +367,7 @@ impl<'s> Running<'s> {
         Ok(Some(PreparedResources {
             session,
             step: Some(step),
-            counters: execute::Counters {
+            counters: Counters {
                 balance,
                 peak,
                 debt,

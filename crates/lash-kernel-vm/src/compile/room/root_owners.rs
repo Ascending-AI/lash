@@ -269,8 +269,6 @@ impl OwnerSlots {
                 Slot::Capture(index)
             }
             Owner::Binding { .. } => Slot::Binding(index),
-            Owner::HookArgument { .. } => Slot::Argument(index),
-            Owner::HookResult { .. } => Slot::Control(index),
             Owner::LoopCursor(_) | Owner::LoopHeader(_) => Slot::Control(index),
             Owner::PendingDeparture(_) | Owner::ActiveDeparture(_) => Slot::Departure(index),
             _ => return None,
@@ -311,11 +309,7 @@ impl OwnerSlots {
             (Owner::Operands(at), Owner::Operand(site) | Owner::Selected(site))
             | (
                 Owner::Operands(at),
-                Owner::Atom { at: site, .. }
-                | Owner::HookArgument { at: site, .. }
-                | Owner::HookResult { at: site, .. }
-                | Owner::LoopCursor(site)
-                | Owner::LoopHeader(site),
+                Owner::Atom { at: site, .. } | Owner::LoopCursor(site) | Owner::LoopHeader(site),
             ) => at.unit == site.unit && site.path.starts_with(&at.path),
             (
                 Owner::Departures(at),

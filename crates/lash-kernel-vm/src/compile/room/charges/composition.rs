@@ -1,6 +1,5 @@
 //! A statement's original charge program, admitted as one statement debt.
 use super::*;
-use crate::compile::CodeId;
 
 /// One statement's debt under its original charge program.
 pub(crate) enum StatementDebt<'a> {
@@ -48,50 +47,4 @@ impl<'a> crate::admission::SourceResources<'a> {
         };
         self.admit_interval(&facts, &need, request)
     }
-}
-
-/// Statement and branch order comes from the defining body's compiled blocks.
-/// Every selected test and returned statement keeps its original charge span.
-fn body_programs(
-    exe: &Executable,
-    code: CodeId,
-    block: crate::compile::BlockId,
-    selected: &[super::super::Selection],
-    programs: &mut Vec<ChargeProgram>,
-) -> Result<bool, Refused> {
-    for &statement in &exe.block(block).stmts {
-        let (stream, stmt, _) = exe.statement(statement);
-        programs.push(ChargeProgram::compile(exe, code, statement, stmt.ops)?);
-        match stmt.form {
-            crate::compile::Form::If {
-                then_block,
-                else_block,
-            } => {
-                let taken = selected
-                    .iter()
-                    .find_map(|selection| match selection {
-                        super::super::Selection::Branch { at, taken } if *at == stmt.site => {
-                            Some(*taken)
-                        }
-                        _ => None,
-                    })
-                    .ok_or(Refused::Path)?;
-                if body_programs(
-                    exe,
-                    code,
-                    if taken { then_block } else { else_block },
-                    selected,
-                    programs,
-                )? {
-                    return Ok(true);
-                }
-            }
-            crate::compile::Form::Plain | crate::compile::Form::Action(_) => {}
-            _ => return Err(Refused::Source),
-        }
-        if matches!(stream.ops[stmt.ops.end() as usize - 1], Op::Return { .. }) {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }

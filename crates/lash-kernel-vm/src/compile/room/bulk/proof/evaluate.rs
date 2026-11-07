@@ -738,7 +738,7 @@ impl CollectionProgram {
             return Ok(None);
         }
         let Some(accepted) =
-            bound.prepare_external(frontier, ledger, heap, transaction, resources, memory_bound)?
+            bound.prepare_external(frontier, ledger, transaction, resources, memory_bound)?
         else {
             return Ok(None);
         };

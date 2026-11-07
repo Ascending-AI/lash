@@ -56,16 +56,12 @@ impl<'m> Authority<'m> {
         image: &mut Reconstruction,
         frozen: FrozenGraph<'m>,
     ) -> Result<Prepared<'m>, RegionError> {
-        let (lease, graph, invocations, publications) = match frozen {
-            FrozenGraph::Machine {
-                lease,
-                graph,
-                invocations,
-                publications,
-            } => (lease, graph, invocations, publications),
-            #[cfg(test)]
-            FrozenGraph::Fixture(_) => return Err(invalid(Refused::Facts)),
-        };
+        let FrozenGraph {
+            lease,
+            graph,
+            invocations,
+            publications,
+        } = frozen;
         let canonical = image
             .canonical
             .take()
@@ -139,15 +135,6 @@ impl<'m> Authority<'m> {
             }));
         }
         if let Some(value) = publications.payload {
-            outputs.push((Owner::Incoming(self.task), value));
-        }
-        if let Some(value) = publications.returning {
-            if outputs
-                .iter()
-                .any(|(owner, _)| *owner == Owner::Incoming(self.task))
-            {
-                return Err(invalid(Refused::Exit));
-            }
             outputs.push((Owner::Incoming(self.task), value));
         }
         for (digest, value) in publications.sessions {

@@ -55,16 +55,14 @@ fn callee_inputs_preserve_order_absence_and_reserved_identity() {
     let stamp = machine.logical.borrow().stamp();
     let charged = machine.charged;
     let memory = machine.logical_memory.get();
-    let mut lease = RegionLease::acquire(machine, program).unwrap();
+    let mut lease = acquire(machine, program).unwrap();
     for _ in 0..2 {
         assert_eq!(
             lease.run(StopAt::NextLegalPrefix).unwrap(),
             RegionStop::Handoff
         );
     }
-    let Executing::Machine(execution) = &mut lease.execution else {
-        unreachable!()
-    };
+    let execution = &mut lease.execution;
     let crate::compile::region_isa::RegionOp::Call { site, .. } =
         execution.code.program.op(execution.pc).unwrap()
     else {
@@ -139,7 +137,7 @@ main {}"#,
         machine.logical_memory.get(),
         machine.charged,
     );
-    let mut lease = RegionLease::acquire(machine, Arc::clone(&program)).unwrap();
+    let mut lease = acquire(machine, Arc::clone(&program)).unwrap();
     assert_eq!(
         lease.run(StopAt::NextLegalPrefix).unwrap(),
         RegionStop::Handoff
@@ -162,7 +160,7 @@ main {}"#,
         (before.1, before.2)
     );
 
-    let mut lease = RegionLease::acquire(machine, Arc::clone(&program)).unwrap();
+    let mut lease = acquire(machine, Arc::clone(&program)).unwrap();
     lease.run(StopAt::NextLegalPrefix).unwrap();
     lease
         .materialize()
@@ -177,7 +175,7 @@ main {}"#,
             .region_values()
             .any(|(_, value)| value.same(&Value::Int(7)))
     );
-    let mut lease = RegionLease::acquire(machine, program).unwrap();
+    let mut lease = acquire(machine, program).unwrap();
     assert_eq!(
         lease.run(StopAt::NextLegalPrefix).unwrap(),
         RegionStop::Handoff
@@ -218,9 +216,7 @@ main {}"#,
         (run, program)
     }
     fn binding(lease: &RegionLease<'_>) -> bool {
-        let Executing::Machine(execution) = &lease.execution else {
-            unreachable!()
-        };
+        let execution = &lease.execution;
         execution
             .code
             .program
@@ -273,21 +269,21 @@ main {}"#,
         ) && value.same(&Value::Int(7))));
     }
     let (mut split, program) = machine();
-    let mut lease = RegionLease::acquire(&mut split.machine, Arc::clone(&program)).unwrap();
+    let mut lease = acquire(&mut split.machine, Arc::clone(&program)).unwrap();
     next_binding(&mut lease);
     let prefix = lease.materialize().unwrap();
     pass(prefix.reconstruction(), 1);
     prefix.prepare_exit().unwrap().commit().unwrap();
 
     let (mut uninterrupted, complete_program) = machine();
-    let mut lease = RegionLease::acquire(&mut uninterrupted.machine, complete_program).unwrap();
+    let mut lease = acquire(&mut uninterrupted.machine, complete_program).unwrap();
     next_binding(&mut lease);
     next_binding(&mut lease);
     let complete = lease.materialize().unwrap();
     pass(complete.reconstruction(), 2);
     let expected = complete.reconstruction().counters;
 
-    let mut lease = RegionLease::acquire(&mut split.machine, program).unwrap();
+    let mut lease = acquire(&mut split.machine, program).unwrap();
     next_binding(&mut lease);
     let prefix = lease.materialize().unwrap();
     pass(prefix.reconstruction(), 2);
@@ -321,16 +317,14 @@ fn static_body_entry_uses_its_own_bank_and_exact_frame_limits() {
         let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
         let stamp = machine.logical.borrow().stamp();
         let canonical = (machine.charged, machine.logical_memory.get());
-        let mut lease = RegionLease::acquire(machine, program).unwrap();
+        let mut lease = acquire(machine, program).unwrap();
         for _ in 0..2 {
             assert_eq!(
                 lease.run(StopAt::NextLegalPrefix).unwrap(),
                 RegionStop::Handoff
             );
         }
-        let Executing::Machine(execution) = &mut lease.execution else {
-            unreachable!()
-        };
+        let execution = &mut lease.execution;
         let before = execution.counters;
         let first = execution.invocations.prepare().unwrap().id;
         let required = before.balance
@@ -343,9 +337,7 @@ fn static_body_entry_uses_its_own_bank_and_exact_frame_limits() {
                 lease.run(StopAt::NextLegalPrefix).unwrap(),
                 RegionStop::Refusal
             );
-            let Executing::Machine(execution) = &lease.execution else {
-                unreachable!()
-            };
+            let execution = &lease.execution;
             assert_eq!(execution.invocations.prepare().unwrap().id, first);
             assert_eq!(execution.frame_index(), 0);
             assert_eq!(
@@ -357,9 +349,7 @@ fn static_body_entry_uses_its_own_bank_and_exact_frame_limits() {
                 lease.run(StopAt::NextLegalPrefix).unwrap(),
                 RegionStop::Handoff
             );
-            let Executing::Machine(execution) = &mut lease.execution else {
-                unreachable!()
-            };
+            let execution = &mut lease.execution;
             assert_ne!(execution.code.program.code(), root);
             assert_eq!(execution.reached.invocation, first);
             assert_eq!(execution.frame_index(), 1);
@@ -391,9 +381,7 @@ fn static_body_entry_uses_its_own_bank_and_exact_frame_limits() {
                 assert_eq!(result, RegionStop::Refusal);
             } else {
                 assert_eq!(result, RegionStop::Handoff);
-                let Executing::Machine(execution) = &lease.execution else {
-                    unreachable!()
-                };
+                let execution = &lease.execution;
                 let map = execution.code.program.recovery(execution.prefix).unwrap();
                 assert!(map.roles.iter().any(|(slot, register)| {
                     matches!(
@@ -440,7 +428,7 @@ fn an_active_static_call_preserves_both_canonical_frames() {
         let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
         let stamp = machine.logical.borrow().stamp();
         let before = (machine.charged, machine.logical_memory.get());
-        let mut lease = RegionLease::acquire(machine, program).unwrap();
+        let mut lease = acquire(machine, program).unwrap();
         for _ in 0..3 {
             assert_eq!(
                 lease.run(StopAt::NextLegalPrefix).unwrap(),
@@ -529,16 +517,14 @@ fn a_nested_call_reconstructs_the_saved_expression_operand() {
         let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
         let stamp = machine.logical.borrow().stamp();
         let before = (machine.charged, machine.logical_memory.get());
-        let mut lease = RegionLease::acquire(machine, program).unwrap();
+        let mut lease = acquire(machine, program).unwrap();
         let mut entered = false;
         for _ in 0..16 {
             assert_eq!(
                 lease.run(StopAt::NextLegalPrefix).unwrap(),
                 RegionStop::Handoff
             );
-            let Executing::Machine(execution) = &lease.execution else {
-                unreachable!()
-            };
+            let execution = &lease.execution;
             if execution.frame_index() == 1 {
                 entered = true;
                 break;
@@ -611,25 +597,22 @@ fn an_exhausted_production_slice_preserves_the_exact_caller_prefix() {
             let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
             let stamp = machine.logical.borrow().stamp();
             let before = (machine.charged, machine.logical_memory.get());
-            let mut lease = RegionLease::acquire(machine, program).unwrap();
+            let mut lease = acquire(machine, program).unwrap();
             for _ in 0..2 {
                 assert_eq!(
                     lease.run(StopAt::NextLegalPrefix).unwrap(),
                     RegionStop::Handoff
                 );
             }
-            let reached = *lease.prefix();
-            let Executing::Machine(execution) = &mut lease.execution else {
-                unreachable!()
-            };
+            let reached = lease.execution.reached;
+            let execution = &mut lease.execution;
             execution.limits.slice = execution.counters.progress;
             let counters = execution.counters;
             assert_eq!(lease.run(request).unwrap(), RegionStop::Slice);
-            assert_eq!(*lease.prefix(), reached);
+            assert_eq!(lease.execution.reached, reached);
             assert_eq!(lease.run(request).unwrap(), RegionStop::Slice);
             let prefix = lease.materialize().unwrap();
             let image = prefix.reconstruction();
-            assert_eq!(image.issued_invocations, 0);
             assert_eq!(image.frames.len(), 1);
             assert_eq!(
                 (
@@ -681,7 +664,7 @@ fn a_scalar_prefix_obeys_the_exact_source_memory_cutoff() {
             machine.bounds.memory = u64::try_from(i128::from(entry + word) + offset).unwrap();
             let stamp = machine.logical.borrow().stamp();
             let charged = machine.charged;
-            let mut lease = RegionLease::acquire(machine, program).unwrap();
+            let mut lease = acquire(machine, program).unwrap();
             let stop = if offset < 0 {
                 RegionStop::Refusal
             } else {
@@ -693,11 +676,10 @@ fn a_scalar_prefix_obeys_the_exact_source_memory_cutoff() {
             let accepted = u64::from(offset >= 0) * word;
             assert_eq!(image.counters.balance, entry + accepted);
             assert_eq!(image.counters.peak, entry + accepted);
-            assert_eq!(image.issued_invocations, 0);
             let roles = &image.frames[0].roles;
             if offset < 0 {
                 assert!(roles.is_empty());
-                assert!(image.pending.is_none());
+                assert!(image.frames[0].pending.is_none());
             } else {
                 let [(_, value)] = roles.as_ref() else {
                     panic!("one evaluated literal is source-live")
@@ -758,14 +740,12 @@ fn a_returned_call_restores_its_result_after_releasing_the_callee() {
     let calls = compile_calls(&machine.exe, &draft).unwrap();
     let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
     let stamp = machine.logical.borrow().stamp();
-    let mut lease = RegionLease::acquire(machine, program).unwrap();
+    let mut lease = acquire(machine, program).unwrap();
     let mut entered = false;
     let mut restored = false;
     for _ in 0..32 {
         let result = lease.run(StopAt::NextLegalPrefix);
-        let Executing::Machine(execution) = &lease.execution else {
-            unreachable!()
-        };
+        let execution = &lease.execution;
         assert_eq!(
             result.unwrap_or_else(|error| panic!(
                 "{error:?} at {:?}: {:?}",
@@ -778,9 +758,7 @@ fn a_returned_call_restores_its_result_after_releasing_the_callee() {
             )),
             RegionStop::Handoff
         );
-        let Executing::Machine(execution) = &lease.execution else {
-            unreachable!()
-        };
+        let execution = &lease.execution;
         entered |= execution.frame_index() == 1;
         if entered && execution.frame_index() == 0 && execution.returning.is_none() {
             let map = execution.code.program.recovery(execution.prefix).unwrap();
@@ -833,7 +811,7 @@ fn a_constructor_transfers_its_actual_operands_once() {
                 let stamp = machine.logical.borrow().stamp();
                 let memory = machine.logical_memory.get();
                 machine.bounds.memory = u64::try_from(i128::from(peak) + offset).unwrap();
-                let mut lease = RegionLease::acquire(machine, program).unwrap();
+                let mut lease = acquire(machine, program).unwrap();
                 for _ in 0..2 {
                     assert_eq!(
                         lease.run(StopAt::NextLegalPrefix).unwrap(),
@@ -904,11 +882,9 @@ fn member_operand_peak() {
         let draft = compile_region(&machine.exe, root).unwrap();
         let calls = compile_calls(&machine.exe, &draft).unwrap();
         let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
-        let mut lease = RegionLease::acquire(machine, program).unwrap();
+        let mut lease = acquire(machine, program).unwrap();
         for _ in 0..32 {
-            let Executing::Machine(execution) = &mut lease.execution else {
-                unreachable!()
-            };
+            let execution = &mut lease.execution;
             if matches!(execution.code.program.op(execution.pc), Some(crate::compile::region_isa::RegionOp::Heap { kernel, .. }) if matches!(kernel.kind(), crate::compile::region_isa::HeapKind::Index { .. }))
             {
                 break;
@@ -918,9 +894,7 @@ fn member_operand_peak() {
                 RegionStop::Handoff
             );
         }
-        let Executing::Machine(execution) = &mut lease.execution else {
-            unreachable!()
-        };
+        let execution = &mut lease.execution;
         let before = execution.counters;
         // K-LIM-002: base, index and RHS remain live while canonical member
         // scratch borrows another occurrence of each. Overwrite grows no body.
@@ -935,9 +909,7 @@ fn member_operand_peak() {
                 RegionStop::Handoff
             }
         );
-        let Executing::Machine(execution) = &lease.execution else {
-            unreachable!()
-        };
+        let execution = &lease.execution;
         assert_eq!(
             execution.counters.peak,
             if offset < 0 {
@@ -947,9 +919,7 @@ fn member_operand_peak() {
             }
         );
         // Publication takes the limits the lease entered under, or grown.
-        let Executing::Machine(execution) = &mut lease.execution else {
-            unreachable!()
-        };
+        let execution = &mut lease.execution;
         execution.limits.memory = entry;
         lease
             .materialize()
@@ -969,16 +939,14 @@ fn captured_constructor() {
     let draft = compile_region(&machine.exe, root).unwrap();
     let calls = compile_calls(&machine.exe, &draft).unwrap();
     let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
-    let mut lease = RegionLease::acquire(machine, program).unwrap();
+    let mut lease = acquire(machine, program).unwrap();
     let mut found = false;
     for _ in 0..32 {
         assert_eq!(
             lease.run(StopAt::NextLegalPrefix).unwrap(),
             RegionStop::Handoff
         );
-        let Executing::Machine(execution) = &mut lease.execution else {
-            unreachable!()
-        };
+        let execution = &mut lease.execution;
         let code = Arc::clone(&execution.code);
         let map = code.program.recovery(execution.prefix).unwrap();
         for (_, reg) in &map.roles {
@@ -1034,11 +1002,9 @@ fn completed_root() {
         let draft = compile_region(&machine.exe, root).unwrap();
         let calls = compile_calls(&machine.exe, &draft).unwrap();
         let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
-        let mut lease = RegionLease::acquire(machine, program).unwrap();
+        let mut lease = acquire(machine, program).unwrap();
         let outcome = lease.run(StopAt::NextBoundary);
-        let Executing::Machine(execution) = &lease.execution else {
-            unreachable!()
-        };
+        let execution = &lease.execution;
         assert_eq!(
             outcome.unwrap_or_else(|error| panic!(
                 "uninterrupted {body}: {error:?} at {:?}",
@@ -1166,14 +1132,12 @@ main {}"#,
     let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
     let entry_charge = machine.charged;
     ANSWERS.store(0, Ordering::Relaxed);
-    let mut lease = RegionLease::acquire(machine, program).unwrap();
+    let mut lease = acquire(machine, program).unwrap();
     assert_eq!(
         lease.run(StopAt::NextLegalPrefix).unwrap(),
         RegionStop::Handoff
     );
-    let Executing::Machine(execution) = &lease.execution else {
-        unreachable!()
-    };
+    let execution = &lease.execution;
     let before = execution.counters.charge;
     assert!(before >= entry_charge);
     assert_eq!(ANSWERS.load(Ordering::Relaxed), 0);
@@ -1181,9 +1145,7 @@ main {}"#,
         lease.run(StopAt::NextLegalPrefix).unwrap(),
         RegionStop::Handoff
     );
-    let Executing::Machine(execution) = &mut lease.execution else {
-        unreachable!()
-    };
+    let execution = &mut lease.execution;
     assert_eq!(execution.counters.charge - before, 17 + 2 + 2);
     assert_eq!(ANSWERS.load(Ordering::Relaxed), 1);
     let map = execution.code.program.recovery(execution.prefix).unwrap();
@@ -1246,11 +1208,9 @@ fn reopened_return_phases() {
         let draft = compile_region(&machine.exe, id).unwrap();
         let calls = compile_calls(&machine.exe, &draft).unwrap();
         let code = verify_region(&machine.exe, id, draft, &calls).unwrap();
-        let mut lease = RegionLease::acquire(machine, code).unwrap();
+        let mut lease = acquire(machine, code).unwrap();
         let outcome = lease.run(StopAt::NextBoundary);
-        let Executing::Machine(execution) = &lease.execution else {
-            unreachable!()
-        };
+        let execution = &lease.execution;
         assert_eq!(
             outcome.unwrap_or_else(|error| panic!(
                 "uninterrupted {body}: {error:?} at {:?}",
@@ -1285,11 +1245,9 @@ fn reopened_return_phases() {
             let draft = compile_region(&machine.exe, id).unwrap();
             let calls = compile_calls(&machine.exe, &draft).unwrap();
             let code = verify_region(&machine.exe, id, draft, &calls).unwrap();
-            let mut lease = RegionLease::acquire(machine, code)
+            let mut lease = acquire(machine, code)
                 .unwrap_or_else(|error| panic!("{body} prefix {prefix_index}: {error:?}"));
-            let Executing::Machine(execution) = &lease.execution else {
-                unreachable!()
-            };
+            let execution = &lease.execution;
             let returning = matches!(
                 execution.code.program.op(execution.pc),
                 Some(crate::compile::region_isa::RegionOp::Return { .. })
@@ -1297,9 +1255,7 @@ fn reopened_return_phases() {
             let leaving = execution.code.program.step(execution.pc).unwrap().at.phase
                 == crate::compile::room::Phase::Leave;
             let outcome = lease.run(StopAt::NextLegalPrefix);
-            let Executing::Machine(execution) = &lease.execution else {
-                unreachable!()
-            };
+            let execution = &lease.execution;
             let stop = outcome.unwrap_or_else(|error| panic!(
                 "{body} prefix {prefix_index}: {error:?}, at {:?}, frames {}, returning {}, departing {}",
                 execution.code.program.step(execution.pc).map(|step| &step.at),
@@ -1406,7 +1362,7 @@ fn reopened_charge_refusal(body: &str, limit: u64) {
         let draft = compile_region(&machine.exe, id).unwrap();
         let calls = compile_calls(&machine.exe, &draft).unwrap();
         let code = verify_region(&machine.exe, id, draft, &calls).unwrap();
-        let mut lease = RegionLease::acquire(machine, code)
+        let mut lease = acquire(machine, code)
             .unwrap_or_else(|error| panic!("{body}, limit {limit}, reopen {reopen}: {error:?}"));
         let stop = lease
             .run(StopAt::NextBoundary)
@@ -1431,7 +1387,7 @@ fn reopened_charge_refusal(body: &str, limit: u64) {
             image.counters.charge,
             image.counters.balance,
             image.counters.depth,
-            image.prefix.debt,
+            image.counters.debt,
         );
         if let Some(before) = before {
             assert_eq!(
@@ -1443,4 +1399,14 @@ fn reopened_charge_refusal(body: &str, limit: u64) {
         prefix.prepare_exit().unwrap().commit().unwrap();
         run.reopen(crate::Layout::default(), false);
     }
+}
+
+/// Binds verified tables and enters the lease the way production entry does.
+fn acquire(
+    machine: &mut KernelMachine,
+    code: Arc<RegionCode>,
+) -> Result<RegionLease<'_>, RegionError> {
+    let tables = machine.bound.get(&machine.exe, &code)?;
+    let limits = Limits::machine(machine)?;
+    RegionLease::acquire_verified(machine, tables, limits)
 }

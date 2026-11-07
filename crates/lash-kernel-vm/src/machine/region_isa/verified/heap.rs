@@ -9,12 +9,12 @@ use lash_kernel_state::kernel_internals::logical::{
 };
 
 fn counters(
-    before: execute::Counters,
+    before: Counters,
     delta: i128,
     peak: u64,
     limiters: &mut crate::machine::limits::Limiters,
     limits: &mut Limits,
-) -> Result<Option<execute::Counters>, RegionError> {
+) -> Result<Option<Counters>, RegionError> {
     let balance = i128::from(before.balance)
         .checked_add(delta)
         .and_then(|balance| u64::try_from(balance).ok())
@@ -26,7 +26,7 @@ fn counters(
         .max(balance)
         .max(before.peak);
     Ok(
-        charge::fits_memory(limiters, limits, peak).then_some(execute::Counters {
+        charge::fits_memory(limiters, limits, peak).then_some(Counters {
             balance,
             peak,
             ..before

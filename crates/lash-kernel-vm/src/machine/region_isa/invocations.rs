@@ -42,18 +42,6 @@ impl Invocations {
             range: Some(range),
         })
     }
-    #[cfg(test)]
-    pub(super) fn fixture(first: u64, capacity: u64) -> Result<Self, RegionError> {
-        if first == 0 || first.checked_add(capacity).is_none() {
-            return Err(invalid(Refused::Facts));
-        }
-        Ok(Self {
-            first: (capacity != 0).then_some(first),
-            capacity,
-            issued: 0,
-            range: None,
-        })
-    }
     pub(super) fn follows(&self, invocation: u64) -> bool {
         self.first.is_none_or(|first| first > invocation)
     }
@@ -74,15 +62,13 @@ impl Invocations {
     pub(super) fn accept(&mut self, next: NextInvocation) {
         self.issued = next.issued;
     }
-    pub(super) fn finish(self) -> Result<(u64, Option<InvocationRange>), RegionError> {
-        let range = self
-            .range
+    pub(super) fn finish(self) -> Result<Option<InvocationRange>, RegionError> {
+        self.range
             .map(|range| {
                 range
                     .prefix(self.issued)
                     .ok_or_else(|| invalid(Refused::Facts))
             })
-            .transpose()?;
-        Ok((self.issued, range))
+            .transpose()
     }
 }

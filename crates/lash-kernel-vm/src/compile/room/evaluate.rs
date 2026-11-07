@@ -83,6 +83,7 @@ fn run(
     .node(node, at)
 }
 
+#[cfg(test)]
 pub(super) fn prefix(
     source: &Source,
     at: &Site,
@@ -108,12 +109,14 @@ pub(super) fn prefix(
         exit,
     })
 }
+#[cfg(test)]
 struct Prices<'a, E> {
     source: &'a Source,
     execution: &'a mut E,
     balance: i128,
     peak: i128,
 }
+#[cfg(test)]
 impl<E: Execution> Events for Prices<'_, E> {
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
         let at = point(site, phase);
@@ -169,8 +172,9 @@ impl<E: Execution> Events for Prices<'_, E> {
     fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
         self.execution.choose(site).ok_or(Refused::Facts)
     }
-    fn walked(&mut self, site: &Site) -> Result<Walk, Refused> {
-        self.execution.walked(site).ok_or(Refused::Facts)
+    /// No source execution names what a `for … via` walks.
+    fn walked(&mut self, _: &Site) -> Result<Walk, Refused> {
+        Err(Refused::Facts)
     }
 }
 struct Run<'a, E> {

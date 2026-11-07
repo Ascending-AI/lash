@@ -38,6 +38,7 @@ fn caller_span(stmt: &compile::Stmt, pc: u32) -> Result<OpRange, Refused> {
     }
 }
 
+#[cfg(test)]
 /// Resolution reads the actual call opcode and its admitted target. An equal
 /// formula, signature or function name cannot stand in for this identity.
 pub(in crate::compile::room) fn resolved(

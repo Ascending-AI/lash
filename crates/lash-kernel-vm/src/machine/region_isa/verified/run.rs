@@ -25,7 +25,7 @@ impl Running<'_> {
     /// The charge for copying the value in `value` out of the run.
     fn copy_charge<T>(
         &mut self,
-        counters: execute::Counters,
+        counters: Counters,
         value: crate::compile::region_isa::Reg<T>,
     ) -> Result<charge::Payment, RegionError> {
         if !self.limits.charge_enabled {

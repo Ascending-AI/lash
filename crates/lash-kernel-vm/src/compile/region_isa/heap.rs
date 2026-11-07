@@ -173,9 +173,6 @@ impl HeapKernel {
     pub(crate) fn atomic_move(&self) -> bool {
         matches!(self.kind, HeapKind::Tuple | HeapKind::Cell)
     }
-    pub(crate) fn phases(&self) -> &[HeapPhase] {
-        &self.phases
-    }
     pub(super) fn compile(
         source: &Source,
         roles: &[(Role, Reg<LeaseValue>)],

@@ -11,7 +11,6 @@ use lash_kernel_state::{
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 pub(crate) use loop_entry::{LoopEntry, PaidLoopInput};
 use schedule::BoundaryCharges;
-use schedule::StatementSchedule;
 
 /// Source compilers derive these from the selected call/occurrence schedule.
 /// They are not runtime allowances or declarations that a prefix is paid.
@@ -45,7 +44,6 @@ pub(crate) struct CompiledPublication {
     recovery: [u8; 32],
     charges: Box<[Arc<ChargeProgram>]>,
     needs: BoundaryNeeds,
-    statements: Option<StatementSchedule>,
 }
 
 /// The entry revision and proposed source exit cannot be rebound after this
@@ -58,11 +56,9 @@ struct Cursor {
     next: Position,
 }
 pub(crate) struct BoundPublication<D = Vec<SettledDebt>> {
-    plan: Arc<CompiledPublication>,
     cursor: Cursor,
     evidence: BoundaryEvidence,
     debts: D,
-    completion: Option<(logical::InvocationRange, u64)>,
     needs: BoundaryNeeds,
 }
 
@@ -117,25 +113,13 @@ impl CompiledPublication {
             recovery: logical_digest(&encoding.into_bytes()),
             charges: charges.into(),
             needs,
-            statements: None,
         }))
     }
 
-    pub(in crate::compile::room) fn authenticates(
-        &self,
-        source: &Arc<Source>,
-        first: &Point,
-        through: &Point,
-    ) -> bool {
-        Arc::ptr_eq(&self.source, source) && self.first == *first && self.through == *through
-    }
-    #[cfg(test)]
-    pub(crate) fn accepts_debt_for_law(&self, debt: ChargeDebt<'_>) -> bool {
-        self.charges[0].settle(debt).is_some()
-    }
     pub(in crate::compile::room) fn charges(&self) -> &[Arc<ChargeProgram>] {
         &self.charges
     }
+    #[cfg(test)]
     pub(crate) fn start(&self, occurrence: Occurrence) -> Position {
         Position {
             at: self.first.clone(),
@@ -169,7 +153,7 @@ impl CompiledPublication {
         debts: Vec<ChargeDebt<'_>>,
         proposed: Position,
     ) -> Result<Option<BoundPublication>, HeapFault> {
-        if self.statements.is_some() || debts.len() != self.charges.len() {
+        if debts.len() != self.charges.len() {
             return Ok(None);
         }
         let Some(debts) = self
@@ -225,7 +209,6 @@ impl CompiledPublication {
             return Ok(None);
         }
         Ok(Some(BoundPublication {
-            plan: Arc::clone(self),
             cursor: Cursor {
                 source: Arc::clone(&self.source),
                 frontier: std::rc::Rc::clone(&frontier.identity),
@@ -235,7 +218,6 @@ impl CompiledPublication {
             },
             evidence,
             debts,
-            completion: None,
             needs: self.needs.clone(),
         }))
     }
@@ -245,25 +227,6 @@ impl<D: BoundaryCharges> BoundPublication<D> {
     pub(crate) fn roots(&self) -> (&[logical::Owner], &[(logical::Owner, PublicationValue)]) {
         (&self.evidence.inputs, &self.evidence.outputs)
     }
-    /// The call verifier supplies its one ledger-owned reservation and the
-    /// genuinely completed prefix. The source plan requires exactly that many.
-    pub(in crate::compile::room) fn with_invocations(
-        mut self,
-        ledger: &Ledger,
-        range: logical::InvocationRange,
-        completed: u64,
-    ) -> Option<Self> {
-        if self.completion.is_some()
-            || completed == 0
-            || completed != self.needs.invocations
-            || completed > range.len()
-            || !range.is_current(ledger, &self.evidence.invocation)
-        {
-            return None;
-        }
-        self.completion = Some((range, completed));
-        Some(self)
-    }
 
     /// No journal is reconstructed here. The compiler's exact roots and final
     /// edits authenticate the external transaction; its interior room is added
@@ -272,14 +235,13 @@ impl<D: BoundaryCharges> BoundPublication<D> {
         self,
         frontier: &Frontier,
         ledger: &Ledger,
-        heap: &PagedHeap,
         mut transaction: logical::BoundaryTransaction<'a>,
         resources: SourceResources<'r>,
         memory_bound: u64,
     ) -> Result<Option<SourceAccepted<'r, PreparedPublication<'a, D>>>, HeapFault> {
         if !self.cursor.current(frontier)
             || !ledger.is_current(self.evidence.dependencies.ledger())
-            || self.completion.as_ref().map_or(0, |(_, n)| *n) != self.needs.invocations
+            || self.needs.invocations != 0
             || !transaction.matches_roots(
                 ledger,
                 &self.evidence.inputs,
@@ -295,11 +257,9 @@ impl<D: BoundaryCharges> BoundPublication<D> {
             return Ok(None);
         }
         let Self {
-            plan: _,
             cursor,
             evidence,
             debts,
-            completion,
             needs,
         } = self;
         transaction = transaction.bind_dependencies(evidence.dependencies)?;
@@ -315,17 +275,10 @@ impl<D: BoundaryCharges> BoundPublication<D> {
         {
             return Ok(None);
         }
-        let Some(mut transaction) =
-            transaction.require_source_room(evidence.room.balance.peak_extra)
+        let Some(transaction) = transaction.require_source_room(evidence.room.balance.peak_extra)
         else {
             return Ok(None);
         };
-        if let Some((range, completed)) = completion {
-            if !range.is_current(ledger, &evidence.invocation) {
-                return Ok(None);
-            }
-            transaction = transaction.complete_invocations(range, completed, heap.pages())?;
-        }
         if transaction.peak() > memory_bound {
             return Ok(None);
         }

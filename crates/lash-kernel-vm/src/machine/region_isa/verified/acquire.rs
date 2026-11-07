@@ -345,7 +345,7 @@ impl<'m> RegionLease<'m> {
             execution.restore_phase(source)?;
         }
         Ok(Self {
-            authority: Authority::Machine(publication::Authority {
+            authority: publication::Authority {
                 frames: &mut task.frames,
                 task_state: &mut task.record.state,
                 counters,
@@ -361,8 +361,8 @@ impl<'m> RegionLease<'m> {
                 entry_frames,
                 inputs: inputs.into_boxed_slice(),
                 limits,
-            }),
-            execution: Executing::Machine(execution),
+            },
+            execution,
         })
     }
 }

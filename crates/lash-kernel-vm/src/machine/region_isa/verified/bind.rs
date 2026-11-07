@@ -49,8 +49,6 @@ fn session_index(code: &RegionCode, register: u32) -> Option<usize> {
 pub(super) struct SavedRole {
     pub(super) source: Slot,
     pub(super) parked: Slot,
-    pub(super) suffix: Arc<[u32]>,
-    pub(super) register: Register,
 }
 
 pub(in crate::machine::region_isa) struct Call {
@@ -225,7 +223,7 @@ impl Code {
                                     u32::try_from(index).map_err(|_| invalid(Refused::Facts))?;
                                 source_counters::CounterPlan::bind(
                                     Box::new([source_counters::CounterEdit { index, advance: 1 }]),
-                                    Some(source_counters::CounterRead::Issued(index)),
+                                    Some(source_counters::CounterRead { issued: index }),
                                     exe.occurrence_count(),
                                 )?
                             }
@@ -404,12 +402,8 @@ fn saved_roles(
                 .iter()
                 .find_map(|(slot, reg)| (*slot == Role::Slot(source)).then_some(*reg))
                 .ok_or_else(|| invalid(Refused::Facts))?;
-            Ok(SavedRole {
-                source,
-                parked,
-                suffix: Arc::clone(&role.suffix),
-                register: physical(program, reg)?,
-            })
+            physical(program, reg)?;
+            Ok(SavedRole { source, parked })
         })
         .collect()
 }

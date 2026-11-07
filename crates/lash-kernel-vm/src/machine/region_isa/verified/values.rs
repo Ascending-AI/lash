@@ -158,18 +158,6 @@ impl Running<'_> {
                     Operand::Immediate(Value::Bool(value)),
                 )?;
             }
-            CheckedKind::UnpackInt { input, output } => {
-                let Some(Value::Int(value)) = self.inline(*input)? else {
-                    return Ok(false);
-                };
-                self.registers.write(
-                    &mut self.view,
-                    self.parked.len(),
-                    invocation,
-                    Register::Int(output.index()),
-                    Operand::Immediate(Value::Int(value)),
-                )?;
-            }
             _ => return Err(invalid(Refused::Facts)),
         }
         Ok(true)

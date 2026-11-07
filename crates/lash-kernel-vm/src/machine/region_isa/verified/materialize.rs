@@ -123,7 +123,9 @@ impl<'m> Running<'m> {
                 self.canonical_frame(depth, &code, frame, &graph)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let current = translated.last().ok_or_else(|| invalid(Refused::Exit))?;
+        if translated.is_empty() {
+            return Err(invalid(Refused::Exit));
+        }
         let lash_kernel_state::kernel_internals::logical::Owner::Frame { task, .. } = self
             .canonical
             .logical
@@ -146,28 +148,21 @@ impl<'m> Running<'m> {
             ),
         )
         .map_err(RegionError::Heap)?;
-        let pending = current.pending;
         let (sessions, written) = self.session_images(&graph)?;
         let live = live::Live {
             frames: frames.into_boxed_slice(),
             payload: None,
-            returning: None,
             sessions,
         };
-        let (issued_invocations, invocations) = self.invocations.finish()?;
+        let invocations = self.invocations.finish()?;
         let image = Reconstruction {
-            issued_invocations,
-            prefix: self.reached,
-            pending,
             frames: translated.into_boxed_slice(),
             attempted: self.attempted,
             counters: self.counters,
             limits: self.limits,
             stop,
             payload: None,
-            returning: None,
             source_counts: self.source.freeze(),
-            entering: None,
             sessions: written,
             canonical: Some(publication::Canonical {
                 frames: canonical,
@@ -251,21 +246,16 @@ impl<'m> Running<'m> {
             &value,
         )
         .map_err(RegionError::Heap)?;
-        let (issued_invocations, invocations) = self.invocations.finish()?;
+        let invocations = self.invocations.finish()?;
         Ok(reconstruct::Finished {
             image: Reconstruction {
-                issued_invocations,
-                prefix: self.reached,
-                pending: None,
                 frames: Box::new([]),
                 attempted: self.attempted,
                 counters: self.counters,
                 limits: self.limits,
                 stop,
                 payload: Some(value),
-                returning: None,
                 source_counts: self.source.freeze(),
-                entering: None,
                 sessions: written,
                 canonical: Some(publication::Canonical {
                     frames: Vec::new(),
@@ -277,7 +267,6 @@ impl<'m> Running<'m> {
             live: live::Live {
                 frames: Box::new([]),
                 payload: Some(incoming.value),
-                returning: None,
                 sessions,
             },
             view: self.view,

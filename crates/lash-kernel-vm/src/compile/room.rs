@@ -1,9 +1,6 @@
-//! Source memory programs. Compilation records source obligations; production
-//! admission continues to use its existing metric until the ledger cutover.
-#![allow(
-    dead_code,
-    reason = "checked phase-one projection; admission consumes it in phase two"
-)]
+//! Source memory programs: the obligations a region's source facts name.
+//! The region ISA prices them; the source evaluator runs only as the testing
+//! oracle the verified region is compared against.
 
 use lash_kernel_doc::{self as doc, LogicalHeldV1 as Cost};
 use lash_kernel_value::sites::{Site, Unit};
@@ -46,7 +43,6 @@ pub(crate) enum TransferTarget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Walk {
     Collection,
-    Text,
     Guarded,
     Driver,
 }
@@ -75,11 +71,6 @@ pub(crate) struct Point {
     pub(crate) phase: Phase,
 }
 
-pub(crate) struct Prefix<'a> {
-    pub(crate) source: &'a Arc<Source>,
-    pub(crate) at: &'a Site,
-}
-
 /// Source owner selectors, instantiated per invocation and loop occurrence.
 /// Scope selects active bindings in its source subtree; Operands selects its
 /// pending source occurrences. Sessions selects durable session roots. These
@@ -102,8 +93,6 @@ pub(crate) enum Owner {
     LoopCursor(Site),
     LoopHeader(Site),
     Departures(Site),
-    HookArgument { at: Site, phase: Phase, index: u32 },
-    HookResult { at: Site, phase: Phase },
     Cell { declared: Site, name: Name },
     Binding { declared: Site, name: Name },
     Visible { at: Site, name: Name },
@@ -140,11 +129,6 @@ pub(crate) enum Measure {
     CallDelta {
         at: Site,
         callee: CallSource,
-    },
-    NativeRelease {
-        at: Site,
-        callee: CallSource,
-        owners: Box<[Owner]>,
     },
 }
 
@@ -209,15 +193,6 @@ impl Amount {
                 call.for_call(CallSource::Native(*function), None)?;
                 i128::from(call.native_contract.as_ref()?.scratch_peak)
             }
-            Measure::NativeRelease { at, callee, owners } => {
-                let called = facts.call(at, *callee)?;
-                called.for_call(*callee, facts.resolved(at))?;
-                if called.native {
-                    facts.measure(&Measure::Release(owners.clone()))?
-                } else {
-                    0
-                }
-            }
             _ => facts.measure(m)?,
         };
         if value < 0 && !matches!(m, Measure::MemberDelta(_) | Measure::CallDelta { .. }) {
@@ -247,10 +222,6 @@ pub(crate) trait Execution {
     fn event(&mut self, point: &Point) -> Option<Box<dyn Facts + '_>>;
     /// Selected from the source condition/cursor, not a plan's trip count.
     fn choose(&mut self, site: &Site) -> Option<bool>;
-    /// What the `for … via` at `site` walks, from what its `open` gave.
-    fn walked(&mut self, _: &Site) -> Option<Walk> {
-        None
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -329,11 +300,6 @@ impl Event {
                         Measure::Release(owners) => {
                             Measure::Release(owners.iter().map(rename).collect())
                         }
-                        Measure::NativeRelease { at, callee, owners } => Measure::NativeRelease {
-                            at: at.clone(),
-                            callee: *callee,
-                            owners: owners.iter().map(rename).collect(),
-                        },
                         other => other.clone(),
                     };
                     (measure, *coefficient)
@@ -673,6 +639,7 @@ impl Source {
             }),
         }
     }
+    #[cfg(test)]
     pub(crate) fn compile(
         owner: doc::constant_pool::PoolOwner,
         site: Site,
@@ -853,8 +820,7 @@ impl Source {
                                 Measure::Local(owner) => {
                                     owners.insert(owner.clone());
                                 }
-                                Measure::Release(group)
-                                | Measure::NativeRelease { owners: group, .. } => {
+                                Measure::Release(group) => {
                                     owners.extend(group.iter().cloned());
                                 }
                                 _ => {}
@@ -1245,6 +1211,7 @@ impl Source {
         Ok(successor)
     }
 
+    #[cfg(test)]
     /// A finite source execution, including selected branches and repeated
     /// source loop tests. Budget exhaustion is an eligibility miss.
     pub(crate) fn evaluate(
@@ -1255,6 +1222,7 @@ impl Source {
         self.verify()?;
         evaluate::prefix(self, &self.site, execution, budget)
     }
+    #[cfg(test)]
     pub(crate) fn evaluate_prefix(
         &self,
         at: &Site,

@@ -45,7 +45,7 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(in crate::machine::region_isa) pc: Pc,
     pub(in crate::machine::region_isa) prefix: PrefixId,
     pub(in crate::machine::region_isa) reached: ReachedPrefix,
-    pub(in crate::machine::region_isa) counters: execute::Counters,
+    pub(in crate::machine::region_isa) counters: Counters,
     pub(in crate::machine::region_isa) limits: Limits,
     /// The segment's limiters, asked where a bound is reached in the run.
     pub(super) limiters: &'m mut crate::machine::limits::Limiters,
@@ -202,7 +202,7 @@ impl<'m> Running<'m> {
             pc,
             prefix,
             reached,
-            counters: execute::Counters {
+            counters: Counters {
                 charge: limits.entry_charge,
                 progress: limits.entry_progress,
                 balance: limits.entry_balance,

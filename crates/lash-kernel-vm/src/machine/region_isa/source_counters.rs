@@ -7,9 +7,9 @@ pub(super) struct CounterEdit {
     pub(super) advance: u64,
 }
 #[derive(Clone, Copy)]
-pub(super) enum CounterRead {
-    Next(u32),
-    Issued(u32),
+pub(super) struct CounterRead {
+    /// The counter whose most recently issued occurrence the step reads.
+    pub(super) issued: u32,
 }
 pub(super) struct CounterPlan {
     edits: Box<[CounterEdit]>,
@@ -29,9 +29,7 @@ impl CounterPlan {
         occurrence: Option<CounterRead>,
         width: usize,
     ) -> Result<Self, RegionError> {
-        let observed = occurrence.map(|read| match read {
-            CounterRead::Next(index) | CounterRead::Issued(index) => index,
-        });
+        let observed = occurrence.map(|read| read.issued);
         if edits.iter().any(|edit| edit.index as usize >= width)
             || edits.windows(2).any(|pair| pair[0].index >= pair[1].index)
             || observed.is_some_and(|index| index as usize >= width)
@@ -76,19 +74,12 @@ impl SourceCounters {
         let occurrence = plan
             .occurrence
             .map(|read| {
-                let (index, issued) = match read {
-                    CounterRead::Next(index) => (index, false),
-                    CounterRead::Issued(index) => (index, true),
-                };
+                let index = read.issued;
                 let mut count = self.current(index)?;
                 if let Some(edit) = plan.edits.iter().find(|edit| edit.index == index) {
                     count += edit.advance;
                 }
-                if issued {
-                    count.checked_sub(1).ok_or_else(|| invalid(Refused::Facts))
-                } else {
-                    Ok(count)
-                }
+                count.checked_sub(1).ok_or_else(|| invalid(Refused::Facts))
             })
             .transpose()?;
         Ok(ReadyCounters {

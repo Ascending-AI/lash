@@ -297,7 +297,7 @@ impl EventRoles {
         let mut groups = Vec::new();
         let mut sessions = BTreeSet::new();
         for measure in event.peak.measures().chain(event.delta.measures()) {
-            if let Measure::Release(owners) | Measure::NativeRelease { owners, .. } = measure {
+            if let Measure::Release(owners) = measure {
                 for owner in owners {
                     if let Some(owner) = root(owner) {
                         reads.insert(owner);

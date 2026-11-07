@@ -20,8 +20,8 @@ pub(super) enum Fact {
     /// an answer in place, the returned value's occurrence.
     Native(Balance),
     Release(usize, u64),
-    Zero,
-    Source(Measure),
+    /// A source measure the region has no price for: refused if read.
+    Source,
 }
 #[derive(Clone, Copy)]
 pub(super) enum Balance {
@@ -221,15 +221,7 @@ impl Flow {
                             quotes.push(roots);
                             Fact::Release(index, headers)
                         }
-                        ResourceInput::SourceFact(Measure::NativeRelease { at, callee, owners })
-                            if *at == step.at.site && matches!(callee,
-                                crate::compile::room::CallSource::Native(function) if Some(*function) == native) => {
-                            let (roots, headers) = release_roots(code, before, owners)?;
-                            let index = quotes.len();
-                            quotes.push(roots);
-                            Fact::Release(index, headers)
-                        }
-                        ResourceInput::SourceFact(measure) => Fact::Source(measure.clone()),
+                        ResourceInput::SourceFact(_) => Fact::Source,
                     };
                     Ok((fact, *coefficient))
                 })

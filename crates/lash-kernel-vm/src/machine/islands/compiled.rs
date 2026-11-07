@@ -107,10 +107,6 @@ pub(crate) struct Compiled {
     cleanup: Box<[Cleanup]>,
     room: u32,
     observes: bool,
-    #[allow(
-        dead_code,
-        reason = "phase-one source projection; consumed by ledger admission later"
-    )]
     pub(crate) source_room: std::sync::Arc<crate::compile::room::Source>,
 }
 

@@ -147,16 +147,6 @@ impl ChargeProgram {
         Self::compile_selected(exe, code, statement, range, None)
     }
 
-    pub(in crate::compile::room) fn compile_callback(
-        exe: &Executable,
-        code: compile::CodeId,
-        statement: compile::StmtId,
-        range: OpRange,
-        target: compile::CodeId,
-    ) -> Result<Self, Refused> {
-        Self::compile_selected(exe, code, statement, range, Some(target))
-    }
-
     fn compile_selected(
         exe: &Executable,
         code: compile::CodeId,
@@ -804,6 +794,7 @@ fn completion(
 }
 
 impl crate::admission::Window {
+    #[cfg(test)]
     /// A compiled charge prefix has already authenticated every close and
     /// measured its canonical formulas. Quiet admission uses its reduced sum.
     #[inline(always)]
@@ -817,6 +808,7 @@ impl crate::admission::Window {
 }
 
 impl<'a> crate::admission::SourceResources<'a> {
+    #[cfg(test)]
     /// Compiled prefixes spend one authenticated charge debt together with
     /// their logical boundary. Resource staging is pure until commit.
     pub(crate) fn admit_region<C>(

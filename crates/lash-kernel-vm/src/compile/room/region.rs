@@ -3,7 +3,6 @@
 //! physical recovery placement and composed-call authentication must join it
 //! before runtime consumers can elide operations under shared acceptance.
 use super::*;
-mod affine;
 #[path = "calls.rs"]
 pub(crate) mod calls;
 mod captures;
@@ -577,16 +576,6 @@ impl Source {
         self.compile_scalar_entered(interval, body, &[])
     }
 
-    /// Earlier verified pieces retain these roles, including scope bindings
-    /// that this suffix releases without reading.
-    pub(super) fn compile_scalar_region_from(
-        self: &Arc<Self>,
-        interval: Arc<CompiledInterval>,
-        live: &[Slot],
-    ) -> Result<ScalarRegion, Refused> {
-        self.compile_scalar_entered(interval, false, live)
-    }
-
     fn compile_scalar_entered(
         self: &Arc<Self>,
         interval: Arc<CompiledInterval>,
@@ -594,13 +583,6 @@ impl Source {
         live: &[Slot],
     ) -> Result<ScalarRegion, Refused> {
         self.compile_scalar_mode(interval, body, live, false)
-    }
-
-    pub(super) fn compile_callback_body(
-        self: &Arc<Self>,
-        interval: Arc<CompiledInterval>,
-    ) -> Result<ScalarRegion, Refused> {
-        self.compile_scalar_mode(interval, true, &[], true)
     }
 
     fn compile_scalar_mode(
@@ -1007,6 +989,7 @@ impl ScalarRegion {
         }
         self.bind_values(ledger, arena, heap, invocation, values)
     }
+    #[cfg(test)]
     pub(crate) fn recovery_after(&self, point: &Point) -> Option<&[(Slot, ScalarFact)]> {
         self.recovery
             .iter()
@@ -1160,6 +1143,7 @@ impl BoundScalarRegion<'_> {
     pub(crate) fn invocation(&self) -> &logical::Invocation {
         &self.invocation
     }
+    #[cfg(test)]
     pub(crate) fn peak(&self) -> u64 {
         self.peak
     }

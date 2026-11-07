@@ -377,7 +377,7 @@ impl Running<'_> {
             prefix: prefix.index() as u32,
             debt,
         };
-        self.counters = execute::Counters {
+        self.counters = Counters {
             balance,
             peak,
             depth: self.counters.depth + 1,

@@ -101,23 +101,6 @@ impl GraphRecovery {
     pub(crate) fn incoming(&self) -> Option<Reg<LeaseValue>> {
         self.incoming
     }
-    pub(crate) fn roles(&self) -> &[(Slot, Reg<LeaseValue>)] {
-        &self.roles
-    }
-    pub(crate) fn scratch(&self) -> &[Reg<LeaseValue>] {
-        &self.scratch
-    }
-    /// Binding-slot indices, resolved to actual current object versions by C/D.
-    pub(crate) fn versions(&self) -> &[(Reg<LeaseValue>, u32)] {
-        &self.versions
-    }
-    /// Binding-slot indices, never predicted or reused source object identities.
-    pub(crate) fn identities(&self) -> &[(Reg<LeaseValue>, u32)] {
-        &self.identities
-    }
-    pub(crate) fn release_phase(&self) -> u32 {
-        self.release_phase
-    }
     #[cfg(test)]
     pub(super) fn substitute_identity(&mut self) -> bool {
         let Some((_, binding)) = self.identities.first_mut() else {
@@ -125,19 +108,6 @@ impl GraphRecovery {
         };
         *binding = binding.checked_add(1).expect("fixture binding");
         true
-    }
-    #[cfg(any(test, feature = "testing"))]
-    pub(super) fn fixture(source: &Point) -> Self {
-        Self {
-            source: source.clone(),
-            roles: Box::new([]),
-            pending: None,
-            incoming: None,
-            scratch: Box::new([]),
-            release_phase: 0,
-            versions: Box::new([]),
-            identities: Box::new([]),
-        }
     }
 }
 

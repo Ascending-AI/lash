@@ -59,7 +59,7 @@ pub(super) fn fits_memory(limiters: &mut Limiters, limits: &mut Limits, peak: u6
 }
 
 pub(super) struct Payment {
-    pub(super) counters: execute::Counters,
+    pub(super) counters: Counters,
     pub(super) crossing: Option<Crossing>,
 }
 
@@ -94,7 +94,7 @@ fn weight(payment: &mut Payment, limits: Limits, weight: Weight) -> bool {
 
 /// K-CHG-005: copying an explicit root Return uses one atomic deep-size fee.
 /// The caller derives this size from the actual lease-owned result.
-pub(super) fn export(counters: execute::Counters, limits: Limits, units: u64) -> Payment {
+pub(super) fn export(counters: Counters, limits: Limits, units: u64) -> Payment {
     let mut payment = Payment {
         counters,
         crossing: None,
@@ -104,7 +104,7 @@ pub(super) fn export(counters: execute::Counters, limits: Limits, units: u64) ->
 }
 
 pub(super) fn bill(
-    counters: execute::Counters,
+    counters: Counters,
     limits: Limits,
     closes: &[CanonicalClose],
     moment: ChargeMoment,
@@ -159,7 +159,7 @@ mod laws {
                         entry_depth: 1,
                     };
                     let mut actual = Payment {
-                        counters: execute::Counters {
+                        counters: Counters {
                             charge: entry,
                             progress: entry,
                             balance: 0,

@@ -7,15 +7,6 @@ pub(crate) struct SettledDebt {
     units: u64,
 }
 impl ChargeProgram {
-    #[cfg(test)]
-    pub(in crate::compile::room) fn recompile_for_boundary_law(
-        &self,
-        exe: &Executable,
-        code: compile::CodeId,
-    ) -> Result<Self, Refused> {
-        Self::compile(exe, code, self.statement, self.range)
-    }
-
     pub(in crate::compile::room) fn through(&self) -> &Point {
         &self.through
     }

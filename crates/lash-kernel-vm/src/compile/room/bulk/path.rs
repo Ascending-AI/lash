@@ -413,6 +413,7 @@ impl CollectionProgram {
             .iter()
             .any(|(choice, next)| *choice == successor && Some(next) == exit.unpaid.as_ref())
     }
+    #[cfg(test)]
     pub(crate) fn source(&self) -> &Arc<Source> {
         &self.source
     }
@@ -469,24 +470,31 @@ impl CollectionProgram {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn first(&self) -> &Point {
         &self.first
     }
+    #[cfg(test)]
     pub(crate) fn through(&self) -> &Point {
         &self.through
     }
+    #[cfg(test)]
     pub(crate) fn choices(&self) -> &[(Site, bool)] {
         &self.choices
     }
+    #[cfg(test)]
     pub(crate) fn events(&self) -> &[Arc<CompiledInterval>] {
         &self.events
     }
+    #[cfg(test)]
     pub(crate) fn charges(&self) -> impl Iterator<Item = &ChargeProgram> {
         self.charges.iter().map(|span| span.program.as_ref())
     }
+    #[cfg(test)]
     pub(crate) fn scopes(&self) -> &[Point] {
         &self.scopes
     }
+    #[cfg(test)]
     pub(crate) fn allocations(&self) -> &[(Point, Owner)] {
         &self.allocations
     }

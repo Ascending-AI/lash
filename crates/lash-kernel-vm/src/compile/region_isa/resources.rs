@@ -18,6 +18,7 @@ pub(crate) struct IndexedAmount {
     pub(crate) terms: Box<[(ResourceInput, i128)]>,
 }
 impl IndexedAmount {
+    #[cfg(test)]
     pub(crate) fn evaluate(
         &self,
         mut fact: impl FnMut(&ResourceInput) -> Option<i128>,

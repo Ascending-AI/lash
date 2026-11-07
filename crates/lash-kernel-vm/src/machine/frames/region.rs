@@ -1,8 +1,4 @@
 //! Canonical frame replacement reserved before the single region publication.
-#![allow(
-    dead_code,
-    reason = "canonical region installation is connected at machine cutover"
-)]
 use super::*;
 
 pub(in crate::machine) struct PreparedRegionFrames<'a> {

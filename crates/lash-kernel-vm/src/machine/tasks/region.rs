@@ -1,8 +1,4 @@
 //! One atomic source-counter installation, coupled to C's sealed execution.
-#![allow(
-    dead_code,
-    reason = "canonical region installation is connected at machine cutover"
-)]
 //! This storage guard alone proves no source/ISA semantic correspondence.
 use super::{HeapFault, Occurrences};
 

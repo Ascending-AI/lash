@@ -178,20 +178,14 @@ impl KernelMachine {
             let outcome = lease.run(request);
             // The point the region stopped at, and, standing before a step
             // the machine serves, the slots its frame holds its operands in.
-            let (at, native, effect, checked) = match &lease.execution {
-                Executing::Machine(execution) => (
-                    execution
-                        .code
-                        .program
-                        .step(execution.pc)
-                        .map(|step| step.at.clone()),
-                    execution.code.program.native_arguments(execution.pc),
-                    execution.code.program.effect_argument(execution.pc),
-                    execution.code.program.checked_call(execution.pc),
-                ),
-                #[cfg(test)]
-                Executing::Fixture(_) => (None, None, None, None),
-            };
+            let execution = &lease.execution;
+            let program = &execution.code.program;
+            let (at, native, effect, checked) = (
+                program.step(execution.pc).map(|step| step.at.clone()),
+                program.native_arguments(execution.pc),
+                program.effect_argument(execution.pc),
+                program.checked_call(execution.pc),
+            );
             let stop = outcome.map_err(|error| match error {
                 RegionError::Heap(error) => error.into(),
                 RegionError::Invalid(reason) => fault(&format!(
@@ -237,7 +231,7 @@ impl KernelMachine {
                         .map(Box::new);
                     return Err(Halt::Bound(exceeded));
                 }
-                RegionStop::Slice | RegionStop::Handoff | RegionStop::Observer => {}
+                RegionStop::Slice | RegionStop::Handoff => {}
                 // The frame stands at the action in its source continuation, a
                 // canonical safe point: the physical cursor is discarded, since
                 // performing the action may run another task before it resumes.

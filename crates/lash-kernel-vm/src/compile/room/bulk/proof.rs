@@ -165,17 +165,13 @@ impl Compiler<'_> {
         let mut measures = Vec::new();
         for measure in event.peak.measures().chain(event.delta.measures()) {
             let owners = match measure {
-                Measure::Release(owners) | Measure::NativeRelease { owners, .. } => Some(owners),
+                Measure::Release(owners) => Some(owners),
                 _ => None,
             };
             if let Some(owners) = owners {
                 let values = self.release(owners)?;
                 if !measures.iter().any(|(m, _)| m == measure) {
-                    let key = match measure {
-                        Measure::NativeRelease { owners, .. } => Measure::Release(owners.clone()),
-                        _ => measure.clone(),
-                    };
-                    measures.push((key, values.into_boxed_slice()));
+                    measures.push((measure.clone(), values.into_boxed_slice()));
                 }
             }
         }
@@ -363,7 +359,6 @@ impl Compiler<'_> {
                     measures.push((measure.clone(), Box::default()));
                 }
                 Measure::Release(_)
-                | Measure::NativeRelease { .. }
                 | Measure::CallPeak { .. }
                 | Measure::CallDelta { .. }
                 | Measure::NativeScratch { .. } => {}
