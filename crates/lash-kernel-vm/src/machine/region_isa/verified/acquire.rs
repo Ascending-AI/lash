@@ -310,8 +310,10 @@ impl<'m> RegionLease<'m> {
                 target: frame.code,
                 link: frame.link,
             });
-            execution.registers.reserve_frame(depth)?;
             let code = Arc::clone(execution.programs.code(frame.code)?);
+            execution
+                .registers
+                .reserve_frame(depth, code.program.registers().len())?;
             let (pc, prefix) = positions[depth];
             for (reg, value) in super::resume::values(&code, &frame, task_id, pc, prefix)? {
                 execution.registers.write(

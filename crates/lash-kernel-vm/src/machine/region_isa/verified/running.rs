@@ -126,7 +126,7 @@ impl<'m> Running<'m> {
             return Err(invalid(Refused::Facts));
         }
         let mut registers =
-            registers::Registers::new(programs.registers, 1, programs.sessions.len())?;
+            registers::Registers::new(code.program.registers().len(), programs.sessions.len())?;
         for (reg, value) in values {
             registers.write(
                 &mut view,

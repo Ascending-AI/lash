@@ -16,76 +16,87 @@ impl<T: Default> Default for Cell<T> {
         }
     }
 }
-pub(super) struct Registers<V: Copy> {
+struct Bank<V: Copy> {
     ints: Vec<Cell<i64>>,
     floats: Vec<Cell<f64>>,
     bools: Vec<Cell<bool>>,
     values: Vec<Cell<Option<V>>>,
-    /// The lease-wide session bank, by bank cell. Frames neither enter nor
-    /// clear it, and a session cell is valid from its import or first
-    /// write on, whichever invocation reads it.
-    sessions: Vec<Option<V>>,
-    width: usize,
 }
-impl<V: Copy> Registers<V> {
-    pub(super) fn new(width: usize, frames: usize, sessions: usize) -> Result<Self, RegionError> {
-        let count = width
-            .checked_mul(frames)
-            .ok_or_else(|| invalid(Refused::Facts))?;
+impl<V: Copy> Bank<V> {
+    fn new(width: usize) -> Result<Self, RegionError> {
         fn bank<T: Copy + Default>(count: usize) -> Result<Vec<Cell<T>>, RegionError> {
-            let mut values = Vec::new();
-            values
-                .try_reserve_exact(count)
-                .map_err(|_| invalid(Refused::Scratch))?;
-            values.resize(count, Cell::default());
-            Ok(values)
-        }
-        Ok(Self {
-            ints: bank(count)?,
-            floats: bank(count)?,
-            bools: bank(count)?,
-            values: bank(count)?,
-            sessions: {
-                let mut cells = Vec::new();
-                cells
-                    .try_reserve_exact(sessions)
-                    .map_err(|_| invalid(Refused::Scratch))?;
-                cells.resize(sessions, None);
-                cells
-            },
-            width,
-        })
-    }
-    pub(super) fn reserve_frame(&mut self, frame: usize) -> Result<(), RegionError> {
-        let required = frame
-            .checked_add(1)
-            .and_then(|n| self.width.checked_mul(n))
-            .ok_or_else(|| invalid(Refused::Facts))?;
-        if required <= self.ints.len() {
-            return Ok(());
-        }
-        let count = required.max(self.ints.len().saturating_mul(2));
-        fn grow<T: Copy + Default>(
-            bank: &mut Vec<Cell<T>>,
-            count: usize,
-        ) -> Result<(), RegionError> {
-            bank.try_reserve(count - bank.len())
+            let mut bank = Vec::new();
+            bank.try_reserve_exact(count)
                 .map_err(|_| invalid(Refused::Scratch))?;
             bank.resize(count, Cell::default());
-            Ok(())
+            Ok(bank)
         }
-        grow(&mut self.ints, count)?;
-        grow(&mut self.floats, count)?;
-        grow(&mut self.bools, count)?;
-        grow(&mut self.values, count)
+        Ok(Self {
+            ints: bank(width)?,
+            floats: bank(width)?,
+            bools: bank(width)?,
+            values: bank(width)?,
+        })
     }
-    fn at(&self, frame: usize, index: u32) -> Result<usize, RegionError> {
-        if index as usize >= self.width {
+    fn reserve(&mut self, width: usize) -> Result<(), RegionError> {
+        if width <= self.ints.len() {
+            return Ok(());
+        }
+        let count = width.max(self.ints.len().saturating_mul(2));
+        fn reserve<T>(bank: &mut Vec<T>, count: usize) -> Result<(), RegionError> {
+            bank.try_reserve(count - bank.len())
+                .map_err(|_| invalid(Refused::Scratch))
+        }
+        reserve(&mut self.ints, count)?;
+        reserve(&mut self.floats, count)?;
+        reserve(&mut self.bools, count)?;
+        reserve(&mut self.values, count)?;
+        self.ints.resize(count, Cell::default());
+        self.floats.resize(count, Cell::default());
+        self.bools.resize(count, Cell::default());
+        self.values.resize(count, Cell::default());
+        Ok(())
+    }
+}
+
+pub(super) struct Registers<V: Copy> {
+    frames: Vec<Bank<V>>,
+    /// Session cells are outside the per-frame banks.
+    sessions: Vec<Option<V>>,
+}
+impl<V: Copy> Registers<V> {
+    pub(super) fn new(width: usize, sessions: usize) -> Result<Self, RegionError> {
+        let mut frames = Vec::new();
+        frames
+            .try_reserve_exact(1)
+            .map_err(|_| invalid(Refused::Scratch))?;
+        frames.push(Bank::new(width)?);
+        let mut cells = Vec::new();
+        cells
+            .try_reserve_exact(sessions)
+            .map_err(|_| invalid(Refused::Scratch))?;
+        cells.resize(sessions, None);
+        Ok(Self {
+            frames,
+            sessions: cells,
+        })
+    }
+    pub(super) fn reserve_frame(&mut self, frame: usize, width: usize) -> Result<(), RegionError> {
+        if let Some(bank) = self.frames.get_mut(frame) {
+            return bank.reserve(width);
+        }
+        if frame != self.frames.len() {
             return Err(invalid(Refused::Facts));
         }
-        frame
-            .checked_mul(self.width)
-            .and_then(|base| base.checked_add(index as usize))
+        self.frames
+            .try_reserve(1)
+            .map_err(|_| invalid(Refused::Scratch))?;
+        self.frames.push(Bank::new(width)?);
+        Ok(())
+    }
+    fn bank(&self, frame: usize) -> Result<&Bank<V>, RegionError> {
+        self.frames
+            .get(frame)
             .ok_or_else(|| invalid(Refused::Facts))
     }
     pub(super) fn read(
@@ -103,21 +114,21 @@ impl<V: Copy> Registers<V> {
         }
         Ok(match reg {
             Register::Int(index) => Operand::Immediate(Value::Int(read(
-                self.ints.get(self.at(frame, index)?),
+                self.bank(frame)?.ints.get(index as usize),
                 invocation,
             )?)),
             Register::Float(index) => {
                 Operand::Immediate(Value::Float(lash_kernel_doc::Float::new(read(
-                    self.floats.get(self.at(frame, index)?),
+                    self.bank(frame)?.floats.get(index as usize),
                     invocation,
                 )?)))
             }
             Register::Bool(index) => Operand::Immediate(Value::Bool(read(
-                self.bools.get(self.at(frame, index)?),
+                self.bank(frame)?.bools.get(index as usize),
                 invocation,
             )?)),
             Register::Value(index) => Operand::Dynamic(
-                read(self.values.get(self.at(frame, index)?), invocation)?
+                read(self.bank(frame)?.values.get(index as usize), invocation)?
                     .ok_or_else(|| invalid(Refused::Facts))?,
             ),
             Register::Session(bank) => Operand::Dynamic(
@@ -136,8 +147,9 @@ impl<V: Copy> Registers<V> {
         index: u32,
     ) -> Result<i64, RegionError> {
         let cell = self
+            .bank(frame)?
             .ints
-            .get(self.at(frame, index)?)
+            .get(index as usize)
             .ok_or_else(|| invalid(Refused::Facts))?;
         if !cell.valid || cell.invocation != invocation {
             return Err(invalid(Refused::Facts));
@@ -151,8 +163,9 @@ impl<V: Copy> Registers<V> {
         index: u32,
     ) -> Result<f64, RegionError> {
         let cell = self
+            .bank(frame)?
             .floats
-            .get(self.at(frame, index)?)
+            .get(index as usize)
             .ok_or_else(|| invalid(Refused::Facts))?;
         if !cell.valid || cell.invocation != invocation {
             return Err(invalid(Refused::Facts));
@@ -187,30 +200,42 @@ impl<V: Copy> Registers<V> {
                 let Value::Int(value) = value.scalar(view)? else {
                     return Err(invalid(Refused::Facts));
                 };
-                let at = self.at(frame, index)?;
-                self.ints.get(at).ok_or_else(|| invalid(Refused::Facts))?;
+                let at = index as usize;
+                self.bank(frame)?
+                    .ints
+                    .get(at)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
                 (at, PreparedValue::Int(value))
             }
             Register::Float(index) => {
                 let Value::Float(value) = value.scalar(view)? else {
                     return Err(invalid(Refused::Facts));
                 };
-                let at = self.at(frame, index)?;
-                self.floats.get(at).ok_or_else(|| invalid(Refused::Facts))?;
+                let at = index as usize;
+                self.bank(frame)?
+                    .floats
+                    .get(at)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
                 (at, PreparedValue::Float(value.get()))
             }
             Register::Bool(index) => {
                 let Value::Bool(value) = value.scalar(view)? else {
                     return Err(invalid(Refused::Facts));
                 };
-                let at = self.at(frame, index)?;
-                self.bools.get(at).ok_or_else(|| invalid(Refused::Facts))?;
+                let at = index as usize;
+                self.bank(frame)?
+                    .bools
+                    .get(at)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
                 (at, PreparedValue::Bool(value))
             }
             Register::Value(index) => {
                 let value = value.bind(view).map_err(RegionError::Heap)?;
-                let at = self.at(frame, index)?;
-                self.values.get(at).ok_or_else(|| invalid(Refused::Facts))?;
+                let at = index as usize;
+                self.bank(frame)?
+                    .values
+                    .get(at)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
                 (at, PreparedValue::Dynamic(value))
             }
             Register::Session(bank) => {
@@ -223,6 +248,7 @@ impl<V: Copy> Registers<V> {
             }
         };
         Ok(PreparedWrite {
+            frame,
             at,
             invocation,
             value,
@@ -240,53 +266,45 @@ impl<V: Copy> Registers<V> {
             };
         }
         match write.value {
-            PreparedValue::Int(value) => publish(&mut self.ints[write.at], write.invocation, value),
-            PreparedValue::Float(value) => {
-                publish(&mut self.floats[write.at], write.invocation, value)
-            }
-            PreparedValue::Bool(value) => {
-                publish(&mut self.bools[write.at], write.invocation, value)
-            }
-            PreparedValue::Dynamic(value) => {
-                publish(&mut self.values[write.at], write.invocation, Some(value))
-            }
+            PreparedValue::Int(value) => publish(
+                &mut self.frames[write.frame].ints[write.at],
+                write.invocation,
+                value,
+            ),
+            PreparedValue::Float(value) => publish(
+                &mut self.frames[write.frame].floats[write.at],
+                write.invocation,
+                value,
+            ),
+            PreparedValue::Bool(value) => publish(
+                &mut self.frames[write.frame].bools[write.at],
+                write.invocation,
+                value,
+            ),
+            PreparedValue::Dynamic(value) => publish(
+                &mut self.frames[write.frame].values[write.at],
+                write.invocation,
+                Some(value),
+            ),
             PreparedValue::Session(value) => self.sessions[write.at] = Some(value),
         }
     }
 
     pub(super) fn clear(&mut self, frame: usize) -> Result<(), RegionError> {
-        let base = frame
-            .checked_mul(self.width)
+        let bank = self
+            .frames
+            .get_mut(frame)
             .ok_or_else(|| invalid(Refused::Facts))?;
-        let end = base
-            .checked_add(self.width)
-            .ok_or_else(|| invalid(Refused::Facts))?;
-        for cell in self
-            .ints
-            .get_mut(base..end)
-            .ok_or_else(|| invalid(Refused::Facts))?
-        {
+        for cell in &mut bank.ints {
             cell.valid = false;
         }
-        for cell in self
-            .floats
-            .get_mut(base..end)
-            .ok_or_else(|| invalid(Refused::Facts))?
-        {
+        for cell in &mut bank.floats {
             cell.valid = false;
         }
-        for cell in self
-            .bools
-            .get_mut(base..end)
-            .ok_or_else(|| invalid(Refused::Facts))?
-        {
+        for cell in &mut bank.bools {
             cell.valid = false;
         }
-        for cell in self
-            .values
-            .get_mut(base..end)
-            .ok_or_else(|| invalid(Refused::Facts))?
-        {
+        for cell in &mut bank.values {
             cell.valid = false;
             cell.value = None;
         }
@@ -302,6 +320,7 @@ enum PreparedValue<V: Copy> {
     Session(V),
 }
 pub(super) struct PreparedWrite<V: Copy> {
+    frame: usize,
     at: usize,
     invocation: u64,
     value: PreparedValue<V>,
@@ -325,8 +344,11 @@ impl<V: Copy> Registers<V> {
     ) -> Result<DynamicWrite<'_, V>, RegionError> {
         match reg {
             Register::Value(index) => {
-                let at = self.at(frame, index)?;
+                let at = index as usize;
                 let cell = self
+                    .frames
+                    .get_mut(frame)
+                    .ok_or_else(|| invalid(Refused::Facts))?
                     .values
                     .get_mut(at)
                     .ok_or_else(|| invalid(Refused::Facts))?;

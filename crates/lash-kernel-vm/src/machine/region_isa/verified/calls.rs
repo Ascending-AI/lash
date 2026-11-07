@@ -247,7 +247,8 @@ impl Running<'_> {
         self.parked
             .try_reserve(1)
             .map_err(|_| invalid(Refused::Scratch))?;
-        self.registers.reserve_frame(frame)?;
+        self.registers
+            .reserve_frame(frame, callee.program.registers().len())?;
         self.registers.clear(frame)?;
         let required_loops = frame
             .checked_add(1)

@@ -66,7 +66,6 @@ pub(super) struct Programs {
     codes: Vec<Option<Arc<Code>>>,
     calls: Vec<Option<Arc<super::call_bind::Calls>>>,
     plans: Vec<Vec<Vec<Arc<CalleePlan>>>>,
-    pub(super) registers: usize,
     pub(super) arguments: usize,
     pub(super) transfer_width: usize,
     pub(super) quotes: usize,
@@ -90,7 +89,6 @@ impl Programs {
             codes: table(count, || None)?,
             calls: table(count, || None)?,
             plans: table(count, Vec::new)?,
-            registers: 0,
             arguments: 0,
             transfer_width: 0,
             quotes: 0,
@@ -116,7 +114,6 @@ impl Programs {
                 None => self.sessions[bank] = Some(cell.clone()),
             }
         }
-        self.registers = self.registers.max(code.program.registers().len());
         self.arguments = self.arguments.max(code.arguments);
         self.captures = self.captures.max(code.captures);
         self.transfer_width = self.transfer_width.max(code.transfer_width);
