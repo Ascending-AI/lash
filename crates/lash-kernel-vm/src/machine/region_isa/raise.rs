@@ -45,8 +45,24 @@ impl KernelMachine {
             .source
             .as_ref()
             .ok_or_else(|| fault("a leaving frame has no source continuation"))?;
-        // A `return via` returns what its policy gave, the task's incoming.
-        let value = if source.at.phase == crate::compile::room::Phase::Restore {
+        // A `return via` returns what its policy gave: the value its
+        // Restore takes when its policy returned in the region, or else the
+        // task's incoming.
+        let value = if source.at.phase == crate::compile::room::Phase::Policy {
+            let value = source
+                .pending
+                .ok_or_else(|| fault("a leaving policy return has no result"))?;
+            // The frame takes the result its Restore would have: the task's
+            // Incoming lets go of it.
+            use lash_kernel_state::kernel_internals::logical::Owner;
+            let store = self.logical.clone();
+            let mut ledger = store.borrow_mut();
+            let owner = Owner::Incoming(task);
+            if ledger.holding(owner, self.heap.pages())?.is_some() {
+                ledger.transfer_source(&mut self.arena.borrow_mut(), &self.heap, &[owner], &[])?;
+            }
+            value
+        } else if source.at.phase == crate::compile::room::Phase::Restore {
             let Some(crate::machine::Incoming::Value(value)) = self.task(task)?.take_incoming()
             else {
                 return Err(fault("a leaving policy return has no incoming result"));

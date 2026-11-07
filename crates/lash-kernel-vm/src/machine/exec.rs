@@ -559,6 +559,9 @@ impl KernelMachine {
     ) -> Result<Option<Result<Value, Value>>, Halt> {
         let code = exe.code(self.frame(task)?.code);
         let statement = lash_kernel_state::paged::SiteRef::new(&code.site, self.heap.pages())?;
+        // A region frame the machine completes leaves its continuation as
+        // a return policy's exit does: the frame then stands at its body.
+        self.leave_source_roles(task)?;
         for at in 0..code.slots_by_at.len() {
             self.set_source_slot(task, at as u32, SlotState::Empty)?;
         }
