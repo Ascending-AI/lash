@@ -1004,6 +1004,62 @@ fn captured_constructor() {
         .unwrap();
 }
 
+struct BoundPrefix<'m> {
+    prefix: MaterializedPrefix<'m>,
+    stop: RegionStop,
+    code: Arc<super::Code>,
+    returning: bool,
+    leaving: bool,
+}
+
+// Keep the exclusive lease at the proof site while binding ephemeral tables.
+macro_rules! bound_prefix {
+    ($machine:ident, $program:expr, $until:expr, $context:expr) => {{
+        let mut program = $program;
+        let until = $until;
+        let context = $context;
+        let target_count = $machine.exe.code_count();
+        let mut binds = 0;
+        loop {
+            let mut lease = acquire(&mut *$machine, Arc::clone(&program))
+                .unwrap_or_else(|error| panic!("{}: {:?}", context, error));
+            let execution = &lease.execution;
+            let returning = matches!(
+                execution.code.program.op(execution.pc),
+                Some(crate::compile::region_isa::RegionOp::Return { .. })
+            );
+            let leaving = execution.code.program.step(execution.pc).unwrap().at.phase
+                == crate::compile::room::Phase::Leave;
+            let stop = lease
+                .run(until)
+                .unwrap_or_else(|error| panic!("{}: {:?}", context, error));
+            let code = Arc::clone(&lease.execution.code);
+            let prefix = lease
+                .materialize()
+                .unwrap_or_else(|error| panic!("{}: {:?}", context, error));
+            if stop == RegionStop::Bind {
+                binds += 1;
+                assert!(
+                    binds <= target_count,
+                    "dynamic binding must advance: {}",
+                    context
+                );
+                prefix.prepare_exit().unwrap().commit().unwrap();
+                let top = $machine.frame(TaskId::MAIN).unwrap().code;
+                program = $machine.exe.region(top).unwrap();
+                continue;
+            }
+            break BoundPrefix {
+                prefix,
+                stop,
+                code,
+                returning,
+                leaving,
+            };
+        }
+    }};
+}
+
 fn completed_root() {
     for (body, expected) in [
         ("return 9", Value::Int(9)),
@@ -1025,22 +1081,9 @@ fn completed_root() {
         let draft = compile_region(&machine.exe, root).unwrap();
         let calls = compile_calls(&machine.exe, &draft).unwrap();
         let program = verify_region(&machine.exe, root, draft, &calls).unwrap();
-        let mut lease = acquire(machine, program).unwrap();
-        let outcome = lease.run(StopAt::NextBoundary);
-        let execution = &lease.execution;
-        assert_eq!(
-            outcome.unwrap_or_else(|error| panic!(
-                "uninterrupted {body}: {error:?} at {:?}",
-                execution
-                    .code
-                    .program
-                    .step(execution.pc)
-                    .map(|step| &step.at)
-            )),
-            RegionStop::Complete,
-            "{body}"
-        );
-        let prefix = lease.materialize().unwrap();
+        let BoundPrefix { prefix, stop, .. } =
+            bound_prefix!(machine, program, StopAt::NextBoundary, body);
+        assert_eq!(stop, RegionStop::Complete, "{body}");
         assert!(prefix.reconstruction().frames.is_empty());
         assert!(
             prefix.reconstruction().payload.unwrap().same(&expected),
@@ -1231,22 +1274,9 @@ fn reopened_return_phases() {
         let draft = compile_region(&machine.exe, id).unwrap();
         let calls = compile_calls(&machine.exe, &draft).unwrap();
         let code = verify_region(&machine.exe, id, draft, &calls).unwrap();
-        let mut lease = acquire(machine, code).unwrap();
-        let outcome = lease.run(StopAt::NextBoundary);
-        let execution = &lease.execution;
-        assert_eq!(
-            outcome.unwrap_or_else(|error| panic!(
-                "uninterrupted {body}: {error:?} at {:?}",
-                execution
-                    .code
-                    .program
-                    .step(execution.pc)
-                    .map(|step| &step.at)
-            )),
-            RegionStop::Complete,
-            "{body}"
-        );
-        let prefix = lease.materialize().unwrap();
+        let BoundPrefix { prefix, stop, .. } =
+            bound_prefix!(machine, code, StopAt::NextBoundary, body);
+        assert_eq!(stop, RegionStop::Complete, "{body}");
         let expected_charge = prefix.reconstruction().counters.progress;
         let expected_balance = prefix.reconstruction().counters.balance;
         drop(prefix);
@@ -1268,26 +1298,15 @@ fn reopened_return_phases() {
             let draft = compile_region(&machine.exe, id).unwrap();
             let calls = compile_calls(&machine.exe, &draft).unwrap();
             let code = verify_region(&machine.exe, id, draft, &calls).unwrap();
-            let mut lease = acquire(machine, code)
-                .unwrap_or_else(|error| panic!("{body} prefix {prefix_index}: {error:?}"));
-            let execution = &lease.execution;
-            let returning = matches!(
-                execution.code.program.op(execution.pc),
-                Some(crate::compile::region_isa::RegionOp::Return { .. })
-            );
-            let leaving = execution.code.program.step(execution.pc).unwrap().at.phase
-                == crate::compile::room::Phase::Leave;
-            let outcome = lease.run(StopAt::NextLegalPrefix);
-            let execution = &lease.execution;
-            let stop = outcome.unwrap_or_else(|error| panic!(
-                "{body} prefix {prefix_index}: {error:?}, at {:?}, frames {}, returning {}, departing {}",
-                execution.code.program.step(execution.pc).map(|step| &step.at),
-                execution.parked.len() + 1, execution.returning.is_some(), execution.departing.is_some()
-            ));
+            let BoundPrefix {
+                prefix,
+                stop,
+                code: current_code,
+                returning,
+                leaving,
+            } = bound_prefix!(machine, code, StopAt::NextLegalPrefix, body);
             returns += usize::from(returning);
             leaves += usize::from(leaving);
-            let current_code = Arc::clone(&execution.code);
-            let prefix = lease.materialize().unwrap();
             if let Some(source) = prefix
                 .reconstruction()
                 .canonical
@@ -1385,11 +1404,8 @@ fn reopened_charge_refusal(body: &str, limit: u64) {
         let draft = compile_region(&machine.exe, id).unwrap();
         let calls = compile_calls(&machine.exe, &draft).unwrap();
         let code = verify_region(&machine.exe, id, draft, &calls).unwrap();
-        let mut lease = acquire(machine, code)
-            .unwrap_or_else(|error| panic!("{body}, limit {limit}, reopen {reopen}: {error:?}"));
-        let stop = lease
-            .run(StopAt::NextBoundary)
-            .unwrap_or_else(|error| panic!("{body}, limit {limit}, reopen {reopen}: {error:?}"));
+        let BoundPrefix { prefix, stop, .. } =
+            bound_prefix!(machine, code, StopAt::NextBoundary, body);
         if stop == RegionStop::Complete {
             assert!(
                 before.is_none(),
@@ -1402,9 +1418,6 @@ fn reopened_charge_refusal(body: &str, limit: u64) {
             RegionStop::Refusal,
             "{body}, limit {limit}, reopen {reopen}"
         );
-        let prefix = lease.materialize().unwrap_or_else(|error| {
-            panic!("materialize {body}, limit {limit}, reopen {reopen}: {error:?}")
-        });
         let image = prefix.reconstruction();
         let actual = (
             image.counters.charge,

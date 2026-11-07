@@ -730,6 +730,7 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     let original = snapshot(&root);
     let mut heap =
         PagedHeap::open_header(root.heap, Box::new(run.source.clone()), EditEpoch(20)).unwrap();
+    heap.restore_execution_roots(&root);
     heap.set_census(Box::new(Census::restore(heap.certificate()).unwrap()))
         .unwrap();
     heap.allocate_object(ObjectInit::List(vec![PageValue::Bool(false)]))
@@ -752,14 +753,11 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     let mut task = tasks.get(&key, heap.pages()).unwrap().unwrap();
     let frame_key = lash_kernel_state::kernel_internals::directory::ordinal_key(0);
     let mut frame = task.frames.get(&frame_key, heap.pages()).unwrap().unwrap();
-    frame.statement = lash_kernel_state::paged::SiteRef::new(
-        &lash_kernel_value::sites::Site {
-            unit: lash_kernel_value::sites::Unit::Main,
-            path: vec![0],
-        },
-        heap.pages(),
-    )
-    .unwrap();
+    frame
+        .pending
+        .as_mut()
+        .expect("the canonical region continuation")
+        .site = vec![0, 0];
     task.frames.write(frame_key, frame, heap.pages()).unwrap();
     tasks.write(key, task, heap.pages()).unwrap();
     tasks

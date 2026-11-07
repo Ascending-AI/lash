@@ -653,11 +653,18 @@ fn a_seal_inside_an_expression_callee_is_exact() {
     assert_eq!(active.requests, reference.requests);
 
     let program = scheduled("let v = [probe.long(\"a\"), probe.long(\"b\")]");
-    let (whole, _) = observe(&program, u64::MAX, |_| {});
+    let mut uninterrupted = Embedder::with(&program, setup(ROOMY, u64::MAX));
+    let whole_end = uninterrupted.run_to_end(&[]);
+    let mut whole = (
+        whole_end,
+        uninterrupted.world.printed.clone(),
+        uninterrupted.asked(),
+        uninterrupted.machine.meters().charged.unwrap(),
+    );
     let mut embedder = Embedder::with(&program, setup(ROOMY, 0));
     let mut sealed = 0;
     let mut layouts = [Layout(1), Layout::default()].into_iter().cycle();
-    let end = loop {
+    let mut end = loop {
         let step = embedder.run();
         if !matches!(step, Step::Ended(_)) {
             let (root, certificate) = embedder.checkpoint();
@@ -676,6 +683,18 @@ fn a_seal_inside_an_expression_callee_is_exact() {
             .charged
             .expect("exact charge"),
         embedder.asked(),
+    );
+    let carried = |end: &mut End, source: &super::embedder::Source| {
+        let End::Finished(finished) = end else {
+            panic!("the expression callee finishes")
+        };
+        finished.carry.take().map(|root| {
+            lash_kernel_state::semantic::session(&root, Box::new(source.clone())).unwrap()
+        })
+    };
+    assert_eq!(
+        carried(&mut end, &embedder.source),
+        carried(&mut whole.0, &uninterrupted.source)
     );
     assert_eq!((end, embedder.world.printed, asked, charged), whole);
 }
