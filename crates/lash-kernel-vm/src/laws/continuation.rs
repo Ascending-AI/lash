@@ -851,7 +851,15 @@ fn refused_here(embedder: &mut Embedder) -> RestoreRefusal {
         .restore_refusal(TaskId::MAIN, 0)
         .expect("the frame row reads")
         .expect("the grammar refuses the frame");
-    let problem = loop {
+    let problem = run_out(embedder);
+    let named = format!("continuation refused: {refusal}");
+    assert!(problem.contains(&named), "{problem} names no {named}");
+    refusal
+}
+
+/// How the run ends as `embedder` stands, run on and answered oldest first.
+fn run_out(embedder: &mut Embedder) -> String {
+    loop {
         let step = match embedder.machine.run(&mut embedder.world, 0) {
             Ok(step) => step,
             Err(error) => break format!("{error:?}"),
@@ -872,10 +880,7 @@ fn refused_here(embedder: &mut Embedder) -> RestoreRefusal {
                 }
             }
         }
-    };
-    let named = format!("continuation refused: {refusal}");
-    assert!(problem.contains(&named), "{problem} names no {named}");
-    refusal
+    }
 }
 
 fn path<const N: usize>(path: [u32; N]) -> SitePath {
@@ -890,10 +895,11 @@ fn edit_roles(embedder: &mut Embedder, edit: impl FnOnce(&mut Vec<RoleRecord>)) 
             let pending = pending.as_mut().expect("a saved continuation");
             let mut roles = pending.roles(access).unwrap();
             edit(&mut roles);
-            let invocation = pending.invocation;
-            *pending = ContinuationRecord::new(pending.site.clone(), pending.phase, roles, access)
-                .unwrap()
-                .with_invocation(invocation);
+            // Only the roles change; the rest of the continuation stands.
+            pending.roles =
+                ContinuationRecord::new(pending.site.clone(), pending.phase, roles, access)
+                    .unwrap()
+                    .roles;
         })
         .unwrap();
 }
@@ -1014,6 +1020,69 @@ fn a_role_saved_twice_is_refused() {
     });
     let role = SitePath(twice.unwrap().into());
     assert_eq!(refused(&mut embedder), RestoreRefusal::ExtraRole { role });
+}
+
+/// Q4: a saved region role names one slot of its body by kind and full
+/// source discriminator. Two saved roles under one slot, which is what a
+/// non-injective RoleKey table would write, and a role its body does not
+/// key under that kind, refuse the reopen as malformed.
+#[test]
+fn a_slot_two_saved_roles_share_or_its_body_does_not_key_is_refused() {
+    use lash_kernel_state::kernel_internals::logical::SlotKind;
+    use lash_kernel_state::paged::RoleCoordinate;
+    let cases: [(&str, fn(&mut Vec<RoleRecord>)); 2] = [
+        ("source continuation duplicates a frame role", |roles| {
+            let twice = roles
+                .iter()
+                .find(|role| matches!(role.coordinate, RoleCoordinate::Source { .. }))
+                .expect("a saved source role")
+                .clone();
+            roles.push(twice);
+        }),
+        (
+            "source continuation role is not a role of its body",
+            |roles| {
+                let RoleCoordinate::Source { kind, .. } = &mut roles
+                    .iter_mut()
+                    .find(|role| matches!(role.coordinate, RoleCoordinate::Source { .. }))
+                    .expect("a saved source role")
+                    .coordinate
+                else {
+                    unreachable!()
+                };
+                *kind = match kind {
+                    SlotKind::Control => SlotKind::Departure,
+                    _ => SlotKind::Control,
+                };
+            },
+        ),
+    ];
+    for (named, edit) in cases {
+        // `main` parked at the nested `perform`, keeping the operands it
+        // evaluated; cold, so the edit reaches its saved row.
+        let mut embedder = Embedder::with(NESTED_AWAIT, setup(0));
+        loop {
+            let step = embedder.run();
+            let saved = embedder.machine.pending_roles();
+            if let [(TaskId::MAIN, 0, roles)] = &saved[..]
+                && roles.len() > 1
+                && embedder.machine.pending_phases() == only(STANDING)
+            {
+                break;
+            }
+            match step {
+                Step::Ended(end) => panic!("the run ended at {end:?} before it parked"),
+                Step::Slice => {}
+                Step::Parked(_) => embedder.deliver_next(),
+            }
+        }
+        embedder
+            .try_reopen(Layout(0), true)
+            .expect("the run reopens");
+        edit_roles(&mut embedder, edit);
+        let problem = run_out(&mut embedder);
+        assert!(problem.contains(named), "{problem} names no {named}");
+    }
 }
 
 /// CONT-GRAMMAR: a saved wait on a task that a value, not its request,

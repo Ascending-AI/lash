@@ -425,3 +425,72 @@ impl OwnerSlots {
         Some(read(members))
     }
 }
+
+#[cfg(test)]
+mod role_key_laws {
+    use super::*;
+
+    /// Q4: a body's Slot→RoleKey table round-trips each role through its own
+    /// key, and a table under which one key would name two roles refuses the
+    /// body, so no frame of it can persist a slot two roles share.
+    #[test]
+    fn one_role_key_naming_two_roles_refuses_the_body() {
+        let document = lash_kernel_doc::parse_document(
+            "numbers by_spelling\nkernel 1\nmain { let a = 1 let b = [a, 2] return [a, b] }",
+        )
+        .unwrap();
+        let source = Source::compile(
+            doc::constant_pool::PoolOwner::Document(document.identity()),
+            Site::new(lash_kernel_value::sites::Unit::Main, vec![]),
+            document.main.as_ref().unwrap(),
+            &[],
+            Default::default(),
+            &BTreeMap::new(),
+            &BTreeSet::from([Name::new("a"), Name::new("b")]),
+        );
+        let table = source.owner_slots().unwrap();
+        for owner in table.slots.keys().chain(table.binding_slots.keys()) {
+            if let (Some(slot), Some(role)) = (table.slot(owner), source_role(owner)) {
+                assert_eq!(slot.id(), role.id(), "{owner:?} is keyed by its role");
+                assert_eq!(table.role(slot), Some(role), "{slot:?} names {owner:?}");
+            }
+        }
+        let rebuilt = |slots, binding_slots| OwnerSlots {
+            owner: table.owner,
+            source: table.source.clone(),
+            slots,
+            scopes: table.scopes.clone(),
+            aliases: table.aliases.clone(),
+            binding_slots,
+            roles: BTreeMap::new(),
+            groups: Default::default(),
+        };
+        // Two operands under the first one's key.
+        let operands: Vec<_> = table
+            .slots
+            .iter()
+            .filter(|(owner, id)| matches!(owner, Owner::Operand(_)) && id.is_some())
+            .collect();
+        let [(_, key), (other, _), ..] = operands[..] else {
+            panic!("the body has two operands");
+        };
+        let mut slots = table.slots.clone();
+        slots.insert((*other).clone(), *key);
+        let merged = rebuilt(slots, table.binding_slots.clone());
+        assert_eq!(merged.role_table(), Err(Refused::Facts));
+        // Two bindings under the first one's key.
+        let binding = |name: &str, key| {
+            let declared = Site::new(lash_kernel_value::sites::Unit::Main, vec![0]);
+            let name = Name::new(name);
+            (Owner::Binding { declared, name }, (key, false))
+        };
+        let key = SourceRole::Binding {
+            declared: Site::new(lash_kernel_value::sites::Unit::Main, vec![0]),
+            name: Name::new("a"),
+        }
+        .id();
+        let binding_slots = BTreeMap::from([binding("a", key), binding("b", key)]);
+        let merged = rebuilt(table.slots.clone(), binding_slots);
+        assert_eq!(merged.role_table(), Err(Refused::Facts));
+    }
+}

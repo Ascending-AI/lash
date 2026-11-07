@@ -1554,6 +1554,31 @@ impl KernelMachine {
         phases
     }
 
+    /// The saved roles of every published frame row that stands at a
+    /// nested action, by task and frame index.
+    pub(crate) fn pending_roles(
+        &mut self,
+    ) -> Vec<(TaskId, usize, Vec<lash_kernel_state::paged::RoleCoordinate>)> {
+        let mut saved = Vec::new();
+        let access = self.heap.pages().clone();
+        self.publish_holdings().expect("the run publishes");
+        self.tasks
+            .visit(&mut |id, task| {
+                for index in 0..task.frames.len() {
+                    if let Ok(Some((_, frame))) = task.frames.rank_get(index, &access)
+                        && let Some(pending) = &frame.pending
+                    {
+                        let roles = pending.roles(&access).expect("the roles read");
+                        let roles = roles.into_iter().map(|role| role.coordinate);
+                        saved.push((id, index as usize, roles.collect()));
+                    }
+                }
+                true
+            })
+            .expect("the task rows read");
+        saved
+    }
+
     /// The header of every published loop row: where each loop stood.
     pub(crate) fn loop_headers(&mut self) -> Vec<lash_kernel_state::paged::HeaderRecord> {
         let mut headers = Vec::new();
