@@ -180,7 +180,7 @@ impl<'m> RegionLease<'m> {
         let (pc, prefix) = *positions.last().ok_or_else(|| invalid(Refused::Facts))?;
         super::resume::warm_next(machine, top_code, top, task_id, pc, prefix)?;
         let saved = machine.saved_environments().map_err(RegionError::Heap)?;
-        let indexes: Vec<_> = (0..exe.occurrence_count()).collect();
+        let indexes: Vec<_> = programs.counters.iter().copied().collect();
         let task = machine
             .tasks
             .get_mut(task_id.0 as usize)

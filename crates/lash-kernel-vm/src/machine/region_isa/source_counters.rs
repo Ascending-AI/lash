@@ -16,7 +16,7 @@ pub(super) struct CounterPlan {
     occurrence: Option<CounterRead>,
 }
 pub(super) struct SourceCounters {
-    values: Box<[u64]>,
+    values: Box<[(usize, u64)]>,
 }
 pub(super) struct ReadyCounters<'a> {
     counters: &'a mut SourceCounters,
@@ -24,6 +24,12 @@ pub(super) struct ReadyCounters<'a> {
     occurrence: Option<u64>,
 }
 impl CounterPlan {
+    pub(super) fn indexes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.edits
+            .iter()
+            .map(|edit| edit.index as usize)
+            .chain(self.occurrence.map(|read| read.issued as usize))
+    }
     pub(super) fn bind(
         edits: Box<[CounterEdit]>,
         occurrence: Option<CounterRead>,
@@ -46,7 +52,10 @@ impl CounterPlan {
     }
 }
 impl SourceCounters {
-    pub(super) fn bind(actual: &[u64]) -> Result<Self, RegionError> {
+    pub(super) fn bind(actual: &[(usize, u64)]) -> Result<Self, RegionError> {
+        if actual.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+            return Err(invalid(Refused::Facts));
+        }
         let mut values = Vec::new();
         values
             .try_reserve_exact(actual.len())
@@ -57,10 +66,13 @@ impl SourceCounters {
         })
     }
     pub(super) fn current(&self, index: u32) -> Result<u64, RegionError> {
+        let position = self.position(index)?;
+        Ok(self.values[position].1)
+    }
+    fn position(&self, index: u32) -> Result<usize, RegionError> {
         self.values
-            .get(index as usize)
-            .copied()
-            .ok_or_else(|| invalid(Refused::Facts))
+            .binary_search_by_key(&(index as usize), |&(index, _)| index)
+            .map_err(|_| invalid(Refused::Facts))
     }
     pub(super) fn prepare<'a>(
         &'a mut self,
@@ -88,15 +100,16 @@ impl SourceCounters {
             occurrence,
         })
     }
-    pub(super) fn freeze(self) -> Box<[u64]> {
+    pub(super) fn freeze(self) -> Box<[(usize, u64)]> {
         self.values
     }
 }
 impl ReadyCounters<'_> {
-    pub(super) fn accept(self) -> Option<u64> {
+    pub(super) fn accept(self) -> Result<Option<u64>, RegionError> {
         for edit in &self.plan.edits {
-            self.counters.values[edit.index as usize] += edit.advance;
+            let position = self.counters.position(edit.index)?;
+            self.counters.values[position].1 += edit.advance;
         }
-        self.occurrence
+        Ok(self.occurrence)
     }
 }

@@ -4,8 +4,7 @@ use super::{HeapFault, Occurrences};
 
 pub(in crate::machine) struct CounterLease<'a> {
     actual: &'a mut Occurrences,
-    indexes: Box<[usize]>,
-    entry: Box<[u64]>,
+    entry: Box<[(usize, u64)]>,
 }
 
 pub(in crate::machine) struct PreparedCounterExit<'a> {
@@ -32,37 +31,32 @@ impl Occurrences {
                 "region source counters are not distinct canonical indexes",
             ));
         }
-        let mut bound = Vec::new();
         let mut entry = Vec::new();
-        bound
-            .try_reserve_exact(indexes.len())
-            .map_err(|_| exhausted())?;
         entry
             .try_reserve_exact(indexes.len())
             .map_err(|_| exhausted())?;
         for &index in indexes {
-            entry.push(
+            entry.push((
+                index,
                 self.current(index)
                     .ok_or_else(|| invalid("region source counter is absent"))?,
-            );
-            bound.push(index);
+            ));
         }
         Ok(CounterLease {
             actual: self,
-            indexes: bound.into_boxed_slice(),
             entry: entry.into_boxed_slice(),
         })
     }
 }
 
 impl<'a> CounterLease<'a> {
-    pub(in crate::machine) fn entry(&self) -> &[u64] {
+    pub(in crate::machine) fn entry(&self) -> &[(usize, u64)] {
         &self.entry
     }
 
     pub(in crate::machine) fn prepare(
         self,
-        reached: &[u64],
+        reached: &[(usize, u64)],
     ) -> Result<PreparedCounterExit<'a>, HeapFault> {
         if reached.len() != self.entry.len() {
             return Err(invalid("region source counter shape changed"));
@@ -71,8 +65,8 @@ impl<'a> CounterLease<'a> {
         updates
             .try_reserve_exact(reached.len())
             .map_err(|_| exhausted())?;
-        for ((&index, &entry), &next) in self.indexes.iter().zip(self.entry.iter()).zip(reached) {
-            if self.actual.current(index) != Some(entry) || next < entry {
+        for (&(index, entry), &(reached_index, next)) in self.entry.iter().zip(reached) {
+            if reached_index != index || self.actual.current(index) != Some(entry) || next < entry {
                 return Err(invalid(
                     "region source counter entry or ordered prefix changed",
                 ));
@@ -129,35 +123,35 @@ mod laws {
         assert!(actual.lease_counters(&[0, 0]).is_err());
         assert!(actual.lease_counters(&[3]).is_err());
         let lease = actual.lease_counters(&[0, 2]).unwrap();
-        assert_eq!(lease.entry(), [17, u64::MAX - 1]);
-        drop(lease.prepare(&[18, u64::MAX]).unwrap());
+        assert_eq!(lease.entry(), [(0, 17), (2, u64::MAX - 1)]);
+        drop(lease.prepare(&[(0, 18), (2, u64::MAX)]).unwrap());
         assert_eq!(&*actual.counts, [17, 91, u64::MAX - 1]);
         assert!(
             actual
                 .lease_counters(&[0, 2])
                 .unwrap()
-                .prepare(&[16, u64::MAX])
+                .prepare(&[(0, 16), (2, u64::MAX)])
                 .is_err()
         );
         assert!(
             actual
                 .lease_counters(&[0, 2])
                 .unwrap()
-                .prepare(&[18])
+                .prepare(&[(0, 18)])
                 .is_err()
         );
         assert_eq!(&*actual.counts, [17, 91, u64::MAX - 1]);
         actual
             .lease_counters(&[0, 2])
             .unwrap()
-            .prepare(&[18, u64::MAX])
+            .prepare(&[(0, 18), (2, u64::MAX)])
             .unwrap()
             .publish();
         assert_eq!(&*actual.counts, [18, 91, u64::MAX]);
         actual
             .lease_counters(&[0, 2])
             .unwrap()
-            .prepare(&[21, u64::MAX])
+            .prepare(&[(0, 21), (2, u64::MAX)])
             .unwrap()
             .publish();
         assert_eq!(&*actual.counts, [21, 91, u64::MAX]);

@@ -111,7 +111,7 @@ impl Calls {
     pub(super) fn bind(
         caller: &Code,
         targets: &[Vec<Arc<CalleePlan>>],
-        codes: &[Option<Arc<Code>>],
+        codes: &std::collections::BTreeMap<CodeId, Arc<Code>>,
     ) -> Result<Self, RegionError> {
         if targets.len() != caller.calls.len() {
             return Err(invalid(Refused::Source));
@@ -123,8 +123,7 @@ impl Calls {
                     .iter()
                     .map(|plan| {
                         let callee = codes
-                            .get(plan.code().0 as usize)
-                            .and_then(Option::as_ref)
+                            .get(&plan.code())
                             .ok_or_else(|| invalid(Refused::Source))?;
                         if !Arc::ptr_eq(plan.source(), callee.program.source()) {
                             return Err(invalid(Refused::Source));

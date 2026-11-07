@@ -440,7 +440,14 @@ fn an_active_static_call_preserves_both_canonical_frames() {
         let image = prefix.reconstruction();
         assert_eq!(image.frames.len(), 2);
         if let (Some(index), Some(count)) = (occurrence, initial_count) {
-            assert_eq!(image.source_counts[index], count + 1);
+            assert_eq!(
+                image
+                    .source_counts
+                    .iter()
+                    .find(|row| row.0 == index)
+                    .map(|row| row.1),
+                Some(count + 1),
+            );
         }
         assert_eq!(
             (image.frames[0].program, image.frames[0].invocation),

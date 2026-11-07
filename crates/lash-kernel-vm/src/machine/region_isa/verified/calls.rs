@@ -383,7 +383,7 @@ impl Running<'_> {
         // The caller's suspended Pending carries the occurrence issued by
         // this entry, while the callee starts its own source coordinates.
         let ready = phase.reserve().map_err(RegionError::Heap)?;
-        reached.occurrence = counter.accept();
+        reached.occurrence = counter.accept()?;
         reached.prefix = step.after.index() as u32;
         let parked = Parked {
             callee: identity,

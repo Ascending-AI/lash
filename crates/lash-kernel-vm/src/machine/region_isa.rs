@@ -60,7 +60,7 @@ pub(crate) struct Reconstruction {
     limits: Limits,
     stop: RegionStop,
     payload: Option<Value>,
-    source_counts: Box<[u64]>,
+    source_counts: Box<[(usize, u64)]>,
     canonical: Option<publication::Canonical>,
     /// Main session cells this lease wrote, for the VM session table.
     sessions: Box<[(crate::compile::BindingName, Value)]>,
