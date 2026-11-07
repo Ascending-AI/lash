@@ -899,6 +899,9 @@ impl Compiler<'_> {
                 self.path = enclosing_path;
                 let id = CodeId(self.base.codes + self.codes.len() as u32);
                 self.codes.push(Some(code));
+                if let Some(scope) = self.scopes.last_mut() {
+                    scope.closures.push(id);
+                }
                 ops.push(Op::Closure {
                     dst,
                     code: CodeIx(id.0),

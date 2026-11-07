@@ -69,46 +69,91 @@ pub(super) fn source_kind(
         doc::Node::Expr(doc::Expr::Literal(doc::Literal::Function(function))) => {
             HeapKind::Function(*function)
         }
-        doc::Node::Expr(doc::Expr::Closure(_)) => {
-            // One lifted body compiles once per set of names its enclosing
-            // code shares with it: the parent's compilation is the one whose
-            // every capture names a variable of the parent, with the most.
-            let outer = exe.code(parent);
-            let code = exe
-                .closures_at(&at.site)
-                .filter(|code| {
-                    let inner = exe.code(*code);
-                    inner.captures.iter().all(|capture| {
-                        outer
-                            .slots_by_at
-                            .get(capture.outer_at as usize)
-                            .and_then(|slot| outer.slots.get(*slot as usize))
-                            .zip(inner.slots.get(capture.inner as usize))
-                            .is_some_and(|(outer, inner)| outer.name == inner.name)
-                    })
-                })
-                .max_by_key(|code| exe.code(*code).captures.len())
-                .ok_or(Refused::Source)?;
-            let captures = exe
-                .code(code)
-                .captures
-                .iter()
-                .map(|capture| {
-                    let at = *exe
-                        .code(parent)
-                        .slots_by_at
-                        .get(capture.outer_at as usize)
+        doc::Node::Expr(doc::Expr::Closure(closure)) => {
+            let slots = source.owner_slots()?;
+            let mut expected = std::collections::BTreeMap::new();
+            for name in source.closure_free(&closure.function)? {
+                if let Some(binding) =
+                    crate::compile::room::root_owners::visible(&slots.scopes, &at.site, &name)
+                {
+                    let slot = slots
+                        .root(binding, doc::TaskId::MAIN, 0)
+                        .and_then(resources::root_role)
+                        .and_then(Role::slot)
                         .ok_or(Refused::Source)?;
-                    match source.binding_root(at, doc::TaskId::MAIN, 0) {
-                        Some(lash_kernel_state::kernel_internals::logical::Owner::Value {
-                            slot,
-                            ..
-                        }) => Ok(slot),
-                        _ => Err(Refused::Source),
+                    expected.insert(name, slot);
+                }
+            }
+            let outer = exe.code(parent);
+            let mut matches = exe.closures_at(&at.site).filter_map(|id| {
+                let inner = exe.code(id);
+                let origin = inner.created_in.as_ref()?;
+                if inner.site.unit != lash_kernel_value::sites::Unit::Library(closure.function)
+                    || inner.created.as_ref() != Some(&at.site)
+                    || !inner.site.path.is_empty()
+                    || inner.source_room.site != inner.site
+                    || inner.source_room.owner
+                        != doc::constant_pool::PoolOwner::Function(closure.function)
+                    || !std::ptr::eq(origin.as_ref(), source)
+                    || !origin.same_bindings(source)
+                    || !inner.free.is_empty()
+                    || inner.captures.len() != expected.len()
+                    || inner.capture_names != expected.keys().cloned().collect::<Vec<_>>()
+                {
+                    return None;
+                }
+                let mut captures = Vec::new();
+                let mut remaining = expected.clone();
+                let mut last = None;
+                for capture in &inner.captures {
+                    if last.is_some_and(|last| last >= capture.inner) {
+                        return None;
                     }
-                })
-                .collect::<Result<_, Refused>>()?;
-            HeapKind::Closure { code, captures }
+                    last = Some(capture.inner);
+                    let binding = inner.slots.get(capture.inner as usize)?;
+                    if binding.declared != inner.site
+                        || !binding.shared
+                        || inner.slots_by_at.get(capture.inner_at as usize) != Some(&capture.inner)
+                        || outer.slots_by_at.get(capture.outer_at as usize) != Some(&capture.outer)
+                    {
+                        return None;
+                    }
+                    let inner_slot = Slot::Capture(
+                        lash_kernel_state::kernel_internals::logical::SourceRole::Binding {
+                            declared: inner.site.clone(),
+                            name: binding.name.clone(),
+                        }
+                        .id(),
+                    );
+                    if inner
+                        .source_room
+                        .binding_root(capture.inner, doc::TaskId::MAIN, 0)
+                        .and_then(resources::root_role)
+                        .and_then(Role::slot)
+                        != Some(inner_slot)
+                    {
+                        return None;
+                    }
+                    let actual = outer
+                        .source_room
+                        .binding_root(capture.outer, doc::TaskId::MAIN, 0)
+                        .and_then(resources::root_role)
+                        .and_then(Role::slot)?;
+                    if remaining.remove(&binding.name) != Some(actual) {
+                        return None;
+                    }
+                    captures.push(actual);
+                }
+                Some((id, captures))
+            });
+            let (code, captures) = matches.next().ok_or(Refused::Source)?;
+            if matches.next().is_some() {
+                return Err(Refused::Source);
+            }
+            HeapKind::Closure {
+                code,
+                captures: captures.into(),
+            }
         }
         doc::Node::Expr(doc::Expr::List(_)) => HeapKind::List,
         doc::Node::Expr(doc::Expr::Tuple(_)) => HeapKind::Tuple,

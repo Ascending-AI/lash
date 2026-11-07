@@ -136,6 +136,8 @@ struct Tables {
     code_at: BTreeMap<(Site, Vec<Name>), CodeId>,
     /// Lexical closure bodies by function and creation site.
     closure_at: BTreeMap<(FunctionId, Site, Vec<Name>), CodeId>,
+    /// All lexical compilations, including variants with equal capture names.
+    closure_variants: BTreeMap<Site, Vec<CodeId>>,
     /// Canonical action-site order, independent of the executable layout.
     occurrence_at: BTreeMap<Site, usize>,
     occurrence_keys: Box<[Vec<u8>]>,
@@ -754,9 +756,14 @@ impl Executable {
             .filter(|tables| !std::ptr::eq(*tables, &self.own.tables));
         unit.into_iter()
             .chain([&self.own.tables])
-            .flat_map(|tables| tables.closure_at.iter())
-            .filter(move |((_, at, _), _)| at == site)
-            .map(|(_, code)| *code)
+            .flat_map(move |tables| {
+                tables
+                    .closure_variants
+                    .get(site)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+            })
     }
 
     /// A closure's lexical body under its defining executable tables.
@@ -842,6 +849,8 @@ pub(crate) struct Code {
     /// Sorted lexical capture names distinguish compilations of one lifted body.
     pub(crate) capture_names: Vec<Name>,
     pub(crate) created: Option<Site>,
+    /// Complete source bindings of the lexical compilation that creates this body.
+    pub(crate) created_in: Option<Arc<room::Source>>,
     /// The site of the body: a unit's, or a closure expression's child.
     pub(crate) site: Site,
     pub(crate) params: Vec<Local>,
@@ -1242,6 +1251,7 @@ struct Scopes {
     blocks: Vec<Vec<(Name, Declared)>>,
     slots: Vec<SlotInfo>,
     captures: Vec<Capture>,
+    closures: Vec<CodeId>,
     /// A document function's free names, each with its variable; `None`
     /// for any other code, whose free names are unbound.
     free: Option<Vec<(Name, Slot)>>,
@@ -1440,6 +1450,15 @@ impl<'a> Compiler<'a> {
                 )
             })
             .collect();
+        let mut closure_variants: BTreeMap<Site, Vec<CodeId>> = BTreeMap::new();
+        for (index, code) in codes.iter().enumerate() {
+            if let Some(at) = &code.created {
+                closure_variants
+                    .entry(at.clone())
+                    .or_default()
+                    .push(CodeId(base.codes + index as u32));
+            }
+        }
         let closure_at = codes
             .iter()
             .enumerate()
@@ -1466,6 +1485,7 @@ impl<'a> Compiler<'a> {
             edges,
             code_at,
             closure_at,
+            closure_variants,
             occurrence_at,
             occurrence_keys,
             occurrence_units,

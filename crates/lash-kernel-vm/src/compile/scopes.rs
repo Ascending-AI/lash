@@ -67,6 +67,7 @@ impl Compiler<'_> {
             blocks: Vec::new(),
             slots: Vec::new(),
             captures: Vec::new(),
+            closures: Vec::new(),
             free: free.then(Vec::new),
         });
         let (body, params) = self.block(body, params);
@@ -78,6 +79,7 @@ impl Compiler<'_> {
             blocks: Vec::new(),
             slots: Vec::new(),
             captures: Vec::new(),
+            closures: Vec::new(),
             free: None,
         });
         self.live = enclosing;
@@ -161,11 +163,17 @@ impl Compiler<'_> {
             Arc::clone(&self.resolve.library.registry),
             self.private,
         ));
+        for closure in &scopes.closures {
+            if let Some(Some(code)) = self.codes.get_mut((closure.0 - self.base.codes) as usize) {
+                code.created_in = Some(Arc::clone(&source_room));
+            }
+        }
         self.source_body = enclosing_source;
         Code {
             source_room,
             capture_names,
             created: None,
+            created_in: None,
             site,
             params,
             body,

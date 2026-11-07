@@ -366,6 +366,7 @@ pub(crate) struct SourceRoom {
 
 /// Immutable source authority retained separately from the projections. The
 /// verifier reads this tree, not a second consumer of SourceRoom's formulas.
+#[derive(PartialEq, Eq)]
 pub(super) struct BindingSlot {
     pub(super) declared: Site,
     pub(super) name: Name,
@@ -639,6 +640,26 @@ impl std::ops::Deref for Source {
     }
 }
 impl Source {
+    pub(super) fn same_bindings(&self, other: &Self) -> bool {
+        self.owner == other.owner && self.site == other.site && self.bindings == other.bindings
+    }
+
+    pub(super) fn closure_free(
+        &self,
+        function: &FunctionId,
+    ) -> Result<std::collections::BTreeSet<Name>, Refused> {
+        let catalog = &self.seed.as_ref().ok_or(Refused::Source)?.catalog;
+        let definition = catalog.get(function).ok_or(Refused::Source)?.definition();
+        let params: Vec<_> = definition
+            .signature
+            .params
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        let body = definition.body().ok_or(Refused::Source)?;
+        Ok(doc::snapshot::CodeReads::of(&params, &body.block, &**catalog).free)
+    }
+
     pub(crate) fn binding_root(
         &self,
         index: u32,
