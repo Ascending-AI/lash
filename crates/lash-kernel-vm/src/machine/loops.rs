@@ -448,6 +448,7 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
     ) -> Status {
+        self.oracle_only()?;
         let link = self.frame(task)?.link;
         let document = self
             .program

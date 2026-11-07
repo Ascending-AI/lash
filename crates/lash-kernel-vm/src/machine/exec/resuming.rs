@@ -19,6 +19,7 @@ impl KernelMachine {
         value: Value,
         origin: ResultOrigin,
     ) -> Eval<(StmtId, Ran)> {
+        self.oracle_only()?;
         if matches!(origin, ResultOrigin::Returned)
             && let Some((id, pc)) = self.publish_source_call_resume(task, exe, value)?
         {

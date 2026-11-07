@@ -1149,6 +1149,17 @@ impl KernelMachine {
         self.step_source(task, host, exe)
     }
 
+    /// The statement executor runs only as the testing oracle: every frame
+    /// of an ordinary run stands in its region, so reaching a statement
+    /// outside the oracle is the machine's fault, never a fallback.
+    pub(super) fn oracle_only(&self) -> Result<(), Halt> {
+        #[cfg(any(test, feature = "testing"))]
+        if self.islands.source_only {
+            return Ok(());
+        }
+        Err(fault("a statement ran outside its region"))
+    }
+
     /// The source oracle: runs one statement of `task` through the
     /// statement executor, as laws compare the region against.
     #[cfg(any(test, feature = "testing"))]

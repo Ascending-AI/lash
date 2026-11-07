@@ -140,6 +140,7 @@ impl KernelMachine {
         running: &Running<'_>,
         pc: usize,
     ) -> Eval<Ran> {
+        self.oracle_only()?;
         #[cfg(any(test, feature = "perf-witness"))]
         if self.islands.counting {
             return self.run_counted(host, running, pc);
