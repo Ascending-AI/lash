@@ -56,29 +56,26 @@ impl StateLease<'_> {
         self.load_head(index)?;
         let slot = &self.local.slots[index];
         let entity = slot.existing.as_ref().and_then(|existing| existing.entity);
-        let closure = match &slot.body {
-            Some(LocalBody::Closure(closure)) => closure,
-            _ => match slot
-                .existing
+        let (identity, closure, captures) = match (
+            &slot.body,
+            slot.existing
                 .as_ref()
-                .and_then(|existing| existing.callable.as_ref())
-            {
-                Some(LocalCallable::Function(identity)) => {
-                    return Ok(LeaseCallable {
-                        identity,
-                        closure: None,
-                        captures: &[],
-                        entity,
-                    });
-                }
-                Some(LocalCallable::Closure(closure)) => closure,
-                None => return Err(LeaseFault::BoundaryRequired),
-            },
+                .and_then(|existing| existing.callable.as_ref()),
+        ) {
+            (Some(LocalBody::Leaf(LeafBody::Function(identity))), _)
+            | (None, Some(LocalCallable::Function(identity))) => (identity, None, &[][..]),
+            (Some(LocalBody::Closure(closure)), _)
+            | (None, Some(LocalCallable::Closure(closure))) => (
+                &closure.identity.callable,
+                Some(&*closure.identity),
+                closure.captures.as_slice(),
+            ),
+            _ => return Err(LeaseFault::BoundaryRequired),
         };
         Ok(LeaseCallable {
-            identity: &closure.identity.callable,
-            closure: Some(&closure.identity),
-            captures: &closure.captures,
+            identity,
+            closure,
+            captures,
             entity,
         })
     }
