@@ -105,6 +105,7 @@ impl Running<'_> {
                 stage: LoopStage { info, phase },
                 driver,
                 ended,
+                unchecked,
             } => {
                 let info = *info;
                 let via = program
@@ -182,6 +183,11 @@ impl Running<'_> {
                         }
                         match item {
                             Some(item) => {
+                                // Only a map's or a set's walk is checked.
+                                let next = match (state.guard, unchecked) {
+                                    (None, Some(unchecked)) => *unchecked,
+                                    _ => next,
+                                };
                                 let answer = self.written(dst, item, next)?;
                                 Ok(Stood::Taken(answer, info, state))
                             }

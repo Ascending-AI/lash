@@ -181,10 +181,14 @@ impl Code {
                             pending.push(*exhausted);
                         }
                         crate::compile::region_isa::CheckedKind::Header {
-                            driver, ended, ..
+                            driver,
+                            ended,
+                            unchecked,
+                            ..
                         } => {
                             pending.extend(*driver);
                             pending.extend(*ended);
+                            pending.extend(*unchecked);
                         }
                         crate::compile::region_isa::CheckedKind::Cleanup { at } => {
                             pending.extend(program.restores(at));

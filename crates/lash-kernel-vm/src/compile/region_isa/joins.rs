@@ -75,9 +75,17 @@ fn redirect(op: &mut RegionOp, old: Pc, new: Pc) {
             replace(next);
             match &mut kernel.kind {
                 CheckedKind::Cursor { exhausted, .. } => replace(exhausted),
-                CheckedKind::Header { driver, ended, .. } => {
+                CheckedKind::Header {
+                    driver,
+                    ended,
+                    unchecked,
+                    ..
+                } => {
                     if let Some(driver) = driver {
                         replace(driver);
+                    }
+                    if let Some(unchecked) = unchecked {
+                        replace(unchecked);
                     }
                     if let Some(ended) = ended {
                         replace(ended);

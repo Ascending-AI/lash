@@ -220,11 +220,13 @@ pub(crate) enum CheckedKind {
     },
     /// A protocol `for`'s header stage (`K-ITER-005`): it branches on what
     /// `open` returned. `driver` is the unaccepted jump to `next`'s call;
-    /// `ended` is where the loop leaves once nothing is left.
+    /// `ended` is where the loop leaves once nothing is left; `unchecked`
+    /// is where a step of neither a map nor a set goes on past `check`.
     Header {
         stage: LoopStage,
         driver: Option<Pc>,
         ended: Option<Pc>,
+        unchecked: Option<Pc>,
     },
     /// A protocol `for` binds the item its header holds, or `item`'s
     /// result, and starts a pass.

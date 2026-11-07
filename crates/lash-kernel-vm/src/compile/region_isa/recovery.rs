@@ -224,9 +224,15 @@ pub(super) fn successors(draft: &RegionDraft, pc: usize) -> Vec<super::Pc> {
             super::CheckedKind::Cleanup { at } => std::iter::once(*next)
                 .chain(super::departures::restores_at(draft, at))
                 .collect(),
-            super::CheckedKind::Header { driver, ended, .. } => std::iter::once(*next)
+            super::CheckedKind::Header {
+                driver,
+                ended,
+                unchecked,
+                ..
+            } => std::iter::once(*next)
                 .chain(*driver)
                 .chain(*ended)
+                .chain(*unchecked)
                 .collect(),
             _ => vec![*next],
         },
@@ -254,6 +260,7 @@ pub(super) fn unaccepted(op: &RegionOp, successor: super::Pc) -> bool {
             stage,
             driver,
             ended,
+            ..
         } => {
             stage.phase == super::LoopPhase::Step
                 && (*driver == Some(successor) || *ended == Some(successor))

@@ -25,9 +25,17 @@ fn redirect(op: &mut RegionOp, old: Pc, new: Pc) {
             replace(next);
             match &mut kernel.kind {
                 CheckedKind::Cursor { exhausted, .. } => replace(exhausted),
-                CheckedKind::Header { driver, ended, .. } => {
+                CheckedKind::Header {
+                    driver,
+                    ended,
+                    unchecked,
+                    ..
+                } => {
                     if let Some(driver) = driver {
                         replace(driver);
+                    }
+                    if let Some(unchecked) = unchecked {
+                        replace(unchecked);
                     }
                     if let Some(ended) = ended {
                         replace(ended);
@@ -204,6 +212,7 @@ fn expected(
         stage,
         driver,
         ended,
+        unchecked: None,
     };
     let ended = || own(LoopPhase::Ended);
     Ok(match stage.phase {
@@ -247,10 +256,16 @@ fn expected(
             event.output = Some(header.clone());
             event.peak = Amount::header(Some(header.clone()), None);
             event.delta = event.peak.clone();
+            // `check` runs only on a map's or a set's walk (`K-ITER-005`).
             Expected {
                 event,
                 charges,
-                kind: header_kind(via.next.then(|| hook(Phase::Next)).transpose()?, Some(done)),
+                kind: CheckedKind::Header {
+                    stage,
+                    driver: via.next.then(|| hook(Phase::Next)).transpose()?,
+                    ended: Some(done),
+                    unchecked: via.check.then_some(pass),
+                },
                 args: Box::new([reg(&cursor)?]),
                 dst: reg(&header)?,
                 next: if via.check { hook(Phase::Check)? } else { pass },

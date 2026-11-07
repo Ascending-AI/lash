@@ -351,7 +351,7 @@ pub(in crate::machine) fn restore_source_controls(
         return Err(malformed());
     }
     let (pc, prefix) = position(&code, source).map_err(|_| malformed())?;
-    let roles = expected(&code, pc, prefix, source.progress == 3).map_err(|_| malformed())?;
+    let roles = expected(&code, pc, prefix, Some(source)).map_err(|_| malformed())?;
     let expected: Vec<_> = roles
         .iter()
         .filter(|(slot, _)| {
@@ -492,7 +492,7 @@ fn expected(
     code: &Code,
     pc: Pc,
     prefix: PrefixId,
-    suspended: bool,
+    source: Option<&SourceContinuation>,
 ) -> Result<
     Vec<(
         lash_kernel_state::kernel_internals::logical::Slot,
@@ -504,15 +504,26 @@ fn expected(
         .program
         .recovery(prefix)
         .ok_or_else(|| invalid(Refused::Exit))?;
-    let call = if suspended {
-        let crate::compile::region_isa::RegionOp::Call { site, .. } =
-            code.program.op(pc).ok_or_else(|| invalid(Refused::Path))?
-        else {
-            return Err(invalid(Refused::Path));
-        };
-        Some(code.call(*site)?)
-    } else {
-        None
+    // A suspended call's roles stand parked; so do they when its callee's
+    // raise departs from the call's Restore.
+    let call = match source {
+        Some(source) if source.progress == 3 => {
+            let crate::compile::region_isa::RegionOp::Call { site, .. } =
+                code.program.op(pc).ok_or_else(|| invalid(Refused::Path))?
+            else {
+                return Err(invalid(Refused::Path));
+            };
+            Some(code.call(*site)?)
+        }
+        Some(SourceContinuation {
+            departure: Some(at),
+            ..
+        }) => code
+            .calls
+            .iter()
+            .flatten()
+            .find(|call| call.plan.resume() == at),
+        _ => None,
     };
     let mut values = Vec::new();
     for (slot, reg) in &map.roles {
@@ -565,12 +576,7 @@ pub(super) fn values(
     if let Some(source) = source {
         actual.extend(source.roles.iter().copied());
     }
-    let roles = expected(
-        code,
-        pc,
-        prefix,
-        source.is_some_and(|source| source.progress == 3),
-    )?;
+    let roles = expected(code, pc, prefix, source)?;
     if actual.len() != roles.len() {
         return Err(RegionError::Heap(HeapFault::Malformed(format!(
             "source continuation roles differ at {:?}: actual {:?}, expected {:?}",
