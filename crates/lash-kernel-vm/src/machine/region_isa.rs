@@ -79,7 +79,7 @@ pub(crate) enum StopAt {
     NextLegalPrefix,
     NextBoundary,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RegionStop {
     Boundary,
     /// The region stands at a delivering action for the machine to perform.
@@ -103,7 +103,7 @@ pub(crate) enum RegionStop {
     /// the machine raises it there, as it raises a native's error.
     Refused {
         kind: &'static str,
-        message: &'static str,
+        message: std::borrow::Cow<'static, str>,
     },
     /// The region stands before a checked helper's call whose arguments it
     /// cannot show fit the helper's signature: the machine checks them,
@@ -181,7 +181,7 @@ impl<'m> MaterializedPrefix<'m> {
 }
 impl PreparedRegionExit<'_> {
     pub(crate) fn commit(self) -> Result<RegionStop, RegionError> {
-        let stop = self.reconstruction.stop;
+        let stop = self.reconstruction.stop.clone();
         self.prepared.commit(self.reconstruction)?;
         Ok(stop)
     }

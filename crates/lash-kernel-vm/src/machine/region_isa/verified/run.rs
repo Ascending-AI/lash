@@ -9,10 +9,10 @@ impl Running<'_> {
         if self.faulted {
             return Err(invalid(Refused::Facts));
         }
-        if let Some(stop) = self.stop
-            && stop != RegionStop::Handoff
+        if let Some(stop) = &self.stop
+            && *stop != RegionStop::Handoff
         {
-            return Ok(stop);
+            return Ok(stop.clone());
         }
         self.stop = None;
         let outcome = self.dispatch(request);
@@ -46,7 +46,7 @@ impl Running<'_> {
 
     fn halt(&mut self, reason: RegionStop) -> Result<RegionStop, RegionError> {
         self.release_atoms()?;
-        self.stop = Some(reason);
+        self.stop = Some(reason.clone());
         Ok(reason)
     }
 
@@ -58,7 +58,7 @@ impl Running<'_> {
         } else {
             return None;
         };
-        self.stop = Some(stop);
+        self.stop = Some(stop.clone());
         Some(stop)
     }
 
@@ -90,7 +90,8 @@ impl Running<'_> {
                 .ok_or_else(|| invalid(Refused::Path))?;
             if let RegionOp::Call { site, .. } = op {
                 let Some(activation) = self.prepare_call(site.index())? else {
-                    return self.halt(self.stop.unwrap_or(RegionStop::Refusal));
+                    let stop = self.stop.take().unwrap_or(RegionStop::Refusal);
+                    return self.halt(stop);
                 };
                 self.activation = Some(activation);
                 if let Some(stop) = self.prefix_stop(request) {
@@ -129,7 +130,7 @@ impl Running<'_> {
                 }
                 return self.halt(RegionStop::Refused {
                     kind: "type_error",
-                    message: crate::machine::loops::NOT_ITERABLE,
+                    message: crate::machine::loops::NOT_ITERABLE.into(),
                 });
             }
             let mut answered = None;
@@ -204,7 +205,7 @@ impl Running<'_> {
                         super::header::Stood::Refused(message) => {
                             return self.halt(RegionStop::Refused {
                                 kind: "type_error",
-                                message,
+                                message: message.into(),
                             });
                         }
                         super::header::Stood::Boundary => {
@@ -311,7 +312,7 @@ impl Running<'_> {
                 {
                     return self.halt(RegionStop::Refused {
                         kind: "type_error",
-                        message,
+                        message: message.into(),
                     });
                 }
                 return Err(invalid(Refused::Facts));
@@ -356,7 +357,8 @@ impl Running<'_> {
             } = op
             {
                 if !self.heap_step(kernel, args, *dst, *next)? {
-                    return self.halt(self.stop.unwrap_or(RegionStop::Refusal));
+                    let stop = self.stop.take().unwrap_or(RegionStop::Refusal);
+                    return self.halt(stop);
                 }
                 if let Some(stop) = self.prefix_stop(request) {
                     return Ok(stop);

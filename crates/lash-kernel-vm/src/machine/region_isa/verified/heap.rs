@@ -172,7 +172,7 @@ impl Running<'_> {
                         _ => {
                             self.stop = Some(RegionStop::Refused {
                                 kind: "type_error",
-                                message: "a set's member is assigned `true` to add it or `false` to remove it",
+                                message: "a set's member is assigned `true` to add it or `false` to remove it".into(),
                             });
                             return Ok(false);
                         }
@@ -283,6 +283,23 @@ impl Running<'_> {
                 }
             }
         };
+        // A step the state refuses with a typed error (a key that is no
+        // key) raises it before the step is billed, as a served step does.
+        let phase = match self.view.stage(operation) {
+            Ok(phase) => phase,
+            Err(LeaseFault::BoundaryRequired) => {
+                self.stop = Some(RegionStop::Boundary);
+                return Ok(false);
+            }
+            Err(LeaseFault::Native(lash_kernel_doc::NativeError::Refused { kind, message })) => {
+                self.stop = Some(RegionStop::Refused {
+                    kind,
+                    message: message.into(),
+                });
+                return Ok(false);
+            }
+            Err(error) => return Err(storage_fault(error)),
+        };
         let entry = self.counters;
         let payment = charge::billed(self.limiters, &mut self.limits, |limits| {
             charge::bill(entry, limits, &step.charges, ChargeMoment::After, None)
@@ -295,14 +312,6 @@ impl Running<'_> {
             self.stop = Some(RegionStop::Refusal);
             return Ok(false);
         }
-        let phase = match self.view.stage(operation) {
-            Ok(phase) => phase,
-            Err(LeaseFault::BoundaryRequired) => {
-                self.stop = Some(RegionStop::Boundary);
-                return Ok(false);
-            }
-            Err(error) => return Err(storage_fault(error)),
-        };
         let Some(allocated) = counters(
             self.counters,
             phase.facts().delta(),

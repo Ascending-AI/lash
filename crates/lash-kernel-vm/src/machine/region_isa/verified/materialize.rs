@@ -10,7 +10,7 @@ impl<'m> Running<'m> {
         if self.faulted {
             return Err(invalid(Refused::Facts));
         }
-        let stop = self.stop.ok_or_else(|| invalid(Refused::Exit))?;
+        let stop = self.stop.clone().ok_or_else(|| invalid(Refused::Exit))?;
         if (stop == RegionStop::Refusal) != self.refusal.is_some() {
             return Err(invalid(Refused::Facts));
         }

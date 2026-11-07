@@ -1375,10 +1375,20 @@ fn inputs(site: &Site, node: doc::Node<'_>) -> Box<[Owner]> {
 /// Whether an event at `node`'s `phase` can raise besides taking its own
 /// exit: an expression or action may raise, a protocol hook's callee may
 /// raise, a plain `for` may refuse what it cannot walk, and a condition may
-/// refuse a non-bool. A `return via`'s policy may raise at its call.
+/// refuse a non-bool. A `return via`'s policy may raise at its call, and a
+/// write or removal of a member may refuse its key at its commit.
 fn raises(node: doc::Node<'_>, phase: Phase) -> bool {
     matches!(node, doc::Node::Expr(_) | doc::Node::Action(_))
         || hook_raises(node, phase)
+        || (matches!(
+            node,
+            doc::Node::Stmt(
+                doc::Stmt::Assign {
+                    place: doc::Place::Member(_),
+                    ..
+                } | doc::Stmt::Remove { .. }
+            )
+        ) && phase == Phase::Commit)
         || (matches!(node, doc::Node::Stmt(doc::Stmt::ReturnVia { .. })) && phase == Phase::Policy)
         || (matches!(node, doc::Node::Stmt(doc::Stmt::For { via: None, .. }))
             && phase == Phase::Enter)
