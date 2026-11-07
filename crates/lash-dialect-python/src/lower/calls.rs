@@ -360,7 +360,7 @@ impl Lowerer<'_> {
                 constructor,
                 lash_kernel_dialect::value_constructors::Constructor::Call
             ) && let Some((target, args)) = args.split_first()
-                && let Some(super::packages::PackageRef::Callable { member, .. }) =
+                && let Some(lash_kernel_dialect::dispatch::PackageRef::Callable { member, .. }) =
                     self.package_ref(target)?
             {
                 // Exact calls retain already adapted operands, without source-call

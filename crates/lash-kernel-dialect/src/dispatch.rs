@@ -35,6 +35,73 @@ use crate::exports::{
 };
 use {lash_kernel_value::PackagePath, lash_kernel_value::Segment};
 
+/// What a dotted path in the source names among the packages in view.
+pub enum PackageRef<'a> {
+    /// A package, or a prefix of package paths: a namespace.
+    Namespace(String),
+    /// A package function, or a static of a value type.
+    Callable {
+        member: &'a FunctionMember,
+        spelled: String,
+    },
+    /// A value type.
+    Type { spelled: String },
+    /// An error, by its kernel kind: the error's canonical path.
+    Error { kind: String, spelled: String },
+}
+
+/// Classify a resolved package path and register its type or error import.
+/// Source path extraction, spelling repairs and diagnostics stay with the dialect.
+pub fn package_ref<'a, E>(
+    resolution: crate::Resolution<'a>,
+    spelled: String,
+    imports: &crate::authoring::Imports,
+    unknown: impl FnOnce() -> Result<Option<PackageRef<'a>>, E>,
+    refuse: impl FnOnce(String, String) -> E,
+) -> Result<Option<PackageRef<'a>>, E> {
+    use crate::Resolution;
+    let found = match resolution {
+        Resolution::Operation { .. } | Resolution::Deferred { .. } => return Ok(None),
+        Resolution::Namespace => PackageRef::Namespace(spelled),
+        Resolution::Export {
+            package,
+            segment,
+            export,
+            member,
+        } => {
+            imports.namespace(package, segment, export);
+            match (export, member) {
+                (NamespaceKind::Function(member), None) => PackageRef::Callable { member, spelled },
+                (NamespaceKind::Type(_), None) => PackageRef::Type { spelled },
+                (NamespaceKind::Error, None) => PackageRef::Error {
+                    kind: format!("{package}.{segment}"),
+                    spelled,
+                },
+                (NamespaceKind::Operation(_), _) => {
+                    return Err(refuse(
+                        format!("`{spelled}` is an operation this session does not offer"),
+                        "call an operation the prompt lists".to_owned(),
+                    ));
+                }
+                (_, Some((_, TypeMember::Static(member)))) => {
+                    PackageRef::Callable { member, spelled }
+                }
+                (_, Some((_, TypeMember::Method(_) | TypeMember::Property(_)))) => {
+                    let (owner, name) = spelled.rsplit_once('.').unwrap_or((&spelled, ""));
+                    return Err(refuse(
+                        format!(
+                            "`{name}` is a member of `{owner}` values, not of `{owner}` itself"
+                        ),
+                        format!("call it on a value: `value.{name}(...)`"),
+                    ));
+                }
+            }
+        }
+        Resolution::Unknown => return unknown(),
+    };
+    Ok(Some(found))
+}
+
 /// The library function a front end reads a value's brand with: a text
 /// pair, or `absent` for a value of no package type.
 pub const BRAND_OF: &str = "brand.of";

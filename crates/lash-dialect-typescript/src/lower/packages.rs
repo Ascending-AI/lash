@@ -18,7 +18,7 @@
 //!   member's identity; `const { col } = dataframe` binds one by name. A
 //!   namespace, a value type, an error and an operation are never values.
 
-use lash_kernel_dialect::dispatch::{self, Adapt, Brand, Filled, Selection, Target};
+use lash_kernel_dialect::dispatch::{self, Adapt, Brand, Filled, PackageRef, Selection, Target};
 use lash_kernel_dialect::{
     FunctionMember, NamespaceKind, NamespaceView, Resolution, SpellKind, Spelling, TypeMember,
     ValueType,
@@ -33,21 +33,6 @@ use crate::adapter as ast;
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 const SPELLING: Spelling = Spelling::TypeScript;
-
-/// What a dotted path in the source names among the packages in view.
-pub(super) enum PackageRef<'a> {
-    /// A package, or a prefix of package paths: a namespace.
-    Namespace(String),
-    /// A package function, or a static of a value type.
-    Callable {
-        member: &'a FunctionMember,
-        spelled: String,
-    },
-    /// A value type.
-    Type { spelled: String },
-    /// An error, by its kernel kind: the error's canonical path.
-    Error { kind: String, spelled: String },
-}
 
 /// One argument list, evaluated once: each argument by itself, or, when
 /// one is spread, the whole list.
@@ -90,71 +75,13 @@ impl<'a> Lowerer<'a> {
             return Ok(None);
         };
         let spelled = path.join(".");
-        let found = match self.namespaces.resolve(&path, SPELLING) {
-            Resolution::Operation { .. } | Resolution::Deferred { .. } => return Ok(None),
-            Resolution::Namespace => PackageRef::Namespace(spelled),
-            Resolution::Export {
-                package,
-                segment,
-                export,
-                member,
-            } => {
-                let name = lash_kernel_value::QualifiedName {
-                    package: package.clone(),
-                    member: segment.clone(),
-                    type_member: None,
-                };
-                let brand = lash_kernel_value::Brand {
-                    package: package.clone(),
-                    name: segment.clone(),
-                };
-                match export {
-                    NamespaceKind::Type(_) => {
-                        self.imports.insert(lash_kernel_value::Import {
-                            name,
-                            kind: lash_kernel_value::ImportKind::Type { brand },
-                        });
-                    }
-                    NamespaceKind::Error => {
-                        self.imports.insert(lash_kernel_value::Import {
-                            name,
-                            kind: lash_kernel_value::ImportKind::Error { kind: brand },
-                        });
-                    }
-                    _ => {}
-                }
-                match (export, member) {
-                    (NamespaceKind::Function(member), None) => {
-                        PackageRef::Callable { member, spelled }
-                    }
-                    (NamespaceKind::Type(_), None) => PackageRef::Type { spelled },
-                    (NamespaceKind::Error, None) => PackageRef::Error {
-                        kind: format!("{package}.{segment}"),
-                        spelled,
-                    },
-                    (NamespaceKind::Operation(_), _) => {
-                        return Err(self.unknown_member(
-                            format!("`{spelled}` is an operation this session does not offer"),
-                            "call an operation the prompt lists".to_owned(),
-                        ));
-                    }
-                    (_, Some((_, TypeMember::Static(member)))) => {
-                        PackageRef::Callable { member, spelled }
-                    }
-                    (_, Some((_, TypeMember::Method(_) | TypeMember::Property(_)))) => {
-                        let (owner, name) = spelled.rsplit_once('.').unwrap_or((&spelled, ""));
-                        return Err(self.unknown_member(
-                            format!(
-                                "`{name}` is a member of `{owner}` values, not of `{owner}` itself"
-                            ),
-                            format!("call it on a value: `value.{name}(...)`"),
-                        ));
-                    }
-                }
-            }
-            Resolution::Unknown => return self.unknown_path(&path).map_or(Ok(None), Err),
-        };
-        Ok(Some(found))
+        dispatch::package_ref(
+            self.namespaces.resolve(&path, SPELLING),
+            spelled,
+            &self.imports,
+            || self.unknown_path(&path).map_or(Ok(None), Err),
+            |message, repair| self.unknown_member(message, repair),
+        )
     }
 
     /// The refusal of `path`, which `Namespaces::resolve` found nothing at:
@@ -172,7 +99,7 @@ impl<'a> Lowerer<'a> {
         })?;
         let written = rest[0];
         let export = exports.iter().find(|(segment, export)| {
-            let kind = export_kind(&export.kind);
+            let kind = export.kind.spell_kind();
             SPELLING.spell(kind, segment) == written || loosely(segment.as_str(), written)
         });
         let Some((segment, export)) = export else {
@@ -183,9 +110,9 @@ impl<'a> Lowerer<'a> {
         };
         let owner = format!(
             "{package}.{}",
-            SPELLING.spell(export_kind(&export.kind), segment)
+            SPELLING.spell(export.kind.spell_kind(), segment)
         );
-        if SPELLING.spell(export_kind(&export.kind), segment) != written {
+        if SPELLING.spell(export.kind.spell_kind(), segment) != written {
             if let Some(misspelled) = self.namespaces.misspelled(path, SPELLING) {
                 return Some(Diagnostic::with_repair(
                     DiagnosticCode::OperationSpelling,
@@ -992,14 +919,6 @@ fn integral(number: f64) -> Option<lash_kernel_doc::Integer> {
     #[expect(clippy::cast_precision_loss, reason = "checked to be exact")]
     (number.fract() == 0.0 && whole as f64 == number && number.abs() < 9.0e15)
         .then(|| lash_kernel_doc::Integer::from(whole))
-}
-
-/// How TypeScript spells an export of this kind.
-fn export_kind(export: &NamespaceKind) -> SpellKind {
-    match export {
-        NamespaceKind::Type(_) | NamespaceKind::Error => SpellKind::TypeName,
-        NamespaceKind::Operation(_) | NamespaceKind::Function(_) => SpellKind::Member,
-    }
 }
 
 /// Whether `written` is the canonical `segment` in some spelling: the

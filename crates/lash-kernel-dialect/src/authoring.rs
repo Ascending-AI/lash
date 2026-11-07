@@ -48,6 +48,32 @@ impl Imports {
             kind: ImportKind::Operation { signature },
         })
     }
+    /// Retain the requirement on a resolved namespace type or error, even
+    /// when the source selects a static or refuses an instance member.
+    pub fn namespace(
+        &self,
+        package: &PackagePath,
+        segment: &Segment,
+        export: &crate::NamespaceKind,
+    ) {
+        let brand = Brand {
+            package: package.clone(),
+            name: segment.clone(),
+        };
+        let kind = match export {
+            crate::NamespaceKind::Type(_) => ImportKind::Type { brand },
+            crate::NamespaceKind::Error => ImportKind::Error { kind: brand },
+            _ => return,
+        };
+        self.insert(Import {
+            name: QualifiedName {
+                package: package.clone(),
+                member: segment.clone(),
+                type_member: None,
+            },
+            kind,
+        });
+    }
     pub fn into_map(self) -> BTreeMap<ImportSlot, Import> {
         self.0.into_inner()
     }

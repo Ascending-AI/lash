@@ -275,10 +275,7 @@ impl Namespaces {
                 if member.visibility != Visibility::Public {
                     continue;
                 }
-                let kind = match &member.kind {
-                    NamespaceKind::Type(_) | NamespaceKind::Error => SpellKind::TypeName,
-                    _ => SpellKind::Member,
-                };
+                let kind = member.kind.spell_kind();
                 if spelling.spell(kind, segment) != *word {
                     continue;
                 }

@@ -33,6 +33,16 @@ pub enum NamespaceKind {
     Error,
 }
 
+impl NamespaceKind {
+    /// The source naming namespace of this export.
+    pub fn spell_kind(&self) -> crate::SpellKind {
+        match self {
+            Self::Type(_) | Self::Error => crate::SpellKind::TypeName,
+            Self::Operation(_) | Self::Function(_) => crate::SpellKind::Member,
+        }
+    }
+}
+
 /// Source lowering needs the signature and scheduling metadata, never a
 /// contract chosen by fulfilment.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

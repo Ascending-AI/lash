@@ -1,8 +1,8 @@
 //! Pure builtin argument binding, kept beside the ordinary call lowerer.
 use super::calls::arguments_error;
-use super::packages::PackageRef;
 use super::{Lowerer, Lowering, Operand};
 use crate::scope::Ty;
+use lash_kernel_dialect::dispatch::PackageRef;
 use lash_kernel_dialect::{NamespaceKind, NamespaceView, SpellKind, Spelling};
 use lash_kernel_doc::{Expr, Literal};
 use lash_kernel_doc::{Place, Rhs};
