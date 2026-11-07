@@ -781,26 +781,18 @@ impl Executable {
             .copied()
     }
 
-    /// Immutable closure placement used to compile allocation-free call dispatch.
-    pub(crate) fn closure_entries(
-        &self,
-    ) -> impl Iterator<Item = (&FunctionId, &Site, &[Name], CodeId)> {
-        self.library
-            .0
-            .tables
-            .bodies
-            .iter()
-            .enumerate()
-            .flat_map(|(index, _)| {
-                self.library
-                    .0
-                    .tables
-                    .tables(&self.library.0, index)
-                    .closure_at
-                    .iter()
-            })
-            .chain(self.own.tables.closure_at.iter())
-            .map(|((function, site, names), code)| (function, site, names.as_slice(), *code))
+    /// Every compilation of the closure lifted at `site`. Only the tables
+    /// that hold the site's unit can place it, so no other library body is
+    /// compiled to answer.
+    pub(crate) fn closures_at<'e>(&'e self, site: &'e Site) -> impl Iterator<Item = CodeId> + 'e {
+        let unit = self
+            .tables_of(&site.unit)
+            .filter(|tables| !std::ptr::eq(*tables, &self.own.tables));
+        unit.into_iter()
+            .chain([&self.own.tables])
+            .flat_map(|tables| tables.closure_at.iter())
+            .filter(move |((_, at, _), _)| at == site)
+            .map(|(_, code)| *code)
     }
 
     /// A closure's lexical body under its defining executable tables.

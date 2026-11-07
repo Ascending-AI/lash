@@ -75,9 +75,7 @@ pub(super) fn source_kind(
             // every capture names a variable of the parent, with the most.
             let outer = exe.code(parent);
             let code = exe
-                .closure_entries()
-                .filter(|(_, site, _, _)| *site == &at.site)
-                .map(|(_, _, _, code)| code)
+                .closures_at(&at.site)
                 .filter(|code| {
                     let inner = exe.code(*code);
                     inner.captures.iter().all(|capture| {
