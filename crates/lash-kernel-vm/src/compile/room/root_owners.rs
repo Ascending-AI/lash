@@ -64,18 +64,28 @@ pub(super) fn form(source: &Source, owners: &BTreeSet<Owner>) -> Result<Resoluti
             },
             _ => None,
         };
-        if let Some(name) = read
-            && visible(&scopes, &at, name).is_none()
-        {
-            aliases
-                .entry(Owner::Visible {
-                    at: at.clone(),
-                    name: name.clone(),
-                })
-                .or_insert_with(|| Owner::SessionCell {
-                    at: source.site.clone(),
-                    name: name.clone(),
-                });
+        let atoms = match node {
+            doc::Node::Action(action) => action_atoms(action),
+            _ => &[],
+        };
+        for name in read.into_iter().chain(atoms.iter().filter_map(|atom| {
+            if let doc::Atom::Variable(name) = atom {
+                Some(name)
+            } else {
+                None
+            }
+        })) {
+            if visible(&scopes, &at, name).is_none() {
+                aliases
+                    .entry(Owner::Visible {
+                        at: at.clone(),
+                        name: name.clone(),
+                    })
+                    .or_insert_with(|| Owner::SessionCell {
+                        at: source.site.clone(),
+                        name: name.clone(),
+                    });
+            }
         }
         pending.extend(
             node.children()
