@@ -318,7 +318,8 @@ impl KernelMachine {
         }
         let batch = self.native_batch(task, &exe, lib, function, &operands, &at.site.unit);
         self.regs.clear_range(0..used);
-        let batch = batch?;
+        // A bound passed answering the call names the native (`K-LIB-006`).
+        let batch = batch.map_err(|interrupt| interrupt.answering(function))?;
         // Serving can project other tasks' frames and identify their held
         // objects. Publish those source identity changes before reacquiring
         // the lease. The native's detached batch is still unaccepted.

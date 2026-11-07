@@ -24,10 +24,21 @@ impl<'m> Running<'m> {
                 crate::Bound::CallDepth => u64::from(self.limits.depth),
                 _ => unreachable!("only execution limits can refuse a region phase"),
             };
+            // A native refused at its own step, by the charge or memory its
+            // answer costs, names the native (`K-LIB-006`); depth belongs to
+            // guest recursion.
+            let function = match bound {
+                crate::Bound::CallDepth => None,
+                _ => self
+                    .code
+                    .program
+                    .native_operands(self.pc)
+                    .map(|(lib, _, _)| self.code.exe.lib(lib).header.name.clone()),
+            };
             Box::new(crate::BoundExceeded {
                 bound: bound.clone(),
                 limit,
-                function: None,
+                function,
                 site: None,
             })
         });

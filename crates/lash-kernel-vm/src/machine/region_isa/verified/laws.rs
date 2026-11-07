@@ -410,6 +410,7 @@ fn an_active_static_call_preserves_both_canonical_frames() {
         let mut run = call_machine();
         let machine = &mut run.machine;
         machine.current = Some(TaskId::MAIN);
+        let exe = Arc::clone(&machine.exe);
         let root = machine.frame(TaskId::MAIN).unwrap().code;
         let caller = machine.frame(TaskId::MAIN).unwrap().invocation;
         let draft = compile_region(&machine.exe, root).unwrap();
@@ -458,11 +459,33 @@ fn an_active_static_call_preserves_both_canonical_frames() {
             })
             .collect();
         assert_eq!(values.len(), 3);
-        for (actual, expected) in values
-            .iter()
-            .zip([Value::Int(7), Value::Int(9), Value::Absent])
-        {
-            assert!(actual.same(&expected));
+        // Roles are keyed by digest, so each parameter is read by its key.
+        let callee = exe.code(image.frames[1].program);
+        for (name, expected) in [
+            ("a", Value::Int(7)),
+            ("b", Value::Int(9)),
+            ("c", Value::Absent),
+        ] {
+            let index = callee
+                .slots
+                .iter()
+                .position(|slot| slot.name.as_str() == name)
+                .unwrap();
+            let Some(lash_kernel_state::kernel_internals::logical::Owner::Value { slot, .. }) =
+                callee.source_room.binding_root(
+                    u32::try_from(index).unwrap(),
+                    TaskId::MAIN,
+                    image.frames[1].invocation,
+                )
+            else {
+                panic!("parameter {name} has no value owner");
+            };
+            let (_, actual) = image.frames[1]
+                .roles
+                .iter()
+                .find(|(role, _)| *role == slot)
+                .unwrap_or_else(|| panic!("parameter {name} has no role"));
+            assert!(actual.same(&expected), "{name}: {actual:?}");
         }
         let canonical = image.canonical.as_ref().unwrap();
         assert_eq!(
