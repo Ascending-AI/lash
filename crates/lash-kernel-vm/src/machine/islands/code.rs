@@ -19,7 +19,6 @@ pub(super) struct Packet {
 const _: () = assert!(std::mem::size_of::<Packet>() == 16);
 
 mod families;
-pub(super) mod repeat;
 mod verify;
 use verify::Closes;
 
@@ -327,7 +326,6 @@ operations! {
             }
             Header header {
                 entry: Option<std::sync::Arc<crate::compile::room::publication::boundary::LoopEntry>>,
-                repeat: Option<Box<RepeatSite>>,
                 id: StmtId,
                 cost: u64,
                 metered: u64,

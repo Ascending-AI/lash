@@ -238,6 +238,9 @@ pub(super) struct Guard {
     pub(super) remaining: u64,
 }
 
+/// Why a plain `for` refuses what it was given (`K-ITER-001`).
+pub(crate) const NOT_ITERABLE: &str = "`for` iterates a list, a tuple, a map or a set";
+
 /// The protocol of `for` statement `stmt`.
 fn via_of(exe: &Executable, stmt: StmtId) -> Option<Via> {
     match &exe.stmt(stmt).form {
@@ -276,10 +279,7 @@ impl KernelMachine {
         let value = self.take(iterable);
         let Some(via) = via_of(exe, stmt) else {
             let Ok(cursor) = Cursor::over(value, false) else {
-                return raise(
-                    "type_error",
-                    "`for` iterates a list, a tuple, a map or a set",
-                );
+                return raise("type_error", NOT_ITERABLE);
             };
             if self.publish_initial_for_entry(task, exe, stmt, &cursor, paid.as_ref())? {
                 return Ok(Flow::Step);
@@ -448,6 +448,7 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
     ) -> Status {
+        self.oracle_only()?;
         let link = self.frame(task)?.link;
         let document = self
             .program

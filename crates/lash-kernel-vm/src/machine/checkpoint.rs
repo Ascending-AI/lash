@@ -368,7 +368,8 @@ impl KernelMachine {
         ));
         arena.borrow_mut().watch_logical_members();
         let logical = heap.logical_ledger();
-        let machine = Self {
+        let bound = Arc::default();
+        let mut machine = Self {
             logical: logical.clone(),
             logical_memory: Default::default(),
             active_link: program.link,
@@ -378,6 +379,7 @@ impl KernelMachine {
             session_cell: matches!(root.target, lash_kernel_state::paged::CellTargetKind::Main),
             program,
             exe: Arc::clone(&exe),
+            bound: Arc::clone(&bound),
             bounds,
             limits,
             tasks: tasks::Tasks::open(
@@ -386,6 +388,7 @@ impl KernelMachine {
                 access.clone(),
                 std::rc::Rc::clone(&arena),
                 exe,
+                bound,
             ),
             arena,
             ready: queue::Queue::open(sequence(root.ready), access.clone()),
@@ -403,6 +406,7 @@ impl KernelMachine {
             heap,
             session: super::session::Session::default(),
             pins: Pins::default(),
+            served: None,
             projecting: false,
             charging: true,
             paced: false,
@@ -430,7 +434,9 @@ impl KernelMachine {
             function_origins: Default::default(),
             limiters: Limiters::default(),
         };
-        machine.publish_logical_meter().map_err(OpenError::Heap)?;
+        machine
+            .reconstruct_canonical_region()
+            .map_err(OpenError::Heap)?;
         Ok(machine)
     }
 }
@@ -593,6 +599,7 @@ impl KernelMachine {
             access,
             std::rc::Rc::clone(&self.arena),
             Arc::clone(&self.exe),
+            Arc::clone(&self.bound),
         );
         Ok(Some(SealedRoot { page, root }))
     }

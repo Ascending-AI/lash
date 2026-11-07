@@ -123,6 +123,7 @@ pub(crate) fn start(
             .borrow_mut()
             .begin_cell(&mut arena.borrow_mut(), &heap)?;
     }
+    let bound = Arc::default();
     let mut machine = KernelMachine {
         logical: logical.clone(),
         logical_memory: Default::default(),
@@ -133,6 +134,7 @@ pub(crate) fn start(
         program,
         document: None,
         exe: Arc::clone(&exe),
+        bound: Arc::clone(&bound),
         bounds,
         heap,
         arena: std::rc::Rc::clone(&arena),
@@ -142,6 +144,7 @@ pub(crate) fn start(
             access.clone(),
             std::rc::Rc::clone(&arena),
             Arc::clone(&exe),
+            bound,
         ),
         ready: queue::Queue::open(Tree::new(true), access.clone()),
         current: Some(TaskId::MAIN),
@@ -162,6 +165,7 @@ pub(crate) fn start(
         session_cell: matches!(start.target, Target::Main),
         session: Session::default(),
         pins: Pins::default(),
+        served: None,
         projecting: false,
         charging: false,
         paced: false,
@@ -191,6 +195,7 @@ pub(crate) fn start(
         access,
         arena,
         Arc::clone(&exe),
+        Arc::clone(&machine.bound),
     ))?;
     let arguments = |problem: String| StartError::Arguments { problem };
     // Host-supplied start values are not guest work (`K-CHG-002`).
@@ -685,6 +690,40 @@ impl PreparedSessionWrite {
 }
 
 impl Session {
+    /// Reserve storage for several distinct writes published in this order.
+    pub(super) fn prepare_writes(
+        &mut self,
+        writes: &[(BindingName, Value)],
+    ) -> Result<Vec<PreparedSessionWrite>, lash_kernel_doc::heap::HeapFault> {
+        use lash_kernel_doc::heap::{HeapFault, HostResource};
+        let exhausted = || HeapFault::Exhausted {
+            resource: HostResource::StagingBytes,
+        };
+        let fresh = writes
+            .iter()
+            .filter(|(name, _)| !self.bindings.contains_key(&name.key))
+            .count();
+        self.bindings.try_reserve(fresh).map_err(|_| exhausted())?;
+        let mut prepared = Vec::new();
+        prepared
+            .try_reserve_exact(writes.len())
+            .map_err(|_| exhausted())?;
+        let mut revision = self.writes;
+        for (name, value) in writes {
+            let next = revision
+                .checked_add(1)
+                .ok_or_else(|| HeapFault::Malformed("session write ordinal overflow".into()))?;
+            prepared.push(PreparedSessionWrite {
+                name: name.clone(),
+                value: *value,
+                revision,
+                next,
+                present: self.bindings.contains_key(&name.key),
+            });
+            revision = next;
+        }
+        Ok(prepared)
+    }
     /// Reserve implementation storage without changing any binding or owner.
     pub(super) fn prepare_write(
         &mut self,
@@ -865,6 +904,24 @@ impl KernelMachine {
         .map_err(super::write_halt)
     }
 
+    /// The environments of the session's saved functions, sorted.
+    pub(super) fn saved_environments(
+        &self,
+    ) -> Result<Box<[lash_kernel_doc::heap::EntityId]>, HeapFault> {
+        let mut saved = Vec::new();
+        if self.functions != KeyedRoot::Empty {
+            open_tree::<lash_kernel_state::paged::FunctionRecord>(self.functions).visit(
+                self.heap.pages(),
+                &mut |_, record| {
+                    saved.push(record.environment);
+                    true
+                },
+            )?;
+        }
+        saved.sort_unstable();
+        saved.dedup();
+        Ok(saved.into_boxed_slice())
+    }
     pub(super) fn session_get(&mut self, name: &BindingName) -> Result<Option<Value>, Halt> {
         if let Some(bound) = self.session.bindings.get(&name.key) {
             return Ok(Some(bound.value));

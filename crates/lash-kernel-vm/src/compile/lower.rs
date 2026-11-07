@@ -96,7 +96,10 @@ impl Ops {
         if !self.metered {
             return;
         }
+        // A region splits only between ops: an event still waiting for its
+        // op stands at that op, never at the next region's head.
         if self.open
+            && self.regions.at.last() != Some(&(self.ops.len() as u32))
             && let Some(split) = &mut self.split
             && split.next() % 3 == 0
         {

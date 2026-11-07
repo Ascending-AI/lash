@@ -107,7 +107,7 @@ fn calls_kind(body: bool) {
         )
         .unwrap();
     let incoming = Root::Incoming(TaskId::MAIN);
-    let foreign = invocation.owner(Slot::Argument(999));
+    let foreign = invocation.owner(Slot::Argument(crate::laws::role_id(999)));
     let value = Value::Int(1);
     let preserved = Value::Int(7);
     let entered = ledger

@@ -40,7 +40,7 @@ impl KernelMachine {
                 output: Owner::Value {
                     task: doc::TaskId::MAIN,
                     invocation: 1,
-                    slot: Slot::Operand(0),
+                    slot: Slot::Operand(crate::laws::role_id(0)),
                 },
                 at: Point {
                     site: Site::new(Unit::Main, vec![0]),
@@ -119,7 +119,7 @@ impl KernelMachine {
                 &self.heap,
                 &[],
                 &[(
-                    owner(0),
+                    owner(crate::laws::role_id(0)),
                     lash_kernel_state::kernel_internals::logical::RootValue::Value(&input),
                 )],
             )
@@ -137,7 +137,7 @@ impl KernelMachine {
             contract,
             function,
             args: vec![doc::Value::Int(mode)],
-            output: owner(1),
+            output: owner(crate::laws::role_id(1)),
             at: at.clone(),
             release: vec![].into_boxed_slice(),
             ledger: Rc::clone(&ledger),
@@ -161,7 +161,7 @@ impl KernelMachine {
         wrong.known = Some((doc::Value::Int(8), 0));
         assert!(
             wrong
-                .prepare_for_law(&mut arena, &[owner(0)])
+                .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
                 .unwrap()
                 .is_none(),
             "same-price native result must match its canonical prepared entry"
@@ -169,7 +169,7 @@ impl KernelMachine {
         let mut exact = recipe(0, contract(0, &arena));
         exact.known = Some((doc::Value::Int(7), 0));
         let exact = exact
-            .prepare_for_law(&mut arena, &[owner(0)])
+            .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
             .unwrap()
             .unwrap();
         assert!(matches!(exact.storage.value(), doc::Value::Int(7)));
@@ -177,7 +177,7 @@ impl KernelMachine {
         let mut scratch = recipe(6, contract(6, &arena));
         scratch.known = Some((doc::Value::Int(7), 0));
         let scratch = scratch
-            .prepare_for_law(&mut arena, &[owner(0)])
+            .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -194,25 +194,25 @@ impl KernelMachine {
         // must leave both the ledger and the physical nursery untouched.
         assert!(
             recipe(2, contract(2, &arena))
-                .prepare_for_law(&mut arena, &[owner(0)])
+                .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
                 .unwrap()
                 .is_none()
         );
         assert!(
             recipe(3, contract(3, &arena))
-                .prepare_for_law(&mut arena, &[owner(0)])
+                .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
                 .unwrap()
                 .is_none()
         );
         assert!(
             recipe(4, contract(0, &arena))
-                .prepare_for_law(&mut arena, &[owner(0)])
+                .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
                 .unwrap()
                 .is_none()
         );
         assert!(
             recipe(5, contract(5, &arena))
-                .prepare_for_law(&mut arena, &[owner(0)])
+                .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
                 .unwrap()
                 .is_none()
         );
@@ -220,7 +220,7 @@ impl KernelMachine {
         assert_eq!(arena.next_provisional(), identity);
         assert_eq!(arena.allocations(), allocations);
         let scalar = recipe(0, contract(0, &arena))
-            .prepare_for_law(&mut arena, &[owner(0)])
+            .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
             .unwrap()
             .expect("scalar native ran");
         assert!(matches!(scalar.storage.value(), doc::Value::Int(7)));
@@ -234,9 +234,9 @@ impl KernelMachine {
             .prepare_source_boundary(
                 arena.registration().unwrap(),
                 &self.heap,
-                &[owner(0)],
+                &[owner(crate::laws::role_id(0))],
                 &[(
-                    owner(0),
+                    owner(crate::laws::role_id(0)),
                     lash_kernel_state::kernel_internals::logical::RootValue::Value(&list_input),
                 )],
             )
@@ -246,7 +246,8 @@ impl KernelMachine {
         update.publish(&mut ledger.borrow_mut(), |_, _| {}).unwrap();
         let balance = ledger.borrow().balance().unwrap();
         let phases = contract(1, &arena);
-        let events = native_storage::scratch_events(owner(1), &phases).unwrap();
+        let events =
+            native_storage::scratch_events(owner(crate::laws::role_id(1)), &phases).unwrap();
         let scratch = |index| Owner::Value {
             task: doc::TaskId::MAIN,
             invocation: 1,
@@ -256,8 +257,8 @@ impl KernelMachine {
             ScratchEvent::Begin { owner: a, bytes: 40 }, ScratchEvent::End { owner: b },
             ScratchEvent::Begin { owner: c, bytes: 20 }, ScratchEvent::Begin { owner: d, bytes: 30 },
             ScratchEvent::End { owner: e }, ScratchEvent::End { owner: f },
-        ] if *a == scratch(0) && *b == scratch(0) && *c == scratch(1)
-            && *d == scratch(2) && *e == scratch(2) && *f == scratch(1)));
+        ] if *a == scratch(crate::laws::role_id(0)) && *b == scratch(crate::laws::role_id(0)) && *c == scratch(crate::laws::role_id(1))
+            && *d == scratch(crate::laws::role_id(2)) && *e == scratch(crate::laws::role_id(2)) && *f == scratch(crate::laws::role_id(1))));
         assert_eq!(phases.peak_scratch_bytes(), Some(50));
         // 17-byte input + a 66-byte list + the 20-byte lease still live
         // during the entity allocation. The 30-byte lease ended beforehand.
@@ -266,7 +267,7 @@ impl KernelMachine {
             transaction,
             storage,
         } = recipe(1, phases.clone())
-            .prepare_for_law(&mut arena, &[owner(0)])
+            .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
             .unwrap()
             .expect("actual native boundary executed");
         assert_eq!(transaction.peak(), peak);
@@ -288,7 +289,7 @@ impl KernelMachine {
             transaction,
             storage,
         } = recipe(1, phases)
-            .prepare_for_law(&mut arena, &[owner(0)])
+            .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
             .unwrap()
             .expect("retry runs canonical native");
         let value = storage.value();
@@ -309,14 +310,14 @@ impl KernelMachine {
         assert!(
             ledger
                 .borrow()
-                .holding(owner(0), self.heap.pages())
+                .holding(owner(crate::laws::role_id(0)), self.heap.pages())
                 .unwrap()
                 .is_none()
         );
         assert!(
             ledger
                 .borrow()
-                .holding(owner(1), self.heap.pages())
+                .holding(owner(crate::laws::role_id(1)), self.heap.pages())
                 .unwrap()
                 .is_some()
         );
@@ -475,7 +476,7 @@ impl KernelMachine {
                 }
                 let wrong = [doc::Value::Null];
                 let arguments = if guard == 0 { &wrong[..] } else { storage.arguments() };
-                let wrong_owner = invocation.owner(Slot::Operand(u32::MAX));
+                let wrong_owner = invocation.owner(Slot::Operand(crate::laws::role_id(u32::MAX)));
                 let bound = event.bind_external(&frontier, &ledger.borrow(), arena, &self.heap, &mut prefix.facts,
                     ExactRoots { inputs: vec![], outputs: vec![(if guard == 1 { wrong_owner } else { output }, lash_kernel_state::kernel_internals::logical::PublicationValue::Prepared(page.clone()))], ..Default::default() },
                     prefix.next, prefix.allowance, facts,
@@ -738,7 +739,7 @@ fn prepared_scalar_answers_supply_only_graph_free_contracts() {
                 &machine.heap,
                 &[],
                 &[(
-                    owner(0),
+                    owner(crate::laws::role_id(0)),
                     lash_kernel_state::kernel_internals::logical::RootValue::Value(&value),
                 )],
             )
@@ -761,7 +762,7 @@ fn prepared_scalar_answers_supply_only_graph_free_contracts() {
             contract,
             function,
             args: vec![value],
-            output: owner(1),
+            output: owner(crate::laws::role_id(1)),
             at: Point {
                 site: Site::new(Unit::Main, vec![0]),
                 phase: Phase::Commit,
@@ -776,7 +777,7 @@ fn prepared_scalar_answers_supply_only_graph_free_contracts() {
         };
         {
             let prepared = recipe(Some((value, 0)), contract.clone())
-                .prepare_for_law(&mut arena, &[owner(0)])
+                .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
                 .unwrap();
             if kind == 0 {
                 if let Some(prepared) = prepared {
@@ -812,7 +813,7 @@ fn prepared_scalar_answers_supply_only_graph_free_contracts() {
                     _ => wrong.known = None,
                 }
                 if wrong
-                    .prepare_for_law(&mut arena, &[owner(0)])
+                    .prepare_for_law(&mut arena, &[owner(crate::laws::role_id(0))])
                     .unwrap()
                     .is_some()
                 {

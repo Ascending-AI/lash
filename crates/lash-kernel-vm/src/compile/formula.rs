@@ -28,7 +28,8 @@ const STACK: usize = 16;
 /// saturating sum, product, maximum or minimum, which no grouping or order
 /// of its terms changes, so nested sums and products are flattened and
 /// their constants folded. Each distinct operand and measure is measured
-/// once per evaluation.
+/// once per evaluation. Equal plans charge equally for every operand.
+#[derive(PartialEq, Eq)]
 pub(crate) struct Plan {
     ops: Vec<Op>,
     measurements: Vec<(Source, doc::Measure)>,
@@ -50,6 +51,7 @@ pub(crate) struct TextCharge {
 /// An instruction of a plan's program. Each combining one takes the two
 /// amounts on the top of the stack: a sum of more terms is its terms
 /// combined pairwise from the left, as the saturating fold computes it.
+#[derive(PartialEq, Eq)]
 enum Linear {
     Sum(u64),
     /// A sum with one minimum of two adjacent measurements. Their
@@ -60,7 +62,7 @@ enum Linear {
     },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Op {
     Constant(u64),
     /// The measurement of that index.
@@ -79,6 +81,35 @@ enum Fold {
 }
 
 impl Plan {
+    /// Measure the current exclusive graph without replaying the native/body.
+    pub(crate) fn lease(
+        &self,
+        lease: &mut lash_kernel_state::kernel_internals::logical::StateLease<'_>,
+        arguments: &[lash_kernel_state::kernel_internals::logical::LeaseValue],
+        result: lash_kernel_state::kernel_internals::logical::LeaseValue,
+    ) -> Result<u64, lash_kernel_state::kernel_internals::logical::LeaseFault> {
+        let absent = lease.import(&Value::Absent)?;
+        let mut failure = None;
+        let units = self.evaluate(|source, selector| {
+            if failure.is_some() {
+                return 0;
+            }
+            let value = match source {
+                Source::Arg(index) => arguments.get(index).copied().unwrap_or(absent),
+                Source::Result => result,
+                Source::Nothing => return 0,
+            };
+            match lease.measure(value, selector) {
+                Ok(amount) => amount,
+                Err(error) => {
+                    failure = Some(error);
+                    0
+                }
+            }
+        });
+        failure.map_or(Ok(units), Err)
+    }
+
     /// A size minimum capped at one needs no collection measurement when
     /// every value is resident. Other terms still require immediate measures.
     pub(crate) fn resident_minimum(&self, args: &[Value], result: &Value) -> Option<u64> {

@@ -228,11 +228,6 @@ impl ChargeTape {
         self.lock().work
     }
 
-    /// Counts `blocks` typed runs a scalar loop ran whole.
-    pub(crate) fn typed(&self, blocks: u64) {
-        self.lock().work.blocks += blocks;
-    }
-
     pub(crate) fn typed_packet(&self) {
         self.lock().work.typed_packets += 1;
     }

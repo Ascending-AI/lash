@@ -22,7 +22,7 @@ mod read;
 mod resuming;
 pub(in crate::machine) mod return_storage;
 mod returning;
-use occurrence::source_loops;
+pub(in crate::machine) use occurrence::source_loops;
 mod scope;
 mod session;
 mod test;

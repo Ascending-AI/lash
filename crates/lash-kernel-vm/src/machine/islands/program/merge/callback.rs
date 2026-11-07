@@ -1,21 +1,9 @@
 //! One source call descriptor for collection callbacks and native reductions.
 use super::*;
 
-type ProgramCache = std::sync::Arc<
-    std::sync::Mutex<
-        std::collections::BTreeMap<
-            crate::compile::CodeId,
-            Option<std::sync::Arc<crate::compile::room::publication::sort::CallbackProgram>>,
-        >,
-    >,
->;
-
 #[derive(Clone)]
 pub(in crate::machine::islands) struct Callback {
-    statement: StmtId,
-    pc: u32,
     target: Target,
-    programs: ProgramCache,
 }
 #[derive(Clone)]
 enum Target {
@@ -26,52 +14,13 @@ enum Target {
     },
     Body {
         lib: LibId,
-        code: crate::compile::CodeId,
     },
-    Declared(crate::compile::CodeId),
-    Binding(usize),
+    Guest,
 }
 impl Callback {
-    pub(in crate::machine::islands) fn program(
-        &self,
-        exe: &Executable,
-        caller: crate::compile::CodeId,
-        callee: crate::compile::CodeId,
-    ) -> Option<std::sync::Arc<crate::compile::room::publication::sort::CallbackProgram>> {
-        let mut programs = self.programs.lock().ok()?;
-        programs
-            .entry(callee)
-            .or_insert_with(|| {
-                crate::compile::room::publication::sort::CallbackProgram::compile(
-                    exe,
-                    caller,
-                    self.statement,
-                    self.pc,
-                    callee,
-                )
-                .ok()
-                .map(std::sync::Arc::new)
-            })
-            .clone()
-    }
-    pub(in crate::machine::islands) fn statement(&self) -> StmtId {
-        self.statement
-    }
     pub(in crate::machine::islands) fn library(&self) -> Option<LibId> {
         match self.target {
             Target::Native { lib, .. } | Target::Body { lib, .. } => Some(lib),
-            _ => None,
-        }
-    }
-    pub(in crate::machine::islands) fn body(&self) -> Option<crate::compile::CodeId> {
-        match self.target {
-            Target::Body { code, .. } | Target::Declared(code) => Some(code),
-            _ => None,
-        }
-    }
-    pub(in crate::machine::islands) fn binding(&self) -> Option<usize> {
-        match self.target {
-            Target::Binding(at) => Some(at),
             _ => None,
         }
     }
@@ -97,10 +46,7 @@ impl Build<'_> {
             let function = self.exe.lib(lib);
             function.limit.is_none().then_some(())?;
             Some(match function.run {
-                LibRun::Body(code)
-                | LibRun::Native {
-                    body: Some(code), ..
-                } => Target::Body { lib, code },
+                LibRun::Body(_) | LibRun::Native { body: Some(_), .. } => Target::Body { lib },
                 LibRun::Native { body: None, .. } => {
                     let native = function.specialization.native.immediate.map(Entry::Native);
                     let entry = native.as_ref().or_else(|| {
@@ -157,25 +103,16 @@ impl Build<'_> {
                 } else {
                     match callee {
                         crate::compile::expr::Callee::Read(value) => {
-                            let at = local(value)? as usize;
-                            (!self.shared[at]).then_some(())?;
-                            Target::Binding(at)
+                            local(value)?;
+                            Target::Guest
                         }
-                        crate::compile::expr::Callee::Declared(code) => Target::Declared(*code),
+                        crate::compile::expr::Callee::Declared(_) => Target::Guest,
                     }
                 };
                 (target, &**args)
             }
             _ => return None,
         };
-        Some((
-            Callback {
-                statement,
-                pc: value.pc,
-                target,
-                programs: Default::default(),
-            },
-            args,
-        ))
+        Some((Callback { target }, args))
     }
 }

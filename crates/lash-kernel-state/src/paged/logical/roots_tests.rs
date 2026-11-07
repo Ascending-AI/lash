@@ -385,3 +385,62 @@ pub(super) fn cached_transfers() {
         "cached transfers differ from fresh queries: {failures:?}"
     );
 }
+
+/// Q4 carry: a version carry moves each frame value to its successor's role
+/// key. Two values the carry would put under one key refuse the whole carry,
+/// and a swap of two keys is not a collision. Either way the sealed root
+/// the carry started from still opens to every holding it had.
+#[test]
+fn a_carry_putting_two_values_under_one_key_refuses_and_keeps_its_root() {
+    let (heap, _) = fresh();
+    let access = heap.pages().clone();
+    let mut ledger = Ledger::fresh();
+    admit(
+        &mut ledger,
+        vec![Change::Roots(vec![
+            (frame(), Some(Holding::frame())),
+            (owner(0), Some(value(32, &[], &access))),
+            (owner(1), Some(value(48, &[], &access))),
+        ])],
+        u64::MAX,
+        &access,
+    );
+    let root = ledger.seal(&access, budget()).unwrap().unwrap();
+    let held = |root: LedgerRoot| {
+        let ledger = Ledger::open(root).unwrap();
+        [0, 1, 2].map(|n| {
+            let holding = ledger.holding(owner(n), &access).unwrap();
+            holding.map(|holding| holding.bytes())
+        })
+    };
+    let collision = |_| HeapFault::Malformed("collide".into());
+    let renames: [&dyn Fn(Owner) -> Owner; 2] = [
+        // Both onto a fresh key.
+        &|from| {
+            if from == owner(0) || from == owner(1) {
+                owner(2)
+            } else {
+                from
+            }
+        },
+        // One onto the key the other keeps.
+        &|from| if from == owner(1) { owner(0) } else { from },
+    ];
+    for rename in renames {
+        let refused =
+            root.rekey_values(&access, |from| Ok::<_, HeapFault>(rename(from)), collision);
+        assert!(matches!(refused, Err(HeapFault::Malformed(reason)) if reason == "collide"));
+        assert_eq!(held(root), [Some(32), Some(48), None]);
+    }
+    let swap = |from| match from {
+        from if from == owner(0) => owner(1),
+        from if from == owner(1) => owner(0),
+        from => from,
+    };
+    let swapped = root
+        .rekey_values(&access, |from| Ok::<_, HeapFault>(swap(from)), collision)
+        .unwrap()
+        .expect("the swap moves both values");
+    assert_eq!(held(swapped), [Some(48), Some(32), None]);
+    assert_eq!(held(root), [Some(32), Some(48), None]);
+}

@@ -20,7 +20,7 @@ doctest = false
 
 [features]
 # Differential execution controls for embedders' laws.
-testing = []
+testing = ["lash-kernel-state/testing"]
 # Unsupported synchronous capture/import diagnostics; absent from ordinary builds.
 perf-witness = ["lash-kernel-state/perf-witness", "lash-kernel-doc/perf-witness"]
 # The machine also runs the synthetic successor of kernel version 1.

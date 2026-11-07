@@ -538,6 +538,7 @@ impl NativeFunction for NumericFunction {
         use lash_kernel_doc::SymbolicNative;
         lash_kernel_doc::NativeSpecialization {
             immediate: self.prepare(),
+            immediate_resources: true,
             symbolic: match (self.operation, self.domain) {
                 (Operation::Kind, Domain::Any) => Some(SymbolicNative::Kind),
                 (Operation::Same, Domain::Any) => Some(SymbolicNative::Same),

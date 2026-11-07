@@ -1184,3 +1184,63 @@ definition "function quiet() -> Any\nkernel 1\nmetering statements\nbody {  retu
         "the raising task's reachable result fit beside the second text"
     );
 }
+/// An action's operand that names a closure's capture, or a binding a
+/// closure shares, is the cell's value: `join` takes the handles, not the
+/// cell holding them.
+#[test]
+fn a_join_on_shared_handles_takes_the_handles_the_cell_holds() {
+    let (end, _) = run(r#"
+definition "function now(v: Any) -> Any\nkernel 1\nmetering statements\nbody {  return v  }"
+
+definition "function waiter(hs: Any) -> Any\nkernel 1\nmetering statements\nbody {\n  let wait = fn(this, args) {\n    let values = join all hs\n    return values\n  }\n  let first = apply wait(absent, absent)\n  let again = join all hs\n  return (first, again)\n}"
+
+main {
+  let a = spawn call now(1)
+  let b = spawn call now(2)
+  let hs = [a, b]
+  let out = call waiter(hs)
+  return out
+}"#);
+    let both = Datum::List(vec![int(1), int(2)]);
+    assert_eq!(result(end), Datum::Tuple(vec![both.clone(), both]));
+}
+
+/// A raise of a catch body no finally follows passes its own try by and
+/// leaves the frame, to the caller's try.
+#[test]
+fn a_raise_from_a_catch_body_leaves_the_frame() {
+    let (end, _) = run(r#"
+definition "function bad(v: Any) -> Any\nkernel 1\nmetering statements\nbody {  throw v  }"
+
+definition "function rethrow(v: Any) -> Any\nkernel 1\nmetering statements\nbody {\n  let state = \"pending\"\n  try {\n    let r = call bad(v)\n  } catch reason {\n    set state = \"rejected\"\n    throw (state, reason)\n  }\n  return state\n}"
+
+main {
+  let out = null
+  try {
+    let r = call rethrow("x")
+  } catch e {
+    set out = e
+  }
+  return out
+}"#);
+    assert_eq!(result(end), Datum::Tuple(vec![text("rejected"), text("x")]));
+}
+
+/// A raising event no path reaches is no raise route's origin: the region
+/// runs, and the reachable code around it.
+#[test]
+fn a_try_whose_raising_call_is_unreachable_runs() {
+    let (end, _) = run(r#"
+definition "function now(v: Any) -> Any\nkernel 1\nmetering statements\nbody {  return v  }"
+
+main {
+  try {
+    return 1
+    let y = call now(2)
+  } catch e {
+    return 2
+  }
+  return 3
+}"#);
+    assert_eq!(result(end), int(1));
+}

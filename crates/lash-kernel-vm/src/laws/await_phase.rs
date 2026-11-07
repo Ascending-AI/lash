@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::{Datum, FunctionRegistry, TaskId, parse_definition};
 
-use lash_kernel_state::paged::{IncomingRecord, PhaseRecord, TaskStateRecord};
+use lash_kernel_state::paged::{ContinuationPhase, IncomingRecord, TaskStateRecord};
 use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, Setup, answer, label, wait_of};
@@ -234,11 +234,11 @@ fn an_await_waits_where_its_policy_waits() {
     );
     let mut embedder = Embedder::with(AWAITED, setup(u64::MAX));
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let phases: Vec<PhaseRecord> = embedder
+    let phases: Vec<ContinuationPhase> = embedder
         .machine
         .pending_phases()
         .into_iter()
         .map(|(_, _, phase)| phase)
         .collect();
-    assert_eq!(phases, [PhaseRecord::Called]);
+    assert_eq!(phases, [ContinuationPhase::Call { phase: 0 }]);
 }

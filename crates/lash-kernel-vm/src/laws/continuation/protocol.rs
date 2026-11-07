@@ -149,13 +149,24 @@ fn a_text_walks_code_points_and_loops_take_continue_break_and_else() {
     );
 }
 
-/// A value the protocol cannot step raises `type_error` at the header: an
-/// opened value that is no collection, with no `next`.
+/// A value its loop cannot walk raises `type_error` that a try of the same
+/// frame catches: a plain `for` raises at its entry, and a protocol at its
+/// header, when it opens a value that is no collection and has no `next`.
 #[test]
 fn an_opened_value_with_no_next_raises() {
-    const SOURCE: &str = "main { try {\n\
+    const SOURCE: &str = "main { let out = []\n\
+        try {\n\
+          for x in {a: 1} { print x }\n\
+        } catch e { set out[list.len(out)] = \"plain\" }\n\
+        try {\n\
           for x in {a: 1} via (open proto.open) { print x }\n\
-        } catch e { return \"refused\" }\n\
-        return \"walked\" }\n";
-    run(SOURCE, &[], &text("refused"), &[], &[]);
+        } catch e { set out[list.len(out)] = \"protocol\" }\n\
+        return out }\n";
+    run(
+        SOURCE,
+        &[],
+        &list(&[text("plain"), text("protocol")]),
+        &[],
+        &[],
+    );
 }

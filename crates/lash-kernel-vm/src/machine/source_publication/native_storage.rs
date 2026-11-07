@@ -671,7 +671,9 @@ pub(in crate::machine) fn scratch_events(
     let owner = |index: doc::NativeResourceOwner| Owner::Value {
         task,
         invocation,
-        slot: Slot::Scratch(index.0),
+        slot: Slot::Scratch(
+            lash_kernel_state::kernel_internals::logical::SourceRole::native_resource(index.0),
+        ),
     };
     let mut active = Vec::new();
     let mut events = Vec::new();

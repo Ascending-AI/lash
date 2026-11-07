@@ -21,7 +21,7 @@ impl Source {
 
     pub(crate) fn native_inputs(&self, at: &Point) -> Result<Box<[Owner]>, Refused> {
         if let Ok(action) = self.root_action(at) {
-            return Ok((0..super::super::super::atoms(action).len())
+            return Ok((0..super::super::super::action_atoms(action).len())
                 .map(|index| Owner::Atom {
                     at: at.site.clone(),
                     index: index as u32,
@@ -135,10 +135,7 @@ impl ExactEvent {
                             };
                             activation.value(slot).ok_or(Refused::Facts)?
                         }
-                        None if self.source.site.unit == lash_kernel_value::sites::Unit::Main => {
-                            sessions.value(name, ledger).ok_or(Refused::Facts)?
-                        }
-                        None => return Err(Refused::Source),
+                        None => sessions.value(name, ledger).ok_or(Refused::Facts)?,
                     }
                 }
                 doc::Atom::Literal(literal) => match literal {

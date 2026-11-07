@@ -168,7 +168,6 @@ pub(crate) struct Merge {
     pub(in crate::machine::islands) body: usize,
     pub(in crate::machine::islands) compared: [usize; 2],
     pub(in crate::machine::islands) callback: usize,
-    pub(in crate::machine::islands) callback_site: Callback,
 }
 
 #[derive(Clone)]
@@ -790,7 +789,7 @@ impl Build<'_> {
         (at == left && self.merge_locals(second_value, "list.get")? == [sorted, right])
             .then_some(())?;
         let (output, application) = assigned(apply, true)?;
-        let (callback_site, args) = self.callback(apply.id, application)?;
+        let (_, args) = self.callback(apply.id, application)?;
         let [first_argument, second_argument] = args else {
             return None;
         };
@@ -862,7 +861,6 @@ impl Build<'_> {
             body: block(body.id)?,
             compared,
             callback: self.blocks[compared[1]].starts[2],
-            callback_site,
         })
     }
 
@@ -938,7 +936,7 @@ impl Build<'_> {
         let (second_slot, same_sorted, at2) = read(second)?;
         (at == left && at2 == right && sorted == same_sorted).then_some(())?;
         let (order, application) = assigned(apply, true)?;
-        let (callback_site, arguments) = self.callback(apply.id, application)?;
+        let (_, arguments) = self.callback(apply.id, application)?;
         let [first, second] = arguments else {
             return None;
         };
@@ -998,7 +996,6 @@ impl Build<'_> {
             body,
             compared: [body, body],
             callback: self.blocks[body].starts[3],
-            callback_site,
         })
     }
     fn primitive(&self, value: &Expr, arity: usize) -> Option<LibId> {

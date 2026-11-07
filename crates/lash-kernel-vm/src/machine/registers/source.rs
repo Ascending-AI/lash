@@ -389,7 +389,11 @@ impl Operands {
             let owner = Owner::Value {
                 task: lash_kernel_doc::TaskId::MAIN,
                 invocation: 0,
-                slot: Slot::Argument(index as u32),
+                slot: Slot::Argument(
+                    lash_kernel_state::kernel_internals::logical::SourceRole::argument(
+                        index as u32,
+                    ),
+                ),
             };
             if !inputs.contains(&owner) && ledger.holding(owner, projection.heap.pages())?.is_some()
             {
@@ -399,6 +403,14 @@ impl Operands {
             outputs.push((owner, held.value));
         }
         Ok(outputs)
+    }
+    pub(super) fn live_values(&self) -> impl Iterator<Item = (Owner, Value)> + '_ {
+        self.values
+            .iter()
+            .map(|operand| &operand.held)
+            .chain(&self.atoms)
+            .chain(&self.entry)
+            .filter_map(|held| held.owner.map(|owner| (owner, held.value)))
     }
     pub(super) fn live_owners(&self) -> impl Iterator<Item = Owner> + '_ {
         self.values

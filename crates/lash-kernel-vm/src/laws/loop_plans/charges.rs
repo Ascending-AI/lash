@@ -1,5 +1,3 @@
-#[path = "calls.rs"]
-mod calls;
 use super::*;
 use crate::compile::room::charges::{ChargeProgram, FormulaValues};
 use lash_kernel_doc::Value;
@@ -9,7 +7,6 @@ use lash_kernel_exec::{Op, OpRange, Weight};
 /// same compiled formula and zero/nonzero measurements serve tape and quiet
 /// admission, including exact charge-bound and strict slice equality.
 pub(super) fn compiled_charges() {
-    calls::pure_calls();
     member_closes();
     constructor_debt();
     native_after_ordered_closes();

@@ -3,12 +3,9 @@
 //! physical recovery placement and composed-call authentication must join it
 //! before runtime consumers can elide operations under shared acceptance.
 use super::*;
-mod affine;
 #[path = "calls.rs"]
 pub(crate) mod calls;
 mod captures;
-#[path = "region/continuation.rs"]
-mod continuation;
 pub(crate) mod text;
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_state::{
@@ -416,15 +413,19 @@ impl Compiler<'_> {
             }
             return Ok(());
         }
+        // The body's Leave lets the frame go, unless a `return via`'s policy
+        // still runs in it.
+        let frame = event.delta.fixed;
         let root_leave = event.point.site == self.source.site
             && event.point.phase == Phase::Leave
             && event.inputs.is_empty()
             && event.output.is_none()
             && event.entities.is_empty()
             && event.peak == Amount::default()
+            && (frame == -i128::from(Cost::FRAME) || frame == 0)
             && event.delta
                 == Amount {
-                    fixed: -i128::from(Cost::FRAME),
+                    fixed: frame,
                     terms: vec![(
                         Measure::Release(
                             vec![
@@ -462,7 +463,7 @@ impl Compiler<'_> {
                 }
             }
             if root_leave {
-                self.delta.fixed -= i128::from(Cost::FRAME);
+                self.delta.fixed += frame;
             }
             return Ok(());
         }
@@ -575,16 +576,6 @@ impl Source {
         self.compile_scalar_entered(interval, body, &[])
     }
 
-    /// Earlier verified pieces retain these roles, including scope bindings
-    /// that this suffix releases without reading.
-    pub(super) fn compile_scalar_region_from(
-        self: &Arc<Self>,
-        interval: Arc<CompiledInterval>,
-        live: &[Slot],
-    ) -> Result<ScalarRegion, Refused> {
-        self.compile_scalar_entered(interval, false, live)
-    }
-
     fn compile_scalar_entered(
         self: &Arc<Self>,
         interval: Arc<CompiledInterval>,
@@ -592,13 +583,6 @@ impl Source {
         live: &[Slot],
     ) -> Result<ScalarRegion, Refused> {
         self.compile_scalar_mode(interval, body, live, false)
-    }
-
-    pub(super) fn compile_callback_body(
-        self: &Arc<Self>,
-        interval: Arc<CompiledInterval>,
-    ) -> Result<ScalarRegion, Refused> {
-        self.compile_scalar_mode(interval, true, &[], true)
     }
 
     fn compile_scalar_mode(
@@ -692,7 +676,6 @@ pub(crate) struct BoundScalarRegion<'a> {
     values: Vec<Value>,
     peak: u64,
     delta: i128,
-    transfer: Option<continuation::Transfer>,
 }
 impl ScalarRegion {
     fn branch_guards(&self, recovery: &[Recovery]) -> Result<Vec<(ScalarFact, bool)>, Refused> {
@@ -1006,6 +989,7 @@ impl ScalarRegion {
         }
         self.bind_values(ledger, arena, heap, invocation, values)
     }
+    #[cfg(test)]
     pub(crate) fn recovery_after(&self, point: &Point) -> Option<&[(Slot, ScalarFact)]> {
         self.recovery
             .iter()
@@ -1149,7 +1133,6 @@ impl ScalarRegion {
             values: values.values.to_vec(),
             peak,
             delta,
-            transfer: None,
         }))
     }
 }
@@ -1160,6 +1143,7 @@ impl BoundScalarRegion<'_> {
     pub(crate) fn invocation(&self) -> &logical::Invocation {
         &self.invocation
     }
+    #[cfg(test)]
     pub(crate) fn peak(&self) -> u64 {
         self.peak
     }
@@ -1174,42 +1158,30 @@ impl BoundScalarRegion<'_> {
         if !ledger.is_current(&self.stamp) {
             return Ok(None);
         }
-        let default_inputs;
-        let default_outputs;
-        let (inputs, outputs) = if let Some(transfer) = &self.transfer {
-            (&transfer.inputs, &transfer.outputs)
-        } else {
-            default_inputs = self.region.entries.iter().map(|entry| entry.slot).collect();
-            default_outputs = self
-                .region
-                .survivors
-                .iter()
-                .map(|(slot, live)| (*slot, self.values[live.fact.0], live.entry))
-                .collect();
-            (&default_inputs, &default_outputs)
-        };
-        let inputs: Vec<_> = inputs
+        let inputs: Vec<_> = self
+            .region
+            .entries
             .iter()
-            .map(|slot| self.invocation.owner(*slot))
+            .map(|entry| self.invocation.owner(entry.slot))
             .collect();
-        let outputs: Vec<_> = outputs
+        let outputs: Vec<_> = self
+            .region
+            .survivors
             .iter()
-            .map(|(slot, value, entry)| {
+            .map(|(slot, live)| {
                 (
                     self.invocation.owner(*slot),
-                    entry.map_or(RootValue::Value(value), |entry| {
-                        RootValue::Existing(self.invocation.owner(entry))
-                    }),
+                    live.entry
+                        .map_or(RootValue::Value(&self.values[live.fact.0]), |entry| {
+                            RootValue::Existing(self.invocation.owner(entry))
+                        }),
                 )
             })
             .collect();
         // Preparing authenticates result holdings through the canonical source
         // projection. No naked retained-byte delta authorizes this transfer.
         let before = ledger.balance()?.total()?;
-        let mut prepared = ledger.prepare_source_boundary(registration, heap, &inputs, &outputs)?;
-        if let Some(transfer) = self.transfer {
-            prepared = prepared.complete_invocations(transfer.reservation, 1, heap.pages())?;
-        }
+        let prepared = ledger.prepare_source_boundary(registration, heap, &inputs, &outputs)?;
         let after = prepared.balance()?.total()?;
         if i128::from(after) - i128::from(before) != self.delta {
             return Ok(None);

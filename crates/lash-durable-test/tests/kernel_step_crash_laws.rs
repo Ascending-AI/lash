@@ -678,3 +678,24 @@ mod successor_pair;
 
 #[path = "kernel_step_crash_laws/linked_carry.rs"]
 mod linked_carry;
+
+/// FIG-7657: immutable worker indexes borrow the transferred image, so each
+/// isolated crash scenario retains at most one backing for those bytes.
+#[test]
+fn worker_indexes_stay_within_the_transferred_image() {
+    let built = lash_vm_client::packages::WorkerLibrary::built().expect("the build image");
+    let frame = built.frame();
+    let received = lash_vm_client::packages::WorkerLibrary::from_frame(Arc::clone(&frame))
+        .expect("the received image");
+    for library in [built.as_ref(), &received] {
+        let frame = library.frame();
+        let backing = frame.as_ptr_range();
+        for index in library.indexes().expect("the immutable indexes") {
+            let range = index.as_ptr_range();
+            assert!(
+                backing.start <= range.start && range.end <= backing.end,
+                "worker index retained a second image backing instead of borrowing the transferred bytes"
+            );
+        }
+    }
+}

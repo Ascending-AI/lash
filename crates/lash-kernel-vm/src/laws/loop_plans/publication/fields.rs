@@ -102,8 +102,14 @@ pub(super) fn names() {
             heap.pages(),
             &[],
             &[
-                (Slot::Binding(0), RootValue::Value(&record)),
-                (Slot::Binding(1), RootValue::Value(&foreign)),
+                (
+                    Slot::Binding(crate::laws::role_id(0)),
+                    RootValue::Value(&record),
+                ),
+                (
+                    Slot::Binding(crate::laws::role_id(1)),
+                    RootValue::Value(&foreign),
+                ),
             ],
         )
         .unwrap();
@@ -295,8 +301,14 @@ fn private_member_storage() {
             heap.pages(),
             &[],
             &[
-                (Slot::Binding(0), RootValue::Value(&list)),
-                (Slot::Binding(1), RootValue::Value(&table)),
+                (
+                    Slot::Binding(crate::laws::role_id(0)),
+                    RootValue::Value(&list),
+                ),
+                (
+                    Slot::Binding(crate::laws::role_id(1)),
+                    RootValue::Value(&table),
+                ),
             ],
         )
         .unwrap();
@@ -382,7 +394,10 @@ fn private_member_storage() {
             .unwrap()
             .is_none()
     );
-    for slot in [Slot::Binding(0), Slot::Binding(1)] {
+    for slot in [
+        Slot::Binding(crate::laws::role_id(0)),
+        Slot::Binding(crate::laws::role_id(1)),
+    ] {
         assert!(
             ledger
                 .holding(invocation.owner(slot), heap.pages())
@@ -421,11 +436,26 @@ fn private_cell_storage() {
             heap.pages(),
             &[],
             &[
-                (Slot::Binding(0), RootValue::Value(&variable)),
-                (Slot::Binding(1), RootValue::Value(&variable)),
-                (Slot::Binding(2), RootValue::Value(&second_value)),
-                (Slot::Binding(3), RootValue::Value(&foreign_value)),
-                (Slot::Capture(0), RootValue::Capture(cell)),
+                (
+                    Slot::Binding(crate::laws::role_id(0)),
+                    RootValue::Value(&variable),
+                ),
+                (
+                    Slot::Binding(crate::laws::role_id(1)),
+                    RootValue::Value(&variable),
+                ),
+                (
+                    Slot::Binding(crate::laws::role_id(2)),
+                    RootValue::Value(&second_value),
+                ),
+                (
+                    Slot::Binding(crate::laws::role_id(3)),
+                    RootValue::Value(&foreign_value),
+                ),
+                (
+                    Slot::Capture(crate::laws::role_id(0)),
+                    RootValue::Capture(cell),
+                ),
             ],
         )
         .unwrap();
@@ -437,7 +467,10 @@ fn private_cell_storage() {
             arena.registration().unwrap(),
             heap,
             &[],
-            &[(invocation.owner(Slot::Operand(0)), RootValue::Value(&cycle))],
+            &[(
+                invocation.owner(Slot::Operand(crate::laws::role_id(0))),
+                RootValue::Value(&cycle),
+            )],
         )
         .unwrap()
         .admit(u64::MAX)
@@ -449,7 +482,7 @@ fn private_cell_storage() {
         .unwrap();
     let before = ledger.balance().unwrap();
     let version = arena.content_version(cell).unwrap();
-    let inputs = [invocation.owner(Slot::Operand(0))];
+    let inputs = [invocation.owner(Slot::Operand(crate::laws::role_id(0)))];
 
     // Abandonment and memory refusal both discard the private writes. No
     // source increment is replayed because none has reached the arena yet.
@@ -560,7 +593,11 @@ fn private_cell_storage() {
     assert!(arena.cell(foreign).unwrap().same(&Value::Int(42)));
     assert!(!arena.content_is(&version));
     assert!(ledger.holding(inputs[0], heap.pages()).unwrap().is_none());
-    for slot in [Slot::Binding(0), Slot::Binding(1), Slot::Capture(0)] {
+    for slot in [
+        Slot::Binding(crate::laws::role_id(0)),
+        Slot::Binding(crate::laws::role_id(1)),
+        Slot::Capture(crate::laws::role_id(0)),
+    ] {
         let held = ledger
             .holding(invocation.owner(slot), heap.pages())
             .unwrap()
@@ -605,7 +642,10 @@ fn private_cell_storage() {
     );
     assert!(
         ledger
-            .holding(invocation.owner(Slot::Binding(3)), heap.pages())
+            .holding(
+                invocation.owner(Slot::Binding(crate::laws::role_id(3))),
+                heap.pages()
+            )
             .unwrap()
             .is_some()
     );
@@ -663,8 +703,14 @@ fn indexed_members() {
                 heap.pages(),
                 &[],
                 &[
-                    (Slot::Binding(0), RootValue::Value(&target)),
-                    (Slot::Binding(1), RootValue::Value(&foreign)),
+                    (
+                        Slot::Binding(crate::laws::role_id(0)),
+                        RootValue::Value(&target),
+                    ),
+                    (
+                        Slot::Binding(crate::laws::role_id(1)),
+                        RootValue::Value(&foreign),
+                    ),
                 ],
             )
             .unwrap();

@@ -92,7 +92,7 @@ pub(super) fn entries() {
     let continuation = caller_slots
         .continuation(&nested.roles[0].site, TaskId::MAIN, caller.id())
         .unwrap();
-    let foreign = caller.owner(Slot::Argument(1));
+    let foreign = caller.owner(Slot::Argument(crate::laws::role_id(1)));
     let creation = exe
         .islands
         .plans

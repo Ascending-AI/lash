@@ -28,34 +28,195 @@ mod observers;
 pub use observers::ObserverExclusion;
 mod ownership;
 mod program;
-#[cfg(any(test, feature = "perf-witness"))]
+#[cfg(any(test, feature = "testing", feature = "perf-witness"))]
 pub use program::{
     AcceptedProgram, EvaluatedProgram, JournalEvent, Materializations, PreparedProgram, Program,
 };
 pub use program::{FrameEvent, ScratchEvent, VirtualBody, VirtualEntity};
 mod publication;
+mod region;
 use members::PreparedMember;
 pub use members::{Member, MemberFault};
 pub use ownership::{PublicationValue, RootValue};
 pub use publication::{AcceptedBoundary, BoundaryTransaction, MemberEdit};
+use region::Lineage;
+#[cfg(any(test, feature = "testing", feature = "perf-witness"))]
+pub use region::fixtures as region_fixtures;
+pub use region::{
+    LeaseAllocation, LeaseCallable, LeaseFacts, LeaseFault, LeaseGraphExit, LeaseLoader,
+    LeaseMeasure, LeaseMember, LeaseObject, LeaseOp, LeaseProjection, LeaseStep, LeaseValue,
+    NativeBatch, PreparedStateExit, ReadyLeaseStep, StateExit, StateLease,
+};
 mod warming;
 pub use warming::WarmFact;
 mod values;
 pub(crate) use values::stream_value_edges;
 
-/// An index in the exact source unit, assigned before register placement.
+/// A source role's identity: the first 16 bytes of the digest of its full
+/// canonical discriminator ([`SourceRole`]), domain-separated by the page
+/// format. No compiler numbering takes part, so a role keeps its identity
+/// across compilations of the same source and carries by correspondence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RoleId(pub [u8; 16]);
+
+/// A frame's role, by kind and source identity. Register placement maps it
+/// through its code's table; the ledger keys `Owner::Value` by it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Slot {
-    Binding(u32),
-    Operand(u32),
-    Control(u32),
-    Argument(u32),
-    Departure(u32),
-    Continuation(u32),
-    Scratch(u32),
+    Binding(RoleId),
+    Operand(RoleId),
+    Control(RoleId),
+    Argument(RoleId),
+    Departure(RoleId),
+    Continuation(RoleId),
+    Scratch(RoleId),
     /// A frame's borrowed reach to a captured variable cell. The declaring
     /// binding and closure entity own the priced occurrences.
-    Capture(u32),
+    Capture(RoleId),
+}
+
+/// The kind half of a [`Slot`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SlotKind {
+    Binding,
+    Operand,
+    Control,
+    Argument,
+    Departure,
+    Continuation,
+    Scratch,
+    Capture,
+}
+
+impl Slot {
+    pub fn new(kind: SlotKind, id: RoleId) -> Self {
+        match kind {
+            SlotKind::Binding => Self::Binding(id),
+            SlotKind::Operand => Self::Operand(id),
+            SlotKind::Control => Self::Control(id),
+            SlotKind::Argument => Self::Argument(id),
+            SlotKind::Departure => Self::Departure(id),
+            SlotKind::Continuation => Self::Continuation(id),
+            SlotKind::Scratch => Self::Scratch(id),
+            SlotKind::Capture => Self::Capture(id),
+        }
+    }
+    pub fn kind(self) -> SlotKind {
+        self.parts().0
+    }
+    pub fn id(self) -> RoleId {
+        self.parts().1
+    }
+    fn parts(self) -> (SlotKind, RoleId) {
+        match self {
+            Self::Binding(id) => (SlotKind::Binding, id),
+            Self::Operand(id) => (SlotKind::Operand, id),
+            Self::Control(id) => (SlotKind::Control, id),
+            Self::Argument(id) => (SlotKind::Argument, id),
+            Self::Departure(id) => (SlotKind::Departure, id),
+            Self::Continuation(id) => (SlotKind::Continuation, id),
+            Self::Scratch(id) => (SlotKind::Scratch, id),
+            Self::Capture(id) => (SlotKind::Capture, id),
+        }
+    }
+}
+
+/// The full canonical discriminator of a source role (Q4). Sites are whole
+/// source sites; a version carry maps them by correspondence and recomputes
+/// the [`RoleId`].
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SourceRole {
+    Operand(lash_kernel_value::sites::Site),
+    Selected(lash_kernel_value::sites::Site),
+    Atom {
+        at: lash_kernel_value::sites::Site,
+        index: u32,
+    },
+    LoopCursor(lash_kernel_value::sites::Site),
+    LoopHeader(lash_kernel_value::sites::Site),
+    PendingDeparture(lash_kernel_value::sites::Site),
+    ActiveDeparture(lash_kernel_value::sites::Site),
+    Binding {
+        declared: lash_kernel_value::sites::Site,
+        name: lash_kernel_value::Name,
+    },
+    /// An entry argument, by position.
+    Argument(u32),
+    /// A native call's resource owner, by its contract index.
+    NativeResource(u32),
+}
+
+impl SourceRole {
+    /// The identity of positional argument `index`; the low positions are
+    /// derived once per process, since every call names them.
+    pub fn argument(index: u32) -> RoleId {
+        static LOW: std::sync::OnceLock<Box<[RoleId]>> = std::sync::OnceLock::new();
+        Self::positional(&LOW, index, SourceRole::Argument)
+    }
+    /// The identity of native resource `index`.
+    pub fn native_resource(index: u32) -> RoleId {
+        static LOW: std::sync::OnceLock<Box<[RoleId]>> = std::sync::OnceLock::new();
+        Self::positional(&LOW, index, SourceRole::NativeResource)
+    }
+    /// The positional role a low argument or native resource slot names.
+    pub fn positional_of(slot: Slot) -> Option<SourceRole> {
+        type Positional = (fn(u32) -> SourceRole, fn(u32) -> RoleId);
+        let (role, of): Positional = match slot {
+            Slot::Argument(_) => (SourceRole::Argument, Self::argument),
+            Slot::Scratch(_) => (SourceRole::NativeResource, Self::native_resource),
+            _ => return None,
+        };
+        (0..64).find(|index| of(*index) == slot.id()).map(role)
+    }
+    fn positional(
+        low: &std::sync::OnceLock<Box<[RoleId]>>,
+        index: u32,
+        role: fn(u32) -> SourceRole,
+    ) -> RoleId {
+        const LOW: u32 = 64;
+        if index < LOW {
+            low.get_or_init(|| (0..LOW).map(|index| role(index).id()).collect())[index as usize]
+        } else {
+            role(index).id()
+        }
+    }
+    pub fn id(&self) -> RoleId {
+        let mut out = lash_kernel_value::tokens::TokenWriter::new();
+        out.seq(3);
+        out.text("lash.source-role");
+        out.unsigned(u64::from(super::source::PAGE_FORMAT));
+        lash_kernel_value::tokens::TokenCodec::encode(self, &mut out);
+        let digest = lash_kernel_value::tokens::logical_digest(&out.into_bytes());
+        let mut id = [0; 16];
+        id.copy_from_slice(&digest[..16]);
+        RoleId(id)
+    }
+    /// The same role with each site mapped, for a version carry.
+    pub fn map_sites<E>(
+        &self,
+        mut map: impl FnMut(
+            &lash_kernel_value::sites::Site,
+        ) -> Result<lash_kernel_value::sites::Site, E>,
+    ) -> Result<Self, E> {
+        Ok(match self {
+            Self::Operand(at) => Self::Operand(map(at)?),
+            Self::Selected(at) => Self::Selected(map(at)?),
+            Self::Atom { at, index } => Self::Atom {
+                at: map(at)?,
+                index: *index,
+            },
+            Self::LoopCursor(at) => Self::LoopCursor(map(at)?),
+            Self::LoopHeader(at) => Self::LoopHeader(map(at)?),
+            Self::PendingDeparture(at) => Self::PendingDeparture(map(at)?),
+            Self::ActiveDeparture(at) => Self::ActiveDeparture(map(at)?),
+            Self::Binding { declared, name } => Self::Binding {
+                declared: map(declared)?,
+                name: name.clone(),
+            },
+            Self::Argument(index) => Self::Argument(*index),
+            Self::NativeResource(index) => Self::NativeResource(*index),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -344,6 +505,66 @@ pub struct LedgerRoot {
 }
 
 impl LedgerRoot {
+    /// Rekeys the value owners a version carry renames, keeping each holding.
+    /// `rekey` names each value owner's successor, refusing an owner it cannot
+    /// name; a successor two owners would share refuses through `collision`.
+    /// The receiver is untouched, so a refused carry keeps its checkpoint;
+    /// `None` when no owner moves.
+    pub fn rekey_values<E: From<HeapFault>>(
+        self,
+        access: &Access<'_>,
+        mut rekey: impl FnMut(Owner) -> Result<Owner, E>,
+        collision: impl Fn(Owner) -> E,
+    ) -> Result<Option<Self>, E> {
+        let mut execution = Tree::<RootHolding>::of_keyed(&self.execution);
+        let mut rows = Vec::new();
+        execution.visit(access, &mut |_, row| {
+            rows.push(row.clone());
+            true
+        })?;
+        let mut moved = Vec::new();
+        for row in rows {
+            if !matches!(row.owner, Owner::Value { .. }) {
+                continue;
+            }
+            let to = rekey(row.owner)?;
+            if to != row.owner {
+                moved.push((row, to));
+            }
+        }
+        if moved.is_empty() {
+            return Ok(None);
+        }
+        // Remove every renamed owner first, so a swap is not a collision.
+        for (row, _) in &moved {
+            execution.remove(&owner_key(row.owner), access)?;
+        }
+        for (row, to) in moved {
+            let key = owner_key(to);
+            if execution.get(&key, access)?.is_some() {
+                return Err(collision(to));
+            }
+            execution.write(
+                key,
+                RootHolding {
+                    owner: to,
+                    value: row.value,
+                },
+                access,
+            )?;
+        }
+        execution.seal(
+            access,
+            &mut SealWork::new(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            }),
+        )?;
+        Ok(Some(Self {
+            execution: execution.keyed_root()?,
+            ..self
+        }))
+    }
     /// Authenticated source balance from root summaries; no physical residency
     /// counter or previous capacity certificate participates in this value.
     pub fn balance(self) -> Result<Balance, HeapFault> {
@@ -452,7 +673,7 @@ pub enum Change {
 
 pub struct Ledger {
     state: State,
-    identity: Rc<()>,
+    identity: Rc<Lineage>,
     revision: u64,
     facts: std::cell::RefCell<facts::Facts>,
 }
@@ -461,13 +682,13 @@ pub struct Ledger {
 /// or survive opening a sealed root. Arena facts carry their own content stamps.
 #[derive(Clone)]
 pub struct Stamp {
-    identity: Rc<()>,
+    identity: Rc<Lineage>,
     revision: u64,
 }
 
 /// A complete staged operation. No semantic tree has changed yet.
 pub struct Prepared {
-    identity: Rc<()>,
+    identity: Rc<Lineage>,
     revision: u64,
     next: State,
     peak: u64,
@@ -508,7 +729,7 @@ impl Prepared {
     ) -> Result<Self, HeapFault> {
         let mut swept = Ledger {
             state: before.state.clone(),
-            identity: Rc::new(()),
+            identity: Rc::new(Lineage::default()),
             revision: before.revision,
             facts: Default::default(),
         };
@@ -563,7 +784,7 @@ impl Ledger {
                 refinements: 0,
                 next_invocation: 1,
             },
-            identity: Rc::new(()),
+            identity: Rc::new(Lineage::default()),
             revision: 0,
             facts: Default::default(),
         }
@@ -578,7 +799,7 @@ impl Ledger {
                 refinements: root.refinements,
                 next_invocation: root.next_invocation,
             },
-            identity: Rc::new(()),
+            identity: Rc::new(Lineage::default()),
             revision: 0,
             facts: Default::default(),
         };
@@ -641,6 +862,7 @@ impl Ledger {
     /// A callback, cold load or safe-point handoff expires outstanding
     /// capabilities even when no logical holding changes. Price stays constant.
     pub fn handoff(&mut self) -> Result<(), HeapFault> {
+        self.require_unleased()?;
         self.revision = self
             .revision
             .checked_add(1)
@@ -852,6 +1074,7 @@ impl Ledger {
         accepted: Accepted,
         semantic: impl FnOnce(),
     ) -> Result<(), HeapFault> {
+        self.require_unleased()?;
         let Prepared {
             identity,
             revision,
@@ -992,7 +1215,116 @@ impl Ledger {
             next_invocation: self.state.next_invocation,
         })
     }
+    /// A source operand can cross a seal only when the canonical frame names
+    /// that exact owner and value. Unprojected evaluator roots still refuse.
+    pub(super) fn validate_frame_continuations(
+        &self,
+        access: &Access<'_>,
+        tasks: &super::tree::Tree<super::directory::execution::TaskRecord>,
+    ) -> Result<(), HeapFault> {
+        let mut saved = BTreeMap::new();
+        let mut error = None;
+        tasks.visit(access, &mut |key, task| {
+            let mut visit = || -> Result<(), HeapFault> {
+                let id = TaskId(u64::from_be_bytes(
+                    key.try_into().map_err(|_| invalid("invalid task key"))?,
+                ));
+                visit_tree(&task.frames, access, &mut |frame| {
+                    let Some(record) = &frame.pending else {
+                        return Ok(());
+                    };
+                    if record.unpaid.is_none() {
+                        return Ok(());
+                    }
+                    if record.invocation == 0 || record.invocation != frame.invocation {
+                        return Err(invalid("continuation names another frame invocation"));
+                    }
+                    for role in record.roles(access)? {
+                        let Some(slot) = role.coordinate.slot() else {
+                            return Err(invalid(
+                                "canonical source continuation has an expression role",
+                            ));
+                        };
+                        let owner = Owner::Value {
+                            task: id,
+                            invocation: frame.invocation,
+                            slot,
+                        };
+                        if owner.transient()
+                            && saved
+                                .insert(owner, Holding::from_page(access, &role.value)?)
+                                .is_some()
+                        {
+                            return Err(invalid(
+                                "canonical continuation duplicates a source owner",
+                            ));
+                        }
+                    }
+                    Ok(())
+                })
+            };
+            match visit() {
+                Ok(()) => true,
+                Err(fault) => {
+                    error = Some(fault);
+                    false
+                }
+            }
+        })?;
+        if let Some(fault) = error {
+            return Err(fault);
+        }
+        visit_tree(&self.state.execution, access, &mut |root| {
+            if !root.owner.transient() {
+                return Ok(());
+            }
+            let value = saved
+                .remove(&root.owner)
+                .ok_or_else(|| invalid("transient source owner has no canonical continuation"))?;
+            let mut expected = BTreeMap::new();
+            let mut actual = BTreeMap::new();
+            value.visit_edges(access, &mut |id, count| {
+                expected.insert(id, count);
+                Ok(())
+            })?;
+            root.value.visit_edges(access, &mut |id, count| {
+                actual.insert(id, count);
+                Ok(())
+            })?;
+            if value.bytes != root.value.bytes || expected != actual {
+                return Err(invalid(
+                    "canonical continuation holding differs from its source owner",
+                ));
+            }
+            Ok(())
+        })?;
+        if !saved.is_empty() {
+            return Err(invalid("canonical continuation has an absent source owner"));
+        }
+        Ok(())
+    }
+
+    pub(super) fn seal_with_frames(
+        &mut self,
+        access: &Access<'_>,
+        work: &mut SealWork,
+        tasks: &super::tree::Tree<super::directory::execution::TaskRecord>,
+    ) -> Result<Option<LedgerRoot>, HeapFault> {
+        self.validate_frame_continuations(access, tasks)?;
+        self.seal_canonical(access, work)
+    }
+
     pub(super) fn seal_with(
+        &mut self,
+        access: &Access<'_>,
+        work: &mut SealWork,
+    ) -> Result<Option<LedgerRoot>, HeapFault> {
+        if self.state.execution.live_members(access)? != 0 {
+            return Err(invalid("transient source owners at seal"));
+        }
+        self.seal_canonical(access, work)
+    }
+    fn seal_canonical(
         &mut self,
         access: &Access<'_>,
         work: &mut SealWork,
@@ -1000,9 +1332,6 @@ impl Ledger {
         // A seal ends the active borrowed execution view even if its budget
         // yields. Outstanding admissions cannot survive the handoff.
         self.handoff()?;
-        if self.state.execution.live_members(access)? != 0 {
-            return Err(invalid("transient source owners at seal"));
-        }
         self.drop_provisional(access)?;
         let mut state = self.state.clone();
         if !state.owners.seal(access, work)?
@@ -1244,3 +1573,7 @@ fn owner_key(owner: Owner) -> codec::Key {
 fn keyed<T: Cell>(tree: &Tree<T>) -> Result<KeyedRoot, HeapFault> {
     tree.keyed_root()
 }
+
+/// Independent itemized state oracle for qualification and witness builds.
+#[cfg(any(test, feature = "testing", feature = "perf-witness"))]
+pub mod testing;

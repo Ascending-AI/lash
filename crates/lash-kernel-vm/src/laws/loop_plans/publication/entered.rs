@@ -143,7 +143,7 @@ pub(super) fn nested_scope() {
         .borrow_mut()
         .enter_source(TaskId::MAIN, &mut arena, heap, &[], &[])
         .unwrap();
-    let argument = caller.owner(Slot::Argument(0));
+    let argument = caller.owner(Slot::Argument(crate::laws::role_id(0)));
     store
         .borrow_mut()
         .transfer_source(

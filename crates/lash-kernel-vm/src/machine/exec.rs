@@ -275,6 +275,12 @@ impl KernelMachine {
         mut departure: Completion,
     ) -> Result<(), Halt> {
         loop {
+            // A canonical frame's try takes a raise through its region route.
+            if let Completion::Throw(value) = &departure
+                && self.catch_in_region(task, **value)?
+            {
+                return Ok(());
+            }
             self.logical_departure(task, super::controls::Departed::of(&departure))?;
             match &departure {
                 Completion::Normal => return Ok(()),
@@ -314,6 +320,48 @@ impl KernelMachine {
                 &[],
             )?;
             let frame = self.frame(task)?;
+            // A canonical frame's try takes a raise only through its region
+            // route: one its body holds that no route took has no meaning.
+            // Its catch blocks the raise leaves let go of what they took.
+            if let Completion::Throw(value) = &departure
+                && frame.pending.source.is_some()
+            {
+                if frame.control.iter().any(|control| {
+                    matches!(
+                        control,
+                        Control::Try {
+                            phase: TryPhase::Body,
+                            ..
+                        }
+                    )
+                }) {
+                    return Err(fault(
+                        "a raise reached a try of a canonical frame outside its region route",
+                    ));
+                }
+                let value = **value;
+                let left: Vec<usize> = frame
+                    .control
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, control)| {
+                        matches!(
+                            control,
+                            Control::Try {
+                                phase: TryPhase::Catch,
+                                ..
+                            }
+                        )
+                    })
+                    .map(|(index, _)| index)
+                    .rev()
+                    .collect();
+                for index in left {
+                    self.catch_left(task, index, Some(&value))?;
+                }
+                self.frame(task)?.control.clear();
+            }
+            let frame = self.frame(task)?;
             frame.awaiting = None;
             frame.nested = None;
             frame.pending.take();
@@ -338,6 +386,7 @@ impl KernelMachine {
                     // Source handlers have gone. The policy is an ordinary
                     // call, and its result leaves this frame directly.
                     let slots = exe.code(frame.code).slots_by_at.len();
+                    self.leave_source_roles(task)?;
                     for at in 0..slots {
                         self.set_source_slot(task, at as u32, SlotState::Empty)?;
                     }
@@ -510,6 +559,9 @@ impl KernelMachine {
     ) -> Result<Option<Result<Value, Value>>, Halt> {
         let code = exe.code(self.frame(task)?.code);
         let statement = lash_kernel_state::paged::SiteRef::new(&code.site, self.heap.pages())?;
+        // A region frame the machine completes leaves its continuation as
+        // a return policy's exit does: the frame then stands at its body.
+        self.leave_source_roles(task)?;
         for at in 0..code.slots_by_at.len() {
             self.set_source_slot(task, at as u32, SlotState::Empty)?;
         }
@@ -650,6 +702,9 @@ impl KernelMachine {
             return self.leave_frame(task, host, exe, result);
         }
         Ok(match result {
+            // A caller suspended at a region call takes the result at its
+            // call's Restore, in its next lease.
+            Ok(value) if self.return_into_region(task, value)? => None,
             Ok(value) => match self
                 .finish_action(task, host, exe, value, ResultOrigin::Returned)
                 .and_then(|ran| self.resumed(task, exe, ran).map(Some))
@@ -1051,7 +1106,7 @@ impl KernelMachine {
                 task,
                 entry,
                 act,
-                lash_kernel_state::paged::PhaseRecord::Called,
+                lash_kernel_state::paged::ContinuationPhase::Call { phase: 0 },
             )?;
         }
         if let Some(stmt) = awaited_by {

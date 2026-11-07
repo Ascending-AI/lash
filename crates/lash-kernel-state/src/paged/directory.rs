@@ -397,7 +397,8 @@ pub fn ordinal_key(ordinal: u64) -> super::tree::Key {
 /// image rebuilt at park. Only changed paths become editable.
 pub mod execution {
     pub use super::continuation::{
-        PendingRecord, PhaseRecord, ROLE_CHUNK, ROLE_FLAT, RoleChunk, RoleRecord, RolesRecord,
+        ChargeDebtRecord, ContinuationPhase, ContinuationRecord, ROLE_CHUNK, ROLE_FLAT, RoleChunk,
+        RoleCoordinate, RoleRecord, RolesRecord,
     };
     use super::*;
     use lash_kernel_doc::TaskId;
@@ -455,7 +456,7 @@ pub mod execution {
         pub arguments: Option<Tree<PageValue>>,
         /// The action nested in its statement the frame stands at, if it
         /// stands at one (`K-EVAL-008`).
-        pub pending: Option<PendingRecord>,
+        pub pending: Option<ContinuationRecord>,
     }
     /// Provenance of an occurrence key, retained even after its helper dies.
     #[derive(Clone, Debug, PartialEq, Eq)]
@@ -717,14 +718,17 @@ pub mod execution {
                 + self.iterated.task_edges()
                 + self.departing.task_edges()
                 + self.arguments.as_ref().map_or(0, Tree::task_edges)
-                + self.pending.as_ref().map_or(0, PendingRecord::task_edges)
+                + self
+                    .pending
+                    .as_ref()
+                    .map_or(0, ContinuationRecord::task_edges)
         }
         fn cost(&self) -> u64 {
             LogicalHeldV1::frame([
                 self.bindings.cost(),
                 self.iterated.cost(),
                 self.departing.cost(),
-                self.pending.as_ref().map_or(0, PendingRecord::cost),
+                self.pending.as_ref().map_or(0, ContinuationRecord::cost),
             ])
         }
         fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
@@ -902,7 +906,7 @@ pub mod execution {
                 iterated: <Tree<IteratedRecord>>::decode(input)?,
                 departing: <Tree<PageValue>>::decode(input)?,
                 arguments: <Option<Tree<PageValue>>>::decode(input)?,
-                pending: <Option<PendingRecord>>::decode(input)?,
+                pending: <Option<ContinuationRecord>>::decode(input)?,
             })
         }
     }

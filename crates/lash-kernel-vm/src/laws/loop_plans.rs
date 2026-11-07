@@ -342,7 +342,6 @@ fn test_close(plan: &mut islands::IslandPlan) -> &mut expr::Close {
 /// owners used by prepared, typed, island, native/body and scalar entries.
 fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
     use crate::compile::{CodeId, LibId};
-    let typed_count = std::cell::Cell::new(0);
     let rejected_joins = std::cell::Cell::new(0);
     let typed_text = LOOP
         .replace("num.add", "law.typed_add")
@@ -403,9 +402,9 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                             task: lash_kernel_doc::TaskId::MAIN,
                             invocation: 73,
                             slot: if borrowed {
-                                Slot::Capture(slot as u32)
+                                Slot::Capture(crate::laws::role_id(slot as u32))
                             } else {
-                                Slot::Binding(slot as u32)
+                                Slot::Binding(crate::laws::role_id(slot as u32))
                             }
                         })
                     );
@@ -545,18 +544,6 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                 plan.verify(plan.stream(&exe)).unwrap();
                 assert_eq!(plan.source_room.site, exe.code(plan.code).site);
                 if let Some(compiled) = plan.compiled(&exe) {
-                    let repeats = compiled.verify_room_projections(&exe, plan).unwrap();
-                    typed_count.set(typed_count.get() + repeats);
-                    if repeats != 0 {
-                        let mut corrupted =
-                            crate::machine::islands::Compiled::of(plan, &exe).unwrap();
-                        assert!(corrupted.corrupt_repeat_input());
-                        assert_eq!(
-                            corrupted.verify_room_projections(&exe, plan),
-                            Err(crate::compile::room::Refused::Source),
-                            "a fixed graph must retain the source input role"
-                        );
-                    }
                     assert!(std::sync::Arc::ptr_eq(
                         &compiled.source_room,
                         &plan.source_room
@@ -565,10 +552,6 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
             }
         }
     }
-    assert!(
-        typed_count.get() > 0,
-        "typed repeats retain their checked source prefix"
-    );
     assert!(
         rejected_joins.get() > 0,
         "missing source ownership transfers are refused"
@@ -1167,8 +1150,8 @@ fn source_room_exits_preserve_charge_prefix_and_holdings() {
                 .chain(event.entities.iter())
             {
                 assert!(
-                    slots.get(owner).is_some(),
-                    "every concrete source owner has an index"
+                    slots.contains(owner),
+                    "every concrete source owner is in the owner table"
                 );
             }
         }

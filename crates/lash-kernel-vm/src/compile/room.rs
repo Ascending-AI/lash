@@ -1,9 +1,6 @@
-//! Source memory programs. Compilation records source obligations; production
-//! admission continues to use its existing metric until the ledger cutover.
-#![allow(
-    dead_code,
-    reason = "checked phase-one projection; admission consumes it in phase two"
-)]
+//! Source memory programs: the obligations a region's source facts name.
+//! The region ISA prices them; the source evaluator runs only as the testing
+//! oracle the verified region is compared against.
 
 use lash_kernel_doc::{self as doc, LogicalHeldV1 as Cost};
 use lash_kernel_value::sites::{Site, Unit};
@@ -20,7 +17,7 @@ mod interval;
 pub(crate) mod placement;
 pub(crate) mod publication;
 pub(crate) mod region;
-mod root_owners;
+pub(crate) mod root_owners;
 pub(crate) use interval::CompiledInterval;
 pub(crate) type Selection = interval::Selection;
 mod verify;
@@ -39,6 +36,17 @@ pub(crate) enum TransferTarget {
     NativeInput,
 }
 
+/// What a `for … via` walks once its `open` has answered (`K-ITER-005`):
+/// a list, a tuple, or a map or a set it does not check, by its own cursor;
+/// a text by code point; a map or a set its protocol checks; or a driver
+/// its `next` steps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Walk {
+    Collection,
+    Guarded,
+    Driver,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Phase {
     Enter,
@@ -54,16 +62,44 @@ pub(crate) enum Phase {
     Commit,
     Fallthrough,
     Leave,
+    /// A `return via`'s policy call, after every finally of its frame.
+    Policy,
+}
+impl Phase {
+    /// Every phase, in declaration order: a phase's position is its tag in
+    /// a saved continuation.
+    const ALL: [Phase; lash_kernel_state::paged::ContinuationPhase::SOURCE_PHASES as usize] = [
+        Phase::Enter,
+        Phase::Open,
+        Phase::Next,
+        Phase::Check,
+        Phase::Item,
+        Phase::Test,
+        Phase::Catch,
+        Phase::Suspend,
+        Phase::Restore,
+        Phase::Supersede,
+        Phase::Commit,
+        Phase::Fallthrough,
+        Phase::Leave,
+        Phase::Policy,
+    ];
+    /// The phase's tag in a saved continuation.
+    pub(crate) fn code(self) -> u32 {
+        self as u32
+    }
+    /// The phase a saved continuation's tag names.
+    pub(crate) fn from_code(code: u32) -> Option<Self> {
+        Self::ALL
+            .get(code as usize)
+            .copied()
+            .filter(|phase| phase.code() == code)
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Point {
     pub(crate) site: Site,
     pub(crate) phase: Phase,
-}
-
-pub(crate) struct Prefix<'a> {
-    pub(crate) source: &'a Arc<Source>,
-    pub(crate) at: &'a Site,
 }
 
 /// Source owner selectors, instantiated per invocation and loop occurrence.
@@ -88,8 +124,6 @@ pub(crate) enum Owner {
     LoopCursor(Site),
     LoopHeader(Site),
     Departures(Site),
-    HookArgument { at: Site, phase: Phase, index: u32 },
-    HookResult { at: Site, phase: Phase },
     Cell { declared: Site, name: Name },
     Binding { declared: Site, name: Name },
     Visible { at: Site, name: Name },
@@ -127,11 +161,6 @@ pub(crate) enum Measure {
         at: Site,
         callee: CallSource,
     },
-    NativeRelease {
-        at: Site,
-        callee: CallSource,
-        owners: Box<[Owner]>,
-    },
 }
 
 /// A checked integer polynomial over logical source facts. Only member updates
@@ -154,6 +183,18 @@ impl Amount {
             Err(at) => self.terms.insert(at, (m, coefficient)),
         }
         self
+    }
+    /// What a protocol `for`'s header row holds once it writes `held`,
+    /// less what it lets go of in `released`.
+    pub(crate) fn header(held: Option<Owner>, released: Option<Owner>) -> Self {
+        let mut amount = Self::default();
+        if let Some(owner) = held {
+            amount = amount.term(Measure::Local(owner), 1);
+        }
+        if let Some(owner) = released {
+            amount = amount.term(release([owner]), -1);
+        }
+        amount
     }
     pub(crate) fn measures(&self) -> impl ExactSizeIterator<Item = &Measure> {
         self.terms.iter().map(|(measure, _)| measure)
@@ -182,15 +223,6 @@ impl Amount {
                 let call = facts.call(at, CallSource::Native(*function))?;
                 call.for_call(CallSource::Native(*function), None)?;
                 i128::from(call.native_contract.as_ref()?.scratch_peak)
-            }
-            Measure::NativeRelease { at, callee, owners } => {
-                let called = facts.call(at, *callee)?;
-                called.for_call(*callee, facts.resolved(at))?;
-                if called.native {
-                    facts.measure(&Measure::Release(owners.clone()))?
-                } else {
-                    0
-                }
             }
             _ => facts.measure(m)?,
         };
@@ -233,6 +265,9 @@ pub(crate) enum ExitKind {
     Fail,
     Break,
     Continue,
+    /// A ReturnVia departs as a Return does through each `finally` of its
+    /// frame; past the outermost one the machine runs its policy.
+    ReturnVia,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Event {
@@ -242,6 +277,75 @@ pub(crate) struct Event {
     pub(crate) entities: Box<[Owner]>,
     pub(crate) peak: Amount,
     pub(crate) delta: Amount,
+}
+impl Event {
+    /// This event as its Raise exit takes it when the raise departs toward
+    /// a try: the raised value is published into the frame's active
+    /// departure, not the event's output, and is measured there. An event
+    /// that takes no delivered value (a native's answer, a checked call, a
+    /// refused condition or cursor) raises before it runs: the machine
+    /// delivers the raise as the frame's Incoming and the event lets go of
+    /// its inputs, as a delivering action's Commit does.
+    pub(crate) fn raised(&self, frame: &Site) -> Option<Self> {
+        if !self
+            .inputs
+            .iter()
+            .any(|owner| matches!(owner, Owner::Incoming(_)))
+        {
+            let delta = if self.inputs.is_empty() {
+                Amount::default()
+            } else {
+                Amount::default().term(release(self.inputs.iter().cloned()), -1)
+            };
+            return Some(Self {
+                point: self.point.clone(),
+                inputs: self
+                    .inputs
+                    .iter()
+                    .cloned()
+                    .chain(std::iter::once(Owner::Incoming(frame.clone())))
+                    .collect(),
+                output: Some(Owner::ActiveDeparture(frame.clone())),
+                entities: Box::new([]),
+                peak: Amount::default(),
+                delta,
+            });
+        }
+        let from = self.output.clone()?;
+        let to = Owner::ActiveDeparture(frame.clone());
+        let rename = |owner: &Owner| {
+            if *owner == from {
+                to.clone()
+            } else {
+                owner.clone()
+            }
+        };
+        let amount = |amount: &Amount| Amount {
+            fixed: amount.fixed,
+            terms: amount
+                .terms
+                .iter()
+                .map(|(measure, coefficient)| {
+                    let measure = match measure {
+                        Measure::Local(owner) => Measure::Local(rename(owner)),
+                        Measure::Release(owners) => {
+                            Measure::Release(owners.iter().map(rename).collect())
+                        }
+                        other => other.clone(),
+                    };
+                    (measure, *coefficient)
+                })
+                .collect(),
+        };
+        Some(Self {
+            point: self.point.clone(),
+            inputs: self.inputs.clone(),
+            output: Some(to.clone()),
+            entities: self.entities.iter().map(rename).collect(),
+            peak: amount(&self.peak),
+            delta: amount(&self.delta),
+        })
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Exit {
@@ -302,10 +406,20 @@ pub(crate) struct Source {
 pub(crate) struct OwnerSlots {
     pub(crate) owner: doc::constant_pool::PoolOwner,
     pub(crate) source: Site,
-    slots: BTreeMap<Owner, u32>,
-    scopes: BTreeMap<Owner, Site>,
+    /// Every concrete owner, with its role identity (the digest of its full
+    /// discriminator) where a frame slot can name it.
+    slots: BTreeMap<Owner, Option<lash_kernel_state::kernel_internals::logical::RoleId>>,
+    pub(crate) scopes: BTreeMap<Owner, Site>,
     aliases: BTreeMap<Owner, Owner>,
-    binding_slots: BTreeMap<Owner, (u32, bool)>,
+    /// Each binding's role identity and whether the frame borrows it.
+    binding_slots: BTreeMap<Owner, (lash_kernel_state::kernel_internals::logical::RoleId, bool)>,
+    /// The per-code role table (Q4): every slot this body names, with the
+    /// source role it names. Built injective; a checkpoint persists the role
+    /// and restore maps it back through this table.
+    roles: BTreeMap<
+        lash_kernel_state::kernel_internals::logical::Slot,
+        lash_kernel_state::kernel_internals::logical::SourceRole,
+    >,
     groups: std::sync::Mutex<
         std::collections::HashMap<
             Owner,
@@ -327,8 +441,25 @@ impl PartialEq for OwnerSlots {
 }
 impl Eq for OwnerSlots {}
 impl OwnerSlots {
-    pub(crate) fn get(&self, owner: &Owner) -> Option<u32> {
-        self.slots.get(owner).copied()
+    pub(crate) fn get(
+        &self,
+        owner: &Owner,
+    ) -> Option<lash_kernel_state::kernel_internals::logical::RoleId> {
+        self.slots.get(owner).copied().flatten()
+    }
+    pub(crate) fn contains(&self, owner: &Owner) -> bool {
+        self.slots.contains_key(owner)
+    }
+    /// The source role a slot of this body names.
+    pub(crate) fn role(
+        &self,
+        slot: lash_kernel_state::kernel_internals::logical::Slot,
+    ) -> Option<lash_kernel_state::kernel_internals::logical::SourceRole> {
+        use lash_kernel_state::kernel_internals::logical::SourceRole;
+        self.roles
+            .get(&slot)
+            .cloned()
+            .or_else(|| SourceRole::positional_of(slot))
     }
 }
 
@@ -388,8 +519,14 @@ pub(crate) struct Description {
     pub(super) bulk: Option<&'static doc::plan::CopyLoop>,
     pub(crate) calls: BTreeMap<FunctionId, CallSource>,
     pub(crate) room: SourceRoom,
+    // Preserve the first exit and alternatives in their source-room order.
+    exit_kinds: BTreeMap<Point, Vec<ExitKind>>,
 }
 impl Description {
+    fn exits_at(&self, at: &Point) -> &[ExitKind] {
+        self.exit_kinds.get(at).map_or(&[], Vec::as_slice)
+    }
+
     pub(crate) fn assigns_cell(&self, at: &Site) -> bool {
         self.cell_assignments
             .as_ref()
@@ -425,36 +562,6 @@ struct CheckedNative {
     contract: doc::NativeResourceContract,
     scratch_peak: u64,
 }
-/// A body envelope remains tied to the actual evaluated call and both
-/// logical invocations. It cannot be rebound by supplying byte totals.
-pub(crate) struct SourceCallRoom<'call> {
-    call: &'call region::calls::scope::ScopedCall<'call>,
-    checked: CheckedRoom,
-}
-impl<'call> SourceCallRoom<'call> {
-    fn new(call: &'call region::calls::scope::ScopedCall<'call>) -> Self {
-        Self {
-            call,
-            checked: call.checked_room(),
-        }
-    }
-    pub(crate) fn checked(
-        &self,
-        ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
-        arena: &lash_kernel_state::arena::Arena,
-        caller_source: &Arc<Source>,
-        at: &Point,
-        caller: &lash_kernel_state::kernel_internals::logical::Invocation,
-        invocation: &lash_kernel_state::kernel_internals::logical::Invocation,
-    ) -> Option<&CheckedRoom> {
-        (self.call.current(ledger, arena)
-            && self
-                .call
-                .authenticates_source(caller_source, at, caller, invocation))
-        .then_some(&self.checked)
-    }
-}
-
 impl CheckedRoom {
     fn for_call(&self, callee: CallSource, resolved: Option<FunctionId>) -> Option<&Balance> {
         let function = match callee {
@@ -549,15 +656,20 @@ impl Source {
         task: doc::TaskId,
         invocation: u64,
     ) -> Option<lash_kernel_state::kernel_internals::logical::Owner> {
-        use lash_kernel_state::kernel_internals::logical::{Owner as Root, Slot};
+        use lash_kernel_state::kernel_internals::logical::{Owner as Root, Slot, SourceRole};
         let binding = self.bindings.get(index as usize)?;
+        let id = SourceRole::Binding {
+            declared: binding.declared.clone(),
+            name: binding.name.clone(),
+        }
+        .id();
         (binding.index == index).then_some(Root::Value {
             task,
             invocation,
             slot: if binding.borrowed {
-                Slot::Capture(index)
+                Slot::Capture(id)
             } else {
-                Slot::Binding(index)
+                Slot::Binding(id)
             },
         })
     }
@@ -596,6 +708,7 @@ impl Source {
             }),
         }
     }
+    #[cfg(test)]
     pub(crate) fn compile(
         owner: doc::constant_pool::PoolOwner,
         site: Site,
@@ -656,7 +769,12 @@ impl Source {
         let mut calls = BTreeMap::new();
         let mut pending = vec![doc::Node::Block(body)];
         while let Some(node) = pending.pop() {
-            if let doc::Node::Expr(doc::Expr::Call { function, .. }) = node {
+            let function = match node {
+                doc::Node::Expr(doc::Expr::Call { function, .. }) => Some(function),
+                doc::Node::Expr(doc::Expr::Act(act)) => act_local_callee(act),
+                _ => None,
+            };
+            if let Some(function) = function {
                 let body = catalog.header(function).is_some_and(|h| {
                     matches!(
                         h.implementation,
@@ -672,13 +790,19 @@ impl Source {
                     },
                 );
             }
-            if let doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) = node {
-                for target in [&via.open]
+            // A protocol `for`'s hooks and a `return via`'s policy are calls.
+            let targets: Vec<&doc::FunctionTarget> = match node {
+                doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) => [&via.open]
                     .into_iter()
                     .chain(via.next.iter())
                     .chain(via.check.iter())
                     .chain(via.item.iter())
-                {
+                    .collect(),
+                doc::Node::Stmt(doc::Stmt::ReturnVia { policy, .. }) => vec![policy],
+                _ => Vec::new(),
+            };
+            {
+                for target in targets {
                     if let doc::FunctionTarget::Local(function) = target {
                         let has_body = catalog.header(function).is_some_and(|h| {
                             matches!(
@@ -724,9 +848,17 @@ impl Source {
                 scratch: Box::new([]),
                 exits: Box::new([]),
             },
+            exit_kinds: BTreeMap::new(),
         };
         source.cell_assignments = root_owners::cell_assignments(&source);
         source.room = derive::body(&source);
+        for exit in &source.room.exits {
+            source
+                .exit_kinds
+                .entry(exit.point.clone())
+                .or_default()
+                .push(exit.kind);
+        }
         source
     }
     pub(crate) fn verify(&self) -> Result<(), Refused> {
@@ -741,10 +873,20 @@ impl Source {
             .get_or_init(|| {
                 let mut owners = std::collections::BTreeSet::new();
                 owners.insert(Owner::ActiveDeparture(self.site.clone()));
+                // A raise the machine serves arrives as the frame's Incoming.
+                owners.insert(Owner::Incoming(self.site.clone()));
                 for event in self.room.events.values() {
                     if event.point.phase == Phase::Test && matches!(&event.output, Some(Owner::Binding { declared, .. }) if *declared == child(&event.point.site, 1)) {
                         owners.insert(Owner::LoopCursor(event.point.site.clone()));
                         owners.insert(Owner::LoopHeader(event.point.site.clone()));
+                        // A protocol's hooks return into the loop's Incoming,
+                        // which its header rows take and let go of.
+                        if self.room.events.contains_key(&Point {
+                            site: event.point.site.clone(),
+                            phase: Phase::Open,
+                        }) {
+                            owners.insert(Owner::Incoming(event.point.site.clone()));
+                        }
                     }
                     owners.extend(event.inputs.iter().cloned());
                     owners.extend(event.output.iter().cloned());
@@ -755,8 +897,7 @@ impl Source {
                                 Measure::Local(owner) => {
                                     owners.insert(owner.clone());
                                 }
-                                Measure::Release(group)
-                                | Measure::NativeRelease { owners: group, .. } => {
+                                Measure::Release(group) => {
                                     owners.extend(group.iter().cloned());
                                 }
                                 _ => {}
@@ -796,20 +937,23 @@ impl Source {
                 let (scopes, aliases, binding_slots) = root_owners::form(self, &owners)?;
                 let slots = owners
                     .into_iter()
-                    .enumerate()
-                    .map(|(index, owner)| {
-                        Ok((owner, u32::try_from(index).map_err(|_| Refused::Facts)?))
+                    .map(|owner| {
+                        let id = root_owners::source_role(&owner).map(|role| role.id());
+                        (owner, id)
                     })
-                    .collect::<Result<BTreeMap<_, _>, Refused>>()?;
-                Ok(Arc::new(OwnerSlots {
+                    .collect::<BTreeMap<_, _>>();
+                let mut table = OwnerSlots {
                     owner: self.owner,
                     source: self.site.clone(),
                     slots,
                     scopes,
                     aliases,
                     binding_slots,
+                    roles: BTreeMap::new(),
                     groups: Default::default(),
-                }))
+                };
+                table.roles = table.role_table()?;
+                Ok(Arc::new(table))
             })
             .clone()
     }
@@ -1034,6 +1178,31 @@ impl Source {
     /// The first unpaid event after an expression, binding or assignment Commit.
     /// Source syntax and the canonical walker determine the successor. A
     /// required future branch/cursor decision declines instead of inventing it.
+    /// Whether the node at `at` is a native call act, which answers at its Enter.
+    /// The source node at `at`, a site of this source.
+    pub(crate) fn node_at(&self, at: &Site) -> Option<doc::Node<'_>> {
+        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
+            return None;
+        }
+        let mut node = doc::Node::Block(&self.body);
+        for index in &at.path[self.site.path.len()..] {
+            node = *node.children().get(*index as usize)?;
+        }
+        Some(node)
+    }
+    pub(crate) fn answers_at_enter(&self, at: &Site) -> bool {
+        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
+            return false;
+        }
+        let mut node = doc::Node::Block(&self.body);
+        for index in &at.path[self.site.path.len()..] {
+            let Some(child) = node.children().get(*index as usize).copied() else {
+                return false;
+            };
+            node = child;
+        }
+        native_act(node, &self.calls).is_some()
+    }
     pub(crate) fn next_after_commit(&self, at: &Site) -> Result<Point, Refused> {
         self.verify()?;
         if at.unit != self.site.unit
@@ -1061,6 +1230,7 @@ impl Source {
                         | doc::Stmt::Do { .. }
                         | doc::Stmt::Assign { .. }
                         | doc::Stmt::Remove { .. }
+                        | doc::Stmt::Print { .. }
                 )
         ) || !self.room.events.contains_key(&point(at, Phase::Commit))
         {
@@ -1121,6 +1291,7 @@ impl Source {
         Ok(successor)
     }
 
+    #[cfg(test)]
     /// A finite source execution, including selected branches and repeated
     /// source loop tests. Budget exhaustion is an eligibility miss.
     pub(crate) fn evaluate(
@@ -1131,6 +1302,7 @@ impl Source {
         self.verify()?;
         evaluate::prefix(self, &self.site, execution, budget)
     }
+    #[cfg(test)]
     pub(crate) fn evaluate_prefix(
         &self,
         at: &Site,
@@ -1154,6 +1326,57 @@ fn child(site: &Site, index: usize) -> Site {
 }
 fn operand(site: &Site) -> Owner {
     Owner::Operand(site.clone())
+}
+/// The library function a call act calls natively. Such an act is a native
+/// call at its Enter, which publishes the answer as its operand: no callee
+/// is entered and no Incoming is delivered.
+pub(crate) fn native_act(
+    node: doc::Node<'_>,
+    calls: &BTreeMap<FunctionId, CallSource>,
+) -> Option<FunctionId> {
+    match node {
+        doc::Node::Expr(doc::Expr::Act(act)) => act_local_callee(act)
+            .filter(|function| matches!(calls.get(function), Some(CallSource::Native(_))))
+            .copied(),
+        _ => None,
+    }
+}
+/// Whether an expression act calls a function: a call, or an await, which
+/// calls its policy with the awaited value (`K-TASK-026`).
+pub(crate) fn act_calls(act: &doc::ActExpr) -> bool {
+    matches!(act.kind, doc::ActKind::Call(_) | doc::ActKind::Await(_))
+}
+/// The local function an expression act calls: a call's local callee, or
+/// an await's local policy.
+pub(crate) fn act_local_callee(act: &doc::ActExpr) -> Option<&FunctionId> {
+    match &act.kind {
+        doc::ActKind::Call(doc::Callee::Local(function))
+        | doc::ActKind::Await(doc::FunctionTarget::Local(function)) => Some(function),
+        _ => None,
+    }
+}
+/// An action whose result the machine delivers as the task's Incoming:
+/// every statement action, and every nested one except a call or an await,
+/// whose callee completion enters a distinct Restore. Its Commit moves that
+/// Incoming into the action's operand, as Restore does.
+pub(crate) fn delivers(node: doc::Node<'_>) -> bool {
+    match node {
+        doc::Node::Action(_) => true,
+        doc::Node::Expr(doc::Expr::Act(act)) => !act_calls(act),
+        _ => false,
+    }
+}
+/// The inputs of `node`'s Commit: a delivering action's also take its
+/// delivered Incoming.
+fn commit_inputs(site: &Site, node: doc::Node<'_>) -> Box<[Owner]> {
+    let ins = inputs(site, node);
+    if !delivers(node) {
+        return ins;
+    }
+    ins.iter()
+        .cloned()
+        .chain(std::iter::once(Owner::Incoming(site.clone())))
+        .collect()
 }
 fn inputs(site: &Site, node: doc::Node<'_>) -> Box<[Owner]> {
     match node {
@@ -1180,6 +1403,33 @@ fn inputs(site: &Site, node: doc::Node<'_>) -> Box<[Owner]> {
         .map(|(i, _)| operand(&child(site, i)))
         .collect()
 }
+/// Whether an event at `node`'s `phase` can raise besides taking its own
+/// exit: an expression or action may raise, a protocol hook's callee may
+/// raise, a plain `for` may refuse what it cannot walk, and a condition may
+/// refuse a non-bool. A `return via`'s policy may raise at its call, a
+/// write or removal of a member may refuse its key at its commit, and a
+/// print refuses a value that is no data at its commit.
+fn raises(node: doc::Node<'_>, phase: Phase) -> bool {
+    matches!(node, doc::Node::Expr(_) | doc::Node::Action(_))
+        || hook_raises(node, phase)
+        || (matches!(
+            node,
+            doc::Node::Stmt(
+                doc::Stmt::Assign {
+                    place: doc::Place::Member(_),
+                    ..
+                } | doc::Stmt::Remove { .. }
+                    | doc::Stmt::Print { .. }
+            )
+        ) && phase == Phase::Commit)
+        || (matches!(node, doc::Node::Stmt(doc::Stmt::ReturnVia { .. })) && phase == Phase::Policy)
+        || (matches!(node, doc::Node::Stmt(doc::Stmt::For { via: None, .. }))
+            && phase == Phase::Enter)
+        || (matches!(
+            node,
+            doc::Node::Stmt(doc::Stmt::If { .. } | doc::Stmt::While { .. })
+        ) && phase == Phase::Test)
+}
 fn release(owners: impl IntoIterator<Item = Owner>) -> Measure {
     Measure::Release(owners.into_iter().collect())
 }
@@ -1191,7 +1441,7 @@ fn shared(shared: &BTreeMap<(Site, Name), bool>, site: &Site, name: &Name) -> u6
     }
 }
 
-fn atoms(action: &doc::Action) -> &[doc::Atom] {
+pub(crate) fn action_atoms(action: &doc::Action) -> &[doc::Atom] {
     match action {
         doc::Action::Call { args, .. }
         | doc::Action::Spawn { args, .. }
@@ -1205,7 +1455,58 @@ fn atoms(action: &doc::Action) -> &[doc::Atom] {
     }
 }
 
-fn hook(target: &doc::FunctionTarget, calls: &BTreeMap<FunctionId, CallSource>) -> CallSource {
+/// Whether a raise of a protocol hook's callee is born at `phase` of the
+/// `for` at `node`: at the hook's call, or, for `item`, at the Test that
+/// takes its result.
+pub(crate) fn hook_raises(node: doc::Node<'_>, phase: Phase) -> bool {
+    let doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) = node else {
+        return false;
+    };
+    match phase {
+        Phase::Test => via.item.is_some(),
+        phase => hooks(via).any(|(hook, _)| hook == phase),
+    }
+}
+
+/// A protocol's declared hooks, each with the header phase it is called at.
+pub(crate) fn hooks(via: &doc::Protocol) -> impl Iterator<Item = (Phase, &doc::FunctionTarget)> {
+    [
+        (Phase::Open, Some(&via.open)),
+        (Phase::Next, via.next.as_ref()),
+        (Phase::Check, via.check.as_ref()),
+        (Phase::Item, via.item.as_ref()),
+    ]
+    .into_iter()
+    .filter_map(|(phase, target)| Some((phase, target?)))
+}
+
+/// The native a protocol hook at `phase` of the `for` at `node`, or a
+/// `return via`'s policy, calls, when it calls one.
+pub(crate) fn native_hook(
+    node: doc::Node<'_>,
+    phase: Phase,
+    calls: &BTreeMap<FunctionId, CallSource>,
+) -> Option<FunctionId> {
+    let target = match node {
+        doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) => {
+            hooks(via).find_map(|(hook, target)| (hook == phase).then_some(target))?
+        }
+        doc::Node::Stmt(doc::Stmt::ReturnVia { policy, .. }) if phase == Phase::Policy => policy,
+        _ => return None,
+    };
+    match target {
+        doc::FunctionTarget::Local(function) => match calls.get(function)? {
+            CallSource::Native(native) => Some(*native),
+            _ => None,
+        },
+        doc::FunctionTarget::Import(_) => None,
+    }
+}
+
+pub(crate) fn hook(
+    target: &doc::FunctionTarget,
+    calls: &BTreeMap<FunctionId, CallSource>,
+) -> CallSource {
     match target {
         doc::FunctionTarget::Local(f) => calls[f],
         doc::FunctionTarget::Import(_) => CallSource::Dynamic,

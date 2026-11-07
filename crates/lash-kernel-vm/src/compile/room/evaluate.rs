@@ -10,18 +10,18 @@ pub(super) trait Events {
     }
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused>;
     fn choose(&mut self, site: &Site) -> Result<bool, Refused>;
-    /// Only a descriptor issued from an actual VerifiedCall may bridge a
-    /// call. Ordinary source evaluation keeps its genuine action departure.
-    fn resume_call(
-        &mut self,
-        _: &Source,
-        _: &Point,
-        _: ExitKind,
-    ) -> Result<Option<region::calls::CallCompletion>, Refused> {
-        Ok(None)
+    /// What the `for … via` at `site` walks, from what its `open` gave. A
+    /// route that cannot know it cannot know which hooks run.
+    fn walked(&mut self, _: &Site) -> Result<Walk, Refused> {
+        Err(Refused::Facts)
     }
     fn selected_end(&self) -> bool {
         false
+    }
+    /// A selected suffix that starts where a delivered action or a call
+    /// resumes: the point it resumes at after the event at `at`.
+    fn resumed(&mut self, _: &Point) -> Option<Point> {
+        None
     }
 }
 
@@ -83,6 +83,7 @@ fn run(
     .node(node, at)
 }
 
+#[cfg(test)]
 pub(super) fn prefix(
     source: &Source,
     at: &Site,
@@ -108,12 +109,14 @@ pub(super) fn prefix(
         exit,
     })
 }
+#[cfg(test)]
 struct Prices<'a, E> {
     source: &'a Source,
     execution: &'a mut E,
     balance: i128,
     peak: i128,
 }
+#[cfg(test)]
 impl<E: Execution> Events for Prices<'_, E> {
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
         let at = point(site, phase);
@@ -169,6 +172,10 @@ impl<E: Execution> Events for Prices<'_, E> {
     fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
         self.execution.choose(site).ok_or(Refused::Facts)
     }
+    /// No source execution names what a `for … via` walks.
+    fn walked(&mut self, _: &Site) -> Result<Walk, Refused> {
+        Err(Refused::Facts)
+    }
 }
 struct Run<'a, E> {
     source: &'a Source,
@@ -194,18 +201,13 @@ impl<E: Events> Run<'_, E> {
     }
     fn call(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Stop> {
         let exit = self.step(site, phase)?;
-        let Some(completion) = self
-            .events
-            .resume_call(self.source, &point(site, phase), exit)?
-        else {
-            return Ok(exit);
-        };
-        let resume = completion.resume();
-        if resume.site != *site {
-            return Err(Refused::Source.into());
+        if let Some(resume) = self.events.resumed(&point(site, phase)) {
+            if resume.site != *site {
+                return Err(Refused::Source.into());
+            }
+            return self.step(&resume.site, resume.phase);
         }
-        self.step(&resume.site, resume.phase)?;
-        Ok(completion.after_return())
+        Ok(exit)
     }
     fn choose(&mut self, site: &Site) -> Result<bool, Stop> {
         self.events.choose(site).map_err(Stop::Refused)
@@ -242,7 +244,10 @@ impl<E: Events> Run<'_, E> {
         }
         if matches!(node, doc::Node::Expr(doc::Expr::Act(act)) if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_)) | doc::ActKind::Spawn(doc::Callee::Value(_))))
         {
-            self.step(site, Phase::Open)?;
+            let exit = self.step(site, Phase::Open)?;
+            if exit != ExitKind::Normal {
+                return Ok(exit);
+            }
         }
         match node {
             doc::Node::Expr(doc::Expr::If { .. }) | doc::Node::Stmt(doc::Stmt::If { .. }) => {
@@ -250,7 +255,10 @@ impl<E: Events> Run<'_, E> {
                 if exit != ExitKind::Normal {
                     return Ok(exit);
                 }
-                self.step(site, Phase::Test)?;
+                let exit = self.step(site, Phase::Test)?;
+                if exit != ExitKind::Normal {
+                    return Ok(exit);
+                }
                 let arm = if self.choose(site)? { 1 } else { 2 };
                 let exit = self.child(node, site, arm)?;
                 if exit != ExitKind::Normal {
@@ -262,7 +270,10 @@ impl<E: Events> Run<'_, E> {
                 if exit != ExitKind::Normal {
                     return Ok(exit);
                 }
-                self.step(site, Phase::Test)?;
+                let exit = self.step(site, Phase::Test)?;
+                if exit != ExitKind::Normal {
+                    return Ok(exit);
+                }
                 let exit = self.child(node, site, 1)?;
                 if exit != ExitKind::Normal {
                     return Ok(exit);
@@ -275,7 +286,10 @@ impl<E: Events> Run<'_, E> {
                     if exit != ExitKind::Normal {
                         return Ok(exit);
                     }
-                    self.step(site, Phase::Test)?;
+                    let exit = self.step(site, Phase::Test)?;
+                    if exit != ExitKind::Normal {
+                        return Ok(exit);
+                    }
                     if !self.choose(site)? {
                         break;
                     }
@@ -308,27 +322,42 @@ impl<E: Events> Run<'_, E> {
                     return Ok(exit);
                 }
                 let mut broken = false;
-                if via.is_some() {
-                    let exit = self.step(site, Phase::Open)?;
-                    if exit != ExitKind::Normal {
-                        return Ok(exit);
+                // K-ITER-005: `open` takes the value to what the loop walks;
+                // each pass then steps a driver through `next`, any other
+                // walk by its own cursor, and a checked map or set runs
+                // `check` after each step, at exhaustion too.
+                let walk = match via {
+                    Some(_) => {
+                        let exit = self.step(site, Phase::Open)?;
+                        if exit != ExitKind::Normal {
+                            return Ok(exit);
+                        }
+                        Some(self.events.walked(site)?)
                     }
-                }
+                    None => {
+                        let exit = self.step(site, Phase::Enter)?;
+                        if exit != ExitKind::Normal {
+                            return Ok(exit);
+                        }
+                        None
+                    }
+                };
                 loop {
-                    if via.as_ref().is_some_and(|v| v.next.is_some()) {
+                    if walk == Some(Walk::Driver) {
                         let exit = self.step(site, Phase::Next)?;
                         if exit != ExitKind::Normal {
                             return Ok(exit);
                         }
                     }
-                    if !self.choose(site)? {
-                        break;
-                    }
-                    if via.as_ref().is_some_and(|v| v.check.is_some()) {
+                    let more = self.choose(site)?;
+                    if walk == Some(Walk::Guarded) {
                         let exit = self.step(site, Phase::Check)?;
                         if exit != ExitKind::Normal {
                             return Ok(exit);
                         }
+                    }
+                    if !more {
+                        break;
                     }
                     if via.as_ref().is_some_and(|v| v.item.is_some()) {
                         let exit = self.step(site, Phase::Item)?;
@@ -336,7 +365,10 @@ impl<E: Events> Run<'_, E> {
                             return Ok(exit);
                         }
                     }
-                    self.step(site, Phase::Test)?;
+                    let exit = self.step(site, Phase::Test)?;
+                    if exit != ExitKind::Normal {
+                        return Ok(exit);
+                    }
                     match self.child(node, site, 1)? {
                         ExitKind::Normal => {}
                         // A selected Catch ends a suffix carrying its departure.

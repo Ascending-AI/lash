@@ -19,40 +19,10 @@ pub(super) mod resource;
 pub(crate) use super::code::Op;
 use program::Build;
 pub(super) use program::{
-    CallInputs, CollectionAppend, CollectionCallback, CollectionPacket, CollectionStep,
-    Destination, Format, Merge, Operand, Placement, ReadSlot, Reduction, Visit, WriteSite,
+    CallInputs, CollectionAppend, CollectionPacket, CollectionStep, Destination, Format, Merge,
+    Operand, Placement, ReadSlot, Reduction, Visit, WriteSite,
 };
 pub(crate) use program::{Instruction, Read, StatementEntry, StoreInputs};
-
-#[path = "../../compile/room/region/recurrence.rs"]
-pub(crate) mod recurrence;
-
-#[cfg(test)]
-thread_local! {
-    pub(crate) static LOOP_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    pub(crate) static LOOP_INVOCATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    pub(crate) static SUBSTITUTE_LOOP_RESULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-#[cfg(test)]
-pub(crate) fn take_loop_publications() -> u64 {
-    LOOP_PUBLICATIONS.with(|count| count.replace(0))
-}
-#[cfg(test)]
-pub(crate) fn take_loop_invocations() -> u64 {
-    LOOP_INVOCATIONS.with(|count| count.replace(0))
-}
-
-#[cfg(test)]
-pub(crate) fn with_substituted_loop_result<R>(run: impl FnOnce() -> R) -> R {
-    struct Restore(bool);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            SUBSTITUTE_LOOP_RESULT.with(|enabled| enabled.set(self.0));
-        }
-    }
-    let _restore = Restore(SUBSTITUTE_LOOP_RESULT.with(|enabled| enabled.replace(true)));
-    run()
-}
 
 #[cfg(test)]
 thread_local! {
@@ -137,10 +107,6 @@ pub(crate) struct Compiled {
     cleanup: Box<[Cleanup]>,
     room: u32,
     observes: bool,
-    #[allow(
-        dead_code,
-        reason = "phase-one source projection; consumed by ledger admission later"
-    )]
     pub(crate) source_room: std::sync::Arc<crate::compile::room::Source>,
 }
 
@@ -352,12 +318,6 @@ pub(crate) struct CallSite {
     pub(super) after: u64,
 }
 
-/// A whole typed scalar loop, compiled from its verified ordered facts.
-pub(crate) struct RepeatSite {
-    pub(super) run: super::code::repeat::Repeat,
-    pub(super) iteration_max: Option<u64>,
-}
-
 impl Compiled {
     #[cfg(test)]
     pub(crate) fn verify_packets(
@@ -401,75 +361,6 @@ impl Compiled {
             return true;
         }
         false
-    }
-
-    #[cfg(test)]
-    pub(crate) fn corrupt_repeat_input(&mut self) -> bool {
-        for header in &mut self.code.sites.header {
-            if let Some(repeat) = &mut header.repeat {
-                repeat.run.update.operation.inputs[0] =
-                    super::code::repeat::Input::Invariant(u32::MAX);
-                return true;
-            }
-        }
-        false
-    }
-
-    #[cfg(test)]
-    pub(crate) fn verify_room_projections(
-        &self,
-        exe: &Executable,
-        owner: &IslandPlan,
-    ) -> Result<usize, crate::compile::room::Refused> {
-        fn statement(
-            block: &crate::compile::islands::Block,
-            id: StmtId,
-        ) -> Option<&crate::compile::islands::Statement> {
-            use crate::compile::islands::Kind;
-            for candidate in &block.statements {
-                if candidate.id == id {
-                    return Some(candidate);
-                }
-                let nested = match &candidate.kind {
-                    Kind::While {
-                        body, otherwise, ..
-                    }
-                    | Kind::For {
-                        body, otherwise, ..
-                    } => statement(body, id)
-                        .or_else(|| otherwise.as_ref().and_then(|block| statement(block, id))),
-                    Kind::If { then_, else_, .. } => {
-                        statement(then_, id).or_else(|| statement(else_, id))
-                    }
-                    Kind::Try {
-                        body,
-                        catch,
-                        finally,
-                    } => statement(body, id)
-                        .or_else(|| catch.as_ref().and_then(|block| statement(block, id)))
-                        .or_else(|| finally.as_ref().and_then(|block| statement(block, id))),
-                    _ => None,
-                };
-                if nested.is_some() {
-                    return nested;
-                }
-            }
-            None
-        }
-        let mut checked = 0;
-        for header in &self.code.sites.header {
-            if let Some(repeat) = &header.repeat {
-                let statement = statement(&owner.body, header.id)
-                    .ok_or(crate::compile::room::Refused::Source)?;
-                if !repeat.run.verify(statement, exe, &owner.shared) {
-                    return Err(crate::compile::room::Refused::Source);
-                }
-                repeat.run.source_room.verify()?;
-                repeat.run.proof.verify(exe)?;
-                checked += 1;
-            }
-        }
-        Ok(checked)
     }
 
     pub(crate) fn of(plan: &IslandPlan, exe: &Executable) -> Option<Self> {
@@ -760,45 +651,6 @@ pub(crate) fn text_relation(
     ))
 }
 
-/// An immediate unary answer uses the same prepared entry and scalar
-/// table as the general operator path, without an arena measurement.
-#[inline(always)]
-pub(crate) fn unary(
-    site: &OperatorSite,
-    x: Value,
-    exe: &Executable,
-) -> Option<(Value, Option<u64>)> {
-    if !crate::compile::scalar(&x) {
-        return None;
-    }
-    if site.checked
-        && !exe
-            .lib(site.lib)
-            .header
-            .signature
-            .params
-            .iter()
-            .zip([x])
-            .all(|(param, value)| {
-                (param.optional && matches!(value, Value::Absent))
-                    || crate::compile::import_result_fits(&param.ty, value)
-            })
-    {
-        return None;
-    }
-    let value = site.entry(exe).call(&[x])?;
-    if !crate::compile::scalar(&value)
-        || (site.checked
-            && !crate::compile::import_result_fits(
-                &exe.lib(site.lib).header.signature.result,
-                value,
-            ))
-    {
-        return None;
-    }
-    Some((value, site.table(exe).units(super::sizes(&[x], &value))))
-}
-
 /// Resolves an operator's entry, charge and resume sites.
 pub(super) fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
     let (pc, reg) = (expr.pc, expr.reg);
@@ -843,7 +695,3 @@ pub(super) fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSit
     };
     Some(site)
 }
-
-#[cfg(test)]
-#[path = "compiled/repeat_laws.rs"]
-pub(crate) mod repeat_laws;

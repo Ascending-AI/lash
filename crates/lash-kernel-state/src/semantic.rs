@@ -189,7 +189,30 @@ pub fn checkpoint(
         let mut frame_index = 0usize;
         r.tree(&task.frames, |r, frame| {
             let site = frame.statement.resolve(r.heap.pages())?;
-            let pending = frame.pending.as_ref().map(encode_body);
+            // The continuation keeps the pending point's scalar state; its
+            // role and result values are graph edges, numbered below by
+            // first reach rather than by durable id.
+            let pending = frame
+                .pending
+                .as_ref()
+                .map(|pending| {
+                    let mut scalar = pending.clone();
+                    scalar.roles = crate::paged::RolesRecord::Flat(
+                        pending
+                            .roles(r.heap.pages())?
+                            .into_iter()
+                            .map(|role| crate::paged::RoleRecord {
+                                coordinate: role.coordinate,
+                                value: PageValue::Null,
+                            })
+                            .collect(),
+                    );
+                    if scalar.pending.is_some() {
+                        scalar.pending = Some(PageValue::Null);
+                    }
+                    Ok::<_, HeapFault>(encode_body(&scalar))
+                })
+                .transpose()?;
             let mut loops = Vec::new();
             for (_, row) in rows(&frame.loops, r.heap.pages())? {
                 loops.push(encode_body(&row));
@@ -223,10 +246,21 @@ pub fn checkpoint(
             if let Some(pending) = &frame.pending {
                 r.put(&pending.site);
                 r.put(&pending.phase);
+                r.put(&pending.occurrence);
+                r.put(&pending.invocation);
+                r.put(&pending.unpaid);
+                r.put(&pending.departure);
+                r.put(&pending.ordinal);
+                r.put(&pending.debt);
+                r.put(&pending.refusal);
+                r.put(&pending.pending.is_some());
+                if let Some(value) = &pending.pending {
+                    r.value(value)?;
+                }
                 let roles = pending.roles(r.heap.pages())?;
                 r.put(&(roles.len() as u64));
                 for role in roles {
-                    r.put(&role.site);
+                    r.put(&role.coordinate);
                     r.value(&role.value)?;
                 }
             }

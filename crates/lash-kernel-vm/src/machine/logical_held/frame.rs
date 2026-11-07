@@ -212,6 +212,32 @@ pub(in crate::machine) fn source_value(slot: Slot, state: SlotState) -> Option<P
     }
 }
 impl KernelMachine {
+    /// `task`'s top frame leaves its canonical continuation, as a return
+    /// policy's exit ends its variables: each role it held lets go of its
+    /// value.
+    pub(in crate::machine) fn leave_source_roles(&mut self, task: TaskId) -> Result<(), Halt> {
+        let frame = self.frame(task)?;
+        let invocation = frame.invocation;
+        let Some(source) = frame.pending.leave_source() else {
+            return Ok(());
+        };
+        self.publish_logical_meter()?;
+        let store = self.logical.clone();
+        let mut ledger = store.borrow_mut();
+        let mut inputs = Vec::new();
+        for (slot, _) in &source.roles {
+            let owner = Owner::Value {
+                task,
+                invocation,
+                slot: *slot,
+            };
+            if ledger.holding(owner, self.heap.pages())?.is_some() {
+                inputs.push(owner);
+            }
+        }
+        ledger.transfer_source(&mut self.arena.borrow_mut(), &self.heap, &inputs, &[])?;
+        Ok(())
+    }
     /// A precise source binding owns its old root until this transfer commits.
     pub(in crate::machine) fn set_source_slot(
         &mut self,

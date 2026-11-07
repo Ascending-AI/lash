@@ -69,7 +69,7 @@ fn amount(
             // direct occurrences are released here; canonical graph release
             // happens in the final transaction. This is an upper bound even
             // when an earlier source event would have reclaimed a child.
-            Measure::Release(owners) | Measure::NativeRelease { owners, .. } => {
+            Measure::Release(owners) => {
                 for owner in owners {
                     polynomial.term(slot(owner)?, *coefficient)?;
                 }

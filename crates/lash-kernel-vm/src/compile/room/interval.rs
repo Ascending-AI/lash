@@ -1,11 +1,8 @@
 //! A selected source path compiled once into indexed logical algebra. Selection
 //! validation walks source control only on a cache miss, never per execution.
 use super::*;
-mod composed;
 #[path = "publication/exact/construction.rs"]
 pub(in crate::compile::room) mod construction;
-mod continuation;
-pub(crate) use composed::ComposedInterval;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Selection {
@@ -97,7 +94,7 @@ impl Step {
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
         }
         let restores_call = match node {
-            doc::Node::Expr(doc::Expr::Act(act)) => matches!(act.kind, doc::ActKind::Call(_)),
+            doc::Node::Expr(doc::Expr::Act(act)) => super::act_calls(act),
             doc::Node::Expr(doc::Expr::Call { function, .. }) => {
                 matches!(source.calls.get(function), Some(CallSource::Body(_)))
             }
@@ -131,7 +128,12 @@ impl Step {
         };
         let publication = PublicationSite {
             roles: OnceLock::new(),
-            construction: construction::ConstructionEvent::compile(source, &event.point)?,
+            // A raising event constructs nothing.
+            construction: if selected == ExitKind::Raise {
+                None
+            } else {
+                construction::ConstructionEvent::compile(source, &event.point)?
+            },
             uncounted_resumption: event.point.phase == Phase::Restore
                 && matches!(node, doc::Node::Expr(doc::Expr::Call { .. })),
             restored_roles,
@@ -166,12 +168,10 @@ impl Step {
             peak: Linear::compile(&event.peak, &indices),
             delta: Linear::compile(&event.delta, &indices),
             normal: source
-                .room
-                .exits
-                .iter()
-                .find(|exit| exit.point == event.point)
-                .ok_or(Refused::Exit)?
-                .kind,
+                .exits_at(&event.point)
+                .first()
+                .copied()
+                .ok_or(Refused::Exit)?,
             variables: indices.into_iter().collect(),
             event,
             selected,
@@ -198,6 +198,15 @@ pub(crate) struct CompiledInterval {
     commits: std::sync::OnceLock<bool>,
 }
 impl Source {
+    /// The event at `at` as its raise departs, when it may raise besides
+    /// taking its own exit: a delivered action's Commit, a call's Restore,
+    /// or a step the machine serves or refuses before it runs.
+    pub(crate) fn raising(&self, at: &Point) -> Option<Event> {
+        let exits = self.exits_at(at);
+        (exits.contains(&ExitKind::Raise) && exits.iter().any(|exit| *exit != ExitKind::Raise))
+            .then(|| self.room.events.get(at)?.raised(&self.site))
+            .flatten()
+    }
     /// An issued Return leaves its entered ordinary blocks, then its Source.
     /// Its authored path proves enclosing if choices; earlier children have
     /// completed. Entered loop bodies carry their actual occurrence; their
@@ -212,14 +221,101 @@ impl Source {
         &self,
         at: &Point,
     ) -> Result<Arc<CompiledInterval>, Refused> {
+        self.suffix(at, None)
+    }
+    /// A suspended exit's route once its cleanup completes normally: from
+    /// the try's Restore, which makes it the frame's active departure
+    /// again, outward as it would have departed from the try itself.
+    pub(crate) fn compile_restore_suffix(
+        &self,
+        at: &Site,
+        exit: ExitKind,
+    ) -> Result<Arc<CompiledInterval>, Refused> {
+        self.suffix(
+            &Point {
+                site: at.clone(),
+                phase: Phase::Restore,
+            },
+            Some(exit),
+        )
+    }
+    /// A restored exit's route when no try of the frame takes it: its
+    /// Restore alone, after which the machine carries the exit out of the
+    /// frame as it carries an uncaught one from its Commit.
+    fn escape(&self, at: &Point, exit: ExitKind) -> Result<Arc<CompiledInterval>, Refused> {
+        let event = self.room.events.get(at).ok_or(Refused::Path)?.clone();
+        let mut variables = 0;
+        let step = Step::compile(self, event, ExitKind::Normal, &mut variables)?;
+        Ok(Arc::new(CompiledInterval {
+            owner: self.owner,
+            source: self.site.clone(),
+            at: at.site.clone(),
+            route: Box::new([Selection::Event {
+                at: at.clone(),
+                exit: ExitKind::Normal,
+            }]),
+            steps: Box::new([step]),
+            variables,
+            exit,
+            whole: false,
+            return_loops: Some(Box::new([])),
+            resume: None,
+            acquires: std::sync::OnceLock::new(),
+            commits: std::sync::OnceLock::new(),
+        }))
+    }
+    fn suffix(
+        &self,
+        at: &Point,
+        restoring: Option<ExitKind>,
+    ) -> Result<Arc<CompiledInterval>, Refused> {
         self.verify()?;
-        if at.phase != Phase::Commit
-            || at.site.unit != self.site.unit
+        if at.site.unit != self.site.unit
             || !at.site.path.starts_with(&self.site.path)
             || at.site.path.len() <= self.site.path.len()
         {
             return Err(Refused::Path);
         }
+        // An event that may raise besides taking its own exit departs as a
+        // Throw does: its Raise exit publishes the raise into the frame's
+        // active departure.
+        let raising = restoring.is_none().then(|| self.raising(at)).flatten();
+        // A try's restore takes the exit it restores; a call's Restore
+        // departs only by its callee's raise.
+        if (restoring.is_some() && at.phase != Phase::Restore)
+            || (restoring.is_none() && at.phase != Phase::Commit && raising.is_none())
+        {
+            return Err(Refused::Path);
+        }
+        // A raise leaves each expression or simple statement that holds
+        // it: their events after the raising child never run, and those
+        // before it (a `let`'s binding, a called value's Open) have run.
+        // What they hold goes with the enclosing block's Leave.
+        let transparent = |node: doc::Node<'_>, index: u32| {
+            raising.is_some()
+                && match node {
+                    doc::Node::Block(_)
+                    | doc::Node::Stmt(
+                        doc::Stmt::While { .. } | doc::Stmt::For { .. } | doc::Stmt::Try(_),
+                    ) => false,
+                    doc::Node::Stmt(doc::Stmt::If { .. }) => index == 0,
+                    _ => true,
+                }
+        };
+        let before = |site: &Site, node: doc::Node<'_>, index: u32| match node {
+            doc::Node::Expr(doc::Expr::Let { .. }) if index == 1 => Some(point(site, Phase::Test)),
+            doc::Node::Expr(doc::Expr::Act(act))
+                if matches!(
+                    act.kind,
+                    doc::ActKind::Call(doc::Callee::Value(_))
+                        | doc::ActKind::Spawn(doc::Callee::Value(_))
+                ) =>
+            {
+                Some(point(site, Phase::Open))
+            }
+            _ => None,
+        };
+        let mut entered = std::collections::BTreeSet::new();
         let mut node = doc::Node::Block(&self.body);
         let mut path = self.site.clone();
         let mut blocks = Vec::new();
@@ -228,6 +324,9 @@ impl Source {
         let mut for_sites = std::collections::BTreeSet::new();
         let mut raised = std::collections::BTreeSet::new();
         let mut suspend: Option<(Site, Site)> = None;
+        // Each try whose cleanup the departure leaves, with that cleanup:
+        // the departure supersedes what the try suspended, if anything.
+        let mut superseding: Vec<(Site, Site)> = Vec::new();
         let mut target: Option<Site> = None;
         let mut target_while = false;
         // The innermost try a raise reaches takes it: true by its catch.
@@ -235,7 +334,9 @@ impl Source {
         for index in &at.site.path[self.site.path.len()..] {
             match node {
                 doc::Node::Block(_) => blocks.push(path.clone()),
-                doc::Node::Stmt(doc::Stmt::If { .. }) if matches!(*index, 1 | 2) => {
+                doc::Node::Stmt(doc::Stmt::If { .. }) | doc::Node::Expr(doc::Expr::If { .. })
+                    if matches!(*index, 1 | 2) =>
+                {
                     choices.insert(path.clone(), *index == 1);
                 }
                 doc::Node::Stmt(doc::Stmt::While { .. }) if *index == 1 => {
@@ -267,14 +368,36 @@ impl Source {
                         suspend = Some((path.clone(), cleanup));
                     }
                 }
-                // A return inside cleanup supersedes its pending departure.
+                doc::Node::Stmt(doc::Stmt::Try(t))
+                    if t.finally.is_some() && *index == if t.catch.is_some() { 2 } else { 1 } =>
+                {
+                    superseding.push((path.clone(), path.child(*index)));
+                }
+                _ if transparent(node, *index) => {
+                    entered.extend(before(&path, node, *index));
+                }
                 _ => return Err(Refused::Path),
             }
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
             path = path.child(*index);
         }
         let departing = match node {
+            doc::Node::Stmt(doc::Stmt::Try(t)) if restoring.is_some() && t.finally.is_some() => {
+                match restoring {
+                    Some(
+                        exit @ (ExitKind::Return
+                        | ExitKind::ReturnVia
+                        | ExitKind::Raise
+                        | ExitKind::Break
+                        | ExitKind::Continue),
+                    ) => exit,
+                    _ => return Err(Refused::Path),
+                }
+            }
+            _ if restoring.is_some() => return Err(Refused::Path),
+            _ if raising.is_some() => ExitKind::Raise,
             doc::Node::Stmt(doc::Stmt::Return { .. }) => ExitKind::Return,
+            doc::Node::Stmt(doc::Stmt::ReturnVia { .. }) => ExitKind::ReturnVia,
             doc::Node::Stmt(doc::Stmt::Break) => ExitKind::Break,
             doc::Node::Stmt(doc::Stmt::Continue) => ExitKind::Continue,
             doc::Node::Stmt(doc::Stmt::Throw { .. }) => ExitKind::Raise,
@@ -290,6 +413,9 @@ impl Source {
                     caught = Some(try_site.clone());
                 }
                 (Some((try_site, false)), Some((cleanup_try, _))) if try_site == cleanup_try => {}
+                // A restored raise no try of the frame takes leaves the
+                // frame from its Restore.
+                (None, None) if restoring.is_some() => return self.escape(at, departing),
                 _ => return Err(Refused::Path),
             }
         }
@@ -356,12 +482,22 @@ impl Source {
                 .iter()
                 .rev()
                 .take_while(|site| bound.is_none_or(|bound| site.path.len() > bound.path.len()))
-                .map(|site| Selection::Event {
-                    at: Point {
-                        site: site.clone(),
-                        phase: Phase::Leave,
-                    },
-                    exit: ExitKind::Normal,
+                .flat_map(|site| {
+                    // Leaving a cleanup supersedes its try's suspended exit.
+                    let superseded = superseding.iter().find(|(_, cleanup)| cleanup == site).map(
+                        |(try_site, _)| Selection::Event {
+                            at: point(try_site, Phase::Supersede),
+                            exit: ExitKind::Normal,
+                        },
+                    );
+                    std::iter::once(Selection::Event {
+                        at: Point {
+                            site: site.clone(),
+                            phase: Phase::Leave,
+                        },
+                        exit: ExitKind::Normal,
+                    })
+                    .chain(superseded)
                 }),
         )
         .chain(bound.is_some().then(|| Selection::Event {
@@ -383,17 +519,50 @@ impl Source {
         }
         struct Suffix<'a> {
             returning: &'a Site,
+            /// The exit a restored try's body or catch block took, and
+            /// whether the try catches.
+            restoring: Option<(ExitKind, bool)>,
+            /// The tries whose cleanups the departure leaves: each body
+            /// departed, so its cleanup holds a suspended exit to supersede.
+            superseding: &'a [(Site, Site)],
             blocks: &'a [Site],
             choices: &'a BTreeMap<Site, bool>,
             for_sites: &'a std::collections::BTreeSet<Site>,
+            whiles: &'a std::collections::BTreeSet<Site>,
             raised: &'a std::collections::BTreeSet<Site>,
+            /// Events of the raise's ancestors that ran before it.
+            entered: &'a std::collections::BTreeSet<Point>,
             route: &'a [Selection],
             cursor: usize,
+            phase: Phase,
         }
         impl evaluate::Events for Suffix<'_> {
             fn completed(&mut self, site: &Site) -> Option<ExitKind> {
                 if self.returning.path.starts_with(&site.path) {
                     return None;
+                }
+                // A restored try's body or catch block took its exit; its
+                // cleanup completed.
+                if let Some((exit, catches)) = self.restoring
+                    && site.unit == self.returning.unit
+                    && let Some((index, parent)) = site.path.split_last()
+                    && parent == self.returning.path.as_slice()
+                {
+                    return Some(match (index, catches) {
+                        (0, true) if exit == ExitKind::Raise => ExitKind::Raise,
+                        (0, _) | (1, true) => exit,
+                        _ => ExitKind::Normal,
+                    });
+                }
+                // A superseding try's body departed; which exit does not
+                // matter to the cleanup it suspended.
+                if let Some((0, parent)) = site.path.split_last()
+                    && self
+                        .superseding
+                        .iter()
+                        .any(|(try_site, _)| try_site.unit == site.unit && try_site.path == parent)
+                {
+                    return Some(ExitKind::Return);
                 }
                 // The body of an entered catch has already raised.
                 Some(match site.path.split_last() {
@@ -409,13 +578,26 @@ impl Source {
             }
             fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
                 if self.cursor == 0
-                    && ((phase == Phase::Enter && self.blocks.contains(site))
+                    // A raising event's earlier phases have completed.
+                    && ((site == self.returning && phase != self.phase)
+                        || (phase == Phase::Enter && self.blocks.contains(site))
                         || (phase == Phase::Test && self.choices.contains_key(site))
+                        // A while's setup and repeated-test overhead.
+                        || (matches!(phase, Phase::Enter | Phase::Next)
+                            && self.whiles.contains(site))
                         || (phase == Phase::Catch && self.raised.contains(site))
+                        || self.entered.contains(&point(site, phase))
+                        // A superseding try suspended before the departure.
+                        || (phase == Phase::Suspend
+                            && self.superseding.iter().any(|(try_site, _)| try_site == site))
                         || (self.for_sites.contains(site)
                             && matches!(
                                 phase,
-                                Phase::Open | Phase::Next | Phase::Check | Phase::Item
+                                Phase::Enter
+                                    | Phase::Open
+                                    | Phase::Next
+                                    | Phase::Check
+                                    | Phase::Item
                             )))
                 {
                     return Ok(ExitKind::Normal);
@@ -430,26 +612,79 @@ impl Source {
                 Ok(*exit)
             }
             fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
-                self.choices.get(site).copied().ok_or(Refused::Facts)
+                // A protocol hook's raise departs from a pass in progress.
+                self.choices
+                    .get(site)
+                    .copied()
+                    .or((self.cursor == 0 && site == self.returning).then_some(true))
+                    .ok_or(Refused::Facts)
+            }
+            fn walked(&mut self, site: &Site) -> Result<Walk, Refused> {
+                // Before the departing event any walk reaches it: the walk
+                // that runs the hook which raised, or one whose hooks the
+                // navigation steps over.
+                if self.cursor != 0 {
+                    return Err(Refused::Facts);
+                }
+                Ok(match self.phase {
+                    Phase::Next if site == self.returning => Walk::Driver,
+                    Phase::Check if site == self.returning => Walk::Guarded,
+                    _ => Walk::Collection,
+                })
             }
             fn selected_end(&self) -> bool {
                 self.cursor == self.route.len()
             }
+            fn resumed(&mut self, at: &Point) -> Option<Point> {
+                (self.cursor == 0 && at.site == *self.returning && at.phase != self.phase).then(
+                    || Point {
+                        site: self.returning.clone(),
+                        phase: self.phase,
+                    },
+                )
+            }
         }
+        let whiles: std::collections::BTreeSet<Site> = return_loops
+            .iter()
+            .filter(|site| !for_sites.contains(*site))
+            .cloned()
+            .collect();
+        let catches = matches!(node, doc::Node::Stmt(doc::Stmt::Try(t)) if t.catch.is_some());
         let mut suffix = Suffix {
             returning: &at.site,
+            restoring: restoring.map(|exit| (exit, catches)),
+            superseding: &superseding,
             blocks: &blocks,
             choices: &choices,
             for_sites: &for_sites,
+            whiles: &whiles,
             raised: &raised,
+            entered: &entered,
             route: &route,
             cursor: 0,
+            phase: at.phase,
         };
         let exit = evaluate::walk_to(
             self,
             &self.site,
             &mut suffix,
-            route.len() + blocks.len() + choices.len() + 4 * for_sites.len() + raised.len(),
+            route.len()
+                + blocks.len()
+                + choices.len()
+                + 5 * for_sites.len()
+                + 2 * whiles.len()
+                + raised.len()
+                + entered.len()
+                // A restored try's Catch and Suspend.
+                + 2 * usize::from(restoring.is_some())
+                // A superseding try's Suspend and Supersede.
+                + 2 * superseding.len()
+                // A raising event's completed earlier phases at its own site.
+                + if raising.is_some() {
+                    self.room.events.keys().filter(|p| p.site == at.site).count()
+                } else {
+                    0
+                },
         )?;
         if exit != departing || suffix.cursor != route.len() {
             return Err(Refused::Path);
@@ -457,16 +692,22 @@ impl Source {
         let mut variables = 0;
         let steps = route
             .iter()
-            .map(|selection| {
+            .enumerate()
+            .map(|(position, selection)| {
                 let Selection::Event { at, exit } = selection else {
                     return Err(Refused::Path);
                 };
-                Step::compile(
-                    self,
-                    self.room.events.get(at).ok_or(Refused::Path)?.clone(),
-                    *exit,
-                    &mut variables,
-                )
+                let mut event = match (&raising, position) {
+                    (Some(raising), 0) => raising.clone(),
+                    _ => self.room.events.get(at).ok_or(Refused::Path)?.clone(),
+                };
+                // A `return via`'s frame is still held while its policy
+                // runs: the body's Leave lets its scopes go, and the
+                // policy's Restore lets the frame go.
+                if departing == ExitKind::ReturnVia && *at == point(&self.site, Phase::Leave) {
+                    event.delta.fixed += i128::from(Cost::FRAME);
+                }
+                Step::compile(self, event, *exit, &mut variables)
             })
             .collect::<Result<Box<[_]>, Refused>>()?;
         let interval = Arc::new(CompiledInterval {
@@ -690,12 +931,7 @@ impl Source {
                 _ => return Err(Refused::Path),
             }
         }
-        if !self
-            .room
-            .exits
-            .iter()
-            .any(|exit| exit.point == *at && exit.kind == selected)
-        {
+        if !self.exits_at(at).contains(&selected) {
             return Err(Refused::Exit);
         }
         let mut event = self.room.events.get(at).ok_or(Refused::Path)?.clone();
@@ -809,14 +1045,7 @@ impl evaluate::Events for Trace<'_> {
         let Some(Selection::Event { at, exit }) = self.selected.get(self.cursor) else {
             return Err(Refused::Path);
         };
-        if *at != expected
-            || !self
-                .source
-                .room
-                .exits
-                .iter()
-                .any(|allowed| allowed.point == *at && allowed.kind == *exit)
-        {
+        if *at != expected || !self.source.exits_at(at).contains(exit) {
             return Err(Refused::Exit);
         }
         let event = self.source.room.events.get(at).ok_or(Refused::Path)?;
@@ -960,7 +1189,22 @@ impl CompiledInterval {
             [(first, -1), (second, 1)] => consumed(first) && retained(second),
             _ => false,
         };
-        event.point.phase == Phase::Commit
+        // A native call act answers at its Enter.
+        let answers = match event.point.phase {
+            Phase::Commit => true,
+            Phase::Enter => matches!(
+                event.peak.terms.as_slice(),
+                [(
+                    Measure::CallPeak {
+                        callee: CallSource::Native(_),
+                        ..
+                    },
+                    1
+                )]
+            ),
+            _ => false,
+        };
+        answers
             && event.point.site != source.site
             && step.selected == ExitKind::Normal
             && step.normal == ExitKind::Normal

@@ -22,7 +22,7 @@ use std::collections::BTreeSet;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SitePath(pub Box<[u32]>);
 
-/// The phase an action stands at (`K-EVAL-008`): today's `PhaseRecord`.
+/// The phase an action stands at (`K-EVAL-008`): today's `ContinuationPhase`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ActionPhase {
     /// A `yield`: the task awaits its queued turn.

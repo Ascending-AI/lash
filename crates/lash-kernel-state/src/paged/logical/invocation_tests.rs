@@ -56,7 +56,7 @@ pub(super) fn completed_prefix() {
                 &access,
                 &[],
                 &[(
-                    activation.owner(Slot::Binding(0)),
+                    activation.owner(Slot::Binding(RoleId([0; 16]))),
                     RootValue::Value(&Value::Null),
                 )],
             )
@@ -170,8 +170,8 @@ fn entered_boundary() {
         .prepare_enter(TaskId::MAIN, &mut arena, heap.pages(), &[], &[])
         .unwrap();
     ledger.commit(enter.admit(u64::MAX).ok().unwrap()).unwrap();
-    let first = caller.owner(Slot::Operand(0));
-    let second = caller.owner(Slot::Operand(1));
+    let first = caller.owner(Slot::Operand(RoleId([0; 16])));
+    let second = caller.owner(Slot::Operand(RoleId([1; 16])));
     let initial = ledger
         .prepare_source_ownership(
             &mut arena,
@@ -196,10 +196,13 @@ fn entered_boundary() {
     let inputs = [first, second];
     let outputs = [
         (
-            caller.owner(Slot::Continuation(0)),
+            caller.owner(Slot::Continuation(RoleId([0; 16]))),
             RootValue::Existing(first),
         ),
-        (invocation.owner(Slot::Binding(0)), RootValue::Page(&page)),
+        (
+            invocation.owner(Slot::Binding(RoleId([0; 16]))),
+            RootValue::Page(&page),
+        ),
     ];
     for foreign in [false, true] {
         let mut foreign_ledger = Ledger::fresh();
@@ -239,7 +242,7 @@ fn entered_boundary() {
                 &invocation,
                 &inputs,
                 &[(
-                    invocation.owner(Slot::Operand(0)),
+                    invocation.owner(Slot::Operand(RoleId([0; 16]))),
                     RootValue::Existing(first)
                 )],
                 &[]
@@ -335,7 +338,10 @@ fn entered_boundary() {
     assert!(ledger.holding(second, heap.pages()).unwrap().is_none());
     assert_eq!(
         ledger
-            .holding(caller.owner(Slot::Continuation(0)), heap.pages())
+            .holding(
+                caller.owner(Slot::Continuation(RoleId([0; 16]))),
+                heap.pages()
+            )
             .unwrap()
             .unwrap()
             .bytes(),
@@ -343,7 +349,10 @@ fn entered_boundary() {
     );
     assert_eq!(
         ledger
-            .holding(invocation.owner(Slot::Binding(0)), heap.pages())
+            .holding(
+                invocation.owner(Slot::Binding(RoleId([0; 16]))),
+                heap.pages()
+            )
             .unwrap()
             .unwrap()
             .bytes(),

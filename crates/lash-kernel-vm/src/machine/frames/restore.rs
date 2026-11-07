@@ -8,6 +8,7 @@ pub(super) fn frame(
     arrival: Arrival,
     access: &Access<'static>,
     exe: &Arc<Executable>,
+    bound: &crate::machine::region_isa::BoundCodes,
     arena: &mut Arena,
 ) -> Result<Box<Frame>, Unrestored> {
     let site = record.statement.resolve(access)?;
@@ -27,7 +28,44 @@ pub(super) fn frame(
     }
     let code_id = code_of(record, exe, access)?;
     let code = exe.code(code_id);
-    let pending = match &record.pending {
+    if let Some(pending) = &record.pending {
+        if pending.invocation == 0 || pending.invocation != record.invocation {
+            return Err(malformed("continuation invocation differs from its frame").into());
+        }
+        if pending.unpaid.is_none()
+            && (pending.pending.is_some()
+                || pending.departure.is_some()
+                || pending.ordinal != 0
+                || pending.debt != lash_kernel_state::paged::ChargeDebtRecord::default()
+                || pending.refusal.is_some()
+                || matches!(
+                    pending.phase,
+                    ContinuationPhase::Source { .. } | ContinuationPhase::Completion { .. }
+                ))
+        {
+            return Err(malformed("action continuation carries source phase metadata").into());
+        }
+    }
+    let source = record
+        .pending
+        .as_ref()
+        .filter(|pending| pending.unpaid.is_some())
+        .map(|pending| {
+            let owners = code
+                .source_room
+                .owner_slots()
+                .map_err(|_| malformed("a frame's source has no owner table"))?;
+            source::SourceContinuation::restore(
+                pending,
+                record.invocation,
+                &owners,
+                &site,
+                arena,
+                access,
+            )
+        })
+        .transpose()?;
+    let pending = match record.pending.as_ref().filter(|_| source.is_none()) {
         Some(pending) => Some(Pending {
             site: pending.site.as_slice().into(),
             phase: pending.phase,
@@ -57,8 +95,10 @@ pub(super) fn frame(
         awaiting = Some(stmt);
     }
     // A run-root cleanup has left every source scope: the frame stands at
-    // its body, holding the departure the cleanup returns to.
-    let cleaning = if *site == code.site
+    // its body, holding the departure the cleanup returns to. A source
+    // continuation says where its frame stands itself.
+    let cleaning = if source.is_none()
+        && *site == code.site
         && arrival == Arrival::Returned
         && pending.is_none()
         && (record.convention.as_ref().is_some_and(|convention| {
@@ -78,7 +118,30 @@ pub(super) fn frame(
     } else {
         None
     };
-    while adopting.is_none() && cleaning.is_none() {
+    if let Some(source) = &source {
+        let mut values = Vec::new();
+        for index in 0..record.departing.len() {
+            values.push(admit(
+                arena,
+                access,
+                &row(&record.departing, index, access)?,
+            )?);
+        }
+        let (controls, standing) = crate::machine::region_isa::restore_source_controls(
+            bound, exe, code_id, source, record, &values, access,
+        )?;
+        control = controls.iter().cloned().collect();
+        // A frame standing at a delivering action waits in it.
+        if let Some(standing) = standing {
+            awaiting = Some(standing.statement);
+            nested = standing.act;
+        }
+        loops = record.loops.len();
+        iterated = record.iterated.len();
+        finally = record.finally.len();
+        departing = record.departing.len();
+    }
+    while source.is_none() && adopting.is_none() && cleaning.is_none() {
         let index = *site.path.get(depth).ok_or_else(nowhere)? as usize;
         let stmts = &exe.block(block).stmts;
         if depth + 1 == site.path.len() {
@@ -319,12 +382,13 @@ pub(super) fn frame(
         paced: code.paced,
         statement: record.statement.clone(),
         pending: Continuation {
-            saved: if pending.is_some() {
+            saved: if pending.is_some() || source.is_some() {
                 Saved::This
             } else {
                 Saved::Nothing
             },
             pending,
+            source,
         },
         control: control.into(),
         awaiting,
@@ -476,6 +540,7 @@ mod laws {
                 Arrival::Requested,
                 &access,
                 &narrowed,
+                &machine.bound,
                 &mut Arena::new(),
             )
             .is_ok(),
@@ -529,6 +594,7 @@ mod laws {
                 Arrival::Requested,
                 &access,
                 &linked,
+                &machine.bound,
                 &mut Arena::new(),
             )
             .is_err(),
@@ -546,6 +612,7 @@ mod laws {
                     Arrival::Requested,
                     &access,
                     &exe,
+                    &machine.bound,
                     &mut Arena::new()
                 )
                 .is_err(),
@@ -558,6 +625,7 @@ mod laws {
                 Arrival::Requested,
                 &access,
                 &exe,
+                &machine.bound,
                 &mut Arena::new()
             )
             .is_ok()
@@ -582,7 +650,7 @@ mod laws {
                 }
             }
             assert!(
-                matches!(frame(&forged, Arrival::Requested, &access, &exe, &mut Arena::new()),
+                matches!(frame(&forged, Arrival::Requested, &access, &exe, &machine.bound, &mut Arena::new()),
                     Err(Unrestored::Fault(HeapFault::Malformed(problem)))
                         if problem == "binding capture ownership disagrees with its source"),
                 "a substituted capture was accepted"

@@ -482,7 +482,11 @@ impl PoolStartParts {
         if (bytes.len() + part.part.len()) as u64 > *length {
             return Err(refused("pool-start parts pass their length"));
         }
-        bytes.extend_from_slice(&part.part);
+        if bytes.is_empty() {
+            *bytes = part.part;
+        } else {
+            bytes.extend_from_slice(&part.part);
+        }
         if (bytes.len() as u64) < *length {
             return Ok(None);
         }

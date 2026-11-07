@@ -18,14 +18,13 @@ mod dispatch;
 pub(crate) mod member_region;
 mod resource;
 #[cfg(test)]
-pub(crate) use resource::{take_certified_statements, take_composed_statements};
+pub(crate) use resource::take_certified_statements;
 mod merge;
 pub(super) use merge::region::direct::{CollectionSite, MergeTail};
 mod numeric;
 mod pending;
 use pending::{Departing, Departure, Phase};
 mod format;
-mod repeat;
 pub(super) mod source;
 mod storage;
 #[cfg(test)]
@@ -451,14 +450,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                     Opcode::Begin => {
                         let begin = &code.sites.begin[packet.x as usize];
-                        match self.callback_statement(&mut slab.view(active), begin.id) {
-                            Ok(true) => continue,
-                            Ok(false) => {}
-                            Err(error) => {
-                                let stop = self.halt(error.into());
-                                return self.slow_exit(active, &mut callers, slab, recovery, stop);
-                            }
-                        }
                         if let Err(stop) =
                             self.begin(&mut slab.view(active), begin.id, begin.index, begin.ahead)
                         {

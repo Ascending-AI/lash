@@ -44,7 +44,7 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     phases.push(Phase::Open);
                 }
                 phases.push(Phase::Enter);
-                if matches!(act.kind, doc::ActKind::Call(_)) {
+                if super::act_calls(act) && native_act(node, &source.calls).is_none() {
                     phases.push(Phase::Restore);
                 }
             }
@@ -66,7 +66,13 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
             doc::Node::Stmt(doc::Stmt::While { .. } | doc::Stmt::For { .. }) => {
                 phases.extend([Phase::Test, Phase::Catch]);
             }
+            doc::Node::Stmt(doc::Stmt::ReturnVia { .. }) => {
+                phases.extend([Phase::Policy, Phase::Restore]);
+            }
             _ => {}
+        }
+        if let doc::Node::Stmt(doc::Stmt::For { via: None, .. }) = node {
+            phases.push(Phase::Enter);
         }
         if let doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) = node {
             phases.push(Phase::Open);
@@ -91,7 +97,11 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
             if peak.point != at {
                 return Err(Refused::Source);
             }
-            let mut expected_inputs = inputs(&site, node);
+            let mut expected_inputs = if phase == Phase::Commit {
+                commit_inputs(&site, node)
+            } else {
+                inputs(&site, node)
+            };
             let mut output = match node {
                 doc::Node::Expr(_) | doc::Node::Action(_) => Some(operand(&site)),
                 doc::Node::Stmt(doc::Stmt::Let { name, .. }) => {
@@ -109,11 +119,10 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 }
                 doc::Node::Stmt(
                     doc::Stmt::Return { .. }
+                    | doc::Stmt::ReturnVia { .. }
                     | doc::Stmt::Throw { .. }
                     | doc::Stmt::Finish { .. }
-                    | doc::Stmt::Fail { .. }
-                    | doc::Stmt::Break
-                    | doc::Stmt::Continue,
+                    | doc::Stmt::Fail { .. },
                 ) => Some(Owner::ActiveDeparture(source.site.clone())),
                 _ => None,
             };
@@ -133,7 +142,14 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 (doc::Node::Expr(doc::Expr::Act(_)), Phase::Open) => {
                     expected_inputs = Box::new([]);
                 }
-                (doc::Node::Expr(doc::Expr::Act(_)), Phase::Enter) => output = None,
+                (doc::Node::Expr(doc::Expr::Act(_)), Phase::Enter) => {
+                    if delivers(node) {
+                        expected_inputs = Box::new([]);
+                    }
+                    if native_act(node, &source.calls).is_none() {
+                        output = None;
+                    }
+                }
                 (doc::Node::Expr(doc::Expr::Act(_) | doc::Expr::Call { .. }), Phase::Restore) => {
                     expected_inputs = vec![Owner::Incoming(site.clone())].into();
                 }
@@ -166,6 +182,13 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     expected_inputs = vec![Owner::PendingDeparture(site.clone())].into();
                     output = None;
                 }
+                (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Policy) => {
+                    expected_inputs = vec![Owner::ActiveDeparture(source.site.clone())].into();
+                    output = None;
+                }
+                (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Restore) => {
+                    expected_inputs = vec![Owner::Incoming(site.clone())].into();
+                }
                 (doc::Node::Expr(doc::Expr::Let { name, .. }), Phase::Test) => {
                     expected_inputs = vec![operand(&child(&site, 0))].into();
                     output = Some(Owner::Binding {
@@ -173,8 +196,15 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                         name: name.clone(),
                     });
                 }
-                (doc::Node::Stmt(doc::Stmt::For { binding, .. }), Phase::Test) => {
-                    expected_inputs = Box::new([]);
+                (doc::Node::Stmt(doc::Stmt::For { binding, via, .. }), Phase::Test) => {
+                    expected_inputs = match via {
+                        None => Box::new([]),
+                        Some(via) if via.item.is_some() => Box::new([
+                            Owner::Incoming(site.clone()),
+                            Owner::LoopHeader(site.clone()),
+                        ]),
+                        Some(_) => Box::new([Owner::LoopHeader(site.clone())]),
+                    };
                     output = Some(Owner::Binding {
                         declared: child(&site, 1),
                         name: binding.clone(),
@@ -184,26 +214,20 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     expected_inputs = vec![operand(&child(&site, 0))].into();
                     output = None;
                 }
+                (doc::Node::Stmt(doc::Stmt::For { via: None, .. }), Phase::Enter) => {
+                    expected_inputs = Box::new([]);
+                    output = None;
+                }
                 (
                     doc::Node::Stmt(doc::Stmt::For { .. }),
                     Phase::Open | Phase::Next | Phase::Item | Phase::Check,
                 ) => {
-                    let count = match phase {
-                        Phase::Check => 4,
-                        Phase::Item => 2,
-                        _ => 1,
+                    expected_inputs = if phase == Phase::Open {
+                        Box::new([operand(&child(&site, 0))])
+                    } else {
+                        Box::new([])
                     };
-                    expected_inputs = (0..count)
-                        .map(|index| Owner::HookArgument {
-                            at: site.clone(),
-                            phase,
-                            index,
-                        })
-                        .collect();
-                    output = Some(Owner::HookResult {
-                        at: site.clone(),
-                        phase,
-                    });
+                    output = None;
                 }
                 _ => {}
             }
@@ -212,10 +236,15 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
             }
             check_entities(source, peak, &site, node, phase)?;
             let kind = match (node, phase) {
-                (doc::Node::Expr(doc::Expr::Act(_)) | doc::Node::Action(_), Phase::Enter) => {
+                (doc::Node::Expr(doc::Expr::Act(_)) | doc::Node::Action(_), Phase::Enter)
+                    if native_act(node, &source.calls).is_none() =>
+                {
                     ExitKind::Action
                 }
-                (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Commit) => ExitKind::Action,
+                (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Commit) => {
+                    ExitKind::ReturnVia
+                }
+                (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Restore) => ExitKind::Return,
                 (doc::Node::Stmt(doc::Stmt::Return { .. }), Phase::Commit) => ExitKind::Return,
                 (doc::Node::Stmt(doc::Stmt::Throw { .. }), Phase::Commit) => ExitKind::Raise,
                 (doc::Node::Stmt(doc::Stmt::Finish { .. }), Phase::Commit) => ExitKind::Finish,
@@ -224,13 +253,7 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 (doc::Node::Stmt(doc::Stmt::Continue), Phase::Commit) => ExitKind::Continue,
                 _ => ExitKind::Normal,
             };
-            let kinds = if (matches!(node, doc::Node::Expr(_) | doc::Node::Action(_))
-                || matches!(
-                    phase,
-                    Phase::Open | Phase::Next | Phase::Check | Phase::Item
-                ))
-                && kind != ExitKind::Raise
-            {
+            let kinds = if super::raises(node, phase) && kind != ExitKind::Raise {
                 vec![kind, ExitKind::Raise]
             } else {
                 vec![kind]
@@ -246,12 +269,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     Owner::Scope(source.site.clone()),
                     Owner::Operands(source.site.clone()),
                     Owner::Departures(source.site.clone()),
+                    Owner::Sessions(source.site.clone()),
                 ]
-                .into_iter()
-                .chain(
-                    (source.site.unit == Unit::Main).then(|| Owner::Sessions(source.site.clone())),
-                )
-                .collect();
+                .into();
                 if e.owners != owners {
                     return Err(Refused::Exit);
                 }
@@ -262,6 +282,17 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
             if matches!(callee, CallSource::Native(_)) {
                 expected_scratch.push((point(&site, Phase::Commit), *function));
             }
+        }
+        if let Some(function) = native_act(node, &source.calls) {
+            expected_scratch.push((point(&site, Phase::Enter), function));
+        }
+        if let doc::Node::Stmt(doc::Stmt::ReturnVia {
+            policy: doc::FunctionTarget::Local(function),
+            ..
+        }) = node
+            && matches!(source.calls.get(function), Some(CallSource::Native(_)))
+        {
+            expected_scratch.push((point(&site, Phase::Policy), *function));
         }
         if let doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) = node {
             for (phase, target) in [
@@ -380,39 +411,58 @@ fn obligations(
                 p = i128::from(Cost::OBJECT) + i128::from(Cost::REFERENCE);
                 d = p;
             }
-            let local = Measure::Local(Owner::Binding {
-                declared: at,
-                name: binding.clone(),
-            });
-            if via.as_ref().is_none_or(|v| v.item.is_none()) {
-                peak.push((local.clone(), 1));
-                delta.push((local, 1));
+            match via {
+                None => {
+                    let local = Measure::Local(Owner::Binding {
+                        declared: at,
+                        name: binding.clone(),
+                    });
+                    peak.push((local.clone(), 1));
+                    delta.push((local, 1));
+                }
+                Some(via) if via.item.is_some() => {
+                    delta.push((release([Owner::LoopHeader(site.clone())]), -1));
+                }
+                Some(_) => {}
             }
         }
         (
             doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }),
             Phase::Open | Phase::Next | Phase::Item | Phase::Check,
         ) => {
-            let (target, count) = match (phase, &via.next, &via.check, &via.item) {
-                (Phase::Open, _, _, _) => (&via.open, 1),
-                (Phase::Next, Some(next), _, _) => (next, 1),
-                (Phase::Check, _, Some(check), _) => (check, 4),
-                (Phase::Item, _, _, Some(item)) => (item, 2),
-                _ => unreachable!("source phases select only declared protocol hooks"),
-            };
+            let target = hooks(via)
+                .find_map(|(hook, target)| (hook == phase).then_some(target))
+                .unwrap_or_else(|| unreachable!("source phases select only declared hooks"));
             let callee = match target {
                 doc::FunctionTarget::Local(f) => source.calls[f],
                 doc::FunctionTarget::Import(_) => CallSource::Dynamic,
             };
-            let args: Box<[_]> = (0..count)
-                .map(|index| Owner::HookArgument {
+            peak.push((
+                Measure::CallPeak {
                     at: site.clone(),
-                    phase,
-                    index,
-                })
-                .collect();
-            peak.extend(args.iter().cloned().map(|o| (Measure::Local(o), 1)));
-            delta = peak.clone();
+                    callee,
+                },
+                1,
+            ));
+            delta.push((
+                Measure::CallDelta {
+                    at: site.clone(),
+                    callee,
+                },
+                1,
+            ));
+            if phase == Phase::Open && matches!(callee, CallSource::Native(_) | CallSource::Dynamic)
+            {
+                delta.push((release([operand(&child(site, 0))]), -1));
+            }
+        }
+        (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Supersede) => {
+            delta.push((release([Owner::PendingDeparture(site.clone())]), -1));
+        }
+        // A policy is called with the frame still held.
+        (doc::Node::Stmt(doc::Stmt::ReturnVia { policy, .. }), Phase::Policy) => {
+            let callee = super::hook(policy, &source.calls);
+            p = i128::from(Cost::FRAME);
             peak.push((
                 Measure::CallPeak {
                     at: site.clone(),
@@ -428,25 +478,12 @@ fn obligations(
                 1,
             ));
             if matches!(callee, CallSource::Native(_) | CallSource::Dynamic) {
-                delta.push((
-                    Measure::NativeRelease {
-                        at: site.clone(),
-                        callee,
-                        owners: args,
-                    },
-                    -1,
-                ));
+                delta.push((release([Owner::ActiveDeparture(source.site.clone())]), -1));
             }
-            delta.push((
-                release([Owner::HookResult {
-                    at: site.clone(),
-                    phase,
-                }]),
-                -1,
-            ));
         }
-        (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Supersede) => {
-            delta.push((release([Owner::PendingDeparture(site.clone())]), -1));
+        // What the policy returned leaves the frame, which goes with it.
+        (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Restore) => {
+            d = -i128::from(Cost::FRAME);
         }
         (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Suspend | Phase::Restore) => {}
         (doc::Node::Expr(doc::Expr::Act(act)), Phase::Open)
@@ -468,8 +505,29 @@ fn obligations(
                 d = p;
             }
         }
+        (doc::Node::Expr(doc::Expr::Act(_)), Phase::Enter)
+            if native_act(node, &source.calls).is_some() =>
+        {
+            let callee = source.calls[&native_act(node, &source.calls)
+                .unwrap_or_else(|| unreachable!("the guard selected a native call act"))];
+            peak.push((
+                Measure::CallPeak {
+                    at: site.clone(),
+                    callee,
+                },
+                1,
+            ));
+            delta.push((
+                Measure::CallDelta {
+                    at: site.clone(),
+                    callee,
+                },
+                1,
+            ));
+            delta.push((consumed(), -1));
+        }
         (doc::Node::Action(action), Phase::Enter) => {
-            for (index, _) in atoms(action).iter().enumerate() {
+            for (index, _) in action_atoms(action).iter().enumerate() {
                 peak.push((
                     Measure::Local(Owner::Atom {
                         at: site.clone(),
@@ -492,6 +550,9 @@ fn obligations(
                 let value = Measure::Local(operand(site));
                 peak.push((value.clone(), 1));
                 delta.push((value, 1));
+            }
+            doc::Expr::Act(act) if !super::act_calls(act) => {
+                delta.push((consumed(), -1));
             }
             doc::Expr::Variable(_) | doc::Expr::Member(_) | doc::Expr::Act(_) => {
                 let value = Measure::Local(operand(site));
@@ -588,14 +649,16 @@ fn obligations(
             _ => {}
         },
         (doc::Node::Action(action), Phase::Commit) => {
-            let value = Measure::Local(operand(site));
-            peak.push((value.clone(), 1));
-            delta.push((value, 1));
             delta.push((
-                release(atoms(action).iter().enumerate().map(|(i, _)| Owner::Atom {
-                    at: site.clone(),
-                    index: i as u32,
-                })),
+                release(
+                    action_atoms(action)
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| Owner::Atom {
+                            at: site.clone(),
+                            index: i as u32,
+                        }),
+                ),
                 -1,
             ));
         }

@@ -45,12 +45,12 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
             }
             doc::Node::Stmt(
                 doc::Stmt::Return { .. }
+                | doc::Stmt::ReturnVia { .. }
                 | doc::Stmt::Throw { .. }
                 | doc::Stmt::Finish { .. }
-                | doc::Stmt::Fail { .. }
-                | doc::Stmt::Break
-                | doc::Stmt::Continue,
+                | doc::Stmt::Fail { .. },
             ) => Some(Owner::ActiveDeparture(source.clone())),
+            // A loop departure carries no value: its route ends at the loop.
             _ => None,
         };
         let mut events = Vec::new();
@@ -97,7 +97,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
         } else {
             match node {
                 doc::Node::Action(action) => {
-                    let n = atoms(action).iter().enumerate().fold(
+                    let n = action_atoms(action).iter().enumerate().fold(
                         Amount::default(),
                         |amount, (index, _)| {
                             amount.term(
@@ -127,23 +127,57 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                             held,
                         ));
                     }
-                    events.push(event(
-                        &site,
-                        Phase::Enter,
-                        ins.clone(),
-                        None,
-                        Amount::default(),
-                        Amount::default(),
-                    ));
-                    if matches!(act.kind, doc::ActKind::Call(_)) {
+                    if let Some(function) = native_act(node, calls) {
+                        // A native call act answers at its Enter, as a
+                        // native expression call does at its Commit.
+                        let callee = CallSource::Native(function);
                         events.push(event(
                             &site,
-                            Phase::Restore,
-                            vec![Owner::Incoming(site.clone())].into(),
+                            Phase::Enter,
+                            ins.clone(),
                             Some(operand(&site)),
+                            Amount::default().term(
+                                Measure::CallPeak {
+                                    at: site.clone(),
+                                    callee,
+                                },
+                                1,
+                            ),
+                            Amount::default()
+                                .term(
+                                    Measure::CallDelta {
+                                        at: site.clone(),
+                                        callee,
+                                    },
+                                    1,
+                                )
+                                .term(release(ins.iter().cloned()), -1),
+                        ));
+                    } else {
+                        // A call's Enter moves its arguments into the callee. A
+                        // delivering action's arguments stay live until its Commit.
+                        events.push(event(
+                            &site,
+                            Phase::Enter,
+                            if delivers(node) {
+                                Box::new([])
+                            } else {
+                                ins.clone()
+                            },
+                            None,
                             Amount::default(),
                             Amount::default(),
                         ));
+                        if super::act_calls(act) {
+                            events.push(event(
+                                &site,
+                                Phase::Restore,
+                                vec![Owner::Incoming(site.clone())].into(),
+                                Some(operand(&site)),
+                                Amount::default(),
+                                Amount::default(),
+                            ));
+                        }
                     }
                 }
                 doc::Node::Expr(doc::Expr::Call { function, .. })
@@ -201,70 +235,50 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                     ));
                 }
                 doc::Node::Stmt(doc::Stmt::For { binding, via, .. }) => {
+                    // Each protocol hook is a call (`K-ITER-005`). `open`
+                    // moves the iterated value into its callee; `next`,
+                    // `check` and `item` read what the loop walks and the
+                    // item it holds, which the loop keeps. A plain `for`
+                    // enters once its iterable is a value it can walk, and
+                    // raises there when it is not (`K-ITER-001`).
+                    if via.is_none() {
+                        events.push(event(
+                            &site,
+                            Phase::Enter,
+                            Box::new([]),
+                            None,
+                            Amount::default(),
+                            Amount::default(),
+                        ));
+                    }
                     if let Some(via) = via {
-                        let hooks = [
-                            (Phase::Open, Some(&via.open), 1),
-                            (Phase::Next, via.next.as_ref(), 1),
-                            (Phase::Check, via.check.as_ref(), 4),
-                            (Phase::Item, via.item.as_ref(), 2),
-                        ];
-                        for (phase, target, count) in hooks {
-                            if let Some(target) = target {
-                                let args: Box<[_]> = (0..count)
-                                    .map(|index| Owner::HookArgument {
-                                        at: site.clone(),
-                                        phase,
-                                        index,
-                                    })
-                                    .collect();
-                                let callee = hook(target, calls);
-                                let base = args
-                                    .iter()
-                                    .cloned()
-                                    .fold(Amount::default(), |a, o| a.term(Measure::Local(o), 1));
-                                let peak = base.clone().term(
-                                    Measure::CallPeak {
-                                        at: site.clone(),
-                                        callee,
-                                    },
-                                    1,
-                                );
-                                let mut delta = base.term(
-                                    Measure::CallDelta {
-                                        at: site.clone(),
-                                        callee,
-                                    },
-                                    1,
-                                );
-                                if matches!(callee, CallSource::Native(_) | CallSource::Dynamic) {
-                                    delta = delta.term(
-                                        Measure::NativeRelease {
-                                            at: site.clone(),
-                                            callee,
-                                            owners: args.clone(),
-                                        },
-                                        -1,
-                                    );
-                                }
-                                delta = delta.term(
-                                    release([Owner::HookResult {
-                                        at: site.clone(),
-                                        phase,
-                                    }]),
-                                    -1,
-                                );
-                                events.push(event(
-                                    &site,
-                                    phase,
-                                    args,
-                                    Some(Owner::HookResult {
-                                        at: site.clone(),
-                                        phase,
-                                    }),
-                                    peak,
-                                    delta,
-                                ));
+                        for (phase, target) in hooks(via) {
+                            let callee = hook(target, calls);
+                            let args: Box<[_]> = if phase == Phase::Open {
+                                Box::new([operand(&child(&site, 0))])
+                            } else {
+                                Box::new([])
+                            };
+                            let peak = Amount::default().term(
+                                Measure::CallPeak {
+                                    at: site.clone(),
+                                    callee,
+                                },
+                                1,
+                            );
+                            let mut delta = Amount::default().term(
+                                Measure::CallDelta {
+                                    at: site.clone(),
+                                    callee,
+                                },
+                                1,
+                            );
+                            if !args.is_empty()
+                                && matches!(callee, CallSource::Native(_) | CallSource::Dynamic)
+                            {
+                                delta = delta.term(release(args.iter().cloned()), -1);
                             }
+                            events.push(event(&site, phase, args, None, peak, delta));
                         }
                     }
                     let at = child(&site, 1);
@@ -272,17 +286,79 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                         declared: at.clone(),
                         name: binding.clone(),
                     };
-                    let mut delta = Amount::fixed(shared(cells, &at, binding));
-                    if via.as_ref().is_none_or(|v| v.item.is_none()) {
-                        delta = delta.term(Measure::Local(binding_owner.clone()), 1);
-                    }
+                    let shared = Amount::fixed(shared(cells, &at, binding));
+                    // A plain `for` roots the item it takes; a protocol's
+                    // item moves from the header, or `item`'s result does
+                    // and the header lets the raw item go.
+                    let (inputs, peak, delta): (Box<[_]>, _, _) = match via {
+                        None => {
+                            let n = shared.term(Measure::Local(binding_owner.clone()), 1);
+                            (Box::new([]), n.clone(), n)
+                        }
+                        Some(via) if via.item.is_some() => (
+                            Box::new([
+                                Owner::Incoming(site.clone()),
+                                Owner::LoopHeader(site.clone()),
+                            ]),
+                            shared.clone(),
+                            shared.term(release([Owner::LoopHeader(site.clone())]), -1),
+                        ),
+                        Some(_) => (
+                            Box::new([Owner::LoopHeader(site.clone())]),
+                            shared.clone(),
+                            shared,
+                        ),
+                    };
                     events.push(event(
                         &site,
                         Phase::Test,
-                        Box::new([]),
+                        inputs,
                         Some(binding_owner),
-                        delta.clone(),
+                        peak,
                         delta,
+                    ));
+                }
+                // A `return via` calls its policy once every cleanup of the
+                // frame has run and its scopes are left, the frame still
+                // held; what the policy returned leaves the frame from its
+                // Restore.
+                doc::Node::Stmt(doc::Stmt::ReturnVia { policy, .. }) => {
+                    let callee = hook(policy, calls);
+                    let departure = Owner::ActiveDeparture(source.clone());
+                    let mut delta = Amount::default().term(
+                        Measure::CallDelta {
+                            at: site.clone(),
+                            callee,
+                        },
+                        1,
+                    );
+                    if matches!(callee, CallSource::Native(_) | CallSource::Dynamic) {
+                        delta = delta.term(release([departure.clone()]), -1);
+                    }
+                    events.push(event(
+                        &site,
+                        Phase::Policy,
+                        vec![departure.clone()].into(),
+                        None,
+                        Amount::fixed(Cost::FRAME).term(
+                            Measure::CallPeak {
+                                at: site.clone(),
+                                callee,
+                            },
+                            1,
+                        ),
+                        delta,
+                    ));
+                    events.push(event(
+                        &site,
+                        Phase::Restore,
+                        vec![Owner::Incoming(site.clone())].into(),
+                        Some(departure),
+                        Amount::default(),
+                        Amount {
+                            fixed: -i128::from(Cost::FRAME),
+                            ..Amount::default()
+                        },
                     ));
                 }
                 _ => {}
@@ -329,11 +405,12 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                     Amount::default().term(release([pending]), -1),
                 ));
             }
-            let (peak, delta) = formula(authority, &site, node, &ins);
+            let commit = commit_inputs(&site, node);
+            let (peak, delta) = formula(authority, &site, node, &commit);
             events.push(event(
                 &site,
                 Phase::Commit,
-                ins.clone(),
+                commit,
                 out.clone(),
                 peak,
                 delta,
@@ -341,29 +418,22 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
         }
         for mut e in events {
             e.entities = entities(node, &site, e.point.phase, source, params, cells);
-            let kind = exit(node, e.point.phase);
+            let kind = exit(node, e.point.phase, calls);
             let owners: Box<[_]> = vec![
                 Owner::Frame(source.clone()),
                 Owner::Scope(source.clone()),
                 Owner::Operands(source.clone()),
                 Owner::Departures(source.clone()),
+                Owner::Sessions(source.clone()),
             ]
-            .into_iter()
-            .chain((source.unit == Unit::Main).then(|| Owner::Sessions(source.clone())))
-            .collect();
+            .into();
             exits.push(Exit {
                 point: e.point.clone(),
                 charge_prefix: e.point.clone(),
                 kind,
                 owners: owners.clone(),
             });
-            if (matches!(node, doc::Node::Expr(_) | doc::Node::Action(_))
-                || matches!(
-                    e.point.phase,
-                    Phase::Open | Phase::Next | Phase::Check | Phase::Item
-                ))
-                && kind != ExitKind::Raise
-            {
+            if super::raises(node, e.point.phase) && kind != ExitKind::Raise {
                 exits.push(Exit {
                     point: e.point.clone(),
                     charge_prefix: e.point.clone(),
@@ -481,7 +551,21 @@ fn formula(
                     -1,
                 ),
             ),
-            doc::Expr::Act(_) => (result(), result().term(consumed(), -1)),
+            doc::Expr::Act(act) if super::act_calls(act) => {
+                (result(), result().term(consumed(), -1))
+            }
+            // The delivered Incoming moves into the operand, as at Restore.
+            doc::Expr::Act(_) => (
+                zero.clone(),
+                zero.term(
+                    release(
+                        ins.iter()
+                            .filter(|owner| !matches!(owner, Owner::Incoming(_)))
+                            .cloned(),
+                    ),
+                    -1,
+                ),
+            ),
         },
         doc::Node::Stmt(stmt) => match stmt {
             doc::Stmt::Let { name, .. } => {
@@ -532,34 +616,46 @@ fn formula(
             ),
             _ => (zero.clone(), zero),
         },
+        // The delivered Incoming moves into the operand, as at Restore.
         doc::Node::Action(action) => (
-            result(),
-            result().term(
-                release(atoms(action).iter().enumerate().map(|(i, _)| Owner::Atom {
-                    at: site.clone(),
-                    index: i as u32,
-                })),
+            zero.clone(),
+            zero.term(
+                release(
+                    action_atoms(action)
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| Owner::Atom {
+                            at: site.clone(),
+                            index: i as u32,
+                        }),
+                ),
                 -1,
             ),
         ),
         doc::Node::Block(_) => unreachable!("block has entry and release events"),
     }
 }
-fn exit(node: doc::Node<'_>, phase: Phase) -> ExitKind {
+fn exit(node: doc::Node<'_>, phase: Phase, calls: &BTreeMap<FunctionId, CallSource>) -> ExitKind {
+    // A native call act answers inline; every other act suspends at its Enter.
     if phase == Phase::Enter
         && matches!(
             node,
             doc::Node::Action(_) | doc::Node::Expr(doc::Expr::Act(_))
         )
+        && native_act(node, calls).is_none()
     {
         return ExitKind::Action;
+    }
+    // What a `return via`'s policy returned leaves the frame.
+    if phase == Phase::Restore && matches!(node, doc::Node::Stmt(doc::Stmt::ReturnVia { .. })) {
+        return ExitKind::Return;
     }
     if phase != Phase::Commit {
         return ExitKind::Normal;
     }
     match node {
         doc::Node::Stmt(doc::Stmt::Return { .. }) => ExitKind::Return,
-        doc::Node::Stmt(doc::Stmt::ReturnVia { .. }) => ExitKind::Action,
+        doc::Node::Stmt(doc::Stmt::ReturnVia { .. }) => ExitKind::ReturnVia,
         doc::Node::Stmt(doc::Stmt::Throw { .. }) => ExitKind::Raise,
         doc::Node::Stmt(doc::Stmt::Finish { .. }) => ExitKind::Finish,
         doc::Node::Stmt(doc::Stmt::Fail { .. }) => ExitKind::Fail,

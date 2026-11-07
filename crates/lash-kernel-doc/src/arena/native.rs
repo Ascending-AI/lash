@@ -844,6 +844,16 @@ impl<'call> Nursery<'call> {
         self.new
     }
 
+    /// Gives back every slot the call reserved and keeps what it built,
+    /// still named by those slots: a detached batch nothing installs, whose
+    /// names stand only for each other.
+    pub fn detach(self) -> Vec<(ArenaHandle, NewObject)> {
+        for (handle, _) in self.new.iter().rev() {
+            self.objects.unreserve(*handle);
+        }
+        self.new
+    }
+
     /// Gives back every slot the call reserved: its attempt is abandoned.
     pub fn discard(self) {
         for (handle, _) in self.new.iter().rev() {
@@ -901,6 +911,12 @@ pub trait NativeFunction: Send + Sync {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NativeSpecialization {
     pub immediate: Option<PreparedNative>,
+    /// Every successful answer from `immediate` has exactly its immutable
+    /// output occurrence as its logical resource obligation, with no scratch
+    /// or fresh mutable entity. The claim covers only inputs accepted by that
+    /// entry. It must agree with this implementation's `resource_contract`.
+    /// Absence of this certificate never implies zero scratch.
+    pub immediate_resources: bool,
     pub resident: Option<ResidentRead>,
     /// An allocation-free UTF-16 relation on both inline and heap texts.
     pub text_relation: Option<crate::scalar::ScalarOp>,

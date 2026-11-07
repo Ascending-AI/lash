@@ -7,6 +7,8 @@ use lash_kernel_value::kernel_internals::{effect_id, effect_parts};
 use lash_kernel_value::tokens::encode_body;
 use {lash_kernel_value::sites::EffectIdentity, lash_kernel_value::sites::TaskIdentity};
 
+use lash_kernel_doc::TaskId;
+use lash_kernel_state::kernel_internals::logical::{Owner, Slot, SlotKind, SourceRole};
 use lash_kernel_state::kernel_internals::{
     metadata::metadata_key,
     tree::{Access, Cell, SealWork, Tree},
@@ -154,6 +156,46 @@ impl Carry<'_, '_> {
         )?;
         Ok(())
     }
+    /// A source role under the successor's sites.
+    fn role(&self, from: &SourceRole) -> Result<SourceRole, CarryFault> {
+        Ok(from.map_sites(|at| site(self.correspondence, at, "source role", self.helpers))?)
+    }
+    /// Every role identity a carried frame names, with its successor (Q4):
+    /// its bindings by declaration and name, and its continuation's roles.
+    fn renames(&self, frame: &FrameRecord) -> Result<Vec<(Slot, Slot)>, CarryFault> {
+        let mut renames = Vec::new();
+        self.visit(&frame.bindings, |row| {
+            let name = row.name.resolve(&self.access)?;
+            let declared: Site = Site::clone(&*row.declared.resolve(&self.access)?);
+            let from = SourceRole::Binding {
+                declared: declared.clone(),
+                name: name.clone(),
+            };
+            let to = SourceRole::Binding {
+                declared: site(
+                    self.correspondence,
+                    &declared,
+                    "variable declaration",
+                    self.helpers,
+                )?,
+                name,
+            };
+            renames.push((Slot::Binding(from.id()), Slot::Binding(to.id())));
+            renames.push((Slot::Capture(from.id()), Slot::Capture(to.id())));
+            Ok(())
+        })?;
+        if let Some(pending) = &frame.pending {
+            for role in pending.roles(&self.access)? {
+                if let RoleCoordinate::Source { kind, role } = &role.coordinate {
+                    renames.push((
+                        Slot::new(*kind, role.id()),
+                        Slot::new(*kind, self.role(role)?.id()),
+                    ));
+                }
+            }
+        }
+        Ok(renames)
+    }
     fn check_reference(&self, from: &SiteRef, held: &str) -> Result<(), CarryFault> {
         let resolved = from.resolve(&self.access)?;
         site(self.correspondence, &resolved, held, self.helpers)?;
@@ -205,12 +247,22 @@ impl Carry<'_, '_> {
             match &pending.roles {
                 RolesRecord::Flat(roles) => {
                     for role in roles.iter() {
-                        suffix(&role.site, "operand role")?;
+                        match &role.coordinate {
+                            RoleCoordinate::Expression(site) => suffix(site, "operand role")?,
+                            RoleCoordinate::Source { role, .. } => {
+                                self.role(role)?;
+                            }
+                        }
                     }
                 }
                 RolesRecord::Spilled(chunks) => self.visit(chunks, |chunk| {
                     for role in &chunk.0 {
-                        suffix(&role.site, "operand role")?;
+                        match &role.coordinate {
+                            RoleCoordinate::Expression(site) => suffix(site, "operand role")?,
+                            RoleCoordinate::Source { role, .. } => {
+                                self.role(role)?;
+                            }
+                        }
                     }
                     Ok(())
                 })?,
@@ -263,15 +315,34 @@ impl Carry<'_, '_> {
                 Ok(to.path[new.path.len()..].to_vec())
             };
             pending.site = suffix(&pending.site, "pending action")?;
+            if let Some((path, _)) = &mut pending.unpaid {
+                *path = suffix(path, "unpaid continuation")?;
+            }
+            if let Some((path, _)) = &mut pending.departure {
+                *path = suffix(path, "departure origin")?;
+            }
+            for ((path, _), _) in &mut pending.suspended {
+                *path = suffix(path, "suspended departure")?;
+            }
             match &mut pending.roles {
                 RolesRecord::Flat(roles) => {
                     for role in std::sync::Arc::make_mut(roles) {
-                        role.site = suffix(&role.site, "operand role")?;
+                        match &mut role.coordinate {
+                            RoleCoordinate::Expression(site) => {
+                                *site = suffix(site, "operand role")?
+                            }
+                            RoleCoordinate::Source { role, .. } => *role = self.role(role)?,
+                        }
                     }
                 }
                 RolesRecord::Spilled(chunks) => self.tree(chunks, |chunk| {
                     for role in &mut chunk.0 {
-                        role.site = suffix(&role.site, "operand role")?;
+                        match &mut role.coordinate {
+                            RoleCoordinate::Expression(site) => {
+                                *site = suffix(site, "operand role")?
+                            }
+                            RoleCoordinate::Source { role, .. } => *role = self.role(role)?,
+                        }
                     }
                     Ok(())
                 })?,
@@ -416,8 +487,11 @@ pub fn carry_checkpoint(
             .then(|| metadata_key(&entry.from))
         })
         .collect();
+    // Each carried frame's role identities and their successors.
+    let mut renames =
+        std::collections::BTreeMap::<(TaskId, u64), std::collections::BTreeMap<Slot, Slot>>::new();
     for rank in 0..tasks.len() {
-        let (_, row) = tasks
+        let (task_key, row) = tasks
             .rank_get(rank, &carry.access)?
             .ok_or_else(|| state("missing carry task"))?;
         let identity = row.identity.resolve(&carry.access)?;
@@ -440,6 +514,20 @@ pub fn carry_checkpoint(
                 return Err(state("frame has no retained defining Link").into());
             }
             carry.check_frame(&frame)?;
+            if frame.link == root.link && !helper_frame(&frame, &carry.access, helpers)? {
+                let task = TaskId(u64::from_be_bytes(
+                    task_key
+                        .as_slice()
+                        .try_into()
+                        .map_err(|_| state("a task key is not a task id"))?,
+                ));
+                let carried = renames.entry((task, frame.invocation)).or_default();
+                for (from, to) in carry.renames(&frame)? {
+                    if carried.insert(from, to).is_some_and(|other| other != to) {
+                        return Err(state("a carried role has two successors").into());
+                    }
+                }
+            }
             if frame.link == root.link {
                 let at = frame.statement.resolve(&carry.access)?;
                 if let lash_kernel_value::sites::Unit::Library(function) = &at.unit
@@ -534,6 +622,40 @@ pub fn carry_checkpoint(
         Ok(())
     })?;
     root.session = session.keyed_root()?;
+    // The ledger keys a frame's values by role identity, a digest over the
+    // role's sites. A carried frame's values move to their successors'
+    // identities; a value no carried role names refuses the whole carry.
+    root.heap = lash_kernel_state::kernel_internals::heap_impl::rekey_header_values(
+        &carry.access,
+        root.heap,
+        |owner| {
+            let Owner::Value {
+                task,
+                invocation,
+                slot,
+            } = owner
+            else {
+                return Ok::<_, CarryFault>(owner);
+            };
+            let Some(carried) = renames.get(&(task, invocation)) else {
+                return Ok(owner);
+            };
+            if matches!(slot.kind(), SlotKind::Argument | SlotKind::Scratch) {
+                return Ok(owner);
+            }
+            let slot = *carried.get(&slot).ok_or_else(|| {
+                CarryFault::from(state(format!(
+                    "carried frame value {slot:?} has no named role"
+                )))
+            })?;
+            Ok(Owner::Value {
+                task,
+                invocation,
+                slot,
+            })
+        },
+        |owner| state(format!("carried role identities collide at {owner:?}")).into(),
+    )?;
     // Heap closures are function values, including unescaped locals. Their
     // defining callable and creation site remain in the retained predecessor.
     // Only active predecessor frames move to the successor executable.
@@ -564,6 +686,17 @@ pub fn carry_checkpoint(
 
 /// The helper's exact validated static reach owns these declarations. An
 /// equal library digest never authorizes rebinding an operation contract.
+/// Exact helper code keeps its coordinates, so its frames keep their roles.
+fn helper_frame(
+    frame: &FrameRecord,
+    access: &Access<'_>,
+    helpers: &lash_kernel_doc::BuildHelpers,
+) -> Result<bool, HeapFault> {
+    let at = frame.statement.resolve(access)?;
+    Ok(
+        matches!(&at.unit, lash_kernel_value::sites::Unit::Library(function) if helpers.contains(function)),
+    )
+}
 fn check_helper_operation_context(
     root: lash_kernel_value::FunctionId,
     predecessor: lash_kernel_value::LinkId,

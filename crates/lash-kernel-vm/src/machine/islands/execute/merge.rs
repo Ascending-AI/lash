@@ -7,12 +7,6 @@ use super::*;
 pub(super) mod region;
 
 #[cfg(test)]
-thread_local! { static CALLBACK_ACCEPTED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
-#[cfg(test)]
-pub(in crate::machine::islands) fn callback_accepted() {
-    CALLBACK_ACCEPTED.with(|count| count.set(count.get() + 1));
-}
-#[cfg(test)]
 thread_local! { static ACCEPTED: std::cell::Cell<[u64; 7]> = const { std::cell::Cell::new([0; 7]) }; }
 #[cfg(test)]
 pub(super) fn source_publication_accepted(index: usize) {
@@ -24,9 +18,6 @@ pub(super) fn source_publication_accepted(index: usize) {
 }
 #[cfg(test)]
 impl crate::machine::KernelMachine {
-    pub(crate) fn take_callback_acceptances(&self) -> u64 {
-        CALLBACK_ACCEPTED.with(|count| count.replace(0))
-    }
     pub(crate) fn take_collection_acceptances(&self) -> [u64; 7] {
         ACCEPTED.with(|counts| counts.replace([0; 7]))
     }
@@ -39,55 +30,6 @@ macro_rules! collection_count {
     };
     ($other:ident) => {};
 }
-macro_rules! callback_entry {
-    ($island:ident, $frame:ident, $packet:ident, $answer:ident, Merge, 6) => {
-        $answer
-    };
-    ($island:ident, $frame:ident, $packet:ident, $answer:ident, Merge, $index:tt) => {{
-        let mut $answer = $answer;
-        if matches!(
-            &$answer,
-            Some(Ok((_, region::CollectionContinuation::Callback)))
-        ) {
-            let shape = &$packet.shape;
-            let expected = shape.items.map(|at| match $frame.slots.get(at) {
-                Some(SlotState::Value(value)) => Some(*value),
-                _ => None,
-            });
-            if let [Some(a), Some(b)] = expected {
-                if let Err(error) = $island.publish_callback($frame, &shape.callback_site, &[a, b])
-                {
-                    $answer = Some(Err($island.halt(error.into())));
-                }
-            }
-        }
-        $answer
-    }};
-    ($island:ident, $frame:ident, $packet:ident, $answer:ident, Reduction, $index:tt) => {{
-        let mut $answer = $answer;
-        if $answer.is_none() {
-            let shape = &$packet.shape;
-            let expected = [shape.accumulator, shape.item].map(|at| match $frame.slots.get(at) {
-                Some(SlotState::Value(value)) => Some(*value),
-                _ => None,
-            });
-            if let [Some(a), Some(b)] = expected {
-                let args = if shape.reverse { [b, a] } else { [a, b] };
-                match $island.publish_callback($frame, &shape.callback_site, &args) {
-                    Ok(true) => {
-                        $answer = Some(Ok((Next::Continue, region::CollectionContinuation::Commit)))
-                    }
-                    Ok(false) => {}
-                    Err(error) => $answer = Some(Err($island.halt(error.into()))),
-                }
-            }
-        }
-        $answer
-    }};
-    ($island:ident, $frame:ident, $packet:ident, $answer:ident, $other:ident, $index:tt) => {
-        $answer
-    };
-}
 macro_rules! collection_entry {
     ($method:ident, $shape:ty, $family:ident, $index:tt) => {
         impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
@@ -97,7 +39,6 @@ macro_rules! collection_entry {
                 packet: &CollectionPacket<$shape>,
             ) -> Option<Result<Next, Stop>> {
                 let answer = self.publish_collection(frame, packet);
-                let answer = callback_entry!(self, frame, packet, answer, $family, $index);
                 #[cfg(test)]
                 if matches!(&answer, Some(Ok(_))) {
                     source_publication_accepted($index);

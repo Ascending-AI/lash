@@ -34,6 +34,7 @@ mod public_value;
 mod queue;
 mod raises;
 mod refine;
+pub(crate) mod region_isa;
 pub(crate) mod registers;
 mod session;
 pub(crate) use session::SourceSessionReads;
@@ -383,6 +384,8 @@ pub struct KernelMachine {
     /// taken.
     document: Option<DocumentId>,
     exe: Arc<Executable>,
+    /// Each region code bound for `exe`, once.
+    bound: Arc<region_isa::BoundCodes>,
     bounds: Bounds,
     heap: PagedHeap,
     /// The objects the run executes on; the heap is their projection.
@@ -430,6 +433,9 @@ pub struct KernelMachine {
     session: session::Session,
     /// What the statement being run holds outside any variable.
     pins: Pins,
+    /// A step the machine served for a region standing before it, taken
+    /// when the region resumes.
+    served: Option<region_isa::Served>,
     /// A seal ran out of budget mid-projection: the run refuses to run
     /// until a seal completes it (seam G).
     projecting: bool,
@@ -1117,6 +1123,55 @@ impl KernelMachine {
 
     /// Runs one statement of `task`, or resumes the one it waits in.
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
+        if let Some(observer) = self.observer.as_deref() {
+            #[cfg(any(test, feature = "perf-witness"))]
+            if observer.work_witness {
+                crate::perf_witness::step();
+            }
+            #[cfg(not(any(test, feature = "perf-witness")))]
+            let _ = observer;
+            self.observe_step(task, exe);
+        }
+        if self.task(task)?.take_requeue() {
+            // The one more turn a `then yield` wait takes once its outcome
+            // is in, as `yield` takes it (`K-TASK-005`, `K-TASK-006`): it
+            // charges nothing and runs no statement.
+            self.ready.push_back(task)?;
+            self.current = None;
+            return Ok(());
+        }
+        if self.resume_source_continuation(task, host)? {
+            return Ok(());
+        }
+        #[cfg(not(any(test, feature = "testing")))]
+        {
+            let _ = exe;
+            Err(fault("a frame stood outside the region"))
+        }
+        #[cfg(any(test, feature = "testing"))]
+        self.step_source(task, host, exe)
+    }
+
+    /// The statement executor runs only as the testing oracle: every frame
+    /// of an ordinary run stands in its region, so reaching a statement
+    /// outside the oracle is the machine's fault, never a fallback.
+    pub(super) fn oracle_only(&self) -> Result<(), Halt> {
+        #[cfg(any(test, feature = "testing"))]
+        if self.islands.source_only {
+            return Ok(());
+        }
+        Err(fault("a statement ran outside its region"))
+    }
+
+    /// The source oracle: runs one statement of `task` through the
+    /// statement executor, as laws compare the region against.
+    #[cfg(any(test, feature = "testing"))]
+    fn step_source(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+    ) -> Result<(), Halt> {
         let (link, program) = {
             let frame = self.frame(task)?;
             let program = exe
@@ -1142,6 +1197,7 @@ impl KernelMachine {
         result
     }
 
+    #[cfg(any(test, feature = "testing"))]
     fn step_protected(
         &mut self,
         task: TaskId,
@@ -1156,25 +1212,8 @@ impl KernelMachine {
         // refinement refuses rather than trace them (FIG-6318).
         self.heap.execution_roots_moved();
         self.raised = None;
-        if let Some(observer) = self.observer.as_deref() {
-            #[cfg(any(test, feature = "perf-witness"))]
-            if observer.work_witness {
-                crate::perf_witness::step();
-            }
-            #[cfg(not(any(test, feature = "perf-witness")))]
-            let _ = observer;
-            self.observe_step(task, exe);
-        }
         if self.bounds.memory_meter != crate::MemoryMeter::Off {
             self.pins.clear();
-        }
-        if self.task(task)?.take_requeue() {
-            // The one more turn a `then yield` wait takes once its outcome
-            // is in, as `yield` takes it (`K-TASK-005`, `K-TASK-006`): it
-            // charges nothing and runs no statement.
-            self.ready.push_back(task)?;
-            self.current = None;
-            return Ok(());
         }
         let outcome = match self.task(task)?.take_incoming() {
             Some(incoming) => {
@@ -1186,6 +1225,7 @@ impl KernelMachine {
         self.settle(task, host, exe, outcome)
     }
 
+    #[cfg(any(test, feature = "testing"))]
     /// The statement the top frame waits in continues with its delivered
     /// value at the same semantic coordinate.
     fn delivered(
@@ -1307,7 +1347,11 @@ impl KernelMachine {
                     }
                 },
             };
-            match self.step(task, host, &exe) {
+            let outcome = match self.regs.take_region_refusal() {
+                Some(exceeded) => Err(Halt::Bound(exceeded)),
+                None => self.step(task, host, &exe),
+            };
+            match outcome {
                 Ok(()) => {}
                 Err(Halt::Fault(problem)) => {
                     self.ended = true;
@@ -1494,7 +1538,7 @@ impl KernelMachine {
     /// action, by task and frame index.
     pub(crate) fn pending_phases(
         &mut self,
-    ) -> Vec<(TaskId, usize, lash_kernel_state::paged::PhaseRecord)> {
+    ) -> Vec<(TaskId, usize, lash_kernel_state::paged::ContinuationPhase)> {
         let mut phases = Vec::new();
         let access = self.heap.pages().clone();
         self.publish_holdings().expect("the run publishes");
@@ -1511,6 +1555,31 @@ impl KernelMachine {
             })
             .expect("the task rows read");
         phases
+    }
+
+    /// The saved roles of every published frame row that stands at a
+    /// nested action, by task and frame index.
+    pub(crate) fn pending_roles(
+        &mut self,
+    ) -> Vec<(TaskId, usize, Vec<lash_kernel_state::paged::RoleCoordinate>)> {
+        let mut saved = Vec::new();
+        let access = self.heap.pages().clone();
+        self.publish_holdings().expect("the run publishes");
+        self.tasks
+            .visit(&mut |id, task| {
+                for index in 0..task.frames.len() {
+                    if let Ok(Some((_, frame))) = task.frames.rank_get(index, &access)
+                        && let Some(pending) = &frame.pending
+                    {
+                        let roles = pending.roles(&access).expect("the roles read");
+                        let roles = roles.into_iter().map(|role| role.coordinate);
+                        saved.push((id, index as usize, roles.collect()));
+                    }
+                }
+                true
+            })
+            .expect("the task rows read");
+        saved
     }
 
     /// The header of every published loop row: where each loop stood.
@@ -1573,7 +1642,7 @@ impl KernelMachine {
         task: TaskId,
         index: usize,
         edit: impl FnOnce(
-            &mut Option<lash_kernel_state::paged::PendingRecord>,
+            &mut Option<lash_kernel_state::paged::ContinuationRecord>,
             &lash_kernel_state::kernel_internals::tree::Access<'_>,
         ),
     ) -> Result<(), String> {

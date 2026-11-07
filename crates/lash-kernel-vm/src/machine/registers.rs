@@ -2,7 +2,9 @@
 use std::ops::Index;
 use std::slice::SliceIndex;
 mod entry;
+mod region;
 pub(super) use entry::PreparedEntryBank;
+pub(in crate::machine) use region::RegionCursor;
 mod resume;
 mod source;
 pub(super) use resume::{ResumeAt, ResumeValue};
@@ -146,6 +148,10 @@ impl PreparedOutput<'_> {
 
 #[derive(Default)]
 pub(super) struct Registers {
+    region_cursor: Option<RegionCursor>,
+    /// Current ISA roles, translated by the exit packet before the atomic swap.
+    /// These are physical aliases of the single published source roots.
+    region: Vec<(lash_kernel_state::kernel_internals::logical::Owner, Value)>,
     values: Vec<Value>,
     written: Vec<bool>,
     extent: usize,
@@ -254,7 +260,15 @@ impl Registers {
     ) -> Result<Vec<(lash_kernel_state::kernel_internals::logical::Owner, Value)>, HeapFault> {
         self.source.entry_roots(ledger, projection, inputs)
     }
+    pub(in crate::machine) fn region_values(
+        &self,
+    ) -> impl Iterator<Item = (lash_kernel_state::kernel_internals::logical::Owner, Value)> + '_
+    {
+        self.source.live_values().chain(self.region.iter().copied())
+    }
     pub(super) fn source_owners(&self) -> Vec<lash_kernel_state::kernel_internals::logical::Owner> {
+        // Canonical source frames own region roles. Register mirrors carry
+        // no temporary receipt for statement cleanup to release.
         self.source.live_owners().collect()
     }
     pub(super) fn take_source_arguments(
@@ -271,9 +285,12 @@ impl Registers {
         self.window(registers as usize);
     }
 
+    #[cfg(any(test, feature = "testing"))]
     /// Releases the prepared set at every exit of its statement's step.
     #[inline]
     pub(super) fn kill_statement(&mut self) {
+        self.region_cursor = None;
+        self.region.clear();
         self.ready = None;
         self.source.clear();
         let end = std::mem::take(&mut self.kill).min(self.extent);
@@ -358,6 +375,8 @@ impl Registers {
     }
 
     pub(super) fn clear(&mut self) {
+        self.region_cursor = None;
+        self.region.clear();
         self.ready = None;
         self.source.clear();
         #[cfg(any(test, feature = "perf-witness"))]
@@ -588,6 +607,12 @@ impl Registers {
         &self,
         arena: &lash_kernel_state::arena::Arena,
     ) -> Result<u64, HeapFault> {
+        if !self.region.is_empty() {
+            return self.region.iter().try_fold(0_u64, |sum, (_, value)| {
+                sum.checked_add(arena.logical_local(value)?)
+                    .ok_or_else(|| HeapFault::Malformed("region holding cost overflow".into()))
+            });
+        }
         if self.source.owns_values() {
             return self.source.bytes();
         }
@@ -604,7 +629,9 @@ impl Registers {
     /// Active stream operands are source occurrences. Outside a stream, an
     /// action may still be assembling arguments in explicitly written slots.
     pub(super) fn source_projection(&self) -> Vec<Value> {
-        if self.source.owns_values() {
+        if !self.region.is_empty() {
+            self.region.iter().map(|(_, value)| *value).collect()
+        } else if self.source.owns_values() {
             let mut values = Vec::new();
             self.source.each_value(&mut |value| values.push(*value));
             values
@@ -619,6 +646,7 @@ impl Registers {
 
     pub(super) fn each_source_value(&self, visit: &mut dyn FnMut(&Value)) {
         self.source.each_value(visit);
+        self.region.iter().for_each(|(_, value)| visit(value));
     }
 }
 
@@ -637,6 +665,8 @@ impl From<Vec<Value>> for Registers {
         let extent = values.len();
         let owns_values = values.iter().any(|value| !reusable(value));
         Self {
+            region_cursor: None,
+            region: Vec::new(),
             values,
             written: vec![true; extent],
             extent,

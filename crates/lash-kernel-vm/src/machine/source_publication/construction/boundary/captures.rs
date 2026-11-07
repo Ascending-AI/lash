@@ -58,7 +58,10 @@ pub(super) fn source_cells(
                 };
                 roots.push((slot, Value::ObjectRef(cell)));
             }
-            roots.push((Slot::Binding(77), Value::ObjectRef(foreign)));
+            roots.push((
+                Slot::Binding(crate::laws::role_id(77)),
+                Value::ObjectRef(foreign),
+            ));
             let entries: Vec<_> = roots
                 .iter()
                 .map(|(slot, value)| (*slot, RootValue::Value(value)))

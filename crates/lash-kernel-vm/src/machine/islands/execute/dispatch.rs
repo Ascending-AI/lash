@@ -152,7 +152,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             Opcode::Header => {
                 let sites::Header {
                     entry,
-                    repeat,
                     id,
                     cost,
                     metered,
@@ -195,24 +194,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 // Canonical iteration debts include their entered header.
                 // The admitted prefix leaves room for the next unpaid header
                 // so an interior stop always retains an exact source point.
-                let repeated = if !OBSERVING
-                    && self.exe.charging()
-                    && let Some(site) = repeat
-                {
-                    self.repeat_scope(frame, site, *cost, *metered)?
-                } else {
-                    0
-                };
                 self.formula(*cost);
                 if *metered != 0 {
                     self.scheduled(*metered);
-                }
-                if repeated != 0
-                    && let Some(Position::Loop { started, .. }) = frame.state.control.last_mut()
-                {
-                    *started = started
-                        .checked_add(repeated)
-                        .ok_or_else(|| self.halt(fault("loop occurrence overflow")))?;
                 }
                 self.covered = false;
                 frame.state.statement = Some(*id);

@@ -77,8 +77,9 @@ pub(crate) use heap_impl::PagedHeap;
 pub use heap_impl::heap_accounting;
 
 pub use directory::execution::{
-    FrameRecord, IteratedRecord, OccurrenceOwner, OccurrenceRecord, PendingRecord, PhaseRecord,
-    ROLE_CHUNK, ROLE_FLAT, RoleChunk, RoleRecord, RolesRecord, TaskRecord,
+    ChargeDebtRecord, ContinuationPhase, ContinuationRecord, FrameRecord, IteratedRecord,
+    OccurrenceOwner, OccurrenceRecord, ROLE_CHUNK, ROLE_FLAT, RoleChunk, RoleCoordinate,
+    RoleRecord, RolesRecord, TaskRecord,
 };
 
 #[cfg(test)]

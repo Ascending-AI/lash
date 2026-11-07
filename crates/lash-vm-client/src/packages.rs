@@ -214,7 +214,7 @@ impl WorkerLibrary {
     }
     pub fn from_frame(frame: Arc<[u8]>) -> Result<Self, WorkerLibraryRefusal> {
         sections(&frame)?;
-        let owner: &'static [u8] = Box::leak(frame.to_vec().into_boxed_slice());
+        let owner = pin_frame(&frame);
         let [image, _, _, roots, content, metadata] = sections(owner)?;
         let documents = read_documents(content)?;
         let roots = lash_kernel_value::tokens::decode_body(roots).map_err(malformed)?;
@@ -264,9 +264,7 @@ impl WorkerLibrary {
         })
     }
     pub fn indexes(&self) -> Result<[&'static [u8]; 4], WorkerLibraryRefusal> {
-        let bytes = self
-            .live
-            .get_or_init(|| Box::leak(self.frame.to_vec().into_boxed_slice()));
+        let bytes = self.live.get_or_init(|| pin_frame(&self.frame));
         let [image, index, positions, roots, _, _] = sections(bytes)?;
         Ok([image, index, positions, roots])
     }
@@ -322,6 +320,13 @@ impl WorkerLibrary {
         Ok(())
     }
 }
+// Frame indexes live for the process. Pin the existing shared allocation
+// rather than retaining a second complete image beside it.
+fn pin_frame(frame: &Arc<[u8]>) -> &'static [u8] {
+    let owner: &'static Arc<[u8]> = Box::leak(Box::new(Arc::clone(frame)));
+    owner.as_ref()
+}
+
 mod runtime_ops {
     pub trait Sealed {}
     impl Sealed for super::WorkerLibrary {}

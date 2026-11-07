@@ -141,8 +141,11 @@ pub(super) fn source_certificates(
             inputs.pop();
         }
         if guard == 4 {
-            output =
-                invocation.owner(lash_kernel_state::kernel_internals::logical::Slot::Argument(77));
+            output = invocation.owner(
+                lash_kernel_state::kernel_internals::logical::Slot::Argument(crate::laws::role_id(
+                    77,
+                )),
+            );
         }
         if guard == 5 {
             if let Some(doc::NewObject::List(values)) = object.clone() {

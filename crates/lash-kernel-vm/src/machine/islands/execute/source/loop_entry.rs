@@ -100,7 +100,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(accepted) = bound.prepare_external(
             frontier,
             &ledger,
-            self.heap,
             transaction,
             SourceResources {
                 charged: &mut self.charged,

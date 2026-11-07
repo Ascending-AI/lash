@@ -185,6 +185,7 @@ impl Ledger {
     /// discard the entire draft, including any bounded sweep batches. Ended
     /// results are roots only while a source holding reaches their task.
     pub fn normalize(&mut self, access: &Access<'_>, limits: TraceLimits) -> Result<(), HeapFault> {
+        self.require_unleased()?;
         let revision = self
             .revision
             .checked_add(1)

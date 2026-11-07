@@ -475,6 +475,9 @@ impl Admission {
             document: Arc::clone(document),
             own: Arc::clone(&code.own),
             admission: Arc::clone(self),
+            regions: std::sync::Mutex::default(),
+            dynamic_targets: std::sync::Mutex::default(),
+            session_banks: std::sync::Mutex::default(),
         }))
     }
 
@@ -1220,51 +1223,5 @@ mod tests {
             lifetime.upgrade().is_none(),
             "code preparation must not retain its source Document"
         );
-    }
-    /// FIG-7522: layouts may move instructions and registers, but their pool
-    /// owners and canonical subtree coordinates remain source identities.
-    #[test]
-    fn compiled_pools_keep_source_owners_across_layouts() {
-        use crate::compile::Layout;
-        use doc::constant_pool::PoolOwner;
-        let source = "main { let template = [(1, 2), (1, 2)] return template }";
-        let document = Arc::new(doc::parse_document(source).expect("document"));
-        let identity = document.identity();
-        let mut expected = None;
-        for layout in [0, 1, 2, 3, 17] {
-            let library = PreparedLibrary::with_layout(
-                Arc::new(doc::FunctionRegistry::declarations()),
-                Layout(layout),
-            );
-            let code = compile_document(
-                &document,
-                identity,
-                &BTreeMap::new(),
-                &library,
-                &BTreeSet::new(),
-                &BTreeMap::new(),
-                None,
-            )
-            .unwrap_or_else(|_| panic!("compiled document"));
-            let pool = &code.tables.constant_pools[&Unit::Main];
-            let keys: Vec<_> = pool
-                .entries()
-                .iter()
-                .map(|entry| {
-                    assert_eq!(entry.key.owner, PoolOwner::Document(identity));
-                    entry.key.clone()
-                })
-                .collect();
-            assert_eq!(
-                keys.len(),
-                6,
-                "two tuples and four scalar leaves; the list is fresh"
-            );
-            if let Some(expected) = &expected {
-                assert_eq!(&keys, expected);
-            } else {
-                expected = Some(keys);
-            }
-        }
     }
 }

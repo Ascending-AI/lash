@@ -1,5 +1,6 @@
 //! Canonical charge closes compiled into a reduced prefix and a cold tape.
 //! Quiet binding evaluates only changing formulas, never the fixed event list.
+pub(crate) mod region_isa;
 use super::{Point, Refused, Source};
 use crate::compile::{self, Executable, LibId, expr};
 use lash_kernel_doc::{self as doc, Value};
@@ -144,16 +145,6 @@ impl ChargeProgram {
         range: OpRange,
     ) -> Result<Self, Refused> {
         Self::compile_selected(exe, code, statement, range, None)
-    }
-
-    pub(in crate::compile::room) fn compile_callback(
-        exe: &Executable,
-        code: compile::CodeId,
-        statement: compile::StmtId,
-        range: OpRange,
-        target: compile::CodeId,
-    ) -> Result<Self, Refused> {
-        Self::compile_selected(exe, code, statement, range, Some(target))
     }
 
     fn compile_selected(
@@ -388,6 +379,23 @@ fn point(site: &Site, op: Op) -> Point {
 }
 
 fn source_point(stream: &compile::Stream, site: &Site, op: Op) -> Point {
+    // A dynamic callable is read before its arguments. Its local read shares
+    // the action's site, but belongs to Open, never the call's Commit.
+    if matches!(op, Op::Local { .. } | Op::Session { .. })
+        && stream.nested.iter().any(|entry| {
+            entry.site == *site
+                && matches!(
+                    entry.kind,
+                    compile::NestedKind::Call(compile::NestedCallee::Read)
+                        | compile::NestedKind::Spawn(compile::NestedCallee::Read)
+                )
+        })
+    {
+        return Point {
+            site: site.clone(),
+            phase: super::Phase::Open,
+        };
+    }
     if matches!(op, Op::Act) {
         return Point {
             site: site.clone(),
@@ -786,6 +794,7 @@ fn completion(
 }
 
 impl crate::admission::Window {
+    #[cfg(test)]
     /// A compiled charge prefix has already authenticated every close and
     /// measured its canonical formulas. Quiet admission uses its reduced sum.
     #[inline(always)]
@@ -799,6 +808,7 @@ impl crate::admission::Window {
 }
 
 impl<'a> crate::admission::SourceResources<'a> {
+    #[cfg(test)]
     /// Compiled prefixes spend one authenticated charge debt together with
     /// their logical boundary. Resource staging is pure until commit.
     pub(crate) fn admit_region<C>(

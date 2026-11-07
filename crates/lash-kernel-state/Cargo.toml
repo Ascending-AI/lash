@@ -19,6 +19,8 @@ name = "lash_kernel_state"
 doctest = false
 
 [features]
+# Independent itemized state observations for VM qualification laws.
+testing = []
 # Unsupported transient-work diagnostics; absent from ordinary builds.
 perf-witness = []
 # A parked run may state the synthetic successor of kernel version 1.

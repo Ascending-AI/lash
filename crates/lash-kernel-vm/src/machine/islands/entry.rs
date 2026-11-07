@@ -14,7 +14,7 @@ use lash_kernel_doc::{TaskId, Value};
 
 use lash_kernel_exec::{ActIx, RegRange, Weight};
 use lash_kernel_state::arena::Arena;
-use lash_kernel_state::paged::PhaseRecord;
+use lash_kernel_state::paged::ContinuationPhase;
 use lash_kernel_value::data_limits::KernelDataLimits;
 
 use super::super::ops::Flow;
@@ -540,7 +540,7 @@ impl KernelMachine {
         let (task, exe) = (running.task, running.exe);
         if let Caller::Nested(act) = caller {
             let entry = &running.stream.nested[act.ix()];
-            self.capture(task, entry, act, PhaseRecord::Called)?;
+            self.capture(task, entry, act, ContinuationPhase::Call { phase: 0 })?;
         }
         self.frame(task)?.awaiting = Some(running.id);
         let mut top = None;
@@ -727,7 +727,7 @@ impl KernelMachine {
                     act,
                     self.continuation(
                         &entry.suffix,
-                        PhaseRecord::Called,
+                        ContinuationPhase::Call { phase: 0 },
                         roles.len(),
                         |machine, at| {
                             let held = machine.hold_value(roles[at].1)?;
@@ -800,6 +800,7 @@ impl KernelMachine {
         Ok(top)
     }
 
+    #[cfg(any(test, feature = "testing"))]
     pub(in crate::machine) fn advance_active(
         &mut self,
         task: TaskId,
@@ -871,6 +872,7 @@ impl KernelMachine {
         self.resumed(task, exe, (stmt, ran))
     }
 
+    #[cfg(any(test, feature = "testing"))]
     /// A restored or already resident admitted function re-enters the same
     /// loop at its semantic block/statement boundary. Its existing frame
     /// remains the root owner until the loop returns or materializes it.

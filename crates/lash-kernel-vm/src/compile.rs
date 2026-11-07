@@ -57,6 +57,7 @@ mod occurrences;
 mod parameters;
 mod preparation;
 mod reads;
+pub(crate) mod region_isa;
 pub(crate) mod room;
 mod scopes;
 mod template_meter;
@@ -135,13 +136,6 @@ struct Tables {
     stmts: Vec<Stmt>,
     /// Every statement's ops, and what they index.
     stream: Stream,
-    /// Derived from unchanged source before layout transforms. Runtime pool
-    /// reads are a later phase; these entries are code-owned, never serialized.
-    #[allow(
-        dead_code,
-        reason = "phase-one code projection; runtime reads follow in phase three"
-    )]
-    constant_pools: BTreeMap<Unit, doc::constant_pool::ConstantPool>,
     /// Each statement's step edge, by statement.
     edges: Vec<StepEdge>,
     /// Each function body by its site, and each block by its own: how a
@@ -445,6 +439,14 @@ pub(crate) struct Executable {
     own: Arc<DocumentCode>,
     admission: Arc<preparation::Admission>,
     origins: Arc<preparation::Origins>,
+    /// Each code's verified region program, compiled once per executable.
+    regions: std::sync::Mutex<BTreeMap<CodeId, Result<Arc<region_isa::RegionCode>, room::Refused>>>,
+    /// The dynamic call targets runs have reached, by caller code, call
+    /// site and target code: what a lease binds beside its static calls.
+    dynamic_targets: std::sync::Mutex<std::collections::BTreeSet<(CodeId, u32, CodeId)>>,
+    /// Each session cell digest a region names, numbered in the order the
+    /// executable first verified it: one lease-wide bank cell per digest.
+    session_banks: std::sync::Mutex<BTreeMap<[u8; 32], u32>>,
 }
 
 /// Immutable document tables, independent of any run or owning document.
@@ -610,6 +612,47 @@ impl Executable {
         self.library.0.lib(id)
     }
 
+    /// The site of the innermost statement of code body `code` that
+    /// `site` lies in: the statement itself, or one of its expressions.
+    pub(crate) fn stmt_within(&self, code: CodeId, site: &Site) -> Option<Site> {
+        let code = self.code(code);
+        if code.site.unit != site.unit || !site.path.starts_with(&code.site.path) {
+            return None;
+        }
+        let mut depth = code.site.path.len();
+        let mut block = code.body;
+        let within = |end: usize| Site {
+            unit: site.unit.clone(),
+            path: site.path[..end].to_vec(),
+        };
+        loop {
+            // A block's own site lies in the statement that owns it.
+            if depth == site.path.len() {
+                return (depth > code.site.path.len()).then(|| within(depth - 1));
+            }
+            let stmt = *self
+                .block(block)
+                .stmts
+                .get(*site.path.get(depth)? as usize)?;
+            let Some(inner) = site.path.get(..depth + 2) else {
+                return Some(within(depth + 1));
+            };
+            match self
+                .stmt(stmt)
+                .form
+                .blocks()
+                .into_iter()
+                .find(|block| self.block(*block).site.path == inner)
+            {
+                Some(inner) => {
+                    block = inner;
+                    depth += 2;
+                }
+                None => return Some(within(depth + 1)),
+            }
+        }
+    }
+
     /// Resolves a source statement inside one admitted code body.
     pub(crate) fn stmt_at(&self, code: CodeId, site: &Site) -> Option<StmtId> {
         let code = self.code(code);
@@ -736,6 +779,20 @@ impl Executable {
             .code_at
             .get(&(site.clone(), captures.to_vec()))
             .copied()
+    }
+
+    /// Every compilation of the closure lifted at `site`. Only the tables
+    /// that hold the site's unit can place it, so no other library body is
+    /// compiled to answer.
+    pub(crate) fn closures_at<'e>(&'e self, site: &'e Site) -> impl Iterator<Item = CodeId> + 'e {
+        let unit = self
+            .tables_of(&site.unit)
+            .filter(|tables| !std::ptr::eq(*tables, &self.own.tables));
+        unit.into_iter()
+            .chain([&self.own.tables])
+            .flat_map(|tables| tables.closure_at.iter())
+            .filter(move |((_, at, _), _)| at == site)
+            .map(|(_, code)| *code)
     }
 
     /// A closure's lexical body under its defining executable tables.
@@ -1337,7 +1394,6 @@ struct Compiler<'a> {
     document_owner: Option<lash_kernel_value::DocumentId>,
     /// The current immutable unit shared by its deferred source descriptions.
     source_body: Option<room::UnitBody>,
-    constant_pools: BTreeMap<Unit, doc::constant_pool::ConstantPool>,
 }
 
 use document_code::compile_document;
@@ -1429,7 +1485,6 @@ impl<'a> Compiler<'a> {
             stmt_depth: 0,
             document_owner: None,
             source_body: None,
-            constant_pools: BTreeMap::new(),
         }
     }
 
@@ -1502,7 +1557,6 @@ impl<'a> Compiler<'a> {
             blocks: self.blocks,
             stmts: self.stmts,
             stream: self.stream,
-            constant_pools: self.constant_pools,
             edges,
             code_at,
             closure_at,

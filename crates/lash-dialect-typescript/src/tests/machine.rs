@@ -601,6 +601,50 @@ fn stable_ancestor_paths_traverse_once_and_resume_exactly() {
     assert!(sliced.2 > 24);
 }
 
+/// Q3 session cells: a callee's accepted `evaluations++` survives a reopen
+/// at a stop before it returns, so the reopened run counts it once.
+/// Recursion and a mutable alias reach the same lease-wide cells, and an
+/// import at every slice charges and answers as the uninterrupted run does.
+#[test]
+fn a_callees_session_write_survives_reopen_before_it_returns() {
+    let source = "let evaluations = 0; const shared = { hits: 0 }; function once(value) { evaluations++; const alias = shared; alias.hits++; return value; } function depth(n) { if (n === 0) { return 0; } evaluations++; return depth(n - 1) + 1; } const value = once(7); const levels = depth(3); await host.echo(0); await control.finish([value, evaluations, shared.hits, levels]);";
+    let plain = plain_record_resume(source, u64::MAX, false);
+    assert_eq!(
+        end("await control.finish([7, 4, 1, 3]);"),
+        Ended::Finished(plain.0.clone())
+    );
+    for slice in [1, 7, u64::MAX] {
+        let restored = plain_record_resume(source, slice, true);
+        assert_eq!(
+            (&plain.0, plain.1),
+            (&restored.0, restored.1),
+            "slice {slice}"
+        );
+        assert!(restored.2 >= 2, "the echo and finish parks were imported");
+    }
+}
+
+/// A break or continue leaves no value behind: the loop it exits resumes
+/// across a park inside it as the uninterrupted run does.
+#[test]
+fn loop_exits_resume_across_a_park_without_a_departure_value() {
+    let source = "let n = 0; for (let i = 0; i < 4; i++) { await host.echo(i); if (i === 1) { continue; } if (i === 3) { break; } n++; } while (true) { n++; await host.echo(n); if (n > 3) { break; } } await control.finish(n);";
+    let plain = plain_record_resume(source, u64::MAX, false);
+    assert_eq!(
+        end("await control.finish(4);"),
+        Ended::Finished(plain.0.clone())
+    );
+    for slice in [1, 7, u64::MAX] {
+        let restored = plain_record_resume(source, slice, true);
+        assert_eq!(
+            (&plain.0, plain.1),
+            (&restored.0, restored.1),
+            "slice {slice}"
+        );
+        assert!(restored.2 >= 2, "the echo parks were imported");
+    }
+}
+
 /// K-MACH-007/008, K-CHG-007 and ECMA SameValueZero: atomic admission
 /// survives argument parks and serialized charge cuts with exactly the same
 /// total charge, key identities and results as uninterrupted execution.

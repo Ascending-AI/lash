@@ -8,6 +8,38 @@ pub(in crate::compile::room) fn resolve(
     pc: u32,
     selected: Option<CodeId>,
 ) -> Result<Resolved, Refused> {
+    match call_site(exe, caller, statement, pc)? {
+        CallSite::Static(target) => {
+            if selected.is_none_or(|code| code == target.code) {
+                Ok(target)
+            } else {
+                Err(Refused::Source)
+            }
+        }
+        CallSite::Dynamic(site) => site.admit(exe, selected.ok_or(Refused::Source)?),
+    }
+}
+
+/// A call site's facts. A static site names its one target; a dynamic one
+/// names only what the caller holds, and admits each target by its code.
+pub(in crate::compile::room) enum CallSite {
+    Static(Resolved),
+    Dynamic(DynamicSite),
+}
+
+pub(in crate::compile::room) struct DynamicSite {
+    at: Point,
+    arguments: usize,
+    occurrence: Option<usize>,
+    rooted: bool,
+}
+
+pub(in crate::compile::room) fn call_site(
+    exe: &Executable,
+    caller: CodeId,
+    statement: StmtId,
+    pc: u32,
+) -> Result<CallSite, Refused> {
     let (stream, stmt, _) = exe.statement(statement);
     let span = caller_span(stmt, pc)?;
     if exe.stmt_at(caller, &stmt.site) != Some(statement) {
@@ -32,16 +64,7 @@ pub(in crate::compile::room) fn resolve(
         _ => false,
     };
     if !dynamic {
-        let target = resolved_static(exe, caller, statement, pc)?;
-        return if selected.is_none_or(|code| code == target.code) {
-            Ok(target)
-        } else {
-            Err(Refused::Source)
-        };
-    }
-    let code = selected.ok_or(Refused::Source)?;
-    if code.0 as usize >= exe.code_count() {
-        return Err(Refused::Source);
+        return resolved_static(exe, caller, statement, pc).map(CallSite::Static);
     }
     let site = stream
         .source_sites
@@ -85,58 +108,66 @@ pub(in crate::compile::room) fn resolve(
         }
         _ => return Err(Refused::Source),
     };
-    let origin = root_slot(
+    let origin = root_role(
         source,
         &Point {
             site: site.clone(),
             phase: Phase::Enter,
         },
     )?;
-    let placement = super::super::super::placement::BindingPlacement::compile(exe, caller)?;
-    let physical = placement.physical(origin).ok_or(Refused::Source)?;
+    // The callee is read from the frame slot or the session cell its name
+    // resolves to, and from nowhere else.
+    let physical = match origin {
+        Role::Slot(slot) => Some(
+            super::super::super::placement::BindingPlacement::compile(exe, caller)?
+                .physical(slot)
+                .ok_or(Refused::Source)?,
+        ),
+        Role::Session(_) => None,
+    };
+    let local_read = |at, slot| {
+        physical == Some(at) && exe.code(caller).slots_by_at.get(at as usize) == Some(&slot)
+    };
+    let session_read = |name: &lash_kernel_value::Name| matches!(origin, Role::Session(digest) if logical::Owner::session(name) == logical::Owner::Session(digest));
     let valid_read = match op {
         Op::Nested { args, .. } => (span.start..pc)
             .rev()
             .find_map(|read| {
                 let op = &stream.ops[read as usize];
                 (op.writes() == Some(args.start)).then(|| {
-                    matches!(op,
-                        Op::Local { local, .. } if local.at == physical && exe.code(caller).slots_by_at.get(physical as usize) == Some(&local.slot)
-                    ) && stream.source_sites[read as usize].as_deref() == Some(site)
+                    let reads = match op {
+                        Op::Local { local, .. } => local_read(local.at, local.slot),
+                        Op::Session { name, .. } => stream
+                            .names
+                            .get(name.0 as usize)
+                            .is_some_and(|binding| session_read(&binding.name)),
+                        _ => false,
+                    };
+                    reads && stream.source_sites[read as usize].as_deref() == Some(site)
                 })
             })
             .unwrap_or(false),
-        Op::Act => matches!(&stmt.form, compile::Form::Action(compile::Action {
-            kind: compile::ActionKind::Call { callee: compile::Callee::Value(compile::Var::Local(local)), .. }, ..
-        }) if local.at == physical && exe.code(caller).slots_by_at.get(physical as usize) == Some(&local.slot)),
+        Op::Act => match &stmt.form {
+            compile::Form::Action(compile::Action {
+                kind:
+                    compile::ActionKind::Call {
+                        callee: compile::Callee::Value(var),
+                        ..
+                    },
+                ..
+            }) => match var {
+                compile::Var::Local(local) => local_read(local.at, local.slot),
+                compile::Var::Session(binding) => session_read(&binding.name),
+                compile::Var::Unbound(_) => false,
+            },
+            _ => false,
+        },
         _ => false,
     };
     if !valid_read {
         return Err(Refused::Source);
     }
-    let library = match exe.code(code).source_room.owner {
-        doc::constant_pool::PoolOwner::Function(function) => exe.library_lib(&function).filter(|lib| {
-            matches!(exe.lib(*lib).run, LibRun::Body(actual) | LibRun::Native { body: Some(actual), .. } if actual == code)
-        }),
-        doc::constant_pool::PoolOwner::Document(_) => None,
-    };
-    if arguments > exe.code(code).params.len() {
-        return Err(Refused::Source);
-    }
-    if let Some(lib) = library {
-        let function = exe.lib(lib);
-        if !function.body_arity(arguments)
-            || function.limit.is_some()
-            || function.shares_params
-            || function.specialization.resource
-                != CallSource::Body(function.specialization.function)
-        {
-            return Err(Refused::Source);
-        }
-    }
-    Ok(Resolved {
-        code,
-        library,
+    Ok(CallSite::Dynamic(DynamicSite {
         at: Point {
             site: site.clone(),
             phase: Phase::Enter,
@@ -144,8 +175,68 @@ pub(in crate::compile::room) fn resolve(
         arguments,
         occurrence,
         rooted,
-        dynamic: true,
-    })
+    }))
+}
+
+impl DynamicSite {
+    pub(in crate::compile::room) fn occurrence(&self) -> Option<usize> {
+        self.occurrence
+    }
+    pub(in crate::compile::room) fn shape(&self) -> Shape<'_> {
+        Shape {
+            at: &self.at,
+            arguments: self.arguments,
+            rooted: self.rooted,
+            dynamic: true,
+        }
+    }
+
+    /// Admits `code` as this site's target: a body-backed library takes the
+    /// site's arguments within its arity, and no code takes more arguments
+    /// than it has parameters.
+    pub(in crate::compile::room) fn admit(
+        &self,
+        exe: &Executable,
+        code: CodeId,
+    ) -> Result<Resolved, Refused> {
+        if code.0 as usize >= exe.code_count() {
+            return Err(Refused::Source);
+        }
+        let arguments = self.arguments;
+        // A closure's body takes its free names from the closure's cells,
+        // so it is entered as a body, never through its library's
+        // signature.
+        let library = match exe.code(code).source_room.owner {
+            _ if !exe.code(code).capture_names.is_empty() => None,
+            doc::constant_pool::PoolOwner::Function(function) => exe.library_lib(&function).filter(|lib| {
+                matches!(exe.lib(*lib).run, LibRun::Body(actual) | LibRun::Native { body: Some(actual), .. } if actual == code)
+            }),
+            doc::constant_pool::PoolOwner::Document(_) => None,
+        };
+        if arguments > exe.code(code).params.len() {
+            return Err(Refused::Source);
+        }
+        if let Some(lib) = library {
+            let function = exe.lib(lib);
+            if !function.body_arity(arguments)
+                || function.limit.is_some()
+                || function.specialization.resource
+                    != CallSource::Body(function.specialization.function)
+            {
+                return Err(Refused::Source);
+            }
+        }
+        Ok(Resolved {
+            code,
+            library,
+            at: self.at.clone(),
+            arguments,
+            occurrence: self.occurrence,
+            rooted: self.rooted,
+            dynamic: true,
+            checked: false,
+        })
+    }
 }
 
 fn node<'a>(source: &'a Source, at: &Site) -> Result<doc::Node<'a>, Refused> {
@@ -159,7 +250,9 @@ fn node<'a>(source: &'a Source, at: &Site) -> Result<doc::Node<'a>, Refused> {
     Ok(node)
 }
 
-pub(super) fn root_slot(source: &Source, at: &Point) -> Result<Slot, Refused> {
+/// The role a dynamic call reads its callee from: the frame slot of its
+/// name's lexical binding, or the session cell a free name resolves to.
+pub(super) fn root_role(source: &Source, at: &Point) -> Result<Role, Refused> {
     let name = match node(source, &at.site)? {
         doc::Node::Action(doc::Action::Call {
             callee: doc::Callee::Value(name),
@@ -173,89 +266,12 @@ pub(super) fn root_slot(source: &Source, at: &Point) -> Result<Slot, Refused> {
         }
         _ => return Err(Refused::Source),
     };
-    let slots = source.owner_slots()?;
-    let owner = root_owners::visible(&slots.scopes, &at.site, name).ok_or(Refused::Source)?;
-    slot(source, owner)
-}
-
-pub(super) struct CallableSnapshot {
-    pub(super) identity: lash_kernel_value::CallableId,
-    pub(super) captures: Vec<(Slot, doc::arena::ArenaHandle, Value)>,
-}
-
-impl VerifiedCall {
-    pub(super) fn authenticate_callable(
-        &self,
-        exe: &Executable,
-        arena: &Arena,
-        value: Value,
-    ) -> Option<CallableSnapshot> {
-        match value {
-            Value::Closure(handle) => {
-                let (identity, cells, _) = arena.closure(handle).ok()?;
-                let body = exe.code(self.callee);
-                if cells.len() != body.captures.len()
-                    || cells.len() != body.capture_names.len()
-                    || identity.capture_names != body.capture_names
-                {
-                    return None;
-                }
-                let code = crate::machine::project::closure_code(
-                    exe,
-                    &identity.callable,
-                    &identity.site.site,
-                    &identity.capture_names,
-                )
-                .ok()?;
-                if code != self.callee {
-                    return None;
-                }
-                let mut captures = Vec::with_capacity(cells.len());
-                for (capture, cell) in body.captures.iter().zip(cells) {
-                    let binding = body.slots.get(capture.inner as usize)?;
-                    let slot = slot(
-                        &self.source,
-                        &Owner::Binding {
-                            declared: binding.declared.clone(),
-                            name: binding.name.clone(),
-                        },
-                    )
-                    .ok()?;
-                    if !matches!(slot, Slot::Capture(_)) {
-                        return None;
-                    }
-                    let value = arena.cell(*cell).ok()?;
-                    if !super::scope::scalar(value) {
-                        return None;
-                    }
-                    captures.push((slot, *cell, value));
-                }
-                Some(CallableSnapshot {
-                    identity: identity.callable,
-                    captures,
-                })
-            }
-            Value::Function(handle) => {
-                let callable = arena.callable(handle).ok()?;
-                if !exe.admits_callable(&callable) {
-                    return None;
-                }
-                let code = exe.declared.get(&callable.function).copied().or_else(|| {
-                    let lib = exe.library_lib(&callable.function)?;
-                    match exe.lib(lib).run {
-                        LibRun::Body(code)
-                        | LibRun::Native {
-                            body: Some(code), ..
-                        } => Some(code),
-                        _ => None,
-                    }
-                })?;
-                (code == self.callee).then_some(CallableSnapshot {
-                    identity: callable,
-                    captures: Vec::new(),
-                })
-            }
-            _ => None,
-        }
-    }
+    crate::compile::region_isa::owner_role(
+        source,
+        &Owner::Visible {
+            at: at.site.clone(),
+            name: name.clone(),
+        },
+    )
+    .ok_or(Refused::Source)
 }

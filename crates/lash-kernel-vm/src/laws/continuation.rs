@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use lash_kernel_doc::{Datum, FunctionRegistry, TaskId, parse_definition};
 
 use lash_kernel_state::paged::{
-    HeaderRecord, IncomingRecord, PendingRecord, PhaseRecord, RoleRecord, RolesRecord,
+    ContinuationPhase, ContinuationRecord, HeaderRecord, IncomingRecord, RoleRecord, RolesRecord,
     TaskStateRecord,
 };
 use lash_kernel_value::names::FunctionId;
@@ -161,7 +161,7 @@ impl Drive {
 /// generated plans made.
 #[derive(Default)]
 struct Seen {
-    phases: Vec<PhaseRecord>,
+    phases: Vec<ContinuationPhase>,
     headers: Vec<HeaderRecord>,
     parks: usize,
     reopens: u64,
@@ -301,7 +301,13 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
 /// CONT-EXACT and CONT-ONCE of one case: the uninterrupted run gives
 /// `expected` and prints `printed`; every sliced and reopened run leaves
 /// its trace; the reopened runs see each phase of `want`.
-fn case(text: &str, order: &[&str], expected: &Datum, printed: &[Datum], want: &[PhaseRecord]) {
+fn case(
+    text: &str,
+    order: &[&str],
+    expected: &Datum,
+    printed: &[Datum],
+    want: &[ContinuationPhase],
+) {
     let phases = exact(Drive::new(u64::MAX, false), text, order, expected, printed).phases;
     for phase in want {
         assert!(phases.contains(phase), "the reopens saw {phases:?}: {text}");
@@ -376,7 +382,7 @@ fn nested_await_resumes_exactly() {
         &["tool", "c"],
         &expected,
         &printed,
-        &[PhaseRecord::Called, PhaseRecord::Waiting],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
     let (_, crossed) = drive(NESTED_AWAIT, &["tool", "c"], Drive::new(u64::MAX, true));
     assert!(
@@ -402,13 +408,7 @@ const MUTATED_RECEIVER_HOISTED: &str = "definition \"function writer(o: Any) -> 
 #[test]
 fn parked_role_keeps_the_evaluated_value() {
     let expected = tuple(&[list(&[int(1), text("m")]), int(2)]);
-    case(
-        MUTATED_RECEIVER,
-        &["w", "m"],
-        &expected,
-        &[],
-        &[PhaseRecord::Waiting],
-    );
+    case(MUTATED_RECEIVER, &["w", "m"], &expected, &[], &[STANDING]);
     case(MUTATED_RECEIVER_HOISTED, &["w", "m"], &expected, &[], &[]);
 }
 
@@ -426,7 +426,7 @@ fn callback_inside_expression_resumes_exactly() {
         &["echo", "echo"],
         &expected,
         &[text("a"), text("b")],
-        &[PhaseRecord::Called, PhaseRecord::Waiting],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
     case(
         CALLBACK_HOISTED,
@@ -453,7 +453,7 @@ fn a_spawn_inside_an_expression_resumes_exactly() {
         &["child"],
         &expected,
         &printed,
-        &[PhaseRecord::Spawned, PhaseRecord::Called],
+        &[STANDING, ContinuationPhase::Call { phase: 0 }],
     );
     case(SPAWNED_HOISTED, &["child"], &expected, &printed, &[]);
 }
@@ -481,7 +481,7 @@ fn library_bodies_inside_expressions_resume_exactly() {
         &["w"],
         &expected,
         &[int(1)],
-        &[PhaseRecord::Called, PhaseRecord::Waiting],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
 }
 
@@ -502,7 +502,7 @@ fn while_condition_actions_resume_exactly() {
         &[],
         &expected,
         &printed,
-        &[PhaseRecord::Called, PhaseRecord::Waiting],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
     case(WHILE_CONDITION_HOISTED, &[], &expected, &printed, &[]);
 }
@@ -534,7 +534,7 @@ fn assignment_place_actions_resume_exactly() {
         &[],
         &expected,
         &printed,
-        &[PhaseRecord::Called, PhaseRecord::Waiting],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
     case(PLACES_HOISTED, &[], &expected, &printed, &[]);
 }
@@ -564,7 +564,7 @@ fn an_assignments_order_decides_what_its_place_reads() {
         &[],
         &tuple(&[written, untouched]),
         &[],
-        &[PhaseRecord::Called],
+        &[ContinuationPhase::Call { phase: 0 }],
     );
 }
 
@@ -577,11 +577,14 @@ fn a_missing_role_at_a_condition_or_a_place_is_refused() {
         "main { let i = 0\nwhile [i, perform 0(false) as Any][1] { set i = 1 }\nreturn i }\n",
         "main { let t = [0]\nset t[0] = [1, perform 0(\"w\") as Any][1] place first\nreturn t }\n",
     ] {
-        let mut embedder = park_where(source, |phases| phases == only(PhaseRecord::Waiting));
+        let mut embedder = park_where(source, |phases| phases == only(STANDING));
         let mut dropped = None;
         edit_roles(&mut embedder, |roles| {
             assert!(!roles.is_empty(), "{source}");
-            dropped = Some(roles.remove(0).site);
+            dropped = Some(match roles.remove(0).coordinate {
+                lash_kernel_state::paged::RoleCoordinate::Expression(site) => site,
+                _ => panic!("source expression role"),
+            });
         });
         let role = SitePath(dropped.unwrap().into());
         assert_eq!(
@@ -599,7 +602,13 @@ fn a_missing_role_at_a_condition_or_a_place_is_refused() {
 fn a_nested_call_reads_its_callee_before_its_arguments() {
     const SOURCE: &str = "definition \"function g(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return [\\\"g\\\", x]  }\"\n\ndefinition \"function h(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return [\\\"h\\\", x]  }\"\n\nmain { let f = &g\nlet swap = fn() { set f = &h let w = perform 0(\"w\") as Any return w }\nlet r = [apply f(apply swap()), apply f(2)]\nreturn r }\n";
     let expected = list(&[list(&[text("g"), text("w")]), list(&[text("h"), int(2)])]);
-    case(SOURCE, &["w"], &expected, &[], &[PhaseRecord::Called]);
+    case(
+        SOURCE,
+        &["w"],
+        &expected,
+        &[],
+        &[ContinuationPhase::Call { phase: 0 }],
+    );
 }
 
 /// A task cancelled while it waits at a nested `perform` resumes at its
@@ -607,13 +616,7 @@ fn a_nested_call_reads_its_callee_before_its_arguments() {
 #[test]
 fn cancel_at_a_nested_wait_resumes_exactly() {
     const SOURCE: &str = "definition \"function work(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = [perform 0(x) as Any] return v[0]  }\"\n\nmain { let h = spawn call work(0)\ndo cancel h\nlet r = \"none\"\ntry { let v = join h\nset r = v } catch e { set r = e.kind }\nreturn r }\n";
-    case(
-        SOURCE,
-        &[],
-        &text("cancelled"),
-        &[],
-        &[PhaseRecord::Waiting],
-    );
+    case(SOURCE, &[], &text("cancelled"), &[], &[STANDING]);
 }
 
 /// SITE-NESTED (`K-EFF-008`, `K-SITE-002`): each wait of a statement that
@@ -787,7 +790,10 @@ fn a_wait_in_a_while_condition_is_named_inside_its_loop() {
 
 /// Runs `source` at slice 0 until `want` accepts the phases its frames
 /// stand at, and leaves the run there.
-fn park_where(source: &str, want: impl Fn(&[(TaskId, usize, PhaseRecord)]) -> bool) -> Embedder {
+fn park_where(
+    source: &str,
+    want: impl Fn(&[(TaskId, usize, ContinuationPhase)]) -> bool,
+) -> Embedder {
     let mut embedder = Embedder::with(source, setup(0));
     for _ in 0..200 {
         let step = embedder.run();
@@ -804,18 +810,27 @@ fn park_where(source: &str, want: impl Fn(&[(TaskId, usize, PhaseRecord)]) -> bo
     panic!("the run never stood where it was wanted")
 }
 
-fn only(phase: PhaseRecord) -> Vec<(TaskId, usize, PhaseRecord)> {
+/// A frame standing at an action whose Enter is accepted and whose result
+/// is not yet delivered: a spawn, a wait, a join or a yield.
+const STANDING: ContinuationPhase = ContinuationPhase::Source {
+    phase: crate::compile::room::Phase::Enter as u32,
+    progress: 2,
+};
+
+fn only(phase: ContinuationPhase) -> Vec<(TaskId, usize, ContinuationPhase)> {
     vec![(TaskId::MAIN, 0, phase)]
 }
 
 /// `main` parked at the nested `perform` of [`NESTED_AWAIT`].
 fn waiting() -> Embedder {
-    park_where(NESTED_AWAIT, |phases| phases == only(PhaseRecord::Waiting))
+    park_where(NESTED_AWAIT, |phases| phases == only(STANDING))
 }
 
 /// `main` standing at the nested `call a()`, its callee's frame above.
 fn called() -> Embedder {
-    park_where(NESTED_AWAIT, |phases| phases == only(PhaseRecord::Called))
+    park_where(NESTED_AWAIT, |phases| {
+        phases == only(ContinuationPhase::Call { phase: 0 })
+    })
 }
 
 /// Opens `embedder` cold under an odd layout: the refusal the grammar
@@ -836,7 +851,15 @@ fn refused_here(embedder: &mut Embedder) -> RestoreRefusal {
         .restore_refusal(TaskId::MAIN, 0)
         .expect("the frame row reads")
         .expect("the grammar refuses the frame");
-    let problem = loop {
+    let problem = run_out(embedder);
+    let named = format!("continuation refused: {refusal}");
+    assert!(problem.contains(&named), "{problem} names no {named}");
+    refusal
+}
+
+/// How the run ends as `embedder` stands, run on and answered oldest first.
+fn run_out(embedder: &mut Embedder) -> String {
+    loop {
         let step = match embedder.machine.run(&mut embedder.world, 0) {
             Ok(step) => step,
             Err(error) => break format!("{error:?}"),
@@ -857,10 +880,7 @@ fn refused_here(embedder: &mut Embedder) -> RestoreRefusal {
                 }
             }
         }
-    };
-    let named = format!("continuation refused: {refusal}");
-    assert!(problem.contains(&named), "{problem} names no {named}");
-    refusal
+    }
 }
 
 fn path<const N: usize>(path: [u32; N]) -> SitePath {
@@ -875,8 +895,11 @@ fn edit_roles(embedder: &mut Embedder, edit: impl FnOnce(&mut Vec<RoleRecord>)) 
             let pending = pending.as_mut().expect("a saved continuation");
             let mut roles = pending.roles(access).unwrap();
             edit(&mut roles);
-            *pending =
-                PendingRecord::new(pending.site.clone(), pending.phase, roles, access).unwrap();
+            // Only the roles change; the rest of the continuation stands.
+            pending.roles =
+                ContinuationRecord::new(pending.site.clone(), pending.phase, roles, access)
+                    .unwrap()
+                    .roles;
         })
         .unwrap();
 }
@@ -906,7 +929,7 @@ fn a_called_phase_at_a_wait_is_refused() {
     embedder
         .machine
         .tamper_pending(TaskId::MAIN, 0, |pending, _| {
-            pending.as_mut().unwrap().phase = PhaseRecord::Called;
+            pending.as_mut().unwrap().phase = ContinuationPhase::Call { phase: 0 };
         })
         .unwrap();
     assert_eq!(
@@ -925,7 +948,7 @@ fn a_waiting_phase_at_a_call_is_refused() {
     embedder
         .machine
         .tamper_pending(TaskId::MAIN, 0, |pending, _| {
-            pending.as_mut().unwrap().phase = PhaseRecord::Waiting;
+            pending.as_mut().unwrap().phase = ContinuationPhase::Waiting;
         })
         .unwrap();
     assert_eq!(
@@ -947,7 +970,13 @@ fn a_continuation_on_a_fresh_frame_is_refused() {
         .machine
         .tamper_pending(TaskId::MAIN, 0, |pending, access| {
             *pending = Some(
-                PendingRecord::new(vec![0, 0], PhaseRecord::Called, Vec::new(), access).unwrap(),
+                ContinuationRecord::new(
+                    vec![0, 0],
+                    ContinuationPhase::Call { phase: 0 },
+                    Vec::new(),
+                    access,
+                )
+                .unwrap(),
             );
         })
         .unwrap();
@@ -966,7 +995,7 @@ fn an_extra_role_is_refused() {
     let mut embedder = waiting();
     edit_roles(&mut embedder, |roles| {
         roles.push(RoleRecord {
-            site: vec![9],
+            coordinate: lash_kernel_state::paged::RoleCoordinate::Expression(vec![9]),
             value: lash_kernel_doc::heap::PageValue::Null,
         });
     });
@@ -983,11 +1012,78 @@ fn a_role_saved_twice_is_refused() {
     let mut twice = None;
     edit_roles(&mut embedder, |roles| {
         let role = roles[0].clone();
-        twice = Some(role.site.clone());
+        twice = Some(match &role.coordinate {
+            lash_kernel_state::paged::RoleCoordinate::Expression(site) => site.clone(),
+            _ => panic!("source expression role"),
+        });
         roles.push(role);
     });
     let role = SitePath(twice.unwrap().into());
     assert_eq!(refused(&mut embedder), RestoreRefusal::ExtraRole { role });
+}
+
+/// Q4: a saved region role names one slot of its body by kind and full
+/// source discriminator. Two saved roles under one slot, which is what a
+/// non-injective RoleKey table would write, and a role its body does not
+/// key under that kind, refuse the reopen as malformed.
+#[test]
+fn a_slot_two_saved_roles_share_or_its_body_does_not_key_is_refused() {
+    use lash_kernel_state::kernel_internals::logical::SlotKind;
+    use lash_kernel_state::paged::RoleCoordinate;
+    type Edit = fn(&mut Vec<RoleRecord>);
+    let cases: [(&str, Edit); 2] = [
+        ("source continuation duplicates a frame role", |roles| {
+            let twice = roles
+                .iter()
+                .find(|role| matches!(role.coordinate, RoleCoordinate::Source { .. }))
+                .expect("a saved source role")
+                .clone();
+            roles.push(twice);
+        }),
+        (
+            "source continuation role is not a role of its body",
+            |roles| {
+                let RoleCoordinate::Source { kind, .. } = &mut roles
+                    .iter_mut()
+                    .find(|role| matches!(role.coordinate, RoleCoordinate::Source { .. }))
+                    .expect("a saved source role")
+                    .coordinate
+                else {
+                    unreachable!()
+                };
+                *kind = match kind {
+                    SlotKind::Control => SlotKind::Departure,
+                    _ => SlotKind::Control,
+                };
+            },
+        ),
+    ];
+    for (named, edit) in cases {
+        // `main` parked at the nested `perform`, keeping the operands it
+        // evaluated; cold, so the edit reaches its saved row.
+        let mut embedder = Embedder::with(NESTED_AWAIT, setup(0));
+        loop {
+            let step = embedder.run();
+            let saved = embedder.machine.pending_roles();
+            if let [(TaskId::MAIN, 0, roles)] = &saved[..]
+                && roles.len() > 1
+                && embedder.machine.pending_phases() == only(STANDING)
+            {
+                break;
+            }
+            match step {
+                Step::Ended(end) => panic!("the run ended at {end:?} before it parked"),
+                Step::Slice => {}
+                Step::Parked(_) => embedder.deliver_next(),
+            }
+        }
+        embedder
+            .try_reopen(Layout(0), true)
+            .expect("the run reopens");
+        edit_roles(&mut embedder, edit);
+        let problem = run_out(&mut embedder);
+        assert!(problem.contains(named), "{problem} names no {named}");
+    }
 }
 
 /// CONT-GRAMMAR: a saved wait on a task that a value, not its request,
@@ -1064,7 +1160,7 @@ fn a_continuation_keeps_its_roles_flat_and_spills_a_long_list() {
         let operands: String = (0..count).map(|i| format!("{i}, ")).collect();
         let source =
             format!("main {{ let r = [{operands}perform 0(\"w\") as Any]\nreturn list.len(r) }}\n");
-        let mut embedder = park_where(&source, |phases| phases == only(PhaseRecord::Waiting));
+        let mut embedder = park_where(&source, |phases| phases == only(STANDING));
         let mut saved = None;
         embedder
             .machine
@@ -1098,13 +1194,7 @@ const NESTED_JOIN_HOISTED: &str = "definition \"function w(x: Any) -> Any\\nkern
 #[test]
 fn nested_join_resumes_exactly() {
     let expected = list(&[int(1), text("a"), list(&[text("a"), text("b")])]);
-    case(
-        NESTED_JOIN,
-        &["b", "a"],
-        &expected,
-        &[],
-        &[PhaseRecord::Joining],
-    );
+    case(NESTED_JOIN, &["b", "a"], &expected, &[], &[STANDING]);
     case(NESTED_JOIN_HOISTED, &["b", "a"], &expected, &[], &[]);
 }
 
@@ -1131,13 +1221,7 @@ main {
         &["child", "x"],
         &text("done"),
         &[list(&[Datum::Null])],
-        &[
-            PhaseRecord::Called,
-            PhaseRecord::Waiting,
-            PhaseRecord::Yielded,
-            PhaseRecord::Spawned,
-            PhaseRecord::Joining,
-        ],
+        &[ContinuationPhase::Call { phase: 0 }, STANDING],
     );
 }
 
@@ -1165,7 +1249,7 @@ definition "function work() -> Any\nkernel 1\nmetering statements\nbody { \n  tr
 
 main { let value = call work() return value }
 "#;
-    exact(
+    let seen = exact(
         Drive {
             probes: return_policy,
             ..Drive::new(u64::MAX, false)
@@ -1174,6 +1258,77 @@ main { let value = call work() return value }
         &[],
         &int(7),
         &[text("evaluated"), text("finally"), text("adopt")],
+    );
+    // Some reopen stood inside the waiting policy, its frame at the policy
+    // call.
+    assert!(
+        seen.phases.contains(&ContinuationPhase::Call { phase: 13 }),
+        "the reopens saw {:?}",
+        seen.phases
+    );
+}
+
+/// The policies below: one raises, one calls the closure it is given.
+fn policies(
+    registry: &mut FunctionRegistry,
+    ids: &BTreeMap<&'static str, FunctionId>,
+) -> Vec<(&'static str, FunctionId)> {
+    let mut probes = bodies(registry, ids);
+    for (name, text) in [
+        (
+            "body.reject",
+            "function body.reject(x: Any) -> Any\nkernel 1\ncharge 0\nbody { print \"reject\" throw \"rejected\" }",
+        ),
+        (
+            "body.call",
+            "function body.call(x: Any) -> Any\nkernel 1\ncharge 0\nbody { print \"call\" let value = apply x() return value }",
+        ),
+    ] {
+        let definition = parse_definition(text).unwrap();
+        probes.push((name, registry.register(definition, None).unwrap()));
+    }
+    probes
+}
+
+/// K-FORM-017: the policy runs once the frame's handlers are gone, so what
+/// it raises leaves the frame past its own catch, after its finally.
+#[test]
+fn a_return_policy_raise_leaves_its_frame() {
+    let source = r#"
+definition "function work() -> Any\nkernel 1\nmetering statements\nbody { \n  try { return 5 via body.reject }\n  catch e { return \"inside\" }\n  finally { print \"finally\" }\n }"
+
+main { let r = "none" try { let v = call work() set r = v } catch e { set r = e } return r }
+"#;
+    exact(
+        Drive {
+            probes: policies,
+            ..Drive::new(u64::MAX, false)
+        },
+        source,
+        &[],
+        &text("rejected"),
+        &[text("finally"), text("reject")],
+    );
+}
+
+/// K-FORM-017: the frame's bindings are gone when its policy runs; a
+/// closure over one keeps the binding's cell.
+#[test]
+fn a_return_policy_calls_a_closure_over_a_released_binding() {
+    let source = r#"
+definition "function work() -> Any\nkernel 1\nmetering statements\nbody { \n  let n = 41\n  let f = fn() { return num.add(n, 1) }\n  try { return f via body.call }\n  finally { print \"finally\" }\n }"
+
+main { let value = call work() return value }
+"#;
+    exact(
+        Drive {
+            probes: policies,
+            ..Drive::new(u64::MAX, false)
+        },
+        source,
+        &[],
+        &int(42),
+        &[text("finally"), text("call")],
     );
 }
 

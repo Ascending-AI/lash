@@ -2,27 +2,42 @@ use super::*;
 use lash_kernel_doc::heap::PageRef;
 use lash_kernel_value::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 
-fn slot_parts(slot: Slot) -> (u8, u32) {
-    match slot {
-        Slot::Binding(n) => (1, n),
-        Slot::Operand(n) => (2, n),
-        Slot::Control(n) => (3, n),
-        Slot::Argument(n) => (4, n),
-        Slot::Departure(n) => (5, n),
-        Slot::Continuation(n) => (6, n),
-        Slot::Scratch(n) => (7, n),
-        Slot::Capture(n) => (8, n),
+fn kind_tag(kind: SlotKind) -> u8 {
+    match kind {
+        SlotKind::Binding => 1,
+        SlotKind::Operand => 2,
+        SlotKind::Control => 3,
+        SlotKind::Argument => 4,
+        SlotKind::Departure => 5,
+        SlotKind::Continuation => 6,
+        SlotKind::Scratch => 7,
+        SlotKind::Capture => 8,
     }
 }
+fn kind_of(tag: u32) -> Option<SlotKind> {
+    Some(match tag {
+        1 => SlotKind::Binding,
+        2 => SlotKind::Operand,
+        3 => SlotKind::Control,
+        4 => SlotKind::Argument,
+        5 => SlotKind::Departure,
+        6 => SlotKind::Continuation,
+        7 => SlotKind::Scratch,
+        8 => SlotKind::Capture,
+        _ => return None,
+    })
+}
+/// The longest key: an invocation key (tag, task, invocation), a slot kind
+/// and a 16-byte role identity, within 48 bytes.
 #[derive(Clone)]
 pub(super) struct Key {
-    bytes: [u8; 33],
+    bytes: [u8; 48],
     len: usize,
 }
 impl Key {
     pub(super) fn tagged(tag: u8, bytes: &[u8]) -> Self {
         let mut key = Self {
-            bytes: [0; 33],
+            bytes: [0; 48],
             len: 1,
         };
         key.bytes[0] = tag;
@@ -55,7 +70,7 @@ pub(super) fn invocation_key(task: TaskId, invocation: u64) -> Key {
 }
 pub(super) fn operand_prefix(task: TaskId, invocation: u64) -> Key {
     let mut key = invocation_key(task, invocation);
-    key.append(&[slot_parts(Slot::Operand(0)).0]);
+    key.append(&[kind_tag(SlotKind::Operand)]);
     key
 }
 pub(super) fn owner_key(owner: Owner) -> Key {
@@ -64,13 +79,13 @@ pub(super) fn owner_key(owner: Owner) -> Key {
         | Owner::Value {
             task, invocation, ..
         } => {
-            let (kind, index) = match owner {
-                Owner::Value { slot, .. } => slot_parts(slot),
-                _ => (0, 0),
-            };
             let mut key = invocation_key(task, invocation);
-            key.append(&[kind]);
-            key.append(&index.to_be_bytes());
+            if let Owner::Value { slot, .. } = owner {
+                key.append(&[kind_tag(slot.kind())]);
+                key.append(&slot.id().0);
+            } else {
+                key.append(&[0]);
+            }
             key
         }
         Owner::Session(key) => Key::tagged(1, &key),
@@ -79,25 +94,99 @@ pub(super) fn owner_key(owner: Owner) -> Key {
         Owner::Saved(key) => Key::tagged(4, &key),
     }
 }
+impl TokenCodec for SlotKind {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.unsigned(u64::from(kind_tag(*self)));
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let tag = input.unsigned_u32()?;
+        kind_of(tag).ok_or(TokenError::UnsupportedVariant { variant: tag })
+    }
+}
 impl TokenCodec for Slot {
     fn encode(&self, out: &mut TokenWriter) {
-        let (tag, n) = slot_parts(*self);
-        out.sum(u32::from(tag), 1);
-        out.unsigned(u64::from(n));
+        out.sum(u32::from(kind_tag(self.kind())), 1);
+        out.bytes(&self.id().0);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         let (tag, fields) = input.sum()?;
         TokenReader::expect_fields(fields, 1)?;
-        let n = input.unsigned_u32()?;
+        let kind = kind_of(tag).ok_or(TokenError::UnsupportedVariant { variant: tag })?;
+        let id = input
+            .bytes()?
+            .try_into()
+            .map_err(|_| TokenError::Invalid("source role identity is not 16 bytes".into()))?;
+        Ok(Self::new(kind, RoleId(id)))
+    }
+}
+impl TokenCodec for SourceRole {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Operand(at) => {
+                out.sum(0, 1);
+                at.encode(out);
+            }
+            Self::Selected(at) => {
+                out.sum(1, 1);
+                at.encode(out);
+            }
+            Self::Atom { at, index } => {
+                out.sum(2, 2);
+                at.encode(out);
+                out.unsigned(u64::from(*index));
+            }
+            Self::LoopCursor(at) => {
+                out.sum(3, 1);
+                at.encode(out);
+            }
+            Self::LoopHeader(at) => {
+                out.sum(4, 1);
+                at.encode(out);
+            }
+            Self::PendingDeparture(at) => {
+                out.sum(5, 1);
+                at.encode(out);
+            }
+            Self::ActiveDeparture(at) => {
+                out.sum(6, 1);
+                at.encode(out);
+            }
+            Self::Binding { declared, name } => {
+                out.sum(7, 2);
+                declared.encode(out);
+                name.encode(out);
+            }
+            Self::Argument(index) => {
+                out.sum(8, 1);
+                out.unsigned(u64::from(*index));
+            }
+            Self::NativeResource(index) => {
+                out.sum(9, 1);
+                out.unsigned(u64::from(*index));
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        use lash_kernel_value::sites::Site;
+        let (tag, fields) = input.sum()?;
+        TokenReader::expect_fields(fields, if matches!(tag, 2 | 7) { 2 } else { 1 })?;
         Ok(match tag {
-            1 => Self::Binding(n),
-            2 => Self::Operand(n),
-            3 => Self::Control(n),
-            4 => Self::Argument(n),
-            5 => Self::Departure(n),
-            6 => Self::Continuation(n),
-            7 => Self::Scratch(n),
-            8 => Self::Capture(n),
+            0 => Self::Operand(Site::decode(input)?),
+            1 => Self::Selected(Site::decode(input)?),
+            2 => Self::Atom {
+                at: Site::decode(input)?,
+                index: input.unsigned_u32()?,
+            },
+            3 => Self::LoopCursor(Site::decode(input)?),
+            4 => Self::LoopHeader(Site::decode(input)?),
+            5 => Self::PendingDeparture(Site::decode(input)?),
+            6 => Self::ActiveDeparture(Site::decode(input)?),
+            7 => Self::Binding {
+                declared: Site::decode(input)?,
+                name: lash_kernel_value::Name::decode(input)?,
+            },
+            8 => Self::Argument(input.unsigned_u32()?),
+            9 => Self::NativeResource(input.unsigned_u32()?),
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })
     }

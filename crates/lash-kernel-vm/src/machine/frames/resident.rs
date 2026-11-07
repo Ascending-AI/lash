@@ -65,6 +65,22 @@ impl Frames {
                 Some((_, frame)) => {
                     let mut local = lash_kernel_doc::LogicalHeldV1::FRAME;
                     let code = self.exe.code(frame.code);
+                    if let Some(source) = &frame.pending.source {
+                        let mut fault = None;
+                        source.each_value(&mut |value| match arena.logical_local(value).and_then(
+                            |bytes| {
+                                local.checked_add(bytes).ok_or_else(|| {
+                                    HeapFault::Malformed("source holding cost overflow".into())
+                                })
+                            },
+                        ) {
+                            Ok(bytes) => local = bytes,
+                            Err(error) => fault = Some(error),
+                        });
+                        if let Some(error) = fault {
+                            return Err(error);
+                        }
+                    }
                     if let Some(pending) = frame.pending.peek() {
                         for role in &pending.roles {
                             local = local.checked_add(role.holding.bytes()).ok_or_else(|| {

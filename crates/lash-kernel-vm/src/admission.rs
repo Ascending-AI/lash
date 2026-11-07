@@ -1,8 +1,6 @@
 //! Shared source resource admission. All consumers use this owner for charge
 //! additions and slice inequalities; selected ledger programs travel in C.
 use crate::compile::expr::Close;
-#[path = "compile/room/publication/repeat.rs"]
-pub(crate) mod repeat;
 
 /// The source charge window, read before publishing speculative work.
 /// All charge additions and both slice inequalities have one owner.
@@ -104,14 +102,10 @@ pub(crate) struct SourceResources<'a> {
     pub(crate) limit: u64,
     pub(crate) safe_point: u64,
 }
-enum OccurrenceDebt {
-    Steps(Vec<usize>),
-    Repeated(Vec<(usize, u64)>),
-}
 pub(crate) struct SourceAccepted<'a, C> {
     resources: SourceResources<'a>,
     accepted: Accepted<C>,
-    occurrences: OccurrenceDebt,
+    occurrences: Vec<usize>,
 }
 impl SourceResources<'_> {
     pub(crate) fn facts(&self, need: &Allowance) -> Option<ResourceFacts> {
@@ -163,7 +157,7 @@ impl<'a> SourceResources<'a> {
         Ok(Some(SourceAccepted {
             resources: self,
             accepted,
-            occurrences: OccurrenceDebt::Steps(need.occurrences.clone()),
+            occurrences: need.occurrences.clone(),
         }))
     }
 }
@@ -185,16 +179,7 @@ impl<'a, C> SourceAccepted<'a, C> {
     pub(crate) fn commit<R, E>(self, commit: impl FnOnce(C) -> Result<R, E>) -> Result<R, E> {
         let result = commit(self.accepted.request)?;
         *self.resources.charged = self.accepted.end;
-        match self.occurrences {
-            OccurrenceDebt::Steps(sites) => self.resources.counters.publish_admitted(&sites),
-            OccurrenceDebt::Repeated(counts) => {
-                for (site, count) in counts {
-                    for _ in 0..count {
-                        self.resources.counters.publish_admitted(&[site]);
-                    }
-                }
-            }
-        }
+        self.resources.counters.publish_admitted(&self.occurrences);
         Ok(result)
     }
 }
