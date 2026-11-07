@@ -261,6 +261,12 @@ impl Running<'_> {
                             return self.halt(RegionStop::Native);
                         }
                         guarded = true;
+                        // What the kernel has no answer for (a zero divisor,
+                        // a result past the word) is the native's to answer.
+                        match self.scalar_answer(op)? {
+                            Some(answer) => answered = Some(answer),
+                            None => return self.halt(RegionStop::Native),
+                        }
                     }
                 },
                 RegionOp::Effect { kind, value, .. } => match served {
@@ -317,6 +323,47 @@ impl Running<'_> {
                 }
                 return Err(invalid(Refused::Facts));
             }
+            // An integer kernel on registers no native could take raises a
+            // zero divisor itself, before it is billed, as the native does.
+            if answered.is_none()
+                && let RegionOp::IntBinary { kernel, rhs, .. } = op
+                && let Some((kind, message)) = kernel.refusal(self.registers.integer(
+                    self.frame_index(),
+                    self.reached.invocation,
+                    rhs.index(),
+                )?)
+            {
+                return self.halt(RegionStop::Refused {
+                    kind,
+                    message: message.into(),
+                });
+            }
+            // A read the state refuses with a typed error (a missing key, an
+            // index past the end) raises it before the read is billed, as a
+            // refused heap step does.
+            let read = match op {
+                RegionOp::Read {
+                    spec,
+                    base,
+                    dst,
+                    next,
+                } => match self.read_answer(spec, *base, *dst, *next) {
+                    Ok(answer) => Some(answer),
+                    Err(
+                        lash_kernel_state::kernel_internals::logical::LeaseFault::BoundaryRequired,
+                    ) => return self.halt(RegionStop::Boundary),
+                    Err(lash_kernel_state::kernel_internals::logical::LeaseFault::Native(
+                        lash_kernel_doc::NativeError::Refused { kind, message },
+                    )) => {
+                        return self.halt(RegionStop::Refused {
+                            kind,
+                            message: message.into(),
+                        });
+                    }
+                    Err(fault) => return Err(storage_fault(fault)),
+                },
+                _ => None,
+            };
             let counters = self.counters;
             let before = charge::billed(self.limiters, &mut self.limits, |limits| {
                 charge::bill(counters, limits, &step.charges, ChargeMoment::Before, None)
@@ -366,20 +413,7 @@ impl Running<'_> {
                 continue;
             }
             let answer = match op {
-                RegionOp::Read {
-                    spec,
-                    base,
-                    dst,
-                    next,
-                } => match self.read_answer(spec, *base, *dst, *next) {
-                    Ok(answer) => answer,
-                    Err(
-                        lash_kernel_state::kernel_internals::logical::LeaseFault::BoundaryRequired,
-                    ) => {
-                        return self.halt(RegionStop::Boundary);
-                    }
-                    Err(fault) => return Err(storage_fault(fault)),
-                },
+                RegionOp::Read { .. } => read.ok_or_else(|| invalid(Refused::Facts))?,
                 _ => match answered {
                     Some(answer) => answer,
                     None => self

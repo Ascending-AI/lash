@@ -119,12 +119,28 @@ impl Running<'_> {
         } else {
             None
         };
+        // A list position past the end, which the state declines to stage.
+        let mut past_end = None;
         let operation = match kernel.kind() {
             HeapKind::Field { name, removing } => {
                 let base = *self
                     .heap_values
                     .first()
                     .ok_or_else(|| invalid(Refused::Facts))?;
+                if self.view.kind(base).map_err(RegionError::Heap)?
+                    != lash_kernel_doc::ValueKind::Record
+                {
+                    self.stop = Some(RegionStop::Refused {
+                        kind: "type_error",
+                        message: if *removing {
+                            "only a record has fields to remove"
+                        } else {
+                            "only a record has fields to assign"
+                        }
+                        .into(),
+                    });
+                    return Ok(false);
+                }
                 let object = self.view.object(base).map_err(RegionError::Heap)?;
                 let next = if *removing {
                     None
@@ -178,6 +194,8 @@ impl Running<'_> {
                         }
                     }
                 }
+                // A member the source cannot write or remove raises as the
+                // machine's own write does (`K-VAL-010`).
                 let member = match kind {
                     lash_kernel_doc::ValueKind::List => {
                         let index = match self.view.inline(key).map_err(RegionError::Heap)? {
@@ -187,15 +205,60 @@ impl Running<'_> {
                                 (value >= 0.0 && value.fract() == 0.0 && value < u64::MAX as f64)
                                     .then_some(value as u64)
                             }
-                            _ => None,
-                        }
-                        .ok_or_else(|| invalid(Refused::Facts))?;
+                            _ if self.view.kind(key).map_err(RegionError::Heap)?
+                                == lash_kernel_doc::ValueKind::Int =>
+                            {
+                                None
+                            }
+                            _ => {
+                                self.stop = Some(RegionStop::Refused {
+                                    kind: "type_error",
+                                    message: "a list is indexed by a number".into(),
+                                });
+                                return Ok(false);
+                            }
+                        };
+                        let Some(index) = index else {
+                            let length = self.view.member_count(object).map_err(storage_fault)?;
+                            self.stop = Some(RegionStop::Refused {
+                                kind: "index_out_of_range",
+                                message: if removing {
+                                    format!("a list of {length} has no element there to remove")
+                                } else {
+                                    format!("a list of {length} is assigned at 0 to {length}")
+                                }
+                                .into(),
+                            });
+                            return Ok(false);
+                        };
+                        past_end = Some((object, removing));
                         LeaseMember::List(index)
+                    }
+                    lash_kernel_doc::ValueKind::Record
+                        if self.view.kind(key).map_err(RegionError::Heap)?
+                            != lash_kernel_doc::ValueKind::Text =>
+                    {
+                        self.stop = Some(RegionStop::Refused {
+                            kind: "type_error",
+                            message: "a record index must be text".into(),
+                        });
+                        return Ok(false);
                     }
                     lash_kernel_doc::ValueKind::Map
                     | lash_kernel_doc::ValueKind::Set
                     | lash_kernel_doc::ValueKind::Record => LeaseMember::Table(key),
-                    _ => return Err(invalid(Refused::Facts)),
+                    _ => {
+                        self.stop = Some(RegionStop::Refused {
+                            kind: "type_error",
+                            message: if removing {
+                                "only a list, a record, a map or a set has an index to remove"
+                            } else {
+                                "only a list, a record, a map or a set is assigned by index"
+                            }
+                            .into(),
+                        });
+                        return Ok(false);
+                    }
                 };
                 let next = if removing {
                     None
@@ -295,6 +358,21 @@ impl Running<'_> {
                 self.stop = Some(RegionStop::Refused {
                     kind,
                     message: message.into(),
+                });
+                return Ok(false);
+            }
+            Err(LeaseFault::Native(lash_kernel_doc::NativeError::Decline))
+                if let Some((object, removing)) = past_end =>
+            {
+                let length = self.view.member_count(object).map_err(storage_fault)?;
+                self.stop = Some(RegionStop::Refused {
+                    kind: "index_out_of_range",
+                    message: if removing {
+                        format!("a list of {length} has no element there to remove")
+                    } else {
+                        format!("a list of {length} is assigned at 0 to {length}")
+                    }
+                    .into(),
                 });
                 return Ok(false);
             }

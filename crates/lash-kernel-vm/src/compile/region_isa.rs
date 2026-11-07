@@ -159,6 +159,18 @@ impl IntKernel {
     pub(crate) fn apply(&self, lhs: i64, rhs: i64) -> Option<i64> {
         doc::scalar::int_number(self.op, lhs, rhs)
     }
+    /// The typed error the native raises for `rhs` whatever `lhs` is: a
+    /// zero integer divisor.
+    pub(crate) fn refusal(&self, rhs: i64) -> Option<(&'static str, &'static str)> {
+        (rhs == 0
+            && matches!(
+                self.op,
+                doc::scalar::ScalarOp::RemTrunc
+                    | doc::scalar::ScalarOp::RemFloor
+                    | doc::scalar::ScalarOp::FloorDiv
+            ))
+        .then_some(("division_by_zero", "integer divisor is zero"))
+    }
     pub(crate) fn charge(&self, lhs: i64, rhs: i64, result: i64) -> u64 {
         let mask =
             usize::from(lhs != 0) | (usize::from(rhs != 0) << 1) | (usize::from(result != 0) << 3);

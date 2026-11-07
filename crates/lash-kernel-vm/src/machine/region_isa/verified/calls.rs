@@ -98,6 +98,19 @@ impl Running<'_> {
             if !same {
                 return Err(invalid(Refused::Facts));
             }
+            // A callee that is no function raises before the call, unbilled,
+            // as the machine's own call does (`K-FN-005`).
+            if !matches!(
+                self.view.kind(callable).map_err(RegionError::Heap)?,
+                lash_kernel_doc::ValueKind::Function | lash_kernel_doc::ValueKind::Closure
+            ) {
+                self.call_captures.clear();
+                self.stop = Some(RegionStop::Refused {
+                    kind: "type_error",
+                    message: "only a closure or a function reference can be called".into(),
+                });
+                return Ok(None);
+            }
             let Some(binding) = call
                 .plan
                 .bind_callable(&caller.exe, &mut self.view, callable)
