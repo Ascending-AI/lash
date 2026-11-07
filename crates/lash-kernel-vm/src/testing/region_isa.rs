@@ -7,6 +7,7 @@ use lash_kernel_state::kernel_internals::logical::Owner;
 use lash_kernel_state::paged::PageSource;
 
 mod comparison;
+mod execution;
 #[cfg(test)]
 mod tests;
 
@@ -17,9 +18,23 @@ pub struct QualificationCase {
     bounds: Bounds,
     initial: fn() -> Box<dyn PageSource>,
     schedule: Box<[(u64, Interruption)]>,
+    answers: Option<fn(&crate::Request) -> crate::Outcome>,
+    reopen_parks: bool,
 }
 
 impl QualificationCase {
+    /// Supplies external outcomes independently to each run, in request order.
+    pub fn with_answers(mut self, answers: fn(&crate::Request) -> crate::Outcome) -> Self {
+        self.answers = Some(answers);
+        self
+    }
+
+    /// Reopens each independently reached park before delivering its answer.
+    pub fn with_park_reopen(mut self) -> Self {
+        self.reopen_parks = true;
+        self
+    }
+
     /// Source admission, never a compiler/verifier summary.
     pub fn program(&self) -> &Program {
         &self.program
@@ -136,7 +151,8 @@ pub struct PrefixFacts {
 /// A complete observation at one reached legal source prefix.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrefixSnapshot {
-    facts: PrefixFacts,
+    facts: Option<PrefixFacts>,
+    canonical: Option<Box<CanonicalPrefix>>,
     witness: Option<ExecutionWitness>,
 }
 
@@ -144,12 +160,19 @@ impl PrefixSnapshot {
     /// Records observed facts. This constructor mints no execution capability.
     pub fn observed(facts: PrefixFacts) -> Self {
         Self {
-            facts,
+            facts: Some(facts),
+            canonical: None,
             witness: None,
         }
     }
-    pub fn facts(&self) -> &PrefixFacts {
-        &self.facts
+    /// Synthetic fixture facts, absent for a real machine observation.
+    pub fn facts(&self) -> Option<&PrefixFacts> {
+        self.facts.as_ref()
+    }
+
+    /// Complete independently observed machine state, absent for fixtures.
+    pub fn canonical(&self) -> Option<&CanonicalPrefix> {
+        self.canonical.as_deref()
     }
 
     /// Physical counters observed from the ISA, separate from source semantics.
@@ -159,10 +182,31 @@ impl PrefixSnapshot {
     }
 }
 
+/// The full equality domain at an actual run boundary. The semantic reader
+/// includes session values, task/frame order, pending operands, source roles,
+/// ordered completion debt, graph identity, sharing, cycles and insertion order.
+/// The ledger additionally retains unreachable cycles and every priced owner.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CanonicalPrefix {
+    pub state: lash_kernel_state::semantic::Checkpoint,
+    pub session: Option<lash_kernel_state::semantic::Checkpoint>,
+    pub resources: lash_kernel_state::kernel_internals::logical::testing::LedgerSnapshot,
+    pub meters: crate::Meters,
+    pub peak: u64,
+    pub charges: Vec<lash_kernel_exec::Weight>,
+    pub stop: String,
+    /// Canonically encoded stop payload, including full opaque identities.
+    pub event: Vec<Vec<u8>>,
+    pub printed: Vec<Vec<u8>>,
+    pub interruption: Option<Interruption>,
+}
+
 /// Instrumentation from C's real runner. These are diagnostics, never semantic
 /// capabilities. Source execution cannot satisfy this structural requirement.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ExecutionWitness {
+    /// False when any structural counter is unobserved. Partial counters never qualify.
+    pub complete: bool,
     pub verified_operations: u64,
     pub interior_root_transactions: u64,
     pub source_fallbacks: u64,
@@ -212,6 +256,7 @@ pub struct QualificationFailure {
     expected: Option<Box<PrefixSnapshot>>,
     actual: Option<Box<PrefixSnapshot>>,
     evidence: String,
+    reached: Vec<PrefixSnapshot>,
 }
 
 impl QualificationFailure {
@@ -227,6 +272,11 @@ impl QualificationFailure {
     pub fn actual(&self) -> Option<&PrefixSnapshot> {
         self.actual.as_deref()
     }
+    /// Observations reached before an adapter failed. They never prove completion.
+    pub fn reached(&self) -> &[PrefixSnapshot] {
+        &self.reached
+    }
+
     pub fn evidence(&self) -> &str {
         &self.evidence
     }
@@ -237,6 +287,7 @@ impl QualificationFailure {
             expected: None,
             actual: None,
             evidence: evidence.into(),
+            reached: Vec::new(),
         }
     }
 }
@@ -283,32 +334,33 @@ pub fn qualification_case(
         bounds,
         initial,
         schedule,
+        answers: None,
+        reopen_parks: false,
     }
 }
 
-/// Runs the source evaluator with the independent itemized resource oracle.
+/// Executes the testing-only statement evaluator and reads its own checkpoints.
 ///
 /// # Errors
-/// Source prefix/itemized observations are not yet exposed by C/D.
+/// Admission, execution, observation or an unsupported interruption fails.
 pub fn source_oracle(
-    _case: &QualificationCase,
+    case: &QualificationCase,
 ) -> Result<Vec<PrefixSnapshot>, QualificationFailure> {
-    Err(QualificationFailure::unavailable(
-        "C/D source-prefix and itemized-resource observation adapters are not integrated",
-    ))
+    execution::source(case)
 }
 
-/// Observes every reached prefix of the verified ISA in the requested layout.
+/// Executes the verified region machine, with grouped kernels selected by layout.
 ///
 /// # Errors
-/// A/B/C/D execution and materialization are not yet integrated.
+/// Admission, execution, observation or an unsupported interruption fails.
 pub fn isa_prefixes(
-    _case: &QualificationCase,
-    _layout: IsaLayout,
+    case: &QualificationCase,
+    layout: IsaLayout,
 ) -> Result<Vec<PrefixSnapshot>, QualificationFailure> {
-    Err(QualificationFailure::unavailable(
-        "A/B/C/D verified ISA prefix adapter is not integrated",
-    ))
+    execution::isa(case, layout).map_err(|mut failure| {
+        failure.layout = Some(layout);
+        failure
+    })
 }
 
 /// Compares both layouts with independently executed source observations.

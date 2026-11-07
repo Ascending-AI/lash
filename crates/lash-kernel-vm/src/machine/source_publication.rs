@@ -181,6 +181,7 @@ impl<'a> MemoryLimit<'a> {
     /// The live peak past the limit asks the memory limiter, which grows
     /// the limit or ends the run. An unmetered run has no bound.
     fn admit(&mut self, peak: u64) -> Result<u64, Halt> {
+        self.limiters.observe_peak(peak);
         let Some(limit) = self.limit.as_deref_mut() else {
             return Ok(u64::MAX);
         };

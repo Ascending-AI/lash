@@ -144,6 +144,8 @@ pub(crate) fn start(
         end: None,
         ended: false,
         observer: None,
+        #[cfg(any(test, feature = "testing"))]
+        qualification_operations: 0,
         ran: Vec::new(),
         raised: None,
         catches: Default::default(),

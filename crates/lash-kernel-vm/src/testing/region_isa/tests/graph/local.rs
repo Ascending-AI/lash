@@ -577,8 +577,14 @@ pub(super) fn trace(scene: &Scene, layout: IsaLayout, stop: usize) -> (Vec<Prefi
         }
     }
     let last = out.last().unwrap();
-    let ordinal = last.facts.at.site as usize;
-    let failure = last.facts.failure.as_ref().map(|(why, _)| why.as_str());
+    let ordinal = last.facts.as_ref().unwrap().at.site as usize;
+    let failure = last
+        .facts
+        .as_ref()
+        .unwrap()
+        .failure
+        .as_ref()
+        .map(|(why, _)| why.as_str());
     let (frozen, stats) = local.materialize(ordinal, failure);
     *out.last_mut().unwrap() = frozen;
     (out, stats)

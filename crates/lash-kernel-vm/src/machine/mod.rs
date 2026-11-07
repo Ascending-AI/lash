@@ -473,6 +473,8 @@ pub struct KernelMachine {
     ended: bool,
     /// What observes the run, when anything does: never part of its state.
     observer: Option<Box<Observer>>,
+    #[cfg(any(test, feature = "testing"))]
+    qualification_operations: u64,
     /// Statement starts in this run segment, never captured in parked state.
     ran: Vec<u64>,
     /// The task whose raise the running step carries, and where it
@@ -1456,6 +1458,37 @@ pub(crate) fn take_most_visited_frames() -> usize {
 
 #[cfg(any(test, feature = "testing"))]
 impl KernelMachine {
+    pub(crate) fn qualification_resources(
+        &self,
+    ) -> Result<lash_kernel_state::kernel_internals::logical::testing::LedgerSnapshot, HeapFault>
+    {
+        self.logical.borrow().testing_snapshot(self.heap.pages())
+    }
+
+    pub(crate) fn qualification_restore_peak(&mut self, peak: u64) {
+        self.limiters.observe_peak(peak);
+    }
+
+    pub(crate) fn qualification_peak(&self) -> u64 {
+        self.limiters.observed_peak.max(self.logical_memory.get())
+    }
+
+    pub(crate) fn qualification_operations(&self) -> u64 {
+        self.qualification_operations
+    }
+
+    /// A terminal observation still projects the surviving task/session graph.
+    /// Restore the execution guard on every result; this grants no resume path.
+    pub(crate) fn qualification_checkpoint(
+        &mut self,
+    ) -> Result<lash_kernel_state::semantic::Checkpoint, crate::SealError> {
+        let ended = self.ended;
+        self.ended = false;
+        let result = self.try_semantic_checkpoint();
+        self.ended = ended;
+        result
+    }
+
     /// The shared kernel equality domain at a projection point.
     pub(crate) fn try_semantic_checkpoint(
         &mut self,

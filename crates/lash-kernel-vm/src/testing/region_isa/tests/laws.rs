@@ -42,7 +42,14 @@ fn generated_prefixes_match_both_fake_layouts() {
                     });
                     cases += 1;
                     for (ordinal, reached) in expected.iter().enumerate() {
-                        let charged: u64 = reached.facts.charges.iter().map(|c| c.units).sum();
+                        let charged: u64 = reached
+                            .facts
+                            .as_ref()
+                            .unwrap()
+                            .charges
+                            .iter()
+                            .map(|c| c.units)
+                            .sum();
                         for delta in [-1_i64, 0, 1] {
                             let cutoff = |n: u64| n.saturating_add_signed(delta);
                             for bounded in [
@@ -51,11 +58,12 @@ fn generated_prefixes_match_both_fake_layouts() {
                                     ..base.clone()
                                 },
                                 Case {
-                                    memory: cutoff(reached.facts.peak),
+                                    memory: cutoff(reached.facts.as_ref().unwrap().peak),
                                     ..base.clone()
                                 },
                                 Case {
-                                    depth: cutoff(u64::from(reached.facts.depth)) as u32,
+                                    depth: cutoff(u64::from(reached.facts.as_ref().unwrap().depth))
+                                        as u32,
                                     ..base.clone()
                                 },
                             ] {
@@ -100,11 +108,17 @@ fn generated_prefixes_match_both_fake_layouts() {
 fn corrupted_prefixes_are_rejected_by_their_observed_facts() {
     type Mutation = fn(&mut Vec<PrefixSnapshot>);
     let mutants: &[(&str, Mutation)] = &[
-        ("foreign lease", |s| s[2].facts.dependencies[0].0.id += 1),
-        ("stale lease", |s| s[2].facts.dependencies[0].1 -= 1),
-        ("sibling draft", |s| s[2].facts.dependencies[0].2 += 1),
+        ("foreign lease", |s| {
+            s[2].facts.as_mut().unwrap().dependencies[0].0.id += 1
+        }),
+        ("stale lease", |s| {
+            s[2].facts.as_mut().unwrap().dependencies[0].1 -= 1
+        }),
+        ("sibling draft", |s| {
+            s[2].facts.as_mut().unwrap().dependencies[0].2 += 1
+        }),
         ("equal-price substitution", |s| {
-            s[2].facts.values[0].1 = scalar(99)
+            s[2].facts.as_mut().unwrap().values[0].1 = scalar(99)
         }),
         ("duplicate occurrence", |s| {
             s.insert(2, s[1].clone());
@@ -112,11 +126,17 @@ fn corrupted_prefixes_are_rejected_by_their_observed_facts() {
         ("skipped occurrence", |s| {
             s.remove(2);
         }),
-        ("debt substitution", |s| s[2].facts.debt[0].units += 1),
-        ("changed dependency", |s| s[2].facts.dependencies[1].2 += 1),
-        ("mutated peak", |s| s[2].facts.peak -= 1),
+        ("debt substitution", |s| {
+            s[2].facts.as_mut().unwrap().debt[0].units += 1
+        }),
+        ("changed dependency", |s| {
+            s[2].facts.as_mut().unwrap().dependencies[1].2 += 1
+        }),
+        ("mutated peak", |s| s[2].facts.as_mut().unwrap().peak -= 1),
         ("owner edge", |s| {
             s[2].facts
+                .as_mut()
+                .unwrap()
                 .roots
                 .iter_mut()
                 .find(|root| !root.edges.is_empty())
@@ -125,32 +145,52 @@ fn corrupted_prefixes_are_rejected_by_their_observed_facts() {
                 .1 += 1;
         }),
         ("owner identity", |s| {
-            s[2].facts.roots[0].owner = Owner::Frame {
+            s[2].facts.as_mut().unwrap().roots[0].owner = Owner::Frame {
                 task: TaskId(99),
                 invocation: 0,
             }
         }),
-        ("root holding", |s| s[2].facts.roots[0].direct_bytes += 1),
-        ("call offset", |s| s[2].facts.call_offsets[0].1 += 1),
-        ("value provenance", |s| {
-            s[2].facts.values[0].2 = s[1].facts.values[0].2
+        ("root holding", |s| {
+            s[2].facts.as_mut().unwrap().roots[0].direct_bytes += 1
         }),
-        ("producer position", |s| s[2].facts.origins[0].at.site += 99),
+        ("call offset", |s| {
+            s[2].facts.as_mut().unwrap().call_offsets[0].1 += 1
+        }),
+        ("value provenance", |s| {
+            s[2].facts.as_mut().unwrap().values[0].2 = s[1].facts.as_ref().unwrap().values[0].2
+        }),
+        ("producer position", |s| {
+            s[2].facts.as_mut().unwrap().origins[0].at.site += 99
+        }),
         ("producer kernel", |s| {
-            s[2].facts.origins[0].kernel = b"multiply".to_vec()
+            s[2].facts.as_mut().unwrap().origins[0].kernel = b"multiply".to_vec()
         }),
         ("producer input", |s| {
-            s[2].facts.origins[0].inputs[0] = id(IdentityKind::Provenance, 999)
+            s[2].facts.as_mut().unwrap().origins[0].inputs[0] = id(IdentityKind::Provenance, 999)
         }),
-        ("charge order", |s| s[2].facts.charges.swap(0, 1)),
-        ("debt cursor", |s| s[2].facts.debt_cursor += 1),
+        ("charge order", |s| {
+            s[2].facts.as_mut().unwrap().charges.swap(0, 1)
+        }),
+        ("debt cursor", |s| {
+            s[2].facts.as_mut().unwrap().debt_cursor += 1
+        }),
         ("source occurrence", |s| {
-            s[2].facts.at.source_occurrence += 1
+            s[2].facts.as_mut().unwrap().at.source_occurrence += 1
         }),
-        ("operand", |s| s[3].facts.operands[0] = scalar(999)),
-        ("continuation", |s| s[2].facts.continuation.push(9)),
+        ("operand", |s| {
+            s[3].facts.as_mut().unwrap().operands[0] = scalar(999)
+        }),
+        ("continuation", |s| {
+            s[2].facts.as_mut().unwrap().continuation.push(9)
+        }),
         ("lost release", |s| {
-            s.last_mut().unwrap().facts.released.clear();
+            s.last_mut()
+                .unwrap()
+                .facts
+                .as_mut()
+                .unwrap()
+                .released
+                .clear();
         }),
     ];
     let case = Case {
@@ -174,7 +214,13 @@ fn corrupted_prefixes_are_rejected_by_their_observed_facts() {
     let expected_throw = source_oracle_fixture(&throwing);
     for layout in [IsaLayout::Generic, IsaLayout::Specialized] {
         let mut actual = isa_fixture(&throwing, layout);
-        actual.last_mut().unwrap().facts.stop_payload = Some(scalar(99));
+        actual
+            .last_mut()
+            .unwrap()
+            .facts
+            .as_mut()
+            .unwrap()
+            .stop_payload = Some(scalar(99));
         comparison::compare(&expected_throw, &actual, layout)
             .expect_err("equal-price throw payload substitution");
     }
@@ -194,16 +240,17 @@ fn identity_mapping_is_injective_and_lasts_across_prefixes() {
     // Use the same exhaustive visitor as the comparator only to rename every
     // identity. Expected identity/alias behavior still comes from the source.
     for snapshot in &mut renamed {
-        rename_facts(&mut snapshot.facts, false);
+        rename_facts(snapshot.facts.as_mut().unwrap(), false);
     }
     comparison::compare(&source, &renamed, IsaLayout::Generic).unwrap();
     let mut collapsed = source.clone();
     for snapshot in &mut collapsed {
-        rename_facts(&mut snapshot.facts, true);
+        rename_facts(snapshot.facts.as_mut().unwrap(), true);
     }
     comparison::compare(&source, &collapsed, IsaLayout::Generic).expect_err("merged entities");
     let mut stale = renamed;
-    stale[3].facts.values[1].1 = SemanticValue::Reference(id(IdentityKind::Entity, 999));
+    stale[3].facts.as_mut().unwrap().values[1].1 =
+        SemanticValue::Reference(id(IdentityKind::Entity, 999));
     let failure = comparison::compare(&source, &stale, IsaLayout::Specialized).unwrap_err();
     assert_eq!(failure.prefix, 3);
 }

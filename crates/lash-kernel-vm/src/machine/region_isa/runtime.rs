@@ -192,6 +192,11 @@ impl KernelMachine {
                     "canonical region execution refused at {at:?}: {reason:?}"
                 )),
             })?;
+            #[cfg(any(test, feature = "testing"))]
+            let observations = (
+                lease.execution.observed_operations,
+                std::mem::take(&mut lease.execution.observed_charges),
+            );
             let prefix = lease.materialize().map_err(halt)?;
             let (charge_limit, memory) = prefix.limits();
             let attempted = prefix.reconstruction().attempted.clone();
@@ -201,6 +206,19 @@ impl KernelMachine {
                 .map_err(halt)?
                 .commit()
                 .map_err(halt)?;
+            #[cfg(any(test, feature = "testing"))]
+            {
+                self.qualification_operations += observations.0;
+                if let Some(tape) = self
+                    .observer
+                    .as_ref()
+                    .and_then(|observer| observer.charges.as_ref())
+                {
+                    for event in observations.1 {
+                        tape.push(event);
+                    }
+                }
+            }
             // A limiter grew the limits in the run; the machine keeps them.
             if !matches!(self.bounds.charge, crate::Charge::Off) {
                 self.bounds.charge_limit = charge_limit;

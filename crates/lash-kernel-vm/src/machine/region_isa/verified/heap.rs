@@ -382,6 +382,8 @@ impl Running<'_> {
         let payment = charge::billed(self.limiters, &mut self.limits, |limits| {
             charge::bill(entry, limits, &step.charges, ChargeMoment::After, None)
         })?;
+        #[cfg(any(test, feature = "testing"))]
+        self.observed_charges.extend_from_slice(&payment.events);
         self.counters = payment.counters;
         if let Some(crossing) = payment.crossing {
             self.refusal = Some(crate::Bound::Charge);

@@ -54,8 +54,8 @@ impl Identities {
     fn charge(&mut self, charge: &mut ChargeEntry) {
         self.coordinate(&mut charge.at);
     }
-    fn snapshot(&mut self, snapshot: &PrefixSnapshot) -> PrefixFacts {
-        let mut facts = snapshot.facts.clone();
+    fn snapshot(&mut self, snapshot: &PrefixSnapshot) -> Option<PrefixFacts> {
+        let mut facts = snapshot.facts.clone()?;
         facts.values.sort_by_key(|(role, _, _)| *role);
         facts.roots.sort_by_key(|root| root.owner);
         self.coordinate(&mut facts.at);
@@ -119,7 +119,7 @@ impl Identities {
         facts.retained.sort_by_key(|(id, _)| *id);
         facts.released.sort();
         facts.dependencies.sort();
-        facts
+        Some(facts)
     }
 }
 
@@ -133,16 +133,30 @@ pub(super) fn compare(
     for prefix in 0..expected.len().max(actual.len()) {
         let source = expected.get(prefix);
         let isa = actual.get(prefix);
-        let equal = source
-            .zip(isa)
-            .is_some_and(|(source, isa)| source_ids.snapshot(source) == isa_ids.snapshot(isa));
+        let equal = source.zip(isa).is_some_and(|(source, isa)| {
+            match (&source.canonical, &isa.canonical) {
+                (Some(source), Some(isa)) => source == isa,
+                (None, None) => source_ids
+                    .snapshot(source)
+                    .zip(isa_ids.snapshot(isa))
+                    .is_some_and(|(source, isa)| source == isa),
+                _ => false,
+            }
+        });
         if !equal {
+            let evidence = match source.zip(isa) {
+                Some((source, isa)) if source.canonical.is_some() && isa.canonical.is_some() => {
+                    disagreements(std::slice::from_ref(source), std::slice::from_ref(isa)).first().map_or_else(|| "canonical mismatch".into(), |(_, field, expected, actual)| format!("{field}: source={expected}; region={actual}"))
+                },
+                _ => "prefix-exact values, identity, graph, resource, charge or continuation mismatch".into(),
+            };
             return Err(QualificationFailure {
                 prefix,
                 layout: Some(layout),
                 expected: source.cloned().map(Box::new),
                 actual: isa.cloned().map(Box::new),
-                evidence: "prefix-exact values, identity, graph, resource, charge or continuation mismatch".into(),
+                evidence,
+                reached: Vec::new(),
             });
         }
     }
@@ -170,6 +184,11 @@ pub(super) fn qualify_observations(
                     "ISA execution counters were not observed; prefix agreement alone is incomplete",
                 ));
             };
+            if !witness.complete {
+                return Err(QualificationFailure::unavailable(
+                    "complete ISA structural counters are not instrumented",
+                ));
+            }
             if witness.interior_root_transactions != 0
                 || witness.source_fallbacks != 0
                 || witness.interior_roots != 0
@@ -189,16 +208,27 @@ pub(super) fn qualify_observations(
     }
     let mut coverage = BTreeMap::new();
     for prefix in source {
-        if let Some((kind, _)) = &prefix.facts.failure {
+        if let Some(canonical) = &prefix.canonical {
+            *coverage
+                .entry(format!("stop/{}", canonical.stop))
+                .or_default() += 1;
+            continue;
+        }
+        let Some(facts) = prefix.facts.as_ref() else {
+            return Err(QualificationFailure::unavailable(
+                "a snapshot omitted its observations",
+            ));
+        };
+        if let Some((kind, _)) = &facts.failure {
             *coverage.entry(format!("failure/{kind}")).or_default() += 1;
         }
-        if let Some(interruption) = prefix.facts.interruption {
+        if let Some(interruption) = facts.interruption {
             *coverage
                 .entry(format!("interruption/{interruption:?}"))
                 .or_default() += 1;
         }
         *coverage
-            .entry(format!("depth/{}", prefix.facts.depth))
+            .entry(format!("depth/{}", facts.depth))
             .or_default() += 1;
     }
     Ok(QualificationReport {
@@ -208,4 +238,172 @@ pub(super) fn qualify_observations(
         coverage,
         witnesses,
     })
+}
+
+/// Reports the first differing prefix for each independently observed field.
+/// Full observations remain attached to QualificationFailure; this projection
+/// makes large graph disagreements readable without replacing exact equality.
+pub(super) fn disagreements(
+    source: &[PrefixSnapshot],
+    isa: &[PrefixSnapshot],
+) -> Vec<(usize, String, String, String)> {
+    let mut first = BTreeMap::new();
+    for prefix in 0..source.len().max(isa.len()) {
+        let pair = source
+            .get(prefix)
+            .and_then(PrefixSnapshot::canonical)
+            .zip(isa.get(prefix).and_then(PrefixSnapshot::canonical));
+        let Some((source, isa)) = pair else {
+            first.entry("prefix presence".into()).or_insert((
+                prefix,
+                format!("{} prefixes", source.len()),
+                format!("{} prefixes", isa.len()),
+            ));
+            continue;
+        };
+        let mut field = |name: &str, equal: bool, expected: String, actual: String| {
+            if !equal {
+                first
+                    .entry(name.into())
+                    .or_insert((prefix, expected, actual));
+            }
+        };
+        field(
+            "charge",
+            source.meters.charged == isa.meters.charged,
+            format!("{:?}", source.meters.charged),
+            format!("{:?}", isa.meters.charged),
+        );
+        field(
+            "peak",
+            source.peak == isa.peak,
+            source.peak.to_string(),
+            isa.peak.to_string(),
+        );
+        field(
+            "memory",
+            source.meters.memory == isa.meters.memory,
+            source.meters.memory.to_string(),
+            isa.meters.memory.to_string(),
+        );
+        field(
+            "live tasks",
+            source.meters.live_tasks == isa.meters.live_tasks,
+            source.meters.live_tasks.to_string(),
+            isa.meters.live_tasks.to_string(),
+        );
+        field(
+            "stop",
+            source.stop == isa.stop,
+            source.stop.clone(),
+            isa.stop.clone(),
+        );
+        field(
+            "stop payload",
+            source.event == isa.event,
+            format!("{:?}", source.event),
+            format!("{:?}", isa.event),
+        );
+        field(
+            "charges",
+            source.charges == isa.charges,
+            format!("{:?}", source.charges),
+            format!("{:?}", isa.charges),
+        );
+        field(
+            "root holdings",
+            source.resources.roots == isa.resources.roots,
+            format!("{:?}", source.resources.roots),
+            format!("{:?}", isa.resources.roots),
+        );
+        field(
+            "entity holdings",
+            source.resources.entities == isa.resources.entities,
+            format!("{:?}", source.resources.entities),
+            format!("{:?}", isa.resources.entities),
+        );
+        field(
+            "balance",
+            source.resources.balance == isa.resources.balance,
+            format!("{:?}", source.resources.balance),
+            format!("{:?}", isa.resources.balance),
+        );
+        field(
+            "next invocation",
+            source.resources.next_invocation == isa.resources.next_invocation,
+            source.resources.next_invocation.to_string(),
+            isa.resources.next_invocation.to_string(),
+        );
+        for (name, expected, actual) in [
+            (
+                "continuation",
+                source.state.continuation(),
+                isa.state.continuation(),
+            ),
+            ("graph", source.state.graph(), isa.state.graph()),
+        ] {
+            if expected != actual {
+                let at = expected
+                    .iter()
+                    .zip(actual)
+                    .position(|(a, b)| a != b)
+                    .unwrap_or(expected.len().min(actual.len()));
+                field(
+                    name,
+                    false,
+                    format!("row {at}/{}: {:?}", expected.len(), expected.get(at)),
+                    format!("row {at}/{}: {:?}", actual.len(), actual.get(at)),
+                );
+            }
+        }
+        match (&source.session, &isa.session) {
+            (Some(source), Some(isa)) => {
+                for (name, expected, actual) in [
+                    (
+                        "session continuation",
+                        source.continuation(),
+                        isa.continuation(),
+                    ),
+                    ("session graph", source.graph(), isa.graph()),
+                ] {
+                    if expected != actual {
+                        let at = expected
+                            .iter()
+                            .zip(actual)
+                            .position(|(a, b)| a != b)
+                            .unwrap_or(expected.len().min(actual.len()));
+                        field(
+                            name,
+                            false,
+                            format!("row {at}/{}: {:?}", expected.len(), expected.get(at)),
+                            format!("row {at}/{}: {:?}", actual.len(), actual.get(at)),
+                        );
+                    }
+                }
+            }
+            (None, None) => {}
+            _ => field(
+                "session presence",
+                false,
+                source.session.is_some().to_string(),
+                isa.session.is_some().to_string(),
+            ),
+        }
+        field(
+            "printed",
+            source.printed == isa.printed,
+            format!("{:?}", source.printed),
+            format!("{:?}", isa.printed),
+        );
+        field(
+            "interruption",
+            source.interruption == isa.interruption,
+            format!("{:?}", source.interruption),
+            format!("{:?}", isa.interruption),
+        );
+    }
+    first
+        .into_iter()
+        .map(|(field, (prefix, expected, actual))| (prefix, field, expected, actual))
+        .collect()
 }

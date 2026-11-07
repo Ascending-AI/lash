@@ -83,13 +83,13 @@ impl FakeLedger {
         }
         Ok(FakeDraft {
             token,
-            dependencies: self.published.facts.dependencies.clone(),
+            dependencies: self.published.facts.as_ref().unwrap().dependencies.clone(),
             next,
         })
     }
     fn commit(&mut self, draft: FakeDraft, fault: Option<Interruption>) -> Result<(), Refusal> {
         self.authenticate(&draft.token)?;
-        if draft.dependencies != self.published.facts.dependencies {
+        if draft.dependencies != self.published.facts.as_ref().unwrap().dependencies {
             return Err(Refusal::Dependency);
         }
         if fault == Some(Interruption::BeforeCommitFailure) {
@@ -140,7 +140,7 @@ fn fake_authority_refuses_foreign_stale_and_sibling_publications_atomically() {
 
     let token = ledger.acquire();
     let draft = ledger.prepare(token, next.clone(), None).ok().unwrap();
-    ledger.published.facts.dependencies[1].2 += 1;
+    ledger.published.facts.as_mut().unwrap().dependencies[1].2 += 1;
     let before = ledger.published.clone();
     assert_eq!(ledger.commit(draft, None), Err(Refusal::Dependency));
     assert_eq!(ledger.published, before);

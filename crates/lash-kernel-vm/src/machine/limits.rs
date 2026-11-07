@@ -14,6 +14,8 @@ use super::{Halt, KernelMachine, bound};
 pub(super) struct Limiters {
     pub(super) memory: Option<Box<dyn MemoryLimiter>>,
     pub(super) charge: Option<Box<dyn ChargeLimiter>>,
+    #[cfg(any(test, feature = "testing"))]
+    pub(super) observed_peak: u64,
 }
 
 /// Asks `ask` at `used` against `limit`, and again while a grown limit
@@ -37,6 +39,14 @@ fn decide(
 }
 
 impl Limiters {
+    pub(super) fn observe_peak(&mut self, peak: u64) {
+        #[cfg(any(test, feature = "testing"))]
+        {
+            self.observed_peak = self.observed_peak.max(peak);
+        }
+        #[cfg(not(any(test, feature = "testing")))]
+        let _ = peak;
+    }
     /// The run's logical holdings would pass `limit` at `used`.
     #[cold]
     #[inline(never)]
@@ -95,6 +105,7 @@ impl KernelMachine {
     #[inline]
     pub(super) fn capacity_check(&mut self) -> Result<(), Halt> {
         self.publish_logical_meter()?;
+        self.limiters.observe_peak(self.logical_memory.get());
         #[cfg(any(test, feature = "perf-witness"))]
         if let Some(observer) = crate::perf_witness::memory_observer() {
             observer(self.memory_ledger());
@@ -121,6 +132,7 @@ impl KernelMachine {
         let mut sweeps = [false, true].into_iter();
         loop {
             let used = self.capacity_held().saturating_add(bytes);
+            self.limiters.observe_peak(used);
             if used <= self.bounds.memory {
                 return Ok(());
             }

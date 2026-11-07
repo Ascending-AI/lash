@@ -32,6 +32,8 @@ impl Running<'_> {
             return Ok(charge::Payment {
                 counters,
                 crossing: None,
+                #[cfg(any(test, feature = "testing"))]
+                events: Vec::new(),
             });
         }
         let value = self.value(value)?;
@@ -288,8 +290,22 @@ impl Running<'_> {
                         // not asked again by the step's own billing.
                         let paid = match before.crossing {
                             Some(_) => before,
-                            None => self.copy_charge(before.counters, *value)?,
+                            None => {
+                                let copy = self.copy_charge(before.counters, *value)?;
+                                #[cfg(any(test, feature = "testing"))]
+                                let copy = {
+                                    let mut copy = copy;
+                                    let mut events = before.events;
+                                    events.append(&mut copy.events);
+                                    copy.events = events;
+                                    copy
+                                };
+                                copy
+                            }
                         };
+                        if paid.crossing.is_some() {
+                            self.observe_payment(&paid);
+                        }
                         let Some(crossing) = paid.crossing else {
                             return self.halt(RegionStop::Effect(*kind));
                         };
@@ -368,6 +384,7 @@ impl Running<'_> {
             let before = charge::billed(self.limiters, &mut self.limits, |limits| {
                 charge::bill(counters, limits, &step.charges, ChargeMoment::Before, None)
             })?;
+            self.observe_payment(&before);
             self.counters = before.counters;
             if let Some(crossing) = before.crossing {
                 self.refusal = Some(crate::Bound::Charge);
@@ -378,6 +395,7 @@ impl Running<'_> {
             // K-CHG-005: an effect's value is copied out at one deep-size fee.
             if let RegionOp::Effect { value, .. } = op {
                 let copy = self.copy_charge(self.counters, *value)?;
+                self.observe_payment(&copy);
                 self.counters = copy.counters;
                 if let Some(crossing) = copy.crossing {
                     self.refusal = Some(crate::Bound::Charge);
@@ -479,6 +497,7 @@ impl Running<'_> {
                     formula,
                 )
             })?;
+            self.observe_payment(&after);
             self.counters = after.counters;
             // A root frame's own completion is billed as it leaves; a
             // callee's is billed at its caller's Restore.
@@ -492,6 +511,7 @@ impl Running<'_> {
                     let payment = charge::billed(self.limiters, &mut self.limits, |limits| {
                         Ok(charge::export(counters, limits, completion))
                     })?;
+                    self.observe_payment(&payment);
                     self.counters = payment.counters;
                     payment
                 }
@@ -573,6 +593,10 @@ impl Running<'_> {
                 self.registers.publish_write(write);
             }
             self.counters = counters;
+            #[cfg(any(test, feature = "testing"))]
+            {
+                self.observed_operations += 1;
+            }
             self.reached.ordinal = ordinal;
             self.prefix = step.after;
             self.reached.prefix = step.after.index() as u32;

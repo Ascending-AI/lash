@@ -45,6 +45,8 @@ impl Machine for KernelMachine {
         self.limiters = Limiters {
             memory: options.memory_limiter,
             charge: options.charge_limiter,
+            #[cfg(any(test, feature = "testing"))]
+            observed_peak: self.limiters.observed_peak,
         };
     }
     fn take_counts(&mut self) -> crate::SiteCounts {
@@ -426,6 +428,8 @@ impl KernelMachine {
             end: None,
             ended: false,
             observer: None,
+            #[cfg(any(test, feature = "testing"))]
+            qualification_operations: 0,
             ran: Vec::new(),
             raised: None,
             catches: Default::default(),

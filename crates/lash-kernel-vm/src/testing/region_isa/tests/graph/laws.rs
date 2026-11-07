@@ -265,7 +265,7 @@ fn probe(scene: &Scene, stop: usize) -> usize {
             let (mut actual, stats) = local::trace(scene, layout, stop);
             let retained_high_water = expected
                 .iter()
-                .map(|prefix| prefix.facts.retained.len())
+                .map(|prefix| prefix.facts.as_ref().unwrap().retained.len())
                 .max()
                 .unwrap();
             assert_eq!(
@@ -316,18 +316,25 @@ fn allocation_edit_release_prefixes_match_itemized_source() {
         for reached in &expected {
             for delta in [-1_i64, 0, 1] {
                 let cutoff = |value: u64| value.saturating_add_signed(delta);
-                let charged = reached.facts.charges.iter().map(|entry| entry.units).sum();
+                let charged = reached
+                    .facts
+                    .as_ref()
+                    .unwrap()
+                    .charges
+                    .iter()
+                    .map(|entry| entry.units)
+                    .sum();
                 for bounded in [
                     Scene {
                         charge: cutoff(charged),
                         ..scene.clone()
                     },
                     Scene {
-                        memory: cutoff(reached.facts.peak),
+                        memory: cutoff(reached.facts.as_ref().unwrap().peak),
                         ..scene.clone()
                     },
                     Scene {
-                        depth: cutoff(u64::from(reached.facts.depth)) as u32,
+                        depth: cutoff(u64::from(reached.facts.as_ref().unwrap().depth)) as u32,
                         ..scene.clone()
                     },
                 ] {
@@ -440,16 +447,25 @@ fn graph_corruptions_cannot_hide_behind_equal_prices_or_final_roots() {
     for layout in [IsaLayout::Generic, IsaLayout::Specialized] {
         for (name, mutate) in mutations {
             let (mut trace, _) = local::trace(&scene, layout, scene.ops.len());
-            mutate(&mut trace[4].facts);
+            mutate(trace[4].facts.as_mut().unwrap());
             comparison::compare(&source, &trace, layout).expect_err(name);
         }
         let (mut trace, _) = local::trace(&scene, layout, scene.ops.len());
-        trace.last_mut().unwrap().facts.retained.clear();
+        trace
+            .last_mut()
+            .unwrap()
+            .facts
+            .as_mut()
+            .unwrap()
+            .retained
+            .clear();
         comparison::compare(&source, &trace, layout).expect_err("rootless retained cycles omitted");
         let old_scene = scenes().remove(3);
         let old_source = oracle::trace(&old_scene, old_scene.ops.len());
         let (mut old_trace, _) = local::trace(&old_scene, layout, old_scene.ops.len());
-        if let SemanticValue::Object { identity, .. } = &mut old_trace[1].facts.values[0].1 {
+        if let SemanticValue::Object { identity, .. } =
+            &mut old_trace[1].facts.as_mut().unwrap().values[0].1
+        {
             identity.id += 10_000;
         }
         comparison::compare(&old_source, &old_trace, layout)
@@ -569,7 +585,14 @@ fn repeated_edits_slot_reuse_and_callbacks_keep_current_graph() {
         );
         assert_eq!(
             runner.world.objects.len(),
-            source.last().unwrap().facts.retained.len(),
+            source
+                .last()
+                .unwrap()
+                .facts
+                .as_ref()
+                .unwrap()
+                .retained
+                .len(),
             "dead body metadata survived release"
         );
         assert_eq!(

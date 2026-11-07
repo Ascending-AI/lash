@@ -50,6 +50,10 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(in crate::machine::region_isa) prefix: PrefixId,
     pub(in crate::machine::region_isa) reached: ReachedPrefix,
     pub(in crate::machine::region_isa) counters: Counters,
+    #[cfg(any(test, feature = "testing"))]
+    pub(in crate::machine::region_isa) observed_operations: u64,
+    #[cfg(any(test, feature = "testing"))]
+    pub(in crate::machine::region_isa) observed_charges: Vec<lash_kernel_exec::Weight>,
     pub(in crate::machine::region_isa) limits: Limits,
     /// The segment's limiters, asked where a bound is reached in the run.
     pub(super) limiters: &'m mut crate::machine::limits::Limiters,
@@ -218,6 +222,10 @@ impl<'m> Running<'m> {
             limits,
             source,
             invocations,
+            #[cfg(any(test, feature = "testing"))]
+            observed_operations: 0,
+            #[cfg(any(test, feature = "testing"))]
+            observed_charges: Vec::new(),
             attempted: None,
             stop: None,
             faulted: false,

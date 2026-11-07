@@ -21,6 +21,8 @@ pub(super) struct Limits {
     pub(super) entry_progress: u64,
     pub(super) charge_enabled: bool,
     pub(super) entry_depth: u32,
+    #[cfg(any(test, feature = "testing"))]
+    pub(super) record_charges: bool,
 }
 impl Limits {
     pub(super) fn machine(machine: &mut KernelMachine) -> Result<Self, RegionError> {
@@ -59,6 +61,11 @@ impl Limits {
             entry_progress: machine.charged,
             charge_enabled: !matches!(machine.bounds.charge, crate::Charge::Off),
             entry_depth,
+            #[cfg(any(test, feature = "testing"))]
+            record_charges: machine
+                .observer
+                .as_ref()
+                .is_some_and(|observer| observer.charges.is_some()),
         })
     }
 }

@@ -66,6 +66,7 @@ impl Running<'_> {
         let payment = charge::billed(self.limiters, &mut self.limits, |limits| {
             Ok(charge::export(counters, limits, size))
         })?;
+        self.observe_payment(&payment);
         self.counters = payment.counters;
         if let Some(crossing) = payment.crossing {
             self.refusal = Some(crate::Bound::Charge);
@@ -286,6 +287,7 @@ impl Running<'_> {
                     Some(completion),
                 )
             })?;
+            self.observe_payment(&payment);
             self.counters = payment.counters;
             if let Some(crossing) = payment.crossing {
                 self.refusal = Some(crate::Bound::Charge);

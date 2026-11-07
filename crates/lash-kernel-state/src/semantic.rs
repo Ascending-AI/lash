@@ -26,6 +26,16 @@ pub struct Checkpoint {
 }
 
 impl Checkpoint {
+    /// Exact source continuation rows, including pending phases and ordered debt.
+    pub fn continuation(&self) -> &[Vec<u8>] {
+        &self.continuation
+    }
+
+    /// Canonical graph rows, preserving reference multiplicity and insertion order.
+    pub fn graph(&self) -> &[Vec<u8>] {
+        &self.graph
+    }
+
     /// The durable ids of the objects the checkpoint reaches, in the order
     /// its graph first reaches them: what PLAN-INDEP over ids compares
     /// (seam C of `docs/design/kernel-end-state.md`).

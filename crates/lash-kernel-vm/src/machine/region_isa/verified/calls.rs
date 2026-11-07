@@ -221,6 +221,7 @@ impl Running<'_> {
         let payment = charge::billed(self.limiters, &mut self.limits, |limits| {
             charge::bill(counters, limits, &step.charges, ChargeMoment::Before, None)
         })?;
+        self.observe_payment(&payment);
         self.counters = payment.counters;
         if let Some(crossing) = payment.crossing {
             self.refusal = Some(crate::Bound::Charge);

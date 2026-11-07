@@ -47,6 +47,7 @@ pub(super) fn billed(
 /// Whether a phase reaching `peak` fits the memory bound, the memory limiter
 /// deciding where it does not.
 pub(super) fn fits_memory(limiters: &mut Limiters, limits: &mut Limits, peak: u64) -> bool {
+    limiters.observe_peak(peak);
     if peak <= limits.memory {
         return true;
     }
@@ -61,6 +62,8 @@ pub(super) fn fits_memory(limiters: &mut Limiters, limits: &mut Limits, peak: u6
 pub(super) struct Payment {
     pub(super) counters: Counters,
     pub(super) crossing: Option<Crossing>,
+    #[cfg(any(test, feature = "testing"))]
+    pub(super) events: Vec<Weight>,
 }
 
 fn weight(payment: &mut Payment, limits: Limits, weight: Weight) -> bool {
@@ -78,6 +81,13 @@ fn weight(payment: &mut Payment, limits: Limits, weight: Weight) -> bool {
     } else {
         units
     };
+    #[cfg(any(test, feature = "testing"))]
+    if limits.charge_enabled && limits.record_charges {
+        payment.events.push(match weight {
+            Weight::Units(_) => Weight::Units(billed),
+            Weight::Atomic(_) => Weight::Atomic(billed),
+        });
+    }
     payment.counters.progress = payment.counters.progress.saturating_add(billed);
     if limits.charge_enabled {
         payment.counters.charge = payment.counters.charge.saturating_add(billed);
@@ -98,6 +108,8 @@ pub(super) fn export(counters: Counters, limits: Limits, units: u64) -> Payment 
     let mut payment = Payment {
         counters,
         crossing: None,
+        #[cfg(any(test, feature = "testing"))]
+        events: Vec::new(),
     };
     weight(&mut payment, limits, Weight::Atomic(units));
     payment
@@ -113,6 +125,8 @@ pub(super) fn bill(
     let mut payment = Payment {
         counters,
         crossing: None,
+        #[cfg(any(test, feature = "testing"))]
+        events: Vec::new(),
     };
     for close in closes.iter().filter(|close| close.moment == moment) {
         for item in &close.tape {
@@ -129,6 +143,15 @@ pub(super) fn bill(
         }
     }
     Ok(payment)
+}
+
+impl super::Running<'_> {
+    pub(super) fn observe_payment(&mut self, payment: &Payment) {
+        #[cfg(any(test, feature = "testing"))]
+        self.observed_charges.extend_from_slice(&payment.events);
+        #[cfg(not(any(test, feature = "testing")))]
+        let _ = payment;
+    }
 }
 
 #[cfg(test)]
@@ -157,6 +180,7 @@ mod laws {
                         entry_progress: entry,
                         charge_enabled: true,
                         entry_depth: 1,
+                        record_charges: true,
                     };
                     let mut actual = Payment {
                         counters: Counters {
@@ -168,6 +192,8 @@ mod laws {
                             debt: 0,
                         },
                         crossing: None,
+                        #[cfg(any(test, feature = "testing"))]
+                        events: Vec::new(),
                     };
                     let mut source = ReferenceCharger::new(entry, bound);
                     for event in program {

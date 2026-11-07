@@ -599,11 +599,12 @@ fn interrupt_fixture(
     };
     let before = durable.clone();
     let result = fake_publish(durable, state, Some(*interruption));
-    observed.facts.interruption = Some(*interruption);
+    observed.facts.as_mut().unwrap().interruption = Some(*interruption);
     match result {
         Err(fault) => {
             assert_eq!(*durable, before, "failed publication changed durable state");
-            observed.facts.failure = Some((fault.into(), observed.facts.at.clone()));
+            observed.facts.as_mut().unwrap().failure =
+                Some((fault.into(), observed.facts.as_ref().unwrap().at.clone()));
             true
         }
         Ok(()) => {
@@ -650,3 +651,5 @@ fn roomy() -> Case {
 mod authority;
 mod graph;
 mod laws;
+
+mod production;
