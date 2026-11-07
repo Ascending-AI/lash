@@ -18,6 +18,8 @@ pub struct RetainedCode {
     pub frames: BTreeSet<(LinkId, Unit)>,
     /// Exact transient continuation coordinates, including every caller frame.
     pub sites: BTreeSet<(LinkId, lash_kernel_value::sites::Site)>,
+    /// Source departure origins, including exits suspended by cleanup.
+    pub departures: BTreeSet<(LinkId, lash_kernel_value::sites::Site)>,
     /// Convention imports retained outside executable body syntax.
     pub imports: BTreeSet<(LinkId, lash_kernel_value::ImportSlot)>,
 }
@@ -79,9 +81,35 @@ pub(super) fn scan_checkpoint(
         |task| {
             super::census_graph::state_values(&task.state, &mut |value| scan.value(value.clone()))?;
             visit(&task.frames, heap.pages(), |frame| {
-                let site = frame.statement.resolve(heap.pages())?;
+                let root = frame.statement.resolve(heap.pages())?;
+                let mut site = root.as_ref().clone();
+                if let Some(pending) = &frame.pending {
+                    // Region frames name their body; the continuation names
+                    // the reached suffix and the exits its cleanups still owe.
+                    if pending.unpaid.is_some() {
+                        site.path.extend_from_slice(&pending.site);
+                    }
+                    for (path, _) in pending
+                        .departure
+                        .iter()
+                        .chain(pending.suspended.iter().map(|(origin, _)| origin))
+                    {
+                        let mut origin = root.as_ref().clone();
+                        origin.path.extend_from_slice(path);
+                        scan.code.departures.insert((frame.link, origin));
+                    }
+                }
                 scan.code.frames.insert((frame.link, site.unit.clone()));
-                scan.code.sites.insert((frame.link, site.as_ref().clone()));
+                scan.code.sites.insert((frame.link, site.clone()));
+                visit(&frame.finally, heap.pages(), |cleanup| {
+                    if let EnteredRecord::ReturnVia(origin) = &cleanup.entered {
+                        let origin = origin.resolve(heap.pages())?;
+                        scan.code
+                            .departures
+                            .insert((frame.link, origin.as_ref().clone()));
+                    }
+                    Ok(())
+                })?;
                 if let Some(created) = &frame.created {
                     let created = created.resolve(heap.pages())?;
                     // A standalone body origin is already named by the frame;
@@ -362,6 +390,38 @@ pub fn restore_selection(
             enqueue(node, link, document, code_imports, &mut pending)?;
         }
     }
+    for (link, origin) in live.departures {
+        if !matches!(origin.unit, Unit::Main) {
+            continue;
+        }
+        let document = documents
+            .get(&link)
+            .ok_or_else(|| invalid("live departure Link is not loaded"))?;
+        let node = document
+            .node(&origin)
+            .ok_or_else(|| invalid("live departure is not in its document"))?;
+        // The return value was already evaluated. Only its policy is still
+        // owed; rescanning the return operand would pin completed calls.
+        if let Node::Stmt(lash_kernel_doc::Stmt::ReturnVia { policy, .. }) = node {
+            match policy {
+                lash_kernel_doc::FunctionTarget::Local(function) => {
+                    if !document.functions.contains_key(function)
+                        && !document.library.contains(function)
+                    {
+                        return Err(invalid(
+                            "live return policy is not admitted by its Document",
+                        ));
+                    }
+                    pending.push((link, Unit::Library(*function)));
+                }
+                lash_kernel_doc::FunctionTarget::Import(slot) => {
+                    if let Some(callable) = code_imports.get(&(link, *slot)) {
+                        pending.push((callable.link, Unit::Library(callable.function)));
+                    }
+                }
+            }
+        }
+    }
     pending.extend(
         live.callables
             .into_iter()
@@ -495,11 +555,18 @@ fn continuation<'a>(
             }
             _ => {}
         }
-        node = node
+        let child = node
             .children()
             .get(index)
             .copied()
             .ok_or_else(|| invalid("live Main coordinate is not in its document"))?;
+        // An expression coordinate still owes the rest of its statement.
+        // Only entering a nested block narrows to that block's suffix.
+        if matches!(node, Node::Stmt(_)) && !matches!(child, Node::Block(_)) {
+            retained.push(node);
+            return Ok(retained);
+        }
+        node = child;
     }
     retained.push(node);
     Ok(retained)

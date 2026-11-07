@@ -853,20 +853,25 @@ main {
 /// FIG-7169: a genuine helper/callback continuation, including an escaped
 /// callable which has not yet run. The build image owns helper definitions;
 /// the authored document contains only exact library references.
-fn helper_restore_fixture() -> (
+fn helper_restore_fixture(
+    text: &str,
+    roots: &[&str],
+    native_twice: bool,
+) -> (
     Embedder,
     crate::Program,
     std::sync::Arc<lash_kernel_doc::BuildHelpers>,
 ) {
     use lash_kernel_doc::{BuildHelpers, LibraryDependencies};
     use std::sync::Arc;
-    let mut embedder = Embedder::new(
-        "main { let kept = &each.map let callback = fn(x) { let answer = perform 0(x) as Any return answer } let answer = invoke each.twice(callback, 7) let retain = kept return answer }",
+    let mut embedder = Embedder::with(
+        text,
+        Setup {
+            native_twice,
+            ..Setup::default()
+        },
     );
-    let roots = [
-        embedder.library.ids["each.twice"],
-        embedder.library.ids["each.map"],
-    ];
+    let roots = roots.iter().map(|name| embedder.library.ids[*name]);
     let helpers =
         Arc::new(BuildHelpers::new(embedder.library.registry.as_ref().clone(), roots).unwrap());
     let mut document = embedder.document.as_ref().clone();
@@ -899,7 +904,11 @@ fn an_unchanged_pinned_helper_survives_an_unrelated_library_change() {
     use lash_kernel_doc::{BuildHelpers, Selection};
     use lash_kernel_state::paged::helper_compatibility_work as probe;
     use std::sync::Arc;
-    let (mut embedder, mut program, writer) = helper_restore_fixture();
+    let (mut embedder, mut program, writer) = helper_restore_fixture(
+        "main { let kept = &each.map let callback = fn(x) { let answer = perform 0(x) as Any return answer } let answer = invoke each.twice(callback, 7) let retain = kept return answer }",
+        &["each.twice", "each.map"],
+        true,
+    );
     let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
     let reader = Arc::new(
         BuildHelpers::new(
@@ -960,6 +969,69 @@ fn an_unchanged_pinned_helper_survives_an_unrelated_library_change() {
     );
     embedder.deliver("echo");
     assert_eq!(result(embedder.run_to_end(&[])), int(7));
+}
+
+/// FIG-7673: a policy owed by a suspended return remains reachable while
+/// Main parks in finally, even though the return precedes its saved suffix.
+#[test]
+fn a_return_policy_suspended_in_finally_stays_pinned_across_a_library_change() {
+    use lash_kernel_doc::{BuildHelpers, Selection};
+    use lash_kernel_state::paged::HelperCompatibilityError;
+    use std::sync::Arc;
+    let (mut embedder, mut program, writer) = helper_restore_fixture(
+        "main { try { return 7 via pair.twice } finally { do perform 0(0) as Any } }",
+        &["pair.twice"],
+        false,
+    );
+    let helper = embedder.library.ids["pair.twice"];
+    let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
+    let documents = program
+        .instances
+        .iter()
+        .map(|(link, instance)| {
+            (
+                *link,
+                program.documents[&instance.document].as_ref().clone(),
+            )
+        })
+        .collect();
+    assert!(matches!(
+        checkpoint.check_helper_compatibility(
+            Box::new(embedder.source.clone()),
+            &documents,
+            &Default::default(),
+            &BuildHelpers::empty(),
+        ),
+        Err(HelperCompatibilityError::HelperUnavailable { function, .. }) if function == helper
+    ));
+    let reader = Arc::new(
+        BuildHelpers::new(
+            embedder.library.registry.as_ref().clone(),
+            [helper, embedder.library.ids["each.twice"]],
+        )
+        .unwrap(),
+    );
+    assert_ne!(writer.identity(), reader.identity());
+    let (source, selection) = checkpoint
+        .check_helper_compatibility(
+            Box::new(embedder.source.clone()),
+            &documents,
+            &Default::default(),
+            &reader,
+        )
+        .unwrap();
+    let Selection::Restored(restored) = &selection else {
+        panic!("different images need a live selection")
+    };
+    assert!(restored.pins.contains(&helper));
+    assert!(!restored.pins.contains(&embedder.library.ids["each.twice"]));
+    program.library =
+        crate::PreparedLibrary::with_helpers(Arc::clone(&embedder.library.registry), reader);
+    program.selection = selection;
+    embedder.machine =
+        crate::KernelMachine::open(program, embedder.bounds, &checkpoint, source).unwrap();
+    embedder.deliver("echo");
+    assert_eq!(result(embedder.run_to_end(&[])), int(14));
 }
 
 /// FIG-7169: executed helper calls die with their continuation, while a
