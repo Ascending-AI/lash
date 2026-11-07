@@ -1090,8 +1090,9 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         ),
                     }
                 }
-                // A protocol `for`'s hook is a call whose result its header
-                // takes; a hook the region cannot call stops it.
+                // A protocol `for`'s hook, or a `return via`'s policy, is a
+                // call whose result its header or Restore takes as the task's
+                // Incoming: a library body's frame, or a native's answer.
                 (
                     doc::Node::Stmt(doc::Stmt::For { via: Some(_), .. }),
                     Phase::Open | Phase::Next | Phase::Check | Phase::Item,
@@ -1107,14 +1108,34 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     Ok(_),
                 ) => {
                     let statement = exe.stmt_at(code, &at.site).ok_or(Refused::Source)?;
+                    let cursor = || reg(&roles, &source, &Owner::LoopCursor(at.site.clone()));
+                    let arguments = || -> Result<Box<[_]>, Refused> {
+                        Ok(match at.phase {
+                            Phase::Policy => Box::new([reg(
+                                &roles,
+                                &source,
+                                &Owner::ActiveDeparture(source.site.clone()),
+                            )?]),
+                            Phase::Open => {
+                                Box::new([reg(&roles, &source, &Owner::Operand(at.site.child(0)))?])
+                            }
+                            Phase::Item => Box::new([
+                                cursor()?,
+                                reg(&roles, &source, &Owner::LoopHeader(at.site.clone()))?,
+                            ]),
+                            _ => Box::new([cursor()?]),
+                        })
+                    };
+                    // `check` also takes the walk's guard, which no role
+                    // holds.
+                    let native = crate::compile::room::native_hook(node, at.phase, &source.calls)
+                        .filter(|_| at.phase != Phase::Check);
                     match CallPlan::compile_hook(exe, code, statement, at.phase) {
                         Ok(plan) => {
                             let (stream, _, _) = exe.statement(statement);
                             let pc = plan.pc();
                             let site =
                                 CallId(u32::try_from(calls.len()).map_err(|_| Refused::Facts)?);
-                            let cursor =
-                                || reg(&roles, &source, &Owner::LoopCursor(at.site.clone()));
                             calls.push(CallSite {
                                 at: at.clone(),
                                 origin: KirOrigin {
@@ -1123,28 +1144,23 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                                     op: *stream.ops.get(pc as usize).ok_or(Refused::Path)?,
                                 },
                                 atoms: Box::new([]),
-                                arguments: match at.phase {
-                                    Phase::Policy => Box::new([reg(
-                                        &roles,
-                                        &source,
-                                        &Owner::ActiveDeparture(source.site.clone()),
-                                    )?]),
-                                    Phase::Open => Box::new([reg(
-                                        &roles,
-                                        &source,
-                                        &Owner::Operand(at.site.child(0)),
-                                    )?]),
-                                    Phase::Item => Box::new([
-                                        cursor()?,
-                                        reg(&roles, &source, &Owner::LoopHeader(at.site.clone()))?,
-                                    ]),
-                                    _ => Box::new([cursor()?]),
-                                },
+                                arguments: arguments()?,
                                 result: sink,
                                 hook: Some(at.phase),
                             });
                             RegionOp::Call { site, next }
                         }
+                        Err(_) if let Some(function) = native => RegionOp::Checked {
+                            kernel: CheckedKernel {
+                                kind: CheckedKind::Native {
+                                    function,
+                                    lib: exe.library_lib(&function).ok_or(Refused::Source)?,
+                                },
+                            },
+                            args: arguments()?,
+                            dst: sink,
+                            next,
+                        },
                         Err(_) => RegionOp::Boundary {
                             spec: BoundarySpec {
                                 action: None,
@@ -1391,7 +1407,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
             .iter()
             .any(|owner| matches!(owner, Owner::Incoming(_)))
             .then_some(sink);
-        let incoming_after = delivers(&draft.ops[index]).then_some(sink);
+        let incoming_after = delivers(&draft.ops[index], sink).then_some(sink);
         let incoming_pending = incoming_after.or(incoming_before);
         let mut pending_live = if incoming_after.is_some() {
             after.clone()
@@ -1399,7 +1415,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
             before.clone()
         };
         let pending = match &draft.ops[index] {
-            op if delivers(op) => Some(sink),
+            op if delivers(op, sink) => Some(sink),
             RegionOp::Heap { kernel, .. } if kernel.atomic_move() => None,
             // An accepted allocation, or an adopted native answer, stands
             // pending at its output role.
@@ -1478,10 +1494,30 @@ pub(super) fn pending_at_output(op: &RegionOp) -> bool {
     }
 }
 
+/// Whether row `index` calls a protocol hook or a `return via` policy: a
+/// call into its body, or a native answering into the sink.
+pub(super) fn hook_call(draft: &RegionDraft, index: usize) -> Result<bool, Refused> {
+    Ok(match &draft.ops[index] {
+        RegionOp::Call { site, .. } => draft
+            .calls
+            .get(site.offset())
+            .ok_or(Refused::Path)?
+            .hook
+            .is_some(),
+        op => delivers(op, Reg::new(draft.roles.len())?),
+    })
+}
+
 /// Whether the step's completion is delivered into the sink as the task's
-/// Incoming: a call's return.
-pub(super) fn delivers(op: &RegionOp) -> bool {
-    matches!(op, RegionOp::Call { .. })
+/// Incoming: a call's return, or a native hook's answer.
+pub(super) fn delivers(op: &RegionOp, sink: Reg<LeaseValue>) -> bool {
+    match op {
+        RegionOp::Call { .. } => true,
+        RegionOp::Checked { kernel, dst, .. } => {
+            matches!(kernel.kind(), CheckedKind::Native { .. }) && *dst == sink
+        }
+        _ => false,
+    }
 }
 
 /// A statement action's atoms, each loaded into its own slot from a visible

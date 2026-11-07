@@ -1480,6 +1480,29 @@ pub(crate) fn hooks(via: &doc::Protocol) -> impl Iterator<Item = (Phase, &doc::F
     .filter_map(|(phase, target)| Some((phase, target?)))
 }
 
+/// The native a protocol hook at `phase` of the `for` at `node`, or a
+/// `return via`'s policy, calls, when it calls one.
+pub(crate) fn native_hook(
+    node: doc::Node<'_>,
+    phase: Phase,
+    calls: &BTreeMap<FunctionId, CallSource>,
+) -> Option<FunctionId> {
+    let target = match node {
+        doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) => {
+            hooks(via).find_map(|(hook, target)| (hook == phase).then_some(target))?
+        }
+        doc::Node::Stmt(doc::Stmt::ReturnVia { policy, .. }) if phase == Phase::Policy => policy,
+        _ => return None,
+    };
+    match target {
+        doc::FunctionTarget::Local(function) => match calls.get(function)? {
+            CallSource::Native(native) => Some(*native),
+            _ => None,
+        },
+        doc::FunctionTarget::Import(_) => None,
+    }
+}
+
 pub(crate) fn hook(
     target: &doc::FunctionTarget,
     calls: &BTreeMap<FunctionId, CallSource>,

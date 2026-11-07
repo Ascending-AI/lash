@@ -406,7 +406,9 @@ pub(super) fn append(draft: &mut RegionDraft) -> Result<(), Refused> {
                     phase,
                 },
             )?;
-            if let RegionOp::Call { next, .. } = &mut ops[pc.offset()] {
+            if let RegionOp::Call { next, .. } | RegionOp::Checked { next, .. } =
+                &mut ops[pc.offset()]
+            {
                 *next = target;
             }
         }

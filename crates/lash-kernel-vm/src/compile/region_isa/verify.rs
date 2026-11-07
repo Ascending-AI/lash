@@ -1,6 +1,7 @@
 //! Verification reads admitted syntax and canonical resource/charge definitions.
 //! It does not invoke the region emitter or execute a candidate semantic path.
 use super::*;
+mod native;
 mod types;
 mod via;
 use crate::compile::room::charges::region_isa as canonical;
@@ -210,6 +211,11 @@ fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refused> {
     };
     match &draft.ops[index] {
         RegionOp::Boundary { .. } => {}
+        RegionOp::Checked { next, .. }
+            if super::lower::delivers(&draft.ops[index], Reg::new(draft.roles.len())?) =>
+        {
+            return via::hook_edge(draft, step, step.at.phase, *next);
+        }
         RegionOp::Call { site, next } => {
             if let Some(hook) = draft.calls.get(site.offset()).and_then(|call| call.hook) {
                 return via::hook_edge(draft, step, hook, *next);
@@ -680,7 +686,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                     return Err(Refused::Facts);
                 }
             }
-            let Some(function) = native_callee(node, source) else {
+            let Some(function) = native::callee(node, source) else {
                 return Err(Refused::Source);
             };
             let function = &function;
@@ -777,7 +783,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 rhs,
                 units,
             } => {
-                let Some(actual) = native_callee(node, source) else {
+                let Some(actual) = native::callee(node, source) else {
                     return Err(Refused::Source);
                 };
                 let actual = &actual;
@@ -820,7 +826,7 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 rhs,
                 units,
             } => {
-                let Some(actual) = native_callee(node, source) else {
+                let Some(actual) = native::callee(node, source) else {
                     return Err(Refused::Source);
                 };
                 let actual = &actual;
@@ -852,18 +858,15 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 }
             }
             CheckedKind::Native { function, lib } => {
-                let Some(actual) = native_callee(node, source) else {
-                    return Err(Refused::Source);
-                };
-                let actual = &actual;
-                if function != actual
+                let (actual, output, inputs) =
+                    native::facts(draft, step, expected_output, expected_inputs.clone())?;
+                if *function != actual
                     || exe.library_lib(function) != Some(*lib)
                     || !matches!(source.calls.get(function), Some(CallSource::Native(_)))
                 {
                     return Err(Refused::Source);
                 }
-                if Some(*dst) != expected_output || expected_inputs.as_deref() != Ok(args.as_ref())
-                {
+                if Some(*dst) != output || inputs.as_deref() != Ok(args.as_ref()) {
                     return Err(Refused::Facts);
                 }
             }
@@ -1148,10 +1151,10 @@ fn verify_layout(
             return Err(Refused::Scratch);
         }
         let expected_depth = match resources::node(source, &step.at.site)? {
-            node if native_callee(node, source).is_some()
-                && step.at.phase == native_phase(node) =>
+            node if native::callee(node, source).is_some()
+                && step.at.phase == native::phase(node) =>
             {
-                let function = &native_callee(node, source).ok_or(Refused::Source)?;
+                let function = &native::callee(node, source).ok_or(Refused::Source)?;
                 let lib = exe.lib(exe.library_lib(function).ok_or(Refused::Source)?);
                 lib.prepared_depth(exe)
                     .checked_add(u32::from(lib.operation()))
@@ -1262,7 +1265,11 @@ fn verify_layout(
                             .inputs
                             .iter()
                             .any(|owner| matches!(owner, Owner::Incoming(_))))
-                        || (phase > 0 && super::lower::delivers(&draft.ops[index]))
+                        || (phase > 0
+                            && super::lower::delivers(
+                                &draft.ops[index],
+                                Reg::new(draft.roles.len())?,
+                            ))
                     {
                         Some(Reg::new(draft.roles.len())?)
                     } else {
@@ -1378,13 +1385,13 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 .iter()
                 .any(|owner| matches!(owner, Owner::Incoming(_)))
                 .then_some(sink);
-            let incoming_after = super::lower::delivers(&draft.ops[index]).then_some(sink);
+            let incoming_after = super::lower::delivers(&draft.ops[index], sink).then_some(sink);
             let mut pending_roles = if incoming_after.is_some() {
                 after.clone()
             } else {
                 before.clone()
             };
-            let pending = if super::lower::delivers(&draft.ops[index]) {
+            let pending = if super::lower::delivers(&draft.ops[index], sink) {
                 Some(sink)
             } else if matches!(&draft.ops[index], RegionOp::Heap { kernel, .. } if kernel.atomic_move())
             {
@@ -1526,14 +1533,7 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
             if let Some(mut live) = incoming.get(&base).cloned() {
                 // A hook raises once its call is entered: what the call
                 // moved into its callee is gone.
-                if let RegionOp::Call { site, .. } = &draft.ops[base]
-                    && draft
-                        .calls
-                        .get(site.offset())
-                        .ok_or(Refused::Exit)?
-                        .hook
-                        .is_some()
-                {
+                if super::lower::hook_call(draft, base)? {
                     for owner in &draft.steps[base].event.inputs {
                         if let Some(slot) = resources::role(source, owner).and_then(Role::slot) {
                             live.remove(&slot);
@@ -1591,21 +1591,4 @@ pub(super) fn verify(
     generic.steps = draft.generic_steps.clone();
     generic.registers = draft.generic_registers.clone();
     verify_layout(exe, code, &generic, calls)
-}
-
-/// The library function `node` calls: a call expression's, or a native call
-/// act's, which answers at its Enter instead of its Commit.
-fn native_callee(node: doc::Node<'_>, source: &Source) -> Option<FunctionId> {
-    match node {
-        doc::Node::Expr(doc::Expr::Call { function, .. }) => Some(*function),
-        _ => crate::compile::room::native_act(node, &source.calls),
-    }
-}
-
-/// The phase at which `node`'s library call answers.
-fn native_phase(node: doc::Node<'_>) -> Phase {
-    match node {
-        doc::Node::Expr(doc::Expr::Act(_)) => Phase::Enter,
-        _ => Phase::Commit,
-    }
 }

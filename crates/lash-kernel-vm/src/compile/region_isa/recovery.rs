@@ -277,16 +277,7 @@ fn raised_at(
     base: usize,
     mut live: BTreeSet<Slot>,
 ) -> Result<BTreeSet<Slot>, Refused> {
-    let RegionOp::Call { site, .. } = &draft.ops[base] else {
-        return Ok(live);
-    };
-    if draft
-        .calls
-        .get(site.offset())
-        .ok_or(Refused::Path)?
-        .hook
-        .is_some()
-    {
+    if super::lower::hook_call(draft, base)? {
         for input in &draft.steps[base].event.inputs {
             if let Some(slot) = resources::role(&draft.source, input).and_then(Role::slot) {
                 live.remove(&slot);
