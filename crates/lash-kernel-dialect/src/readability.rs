@@ -147,11 +147,13 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                 }
                 for mapped in &map.sites {
                     if mapped.location.ranges().is_empty()
-                        && !matches!(site_node(&case.document, &mapped.site), Some(k::Node::Block(body)) if body.is_empty() && matches!(mapped.location, k::SourceLocation::Implicit { offset } if printed.source.is_char_boundary(offset)))
+                        && !matches!(case.document.node(&mapped.site), Some(k::Node::Block(body)) if body.is_empty() && matches!(mapped.location, k::SourceLocation::Implicit { offset } if printed.source.is_char_boundary(offset)))
                     {
                         return Err("executable node has no source range".into());
                     }
-                    let node = site_node(&case.document, &mapped.site)
+                    let node = case
+                        .document
+                        .node(&mapped.site)
                         .ok_or("map names a nonexistent node")?;
                     for range in mapped.location.ranges() {
                         if range.start >= range.end {
@@ -380,23 +382,6 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
             },
         },
     }
-}
-
-fn site_node<'a>(
-    document: &'a k::Document,
-    site: &lash_kernel_value::sites::Site,
-) -> Option<k::Node<'a>> {
-    let mut node = match &site.unit {
-        lash_kernel_value::sites::Unit::Main => k::Node::Block(document.main.as_ref()?),
-        lash_kernel_value::sites::Unit::Library(id) => {
-            k::Node::Block(&document.functions.get(id)?.body()?.block)
-        }
-        _ => return None,
-    };
-    for index in &site.path {
-        node = *node.children().get(*index as usize)?;
-    }
-    Some(node)
 }
 
 #[cfg(test)]

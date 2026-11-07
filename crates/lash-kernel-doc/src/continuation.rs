@@ -80,9 +80,7 @@ pub fn live_roles_in(body: &Block, site: &Site) -> Result<Vec<Site>, LiveRolesEr
     let mut ancestors: Vec<(Node<'_>, u32, Site)> = Vec::with_capacity(site.path.len());
     for &step in &site.path {
         let next = node
-            .children()
-            .into_iter()
-            .nth(step as usize)
+            .child(step as usize)
             .ok_or(LiveRolesError::NoSuchNode)?;
         ancestors.push((node, step, at.clone()));
         node = next;

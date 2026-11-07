@@ -386,7 +386,7 @@ pub fn closure_at<'a>(
     };
     let mut node = Node::Block(body);
     for step in &site.path {
-        node = node.children().into_iter().nth(*step as usize)?;
+        node = node.child(*step as usize)?;
     }
     match node {
         Node::Expr(Expr::Closure(closure)) => Some(closure),

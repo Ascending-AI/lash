@@ -164,23 +164,6 @@ impl Lowerer<'_> {
         }
     }
 
-    /// Whether the free dotted `path` names package code, which no
-    /// deferred provider serves.
-    fn names_code(&self, path: &str) -> bool {
-        let written = path.split('.').collect::<Vec<_>>();
-        matches!(
-            self.namespaces.resolve(&written, Spelling::Python),
-            Resolution::Export { .. } | Resolution::Namespace
-        )
-    }
-
-    /// `expr` as a dotted path whose root names no variable: a free
-    /// candidate for the run's deferred provider.
-    fn tool_path(&self, expr: &PyExpr) -> Option<String> {
-        let (path, bound) = self.call_path(expr)?;
-        (!bound).then(|| path.join("."))
-    }
-
     /// `expr` as the segments of a dotted path, with whether its root is a
     /// variable. `getattr(path, "name")` is the qualified escape: the path
     /// with `name` after it, for a name Python cannot write as an attribute.
@@ -224,39 +207,6 @@ impl Lowerer<'_> {
             }
             _ => None,
         }
-    }
-
-    /// The canonical operation a free dotted `path` would name, as a
-    /// candidate for the run's deferred provider: `None` for a path that
-    /// names no operation. A path that spells one in another dialect's
-    /// spelling is refused with the spelling Python writes.
-    fn candidate(&self, path: &str, call: &ast::ExprCall) -> Lowering<Option<String>> {
-        let segments = path.split('.').collect::<Vec<_>>();
-        let Some((name, package)) = segments.split_last() else {
-            return Ok(None);
-        };
-        if package.is_empty()
-            || !package
-                .iter()
-                .all(|segment| lash_kernel_value::Segment::is_canonical(segment))
-        {
-            return Ok(None);
-        }
-        if lash_kernel_value::Segment::is_canonical(name) {
-            return Ok(Some(path.to_owned()));
-        }
-        let Some(canonical) =
-            Spelling::TypeScript.unspell(lash_kernel_dialect::SpellKind::Member, name)
-        else {
-            return Ok(None);
-        };
-        let repair = format!("{}.{canonical}", package.join("."));
-        Err(diagnostics::with_repair(
-            Code::OperationSpelling,
-            format!("`{path}` spells an operation name in another dialect's spelling"),
-            call.func.range(),
-            format!("write `{repair}`"),
-        ))
     }
 
     /// The refusal of a call whose dotted path names an operation the
@@ -428,23 +378,6 @@ impl Lowerer<'_> {
             return self.call_function(call, awaited);
         }
         self.operation_refusal(call)?;
-        if self.calls.is_some()
-            && let Some(path) = self.tool_path(&call.func)
-            && !self.names_code(&path)
-        {
-            if let Some(candidate) = self.candidate(&path, call)?
-                && let Some(calls) = &mut self.calls
-            {
-                calls.insert(candidate);
-            }
-            for argument in &call.arguments.args {
-                self.expr(argument)?;
-            }
-            for keyword in &call.arguments.keywords {
-                self.expr(&keyword.value)?;
-            }
-            return Ok(Operand::none());
-        }
         if self.exception_class(&call.func).is_some() {
             return self.call_function(call, awaited);
         }

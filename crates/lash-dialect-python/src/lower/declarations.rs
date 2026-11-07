@@ -1,18 +1,47 @@
 //! Scope declaration dominance and canonical loop-local bindings.
 use super::*;
+use lash_kernel_doc::{Action, Atom, Node};
 
-impl Lowerer<'_> {
-    /// Declaration dominance (FIG-6402 rev2 §11): a straight-line first
-    /// assignment may declare the slot, unless its RHS or an earlier node
-    /// reads or captures it. Nested assignments cannot declare an outer slot.
-    /// A cell's carried names are also used after its root block finishes.
-    pub(super) fn finish_declarations(&self, body: Buf, carried: Option<&BTreeSet<String>>) -> Buf {
-        let (mut statements, mut notes) = body.into_parts();
-        /// Whether `action` reads `name`, as the expression it stands for
-        /// would: as its callee or as one of its arguments.
-        fn action_mentions(action: &lash_kernel_doc::Action, name: &Name) -> bool {
-            use lash_kernel_doc::{Action, Atom};
+struct Uses {
+    first_statement: usize,
+    first_assignment: bool,
+    first: usize,
+    last: usize,
+    captured: bool,
+}
 
+struct LoopLocal {
+    name: Name,
+    id: usize,
+    body: std::ops::Range<usize>,
+}
+
+/// Positions in one traversal let loop bodies prove that no use escapes.
+/// A first use also records whether a straight-line assignment dominates it.
+#[derive(Default)]
+struct Analysis {
+    uses: BTreeMap<Name, Uses>,
+    loops: Vec<LoopLocal>,
+    position: usize,
+    next_loop: usize,
+    captures: BTreeMap<FunctionId, BTreeSet<Name>>,
+}
+
+fn names(node: Node<'_>, mut use_name: impl FnMut(&Name)) {
+    match node {
+        Node::Expr(Expr::Variable(name))
+        | Node::Stmt(Stmt::Assign {
+            place: Place::Variable(name),
+            ..
+        }) => use_name(name),
+        Node::Expr(Expr::Act(act)) => {
+            if let ActKind::Call(Callee::Value(name)) | ActKind::Spawn(Callee::Value(name)) =
+                &act.kind
+            {
+                use_name(name);
+            }
+        }
+        Node::Action(action) => {
             let (callee, atoms): (Option<&Callee>, &[Atom]) = match action {
                 Action::Call { callee, args } | Action::Spawn { callee, args } => {
                     (Some(callee), args)
@@ -25,268 +54,224 @@ impl Lowerer<'_> {
                 | Action::CancelEffect { task: atom } => (None, std::slice::from_ref(atom)),
                 Action::Yield => (None, &[]),
             };
-            matches!(callee, Some(Callee::Value(read)) if read == name)
-                || atoms
-                    .iter()
-                    .any(|atom| matches!(atom, Atom::Variable(read) if read == name))
+            if let Some(Callee::Value(name)) = callee {
+                use_name(name);
+            }
+            for atom in atoms {
+                if let Atom::Variable(name) = atom {
+                    use_name(name);
+                }
+            }
         }
-        fn mentions(
-            node: lash_kernel_doc::Node<'_>,
-            name: &Name,
-            definitions: &BTreeMap<FunctionId, lash_kernel_doc::FunctionDefinition>,
-        ) -> bool {
-            let mut pending = vec![node];
-            let mut closures = BTreeSet::new();
-            while let Some(node) = pending.pop() {
-                match node {
-                    lash_kernel_doc::Node::Expr(Expr::Variable(read)) if read == name => {
-                        return true;
-                    }
-                    lash_kernel_doc::Node::Expr(Expr::Act(act))
-                        if matches!(&act.kind,
-                        ActKind::Call(Callee::Value(read)) | ActKind::Spawn(Callee::Value(read)) if read == name) =>
-                    {
-                        return true;
-                    }
-                    lash_kernel_doc::Node::Stmt(Stmt::Assign {
-                        place: Place::Variable(write),
-                        ..
-                    }) if write == name => return true,
-                    lash_kernel_doc::Node::Action(action) if action_mentions(action, name) => {
-                        return true;
-                    }
-                    lash_kernel_doc::Node::Expr(Expr::Closure(closure)) => {
-                        if closures.insert(closure.function)
+        _ => {}
+    }
+}
+
+impl Analysis {
+    fn record(&mut self, name: &Name, statement: usize, assignment: bool, captured: bool) {
+        self.uses
+            .entry(name.clone())
+            .and_modify(|usage| {
+                if usage.first_statement == statement {
+                    usage.first_assignment = false;
+                }
+                usage.last = self.position;
+                usage.captured |= captured;
+            })
+            .or_insert(Uses {
+                first_statement: statement,
+                first_assignment: assignment,
+                first: self.position,
+                last: self.position,
+                captured,
+            });
+    }
+
+    fn walk<'a>(
+        &mut self,
+        node: Node<'a>,
+        statement: usize,
+        top_level: bool,
+        pending: &mut Vec<Node<'a>>,
+        definitions: &'a BTreeMap<FunctionId, lash_kernel_doc::FunctionDefinition>,
+    ) {
+        self.position += 1;
+        let assignment = top_level && matches!(node, Node::Stmt(Stmt::Assign { .. }));
+        names(node, |name| self.record(name, statement, assignment, false));
+        if let Node::Expr(Expr::Closure(closure)) = node {
+            let captures = self.captures.entry(closure.function).or_insert_with(|| {
+                let mut names_read = BTreeSet::new();
+                let mut functions = BTreeSet::new();
+                let mut pending = vec![node];
+                while let Some(node) = pending.pop() {
+                    names(node, |name| {
+                        names_read.insert(name.clone());
+                    });
+                    if let Node::Expr(Expr::Closure(closure)) = node {
+                        if functions.insert(closure.function)
                             && let Some(body) = definitions
                                 .get(&closure.function)
                                 .and_then(|definition| definition.body())
                         {
-                            pending.push(lash_kernel_doc::Node::Block(&body.block));
+                            pending.push(Node::Block(&body.block));
                         }
+                    } else {
+                        node.children_into(&mut pending);
                     }
-                    _ => pending.extend(node.children()),
                 }
+                names_read
+            });
+            // Move the summary out while updating the per-block use index.
+            let captures = std::mem::take(captures);
+            for name in &captures {
+                self.record(name, statement, false, true);
             }
-            false
+            self.captures.insert(closure.function, captures);
+        }
+        let loop_id = if matches!(node, Node::Stmt(Stmt::For { .. })) {
+            let id = self.next_loop;
+            self.next_loop += 1;
+            Some(id)
+        } else {
+            None
+        };
+        let candidate = match node {
+            Node::Stmt(Stmt::For { binding, body, .. }) => match body.first() {
+                Some(Stmt::Assign {
+                    place: Place::Variable(write),
+                    value: Rhs::Expr(Expr::Variable(read)),
+                    ..
+                }) if read == binding => Some(write.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let start = pending.len();
+        node.children_into(pending);
+        let end = pending.len();
+        let mut body_range = 0..0;
+        for index in start..end {
+            let before = self.position + 1;
+            self.walk(pending[index], statement, false, pending, definitions);
+            if index == start + 1 {
+                body_range = before..self.position + 1;
+            }
+        }
+        pending.truncate(start);
+        if let (Some(name), Some(id)) = (candidate, loop_id) {
+            self.loops.push(LoopLocal {
+                name,
+                id,
+                body: body_range,
+            });
+        }
+    }
+}
+
+/// Apply selected loop bindings in one pass, keeping their parallel notes.
+/// Expressions have no statement blocks; closure bodies are in the function table.
+fn rewrite_loops(
+    block: &mut [Stmt],
+    notes: &mut [Note],
+    selected: &mut BTreeMap<usize, Name>,
+    next_loop: &mut usize,
+) {
+    for (statement, note) in block.iter_mut().zip(notes) {
+        let local = if matches!(statement, Stmt::For { .. }) {
+            let id = *next_loop;
+            *next_loop += 1;
+            selected.remove(&id)
+        } else {
+            None
+        };
+        let mut block_index = 0;
+        for child in lash_kernel_doc::NodeMut::Stmt(&mut *statement).children() {
+            if let lash_kernel_doc::NodeMut::Block(body) = child {
+                rewrite_loops(body, &mut note.blocks[block_index], selected, next_loop);
+                block_index += 1;
+            }
+        }
+        if let Some(name) = local
+            && let Stmt::For { binding, body, .. } = statement
+        {
+            *binding = name;
+            body.remove(0);
+            note.blocks[0].remove(0);
+        }
+    }
+}
+
+impl Lowerer<'_> {
+    /// A straight-line first assignment declares unless its RHS or an earlier
+    /// node reads or captures the name. Carried names outlive the root block.
+    pub(super) fn finish_declarations(&self, body: Buf, carried: Option<&BTreeSet<String>>) -> Buf {
+        let (mut statements, mut notes) = body.into_parts();
+        let declarations: BTreeMap<_, _> = statements
+            .iter()
+            .enumerate()
+            .filter_map(|(index, statement)| {
+                if let Stmt::Let {
+                    name,
+                    value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+                } = statement
+                {
+                    Some((name.clone(), index))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if declarations.is_empty() {
+            return Buf::from_parts(statements, notes);
+        }
+        let mut analysis = Analysis::default();
+        let mut pending = Vec::new();
+        for (index, statement) in statements.iter().enumerate() {
+            analysis.walk(
+                Node::Stmt(statement),
+                index,
+                true,
+                &mut pending,
+                &self.local_functions,
+            );
         }
         let mut remove = BTreeSet::new();
-        for index in 0..statements.len() {
-            let Stmt::Let {
-                name,
-                value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-            } = &statements[index]
-            else {
+        let mut selected = BTreeMap::new();
+        for local in analysis.loops {
+            let Some(&index) = declarations.get(&local.name) else {
                 continue;
             };
-            let name = name.clone();
-            // A loop-only local has the loop's lifetime even when a branch
-            // encloses it. Keep the same canonical form as a root-level loop;
-            // a read, write or capture anywhere outside that loop forbids it.
-            if !carried.is_some_and(|names| names.contains(name.as_str())) {
-                fn loops(
-                    node: lash_kernel_doc::Node<'_>,
-                    path: &mut Vec<u32>,
-                    out: &mut Vec<Vec<u32>>,
-                ) {
-                    if matches!(node, lash_kernel_doc::Node::Stmt(Stmt::For { .. })) {
-                        out.push(path.clone());
-                    }
-                    for (i, child) in node.children().into_iter().enumerate() {
-                        path.push(i as u32);
-                        loops(child, path, out);
-                        path.pop();
-                    }
-                }
-                fn captured(
-                    node: lash_kernel_doc::Node<'_>,
-                    name: &Name,
-                    definitions: &BTreeMap<FunctionId, lash_kernel_doc::FunctionDefinition>,
-                ) -> bool {
-                    match node {
-                        lash_kernel_doc::Node::Expr(Expr::Closure(_)) => {
-                            mentions(node, name, definitions)
-                        }
-                        _ => node
-                            .children()
-                            .into_iter()
-                            .any(|child| captured(child, name, definitions)),
-                    }
-                }
-                // Map an AST path to its parallel statement notes. Expressions
-                // can own blocks too; count those rather than assuming indices.
-                fn note_at<'a>(
-                    stmts: &[Stmt],
-                    notes: &'a mut [Note],
-                    path: &[u32],
-                ) -> Option<&'a mut Note> {
-                    let (&index, rest) = path.split_first()?;
-                    let stmt = stmts.get(index as usize)?;
-                    let note = notes.get_mut(index as usize)?;
-                    if rest.is_empty() {
-                        return Some(note);
-                    }
-                    fn blocks<'b>(
-                        node: lash_kernel_doc::Node<'b>,
-                        path: &mut Vec<u32>,
-                        out: &mut Vec<(Vec<u32>, &'b [Stmt])>,
-                    ) {
-                        if let lash_kernel_doc::Node::Block(body) = node {
-                            out.push((path.clone(), body));
-                            return;
-                        }
-                        for (i, child) in node.children().into_iter().enumerate() {
-                            path.push(i as u32);
-                            blocks(child, path, out);
-                            path.pop();
-                        }
-                    }
-                    let mut nested = Vec::new();
-                    blocks(
-                        lash_kernel_doc::Node::Stmt(stmt),
-                        &mut Vec::new(),
-                        &mut nested,
-                    );
-                    let (block_index, (prefix, block)) = nested
-                        .into_iter()
-                        .enumerate()
-                        .find(|(_, (prefix, _))| rest.starts_with(prefix))?;
-                    note_at(
-                        block,
-                        note.blocks.get_mut(block_index)?,
-                        &rest[prefix.len()..],
-                    )
-                }
-                let mut candidates = Vec::new();
-                loops(
-                    lash_kernel_doc::Node::Block(&statements),
-                    &mut Vec::new(),
-                    &mut candidates,
-                );
-                for path in candidates {
-                    let Some(lash_kernel_doc::Node::Stmt(Stmt::For {
-                        binding,
-                        iterable,
-                        body: pass,
-                        else_block,
-                        ..
-                    })) = path
-                        .iter()
-                        .try_fold(lash_kernel_doc::Node::Block(&statements), |node, index| {
-                            node.children().get(*index as usize).copied()
-                        })
-                    else {
-                        continue;
-                    };
-                    if !matches!(pass.first(), Some(Stmt::Assign { place: Place::Variable(write), value: Rhs::Expr(Expr::Variable(read)), .. }) if write == &name && read == binding)
-                        || mentions(
-                            lash_kernel_doc::Node::Expr(iterable),
-                            &name,
-                            &self.local_functions,
-                        )
-                        || mentions(
-                            lash_kernel_doc::Node::Block(else_block),
-                            &name,
-                            &self.local_functions,
-                        )
-                        || captured(
-                            lash_kernel_doc::Node::Block(pass),
-                            &name,
-                            &self.local_functions,
-                        )
-                    {
-                        continue;
-                    }
-                    fn outside(
-                        node: lash_kernel_doc::Node<'_>,
-                        path: &[u32],
-                        name: &Name,
-                        definitions: &BTreeMap<FunctionId, lash_kernel_doc::FunctionDefinition>,
-                    ) -> bool {
-                        let Some((&selected, rest)) = path.split_first() else {
-                            return false;
-                        };
-                        node.children()
-                            .into_iter()
-                            .enumerate()
-                            .any(|(index, child)| {
-                                if index == selected as usize {
-                                    outside(child, rest, name, definitions)
-                                } else {
-                                    mentions(child, name, definitions)
-                                }
-                            })
-                    }
-                    if outside(
-                        lash_kernel_doc::Node::Block(&statements),
-                        &path,
-                        &name,
-                        &self.local_functions,
-                    ) {
-                        continue;
-                    }
-                    let expression_blocks = {
-                        fn count(node: lash_kernel_doc::Node<'_>) -> usize {
-                            if matches!(node, lash_kernel_doc::Node::Block(_)) {
-                                1
-                            } else {
-                                node.children().into_iter().map(count).sum()
-                            }
-                        }
-                        count(lash_kernel_doc::Node::Expr(iterable))
-                    };
-                    if let Some(note) = note_at(&statements, &mut notes, &path)
-                        && let Some(notes) = note.blocks.get_mut(expression_blocks)
-                    {
-                        notes.remove(0);
-                    }
-                    if let Some(lash_kernel_doc::NodeMut::Stmt(Stmt::For {
-                        binding,
-                        body: pass,
-                        ..
-                    })) = lash_kernel_doc::NodeMut::Block(&mut statements).descend(&path)
-                    {
-                        *binding = name.clone();
-                        pass.remove(0);
-                    }
-                    remove.insert(index);
-                    break;
-                }
-                if remove.contains(&index) {
-                    continue;
-                }
+            let usage = &analysis.uses[&local.name];
+            if carried.is_some_and(|names| names.contains(local.name.as_str()))
+                || usage.captured
+                || !local.body.contains(&usage.first)
+                || !local.body.contains(&usage.last)
+            {
+                continue;
             }
-            for next in statements.iter_mut().skip(index + 1) {
-                if let Stmt::Assign {
-                    place: Place::Variable(write),
-                    value,
-                    ..
-                } = &*next
-                    && write == &name
-                {
-                    let mentioned = match value {
-                        Rhs::Expr(value) => mentions(
-                            lash_kernel_doc::Node::Expr(value),
-                            &name,
-                            &self.local_functions,
-                        ),
-                        Rhs::Action(action) => action_mentions(action, &name),
-                    };
-                    if !mentioned {
-                        *next = Stmt::Let {
-                            name: name.clone(),
-                            value: value.clone(),
-                        };
-                        remove.insert(index);
-                    }
-                    break;
-                }
-                if mentions(
-                    lash_kernel_doc::Node::Stmt(next),
-                    &name,
-                    &self.local_functions,
-                ) {
-                    break;
-                }
+            selected.insert(local.id, local.name);
+            remove.insert(index);
+        }
+        if !selected.is_empty() {
+            rewrite_loops(&mut statements, &mut notes, &mut selected, &mut 0);
+        }
+        for (name, index) in declarations {
+            if remove.contains(&index) {
+                continue;
+            }
+            let Some(usage) = analysis.uses.get(&name) else {
+                continue;
+            };
+            if usage.first_statement <= index || !usage.first_assignment {
+                continue;
+            }
+            let next = &mut statements[usage.first_statement];
+            if let Stmt::Assign { value, .. } = next {
+                *next = Stmt::Let {
+                    name,
+                    value: value.clone(),
+                };
+                remove.insert(index);
             }
         }
         let mut index = 0;

@@ -186,7 +186,6 @@ struct EntryEnvironment {
 pub(crate) struct Lowerer<'a> {
     cell_result_at: Option<usize>,
     source: &'a str,
-    calls: Option<&'a mut BTreeSet<String>>,
     imported: BTreeMap<String, Vec<String>>,
     library: &'a dyn Library,
     /// The packages and offered operations a dotted call resolves through.
@@ -243,17 +242,12 @@ pub(crate) fn is_builtin(name: &str) -> bool {
 
 /// Lowers a parsed module against `environment`, its fresh names clear
 /// of `beside` as well as of the module's own words.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "each is an independent input of one lowering"
-)]
-pub(crate) fn lower_with_calls(
+pub(crate) fn lower(
     module: &ast::ModModule,
     source: &str,
     environment: &Environment<'_>,
     mode: Mode<'_>,
     limits: crate::SourceLimits,
-    calls: Option<&mut BTreeSet<String>>,
     spelled: crate::captions::Spelled,
     beside: &[String],
 ) -> Lowering<Lowered> {
@@ -316,44 +310,10 @@ pub(crate) fn lower_with_calls(
     }
     let integer_locals = scope::integer_locals(&module.body, &bindings, &excluded, true);
     let value_locals = scope::value_locals(&module.body, &bindings, &excluded, true);
-    let mut imported = BTreeMap::new();
-    for statement in &module.body {
-        match statement {
-            ast::Stmt::Import(import) => {
-                for alias in &import.names {
-                    let path = alias
-                        .name
-                        .id
-                        .split('.')
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>();
-                    let local = alias
-                        .asname
-                        .as_ref()
-                        .map_or_else(|| path[0].clone(), |name| name.id.to_string());
-                    imported.insert(local, path);
-                }
-            }
-            ast::Stmt::ImportFrom(import) => {
-                if let Some(module) = &import.module {
-                    for alias in &import.names {
-                        let mut path = module.id.split('.').map(str::to_owned).collect::<Vec<_>>();
-                        path.push(alias.name.id.to_string());
-                        let local = alias
-                            .asname
-                            .as_ref()
-                            .map_or_else(|| alias.name.id.to_string(), |name| name.id.to_string());
-                        imported.insert(local, path);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
+    let imported = scope::imports(&module.body);
     let typed_dicts = typed_dicts::aliases(&module.body, &bindings.locals);
     let mut lowerer = Lowerer {
         source,
-        calls,
         imported,
         library: environment.library,
         namespaces: environment.namespaces,

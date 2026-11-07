@@ -14,6 +14,7 @@
 mod captions;
 mod constructs;
 mod diagnostics;
+mod discovery;
 mod exceptions;
 mod generated_operators;
 mod lower;
@@ -128,35 +129,17 @@ pub fn lower_with_limits(
     mode: Mode<'_>,
     limits: SourceLimits,
 ) -> Result<Lowered, Diagnostic> {
-    lower_with_calls(source, environment, mode, limits, None, &[])
+    lower_beside(source, environment, mode, limits, &[])
 }
 
-fn lower_with_calls(
+fn lower_beside(
     source: &str,
     environment: &Environment<'_>,
     mode: Mode<'_>,
     limits: SourceLimits,
-    calls: Option<&mut std::collections::BTreeSet<String>>,
     beside: &[String],
 ) -> Result<Lowered, Diagnostic> {
-    let max_bytes = limits.max_bytes;
-    if source.len() > max_bytes {
-        return Err(diagnostics::unplaced(
-            Code::SourceTooLarge,
-            format!("the source is larger than the configured {max_bytes}-byte source limit"),
-        ));
-    }
-    let parsed = ruff_python_parser::parse_module(source).map_err(|error| {
-        Diagnostic::dialect(
-            lash_kernel_dialect::DialectCode::from_static(Code::Syntax.as_str()),
-            Code::Syntax.kind(),
-            Some(Span {
-                start: error.location.start().to_usize(),
-                end: error.location.end().to_usize(),
-            }),
-            lash_kernel_dialect::DiagnosticMessage::authored(error.error.to_string()),
-        )
-    })?;
+    let parsed = parse(source, limits)?;
     let spelled = captions::spelled(
         source,
         parsed
@@ -165,13 +148,12 @@ fn lower_with_calls(
             .filter(|token| token.kind() == ruff_python_ast::token::TokenKind::Comment)
             .map(|token| token.start().to_usize()..token.end().to_usize()),
     );
-    lower::lower_with_calls(
+    lower::lower(
         parsed.syntax(),
         source,
         environment,
         mode,
         limits,
-        calls,
         spelled,
         beside,
     )
@@ -190,21 +172,8 @@ impl FrontEnd for Python {
         environment: &Environment<'_>,
         cell: lash_kernel_dialect::CellEnvironment<'_>,
     ) -> Result<lash_kernel_dialect::ToolCalls, Diagnostic> {
-        let mut calls = std::collections::BTreeSet::new();
-        lower_with_calls(
-            source,
-            environment,
-            Mode::Cell(cell),
-            self.limits,
-            Some(&mut calls),
-            &[],
-        )?;
-        Ok(lash_kernel_dialect::ToolCalls {
-            calls,
-            namespace_collisions: environment
-                .namespaces
-                .collisions(cell.bindings, lash_kernel_dialect::Spelling::Python),
-        })
+        let parsed = parse(source, self.limits)?;
+        discovery::tool_calls(parsed.syntax(), environment, cell, self.limits.max_nesting)
     }
 
     fn lower(
@@ -247,3 +216,27 @@ pub fn dialect() -> Dialect {
 }
 
 mod generated_scope;
+
+fn parse(
+    source: &str,
+    limits: SourceLimits,
+) -> Result<ruff_python_parser::Parsed<ruff_python_ast::ModModule>, Diagnostic> {
+    let max_bytes = limits.max_bytes;
+    if source.len() > max_bytes {
+        return Err(diagnostics::unplaced(
+            Code::SourceTooLarge,
+            format!("the source is larger than the configured {max_bytes}-byte source limit"),
+        ));
+    }
+    ruff_python_parser::parse_module(source).map_err(|error| {
+        Diagnostic::dialect(
+            lash_kernel_dialect::DialectCode::from_static(Code::Syntax.as_str()),
+            Code::Syntax.kind(),
+            Some(Span {
+                start: error.location.start().to_usize(),
+                end: error.location.end().to_usize(),
+            }),
+            lash_kernel_dialect::DiagnosticMessage::authored(error.error.to_string()),
+        )
+    })
+}

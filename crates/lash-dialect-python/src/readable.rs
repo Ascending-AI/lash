@@ -185,7 +185,7 @@ fn lower(
         max_bytes: source.len().max(1),
         ..SourceLimits::standard()
     });
-    crate::lower_with_calls(
+    crate::lower_beside(
         source,
         environment,
         if cell {
@@ -194,7 +194,6 @@ fn lower(
             Mode::Module
         },
         limits,
-        None,
         beside,
     )
 }

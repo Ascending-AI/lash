@@ -315,29 +315,7 @@ pub(crate) fn bindings(
     parameters: Option<&ast::Parameters>,
     rebound: &BTreeSet<String>,
 ) -> Bindings {
-    let mut collector = Collector::default();
-    if let Some(parameters) = parameters {
-        for param in parameters
-            .posonlyargs
-            .iter()
-            .chain(&parameters.args)
-            .chain(&parameters.kwonlyargs)
-        {
-            let name = param.parameter.name.id.as_str();
-            // A parameter is bound by the call, so a `def` of the same name
-            // in the body is not the only binding.
-            collector.bind(name);
-            if let Some(annotation) = &param.parameter.annotation {
-                collector.annotate(name, Ty::of_annotation(annotation));
-            }
-        }
-    }
-    if let Some(parameters) = parameters {
-        for param in parameters.vararg.iter().chain(parameters.kwarg.iter()) {
-            collector.bind(param.name.id.as_str());
-        }
-    }
-    collector.body(body);
+    let collector = Collector::collect(body, parameters);
     let Collector {
         bound,
         globals,
@@ -890,4 +868,86 @@ impl<'a> Visitor<'a> for LocalProof<'_> {
             visitor::walk_expr(self, expr);
         }
     }
+}
+
+impl Collector {
+    fn collect(body: &[Stmt], parameters: Option<&ast::Parameters>) -> Self {
+        let mut collector = Collector::default();
+        if let Some(parameters) = parameters {
+            for param in parameters
+                .posonlyargs
+                .iter()
+                .chain(&parameters.args)
+                .chain(&parameters.kwonlyargs)
+            {
+                let name = param.parameter.name.id.as_str();
+                // A parameter is bound by the call, so a `def` of the same name
+                // in the body is not the only binding.
+                collector.bind(name);
+                if let Some(annotation) = &param.parameter.annotation {
+                    collector.annotate(name, Ty::of_annotation(annotation));
+                }
+            }
+        }
+        if let Some(parameters) = parameters {
+            for param in parameters.vararg.iter().chain(parameters.kwarg.iter()) {
+                collector.bind(param.name.id.as_str());
+            }
+        }
+        collector.body(body);
+        collector
+    }
+}
+
+/// Scope names for lexical discovery, without lowering's type and call facts.
+pub(crate) fn lexical_bindings(
+    body: &[Stmt],
+    parameters: Option<&ast::Parameters>,
+) -> (BTreeSet<String>, BTreeSet<String>) {
+    let collector = Collector::collect(body, parameters);
+    let locals = collector
+        .bound
+        .into_keys()
+        .filter(|name| !collector.globals.contains(name) && !collector.nonlocals.contains(name))
+        .collect();
+    (locals, collector.globals)
+}
+
+/// Imported spellings shared by lexical discovery and source lowering.
+pub(crate) fn imports(body: &[Stmt]) -> BTreeMap<String, Vec<String>> {
+    let mut imported = BTreeMap::new();
+    for statement in body {
+        match statement {
+            ast::Stmt::Import(import) => {
+                for alias in &import.names {
+                    let path = alias
+                        .name
+                        .id
+                        .split('.')
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>();
+                    let local = alias
+                        .asname
+                        .as_ref()
+                        .map_or_else(|| path[0].clone(), |name| name.id.to_string());
+                    imported.insert(local, path);
+                }
+            }
+            ast::Stmt::ImportFrom(import) => {
+                if let Some(module) = &import.module {
+                    for alias in &import.names {
+                        let mut path = module.id.split('.').map(str::to_owned).collect::<Vec<_>>();
+                        path.push(alias.name.id.to_string());
+                        let local = alias
+                            .asname
+                            .as_ref()
+                            .map_or_else(|| alias.name.id.to_string(), |name| name.id.to_string());
+                        imported.insert(local, path);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    imported
 }

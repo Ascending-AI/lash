@@ -473,6 +473,32 @@ impl<'a> Node<'a> {
         out
     }
 
+    /// Select a child without materializing a variable-length sibling list.
+    pub(crate) fn child(self, index: usize) -> Option<Node<'a>> {
+        match self {
+            Node::Block(block) => block.get(index).map(Node::Stmt),
+            Node::Expr(Expr::Tuple(items) | Expr::List(items) | Expr::Set(items)) => {
+                items.get(index).map(Node::Expr)
+            }
+            Node::Expr(Expr::Map(entries)) => {
+                let entry = entries.get(index / 2)?;
+                Some(Node::Expr(if index.is_multiple_of(2) {
+                    &entry.key
+                } else {
+                    &entry.value
+                }))
+            }
+            Node::Expr(Expr::Record(entries)) => {
+                entries.get(index).map(|entry| Node::Expr(&entry.value))
+            }
+            Node::Expr(Expr::Call { args, .. }) => args.get(index).map(Node::Expr),
+            Node::Expr(Expr::Act(act)) => act.args.get(index).map(Node::Expr),
+            // Every other form has at most three children; use the shared
+            // ordering inventory for these bounded lists.
+            _ => self.children().get(index).copied(),
+        }
+    }
+
     /// Append ordered children directly to a traversal's existing work list.
     /// The child inventory is shared with `children`, without a temporary list.
     pub fn children_into(self, out: &mut Vec<Node<'a>>) {

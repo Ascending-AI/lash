@@ -1380,10 +1380,7 @@ impl Document {
         };
         let mut node = Node::Block(body);
         for step in &site.path {
-            node = node
-                .children()
-                .into_iter()
-                .nth(usize::try_from(*step).ok()?)?;
+            node = node.child(usize::try_from(*step).ok()?)?;
         }
         Some(node)
     }
