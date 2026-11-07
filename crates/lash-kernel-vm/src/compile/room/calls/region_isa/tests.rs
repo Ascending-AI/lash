@@ -362,6 +362,27 @@ fn captures_keep_cell_order_instead_of_sorted_identity_names() {
         unreachable!()
     };
     plan.verify_region(&exe, &draft, site).unwrap();
+    // K-EVAL-004: the call binds the operand its Open evaluated. Neither a
+    // read of the name's binding at the Enter nor another operand stands in.
+    let Some(CallableOperand::Retained(operand)) = plan.callable else {
+        panic!("an expression call retains its evaluated callee")
+    };
+    let binding = target::root_role(&exe.code(caller).source_room, &plan.at).unwrap();
+    let argument = Role::Slot(plan.arguments[0].slot());
+    for forged in [
+        CallableOperand::Current(operand),
+        CallableOperand::Current(binding),
+        CallableOperand::Retained(binding),
+        CallableOperand::Retained(argument),
+    ] {
+        let mut forged_plan = plan.clone();
+        forged_plan.callable = Some(forged);
+        assert_eq!(
+            forged_plan.verify(&exe).err(),
+            Some(Refused::Source),
+            "{forged:?}"
+        );
+    }
     let made = (0..exe.code_count())
         .map(|index| CodeId(index as u32))
         .find(|code| exe.code(*code).created.is_some() && exe.code(*code).captures.len() == 2)

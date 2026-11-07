@@ -36,10 +36,8 @@ pub(crate) struct CallPlan {
     resume: Point,
     arguments: Box<[CallRole]>,
     saved: Box<[CallRole]>,
-    /// The roles a dynamic call reads its callee from: a slot, or the
-    /// session cell its name resolves to.
-    callable: Option<Role>,
-    callable_origin: Option<Role>,
+    /// The operand a dynamic call takes its callee from.
+    callable: Option<CallableOperand>,
     targets: Targets,
     occurrence: Option<usize>,
     result: CallRole,
@@ -50,6 +48,36 @@ pub(crate) struct CallPlan {
     /// The protocol `for` hook this call runs, at that phase of its loop, or
     /// a `return via` policy at `Phase::Policy`.
     hook: Option<Phase>,
+}
+
+/// Where a dynamic call takes its callee from (`K-EVAL-004`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CallableOperand<R = Role> {
+    /// An expression call's callee, evaluated at the call's Open into its
+    /// operand before any argument. The call binds that value as it was
+    /// evaluated: a later write to the name's binding does not reach it, and
+    /// the value is never read through a cell again.
+    Retained(R),
+    /// A statement call's callee, read from its name's binding (through a
+    /// captured variable's cell) at the call's Enter.
+    Current(R),
+}
+
+impl<R> CallableOperand<R> {
+    pub(crate) fn map<T, E>(
+        self,
+        f: impl FnOnce(R) -> Result<T, E>,
+    ) -> Result<CallableOperand<T>, E> {
+        Ok(match self {
+            Self::Retained(r) => CallableOperand::Retained(f(r)?),
+            Self::Current(r) => CallableOperand::Current(f(r)?),
+        })
+    }
+    pub(crate) fn operand(self) -> R {
+        match self {
+            Self::Retained(r) | Self::Current(r) => r,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -137,10 +165,6 @@ impl CallPlan {
             recovery: saved,
             callable,
         } = caller_roles(&source, shape)?;
-        let callable_origin = shape
-            .dynamic
-            .then(|| target::root_role(&source, shape.at))
-            .transpose()?;
         let result = CallRole::new(slot(&source, &Owner::Operand(shape.at.site.clone()))?);
         let rooted = shape.rooted;
         let resume = Point {
@@ -173,7 +197,6 @@ impl CallPlan {
             arguments: arguments.iter().copied().map(CallRole::new).collect(),
             saved: saved.iter().copied().map(CallRole::new).collect(),
             callable,
-            callable_origin,
             result,
             targets,
             occurrence,
@@ -251,7 +274,6 @@ impl CallPlan {
                 .collect(),
             saved: Box::new([]),
             callable: None,
-            callable_origin: None,
             targets: Targets::Static(Arc::new(callee)),
             occurrence: None,
             result: CallRole::new(header),
@@ -282,7 +304,6 @@ impl CallPlan {
             || self.arguments != expected.arguments
             || self.saved != expected.saved
             || self.callable != expected.callable
-            || self.callable_origin != expected.callable_origin
             || self.result != expected.result
             || self.occurrence != expected.occurrence
             || self.checked != expected.checked
@@ -355,11 +376,8 @@ impl CallPlan {
     pub(crate) fn saved_roles(&self) -> &[CallRole] {
         &self.saved
     }
-    pub(crate) fn callable(&self) -> Option<Role> {
+    pub(crate) fn callable(&self) -> Option<CallableOperand> {
         self.callable
-    }
-    pub(crate) fn callable_origin(&self) -> Option<Role> {
-        self.callable_origin
     }
     /// The helper whose signature this call's arguments must fit.
     pub(crate) fn checked(&self) -> Option<LibId> {

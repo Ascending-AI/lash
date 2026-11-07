@@ -58,8 +58,8 @@ pub(in crate::machine::region_isa) struct Call {
     pub(super) atoms: Box<[crate::compile::region_isa::AtomLoad]>,
     pub(super) saved: Box<[SavedRole]>,
     pub(super) counter: source_counters::CounterPlan,
-    pub(in crate::machine::region_isa) callable: Option<Register>,
-    pub(in crate::machine::region_isa) callable_origin: Option<Register>,
+    pub(in crate::machine::region_isa) callable:
+        Option<crate::compile::room::region::calls::region_isa::CallableOperand<Register>>,
     pub(in crate::machine::region_isa) next: Pc,
 }
 
@@ -257,8 +257,10 @@ impl Code {
                             .ok_or_else(|| invalid(Refused::Source))?
                             .into(),
                         saved: saved_roles(exe, program, plan)?,
-                        callable: plan.callable().map(register).transpose()?,
-                        callable_origin: plan.callable_origin().map(register).transpose()?,
+                        callable: plan
+                            .callable()
+                            .map(|callable| callable.map(register))
+                            .transpose()?,
                         next: *next,
                     };
                     arguments = arguments.max(call.arguments.len());

@@ -305,9 +305,9 @@ pub(in crate::compile::room) fn resolved_hook(
 struct CallerRoles {
     arguments: Box<[Slot]>,
     recovery: Box<[Slot]>,
-    /// The callee's role: a statement call's named slot or session cell,
-    /// an expression call's operand.
-    callable: Option<Role>,
+    /// The callee: a statement call's named slot or session cell, read at
+    /// its Enter; an expression call's operand, evaluated at its Open.
+    callable: Option<region_isa::CallableOperand>,
 }
 /// The caller-side facts of a call site, which never name its target.
 #[derive(Clone, Copy)]
@@ -350,25 +350,45 @@ fn caller_roles(source: &Source, target: Shape<'_>) -> Result<CallerRoles, Refus
             arguments,
             recovery: Box::new([]),
             callable: if target.dynamic {
-                Some(target::root_role(source, target.at)?)
+                Some(region_isa::CallableOperand::Current(target::root_role(
+                    source, target.at,
+                )?))
             } else {
                 None
             },
         });
     }
-    let mut arguments = event
-        .inputs
-        .iter()
-        .map(|owner| slot(source, owner))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut inputs = &event.inputs[..];
+    // An expression call's callee is the value its Open evaluated into the
+    // call's operand, before any argument (`K-EVAL-004`): the Open's one
+    // output is the first input of the Enter, and nothing else writes it.
     let callable = if target.dynamic {
-        if arguments.is_empty() {
+        let operand = Owner::Operand(target.at.site.clone());
+        let open = source
+            .room
+            .events
+            .get(&Point {
+                site: target.at.site.clone(),
+                phase: Phase::Open,
+            })
+            .ok_or(Refused::Source)?;
+        let [first, rest @ ..] = inputs else {
+            return Err(Refused::Source);
+        };
+        if *first != operand || open.output.as_ref() != Some(&operand) || !open.inputs.is_empty() {
             return Err(Refused::Source);
         }
-        Some(Role::Slot(arguments.remove(0)))
+        inputs = rest;
+        Some(region_isa::CallableOperand::Retained(Role::Slot(slot(
+            source, &operand,
+        )?)))
     } else {
         None
     };
+    let arguments = inputs
+        .iter()
+        .map(|owner| slot(source, owner))
+        .collect::<Result<Vec<_>, _>>()?;
     if arguments.len() != target.arguments {
         return Err(Refused::Source);
     }

@@ -959,10 +959,15 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                     atoms = call.atoms.iter().map(|load| load.dst).collect();
                     &atoms[..]
                 }
+                // The callable is the operand its Open evaluated (`K-EVAL-004`).
                 doc::Node::Expr(doc::Expr::Act(act))
                     if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_))) =>
                 {
-                    inputs.get(1..).ok_or(Refused::Facts)?
+                    let (callee, arguments) = inputs.split_first().ok_or(Refused::Facts)?;
+                    let operand = register(draft, &Owner::Operand(step.at.site.clone()))?;
+                    (*callee == operand)
+                        .then_some(arguments)
+                        .ok_or(Refused::Facts)?
                 }
                 doc::Node::Stmt(doc::Stmt::For { via: Some(_), .. })
                     if matches!(call.hook, Some(Phase::Next | Phase::Check | Phase::Item))

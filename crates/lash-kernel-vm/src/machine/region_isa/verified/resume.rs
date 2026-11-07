@@ -634,8 +634,7 @@ pub(super) fn warm_next(
     match code.program.op(pc).ok_or_else(|| invalid(Refused::Path))? {
         RegionOp::Call { site, .. } => {
             let call = code.call(*site)?;
-            needed.extend(call.callable);
-            needed.extend(call.callable_origin);
+            needed.extend(call.callable.map(|callable| callable.operand()));
         }
         RegionOp::Checked { kernel, .. } => {
             if let CheckedKind::Local { slot, .. } = kernel.kind()

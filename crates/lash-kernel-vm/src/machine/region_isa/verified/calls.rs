@@ -3,6 +3,7 @@ use super::super::{operands::Operand, *};
 use super::{Code, Running, charge};
 use crate::compile::region_isa::{CheckedKind, Pc, PrefixId, RegionOp};
 use crate::compile::room::charges::region_isa::ChargeMoment;
+use crate::compile::room::region::calls::region_isa::CallableOperand;
 use lash_kernel_state::kernel_internals::logical::{LeaseAllocation, LeaseMember, LeaseOp};
 
 pub(super) struct Parked {
@@ -63,41 +64,41 @@ impl Running<'_> {
         }
         self.call_captures.clear();
         let mut link = self.frame_link();
-        // A callee read from a captured variable's own register reads its
-        // cell; the call takes the function the cell holds.
-        let mut current = |register| -> Result<_, RegionError> {
-            let value = self
-                .registers
-                .read(self.frame_index(), self.reached.invocation, register)?
-                .bind(&mut self.view)
-                .map_err(RegionError::Heap)?;
-            if self.view.kind(value).map_err(RegionError::Heap)? != lash_kernel_doc::ValueKind::Ref
-            {
-                return Ok(value);
+        let callable = match call.callable {
+            None => None,
+            // An expression call binds the callee its Open evaluated, as it
+            // was then (`K-EVAL-004`); its arguments may since have written
+            // the name's binding.
+            Some(CallableOperand::Retained(register)) => Some(
+                self.registers
+                    .read(self.frame_index(), self.reached.invocation, register)?
+                    .bind(&mut self.view)
+                    .map_err(RegionError::Heap)?,
+            ),
+            // A statement call reads its name's binding now: a captured
+            // variable's register holds its cell, and the call takes the
+            // function the cell holds.
+            Some(CallableOperand::Current(register)) => {
+                let value = self
+                    .registers
+                    .read(self.frame_index(), self.reached.invocation, register)?
+                    .bind(&mut self.view)
+                    .map_err(RegionError::Heap)?;
+                Some(
+                    if self.view.kind(value).map_err(RegionError::Heap)?
+                        == lash_kernel_doc::ValueKind::Ref
+                    {
+                        let object = self.view.object(value).map_err(RegionError::Heap)?;
+                        self.view
+                            .read(object, &LeaseMember::Variable)
+                            .map_err(storage_fault)?
+                    } else {
+                        value
+                    },
+                )
             }
-            let object = self.view.object(value).map_err(RegionError::Heap)?;
-            self.view
-                .read(object, &LeaseMember::Variable)
-                .map_err(storage_fault)
         };
-        let callable = call.callable.map(&mut current).transpose()?;
         let plan = if let Some(callable) = callable {
-            let origin = current(
-                call.callable_origin
-                    .ok_or_else(|| invalid(Refused::Facts))?,
-            )?;
-            let same = match (self.view.inline(origin), self.view.inline(callable)) {
-                (Ok(Some(a)), Ok(Some(b))) => a.same(&b),
-                (Ok(None), Ok(None)) => {
-                    self.view.object(origin).map_err(RegionError::Heap)?
-                        == self.view.object(callable).map_err(RegionError::Heap)?
-                }
-                (Err(error), _) | (_, Err(error)) => return Err(RegionError::Heap(error)),
-                _ => false,
-            };
-            if !same {
-                return Err(invalid(Refused::Facts));
-            }
             // A callee that is no function raises before the call, unbilled,
             // as the machine's own call does (`K-FN-005`).
             if !matches!(

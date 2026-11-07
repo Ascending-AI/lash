@@ -651,6 +651,73 @@ fn rejects_a_substituted_call_origin() {
     );
 }
 
+/// K-EVAL-004: an expression call binds the callee its Open evaluated, and
+/// nothing re-reads the name after its arguments. That value is authorized
+/// only by the Open's verified transfer, which reads the callee's exact
+/// name and dereferences its cell.
+#[test]
+fn rejects_a_retained_callee_without_its_open_transfer() {
+    fixture_body(
+        "function counter() -> Any\nkernel 1\nmetering statements\nbody { let i = 0 let f = fn(x) { return x } let swap = fn() { set f = fn(y) { return 0 } return 1 } while isa.lt(i, 4) { set i = isa.add(i, 1) } return apply f(apply swap()) }",
+        |exe, code, draft| {
+            let plans = crate::compile::room::region::calls::region_isa::compile_calls(exe, &draft)
+                .unwrap();
+            let open = (0..draft.steps.len())
+                .find(|&index| {
+                    let step = &draft.steps[index];
+                    step.at.phase == Phase::Open
+                        && matches!(
+                            &draft.ops[index],
+                            RegionOp::Checked { kernel, .. }
+                                if matches!(kernel.kind, CheckedKind::Local { cell: true, .. })
+                        )
+                        && matches!(
+                            resources::node(&draft.source, &step.at.site),
+                            Ok(doc::Node::Expr(doc::Expr::Act(act)))
+                                if matches!(&act.kind, doc::ActKind::Call(doc::Callee::Value(name)) if name.as_str() == "f")
+                        )
+                })
+                .expect("the call of f opens by reading its shared cell");
+            let RegionOp::Checked { kernel, .. } = &draft.ops[open] else {
+                unreachable!()
+            };
+            let CheckedKind::Local { slot: name, .. } = kernel.kind else {
+                unreachable!()
+            };
+            let other = draft
+                .roles
+                .iter()
+                .map(|(role, _)| *role)
+                .find(|role| *role != name)
+                .expect("another role");
+            let corrupt = |edit: &dyn Fn(&mut RegionOp)| {
+                let mut draft = draft.clone();
+                edit(&mut draft.ops[open]);
+                verify_region(exe, code, draft, &plans).err()
+            };
+            // Role: the Open reads another binding than the callee's name.
+            assert_eq!(
+                corrupt(&|op| if let RegionOp::Checked { kernel, .. } = op
+                    && let CheckedKind::Local { slot, .. } = &mut kernel.kind
+                {
+                    *slot = other;
+                }),
+                Some(Refused::Facts)
+            );
+            // Dereference: the operand retains the cell itself, which the
+            // arguments' write reaches.
+            assert_eq!(
+                corrupt(&|op| if let RegionOp::Checked { kernel, .. } = op
+                    && let CheckedKind::Local { cell, .. } = &mut kernel.kind
+                {
+                    *cell = false;
+                }),
+                Some(Refused::Facts)
+            );
+        },
+    );
+}
+
 #[test]
 fn return_releases_entered_scopes_before_the_defining_frame() {
     fixture_body(
