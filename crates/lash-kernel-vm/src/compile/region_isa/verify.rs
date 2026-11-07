@@ -574,8 +574,10 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
         {
             let sink = Reg::new(draft.roles.len())?;
             let inputs = expected_inputs?;
+            // An `item` hook's raise departs from the loop's Test, which
+            // takes the hook's result before the header.
             if *src != sink
-                || inputs.last() != Some(&sink)
+                || !inputs.contains(&sink)
                 || expected_output != Some(*dst)
                 || step.event.output != Some(Owner::ActiveDeparture(source.site.clone()))
                 || !step.event.entities.is_empty()
