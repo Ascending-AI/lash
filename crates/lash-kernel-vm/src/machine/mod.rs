@@ -384,6 +384,8 @@ pub struct KernelMachine {
     /// taken.
     document: Option<DocumentId>,
     exe: Arc<Executable>,
+    /// Each region code bound for `exe`, once.
+    bound: region_isa::BoundCodes,
     bounds: Bounds,
     heap: PagedHeap,
     /// The objects the run executes on; the heap is their projection.

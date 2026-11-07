@@ -386,6 +386,7 @@ impl KernelMachine {
                     // Source handlers have gone. The policy is an ordinary
                     // call, and its result leaves this frame directly.
                     let slots = exe.code(frame.code).slots_by_at.len();
+                    self.leave_source_roles(task)?;
                     for at in 0..slots {
                         self.set_source_slot(task, at as u32, SlotState::Empty)?;
                     }
@@ -698,6 +699,9 @@ impl KernelMachine {
             return self.leave_frame(task, host, exe, result);
         }
         Ok(match result {
+            // A caller suspended at a region call takes the result at its
+            // call's Restore, in its next lease.
+            Ok(value) if self.return_into_region(task, value)? => None,
             Ok(value) => match self
                 .finish_action(task, host, exe, value, ResultOrigin::Returned)
                 .and_then(|ran| self.resumed(task, exe, ran).map(Some))

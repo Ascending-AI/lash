@@ -96,12 +96,37 @@ pub(super) fn physical_index(code: &RegionCode, index: u32) -> Result<Register, 
     )
 }
 
+/// Each code's bound tables, bound once per machine: binding reads only the
+/// machine's executable, which never changes, and the code's verified
+/// region, which the executable keeps.
+#[derive(Default)]
+pub(in crate::machine) struct BoundCodes(std::sync::Mutex<BTreeMap<CodeId, Arc<Code>>>);
+
+impl BoundCodes {
+    pub(in crate::machine::region_isa) fn get(
+        &self,
+        exe: &Arc<crate::compile::Executable>,
+        program: &Arc<RegionCode>,
+    ) -> Result<Arc<Code>, RegionError> {
+        let mut bound = self.0.lock().map_err(|_| invalid(Refused::Facts))?;
+        if let Some(code) = bound.get(&program.code())
+            && Arc::ptr_eq(&code.exe, exe)
+            && Arc::ptr_eq(&code.program, program)
+        {
+            return Ok(Arc::clone(code));
+        }
+        let code = Code::bind_executable(exe, program)?;
+        bound.insert(program.code(), Arc::clone(&code));
+        Ok(code)
+    }
+}
+
 impl Code {
     pub(in crate::machine::region_isa) fn bind(
         machine: &KernelMachine,
         program: &Arc<RegionCode>,
     ) -> Result<Arc<Self>, RegionError> {
-        Self::bind_executable(&machine.exe, program)
+        machine.bound.get(&machine.exe, program)
     }
 
     pub(super) fn bind_executable(

@@ -18,6 +18,7 @@ mod programs;
 mod read;
 mod resume;
 mod returns;
+pub(in crate::machine) use bind::BoundCodes;
 pub(in crate::machine) use resume::{Standing, raised_at, restore_source_controls, standing};
 mod run;
 mod running;

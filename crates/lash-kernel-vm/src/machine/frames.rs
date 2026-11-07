@@ -391,6 +391,16 @@ impl Continuation {
         pending
     }
 
+    /// The canonical continuation the frame leaves, as a departure the
+    /// machine carries out of it leaves it.
+    pub(in crate::machine) fn leave_source(&mut self) -> Option<source::SourceContinuation> {
+        let source = self.source.take();
+        if source.is_some() && self.saved == Saved::This {
+            self.saved = Saved::Another;
+        }
+        source
+    }
+
     /// Whether the row holds the continuation as it is.
     fn projected(&self) -> bool {
         match self.saved {

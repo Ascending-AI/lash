@@ -133,6 +133,7 @@ pub(crate) fn start(
         program,
         document: None,
         exe: Arc::clone(&exe),
+        bound: Default::default(),
         bounds,
         heap,
         arena: std::rc::Rc::clone(&arena),

@@ -31,6 +31,9 @@ pub(in crate::machine::region_isa) struct Running<'m> {
         Option<lash_kernel_state::kernel_internals::logical::NativeBatch>,
     )>,
     pub(super) complete: bool,
+    /// The root frame returns into a caller the machine holds, awaiting a
+    /// return policy or a run-root cleanup: the machine takes its leaving.
+    pub(super) held_caller: bool,
     pub(super) activation: Option<CallActivation>,
     pub(super) identity: Rc<()>,
     pub(super) scratch: super::phase::Scratch,
@@ -181,6 +184,7 @@ impl<'m> Running<'m> {
             returning: None,
             served: None,
             complete: false,
+            held_caller: false,
             activation: None,
             identity: Rc::new(()),
             call_values,

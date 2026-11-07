@@ -92,17 +92,22 @@ impl Frame {
 }
 
 impl Frames {
-    /// Snapshot only the active source stack before taking the exclusive lease.
-    /// Cold frames are admitted once at entry, never during private execution.
+    /// Snapshot the active source stack the region runs, before taking the
+    /// exclusive lease: the top frame and each caller suspended at a source
+    /// call beneath it, down to a caller the machine holds (one awaiting a
+    /// return policy or a run-root cleanup), which the lease leaves into.
+    /// Gives the index of the lowest snapshot frame. Cold frames are
+    /// admitted once at entry, never during private execution.
     #[expect(clippy::vec_box, reason = "canonical frame allocations")]
-    pub(in crate::machine) fn region_stack(&mut self) -> Result<Vec<Box<Frame>>, HeapFault> {
+    pub(in crate::machine) fn region_stack(&mut self) -> Result<(u64, Vec<Box<Frame>>), HeapFault> {
         self.last_mut()?;
         let (task, logical) = self
             .logical
             .as_ref()
             .ok_or_else(|| malformed("region stack has no source context"))?;
         let mut images = Vec::new();
-        for index in 0..self.len {
+        let mut base = 0;
+        for index in (0..self.len).rev() {
             let mut image = if let Some((_, frame)) = self.cache.iter().find(|(at, _)| *at == index)
             {
                 frame.region_image(logical.clone(), *task, &self.exe)?
@@ -124,19 +129,24 @@ impl Frames {
                 )?);
                 frame
             };
+            // A caller suspended at a region call joins the lease; any other
+            // caller (an awaiting statement, a cleanup, a start adapter) is
+            // the machine's, and the region's root returns into it there.
             if index + 1 < self.len
-                && image
+                && !image
                     .pending
                     .source
                     .as_ref()
-                    .is_none_or(|source| source.progress != 3)
+                    .is_some_and(|source| source.progress == 3)
             {
-                return Err(malformed("region caller has no suspended source call"));
+                base = index + 1;
+                break;
             }
             image.owned = false;
             images.push(image);
         }
-        Ok(images)
+        images.reverse();
+        Ok((base, images))
     }
 
     #[expect(clippy::vec_box, reason = "canonical frame allocations")]
@@ -144,20 +154,21 @@ impl Frames {
         &mut self,
         entry_code: crate::compile::CodeId,
         entry_invocation: u64,
+        entry_base: u64,
         entry_frames: usize,
         replacements: Vec<Box<Frame>>,
     ) -> Result<PreparedRegionFrames<'_>, HeapFault> {
-        if self.len() != entry_frames || self.len == 0 {
+        if self.len() != entry_frames || self.len <= entry_base {
             return Err(malformed("region entry stack changed"));
         }
-        let invocation = match self.cache.iter().find(|(at, _)| *at == 0) {
+        let invocation = match self.cache.iter().find(|(at, _)| *at == entry_base) {
             Some((_, frame)) => frame.invocation,
-            None => row(&self.rows, 0, &self.access)?.invocation,
+            None => row(&self.rows, entry_base, &self.access)?.invocation,
         };
-        if self.code_at(0)? != entry_code || invocation != entry_invocation {
+        if self.code_at(entry_base)? != entry_code || invocation != entry_invocation {
             return Err(malformed("region entry invocation changed"));
         }
-        self.reserve_region_exit(0, replacements)
+        self.reserve_region_exit(entry_base, replacements)
     }
 
     /// The entry frame must already be resident. Preparing an exit never

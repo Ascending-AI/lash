@@ -23,7 +23,11 @@ pub(super) struct Programs {
 impl Programs {
     /// `stack` holds the codes of the lease's frames, outermost first: a
     /// parked call enters the next frame's code.
-    pub(super) fn bind(entry: &Arc<Code>, stack: &[CodeId]) -> Result<Arc<Self>, RegionError> {
+    pub(super) fn bind(
+        entry: &Arc<Code>,
+        stack: &[CodeId],
+        bound: &super::bind::BoundCodes,
+    ) -> Result<Arc<Self>, RegionError> {
         let exe = &entry.exe;
         let mut codes = Vec::new();
         codes
@@ -120,9 +124,9 @@ impl Programs {
                         continue;
                     }
                     let program = exe.region(plan.code()).map_err(invalid)?;
-                    let bound = Code::bind_executable(exe, &program)?;
-                    *slot = Some(Arc::clone(&bound));
-                    pending.push(bound);
+                    let code = bound.get(exe, &program)?;
+                    *slot = Some(Arc::clone(&code));
+                    pending.push(code);
                 }
                 sites.push(plans);
             }

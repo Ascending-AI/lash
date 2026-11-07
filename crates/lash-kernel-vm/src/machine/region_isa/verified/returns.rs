@@ -34,7 +34,7 @@ impl Running<'_> {
     }
     pub(super) fn export_return(&mut self, value: LeaseValue) -> Result<bool, RegionError> {
         use lash_kernel_state::kernel_internals::logical::Owner;
-        if !self.parked.is_empty() || !self.limits.charge_enabled {
+        if !self.parked.is_empty() || self.held_caller || !self.limits.charge_enabled {
             return Ok(true);
         }
         let Owner::Frame { task, .. } = self
@@ -172,29 +172,35 @@ impl Running<'_> {
             completion,
         })
     }
+    /// Whether the root frame leaves through the machine rather than
+    /// completing in the region: it returns into a caller the machine
+    /// holds, or its completion checks a public result, runs a cleanup or
+    /// follows a start convention, as the machine's leave does.
+    pub(super) fn machine_completes_root(&self) -> bool {
+        self.held_caller
+            || self.canonical.cleaning.is_some()
+            || self
+                .canonical
+                .public_result
+                .as_ref()
+                .is_some_and(|ty| !matches!(ty, lash_kernel_value::types::Type::Any))
+            || !matches!(
+                self.canonical.convention,
+                None | Some(
+                    lash_kernel_doc::StartConvention::Direct
+                        | lash_kernel_doc::StartConvention::PyArgsList { .. }
+                )
+            )
+            || (self.canonical.convention.is_none()
+                && self
+                    .code
+                    .exe
+                    .root_cleanup(self.code.program.code())
+                    .is_some())
+    }
     pub(super) fn finish_frame(&mut self) -> Result<(), RegionError> {
         self.authenticate_activation()?;
-        if self.parked.is_empty()
-            && (self.canonical.cleaning.is_some()
-                || self
-                    .canonical
-                    .public_result
-                    .as_ref()
-                    .is_some_and(|ty| !matches!(ty, lash_kernel_value::types::Type::Any))
-                || !matches!(
-                    self.canonical.convention,
-                    None | Some(
-                        lash_kernel_doc::StartConvention::Direct
-                            | lash_kernel_doc::StartConvention::PyArgsList { .. }
-                    )
-                )
-                || (self.canonical.convention.is_none()
-                    && self
-                        .code
-                        .exe
-                        .root_cleanup(self.code.program.code())
-                        .is_some()))
-        {
+        if self.parked.is_empty() && self.machine_completes_root() {
             return Err(invalid(Refused::Facts));
         }
         self.activation.take();

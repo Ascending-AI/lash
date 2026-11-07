@@ -103,6 +103,14 @@ impl Running<'_> {
             {
                 return self.halt(RegionStop::Boundary);
             }
+            // A root frame the machine completes stands before its Exit,
+            // its value in its departure role.
+            if matches!(op, RegionOp::Exit { .. })
+                && self.parked.is_empty()
+                && self.machine_completes_root()
+            {
+                return self.halt(RegionStop::Leave);
+            }
             // A step the machine serves stands unbilled for it; the step
             // then takes what was served through the same acceptance. A
             // native its checked kernel cannot answer in place is answered;

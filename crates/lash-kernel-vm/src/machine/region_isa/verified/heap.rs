@@ -152,7 +152,33 @@ impl Running<'_> {
                     .get(1)
                     .ok_or_else(|| invalid(Refused::Facts))?;
                 let object = self.view.object(base).map_err(RegionError::Heap)?;
-                let member = match self.view.kind(base).map_err(RegionError::Heap)? {
+                let kind = self.view.kind(base).map_err(RegionError::Heap)?;
+                // A set's member is assigned `true` to add it, held with no
+                // value, or `false` to remove it, as the source does.
+                let mut removing = *removing;
+                if kind == lash_kernel_doc::ValueKind::Set && !removing {
+                    let assigned = *self
+                        .heap_values
+                        .get(2)
+                        .ok_or_else(|| invalid(Refused::Facts))?;
+                    match self.view.inline(assigned).map_err(RegionError::Heap)? {
+                        Some(Value::Bool(true)) => {
+                            self.heap_values[2] = self
+                                .view
+                                .import(&Value::Absent)
+                                .map_err(RegionError::Heap)?;
+                        }
+                        Some(Value::Bool(false)) => removing = true,
+                        _ => {
+                            self.stop = Some(RegionStop::Refused {
+                                kind: "type_error",
+                                message: "a set's member is assigned `true` to add it or `false` to remove it",
+                            });
+                            return Ok(false);
+                        }
+                    }
+                }
+                let member = match kind {
                     lash_kernel_doc::ValueKind::List => {
                         let index = match self.view.inline(key).map_err(RegionError::Heap)? {
                             Some(Value::Int(word)) => u64::try_from(word).ok(),
@@ -171,7 +197,7 @@ impl Running<'_> {
                     | lash_kernel_doc::ValueKind::Record => LeaseMember::Table(key),
                     _ => return Err(invalid(Refused::Facts)),
                 };
-                let next = if *removing {
+                let next = if removing {
                     None
                 } else {
                     Some(

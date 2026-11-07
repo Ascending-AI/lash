@@ -31,6 +31,28 @@ impl KernelMachine {
         self.complete(task, host, &exe, Completion::Throw(Box::new(value)))
     }
 
+    /// `task`'s top frame stands before its Exit, its value in its departure
+    /// role, and returns into a caller the machine holds: the machine
+    /// carries the value out as any return, into that caller's wait.
+    pub(super) fn leave_from_region(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn crate::interface::Host,
+    ) -> Result<(), Halt> {
+        let value = self
+            .frame(task)?
+            .pending
+            .source
+            .as_ref()
+            .ok_or_else(|| fault("a leaving frame has no source continuation"))?
+            .roles
+            .iter()
+            .find_map(|(slot, value)| matches!(slot, Slot::Departure(_)).then_some(*value))
+            .ok_or_else(|| fault("a leaving frame holds no departure"))?;
+        let exe = Arc::clone(&self.exe);
+        self.complete(task, host, &exe, Completion::Return(Box::new(value)))
+    }
+
     /// A ReturnVia at `at` the region left past every cleanup of its frame:
     /// its departure holds the value the frame returns through the policy.
     pub(super) fn return_via_from_region(

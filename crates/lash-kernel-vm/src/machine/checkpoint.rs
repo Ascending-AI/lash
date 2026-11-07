@@ -378,6 +378,7 @@ impl KernelMachine {
             session_cell: matches!(root.target, lash_kernel_state::paged::CellTargetKind::Main),
             program,
             exe: Arc::clone(&exe),
+            bound: Default::default(),
             bounds,
             limits,
             tasks: tasks::Tasks::open(

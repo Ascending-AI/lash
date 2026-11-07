@@ -24,7 +24,7 @@ impl<'m> RegionLease<'m> {
     ) -> Result<Self, RegionError> {
         let task_id = machine.current.ok_or_else(|| invalid(Refused::Facts))?;
         let exe = Arc::clone(&machine.exe);
-        let mut stack = machine
+        let (entry_base, mut stack) = machine
             .tasks
             .get_mut(task_id.0 as usize)
             .map_err(RegionError::Heap)?
@@ -38,20 +38,26 @@ impl<'m> RegionLease<'m> {
         {
             return Err(invalid(Refused::Source));
         }
-        let entry_frames = stack.len();
+        let entry_frames = usize::try_from(entry_base)
+            .ok()
+            .and_then(|base| base.checked_add(stack.len()))
+            .ok_or_else(|| invalid(Refused::Facts))?;
         let root = stack.first().ok_or_else(|| invalid(Refused::Facts))?;
         let entry_code = root.code;
         let entry_invocation = root.invocation;
         let root_code = if code.program.code() == root.code {
             code
         } else {
-            Code::bind_executable(&exe, &exe.region(root.code).map_err(invalid)?)?
+            machine
+                .bound
+                .get(&exe, &exe.region(root.code).map_err(invalid)?)?
         };
         let codes: Vec<CodeId> = stack.iter().map(|frame| frame.code).collect();
-        let programs = super::programs::Programs::bind(&root_code, &codes)?;
+        let programs = super::programs::Programs::bind(&root_code, &codes, &machine.bound)?;
         let mut positions = Vec::new();
         let mut dependencies = Vec::new();
         let mut inputs = Vec::new();
+        let stack_len = stack.len();
         for (depth, frame) in stack.iter_mut().enumerate() {
             frame
                 .reconstruct_region_frontier(&exe, &machine.heap, &machine.logical, task_id)
@@ -84,7 +90,7 @@ impl<'m> RegionLease<'m> {
                 // The top frame resumes at the machine's charge; a parked
                 // caller stands at its call's successor and pays nothing
                 // until the callee returns into it.
-                if depth + 1 == entry_frames && source.debt.paid != machine.charged {
+                if depth + 1 == stack_len && source.debt.paid != machine.charged {
                     return Err(invalid(Refused::Facts));
                 }
                 super::resume::position(code, source)?
@@ -250,6 +256,7 @@ impl<'m> RegionLease<'m> {
         execution.reached = super::resume::reached(&execution.canonical, positions[0].1)?;
         let reopened = super::finally::reopened(&execution.code, &execution.canonical)?;
         execution.reopen_suspended(0, reopened)?;
+        execution.held_caller = entry_base > 0;
         for (bank, value) in sessions {
             execution.registers.write(
                 &mut execution.view,
@@ -350,6 +357,7 @@ impl<'m> RegionLease<'m> {
                 exe,
                 entry_code,
                 entry_invocation,
+                entry_base,
                 entry_frames,
                 inputs: inputs.into_boxed_slice(),
                 limits,

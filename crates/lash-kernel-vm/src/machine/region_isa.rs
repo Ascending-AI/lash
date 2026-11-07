@@ -35,7 +35,7 @@ mod storage_fixture;
 mod verified;
 use code::{Code, Limits};
 use execute::Execution;
-pub(in crate::machine) use verified::restore_source_controls;
+pub(in crate::machine) use verified::{BoundCodes, restore_source_controls};
 #[cfg(test)]
 mod fixtures;
 #[cfg(test)]
@@ -115,6 +115,10 @@ pub(crate) enum RegionStop {
     Boundary,
     /// The region stands at a delivering action for the machine to perform.
     Action,
+    /// The lease's root frame stands before its Exit, its value in its
+    /// departure role, for the machine to complete: it returns into a
+    /// caller the machine holds, or its completion is the machine's.
+    Leave,
     /// The region stands before an effect, its value held by the frame's
     /// roles: the machine copies it out and the region takes the step.
     Effect(crate::compile::region_isa::EffectKind),

@@ -13,6 +13,52 @@ fn halt(error: RegionError) -> Halt {
 }
 
 impl KernelMachine {
+    /// `task`'s top frame, if it stands suspended at a region call, takes
+    /// `value` as the call's result: the callee left through the machine,
+    /// which already gave the value to the task's incoming root, and the
+    /// frame stands at the call's Restore as a lease stopped there leaves
+    /// it, its completion billed as the callee left. `false` when the frame
+    /// waits otherwise.
+    pub(in crate::machine) fn return_into_region(
+        &mut self,
+        task: TaskId,
+        value: lash_kernel_doc::Value,
+    ) -> Result<bool, Halt> {
+        let frame = self.frame(task)?;
+        let code = frame.code;
+        let Some(at) = frame
+            .pending
+            .source
+            .as_ref()
+            .filter(|source| source.progress == 3)
+            .map(|source| source.at.clone())
+        else {
+            return Ok(false);
+        };
+        let program = self
+            .exe
+            .region(code)
+            .map_err(|error| halt(invalid(error)))?;
+        let tables = verified::Code::bind(self, &program).map_err(halt)?;
+        let resume = tables
+            .calls
+            .iter()
+            .flatten()
+            .find(|call| call.plan.point() == &at)
+            .map(|call| call.plan.resume().clone())
+            .ok_or_else(|| fault("a suspended canonical call has no plan"))?;
+        let frame = self.frame(task)?;
+        let mut source = frame
+            .pending
+            .leave_source()
+            .ok_or_else(|| fault("a suspended canonical call has no continuation"))?;
+        source.at = resume;
+        source.progress = 4;
+        source.pending = Some(value);
+        frame.pending.source = Some(source);
+        Ok(true)
+    }
+
     pub(in crate::machine) fn resume_source_continuation(
         &mut self,
         task: TaskId,
@@ -225,6 +271,11 @@ impl KernelMachine {
                 RegionStop::Throw => {
                     self.regs.clear();
                     self.raise_from_region(task, host)?;
+                }
+                // The lease's root returns into a caller the machine holds.
+                RegionStop::Leave => {
+                    self.regs.clear();
+                    self.leave_from_region(task, host)?;
                 }
                 // A ReturnVia past every cleanup of its frame returns the
                 // value its departure holds through the statement's policy.

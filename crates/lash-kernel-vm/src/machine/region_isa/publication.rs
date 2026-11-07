@@ -23,6 +23,9 @@ pub(super) struct Authority<'m> {
     pub(super) exe: Arc<crate::compile::Executable>,
     pub(super) entry_code: CodeId,
     pub(super) entry_invocation: u64,
+    /// The stack index of the lease's root frame: above it stand only the
+    /// frames the lease runs, beneath it the frames the machine holds.
+    pub(super) entry_base: u64,
     pub(super) entry_frames: usize,
     pub(super) inputs: Box<[Owner]>,
     pub(super) limits: Limits,
@@ -163,6 +166,7 @@ impl<'m> Authority<'m> {
             .prepare_region_stack_exit(
                 self.entry_code,
                 self.entry_invocation,
+                self.entry_base,
                 self.entry_frames,
                 canonical.frames,
             )
