@@ -107,9 +107,11 @@ impl CalleePlan {
         let body = exe.code(target.code);
         let source = Arc::clone(&body.source_room);
         source.verify()?;
-        if !body.free.is_empty()
+        // A closure's cells bind its lexical captures or, for a body
+        // compiled on its own (a carried or saved closure), its free names.
+        if (!body.free.is_empty() && !body.captures.is_empty())
             || (!target.dynamic && (!body.captures.is_empty() || !body.capture_names.is_empty()))
-            || body.capture_names.len() != body.captures.len()
+            || body.capture_names.len() != body.captures.len() + body.free.len()
             || source.bindings.iter().any(|binding| {
                 binding.borrowed
                     && !(target.dynamic
@@ -170,14 +172,13 @@ impl CalleePlan {
         let captures = body
             .captures
             .iter()
+            .map(|capture| (capture.inner, capture.inner_at))
+            .chain(body.free.iter().map(|(_, local)| (local.slot, local.at)))
             .enumerate()
-            .map(|(index, capture)| {
-                let declared = body
-                    .slots
-                    .get(capture.inner as usize)
-                    .ok_or(Refused::Source)?;
+            .map(|(index, (inner, inner_at))| {
+                let declared = body.slots.get(inner as usize).ok_or(Refused::Source)?;
                 if !body.capture_names.contains(&declared.name)
-                    || body.slots_by_at.get(capture.inner_at as usize) != Some(&capture.inner)
+                    || body.slots_by_at.get(inner_at as usize) != Some(&inner)
                 {
                     return Err(Refused::Source);
                 }

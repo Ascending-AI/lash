@@ -381,6 +381,7 @@ pub struct LeaseCallable<'a> {
     identity: &'a lash_kernel_value::names::CallableId,
     closure: Option<&'a lash_kernel_doc::arena::ClosureIdentity>,
     captures: &'a [LeaseValue],
+    entity: Option<EntityId>,
 }
 impl LeaseCallable<'_> {
     pub fn identity(&self) -> &lash_kernel_value::names::CallableId {
@@ -391,6 +392,11 @@ impl LeaseCallable<'_> {
     }
     pub fn captures(&self) -> &[LeaseValue] {
         self.captures
+    }
+    /// The canonical entity the callable was imported as; none for one the
+    /// lease made.
+    pub fn entity(&self) -> Option<EntityId> {
+        self.entity
     }
 }
 pub(super) struct Existing {

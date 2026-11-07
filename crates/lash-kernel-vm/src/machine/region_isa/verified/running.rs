@@ -8,6 +8,10 @@ pub(in crate::machine::region_isa) struct Running<'m> {
     pub(super) programs: Arc<super::programs::Programs>,
     pub(super) call_values: Vec<LeaseValue>,
     pub(super) call_captures: Vec<LeaseValue>,
+    /// The environments of the session's saved functions, sorted: a call
+    /// of one takes fresh instances of its frozen captures (`K-SES-004`),
+    /// never the closure's cells.
+    pub(super) saved: Box<[lash_kernel_doc::heap::EntityId]>,
     pub(super) arguments: Vec<Value>,
     pub(super) heap_values: Vec<LeaseValue>,
     pub(super) heap_pairs: Vec<(LeaseValue, LeaseValue)>,
@@ -175,6 +179,7 @@ impl<'m> Running<'m> {
         Ok(Self {
             limiters,
             call_captures,
+            saved: Box::default(),
             parked: Vec::new(),
             canonical_callees: Vec::new(),
             departing: None,

@@ -14,9 +14,17 @@ pub(super) struct Parked {
     pub(super) activation: Option<CallActivation>,
     pub(super) site: u32,
     pub(super) target: CodeId,
+    /// The callee's defining Link: a callable's own, else its caller's.
+    pub(super) link: lash_kernel_value::content_ids::LinkId,
 }
 
 impl Running<'_> {
+    /// The defining Link of the running frame.
+    pub(super) fn frame_link(&self) -> lash_kernel_value::content_ids::LinkId {
+        self.parked
+            .last()
+            .map_or(self.canonical.link, |parked| parked.link)
+    }
     pub(in crate::machine::region_isa) fn enter_call(
         &mut self,
         site: u32,
@@ -54,6 +62,7 @@ impl Running<'_> {
             self.write(load.dst, operand)?;
         }
         self.call_captures.clear();
+        let mut link = self.frame_link();
         // A callee read from a captured variable's own register reads its
         // cell; the call takes the function the cell holds.
         let mut current = |register| -> Result<_, RegionError> {
@@ -97,6 +106,14 @@ impl Running<'_> {
                 self.stop = Some(RegionStop::Boundary);
                 return Ok(None);
             };
+            if binding
+                .entity()
+                .is_some_and(|entity| self.saved.binary_search(&entity).is_ok())
+            {
+                self.stop = Some(RegionStop::Boundary);
+                return Ok(None);
+            }
+            link = binding.identity().link;
             self.call_captures
                 .extend(binding.capture_roles().map(|(_, value)| value));
             let plan = Arc::clone(binding.plan());
@@ -359,6 +376,7 @@ impl Running<'_> {
             activation: self.activation.take(),
             site,
             target: plan.code(),
+            link,
         };
         // All bank writes, allocation and checks precede this affine accept.
         ready.accept();

@@ -105,11 +105,11 @@ impl Running<'_> {
             Some(Arc::new(lash_kernel_doc::arena::ClosureIdentity {
                 capture_names: target.capture_names.clone(),
                 callable: lash_kernel_value::names::CallableId {
-                    link: self.canonical.link,
+                    link: self.frame_link(),
                     function,
                 },
                 site: lash_kernel_doc::linked_site::LinkedSite {
-                    link: self.canonical.link,
+                    link: self.frame_link(),
                     site: target
                         .created
                         .clone()
@@ -263,7 +263,7 @@ impl Running<'_> {
                     HeapKind::BigInt(integer) => LeaseAllocation::big_int(integer),
                     HeapKind::Function(function) => {
                         LeaseAllocation::function(lash_kernel_value::names::CallableId {
-                            link: self.canonical.link,
+                            link: self.frame_link(),
                             function: *function,
                         })
                     }

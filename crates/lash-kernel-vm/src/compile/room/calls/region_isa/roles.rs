@@ -49,6 +49,10 @@ impl CallBinding<'_> {
     pub(crate) fn callable(&self) -> LeaseValue {
         self.callable
     }
+    /// The canonical entity the callable was imported as.
+    pub(crate) fn entity(&self) -> Option<lash_kernel_doc::heap::EntityId> {
+        self.view.entity()
+    }
     pub(crate) fn capture_roles(
         &self,
     ) -> impl ExactSizeIterator<Item = (CallRole, LeaseValue)> + '_ {

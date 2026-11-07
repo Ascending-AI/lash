@@ -203,7 +203,11 @@ impl DynamicSite {
             return Err(Refused::Source);
         }
         let arguments = self.arguments;
+        // A closure's body takes its free names from the closure's cells,
+        // so it is entered as a body, never through its library's
+        // signature.
         let library = match exe.code(code).source_room.owner {
+            _ if !exe.code(code).capture_names.is_empty() => None,
             doc::constant_pool::PoolOwner::Function(function) => exe.library_lib(&function).filter(|lib| {
                 matches!(exe.lib(*lib).run, LibRun::Body(actual) | LibRun::Native { body: Some(actual), .. } if actual == code)
             }),

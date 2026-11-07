@@ -112,7 +112,7 @@ impl Running<'_> {
                 ),
                 convention: None,
                 public_result: None,
-                link: self.canonical.link,
+                link: self.parked[depth - 1].link,
                 code: image.program,
                 charging: compiled.charging,
                 paced: compiled.paced,

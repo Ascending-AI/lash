@@ -177,6 +177,7 @@ impl<'m> RegionLease<'m> {
         let top_code = programs.code(top.code)?;
         let (pc, prefix) = *positions.last().ok_or_else(|| invalid(Refused::Facts))?;
         super::resume::warm_next(machine, top_code, top, task_id, pc, prefix)?;
+        let saved = machine.saved_environments().map_err(RegionError::Heap)?;
         let indexes: Vec<_> = (0..exe.occurrence_count()).collect();
         let task = machine
             .tasks
@@ -257,6 +258,7 @@ impl<'m> RegionLease<'m> {
         let reopened = super::finally::reopened(&execution.code, &execution.canonical)?;
         execution.reopen_suspended(0, reopened)?;
         execution.held_caller = entry_base > 0;
+        execution.saved = saved;
         for (bank, value) in sessions {
             execution.registers.write(
                 &mut execution.view,
@@ -304,6 +306,7 @@ impl<'m> RegionLease<'m> {
                 activation,
                 site: site.index(),
                 target: frame.code,
+                link: frame.link,
             });
             execution.registers.reserve_frame(depth)?;
             let code = Arc::clone(execution.programs.code(frame.code)?);

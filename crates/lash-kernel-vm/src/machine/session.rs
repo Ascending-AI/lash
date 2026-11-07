@@ -904,6 +904,24 @@ impl KernelMachine {
         .map_err(super::write_halt)
     }
 
+    /// The environments of the session's saved functions, sorted.
+    pub(super) fn saved_environments(
+        &self,
+    ) -> Result<Box<[lash_kernel_doc::heap::EntityId]>, HeapFault> {
+        let mut saved = Vec::new();
+        if self.functions != KeyedRoot::Empty {
+            open_tree::<lash_kernel_state::paged::FunctionRecord>(self.functions).visit(
+                self.heap.pages(),
+                &mut |_, record| {
+                    saved.push(record.environment);
+                    true
+                },
+            )?;
+        }
+        saved.sort_unstable();
+        saved.dedup();
+        Ok(saved.into_boxed_slice())
+    }
     pub(super) fn session_get(&mut self, name: &BindingName) -> Result<Option<Value>, Halt> {
         if let Some(bound) = self.session.bindings.get(&name.key) {
             return Ok(Some(bound.value));

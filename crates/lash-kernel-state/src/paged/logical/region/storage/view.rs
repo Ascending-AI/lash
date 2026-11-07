@@ -55,6 +55,7 @@ impl StateLease<'_> {
         let index = self.local.index(self.object(value)?)?;
         self.load_head(index)?;
         let slot = &self.local.slots[index];
+        let entity = slot.existing.as_ref().and_then(|existing| existing.entity);
         let closure = match &slot.body {
             Some(LocalBody::Closure(closure)) => closure,
             _ => match slot
@@ -67,6 +68,7 @@ impl StateLease<'_> {
                         identity,
                         closure: None,
                         captures: &[],
+                        entity,
                     });
                 }
                 Some(LocalCallable::Closure(closure)) => closure,
@@ -77,6 +79,7 @@ impl StateLease<'_> {
             identity: &closure.identity.callable,
             closure: Some(&closure.identity),
             captures: &closure.captures,
+            entity,
         })
     }
     pub fn kind(&self, value: LeaseValue) -> Result<ValueKind, HeapFault> {
