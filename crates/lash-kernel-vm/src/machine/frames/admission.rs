@@ -140,6 +140,7 @@ pub(super) fn source_arrival(
     source: &source::SourceContinuation,
     standing: Option<(StmtId, Option<ActIx>)>,
     arrival: Arrival,
+    read: bool,
 ) -> Result<(), RestoreRefusal> {
     // A slice can stop after Enter, before the machine serves the action.
     // Such a ready frame has no delivered input to authenticate yet.
@@ -161,7 +162,18 @@ pub(super) fn source_arrival(
             use crate::compile::ActionKind as Kind;
             match &exe.stmt(statement).form {
                 Form::Action(action) => Some(match action.kind {
-                    Kind::Call { .. } => ActionKind::Call,
+                    Kind::Call { .. } => {
+                        return if matches!(
+                            arrival,
+                            Arrival::Returned | Arrival::Valued { .. } | Arrival::Raised
+                        ) {
+                            Ok(())
+                        } else {
+                            Err(RestoreRefusal::TaskState {
+                                action: site_path(&source.at.site),
+                            })
+                        };
+                    }
                     Kind::Perform { then_yield, .. } => ActionKind::Perform { then_yield },
                     Kind::Yield => ActionKind::Yield,
                     Kind::Spawn { .. } => ActionKind::Spawn,
@@ -177,6 +189,9 @@ pub(super) fn source_arrival(
         .ok_or_else(|| RestoreRefusal::UnknownSite {
             action: action.clone(),
         })?;
+        if matches!(kind, ActionKind::Perform { .. }) && read {
+            return inline_arrival(action, arrival);
+        }
         let phase = match kind {
             ActionKind::Call | ActionKind::Body => ActionPhase::Called,
             ActionKind::Perform { .. } => ActionPhase::Waiting,
@@ -214,4 +229,46 @@ fn inline_arrival(action: SitePath, arrival: Arrival) -> Result<(), RestoreRefus
     } else {
         Err(RestoreRefusal::TaskState { action })
     }
+}
+
+/// A read's synchronous value is admitted only through the saved read binding
+/// for this frame's exact Link and the source import's full discriminator.
+pub(super) fn source_is_read(
+    exe: &Executable,
+    record: &FrameRecord,
+    standing: Option<(StmtId, Option<ActIx>)>,
+    reads: &Tree<lash_kernel_value::OperationUse>,
+    access: &Access<'_>,
+) -> Result<bool, HeapFault> {
+    let Some((statement, act)) = standing else {
+        return Ok(false);
+    };
+    let slot = if let Some(act) = act {
+        let (stream, _, _) = exe.statement(statement);
+        match &stream.nested[act.ix()].kind {
+            NestedKind::Perform { slot, .. } => Some(*slot),
+            _ => None,
+        }
+    } else {
+        match &exe.stmt(statement).form {
+            Form::Action(crate::compile::Action {
+                kind: crate::compile::ActionKind::Perform { slot, .. },
+                ..
+            }) => Some(*slot),
+            _ => None,
+        }
+    };
+    let Some(slot) = slot else {
+        return Ok(false);
+    };
+    let slot = exe
+        .operation_slot(record.link, &exe.stmt(statement).site.unit, slot)
+        .ok_or_else(|| malformed("standing read has no source import"))?;
+    let use_ = lash_kernel_value::OperationUse {
+        link: record.link,
+        slot,
+    };
+    Ok(reads
+        .get(&crate::machine::operation_key(&use_), access)?
+        .is_some_and(|saved| saved == use_))
 }

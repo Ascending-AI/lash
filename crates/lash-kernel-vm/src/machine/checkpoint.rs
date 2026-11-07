@@ -434,6 +434,7 @@ impl KernelMachine {
             function_origins: Default::default(),
             limiters: Limiters::default(),
         };
+        machine.tasks.read_modes(machine.modes.clone());
         machine
             .reconstruct_canonical_region()
             .map_err(OpenError::Heap)?;
@@ -601,6 +602,7 @@ impl KernelMachine {
             Arc::clone(&self.exe),
             Arc::clone(&self.bound),
         );
+        self.tasks.read_modes(self.modes.clone());
         Ok(Some(SealedRoot { page, root }))
     }
 }

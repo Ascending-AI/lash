@@ -351,6 +351,7 @@ pub(super) struct Tasks {
     arena: SharedArena,
     exe: Arc<Executable>,
     bound: Arc<super::region_isa::BoundCodes>,
+    reads: Tree<lash_kernel_value::OperationUse>,
 }
 impl Tasks {
     pub(super) fn open(
@@ -376,7 +377,14 @@ impl Tasks {
             arena,
             exe,
             bound,
+            reads: Tree::new(false),
         }
+    }
+    pub(super) fn read_modes(&mut self, reads: Tree<lash_kernel_value::OperationUse>) {
+        for (_, task) in self.cache.iter_mut().flatten() {
+            task.frames.reads = reads.clone();
+        }
+        self.reads = reads;
     }
     pub(super) fn new(
         logical: std::rc::Rc<
@@ -554,6 +562,7 @@ impl Tasks {
             Arc::clone(&self.bound),
             frames::arrival(&record.state),
         );
+        frames.reads = self.reads.clone();
         frames.logical_context(TaskId(index), self.logical.clone());
         self.cache[slot] = Some((
             index,
@@ -567,6 +576,7 @@ impl Tasks {
         Ok(Some(slot))
     }
     pub(super) fn push(&mut self, mut task: Task) -> Result<(), HeapFault> {
+        task.frames.reads = self.reads.clone();
         self.invalidate_active();
         let index = self.rows.len();
         task.frames

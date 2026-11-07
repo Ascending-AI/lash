@@ -936,6 +936,7 @@ pub(super) struct Frames {
     exe: Arc<Executable>,
     bound: Arc<super::region_isa::BoundCodes>,
     arrival: Arrival,
+    pub(super) reads: Tree<lash_kernel_value::OperationUse>,
 }
 
 #[cfg(test)]
@@ -1048,6 +1049,7 @@ impl Frames {
             exe,
             bound,
             arrival,
+            reads: Tree::new(false),
         }
     }
     pub(super) fn len(&self) -> usize {
@@ -1095,6 +1097,7 @@ impl Frames {
                 &self.exe,
                 &self.bound,
                 &mut self.arena.borrow_mut(),
+                &self.reads,
             )?;
             if let Some((task, lifecycle)) = &self.logical {
                 frame.logical = Some(super::logical_held::FrameRoots::restore(
@@ -1438,6 +1441,7 @@ impl Frames {
             &self.exe,
             &self.bound,
             &mut scratch,
+            &self.reads,
         ) {
             Ok(_) => Ok(None),
             Err(Unrestored::Refused(refusal)) => Ok(Some(refusal)),

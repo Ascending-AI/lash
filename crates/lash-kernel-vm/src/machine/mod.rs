@@ -581,6 +581,7 @@ impl KernelMachine {
                     .write(operation_key(&use_), use_, self.heap.pages())?;
             }
         }
+        self.tasks.read_modes(self.modes.clone());
         Ok(())
     }
 

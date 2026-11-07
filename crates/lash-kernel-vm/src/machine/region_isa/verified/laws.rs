@@ -1511,3 +1511,67 @@ fn a_new_dynamic_target_extends_the_cached_callee_bindings() {
             .same(&Value::Int(9))
     );
 }
+
+impl KernelMachine {
+    /// The saved phase of the source call at `at`, independent of frame layout.
+    pub(crate) fn source_call_phase(
+        &self,
+        at: &lash_kernel_value::sites::Site,
+    ) -> lash_kernel_state::paged::ContinuationPhase {
+        let root = lash_kernel_value::sites::Site::new(at.unit.clone(), Vec::new());
+        let id = self.exe.code_at(&root, &[]).expect("the source body");
+        let draft = crate::compile::region_isa::compile_region(&self.exe, id).unwrap();
+        let calls =
+            crate::compile::room::region::calls::region_isa::compile_calls(&self.exe, &draft)
+                .unwrap();
+        let call = calls
+            .iter()
+            .find(|call| &call.point().site == at)
+            .expect("the source call site");
+        lash_kernel_state::paged::ContinuationPhase::Call {
+            phase: call.point().phase.code(),
+        }
+    }
+}
+
+impl KernelMachine {
+    pub(crate) fn source_pending(
+        &mut self,
+        task: TaskId,
+        index: u64,
+    ) -> Option<lash_kernel_state::paged::ContinuationRecord> {
+        self.publish_holdings().unwrap();
+        let access = self.heap.pages().clone();
+        self.task(task)
+            .unwrap()
+            .frames
+            .rows
+            .rank_get(index, &access)
+            .unwrap()?
+            .1
+            .pending
+    }
+    pub(crate) fn source_action_site(&mut self) -> Option<Vec<u32>> {
+        let pending = self.source_pending(TaskId::MAIN, 0)?;
+        let lash_kernel_state::paged::ContinuationPhase::Source { phase, progress: 2 } =
+            pending.phase
+        else {
+            return None;
+        };
+        let root =
+            lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, Vec::new());
+        let id = self.exe.code_at(&root, &[])?;
+        let program = self.exe.region(id).unwrap();
+        let at = crate::compile::room::Point {
+            site: lash_kernel_value::sites::Site::new(root.unit, pending.site.clone()),
+            phase: crate::compile::room::Phase::from_code(phase)?,
+        };
+        let pc = program.at(&at)?;
+        match program.op(pc)? {
+            crate::compile::region_isa::RegionOp::Boundary { spec } if spec.action().is_some() => {
+                Some(pending.site)
+            }
+            _ => None,
+        }
+    }
+}

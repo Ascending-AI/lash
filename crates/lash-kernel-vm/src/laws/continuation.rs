@@ -28,7 +28,7 @@ use lash_kernel_state::paged::{
 };
 use lash_kernel_value::names::FunctionId;
 
-use lash_kernel_exec::coord::{ActionPhase, LoopPhase, RestoreRefusal, SitePath};
+use lash_kernel_exec::coord::{RestoreRefusal, SitePath};
 use lash_kernel_value::sites::Site;
 
 use super::embedder::{self, Embedder, Setup, label};
@@ -453,7 +453,12 @@ fn a_spawn_inside_an_expression_resumes_exactly() {
         &["child"],
         &expected,
         &printed,
-        &[STANDING, ContinuationPhase::Call { phase: 0 }],
+        &[
+            STANDING,
+            Embedder::with(SPAWNED, setup(0))
+                .machine
+                .source_call_phase(&embedder::main_site([1, 0, 0])),
+        ],
     );
     case(SPAWNED_HOISTED, &["child"], &expected, &printed, &[]);
 }
@@ -481,7 +486,12 @@ fn library_bodies_inside_expressions_resume_exactly() {
         &["w"],
         &expected,
         &[int(1)],
-        &[ContinuationPhase::Call { phase: 0 }, STANDING],
+        &[
+            Embedder::with(BODIES, setup(0))
+                .machine
+                .source_call_phase(&embedder::main_site([2, 0, 0])),
+            STANDING,
+        ],
     );
 }
 
@@ -577,21 +587,26 @@ fn a_missing_role_at_a_condition_or_a_place_is_refused() {
         "main { let i = 0\nwhile [i, perform 0(false) as Any][1] { set i = 1 }\nreturn i }\n",
         "main { let t = [0]\nset t[0] = [1, perform 0(\"w\") as Any][1] place first\nreturn t }\n",
     ] {
-        let mut embedder = park_where(source, |phases| phases == only(STANDING));
-        let mut dropped = None;
+        let mut embedder = park_where(source, |embedder, _| {
+            embedder.machine.source_action_site().is_some()
+        });
         edit_roles(&mut embedder, |roles| {
             assert!(!roles.is_empty(), "{source}");
-            dropped = Some(match roles.remove(0).coordinate {
-                lash_kernel_state::paged::RoleCoordinate::Expression(site) => site,
-                _ => panic!("source expression role"),
-            });
+            let index = roles
+                .iter()
+                .position(|role| {
+                    matches!(
+                        role.coordinate,
+                        lash_kernel_state::paged::RoleCoordinate::Source {
+                            kind: lash_kernel_state::kernel_internals::logical::SlotKind::Operand,
+                            ..
+                        }
+                    )
+                })
+                .expect("an evaluated operand role");
+            roles.remove(index);
         });
-        let role = SitePath(dropped.unwrap().into());
-        assert_eq!(
-            refused(&mut embedder),
-            RestoreRefusal::MissingRole { role },
-            "{source}"
-        );
+        refused(&mut embedder, "canonical source roles differ");
     }
 }
 
@@ -792,13 +807,18 @@ fn a_wait_in_a_while_condition_is_named_inside_its_loop() {
 /// stand at, and leaves the run there.
 fn park_where(
     source: &str,
-    want: impl Fn(&[(TaskId, usize, ContinuationPhase)]) -> bool,
+    want: impl Fn(&mut Embedder, &[(TaskId, usize, ContinuationPhase)]) -> bool,
 ) -> Embedder {
     let mut embedder = Embedder::with(source, setup(0));
     for _ in 0..200 {
         let step = embedder.run();
         let phases = embedder.machine.pending_phases();
-        if want(&phases) {
+        if want(&mut embedder, &phases) {
+            embedder.reopen(Layout(0x9e37_79b9 | 1), true);
+            assert_eq!(
+                embedder.machine.restore_refusal(TaskId::MAIN, 0).unwrap(),
+                None
+            );
             return embedder;
         }
         match step {
@@ -823,23 +843,35 @@ fn only(phase: ContinuationPhase) -> Vec<(TaskId, usize, ContinuationPhase)> {
 
 /// `main` parked at the nested `perform` of [`NESTED_AWAIT`].
 fn waiting() -> Embedder {
-    park_where(NESTED_AWAIT, |phases| phases == only(STANDING))
+    park_where(NESTED_AWAIT, |embedder, _| {
+        embedder.machine.source_action_site() == Some(vec![1, 0, 1])
+    })
 }
 
 /// `main` standing at the nested `call a()`, its callee's frame above.
 fn called() -> Embedder {
-    park_where(NESTED_AWAIT, |phases| {
-        phases == only(ContinuationPhase::Call { phase: 0 })
+    let phase = Embedder::with(NESTED_AWAIT, setup(0))
+        .machine
+        .source_call_phase(&embedder::main_site([1, 0, 0]));
+    park_where(NESTED_AWAIT, |embedder, _| {
+        embedder
+            .machine
+            .source_pending(TaskId::MAIN, 0)
+            .is_some_and(|pending| pending.site == [1, 0, 0] && pending.phase == phase)
     })
 }
 
-/// Opens `embedder` cold under an odd layout: the refusal the grammar
-/// gives `main`'s bottom frame there, which the run then ends with.
-fn refused(embedder: &mut Embedder) -> RestoreRefusal {
-    embedder
-        .try_reopen(Layout(0x9e37_79b9 | 1), true)
-        .expect("the run reopens");
-    refused_here(embedder)
+/// The cold row is edited after sealing, so the independent frame decoder
+/// reads the forged continuation before any publication can reject its ledger.
+fn refused(embedder: &mut Embedder, named: &str) {
+    let refusal = match embedder.machine.restore_refusal(TaskId::MAIN, 0) {
+        Ok(Some(refusal)) => format!("continuation refused: {refusal}"),
+        Err(fault) => fault,
+        Ok(None) => panic!("the grammar accepted the corrupted continuation"),
+    };
+    assert!(refusal.contains(named), "{refusal} names no {named}");
+    let problem = run_out(embedder);
+    assert!(problem.contains(named), "{problem} names no {named}");
 }
 
 /// The refusal the grammar gives `main`'s bottom frame as `embedder`
@@ -914,11 +946,9 @@ fn an_unknown_site_is_refused() {
             pending.as_mut().unwrap().site = vec![9, 9];
         })
         .unwrap();
-    assert_eq!(
-        refused(&mut embedder),
-        RestoreRefusal::UnknownSite {
-            action: path([9, 9])
-        }
+    refused(
+        &mut embedder,
+        "canonical source continuation is not admitted",
     );
 }
 
@@ -929,15 +959,16 @@ fn a_called_phase_at_a_wait_is_refused() {
     embedder
         .machine
         .tamper_pending(TaskId::MAIN, 0, |pending, _| {
-            pending.as_mut().unwrap().phase = ContinuationPhase::Call { phase: 0 };
+            let pending = pending.as_mut().unwrap();
+            let ContinuationPhase::Source { phase, .. } = pending.phase else {
+                panic!("a standing region wait")
+            };
+            pending.phase = ContinuationPhase::Call { phase };
         })
         .unwrap();
-    assert_eq!(
-        refused(&mut embedder),
-        RestoreRefusal::IllegalPhase {
-            action: path([0, 1]),
-            phase: ActionPhase::Called
-        }
+    refused(
+        &mut embedder,
+        "canonical source continuation is not admitted",
     );
 }
 
@@ -948,45 +979,41 @@ fn a_waiting_phase_at_a_call_is_refused() {
     embedder
         .machine
         .tamper_pending(TaskId::MAIN, 0, |pending, _| {
-            pending.as_mut().unwrap().phase = ContinuationPhase::Waiting;
+            let pending = pending.as_mut().unwrap();
+            let ContinuationPhase::Call { phase } = pending.phase else {
+                panic!("a suspended region call")
+            };
+            pending.phase = ContinuationPhase::Source { phase, progress: 2 };
         })
         .unwrap();
-    assert_eq!(
-        refused(&mut embedder),
-        RestoreRefusal::IllegalPhase {
-            action: path([0, 0]),
-            phase: ActionPhase::Waiting
-        }
+    refused(
+        &mut embedder,
+        "canonical source continuation is not admitted",
     );
 }
 
 /// CONT-GRAMMAR: a continuation saved on a frame nothing resumes.
 #[test]
 fn a_continuation_on_a_fresh_frame_is_refused() {
-    // After `let x`, the frame stands at `let r`, whose first nested
-    // action is `call a()`, at suffix [0, 0].
-    let mut embedder = park_where(NESTED_AWAIT, <[_]>::is_empty);
-    embedder
+    let mut saved = None;
+    called()
         .machine
-        .tamper_pending(TaskId::MAIN, 0, |pending, access| {
-            *pending = Some(
-                ContinuationRecord::new(
-                    vec![0, 0],
-                    ContinuationPhase::Call { phase: 0 },
-                    Vec::new(),
-                    access,
-                )
-                .unwrap(),
-            );
+        .tamper_pending(TaskId::MAIN, 0, |pending, _| {
+            saved = pending.clone();
         })
         .unwrap();
-    assert_eq!(
-        refused(&mut embedder),
-        RestoreRefusal::IllegalPhase {
-            action: path([0, 0]),
-            phase: ActionPhase::Called
-        }
-    );
+    // The same root invocation, before it has entered that call.
+    let mut embedder = park_where(NESTED_AWAIT, |embedder, _| {
+        embedder
+            .machine
+            .source_pending(TaskId::MAIN, 0)
+            .is_some_and(|pending| pending.site == [0] && pending.unpaid.is_some())
+    });
+    embedder
+        .machine
+        .tamper_pending(TaskId::MAIN, 0, |pending, _| *pending = saved)
+        .unwrap();
+    refused(&mut embedder, "cannot stand at Called");
 }
 
 /// CONT-GRAMMAR: a saved role the action does not keep.
@@ -995,31 +1022,24 @@ fn an_extra_role_is_refused() {
     let mut embedder = waiting();
     edit_roles(&mut embedder, |roles| {
         roles.push(RoleRecord {
-            coordinate: lash_kernel_state::paged::RoleCoordinate::Expression(vec![9]),
+            coordinate: lash_kernel_state::paged::RoleCoordinate::Source {
+                kind: lash_kernel_state::kernel_internals::logical::SlotKind::Operand,
+                role: lash_kernel_state::kernel_internals::logical::SourceRole::Operand(
+                    embedder::main_site([0, 0]),
+                ),
+            },
             value: lash_kernel_doc::heap::PageValue::Null,
         });
     });
-    assert_eq!(
-        refused(&mut embedder),
-        RestoreRefusal::ExtraRole { role: path([9]) }
-    );
+    refused(&mut embedder, "canonical source roles differ");
 }
 
 /// CONT-GRAMMAR: a role the action keeps, saved twice.
 #[test]
 fn a_role_saved_twice_is_refused() {
     let mut embedder = waiting();
-    let mut twice = None;
-    edit_roles(&mut embedder, |roles| {
-        let role = roles[0].clone();
-        twice = Some(match &role.coordinate {
-            lash_kernel_state::paged::RoleCoordinate::Expression(site) => site.clone(),
-            _ => panic!("source expression role"),
-        });
-        roles.push(role);
-    });
-    let role = SitePath(twice.unwrap().into());
-    assert_eq!(refused(&mut embedder), RestoreRefusal::ExtraRole { role });
+    edit_roles(&mut embedder, |roles| roles.push(roles[0].clone()));
+    refused(&mut embedder, "source continuation duplicates a frame role");
 }
 
 /// Q4: a saved region role names one slot of its body by kind and full
@@ -1101,10 +1121,11 @@ fn a_task_state_that_disagrees_is_refused() {
             },
         )
         .unwrap();
+    embedder.reopen(Layout(1), true);
     assert_eq!(
-        refused(&mut embedder),
+        refused_here(&mut embedder),
         RestoreRefusal::TaskState {
-            action: path([0, 1])
+            action: path([1, 0, 1])
         }
     );
 }
@@ -1123,18 +1144,15 @@ fn a_loop_moved_past_its_cursor_or_off_its_site_is_refused() {
         embedder
     };
     let mut embedder = parked();
-    let site = embedder
+    embedder
         .machine
         .tamper_loop(TaskId::MAIN, 0, |record, _| {
-            record.header = HeaderRecord::Check
+            record.header = HeaderRecord::Check;
         })
         .unwrap();
-    assert_eq!(
-        refused_here(&mut embedder),
-        RestoreRefusal::IllegalLoop {
-            site,
-            phase: LoopPhase::Check
-        }
+    refused(
+        &mut embedder,
+        "canonical source continuation is not admitted",
     );
     let mut embedder = parked();
     embedder
@@ -1144,9 +1162,9 @@ fn a_loop_moved_past_its_cursor_or_off_its_site_is_refused() {
             record.site = lash_kernel_state::paged::SiteRef::new(&moved, access).unwrap();
         })
         .unwrap();
-    assert_eq!(
-        refused_here(&mut embedder),
-        RestoreRefusal::UnknownLoop { site: path([9, 9]) }
+    refused(
+        &mut embedder,
+        "canonical source continuation is not admitted",
     );
 }
 
@@ -1156,11 +1174,17 @@ fn a_loop_moved_past_its_cursor_or_off_its_site_is_refused() {
 /// every one, and resumes exactly from a cold open at every slice.
 #[test]
 fn a_continuation_keeps_its_roles_flat_and_spills_a_long_list() {
-    for (count, cells) in [(16, None), (17, Some(2)), (40, Some(3))] {
+    for count in [15usize, 16, 17, 40] {
+        // The wait's argument is live beside the list's evaluated operands.
+        let roles = count + 1;
+        let cells = (roles > lash_kernel_state::paged::ROLE_FLAT)
+            .then_some(roles.div_ceil(lash_kernel_state::paged::ROLE_CHUNK) as u64);
         let operands: String = (0..count).map(|i| format!("{i}, ")).collect();
         let source =
             format!("main {{ let r = [{operands}perform 0(\"w\") as Any]\nreturn list.len(r) }}\n");
-        let mut embedder = park_where(&source, |phases| phases == only(STANDING));
+        let mut embedder = park_where(&source, |embedder, _| {
+            embedder.machine.source_action_site().is_some()
+        });
         let mut saved = None;
         embedder
             .machine
@@ -1173,7 +1197,11 @@ fn a_continuation_keeps_its_roles_flat_and_spills_a_long_list() {
                 saved = Some((shape, pending.roles(access).unwrap().len()));
             })
             .unwrap();
-        assert_eq!(saved, Some((cells, count)), "{count} roles");
+        assert_eq!(
+            saved,
+            Some((cells, roles)),
+            "{count} operands and the wait argument"
+        );
         let (reference, _) = drive(&source, &["w"], Drive::new(u64::MAX, false));
         assert_eq!(
             reference.end,

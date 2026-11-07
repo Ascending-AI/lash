@@ -116,6 +116,7 @@ impl Frames {
                     &self.exe,
                     &self.bound,
                     &mut self.arena.borrow_mut(),
+                    &self.reads,
                 )?;
                 frame.logical = Some(crate::machine::logical_held::FrameRoots::restore(
                     logical.clone(),

@@ -10,6 +10,7 @@ pub(super) fn frame(
     exe: &Arc<Executable>,
     bound: &crate::machine::region_isa::BoundCodes,
     arena: &mut Arena,
+    reads: &Tree<lash_kernel_value::OperationUse>,
 ) -> Result<Box<Frame>, Unrestored> {
     let site = record.statement.resolve(access)?;
     let document = exe
@@ -130,6 +131,15 @@ pub(super) fn frame(
         let (controls, standing) = crate::machine::region_isa::restore_source_controls(
             bound, exe, code_id, source, record, &values, access,
         )?;
+        let read = admission::source_is_read(
+            exe,
+            record,
+            standing
+                .as_ref()
+                .map(|standing| (standing.statement, standing.act)),
+            reads,
+            access,
+        )?;
         admission::source_arrival(
             exe,
             source,
@@ -137,6 +147,7 @@ pub(super) fn frame(
                 .as_ref()
                 .map(|standing| (standing.statement, standing.act)),
             arrival,
+            read,
         )?;
         control = controls.iter().cloned().collect();
         // A frame standing at a delivering action waits in it.
@@ -550,6 +561,7 @@ mod laws {
                 &narrowed,
                 &machine.bound,
                 &mut Arena::new(),
+                &Tree::new(false),
             )
             .is_ok(),
             "the live child keeps its exact lexical source after selection narrows"
@@ -604,6 +616,7 @@ mod laws {
                 &linked,
                 &machine.bound,
                 &mut Arena::new(),
+                &Tree::new(false),
             )
             .is_err(),
             "a lexical frame borrowed its creation site from another Link"
@@ -621,7 +634,8 @@ mod laws {
                     &access,
                     &exe,
                     &machine.bound,
-                    &mut Arena::new()
+                    &mut Arena::new(),
+                    &Tree::new(false),
                 )
                 .is_err(),
                 "a substituted lexical source was accepted"
@@ -634,7 +648,8 @@ mod laws {
                 &access,
                 &exe,
                 &machine.bound,
-                &mut Arena::new()
+                &mut Arena::new(),
+                &Tree::new(false),
             )
             .is_ok()
         );
@@ -658,7 +673,7 @@ mod laws {
                 }
             }
             assert!(
-                matches!(frame(&forged, Arrival::Requested, &access, &exe, &machine.bound, &mut Arena::new()),
+                matches!(frame(&forged, Arrival::Requested, &access, &exe, &machine.bound, &mut Arena::new(), &Tree::new(false)),
                     Err(Unrestored::Fault(HeapFault::Malformed(problem)))
                         if problem == "binding capture ownership disagrees with its source"),
                 "a substituted capture was accepted"

@@ -490,6 +490,29 @@ impl Executable {
     pub(crate) fn selection(&self) -> &doc::Selection {
         &self.admission.selection
     }
+    /// The operation discriminator a source import names in this exact Link.
+    pub(crate) fn operation_slot(
+        &self,
+        link: lash_kernel_value::LinkId,
+        unit: &Unit,
+        slot: lash_kernel_value::ImportSlot,
+    ) -> Option<lash_kernel_value::OperationSlot> {
+        let document = self.instances.get(&link)?;
+        Some(match unit {
+            Unit::Library(function) if !document.functions.contains_key(function) => {
+                let registered = self
+                    .helpers()
+                    .registered(function)
+                    .or_else(|| self.library.registry().get(function))?;
+                let import = registered.imports().get(&slot)?;
+                lash_kernel_value::OperationSlot::Helper(
+                    lash_kernel_value::HelperOperationId::of_import(import),
+                )
+            }
+            _ => slot.into(),
+        })
+    }
+
     pub(crate) fn helpers(&self) -> &Arc<doc::BuildHelpers> {
         self.library.helpers()
     }
