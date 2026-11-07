@@ -128,7 +128,12 @@ impl Step {
         };
         let publication = PublicationSite {
             roles: OnceLock::new(),
-            construction: construction::ConstructionEvent::compile(source, &event.point)?,
+            // A raising event constructs nothing.
+            construction: if selected == ExitKind::Raise {
+                None
+            } else {
+                construction::ConstructionEvent::compile(source, &event.point)?
+            },
             uncounted_resumption: event.point.phase == Phase::Restore
                 && matches!(node, doc::Node::Expr(doc::Expr::Call { .. })),
             restored_roles,
@@ -278,32 +283,42 @@ impl Source {
         // Throw does: its Raise exit publishes the raise into the frame's
         // active departure.
         let raising = restoring.is_none().then(|| self.raising(at)).flatten();
-        if restoring.is_some() != (at.phase == Phase::Restore)
-            || (at.phase != Phase::Commit && restoring.is_none() && raising.is_none())
+        // A try's restore takes the exit it restores; a call's Restore
+        // departs only by its callee's raise.
+        if (restoring.is_some() && at.phase != Phase::Restore)
+            || (restoring.is_none() && at.phase != Phase::Commit && raising.is_none())
         {
             return Err(Refused::Path);
         }
-        // Its other ancestors hold no event before it: each has only a
-        // Commit, or is a condition's choice still untaken.
-        let transparent = |site: &Site, node: doc::Node<'_>, index: u32| {
+        // A raise leaves each expression or simple statement that holds
+        // it: their events after the raising child never run, and those
+        // before it (a `let`'s binding, a called value's Open) have run.
+        // What they hold goes with the enclosing block's Leave.
+        let transparent = |node: doc::Node<'_>, index: u32| {
             raising.is_some()
-                && !matches!(node, doc::Node::Block(_))
-                && self
-                    .room
-                    .events
-                    .keys()
-                    .filter(|point| point.site == *site)
-                    .all(|point| {
-                        point.phase == Phase::Commit
-                            || (index == 0
-                                && point.phase == Phase::Test
-                                && matches!(
-                                    node,
-                                    doc::Node::Stmt(doc::Stmt::If { .. })
-                                        | doc::Node::Expr(doc::Expr::If { .. })
-                                ))
-                    })
+                && match node {
+                    doc::Node::Block(_)
+                    | doc::Node::Stmt(
+                        doc::Stmt::While { .. } | doc::Stmt::For { .. } | doc::Stmt::Try(_),
+                    ) => false,
+                    doc::Node::Stmt(doc::Stmt::If { .. }) => index == 0,
+                    _ => true,
+                }
         };
+        let before = |site: &Site, node: doc::Node<'_>, index: u32| match node {
+            doc::Node::Expr(doc::Expr::Let { .. }) if index == 1 => Some(point(site, Phase::Test)),
+            doc::Node::Expr(doc::Expr::Act(act))
+                if matches!(
+                    act.kind,
+                    doc::ActKind::Call(doc::Callee::Value(_))
+                        | doc::ActKind::Spawn(doc::Callee::Value(_))
+                ) =>
+            {
+                Some(point(site, Phase::Open))
+            }
+            _ => None,
+        };
+        let mut entered = std::collections::BTreeSet::new();
         let mut node = doc::Node::Block(&self.body);
         let mut path = self.site.clone();
         let mut blocks = Vec::new();
@@ -322,7 +337,9 @@ impl Source {
         for index in &at.site.path[self.site.path.len()..] {
             match node {
                 doc::Node::Block(_) => blocks.push(path.clone()),
-                doc::Node::Stmt(doc::Stmt::If { .. }) if matches!(*index, 1 | 2) => {
+                doc::Node::Stmt(doc::Stmt::If { .. }) | doc::Node::Expr(doc::Expr::If { .. })
+                    if matches!(*index, 1 | 2) =>
+                {
                     choices.insert(path.clone(), *index == 1);
                 }
                 doc::Node::Stmt(doc::Stmt::While { .. }) if *index == 1 => {
@@ -359,7 +376,9 @@ impl Source {
                 {
                     superseding.push((path.clone(), path.child(*index)));
                 }
-                _ if transparent(&path, node, *index) => {}
+                _ if transparent(node, *index) => {
+                    entered.extend(before(&path, node, *index));
+                }
                 _ => return Err(Refused::Path),
             }
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
@@ -514,6 +533,8 @@ impl Source {
             for_sites: &'a std::collections::BTreeSet<Site>,
             whiles: &'a std::collections::BTreeSet<Site>,
             raised: &'a std::collections::BTreeSet<Site>,
+            /// Events of the raise's ancestors that ran before it.
+            entered: &'a std::collections::BTreeSet<Point>,
             route: &'a [Selection],
             cursor: usize,
             phase: Phase,
@@ -568,6 +589,7 @@ impl Source {
                         || (matches!(phase, Phase::Enter | Phase::Next)
                             && self.whiles.contains(site))
                         || (phase == Phase::Catch && self.raised.contains(site))
+                        || self.entered.contains(&point(site, phase))
                         // A superseding try suspended before the departure.
                         || (phase == Phase::Suspend
                             && self.superseding.iter().any(|(try_site, _)| try_site == site))
@@ -640,6 +662,7 @@ impl Source {
             for_sites: &for_sites,
             whiles: &whiles,
             raised: &raised,
+            entered: &entered,
             route: &route,
             cursor: 0,
             phase: at.phase,
@@ -654,6 +677,7 @@ impl Source {
                 + 5 * for_sites.len()
                 + 2 * whiles.len()
                 + raised.len()
+                + entered.len()
                 // A restored try's Catch and Suspend.
                 + 2 * usize::from(restoring.is_some())
                 // A superseding try's Suspend and Supersede.
