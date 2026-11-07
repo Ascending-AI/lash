@@ -1030,7 +1030,8 @@ fn a_role_saved_twice_is_refused() {
 fn a_slot_two_saved_roles_share_or_its_body_does_not_key_is_refused() {
     use lash_kernel_state::kernel_internals::logical::SlotKind;
     use lash_kernel_state::paged::RoleCoordinate;
-    let cases: [(&str, fn(&mut Vec<RoleRecord>)); 2] = [
+    type Edit = fn(&mut Vec<RoleRecord>);
+    let cases: [(&str, Edit); 2] = [
         ("source continuation duplicates a frame role", |roles| {
             let twice = roles
                 .iter()
