@@ -135,6 +135,8 @@ impl StateLease<'_> {
                 value.extend_from_slice(source);
                 LocalBody::Bytes(value)
             }
+            Allocation::BigInt(integer) => LocalBody::Leaf(LeafBody::Integer((*integer).clone())),
+            Allocation::Function(callable) => LocalBody::Leaf(LeafBody::Function(*callable)),
             Allocation::Map(_)
             | Allocation::Record(_)
             | Allocation::RecordFields { .. }

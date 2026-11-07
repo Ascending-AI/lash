@@ -22,8 +22,13 @@ use std::sync::Arc;
 
 /// The service an action asks of the machine.
 enum Service<'a> {
+    /// A statement call the region does not plan.
+    Call,
     Spawn,
-    Perform { slot: ImportSlot, result: &'a Type },
+    Perform {
+        slot: ImportSlot,
+        result: &'a Type,
+    },
     Join,
     JoinMany(JoinMode),
     Yield,
@@ -104,8 +109,8 @@ impl KernelMachine {
                     ActionKind::Yield => (Service::Yield, None),
                     ActionKind::Cancel(_) => (Service::Cancel, None),
                     ActionKind::CancelEffect(_) => (Service::CancelEffect, None),
-                    ActionKind::Call { .. } => {
-                        return Err(fault("a call is not a delivering action").into());
+                    ActionKind::Call { callee, .. } => {
+                        (Service::Call, Some((self.callee(task, &exe, callee)?, 0)))
                     }
                 };
                 (
@@ -157,6 +162,15 @@ impl KernelMachine {
             self.observe_entry(task, host, site, occurrence)?;
         }
         Ok(match service {
+            // The callee runs in a frame of its own unless it answered at
+            // once; its return is delivered as the task's Incoming.
+            Service::Call => {
+                let (target, _) = spawned.ok_or_else(|| fault("a call has no resolved target"))?;
+                match self.call(task, exe, stmt, target, 0, args.len())? {
+                    Flow::Done => Some(self.take(0)),
+                    _ => None,
+                }
+            }
             Service::Spawn => {
                 let (target, at) =
                     spawned.ok_or_else(|| fault("a spawn has no resolved target"))?;

@@ -445,6 +445,16 @@ impl<'s> StateLease<'s> {
                 bytes = payload;
                 Kind::Bytes
             }
+            // Leaves are priced as the arena and adoption price them.
+            Allocation::BigInt(integer) => {
+                payload = integer.bits().div_ceil(8);
+                bytes = payload;
+                Kind::Leaf(Leaf::BigInt)
+            }
+            Allocation::Function(_) => {
+                bytes = 64;
+                Kind::Leaf(Leaf::Function)
+            }
         };
         bytes = plus(
             if kind.mutable() {

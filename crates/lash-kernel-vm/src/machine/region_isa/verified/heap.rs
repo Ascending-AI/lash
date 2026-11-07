@@ -260,6 +260,13 @@ impl Running<'_> {
                     }
                     HeapKind::Text(text) => LeaseAllocation::text(text),
                     HeapKind::Bytes(bytes) => LeaseAllocation::bytes(bytes),
+                    HeapKind::BigInt(integer) => LeaseAllocation::big_int(integer),
+                    HeapKind::Function(function) => {
+                        LeaseAllocation::function(lash_kernel_value::names::CallableId {
+                            link: self.canonical.link,
+                            function: *function,
+                        })
+                    }
                     _ => return Err(invalid(Refused::Facts)),
                 };
                 if kernel.atomic_move() {

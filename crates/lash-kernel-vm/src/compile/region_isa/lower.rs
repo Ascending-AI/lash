@@ -797,8 +797,11 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     });
                     RegionOp::Call { site, next }
                 }
+                // Any other statement action, and a statement call the region
+                // does not plan (another link's export, a limited or native
+                // callee), is delivered: the machine performs it.
                 (doc::Node::Action(action), Phase::Enter, Some(next), None, Ok(_))
-                    if !matches!(action, doc::Action::Call { .. } | doc::Action::Await { .. }) =>
+                    if !matches!(action, doc::Action::Await { .. }) =>
                 {
                     match action_atoms(&roles, &source, &at.site, action) {
                         Some(atoms) => RegionOp::Boundary {

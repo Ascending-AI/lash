@@ -13,6 +13,8 @@ pub(crate) enum HeapKind {
     Closure { code: CodeId, captures: Box<[Slot]> },
     Text(Arc<str>),
     Bytes(Arc<[u8]>),
+    BigInt(Arc<doc::Integer>),
+    Function(FunctionId),
     Field { name: Arc<str>, removing: bool },
     Index { removing: bool },
     Variable { slot: Slot },
@@ -58,6 +60,14 @@ pub(super) fn source_kind(
         }
         doc::Node::Expr(doc::Expr::Literal(doc::Literal::Bytes(bytes))) => {
             HeapKind::Bytes(Arc::from(bytes.as_slice()))
+        }
+        doc::Node::Expr(doc::Expr::Literal(doc::Literal::Int(integer)))
+            if integer.word().is_none() =>
+        {
+            HeapKind::BigInt(Arc::new(integer.clone()))
+        }
+        doc::Node::Expr(doc::Expr::Literal(doc::Literal::Function(function))) => {
+            HeapKind::Function(*function)
         }
         doc::Node::Expr(doc::Expr::Closure(_)) => {
             // One lifted body compiles once per set of names its enclosing

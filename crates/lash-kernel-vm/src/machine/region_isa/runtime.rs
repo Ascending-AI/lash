@@ -18,12 +18,16 @@ impl KernelMachine {
     /// which already gave the value to the task's incoming root, and the
     /// frame stands at the call's Restore as a lease stopped there leaves
     /// it, its completion billed as the callee left. `false` when the frame
-    /// waits otherwise.
+    /// waits otherwise. A frame standing at a statement call the machine
+    /// served takes the value as the call's delivered Incoming instead.
     pub(in crate::machine) fn return_into_region(
         &mut self,
         task: TaskId,
         value: lash_kernel_doc::Value,
     ) -> Result<bool, Halt> {
+        if self.deliver_served_call(task, value)? {
+            return Ok(true);
+        }
         let frame = self.frame(task)?;
         let code = frame.code;
         let Some(at) = frame
@@ -56,6 +60,50 @@ impl KernelMachine {
         source.progress = 4;
         source.pending = Some(value);
         frame.pending.source = Some(source);
+        Ok(true)
+    }
+
+    /// `task`'s top frame stands at a statement call the machine served:
+    /// the callee's value, already the task's incoming root, wakes the
+    /// task, and the frame takes it at the call's Commit when it resumes.
+    fn deliver_served_call(
+        &mut self,
+        task: TaskId,
+        value: lash_kernel_doc::Value,
+    ) -> Result<bool, Halt> {
+        let frame = self.frame(task)?;
+        let code = frame.code;
+        let Some(source) = frame
+            .pending
+            .source
+            .as_ref()
+            .filter(|source| source.progress == 2)
+        else {
+            return Ok(false);
+        };
+        let source = source.clone();
+        let program = self
+            .exe
+            .region(code)
+            .map_err(|error| halt(invalid(error)))?;
+        let tables = verified::Code::bind(self, &program).map_err(halt)?;
+        let Some(standing) = verified::standing(&tables, &source).map_err(halt)? else {
+            return Ok(false);
+        };
+        let calls = standing.act.is_none()
+            && matches!(
+                &self.exe.statement(standing.statement).1.form,
+                crate::compile::Form::Action(crate::compile::Action {
+                    kind: crate::compile::ActionKind::Call { .. },
+                    ..
+                })
+            );
+        if !calls {
+            return Ok(false);
+        }
+        let incoming = Incoming::Value(self.page_form(&value)?);
+        self.task(task)?.wake(incoming, false);
+        self.frame(task)?.awaiting = Some(standing.statement);
         Ok(true)
     }
 

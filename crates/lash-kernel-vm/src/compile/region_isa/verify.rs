@@ -412,11 +412,9 @@ fn check_action(
                 )
             })
         }
-        (doc::Node::Action(_), Op::Act) => matches!(
-            &statement.form,
-            crate::compile::Form::Action(action)
-                if !matches!(action.kind, crate::compile::ActionKind::Call { .. })
-        ),
+        (doc::Node::Action(_), Op::Act) => matches!(&statement.form,
+            crate::compile::Form::Action(action) if !matches!(action.kind, crate::compile::ActionKind::Call { .. })
+                || CallPlan::compile(exe, draft.code, origin.statement, origin.pc).is_err()),
         _ => false,
     };
     let commit = Point {

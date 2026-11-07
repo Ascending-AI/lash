@@ -105,6 +105,8 @@ enum Allocation<'a> {
     Cell(&'a LeaseValue),
     Text(&'a str),
     Bytes(&'a [u8]),
+    BigInt(&'a lash_kernel_doc::Integer),
+    Function(lash_kernel_value::names::CallableId),
     Closure {
         identity: Arc<lash_kernel_doc::arena::ClosureIdentity>,
         captures: &'a [LeaseValue],
@@ -165,6 +167,17 @@ impl<'a> LeaseAllocation<'a> {
     pub fn bytes(value: &'a [u8]) -> Self {
         Self {
             body: Allocation::Bytes(value),
+        }
+    }
+    /// An integer outside the inline word, as the arena holds it.
+    pub fn big_int(value: &'a lash_kernel_doc::Integer) -> Self {
+        Self {
+            body: Allocation::BigInt(value),
+        }
+    }
+    pub fn function(callable: lash_kernel_value::names::CallableId) -> Self {
+        Self {
+            body: Allocation::Function(callable),
         }
     }
 }
