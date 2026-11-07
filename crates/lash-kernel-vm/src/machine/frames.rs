@@ -929,6 +929,7 @@ pub(super) struct Frames {
         std::rc::Rc<std::cell::RefCell<lash_kernel_state::kernel_internals::logical::Ledger>>,
     )>,
     exe: Arc<Executable>,
+    bound: Arc<super::region_isa::BoundCodes>,
     arrival: Arrival,
 }
 
@@ -1012,14 +1013,20 @@ impl Frames {
     ) {
         self.logical = Some((task, lifecycle));
     }
-    pub(super) fn new(access: Access<'static>, arena: SharedArena, exe: Arc<Executable>) -> Self {
-        Self::open(Tree::new(true), access, arena, exe, Arrival::Fresh)
+    pub(super) fn new(
+        access: Access<'static>,
+        arena: SharedArena,
+        exe: Arc<Executable>,
+        bound: Arc<super::region_isa::BoundCodes>,
+    ) -> Self {
+        Self::open(Tree::new(true), access, arena, exe, bound, Arrival::Fresh)
     }
     pub(super) fn open(
         rows: Tree<FrameRecord>,
         access: Access<'static>,
         arena: SharedArena,
         exe: Arc<Executable>,
+        bound: Arc<super::region_isa::BoundCodes>,
         arrival: Arrival,
     ) -> Self {
         let len = rows.len();
@@ -1034,6 +1041,7 @@ impl Frames {
             arena,
             logical: None,
             exe,
+            bound,
             arrival,
         }
     }
@@ -1080,6 +1088,7 @@ impl Frames {
                 self.arrival,
                 &self.access,
                 &self.exe,
+                &self.bound,
                 &mut self.arena.borrow_mut(),
             )?;
             if let Some((task, lifecycle)) = &self.logical {
@@ -1417,7 +1426,14 @@ impl Frames {
         };
         // A scratch arena: the probe leaves the run's arena as it is.
         let mut scratch = Arena::new();
-        match restore_frame(&record, arrival, &self.access, &self.exe, &mut scratch) {
+        match restore_frame(
+            &record,
+            arrival,
+            &self.access,
+            &self.exe,
+            &self.bound,
+            &mut scratch,
+        ) {
             Ok(_) => Ok(None),
             Err(Unrestored::Refused(refusal)) => Ok(Some(refusal)),
             Err(Unrestored::Fault(fault)) => Err(fault),

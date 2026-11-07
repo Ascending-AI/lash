@@ -8,6 +8,7 @@ pub(super) fn frame(
     arrival: Arrival,
     access: &Access<'static>,
     exe: &Arc<Executable>,
+    bound: &crate::machine::region_isa::BoundCodes,
     arena: &mut Arena,
 ) -> Result<Box<Frame>, Unrestored> {
     let site = record.statement.resolve(access)?;
@@ -114,7 +115,7 @@ pub(super) fn frame(
             )?);
         }
         let (controls, standing) = crate::machine::region_isa::restore_source_controls(
-            exe, code_id, source, record, &values, access,
+            bound, exe, code_id, source, record, &values, access,
         )?;
         control = controls.iter().cloned().collect();
         // A frame standing at a delivering action waits in it.
@@ -526,6 +527,7 @@ mod laws {
                 Arrival::Requested,
                 &access,
                 &narrowed,
+                &machine.bound,
                 &mut Arena::new(),
             )
             .is_ok(),
@@ -579,6 +581,7 @@ mod laws {
                 Arrival::Requested,
                 &access,
                 &linked,
+                &machine.bound,
                 &mut Arena::new(),
             )
             .is_err(),
@@ -596,6 +599,7 @@ mod laws {
                     Arrival::Requested,
                     &access,
                     &exe,
+                    &machine.bound,
                     &mut Arena::new()
                 )
                 .is_err(),
@@ -608,6 +612,7 @@ mod laws {
                 Arrival::Requested,
                 &access,
                 &exe,
+                &machine.bound,
                 &mut Arena::new()
             )
             .is_ok()
@@ -632,7 +637,7 @@ mod laws {
                 }
             }
             assert!(
-                matches!(frame(&forged, Arrival::Requested, &access, &exe, &mut Arena::new()),
+                matches!(frame(&forged, Arrival::Requested, &access, &exe, &machine.bound, &mut Arena::new()),
                     Err(Unrestored::Fault(HeapFault::Malformed(problem)))
                         if problem == "binding capture ownership disagrees with its source"),
                 "a substituted capture was accepted"

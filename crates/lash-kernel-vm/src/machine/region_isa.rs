@@ -170,7 +170,7 @@ impl<'m> RegionLease<'m> {
         machine: &'m mut KernelMachine,
         code: Arc<RegionCode>,
     ) -> Result<Self, RegionError> {
-        let tables = Code::bind(machine, &code)?;
+        let tables = machine.bound.get(&machine.exe, &code)?;
         let limits = Limits::machine(machine)?;
         Self::acquire_verified(machine, tables, limits)
     }

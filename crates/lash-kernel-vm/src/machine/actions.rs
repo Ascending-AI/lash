@@ -920,6 +920,7 @@ impl KernelMachine {
             self.heap.pages().clone(),
             std::rc::Rc::clone(&self.arena),
             Arc::clone(&self.exe),
+            Arc::clone(&self.bound),
         ))?;
         self.live_tasks += 1;
         let handle = Value::Task(child);

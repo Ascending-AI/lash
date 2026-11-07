@@ -1,8 +1,10 @@
 //! Bind source root lifetimes and amount inputs to compact physical indexes.
 use super::super::{code::Register, *};
-use crate::compile::region_isa::{CheckedKind, IndexedAmount, Pc, RegionOp, ResourceInput, Role};
+use crate::compile::region_isa::{
+    CheckedKind, IndexedAmount, Pc, Reg, RegionOp, ResourceInput, Role,
+};
 use crate::compile::room::Measure;
-use lash_kernel_state::kernel_internals::logical::Slot;
+use lash_kernel_state::kernel_internals::logical::{LeaseValue, Slot};
 
 #[derive(Clone, Copy)]
 pub(super) struct Root {
@@ -101,49 +103,25 @@ impl Flow {
                 session: None,
             })
         };
-        let mut releases: Vec<Root> = before
-            .roles
-            .iter()
-            .filter(|(slot, reg)| {
-                Some(reg.index()) == destination
-                    || !after.roles.iter().any(|(actual, _)| actual == slot)
-            })
-            .map(|(slot, reg)| root(*slot, *reg))
-            .collect::<Result<_, RegionError>>()?;
-        let mut holds: Vec<Root> = after
-            .roles
-            .iter()
-            .filter(|(slot, reg)| {
-                Some(reg.index()) == destination
-                    || !before.roles.iter().any(|(actual, _)| actual == slot)
-            })
-            .map(|(slot, reg)| root(*slot, *reg))
-            .collect::<Result<_, RegionError>>()?;
         // A Suspend moves its exit's value into the frame's control record
-        // and a Restore moves it back: its root moves, it is neither
-        // released nor held again.
-        if matches!(
+        // and a Restore moves it back. The verified roles have distinct
+        // registers, so exclude departures before binding their roots.
+        let moving_departure = matches!(
             code.op(pc),
             Some(RegionOp::Checked { kernel, .. })
                 if matches!(
                     kernel.kind(),
                     CheckedKind::Suspend { .. } | CheckedKind::Restore { .. } | CheckedKind::Escape { .. }
                 )
-        ) {
-            let departure = |root: &Root| {
-                before
-                    .roles
-                    .iter()
-                    .chain(after.roles.iter())
-                    .any(|(slot, reg)| {
-                        matches!(slot, Slot::Departure(_))
-                            && super::bind::physical(code, *reg)
-                                .is_ok_and(|actual| actual == root.register)
-                    })
-            };
-            releases.retain(|root| !departure(root));
-            holds.retain(|root| !departure(root));
-        }
+        );
+        let mut releases: Vec<Root> = changed_roles(&before.roles, &after.roles, destination)
+            .filter(|(slot, _)| !moving_departure || !matches!(slot, Slot::Departure(_)))
+            .map(|(slot, reg)| root(*slot, *reg))
+            .collect::<Result<_, RegionError>>()?;
+        let mut holds: Vec<Root> = changed_roles(&after.roles, &before.roles, destination)
+            .filter(|(slot, _)| !moving_departure || !matches!(slot, Slot::Departure(_)))
+            .map(|(slot, reg)| root(*slot, *reg))
+            .collect::<Result<_, RegionError>>()?;
         if before.graph.incoming() != after.graph.incoming() {
             if let Some(reg) = before.graph.incoming() {
                 releases.push(Root {
@@ -335,6 +313,23 @@ impl Flow {
                     .unwrap_or(0),
             )
     }
+}
+
+/// Recovery roles retain the verifier's sorted slot order. Walk both lists
+/// once, retaining that order and including a destination even if it is live
+/// on both sides of the step.
+fn changed_roles<'a>(
+    roles: &'a [(Slot, Reg<LeaseValue>)],
+    other: &'a [(Slot, Reg<LeaseValue>)],
+    destination: Option<u32>,
+) -> impl Iterator<Item = &'a (Slot, Reg<LeaseValue>)> {
+    let mut other = other.iter().peekable();
+    roles.iter().filter(move |(slot, reg)| {
+        while other.peek().is_some_and(|(actual, _)| actual < slot) {
+            other.next();
+        }
+        Some(reg.index()) == destination || other.peek().is_none_or(|(actual, _)| actual != slot)
+    })
 }
 
 fn release_roots(

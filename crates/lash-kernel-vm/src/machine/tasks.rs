@@ -36,6 +36,7 @@ impl Task {
         access: Access<'static>,
         arena: SharedArena,
         exe: Arc<Executable>,
+        bound: Arc<super::region_isa::BoundCodes>,
     ) -> Self {
         Self {
             counters: Occurrences::new(&exe),
@@ -49,7 +50,7 @@ impl Task {
                 frames: Tree::new(true),
                 spawn_origin,
             },
-            frames: Frames::new(access, arena, exe),
+            frames: Frames::new(access, arena, exe, bound),
             published: None,
         }
     }
@@ -349,6 +350,7 @@ pub(super) struct Tasks {
     access: Access<'static>,
     arena: SharedArena,
     exe: Arc<Executable>,
+    bound: Arc<super::region_isa::BoundCodes>,
 }
 impl Tasks {
     pub(super) fn open(
@@ -359,6 +361,7 @@ impl Tasks {
         access: Access<'static>,
         arena: SharedArena,
         exe: Arc<Executable>,
+        bound: Arc<super::region_isa::BoundCodes>,
     ) -> Self {
         Self {
             logical,
@@ -372,6 +375,7 @@ impl Tasks {
             access,
             arena,
             exe,
+            bound,
         }
     }
     pub(super) fn new(
@@ -381,8 +385,9 @@ impl Tasks {
         access: Access<'static>,
         arena: SharedArena,
         exe: Arc<Executable>,
+        bound: Arc<super::region_isa::BoundCodes>,
     ) -> Self {
-        Self::open(logical, Tree::new(false), access, arena, exe)
+        Self::open(logical, Tree::new(false), access, arena, exe, bound)
     }
     /// Visits every arena value the cached tasks' frames hold.
     /// What the canonical walk starts from in the tasks the next
@@ -546,6 +551,7 @@ impl Tasks {
             self.access.clone(),
             std::rc::Rc::clone(&self.arena),
             Arc::clone(&self.exe),
+            Arc::clone(&self.bound),
             frames::arrival(&record.state),
         );
         frames.logical_context(TaskId(index), self.logical.clone());

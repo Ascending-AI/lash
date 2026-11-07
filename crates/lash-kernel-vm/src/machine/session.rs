@@ -123,6 +123,7 @@ pub(crate) fn start(
             .borrow_mut()
             .begin_cell(&mut arena.borrow_mut(), &heap)?;
     }
+    let bound = Arc::default();
     let mut machine = KernelMachine {
         logical: logical.clone(),
         logical_memory: Default::default(),
@@ -133,7 +134,7 @@ pub(crate) fn start(
         program,
         document: None,
         exe: Arc::clone(&exe),
-        bound: Default::default(),
+        bound: Arc::clone(&bound),
         bounds,
         heap,
         arena: std::rc::Rc::clone(&arena),
@@ -143,6 +144,7 @@ pub(crate) fn start(
             access.clone(),
             std::rc::Rc::clone(&arena),
             Arc::clone(&exe),
+            bound,
         ),
         ready: queue::Queue::open(Tree::new(true), access.clone()),
         current: Some(TaskId::MAIN),
@@ -193,6 +195,7 @@ pub(crate) fn start(
         access,
         arena,
         Arc::clone(&exe),
+        Arc::clone(&machine.bound),
     ))?;
     let arguments = |problem: String| StartError::Arguments { problem };
     // Host-supplied start values are not guest work (`K-CHG-002`).

@@ -122,14 +122,7 @@ impl BoundCodes {
 }
 
 impl Code {
-    pub(in crate::machine::region_isa) fn bind(
-        machine: &KernelMachine,
-        program: &Arc<RegionCode>,
-    ) -> Result<Arc<Self>, RegionError> {
-        machine.bound.get(&machine.exe, program)
-    }
-
-    pub(super) fn bind_executable(
+    fn bind_executable(
         exe: &Arc<crate::compile::Executable>,
         program: &Arc<RegionCode>,
     ) -> Result<Arc<Self>, RegionError> {

@@ -118,6 +118,7 @@ impl Frames {
                     Arrival::Returned,
                     &self.access,
                     &self.exe,
+                    &self.bound,
                     &mut self.arena.borrow_mut(),
                 )?;
                 frame.logical = Some(crate::machine::logical_held::FrameRoots::restore(

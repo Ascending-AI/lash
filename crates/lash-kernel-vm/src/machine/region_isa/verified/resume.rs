@@ -242,6 +242,7 @@ pub(super) fn unpaid_pc(
 }
 
 pub(in crate::machine) fn restore_source_controls(
+    bound: &super::BoundCodes,
     exe: &Arc<crate::compile::Executable>,
     id: CodeId,
     source: &SourceContinuation,
@@ -250,7 +251,7 @@ pub(in crate::machine) fn restore_source_controls(
     access: &Access<'_>,
 ) -> Result<(Controls, Option<Standing>), HeapFault> {
     let program = exe.region(id).map_err(|_| malformed())?;
-    let code = Code::bind_executable(exe, &program).map_err(|_| malformed())?;
+    let code = bound.get(exe, &program).map_err(|_| malformed())?;
     let mut saved = Vec::new();
     record.loops.visit(access, &mut |_, value| {
         saved.push(value.clone());

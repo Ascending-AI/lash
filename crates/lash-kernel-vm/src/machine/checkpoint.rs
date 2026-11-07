@@ -368,6 +368,7 @@ impl KernelMachine {
         ));
         arena.borrow_mut().watch_logical_members();
         let logical = heap.logical_ledger();
+        let bound = Arc::default();
         let mut machine = Self {
             logical: logical.clone(),
             logical_memory: Default::default(),
@@ -378,7 +379,7 @@ impl KernelMachine {
             session_cell: matches!(root.target, lash_kernel_state::paged::CellTargetKind::Main),
             program,
             exe: Arc::clone(&exe),
-            bound: Default::default(),
+            bound: Arc::clone(&bound),
             bounds,
             limits,
             tasks: tasks::Tasks::open(
@@ -387,6 +388,7 @@ impl KernelMachine {
                 access.clone(),
                 std::rc::Rc::clone(&arena),
                 exe,
+                bound,
             ),
             arena,
             ready: queue::Queue::open(sequence(root.ready), access.clone()),
@@ -597,6 +599,7 @@ impl KernelMachine {
             access,
             std::rc::Rc::clone(&self.arena),
             Arc::clone(&self.exe),
+            Arc::clone(&self.bound),
         );
         Ok(Some(SealedRoot { page, root }))
     }

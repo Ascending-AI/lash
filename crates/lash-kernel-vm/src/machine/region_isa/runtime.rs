@@ -43,7 +43,7 @@ impl KernelMachine {
             .exe
             .region(code)
             .map_err(|error| halt(invalid(error)))?;
-        let tables = verified::Code::bind(self, &program).map_err(halt)?;
+        let tables = self.bound.get(&self.exe, &program).map_err(halt)?;
         let resume = tables
             .calls
             .iter()
@@ -86,7 +86,7 @@ impl KernelMachine {
             .exe
             .region(code)
             .map_err(|error| halt(invalid(error)))?;
-        let tables = verified::Code::bind(self, &program).map_err(halt)?;
+        let tables = self.bound.get(&self.exe, &program).map_err(halt)?;
         let Some(standing) = verified::standing(&tables, &source).map_err(halt)? else {
             return Ok(false);
         };
@@ -143,7 +143,7 @@ impl KernelMachine {
             };
             // The driver performs one semantic step even for a zero-size slice.
             // Direct lease callers retain their exact, possibly exhausted cutoff.
-            let tables = verified::Code::bind(self, &code).map_err(halt)?;
+            let tables = self.bound.get(&self.exe, &code).map_err(halt)?;
             let standing = match &self.frame(task)?.pending.source {
                 Some(source) => verified::standing(&tables, source).map_err(halt)?,
                 None => None,

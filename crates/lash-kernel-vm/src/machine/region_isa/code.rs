@@ -175,14 +175,6 @@ pub(super) struct Code {
     #[cfg(test)]
     pub(super) semantic_operations: Arc<std::sync::atomic::AtomicU64>,
 }
-impl Code {
-    pub(super) fn bind(
-        machine: &KernelMachine,
-        code: &Arc<RegionCode>,
-    ) -> Result<Arc<super::verified::Code>, RegionError> {
-        super::verified::Code::bind(machine, code)
-    }
-}
 #[derive(Clone, Copy)]
 pub(super) struct Limits {
     pub(super) charge: u64,

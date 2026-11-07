@@ -109,10 +109,13 @@ impl KernelMachine {
         let id = frame.code;
         let refused = |error| fault(&format!("canonical region admission refused: {error:?}"));
         let code = self.exe.region(id).map_err(refused)?;
-        let tables = verified::Code::bind(self, &code).map_err(|error| match error {
-            RegionError::Heap(error) => error.into(),
-            RegionError::Invalid(reason) => refused(reason),
-        })?;
+        let tables = self
+            .bound
+            .get(&self.exe, &code)
+            .map_err(|error| match error {
+                RegionError::Heap(error) => error.into(),
+                RegionError::Invalid(reason) => refused(reason),
+            })?;
         let source = self
             .frame(task)?
             .pending
