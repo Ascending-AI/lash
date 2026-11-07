@@ -582,54 +582,10 @@ impl Lifter<'_> {
 
 /// The expression form of a statement action.
 pub(super) fn act_of(action: &k::Action) -> k::ActExpr {
-    let atoms = |args: &[k::Atom]| args.iter().map(expr_of).collect();
-    match action {
-        k::Action::Call { callee, args } => k::ActExpr {
-            kind: k::ActKind::Call(callee.clone()),
-            args: atoms(args),
-        },
-        k::Action::Perform {
-            slot,
-            args,
-            result,
-            then_yield,
-        } => k::ActExpr {
-            kind: k::ActKind::Perform {
-                slot: *slot,
-                result: result.clone(),
-                then_yield: *then_yield,
-            },
-            args: atoms(args),
-        },
-        k::Action::Join { task } => k::ActExpr {
-            kind: k::ActKind::Join,
-            args: vec![expr_of(task)],
-        },
-        k::Action::JoinMany { mode, tasks } => k::ActExpr {
-            kind: k::ActKind::JoinMany(*mode),
-            args: vec![expr_of(tasks)],
-        },
-        k::Action::Yield => k::ActExpr {
-            kind: k::ActKind::Yield,
-            args: Vec::new(),
-        },
-        k::Action::Spawn { callee, args } => k::ActExpr {
-            kind: k::ActKind::Spawn(callee.clone()),
-            args: atoms(args),
-        },
-        k::Action::Cancel { task } => k::ActExpr {
-            kind: k::ActKind::Cancel,
-            args: vec![expr_of(task)],
-        },
-        k::Action::CancelEffect { task } => k::ActExpr {
-            kind: k::ActKind::CancelEffect,
-            args: vec![expr_of(task)],
-        },
-        k::Action::Await { policy, value } => k::ActExpr {
-            kind: k::ActKind::Await(policy.clone()),
-            args: vec![expr_of(value)],
-        },
-    }
+    let k::Expr::Act(act) = k::Expr::from(action.clone()) else {
+        unreachable!("action expression");
+    };
+    *act
 }
 
 fn expr_of(atom: &k::Atom) -> k::Expr {
