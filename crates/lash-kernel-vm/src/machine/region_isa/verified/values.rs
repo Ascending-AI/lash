@@ -30,7 +30,7 @@ impl Running<'_> {
             value,
         )
     }
-    /// An atom's operand. A text literal too long to stand inline is
+    /// An atom's operand. A literal that cannot stand inline is
     /// allocated here; the step loading it holds it at its atom role, and
     /// the allocation's own occurrence is released once that step is
     /// accepted ([`Self::release_atoms`]), or when the region halts first.
@@ -39,50 +39,55 @@ impl Running<'_> {
         src: &crate::compile::region_isa::AtomSource,
     ) -> Result<Operand<LeaseValue>, RegionError> {
         use crate::compile::region_isa::AtomSource;
-        match src {
-            AtomSource::Role { src, cell: false } => self.read(*src),
-            AtomSource::Role { src, cell: true } => {
-                let value = self
-                    .read(*src)?
-                    .bind(&mut self.view)
-                    .map_err(RegionError::Heap)?;
-                let cell = self.view.object(value).map_err(RegionError::Heap)?;
-                Ok(Operand::Dynamic(
-                    self.view
-                        .read(
-                            cell,
-                            &lash_kernel_state::kernel_internals::logical::LeaseMember::Variable,
-                        )
-                        .map_err(storage_fault)?,
-                ))
-            }
-            AtomSource::Constant(value) => Ok(Operand::Immediate(*value)),
-            AtomSource::Text(text) => {
-                let phase = self
-                    .view
-                    .stage(
-                        lash_kernel_state::kernel_internals::logical::LeaseOp::Allocate(
-                            lash_kernel_state::kernel_internals::logical::LeaseAllocation::text(
-                                text,
-                            ),
-                        ),
-                    )
-                    .map_err(storage_fault)?;
-                let value = phase
-                    .reserve()
-                    .map_err(RegionError::Heap)?
-                    .accept()
-                    .ok_or_else(|| invalid(Refused::Facts))?;
-                self.scratch
-                    .atoms
-                    .try_reserve(1)
-                    .map_err(|_| invalid(Refused::Scratch))?;
-                self.scratch.atoms.push(value);
-                Ok(Operand::Dynamic(value))
-            }
-        }
+        use lash_kernel_state::kernel_internals::logical::{LeaseAllocation, LeaseOp};
+        let allocation =
+            match src {
+                AtomSource::Role { src, cell: false } => return self.read(*src),
+                AtomSource::Role { src, cell: true } => {
+                    let value = self
+                        .read(*src)?
+                        .bind(&mut self.view)
+                        .map_err(RegionError::Heap)?;
+                    let cell = self.view.object(value).map_err(RegionError::Heap)?;
+                    return Ok(Operand::Dynamic(self.view.read(cell,
+                    &lash_kernel_state::kernel_internals::logical::LeaseMember::Variable,
+                ).map_err(storage_fault)?));
+                }
+                AtomSource::Constant(value) => return Ok(Operand::Immediate(*value)),
+                AtomSource::Text(text) => LeaseAllocation::text(text),
+                AtomSource::Literal(literal) => match &**literal {
+                    lash_kernel_doc::Literal::Bytes(bytes) => {
+                        LeaseAllocation::bytes(bytes.as_slice())
+                    }
+                    lash_kernel_doc::Literal::Int(integer) if integer.word().is_none() => {
+                        LeaseAllocation::big_int(integer)
+                    }
+                    lash_kernel_doc::Literal::Function(function) => {
+                        LeaseAllocation::function(lash_kernel_value::CallableId {
+                            link: self.frame_link(),
+                            function: *function,
+                        })
+                    }
+                    _ => return Err(invalid(Refused::Facts)),
+                },
+            };
+        self.scratch
+            .atoms
+            .try_reserve(1)
+            .map_err(|_| invalid(Refused::Scratch))?;
+        let phase = self
+            .view
+            .stage(LeaseOp::Allocate(allocation))
+            .map_err(storage_fault)?;
+        let value = phase
+            .reserve()
+            .map_err(RegionError::Heap)?
+            .accept()
+            .ok_or_else(|| invalid(Refused::Facts))?;
+        self.scratch.atoms.push(value);
+        Ok(Operand::Dynamic(value))
     }
-    /// Releases the allocation occurrences of the long text atoms loaded
+    /// Releases the allocation occurrences of the non-inline atoms loaded
     /// for the step just accepted or abandoned.
     pub(super) fn release_atoms(&mut self) -> Result<(), RegionError> {
         while let Some(value) = self.scratch.atoms.pop() {

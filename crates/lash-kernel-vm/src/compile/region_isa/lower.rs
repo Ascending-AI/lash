@@ -1557,7 +1557,10 @@ pub(super) fn action_atoms(
                 {
                     AtomSource::Text(Arc::from(text.as_str()))
                 }
-                doc::Atom::Literal(value) => AtomSource::Constant(literal(value)?),
+                doc::Atom::Literal(value) => match literal(value) {
+                    Some(value) => AtomSource::Constant(value),
+                    None => AtomSource::Literal(Arc::new(value.clone())),
+                },
             };
             Some(AtomLoad { dst, src })
         })

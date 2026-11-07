@@ -500,6 +500,14 @@ fn check_atoms(
             (AtomSource::Constant(value), doc::Atom::Literal(literal)) => {
                 super::lower::literal(literal).is_some_and(|expected| expected.same(value))
             }
+            (AtomSource::Literal(literal), doc::Atom::Literal(expected)) => {
+                **literal == *expected
+                    && match expected {
+                        doc::Literal::Bytes(_) | doc::Literal::Function(_) => true,
+                        doc::Literal::Int(integer) => integer.word().is_none(),
+                        _ => false,
+                    }
+            }
             (AtomSource::Text(text), doc::Atom::Literal(doc::Literal::Text(expected))) => {
                 doc::arena::ShortText::new(expected).is_none() && **text == **expected
             }

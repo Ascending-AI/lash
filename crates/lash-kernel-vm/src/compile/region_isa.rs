@@ -388,7 +388,7 @@ pub(crate) struct AtomLoad {
     pub(crate) src: AtomSource,
 }
 /// Where a checked helper call's argument stands before the call's step.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum CheckedArgument {
     /// A role the frame holds.
     Held(Slot),
@@ -401,6 +401,8 @@ pub(crate) enum CheckedArgument {
     /// A long text literal the call allocates when it loads; only its type
     /// bears on the check.
     Text,
+    /// An exact non-inline literal, materialized for signature validation.
+    Literal(Arc<doc::Literal>),
 }
 #[derive(Clone, Debug)]
 pub(crate) enum AtomSource {
@@ -413,6 +415,8 @@ pub(crate) enum AtomSource {
     Constant(Value),
     /// A text literal too long to stand inline, allocated when it loads.
     Text(Arc<str>),
+    /// Bytes, large integers and linked function references allocate at load.
+    Literal(Arc<doc::Literal>),
 }
 impl PartialEq for AtomSource {
     fn eq(&self, other: &Self) -> bool {
@@ -420,6 +424,7 @@ impl PartialEq for AtomSource {
             (Self::Role { src: a, cell: x }, Self::Role { src: b, cell: y }) => a == b && x == y,
             (Self::Constant(a), Self::Constant(b)) => a.same(b),
             (Self::Text(a), Self::Text(b)) => a == b,
+            (Self::Literal(a), Self::Literal(b)) => a == b,
             _ => false,
         }
     }
@@ -805,6 +810,9 @@ impl RegionCode {
                         }
                         AtomSource::Constant(value) => Some(CheckedArgument::Constant(*value)),
                         AtomSource::Text(_) => Some(CheckedArgument::Text),
+                        AtomSource::Literal(literal) => {
+                            Some(CheckedArgument::Literal(Arc::clone(literal)))
+                        }
                     },
                     None => held(reg),
                 },

@@ -384,6 +384,18 @@ impl KernelMachine {
                     }
                 }
                 CheckedArgument::Constant(value) => *value,
+                CheckedArgument::Literal(literal) => match &**literal {
+                    lash_kernel_doc::Literal::Function(function) => {
+                        let link = self.frame(task)?.link;
+                        self.arena
+                            .borrow_mut()
+                            .function(lash_kernel_value::CallableId {
+                                link,
+                                function: *function,
+                            })
+                    }
+                    _ => self.literal(&crate::compile::Constant::Deferred((**literal).clone()))?,
+                },
                 // Any text has the one public type; the empty text stands
                 // for the literal the call would allocate.
                 CheckedArgument::Text => Value::Text(
