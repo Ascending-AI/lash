@@ -245,12 +245,7 @@ impl Running<'_> {
             },
             root: code.program.source().site.clone(),
             refusal: if depth == self.parked.len() {
-                self.refusal.as_ref().map(|bound| match bound {
-                    crate::Bound::Charge => 0,
-                    crate::Bound::Memory => 1,
-                    crate::Bound::CallDepth => 2,
-                    _ => unreachable!(),
-                })
+                self.refusal.as_ref().map(super::super::refusal_tag)
             } else {
                 None
             },

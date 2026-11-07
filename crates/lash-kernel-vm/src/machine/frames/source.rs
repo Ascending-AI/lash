@@ -22,23 +22,7 @@ pub(in crate::machine) struct SourceContinuation {
 }
 
 pub(in crate::machine) fn phase(tag: u32) -> Result<Phase, HeapFault> {
-    Ok(match tag {
-        0 => Phase::Enter,
-        1 => Phase::Open,
-        2 => Phase::Next,
-        3 => Phase::Check,
-        4 => Phase::Item,
-        5 => Phase::Test,
-        6 => Phase::Catch,
-        7 => Phase::Suspend,
-        8 => Phase::Restore,
-        9 => Phase::Supersede,
-        10 => Phase::Commit,
-        11 => Phase::Fallthrough,
-        12 => Phase::Leave,
-        13 => Phase::Policy,
-        _ => return Err(malformed("unknown canonical source phase")),
-    })
+    Phase::from_code(tag).ok_or_else(|| malformed("unknown canonical source phase"))
 }
 
 impl SourceContinuation {
@@ -85,13 +69,13 @@ impl SourceContinuation {
             self.suffix(&self.at)?,
             match self.progress {
                 3 => ContinuationPhase::Call {
-                    phase: self.at.phase as u32,
+                    phase: self.at.phase.code(),
                 },
                 4 => ContinuationPhase::Completion {
-                    phase: self.at.phase as u32,
+                    phase: self.at.phase.code(),
                 },
                 progress => ContinuationPhase::Source {
-                    phase: self.at.phase as u32,
+                    phase: self.at.phase.code(),
                     progress,
                 },
             },
@@ -100,7 +84,7 @@ impl SourceContinuation {
         )?
         .with_invocation(invocation)
         .with_occurrence(self.occurrence);
-        record.unpaid = Some((self.suffix(&self.unpaid)?, self.unpaid.phase as u32));
+        record.unpaid = Some((self.suffix(&self.unpaid)?, self.unpaid.phase.code()));
         record.pending = self
             .pending
             .as_ref()
@@ -109,13 +93,13 @@ impl SourceContinuation {
         record.departure = self
             .departure
             .as_ref()
-            .map(|point| Ok::<_, HeapFault>((self.suffix(point)?, point.phase as u32)))
+            .map(|point| Ok::<_, HeapFault>((self.suffix(point)?, point.phase.code())))
             .transpose()?;
         record.suspended = self
             .suspended
             .iter()
             .map(|(origin, completion)| {
-                Ok::<_, HeapFault>(((self.suffix(origin)?, origin.phase as u32), *completion))
+                Ok::<_, HeapFault>(((self.suffix(origin)?, origin.phase.code()), *completion))
             })
             .collect::<Result<_, _>>()?;
         record.ordinal = self.ordinal;
@@ -143,7 +127,10 @@ impl SourceContinuation {
             ContinuationPhase::Completion { phase } => (phase, 4),
             _ => return Err(malformed("source continuation has another action phase")),
         };
-        if record.refusal.is_some_and(|bound| bound > 2) {
+        if record
+            .refusal
+            .is_some_and(|tag| crate::machine::region_isa::refusal_bound(tag).is_none())
+        {
             return Err(malformed("source continuation has an unknown refusal"));
         }
         let point = |path: &[u32], tag| -> Result<Point, HeapFault> {

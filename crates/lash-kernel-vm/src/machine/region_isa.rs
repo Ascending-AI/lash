@@ -129,6 +129,26 @@ pub(crate) enum RegionError {
     Invalid(Refused),
     Heap(HeapFault),
 }
+/// The tag a saved continuation gives the execution limit that refused a
+/// region phase; the only refusals a region phase meets.
+pub(in crate::machine) fn refusal_tag(bound: &crate::Bound) -> u32 {
+    match bound {
+        crate::Bound::Charge => 0,
+        crate::Bound::Memory => 1,
+        crate::Bound::CallDepth => 2,
+        _ => unreachable!("only execution limits refuse a region phase"),
+    }
+}
+/// The execution limit a saved continuation's refusal tag names.
+pub(in crate::machine) fn refusal_bound(tag: u32) -> Option<crate::Bound> {
+    [
+        crate::Bound::Charge,
+        crate::Bound::Memory,
+        crate::Bound::CallDepth,
+    ]
+    .into_iter()
+    .find(|bound| refusal_tag(bound) == tag)
+}
 fn invalid(reason: Refused) -> RegionError {
     RegionError::Invalid(reason)
 }

@@ -332,6 +332,11 @@ impl Cell for ContinuationRecord {
     }
 }
 
+impl ContinuationPhase {
+    /// How many source phases a canonical continuation names: its phase
+    /// tags are `0..SOURCE_PHASES`, in the machine's phase order.
+    pub const SOURCE_PHASES: u32 = 14;
+}
 impl TokenCodec for ContinuationPhase {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
@@ -368,8 +373,7 @@ impl TokenCodec for ContinuationPhase {
         if matches!(tag, 0 | 5 | 6) {
             TokenReader::expect_fields(fields, if tag == 5 { 2 } else { 1 })?;
             let phase = u32::decode(input)?;
-            // Phases 0..=13; 13 is a `return via`'s policy call.
-            if phase > 13 {
+            if phase >= Self::SOURCE_PHASES {
                 return Err(TokenError::Invalid("invalid canonical source phase".into()));
             }
             return Ok(match tag {

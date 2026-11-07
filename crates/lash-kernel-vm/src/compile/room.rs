@@ -65,6 +65,37 @@ pub(crate) enum Phase {
     /// A `return via`'s policy call, after every finally of its frame.
     Policy,
 }
+impl Phase {
+    /// Every phase, in declaration order: a phase's position is its tag in
+    /// a saved continuation.
+    const ALL: [Phase; lash_kernel_state::paged::ContinuationPhase::SOURCE_PHASES as usize] = [
+        Phase::Enter,
+        Phase::Open,
+        Phase::Next,
+        Phase::Check,
+        Phase::Item,
+        Phase::Test,
+        Phase::Catch,
+        Phase::Suspend,
+        Phase::Restore,
+        Phase::Supersede,
+        Phase::Commit,
+        Phase::Fallthrough,
+        Phase::Leave,
+        Phase::Policy,
+    ];
+    /// The phase's tag in a saved continuation.
+    pub(crate) fn code(self) -> u32 {
+        self as u32
+    }
+    /// The phase a saved continuation's tag names.
+    pub(crate) fn from_code(code: u32) -> Option<Self> {
+        Self::ALL
+            .get(code as usize)
+            .copied()
+            .filter(|phase| phase.code() == code)
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Point {
     pub(crate) site: Site,

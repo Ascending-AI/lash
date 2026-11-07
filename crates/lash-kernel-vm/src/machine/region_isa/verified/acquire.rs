@@ -228,7 +228,10 @@ impl<'m> RegionLease<'m> {
             stack
                 .last()
                 .and_then(|frame| frame.pending.source.as_ref())
-                .filter(|source| source.refusal == Some(0) && source.debt.paid == machine.charged)
+                .filter(|source| {
+                    source.refusal == Some(super::super::refusal_tag(&crate::Bound::Charge))
+                        && source.debt.paid == machine.charged
+                })
                 .ok_or_else(|| invalid(Refused::Facts))?;
             Some(super::charge::Crossing::restore(
                 limits.charge,

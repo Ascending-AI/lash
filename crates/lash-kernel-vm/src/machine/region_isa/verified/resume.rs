@@ -763,13 +763,11 @@ impl super::Running<'_> {
             return Err(invalid(Refused::Facts));
         }
         if let Some(bound) = source.refusal {
-            self.refusal = Some(match bound {
-                0 => crate::Bound::Charge,
-                1 => crate::Bound::Memory,
-                2 => crate::Bound::CallDepth,
-                _ => return Err(invalid(Refused::Facts)),
-            });
-            if bound == 0 {
+            let bound =
+                super::super::refusal_bound(bound).ok_or_else(|| invalid(Refused::Facts))?;
+            let charge = bound == crate::Bound::Charge;
+            self.refusal = Some(bound);
+            if charge {
                 self.crossing = Some(super::charge::Crossing::restore(
                     self.limits.charge,
                     self.counters.charge,
