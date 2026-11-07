@@ -50,6 +50,7 @@ fn bodies(
         .unwrap();
         (name, registry.register(definition, None).unwrap())
     };
+
     vec![
         register("body.say", "print x return x"),
         register("body.inc", "return num.add(x, 1)"),

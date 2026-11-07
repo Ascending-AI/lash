@@ -24,12 +24,6 @@ fn probes(
     registry: &mut FunctionRegistry,
     ids: &BTreeMap<&'static str, FunctionId>,
 ) -> Vec<(&'static str, FunctionId)> {
-    let uses = |names: &[&str]| {
-        names
-            .iter()
-            .map(|name| format!("use {name} = @{}\n", ids[name]))
-            .collect::<String>()
-    };
     let mut register = |name: &str, params: &str, uses: String, body: &str| {
         let definition = parse_definition(&format!(
             "function {name}({params}) -> Any\nkernel 1\ncharge 1\n{uses}native\nbody {{ {body} }}\n"
@@ -37,6 +31,14 @@ fn probes(
         .unwrap();
         registry.register(definition, None).unwrap()
     };
+
+    let uses = |names: &[&str]| {
+        names
+            .iter()
+            .map(|name| format!("use {name} = @{}\n", ids[name]))
+            .collect::<String>()
+    };
+
     let mut probes = vec![
         (
             "probe.long",
@@ -299,27 +301,8 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             call_depth,
             ..ROOMY
         };
-        crate::machine::islands::witness::begin();
-        let end = Embedder::with(program, setup(bounds, u64::MAX)).run_to_end(&[]);
-        let frames = crate::machine::islands::witness::packet_frame_entries();
-        let resumes = crate::machine::islands::witness::packet_call_resumes();
-        if matches!(end, End::Finished(_)) {
-            assert!(
-                resumes[0] > 0,
-                "the uncounted body chain must restore actual Incoming and continuation owners under source acceptance: {resumes:?}"
-            );
-            if program.contains("deep.hold") {
-                assert!(
-                    resumes[1] > 0,
-                    "the member read must keep its saved source role across the uncounted call: {resumes:?}"
-                );
-            }
-        }
-        assert!(
-            frames[0] > 0,
-            "the expression body chain must install real packet frames under bounded prospective entry: {frames:?}"
-        );
-        end
+
+        Embedder::with(program, setup(bounds, u64::MAX)).run_to_end(&[])
     };
     let chain = "main { return deep.d100(0) }";
     assert_eq!(result(run(chain, 101)), int(100));
@@ -333,8 +316,7 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
     assert_eq!(refused(run(under_a_call, 101)), (Bound::CallDepth, 101));
     assert_eq!(result(run("main { return deep.hold([7]) }", 102)), int(107));
 
-    let scoped_observation = |name: &str, source_only: bool, declined: bool| {
-        crate::machine::islands::witness::begin();
+    let scoped_observation = |name: &str, source_only: bool| {
         let bounds = Bounds {
             call_depth: 2,
             ..ROOMY
@@ -348,28 +330,8 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             &format!("main {{ return {name}({args}) }}"),
             setup(bounds, u64::MAX),
         );
-        let suspended = matches!(
-            name,
-            "deep.cleanup"
-                | "deep.recover"
-                | "deep.supersede"
-                | "deep.brake"
-                | "deep.skip"
-                | "deep.fault"
-                | "deep.rethrow"
-        );
         if source_only {
             embedder.machine.force_source_execution();
-        }
-        // The reference source run takes the ordinary unwind into cleanup.
-        let caught = matches!(
-            name,
-            "deep.halt" | "deep.pass" | "deep.stop" | "deep.next" | "deep.catch"
-        );
-        if declined && caught {
-            crate::machine::islands::witness::decline_caught_departure();
-        } else if declined {
-            crate::machine::islands::witness::decline_suspended_departure();
         }
         let tape = crate::ChargeTape::new();
         embedder.machine.record_charges(tape.clone());
@@ -382,47 +344,6 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
                 vec![int(7)]
             })
         );
-        // A raise leaves the packet; the precise machine runs the catch.
-        let scoped = matches!(name, "deep.branch" | "deep.guard");
-        if (scoped && source_only) || name == "deep.rescue" {
-            assert!(
-                crate::machine::islands::witness::precise_scoped_returns() > 0,
-                "the precise source must publish the same entered block suffix: {name}"
-            );
-        } else if scoped {
-            assert!(
-                crate::machine::islands::witness::packet_scoped_returns() > 0,
-                "the entered block must leave through its accepted return suffix: {name}"
-            );
-        }
-
-        if suspended {
-            assert_eq!(
-                crate::machine::islands::witness::precise_suspended_departures(),
-                // A raise leaves the packet; the precise machine runs its statement.
-                u64::from(
-                    (source_only || matches!(name, "deep.recover" | "deep.fault" | "deep.rethrow"))
-                        && !declined
-                ),
-                "the departure must move into its cleanup's pending departure: {name}"
-            );
-        }
-        // A raise leaves the packet; the precise machine runs its statement.
-        if caught && (source_only || name == "deep.catch") {
-            assert_eq!(
-                crate::machine::islands::witness::precise_caught_departures(),
-                // A decline takes the ordinary unwind once.
-                u64::from(name == "deep.next") + u64::from(!declined),
-                "the departure must move into the Catch that takes it: {name}"
-            );
-        }
-        if name == "deep.loop" || name == "deep.walk" {
-            assert_eq!(
-                crate::machine::islands::witness::loop_returns()[usize::from(source_only)],
-                2,
-                "the second body must return with its actual loop occurrence"
-            );
-        }
         (value, embedder.machine.meters(), tape.steps())
     };
     for name in [
@@ -444,70 +365,20 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         "deep.loop",
         "deep.walk",
     ] {
-        let observation = scoped_observation(name, false, false);
+        let observation = scoped_observation(name, false);
         assert_eq!(
             observation,
-            scoped_observation(name, true, false),
+            scoped_observation(name, true),
             "the accepted block suffix must preserve the source result, charge tape and terminal holdings: {name}"
         );
-        if matches!(
-            name,
-            "deep.cleanup"
-                | "deep.recover"
-                | "deep.supersede"
-                | "deep.brake"
-                | "deep.skip"
-                | "deep.halt"
-                | "deep.pass"
-                | "deep.stop"
-                | "deep.next"
-                | "deep.catch"
-                | "deep.fault"
-                | "deep.rethrow"
-        ) {
-            assert_eq!(
-                observation,
-                scoped_observation(name, true, true),
-                "the suspended departure must leave the ordinary unwind's observation: {name}"
-            );
-        }
     }
     // A call inside a cleanup that holds a pending return publishes its
     // Enter at its source occurrence, like the call that reached the cleanup.
     let unwind = "definition \"function f(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  try { let saved = n return saved } finally { let kept = [call g(n)] } return 0  }\"\ndefinition \"function g(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return n  }\"\n main { let r = call f([7]) return r }";
-    crate::machine::islands::witness::begin();
+
     let mut embedder = Embedder::with(unwind, setup(ROOMY, u64::MAX));
     embedder.machine.force_source_execution();
     assert_eq!(result(embedder.run_to_end(&[])), Datum::List(vec![int(7)]));
-    assert_eq!(
-        crate::machine::islands::witness::call_enters(),
-        2,
-        "both guest calls must publish their Enter"
-    );
-    // A declined packet return resumes before the same library completion fee.
-    let completed = || {
-        let bounds = Bounds {
-            call_depth: 102,
-            ..ROOMY
-        };
-        let mut embedder =
-            Embedder::with("main { return deep.forward(0) }", setup(bounds, u64::MAX));
-        let tape = crate::ChargeTape::new();
-        embedder.machine.record_charges(tape.clone());
-        let end = embedder.run_to_end(&[]);
-        (result(end), embedder.machine.meters().charged, tape.steps())
-    };
-    let reference = completed();
-    crate::machine::islands::witness::decline_body_return();
-    assert_eq!(
-        completed(),
-        reference,
-        "a return miss must leave its completion fee unpaid"
-    );
-    assert!(
-        !crate::machine::islands::witness::take_body_return_decline(),
-        "the bounded packet return must actually decline"
-    );
 }
 
 /// The callee's prints `[tag, 0]` to `[tag, 3]`.
@@ -739,7 +610,7 @@ fn a_seal_inside_an_expression_callee_is_exact() {
     let reference_tape = crate::ChargeTape::new();
     active.machine.record_charges(tape.clone());
     reference.machine.record_charges(reference_tape.clone());
-    let mut checkpoint_bytes = 0;
+
     let mut checkpoints = 0;
     loop {
         let step = active.run();
@@ -763,7 +634,7 @@ fn a_seal_inside_an_expression_callee_is_exact() {
         assert_eq!(root.tasks, expected.tasks);
         assert_eq!(root.ready, expected.ready);
         assert_eq!(root.waits, expected.waits);
-        checkpoint_bytes += lash_kernel_value::tokens::encode_body(&root).len();
+
         checkpoints += 1;
         active.open_at(&root, certificate, Layout(1 + checkpoints * 2), true);
         active.machine.record_charges(tape.clone());
@@ -777,11 +648,7 @@ fn a_seal_inside_an_expression_callee_is_exact() {
         }
     }
     assert!(checkpoints > 20);
-    eprintln!(
-        "active-frame proof: checkpoints={checkpoints} canonical_root_bytes={checkpoint_bytes} charge_events={} explicit_calls={}",
-        tape.len(),
-        tape.work().calls
-    );
+
     assert_eq!(active.world.printed, reference.world.printed);
     assert_eq!(active.requests, reference.requests);
 

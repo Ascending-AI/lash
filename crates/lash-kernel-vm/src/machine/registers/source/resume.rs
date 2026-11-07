@@ -2,51 +2,6 @@ use super::*;
 use crate::machine::registers::ResumeValue;
 
 impl Operands {
-    /// The ledger retains live caller roots while the callee adopts its bank.
-    /// An active callee's own bank or a foreign task's bank cannot be replaced.
-    pub(in crate::machine::registers) fn replay_can_replace(
-        &self,
-        ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
-        heap: &lash_kernel_state::kernel_internals::PagedHeap,
-        current: &lash_kernel_state::kernel_internals::logical::Invocation,
-    ) -> Result<bool, HeapFault> {
-        let Owner::Frame {
-            task: current_task,
-            invocation: current_id,
-        } = current.frame()
-        else {
-            unreachable!("an invocation owns its frame");
-        };
-        ledger.invocation(current_task, current_id, heap.pages())?;
-        for held in self
-            .values
-            .iter()
-            .map(|operand| &operand.held)
-            .chain(&self.atoms)
-            .chain(&self.entry)
-        {
-            let Some(owner) = held.owner else { continue };
-            if ledger.holding(owner, heap.pages())?.is_none() {
-                continue;
-            }
-            let Owner::Value {
-                task, invocation, ..
-            } = owner
-            else {
-                return Ok(false);
-            };
-            if task != current_task
-                || invocation == 0
-                || invocation >= current_id
-                || ledger
-                    .holding(Owner::Frame { task, invocation }, heap.pages())?
-                    .is_none()
-            {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
     pub(in crate::machine::registers) fn prepare_resumption(
         &self,
         roots: BankRoots,

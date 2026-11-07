@@ -6,7 +6,6 @@
 //! This is the machine's one diagnostic seam outside the kernel crates
 //! (FIG-6688): its counters describe this engine, and an engine that
 //! replaces it redefines them.
-pub mod execution;
 
 use std::cell::Cell;
 
@@ -197,14 +196,6 @@ pub(crate) fn preparation(event: Preparation) {
         }
     });
 }
-
-/// Register blocks and call islands executed while a charge tape recorded.
-pub fn register_work(tape: &crate::ChargeTape) -> crate::observe::RegisterWork {
-    tape.work()
-}
-
-/// Register execution counters from a recorded run.
-pub use crate::observe::RegisterWork;
 
 /// The run's logical balance, observed at machine verdict points.
 pub type MemoryObserver = fn(u64);

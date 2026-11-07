@@ -1,345 +1,14 @@
-//! The loop-plan verifiers: lowering admits a scalar loop plan, which feeds
-//! the register program's typed repeat, only as its lowered code, its
-//! stream's charge regions and its statement units state it, and refuses
-//! each misstatement of a summary, of the body's tree and of a `for`'s head;
-//! and it admits an island plan only as its stream's charge regions and
-//! occurrences state it. A closure an island calls keeps the code it found
-//! by its site, as an ordinary call keeps it (FIG-6844).
-
+//! Source ownership, charge and publication laws for canonical regions.
 mod charges;
 mod interval;
 mod placement;
 mod publication;
-
 use super::embedder::{Embedder, Setup};
-use crate::compile::expr::{self, Expr};
-use crate::compile::islands::{self, Kind};
-use crate::compile::{Event, Head, LoopPlan, Lowered, Refused, RegionSlot, Step};
-use crate::costs::Costs;
-
 const LOOP: &str = "definition \"function count(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let i = 0 let s = 0 while num.lt(i, n) { set s = num.add(s, i) set i = num.add(i, 1) } return s  }\"\n\nmain { let r = call count(5) finish r }";
-
 const WALK: &str = "definition \"function walk(xs: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let s = 0 for x in xs { let y = num.add(x, 1) if num.lt(x, 3) { continue } else { set s = num.add(s, y) } } return s  }\"\n\nmain { let r = call walk([1, 2, 3, 4]) finish r }";
-
-/// The one plan `text` forms, and what it is checked against.
-fn checked(text: &str, check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Result<(), Refused>)) {
-    checked_with(text, Setup::default(), check);
-}
-
-fn checked_with(
-    text: &str,
-    setup: Setup,
-    check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Result<(), Refused>),
-) {
-    let (program, _) = Embedder::with(text, setup).program(true);
-    let admitted = program
-        .library
-        .admit(&program.document, Default::default(), &program.selection)
-        .unwrap_or_else(|_| panic!("the loop program is admitted"));
-    let exe = admitted
-        .executable(
-            &program.document,
-            &program.library,
-            &program.documents,
-            &program.functions,
-            &program.instances,
-        )
-        .unwrap_or_else(|_| panic!("the loop program compiles"));
-    let plans: Vec<_> = exe.islands.scalar.iter().collect();
-    let [plan] = &plans[..] else {
-        panic!("one verified loop plan forms, not {}", plans.len());
-    };
-    let (stream, _, _) = exe.statement(plan.stmt);
-    let loop_test = Costs::of_document(&program.document).loop_test;
-    let block = |id| exe.block(id);
-    let stmt = |id| exe.stmt(id);
-    let lib = |id| exe.lib(id);
-    let lib_of = |function: &_| exe.library_lib(function);
-    let island = |code| exe.island_of(code).is_some();
-    let lowered = Lowered {
-        stream,
-        block: &block,
-        stmt: &stmt,
-        lib: &lib,
-        lib_of: &lib_of,
-        island: &island,
-    };
-    assert_eq!(plan.verify(&lowered, loop_test), Ok(()));
-    // Another cost table's loop test is not this plan's.
-    assert_eq!(plan.verify(&lowered, loop_test + 1), Err(Refused::LoopTest));
-    check(plan, &|plan| plan.verify(&lowered, loop_test));
-}
-
-/// `plan` with `change` made to a copy of it.
-fn misstated(plan: &LoopPlan, change: impl FnOnce(&mut LoopPlan)) -> LoopPlan {
-    let mut misstated = plan.copied();
-    change(&mut misstated);
-    misstated
-}
-
-#[test]
-fn lowering_admits_a_loop_plan_only_as_its_stream_states_it() {
-    checked(LOOP, |plan, verify| {
-        let refused = |change: &dyn Fn(&mut LoopPlan)| verify(&misstated(plan, change));
-        assert_eq!(
-            refused(&|plan| plan.source_site.path.push(0)),
-            Err(Refused::Room(crate::compile::room::Refused::Source))
-        );
-        // Summary `at`, numbered as the verifier numbers them: the test 0,
-        // then the body's statements.
-        let edit = |plan: &mut LoopPlan, at: usize, f: &dyn Fn(&mut crate::compile::Summary)| match (
-            at,
-            &mut plan.head,
-            &mut plan.body.steps[..],
-        ) {
-            (0, Head::While(test), _) => f(test),
-            (at, _, steps) => match &mut steps[at - 1] {
-                Step::Write(summary) => f(summary),
-                _ => panic!("the loop's body writes"),
-            },
-        };
-        assert_eq!(
-            refused(&|plan| edit(plan, 1, &|summary| summary.fixed += 1)),
-            Err(Refused::Fixed { statement: 1 })
-        );
-        assert_eq!(
-            refused(&|plan| edit(plan, 0, &|summary| summary.fixed -= 1)),
-            Err(Refused::Fixed { statement: 0 })
-        );
-        assert_eq!(
-            refused(&|plan| edit(plan, 2, &|summary| {
-                let mut program = summary.program.to_vec();
-                program.retain(|event| *event != Event::Formula);
-                summary.program = program.into();
-            })),
-            Err(Refused::Program { statement: 2 })
-        );
-        assert_eq!(
-            refused(&|plan| plan.iteration_max += 1),
-            Err(Refused::Iteration)
-        );
-        assert_eq!(
-            refused(&|plan| edit(plan, 1, &|summary| summary.write =
-                summary.write.map(|slot| match slot {
-                    RegionSlot::Frame(at) => RegionSlot::Frame(at + 1),
-                    RegionSlot::Session(at) => RegionSlot::Session(at + 1),
-                }))),
-            Err(Refused::Slots { statement: 1 })
-        );
-        assert_eq!(
-            refused(&|plan| plan.calls = vec![0].into()),
-            Err(Refused::Calls)
-        );
-        // A scalar statement stated as allocating, and a scalar plan
-        // stated as one that admits each statement (§5, R5).
-        assert_eq!(
-            refused(&|plan| edit(plan, 1, &|summary| summary.general = true)),
-            Err(Refused::Allocates { statement: 1 })
-        );
-        assert_eq!(
-            refused(&|plan| plan.allocates = true),
-            Err(Refused::Allocates { statement: 0 })
-        );
-        assert_eq!(
-            refused(&|plan| edit(plan, 0, &|summary| summary.program =
-                summary.program[1..].into())),
-            Err(Refused::Program { statement: 0 })
-        );
-    });
-}
-
-#[test]
-fn lowering_admits_a_loop_body_tree_only_as_its_blocks_state_it() {
-    let source = super::layout::scalar_document(
-        "let i = 0 let s = 0 while flat.lt(i, 5) { if flat.lt(i, 2) { set s = flat.add(s, flat.mul(i, i)) } else { set s = flat.add(s, i) } set i = flat.add(i, 1) } return s",
-    );
-    checked_with(
-        &source,
-        Setup {
-            probes: Some(super::layout::scalar_probes),
-            ..Setup::default()
-        },
-        |_, _| {},
-    );
-    checked(WALK, |plan, verify| {
-        let refused = |change: &dyn Fn(&mut LoopPlan)| verify(&misstated(plan, change));
-        let arms = |plan: &mut LoopPlan, f: &dyn Fn(&mut Step, &mut Step)| {
-            let Some(Step::If {
-                then, otherwise, ..
-            }) = plan.body.steps.get_mut(1)
-            else {
-                panic!("the body's second statement is an `if`");
-            };
-            let (Some(then), Some(otherwise)) =
-                (then.steps.first_mut(), otherwise.steps.first_mut())
-            else {
-                panic!("both arms have a statement");
-            };
-            f(then, otherwise);
-        };
-        // The arms swapped are not the `if`'s.
-        assert_eq!(
-            refused(&|plan| arms(plan, &|then, otherwise| std::mem::swap(then, otherwise))),
-            Err(Refused::Shape { statement: 3 })
-        );
-        // A `continue` the region would leave to the reference.
-        assert_eq!(
-            refused(&|plan| arms(plan, &|then, _| *then = Step::Leave)),
-            Err(Refused::Shape { statement: 3 })
-        );
-        // The body's declarations, whose variables end with it.
-        assert_eq!(
-            refused(&|plan| plan.body.declares = Box::default()),
-            Err(Refused::Shape { statement: 1 })
-        );
-        // A `let` stated as an assignment.
-        assert_eq!(
-            refused(&|plan| {
-                if let Step::Bind(summary) = &plan.body.steps[0] {
-                    plan.body.steps[0] = Step::Write(summary.clone());
-                }
-            }),
-            Err(Refused::Shape { statement: 1 })
-        );
-        // The `for`'s head: another variable, and one unit more.
-        assert_eq!(
-            refused(&|plan| {
-                if let Head::For { binding, .. } = &mut plan.head {
-                    *binding += 1;
-                }
-            }),
-            Err(Refused::Shape { statement: 0 })
-        );
-        assert_eq!(
-            refused(&|plan| {
-                if let Head::For { charge, .. } = &mut plan.head {
-                    charge.fixed += 1;
-                }
-            }),
-            Err(Refused::Fixed { statement: 0 })
-        );
-        assert_eq!(
-            refused(&|plan| plan.binds = false),
-            Err(Refused::Shape { statement: 0 })
-        );
-    });
-}
-
-const SESSIONS: &str = "main { let s = 0 let i = 0 \
-                        while num.lt(i, 5) { set s = num.add(s, i) set i = num.add(i, 1) } finish s }";
-
-#[test]
-fn lowering_admits_a_session_plan_only_as_its_ops_name_the_bindings() {
-    checked(SESSIONS, |plan, verify| {
-        let refused = |change: &dyn Fn(&mut LoopPlan)| verify(&misstated(plan, change));
-        // The test reads `i` first, so it is the plan's first binding.
-        let named: Vec<_> = plan.sessions.iter().map(|name| name.as_str()).collect();
-        assert_eq!(named, ["i", "s"]);
-        assert_eq!(
-            refused(&|plan| plan.sessions.reverse()),
-            Err(Refused::Slots { statement: 0 })
-        );
-        assert_eq!(
-            refused(&|plan| plan.sessions = plan.sessions[..1].into()),
-            Err(Refused::Slots { statement: 0 })
-        );
-        // The body's first write stated as another binding's.
-        assert_eq!(
-            refused(&|plan| {
-                if let Step::Write(summary) = &mut plan.body.steps[0] {
-                    summary.write = Some(RegionSlot::Session(0));
-                }
-            }),
-            Err(Refused::Slots { statement: 1 })
-        );
-    });
-}
-
-const ISLAND: &str = "definition \"function fib(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  if num.lt(n, 2) { return n } return num.add(apply self(self, num.add(n, -1)), apply self(self, num.add(n, -2)))  }\"\n\nmain { let r = call fib(&fib, 5) finish r }";
-
-#[test]
-fn lowering_admits_an_island_plan_only_as_its_stream_states_it() {
-    let (program, _) = Embedder::new(ISLAND).program(true);
-    let admitted = program
-        .library
-        .admit(&program.document, Default::default(), &program.selection)
-        .unwrap_or_else(|_| panic!("the island program is admitted"));
-    let exe = admitted
-        .executable(
-            &program.document,
-            &program.library,
-            &program.documents,
-            &program.functions,
-            &program.instances,
-        )
-        .unwrap_or_else(|_| panic!("the island program compiles"));
-    // Uncharged library bodies form register programs of their own; `fib`
-    // forms exactly one.
-    let fib = super::embedder::function_unit("fib");
-    let fibs: Vec<_> = exe
-        .islands
-        .plans
-        .iter()
-        .filter(|plan| exe.code(plan.code).site.unit == fib)
-        .collect();
-    let [plan] = &fibs[..] else {
-        panic!("one island of `fib` forms, not {}", fibs.len());
-    };
-    let (stream, _, _) = exe.statement(plan.body.statements[0].id);
-    assert_eq!(plan.verify(stream), Ok(()));
-    // K-CHG-001 / K-EVAL-008: packet publication independently rejects a
-    // changed source close and a lost evaluated argument role.
-    let mut packets = crate::machine::islands::Compiled::generic(plan, &exe).unwrap();
-    assert_eq!(packets.verify_packets(stream), Ok(()));
-    let region = packets.corrupt_packet_close();
-    assert_eq!(
-        packets.verify_packets(stream),
-        Err(islands::Refused::Region { region })
-    );
-    let mut packets = crate::machine::islands::Compiled::generic(plan, &exe).unwrap();
-    assert!(packets.corrupt_packet_role(stream));
-    assert_eq!(packets.verify_packets(stream), Err(islands::Refused::Calls));
-    let refused = |change: &dyn Fn(&mut islands::IslandPlan)| {
-        let mut misstated = plan.copied();
-        change(&mut misstated);
-        misstated.verify(stream)
-    };
-    let region = test_close(&mut plan.copied()).region;
-    assert_eq!(
-        refused(&|plan| test_close(plan).total += 1),
-        Err(islands::Refused::Region { region })
-    );
-    assert_eq!(
-        refused(&|plan| test_close(plan).head += 1),
-        Err(islands::Refused::Region { region })
-    );
-    assert_eq!(
-        refused(&|plan| plan.calls = plan.calls[1..].into()),
-        Err(islands::Refused::Calls)
-    );
-    assert_eq!(
-        refused(&|plan| plan.calls.reverse()),
-        Err(islands::Refused::Calls)
-    );
-}
-
-/// The region the island's `if` test closes at its operator.
-fn test_close(plan: &mut islands::IslandPlan) -> &mut expr::Close {
-    match &mut plan.body.statements[0].kind {
-        Kind::If {
-            cond:
-                Expr {
-                    kind: expr::Kind::Operator { closes, .. },
-                    ..
-                },
-            ..
-        } if closes.len() == 1 => &mut closes[0],
-        _ => panic!("the island's test closes a region at its operator"),
-    }
-}
-
+const CALLS: &str = "definition \"function fib(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  if num.lt(n, 2) { return n } return num.add(apply self(self, num.add(n, -1)), apply self(self, num.add(n, -2)))  }\"\n\nmain { let r = call fib(&fib, 5) finish r }";
 /// All source projections are inspected through the same code/specialization
-/// owners used by prepared, typed, island, native/body and scalar entries.
+/// owners used by prepared, typed, native/body and scalar entries.
 fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
     use crate::compile::{CodeId, LibId};
     let rejected_joins = std::cell::Cell::new(0);
@@ -350,7 +19,7 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
         typed_text.as_str(),
         LOOP,
         WALK,
-        ISLAND,
+        CALLS,
         "main { let x = pair.twice(3) let ys = let(y = x, if(true, [y, if(false, x, y)], if(false, [x], [y]))) return text.join(ys, \"-\") }",
     ] {
         let (program, _) = Embedder::with(
@@ -386,8 +55,15 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                 .unwrap_or_else(|_| panic!("room corpus compiles"));
             for index in 0..exe.code_count() {
                 let code = exe.code(CodeId(index as u32));
-                use lash_kernel_state::kernel_internals::logical::{Owner as Root, Slot};
-                for slot in 0..code.slots.len() {
+                use lash_kernel_state::kernel_internals::logical::{
+                    Owner as Root, Slot, SourceRole,
+                };
+                for (slot, binding) in code.slots.iter().enumerate() {
+                    let role = SourceRole::Binding {
+                        declared: binding.declared.clone(),
+                        name: binding.name.clone(),
+                    }
+                    .id();
                     let borrowed = code
                         .captures
                         .iter()
@@ -402,17 +78,13 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                             task: lash_kernel_doc::TaskId::MAIN,
                             invocation: 73,
                             slot: if borrowed {
-                                Slot::Capture(crate::laws::role_id(slot as u32))
+                                Slot::Capture(role)
                             } else {
-                                Slot::Binding(crate::laws::role_id(slot as u32))
+                                Slot::Binding(role)
                             }
                         })
                     );
                 }
-                assert!(
-                    !exe.code(CodeId(index as u32)).source_room.is_derived(),
-                    "compilation must not derive source memory programs on the worker path"
-                );
             }
             exe.verify_stream().unwrap();
             for index in 0..exe.code_count() {
@@ -540,16 +212,6 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                 (prepared || layout % 2 == 1) && body_native && join,
                 "all entry declarations are in the inventory"
             );
-            for plan in &exe.islands.plans {
-                plan.verify(plan.stream(&exe)).unwrap();
-                assert_eq!(plan.source_room.site, exe.code(plan.code).site);
-                if let Some(compiled) = plan.compiled(&exe) {
-                    assert!(std::sync::Arc::ptr_eq(
-                        &compiled.source_room,
-                        &plan.source_room
-                    ));
-                }
-            }
         }
     }
     assert!(
@@ -591,9 +253,6 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
     room_shared_binding_growth();
     room_unpooled_immutable_growth();
     placement::binding_values();
-    scalar_region_lifetimes();
-    interval::scalar_native_condition_peak();
-    charges::compiled_charges();
     interval::member_read_suffix();
     let source = room_numeric_source();
     let mut execution = RoomExecution::default();
@@ -718,224 +377,6 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
             assert_eq!(source.verify_room(&understated), Err(Refused::Peak));
         }
     });
-}
-
-/// A canceled scalar temporary still requires its interior source peak. The
-/// surviving assignment transfers once at the region exit.
-fn scalar_region_lifetimes() {
-    use crate::compile::room::{self, Phase, Point, region::ScalarRegionValues};
-    use lash_kernel_doc::{TaskId, Value};
-    use lash_kernel_state::kernel_internals::logical::{Ledger, Owner as Root, RootValue};
-    use std::sync::Arc;
-    let run = Embedder::new("main { let keep = true while keep { set keep = false } return null }");
-    let (program, _) = run.program(false);
-    let source = Arc::new(room::Source::compile(
-        lash_kernel_doc::constant_pool::PoolOwner::Document(program.document.identity()),
-        lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, vec![]),
-        program.document.main.as_ref().unwrap(),
-        &[],
-        Default::default(),
-        &std::collections::BTreeMap::new(),
-        &std::collections::BTreeSet::from([lash_kernel_value::Name::new("keep")]),
-    ));
-    let mut execution = RoomExecution::default();
-    source.evaluate(&mut execution, 100).unwrap();
-    let from = Point {
-        site: source.site.child(1).child(0),
-        phase: Phase::Commit,
-    };
-    let through = Point {
-        site: source.site.child(1).child(1),
-        phase: Phase::Leave,
-    };
-    let first = execution
-        .route
-        .iter()
-        .position(|selection| matches!(selection, room::Selection::Event { at, .. } if at == &from))
-        .unwrap();
-    let last = execution
-        .route
-        .iter()
-        .position(
-            |selection| matches!(selection, room::Selection::Event { at, .. } if at == &through),
-        )
-        .unwrap();
-    let interval = source
-        .compile_between(&from, &through, &execution.route[first..=last], 100)
-        .unwrap();
-    assert_eq!(
-        interval
-            .evaluate_interval(&mut RoomExecution::default())
-            .unwrap()
-            .balance(),
-        room::Balance {
-            peak_extra: 16,
-            retained_delta: 0
-        }
-    );
-    let mut region = source.compile_scalar_region(interval).unwrap();
-    assert_eq!(region.verify(), Ok(()));
-    let heap = run.machine.source_law_heap();
-    let mut ledger = Ledger::fresh();
-    let mut arena = lash_kernel_state::arena::Arena::new();
-    let binding = source
-        .owner_slots()
-        .unwrap()
-        .root(
-            &room::Owner::Binding {
-                declared: source.site.child(0),
-                name: lash_kernel_value::Name::new("keep"),
-            },
-            TaskId::MAIN,
-            0,
-        )
-        .unwrap();
-    let Root::Value { slot, .. } = binding else {
-        panic!("private local binding");
-    };
-    let (invocation, entered) = ledger
-        .prepare_enter(
-            TaskId::MAIN,
-            &mut arena,
-            heap.pages(),
-            &[],
-            &[(slot, RootValue::Value(&Value::Bool(true)))],
-        )
-        .unwrap();
-    ledger
-        .commit(entered.admit(u64::MAX).ok().unwrap())
-        .unwrap();
-    let mut values = vec![Value::Null; region.fact_count()];
-    for (_, fact) in region.entries() {
-        values[fact.index()] = Value::Bool(true);
-    }
-    for (at, fact) in region.results() {
-        values[fact.index()] = Value::Bool(at == &from);
-    }
-    let mut wrong_branch = values.clone();
-    for (_, fact) in region.entries() {
-        wrong_branch[fact.index()] = Value::Bool(false);
-    }
-    for (at, fact) in region.results() {
-        if at == &from {
-            wrong_branch[fact.index()] = Value::Bool(false);
-        }
-    }
-    assert!(
-        region
-            .bind(
-                &ledger,
-                &mut arena,
-                heap,
-                &invocation,
-                ScalarRegionValues {
-                    values: &wrong_branch,
-                    calls: &[],
-                }
-            )
-            .unwrap()
-            .is_none(),
-        "a same-price condition cannot select another source branch"
-    );
-    // Equal holding prices do not authenticate a source read or literal.
-    // The condition reads the old binding; the assignment computes false.
-    for (_, fact) in region.results() {
-        let mut wrong = values.clone();
-        let Value::Bool(value) = wrong[fact.index()] else {
-            unreachable!();
-        };
-        wrong[fact.index()] = Value::Bool(!value);
-        assert!(
-            region
-                .bind(
-                    &ledger,
-                    &mut arena,
-                    heap,
-                    &invocation,
-                    ScalarRegionValues {
-                        values: &wrong,
-                        calls: &[],
-                    },
-                )
-                .unwrap()
-                .is_none(),
-            "a same-price substituted read or literal is not the certified value"
-        );
-    }
-    let bound = region
-        .bind(
-            &ledger,
-            &mut arena,
-            heap,
-            &invocation,
-            ScalarRegionValues {
-                values: &values,
-                calls: &[],
-            },
-        )
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        bound.peak(),
-        16,
-        "the temporary is live before its consuming assignment"
-    );
-    let before = ledger.balance().unwrap().total().unwrap();
-    assert!(
-        bound
-            .prepare_boundary(&ledger, arena.registration().unwrap(), heap)
-            .unwrap()
-            .unwrap()
-            .admit(before + 15)
-            .is_err()
-    );
-    assert_eq!(ledger.balance().unwrap().total().unwrap(), before);
-    let bound = region
-        .bind(
-            &ledger,
-            &mut arena,
-            heap,
-            &invocation,
-            ScalarRegionValues {
-                values: &values,
-                calls: &[],
-            },
-        )
-        .unwrap()
-        .unwrap();
-    let prepared = bound
-        .prepare_boundary(&ledger, arena.registration().unwrap(), heap)
-        .unwrap()
-        .unwrap();
-    prepared
-        .admit(before + 16)
-        .ok()
-        .unwrap()
-        .publish(&mut ledger, |_, edits| assert!(edits.is_empty()))
-        .unwrap();
-    assert_eq!(ledger.balance().unwrap().total().unwrap(), before);
-    assert_eq!(
-        ledger
-            .holding(invocation.owner(slot), heap.pages())
-            .unwrap()
-            .unwrap()
-            .bytes(),
-        16
-    );
-    let recovery = region.recovery_after(&from).unwrap();
-    assert!(
-        recovery.iter().any(|(owner, _)| *owner == slot),
-        "the original binding survives the condition's operand acquisition"
-    );
-    let saved_read = region.results().find(|(at, _)| *at == &from).unwrap().1;
-    assert!(
-        recovery.iter().any(|(_, fact)| *fact == saved_read),
-        "an evaluated operand has a recovery role before the condition consumes it"
-    );
-    region.remove_recovery_role_for_law();
-    assert_eq!(region.verify(), Err(room::Refused::Exit));
-    region.understate_peak_for_law();
-    assert_eq!(region.verify(), Err(room::Refused::Peak));
 }
 
 fn room_shared_binding_growth() {

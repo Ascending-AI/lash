@@ -10,28 +10,6 @@ impl Context<'_> {
         storage: S,
         semantic: impl FnOnce(&mut Arena, &mut Session, S),
     ) -> Result<bool, Halt> {
-        self.publish_departure_remaining(
-            invocation,
-            frontier,
-            recipe,
-            storage,
-            semantic,
-            (&mut None, None),
-        )
-    }
-    pub(in crate::machine) fn publish_departure_remaining<S>(
-        self,
-        invocation: &Invocation,
-        frontier: &mut Option<Frontier>,
-        recipe: ReturnRecipe,
-        storage: S,
-        semantic: impl FnOnce(&mut Arena, &mut Session, S),
-        remaining: (
-            &mut Option<room::charges::AcceptedOriginalPrefix>,
-            Option<&crate::observe::ChargeTape>,
-        ),
-    ) -> Result<bool, Halt> {
-        let (receipt, tape) = remaining;
         let ReturnRecipe {
             start,
             next,
@@ -48,18 +26,7 @@ impl Context<'_> {
         if let Some(frontier) = frontier.as_mut()
             && frontier.departs(&start)
         {
-            if let Some(original) = receipt.as_ref() {
-                if !original.enter_event(
-                    frontier,
-                    &mut store.borrow_mut(),
-                    start.clone(),
-                    *self.resources.charged,
-                )? {
-                    return Ok(false);
-                }
-            } else {
-                frontier.handoff(&mut store.borrow_mut(), start.clone())?;
-            }
+            frontier.handoff(&mut store.borrow_mut(), start.clone())?;
         }
         let ledger = store.borrow();
         if frontier.is_none() {
@@ -103,31 +70,8 @@ impl Context<'_> {
         else {
             return Ok(false);
         };
-        let balance = if let Some(original) = receipt.as_ref() {
-            let mut prepared = prepared.with_original_return(frontier, &ledger, original)?;
-            let bound = match self.admission {
-                Admission::Envelope(bound) => bound,
-                Admission::Exact(mut memory) => {
-                    if memory.exceeded(prepared.peak()) {
-                        prepared = prepared.collect(&ledger, self.heap)?;
-                    }
-                    memory.admit(prepared.peak())?
-                }
-            };
-            let Some(accepted) = prepared.admit(frontier, &ledger, self.resources, bound)? else {
-                return Ok(false);
-            };
-            drop(ledger);
-            accepted.publish_original_departure(
-                frontier,
-                &mut store.borrow_mut(),
-                receipt,
-                |arena| semantic(arena, self.session, storage),
-                tape,
-            )?
-        } else {
+        let balance = {
             let memory_bound = match self.admission {
-                Admission::Envelope(bound) => bound,
                 Admission::Exact(mut memory) => {
                     if memory.exceeded(prepared.peak()) {
                         prepared = prepared.collect(&ledger, self.heap)?;
@@ -145,10 +89,7 @@ impl Context<'_> {
             })?
         };
         self.logical_memory.set(balance.total()?);
-        #[cfg(any(test, feature = "testing"))]
-        crate::machine::islands::witness::source_loop_published(
-            &frontier.position().occurrence.loops,
-        );
+
         Ok(true)
     }
 }

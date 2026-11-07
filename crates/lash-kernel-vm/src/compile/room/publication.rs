@@ -19,17 +19,7 @@ pub(crate) use control::{ControlExit, ControlRoots, FrameCaller, FrameEntry};
 mod departure;
 pub(crate) use departure::DepartureExit;
 mod exact;
-pub(crate) mod member_region;
-pub(crate) mod observers;
-mod region;
-pub(crate) mod text;
-mod unit;
-pub(crate) use exact::{
-    BoundEvent, ExactEvent, ExactRoots, ExternalFacts, OriginalBound, OriginalPrepared,
-    PreparedEvent, Successor,
-};
-pub(crate) use region::CompiledExit;
-pub(crate) use unit::UnitComparison;
+pub(crate) use exact::{ExactEvent, ExactRoots, ExternalFacts, PreparedEvent, Successor};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Occurrence {

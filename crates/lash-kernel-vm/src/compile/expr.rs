@@ -1,49 +1,15 @@
-//! The resolved expression tree of a synchronous statement
-//! (`docs/design/kernel-regions.md` §1, §2.1): the one reading of a
-//! statement's ops that loop regions, their compiled nodes and call islands
-//! derive from.
-//!
-//! [`statement`] reads a statement's ops in the order the reference runs
-//! them into one [`Expr`] per value the statement computes: each op's
-//! operands resolved to the expressions that computed them, a conditional
-//! expression with its two arms, an expression local with its value and
-//! its body. Each node carries where it charges and where an exit from it
-//! resumes. An op that charges (an operator, a call, a conditional's test)
-//! closes the charge regions headed since the op before it that charged:
-//! its [`Close`]s, the anchor at which the reference charges them whole. A
-//! read, an index and a binding name the op the reference resumes at when a
-//! tier cannot run them: the head of the region they stand in, which
-//! nothing has charged yet.
-//!
-//! The tree is the grammar alone: which ops a statement is made of and how
-//! their values flow. What a tier runs of it is the tier's to decide: loop
-//! formation ([`super::regions`]) and island formation ([`super::islands`])
-//! each check the tree against their own restrictions, and each plan's
-//! verifier checks what its formation derived against the ops themselves,
-//! never against this tree.
-
-use lash_kernel_doc::Value;
-use lash_kernel_exec::{
-    ActIx, ConstIx, FieldIx, FieldListIx, LocalRef, NameIx, Op, OpRange, Reg, RegRange, SiteIx,
-};
-
+//! Source stream grammar retained by the independent oracle's exact boundaries.
+//! This tracks register consumption and lexical nesting without building a
+//! second executable expression program.
 use super::{CodeId, Constant, LibId, Stream};
 use lash_kernel_doc::JoinMode;
+use lash_kernel_exec::{ActIx, LocalRef, Op, OpRange, Reg, RegRange};
 use lash_kernel_value::Type;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LinkedHook {
     Library(LibId),
     Code(CodeId),
     Import(lash_kernel_value::names::ImportSlot, Option<LibId>),
-}
-impl LinkedHook {
-    pub(crate) fn library(self) -> Option<LibId> {
-        match self {
-            Self::Library(lib) | Self::Import(_, Some(lib)) => Some(lib),
-            _ => None,
-        }
-    }
 }
 
 /// A loop protocol's hooks, compiled (`K-ITER-005`).
@@ -116,445 +82,43 @@ pub(crate) struct Close {
     pub(crate) head: u32,
 }
 
-/// The charge regions an op closes, in the order their heads stand. A
-/// layout that splits a region heads the next one with nothing charged
-/// between them, so one op may close several.
-pub(crate) type Closes = Box<[Close]>;
-
-/// The fixed units `closes` charge.
-pub(crate) fn units(closes: &[Close]) -> u64 {
-    closes.iter().map(|close| u64::from(close.total)).sum()
-}
-
-/// A nested action's resume entry, as an invoke of it reads it.
+/// The source value shape an exact loop-input receipt needs.
 #[derive(Clone, Copy)]
-pub(crate) struct Invoke {
-    pub(crate) checked: bool,
-    pub(crate) act: Option<ActIx>,
-    pub(crate) occurrence: usize,
-    /// It stands in a guest's code rather than a library body's.
-    pub(crate) guest: bool,
-    /// It is a call (`NestedKind::Call`) rather than a library body's run.
-    pub(crate) call: bool,
-    /// It is an operator's call (`Nested::operator`).
-    pub(crate) operator: bool,
-}
-
-impl Invoke {
-    /// The occurrence its call counts (`K-EFF-008`): a guest's call's.
-    pub(crate) fn counted(&self) -> Option<usize> {
-        (self.call && self.guest).then_some(self.occurrence)
-    }
-}
-
-/// A value a statement computes, read from its ops.
-#[derive(Clone)]
-pub(crate) struct Expr {
-    /// The op that computes it: where it charges, and where the reference
-    /// resumes when a tier cannot run that op. An expression local's and a
-    /// pin's are their value's: the op whose value they hold.
-    pub(crate) pc: u32,
-    /// A pure read retains its canonical unpaid charge prefix before folding.
-    pub(crate) read: Option<SourceRead>,
-    /// The register its value goes to.
-    pub(crate) reg: u32,
-    pub(crate) kind: Kind,
-}
-
-/// The original pure source operation and its unpaid region quote. Only
-/// Reader can construct it, while it still owns the actual open regions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SourceRead {
-    pc: u32,
-    quote: u64,
-    unpaid: u32,
-}
-impl SourceRead {
-    pub(crate) fn pc(self) -> u32 {
-        self.pc
-    }
-    pub(crate) fn quote(self) -> u64 {
-        self.quote
-    }
-    pub(crate) fn unpaid(self) -> u32 {
-        self.unpaid
-    }
-    pub(crate) fn verify(&self, stream: &Stream, reg: u32) -> bool {
-        if self.unpaid > self.pc {
-            return false;
-        }
-        let Some(op) = stream.ops.get(self.pc as usize) else {
-            return false;
-        };
-        if !matches!(op, Op::Const { .. } | Op::Local { .. } | Op::Session { .. })
-            || op.writes() != Some(Reg(reg))
-        {
-            return false;
-        }
-        if self.unpaid == self.pc {
-            return self.quote == 0;
-        }
-        let prefix = &stream.ops[self.unpaid as usize..self.pc as usize];
-        if !matches!(prefix.first(), Some(Op::Region { .. })) {
-            return false;
-        }
-        let mut quote = 0_u64;
-        for (offset, op) in prefix.iter().enumerate() {
-            if let Op::Region { region, total } = op {
-                if stream.regions.head(region.0) != self.unpaid + offset as u32
-                    || stream
-                        .regions
-                        .summary(region.0)
-                        .ok()
-                        .is_none_or(|summary| summary.total() != u64::from(*total))
-                {
-                    return false;
-                }
-                let Some(next) = quote.checked_add(u64::from(*total)) else {
-                    return false;
-                };
-                quote = next;
-            } else if !op.kind().in_region() {
-                return false;
-            }
-        }
-        quote == self.quote
-    }
-}
-
-/// An allocating operation inside an original fixed region. The region is
-/// admitted before the operation but closes only at its original source close.
-/// Keeping its identities is essential: a quote is neither paid work nor a
-/// license to bill the unexecuted suffix on an interior memory refusal.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ConstructorPrefix {
-    pc: u32,
-    pending: Closes,
-}
-impl ConstructorPrefix {
-    pub(crate) fn compile(stream: &Stream, range: OpRange, pc: u32) -> Option<Self> {
-        if pc < range.start || pc >= range.end() {
-            return None;
-        }
-        match stream.ops.get(pc as usize)? {
-            Op::MakeList { .. }
-            | Op::MakeTuple { .. }
-            | Op::MakeMap { .. }
-            | Op::MakeSet { .. }
-            | Op::MakeRecord { .. }
-            | Op::Closure { .. } => {}
-            Op::Const { .. } => {}
-            _ => return None,
-        }
-        let mut pending = Vec::new();
-        let mut at = range.start;
-        while at < pc {
-            match stream.ops[at as usize] {
-                Op::JumpIfFalse { skip, .. } => {
-                    let (then_end, end) = arm_ends(stream, at, skip)?;
-                    if end > range.end() {
-                        return None;
-                    }
-                    // Each arm starts with fresh debt and closes it at the
-                    // join, just as Reader::arm does. A linear scan would
-                    // retain the final arm's closes in the joined suffix.
-                    pending.clear();
-                    at = if pc < then_end {
-                        at + 1
-                    } else if pc < end {
-                        then_end
-                    } else {
-                        end
-                    };
-                    continue;
-                }
-                Op::Region { region, total } => {
-                    let close = Close {
-                        region: region.0,
-                        total,
-                        head: at,
-                    };
-                    super::islands::verify_close(Some(&close), stream).ok()?;
-                    pending.push(close);
-                }
-                op if !op.kind().in_region() => pending.clear(),
-                _ => {}
-            }
-            at += 1;
-        }
-        Some(Self {
-            pc,
-            pending: pending.into(),
-        })
-    }
-    pub(crate) fn pc(&self) -> u32 {
-        self.pc
-    }
-    pub(crate) fn pending(&self) -> &[Close] {
-        &self.pending
-    }
-    pub(crate) fn unpaid(&self) -> u32 {
-        self.pending.first().map_or(self.pc, |close| close.head)
-    }
-}
-
-#[derive(Clone)]
 pub(crate) enum Kind {
-    /// The value of a statement-root invoke (`Op::Act`), in the first
-    /// register of its continuation.
-    Act,
-    /// A scheduler action retains its source entry and ordered operands.
-    Schedule {
-        act: ActIx,
-        args: Box<[Expr]>,
-        closes: Closes,
-    },
-    /// A variable read: `scoped` when it reads an expression local open
-    /// around it, `miss` where an exit at it resumes.
-    Local {
-        local: LocalRef,
-        scoped: bool,
-        miss: u32,
-    },
-    /// A session binding read: `miss` is where an exit at it resumes.
-    Session { name: NameIx, miss: u32 },
-    /// A resident constant.
-    Const(Value),
-    /// A text literal constructed in the run's arena at its source read.
-    Text { constant: ConstIx, miss: u32 },
-    /// A library function its prepared entry answers: an operator
-    /// (`Op::Operator`), or a nested invoke of an operator or a helper.
-    Operator {
-        lib: LibId,
-        invoke: Option<Invoke>,
-        args: Box<[Expr]>,
-        closes: Closes,
-    },
-    /// A general call of a native (`Op::Call`).
-    Native {
-        lib: LibId,
-        args: Box<[Expr]>,
-        closes: Closes,
-    },
-    /// A guest call of a closure its callee reads, or of a declared
-    /// function.
-    Call {
-        invoke: Invoke,
-        callee: Callee,
-        args: Box<[Expr]>,
-        closes: Closes,
-        /// The call site's place among the executable's closure call
-        /// sites, which island formation numbers; `u32::MAX` until then.
-        site: u32,
-    },
-    /// A tuple, list, set or map of its members: `miss` is where an exit
-    /// at it resumes.
-    Make {
-        make: Make,
-        items: Box<[Expr]>,
-        ahead: u64,
-        miss: u32,
-    },
-    /// A record of the fields `fields` names.
-    Record {
-        fields: FieldListIx,
-        values: Box<[Expr]>,
-        ahead: u64,
-        miss: u32,
-    },
-    /// `target.field`: `miss` is where an exit at it resumes.
-    Field {
-        target: Box<Expr>,
-        field: FieldIx,
-        miss: u32,
-    },
-    /// `target[index]`: `miss` is where an exit at it resumes.
-    Index {
-        target: Box<Expr>,
-        index: Box<Expr>,
-        site: SiteIx,
-        miss: u32,
-    },
-    /// A closure of `code` over the cells of the variables it shares:
-    /// `miss` is where an exit at it resumes.
-    Closure { code: CodeId, ahead: u64, miss: u32 },
-    /// A value its statement still uses, pinned for it.
-    Pin(Box<Expr>),
-    /// A control statement's operand the register program leaves to the
-    /// source op evaluator: reaching it exits at its first op, `pc`, and
-    /// the statement's control op runs there.
-    Opaque,
-    /// `if(cond, then, otherwise)`, its test closing `closes`.
-    Cond {
-        cond: Box<Expr>,
-        closes: Closes,
-        then: Arm,
-        otherwise: Arm,
-    },
-    /// `let(local = value, body)`.
-    Let {
-        local: LocalRef,
-        value: Box<Expr>,
-        body: Box<Expr>,
-        bind_miss: u32,
-    },
+    Local { scoped: bool },
+    Other,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Make {
-    Tuple,
-    List,
-    Set,
-    Map,
-}
-
-impl Make {
-    pub(crate) fn kind(self) -> lash_kernel_doc::ValueKind {
-        use lash_kernel_doc::ValueKind;
-        match self {
-            Self::Tuple => ValueKind::Tuple,
-            Self::List => ValueKind::List,
-            Self::Set => ValueKind::Set,
-            Self::Map => ValueKind::Map,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) enum Callee {
-    /// The closure its first operand reads.
-    Read(Box<Expr>),
-    Declared(CodeId),
-}
-
-/// A conditional expression's arm.
-#[derive(Clone)]
-pub(crate) struct Arm {
-    /// Its value, computed into the conditional's register; `None` where
-    /// its ops are no expression of the tree, or one a plan does not run.
-    pub(crate) value: Option<Box<Expr>>,
-    /// The regions its end closes.
-    pub(crate) closes: Closes,
-}
-
-impl Expr {
-    /// Its operands, in the order the reference evaluates them: a
-    /// conditional's is its test, whose arms follow it.
-    pub(crate) fn operands(&self) -> impl Iterator<Item = &Expr> {
-        let (first, second, rest): (Option<&Expr>, Option<&Expr>, &[Expr]) = match &self.kind {
-            Kind::Act
-            | Kind::Local { .. }
-            | Kind::Session { .. }
-            | Kind::Const(_)
-            | Kind::Text { .. }
-            | Kind::Closure { .. }
-            | Kind::Opaque => (None, None, &[]),
-            Kind::Schedule { args, .. }
-            | Kind::Operator { args, .. }
-            | Kind::Native { args, .. } => (None, None, args),
-            Kind::Call { callee, args, .. } => match callee {
-                Callee::Read(read) => (Some(read), None, args),
-                Callee::Declared(_) => (None, None, args),
-            },
-            Kind::Make { items, .. } => (None, None, items),
-            Kind::Record { values, .. } => (None, None, values),
-            Kind::Field { target, .. } => (Some(target), None, &[]),
-            Kind::Index { target, index, .. } => (Some(target), Some(index), &[]),
-            Kind::Pin(value) => (Some(value), None, &[]),
-            Kind::Cond { cond, .. } => (Some(cond), None, &[]),
-            Kind::Let { value, body, .. } => (Some(value), Some(body), &[]),
-        };
-        first.into_iter().chain(second).chain(rest)
-    }
-
-    /// First source operation needed before any operand was evaluated.
-    /// Uncharged region heads remain authoritative even for constants.
-    pub(crate) fn start(&self, stream: &Stream) -> u32 {
-        if let Some(first) = self.operands().next() {
-            return first.start(stream);
-        }
-        match self.kind {
-            Kind::Local { miss, .. }
-            | Kind::Session { miss, .. }
-            | Kind::Make { miss, .. }
-            | Kind::Record { miss, .. }
-            | Kind::Closure { miss, .. } => miss,
-            Kind::Text { miss, .. } => miss,
-            _ => {
-                // A binding or pin can separate the first constant from
-                // its unpaid region head. Never cross an operation that
-                // closes that region; use the source inventory's rule.
-                // Every split head in this unpaid prefix must be replayed.
-                let mut start = self.pc;
-                for (pc, op) in stream.ops[..self.pc as usize].iter().enumerate().rev() {
-                    if matches!(op, Op::Region { .. }) {
-                        start = pc as u32;
-                    } else if !op.kind().in_region() {
-                        break;
-                    }
-                }
-                start
-            }
-        }
-    }
-
-    /// The regions it closes where it charges.
-    pub(crate) fn closes(&self) -> &[Close] {
-        match &self.kind {
-            Kind::Schedule { closes, .. }
-            | Kind::Operator { closes, .. }
-            | Kind::Native { closes, .. }
-            | Kind::Call { closes, .. }
-            | Kind::Cond { closes, .. } => closes,
-            _ => &[],
-        }
-    }
-}
-
-/// A statement read as expressions, up to the op that ends it.
 pub(crate) struct Statement {
-    /// The op that ends it.
     pub(crate) last: Op,
-    /// The regions its last op closes.
-    pub(crate) closes: Closes,
-    regs: Vec<Option<Expr>>,
+    pub(crate) closes: Box<[Close]>,
+    regs: Vec<Option<Kind>>,
 }
-
 impl Statement {
-    /// The expression register `reg` holds, taken.
-    pub(crate) fn take(&mut self, reg: Reg) -> Option<Expr> {
+    pub(crate) fn take(&mut self, reg: Reg) -> Option<Kind> {
         self.regs.get_mut(reg.ix())?.take()
     }
-
-    /// Whether every value it computes reached its end: no register holds
-    /// one its last op did not take.
     pub(crate) fn spent(&self) -> bool {
         self.regs.iter().all(Option::is_none)
     }
 }
 
-/// The ops of statement `range` of `stream` read as expressions, up to the
-/// op that ends it: a statement-root invoke's continuation when `rooted`,
-/// whose first op is the invoke (`Op::Act`) and whose value is in the first
-/// register. `None` where the ops are no expressions the tree reads.
 pub(crate) fn statement(stream: &Stream, range: OpRange, rooted: bool) -> Option<Statement> {
     let end = range.end().checked_sub(1)?;
     let last = *stream.ops.get(end as usize)?;
-    let mut reader = Reader::new(stream, Vec::new());
+    let mut reader = Reader {
+        stream,
+        regs: Vec::new(),
+        open: Vec::new(),
+        lets: Vec::new(),
+        scope: Vec::new(),
+    };
     let mut start = range.start;
     if rooted {
         if !matches!(stream.ops.get(start as usize), Some(Op::Act)) {
             return None;
         }
-        reader.define(
-            Reg(0),
-            Expr {
-                pc: start,
-                read: None,
-                reg: 0,
-                kind: Kind::Act,
-            },
-        )?;
+        reader.define(Reg(0), Kind::Other)?;
         start += 1;
     }
     reader.ops(start, end)?;
@@ -568,99 +132,59 @@ pub(crate) fn statement(stream: &Stream, range: OpRange, rooted: bool) -> Option
     })
 }
 
-/// Where the arms of the conditional whose `JumpIfFalse` at `pc` skips
-/// `skip` ops end: the then-arm runs to its `Jump` before the first, the
-/// else-arm from there to the second.
-pub(crate) fn arm_ends(stream: &Stream, pc: u32, skip: u32) -> Option<(u32, u32)> {
-    let then_end = pc.checked_add(1)?.checked_add(skip)?;
-    let Op::Jump { skip: rest } = *stream.ops.get(then_end.checked_sub(1)? as usize)? else {
-        return None;
-    };
-    Some((then_end, then_end.checked_add(rest)?))
-}
-
-/// The reading of one run of ops: a statement's, or an arm's.
-struct Reader<'s> {
-    stream: &'s Stream,
-    /// The expression each register holds and no op has taken.
-    regs: Vec<Option<Expr>>,
-    /// The regions headed and not yet closed.
+struct Reader<'a> {
+    stream: &'a Stream,
+    regs: Vec<Option<Kind>>,
     open: Vec<Close>,
-    /// Whether an op in the open regions took a value computed before their
-    /// head: an exit at that head cannot replay them from there.
-    consumed: bool,
-    /// Each expression local this run bound and has not ended: its
-    /// variable, its register and its value.
-    lets: Vec<(LocalRef, u32, Expr, u32)>,
-    /// The frame positions of the expression locals open around the ops
-    /// read, outermost first: an arm sees its conditional's.
+    lets: Vec<(LocalRef, Reg)>,
     scope: Vec<u32>,
 }
-
-impl<'s> Reader<'s> {
-    fn new(stream: &'s Stream, scope: Vec<u32>) -> Self {
-        Self {
-            stream,
-            regs: Vec::new(),
-            open: Vec::new(),
-            consumed: false,
-            lets: Vec::new(),
-            scope,
+impl Reader<'_> {
+    fn define(&mut self, reg: Reg, kind: Kind) -> Option<()> {
+        if self.regs.len() <= reg.ix() {
+            self.regs.resize(reg.ix() + 1, None);
         }
-    }
-
-    /// Register `at` gets `expr`; `None` when it holds one still untaken.
-    fn define(&mut self, at: Reg, expr: Expr) -> Option<()> {
-        let at = at.ix();
-        if self.regs.len() <= at {
-            self.regs.resize_with(at + 1, || None);
-        }
-        if self.regs[at].is_some() {
+        if self.regs[reg.ix()].is_some() {
             return None;
         }
-        self.regs[at] = Some(expr);
+        self.regs[reg.ix()] = Some(kind);
         Some(())
     }
-
-    fn take(&mut self, at: Reg) -> Option<Expr> {
-        let expr = self.regs.get_mut(at.ix())?.take()?;
-        if self.open.first().is_some_and(|open| expr.pc < open.head) {
-            self.consumed = true;
+    fn take(&mut self, reg: Reg) -> Option<Kind> {
+        self.regs.get_mut(reg.ix())?.take()
+    }
+    fn operands(&mut self, args: RegRange) -> Option<()> {
+        for reg in args.regs() {
+            self.take(reg)?;
         }
-        Some(expr)
+        Some(())
     }
-
-    fn operands(&mut self, args: RegRange) -> Option<Box<[Expr]>> {
-        args.regs().map(|at| self.take(at)).collect()
+    fn nested(&mut self, act: ActIx, args: RegRange) -> Option<()> {
+        let nested = self.stream.nested.get(act.ix())?;
+        if nested.kind.operator_lib().is_none()
+            && !matches!(
+                nested.kind,
+                NestedKind::Spawn(_)
+                    | NestedKind::Perform { .. }
+                    | NestedKind::Join
+                    | NestedKind::JoinMany(_)
+                    | NestedKind::Yield
+                    | NestedKind::Cancel
+                    | NestedKind::CancelEffect
+                    | NestedKind::Call(NestedCallee::Declared(_))
+            )
+            && !matches!(nested.kind, NestedKind::Call(NestedCallee::Read) if args.len >= 1)
+        {
+            return None;
+        }
+        self.operands(args)?;
+        self.open.clear();
+        Some(())
     }
-
-    /// The regions an op that charges here closes.
-    fn close(&mut self) -> Closes {
-        self.consumed = false;
-        std::mem::take(&mut self.open).into()
-    }
-
-    /// Where an exit at op `pc` resumes: the head of the region it stands
-    /// in, which nothing has charged yet.
-    fn miss(&self, pc: u32) -> u32 {
-        self.open.first().map_or(pc, |open| open.head)
-    }
-
-    /// Reads ops `start..end`.
     fn ops(&mut self, start: u32, end: u32) -> Option<()> {
-        let stream = self.stream;
         let mut pc = start;
         while pc < end {
-            let op = *stream.ops.get(pc as usize)?;
-            // A read publishes ahead of its region's charge only where a miss
-            // can replay the region from its head.
-            let read = (matches!(op, Op::Const { .. } | Op::Local { .. } | Op::Session { .. })
-                && !self.consumed)
-                .then(|| SourceRead {
-                    pc,
-                    quote: units(&self.open),
-                    unpaid: self.miss(pc),
-                });
+            let op = *self.stream.ops.get(pc as usize)?;
             let (reg, kind) = match op {
                 Op::Region { region, total } => {
                     if total == u32::MAX {
@@ -677,253 +201,86 @@ impl<'s> Reader<'s> {
                 Op::Local { dst, local } => (
                     dst,
                     Kind::Local {
-                        local,
                         scoped: self.scope.contains(&local.at),
-                        miss: self.miss(pc),
                     },
                 ),
-                Op::Session { dst, name } => (
-                    dst,
-                    Kind::Session {
-                        name,
-                        miss: self.miss(pc),
-                    },
-                ),
-                Op::Const { dst, c } => match stream.consts.get(c.ix())? {
-                    Constant::Resident(value) => (dst, Kind::Const(*value)),
-                    Constant::Deferred(lash_kernel_doc::Literal::Text(_)) => (
-                        dst,
-                        Kind::Text {
-                            constant: c,
-                            miss: self.miss(pc),
-                        },
-                    ),
-                    Constant::Deferred(_) => return None,
-                },
-                Op::Operator { lib, args } => (
-                    args.start,
-                    Kind::Operator {
-                        lib: LibId(lib.0),
-                        invoke: None,
-                        args: self.operands(args)?,
-                        closes: self.close(),
-                    },
-                ),
-                Op::Call { lib, args } => (
-                    args.start,
-                    Kind::Native {
-                        lib: LibId(lib.0),
-                        args: self.operands(args)?,
-                        closes: self.close(),
-                    },
-                ),
-                Op::Nested { act, args } => (args.start, self.nested(act, args)?),
-                Op::MakeTuple { items } => (items.start, self.make(Make::Tuple, items, pc)?),
-                Op::MakeList { items } => (items.start, self.make(Make::List, items, pc)?),
-                Op::MakeSet { items } => (items.start, self.make(Make::Set, items, pc)?),
-                Op::MakeMap { entries } => (entries.start, self.make(Make::Map, entries, pc)?),
-                Op::MakeRecord { fields, values } => (
-                    values.start,
-                    Kind::Record {
-                        fields,
-                        ahead: units(&self.open),
-                        miss: self.miss(pc),
-                        values: self.operands(values)?,
-                    },
-                ),
-                Op::Closure { dst, code } => (
-                    dst,
-                    Kind::Closure {
-                        code: CodeId(code.0),
-                        ahead: units(&self.open),
-                        miss: self.miss(pc),
-                    },
-                ),
-                Op::Field { at, field } => (
-                    at,
-                    Kind::Field {
-                        target: Box::new(self.take(at)?),
-                        field,
-                        miss: self.miss(pc),
-                    },
-                ),
-                Op::Index { at, site } => {
-                    let target = Box::new(self.take(at)?);
-                    let index = Box::new(self.take(Reg(at.0 + 1))?);
-                    let miss = self.miss(pc);
-                    (
-                        at,
-                        Kind::Index {
-                            target,
-                            index,
-                            site,
-                            miss,
-                        },
-                    )
+                Op::Session { dst, .. } | Op::Closure { dst, .. } => (dst, Kind::Other),
+                Op::Const { dst, c } => {
+                    match self.stream.consts.get(c.ix())? {
+                        Constant::Resident(_)
+                        | Constant::Deferred(lash_kernel_doc::Literal::Text(_)) => {}
+                        Constant::Deferred(_) => return None,
+                    }
+                    (dst, Kind::Other)
+                }
+                Op::Operator { args, .. } | Op::Call { args, .. } => {
+                    self.operands(args)?;
+                    self.open.clear();
+                    (args.start, Kind::Other)
+                }
+                Op::Nested { act, args } => {
+                    self.nested(act, args)?;
+                    (args.start, Kind::Other)
+                }
+                Op::MakeTuple { items } | Op::MakeList { items } | Op::MakeSet { items } => {
+                    self.operands(items)?;
+                    (items.start, Kind::Other)
+                }
+                Op::MakeMap { entries } => {
+                    self.operands(entries)?;
+                    (entries.start, Kind::Other)
+                }
+                Op::MakeRecord { values, .. } => {
+                    self.operands(values)?;
+                    (values.start, Kind::Other)
+                }
+                Op::Field { at, .. } => {
+                    self.take(at)?;
+                    (at, Kind::Other)
+                }
+                Op::Index { at, .. } => {
+                    self.take(at)?;
+                    self.take(Reg(at.0 + 1))?;
+                    (at, Kind::Other)
                 }
                 Op::Pin { src } => {
-                    let value = self.take(src)?;
-                    let expr = Expr {
-                        pc: value.pc,
-                        read: None,
-                        reg: src.0,
-                        kind: Kind::Pin(Box::new(value)),
-                    };
-                    self.define(src, expr)?;
-                    pc += 1;
-                    continue;
+                    self.take(src)?;
+                    (src, Kind::Other)
                 }
                 Op::LetBind { local, src } => {
-                    let value = self.take(src)?;
-                    self.lets.push((local, src.0, value, self.miss(pc)));
+                    self.take(src)?;
+                    self.lets.push((local, src));
                     self.scope.push(local.at);
                     pc += 1;
                     continue;
                 }
-                // The value its body computes, in the same register, is the
-                // expression's.
                 Op::LetEnd { local } => {
-                    let (bound, reg, value, bind_miss) = self.lets.pop()?;
+                    let (bound, reg) = self.lets.pop()?;
                     self.scope.pop();
                     if bound.at != local.at {
                         return None;
                     }
-                    let body = self.take(Reg(reg))?;
-                    let expr = Expr {
-                        pc: body.pc,
-                        read: None,
-                        reg,
-                        kind: Kind::Let {
-                            local: bound,
-                            value: Box::new(value),
-                            body: Box::new(body),
-                            bind_miss,
-                        },
-                    };
-                    self.define(Reg(reg), expr)?;
-                    pc += 1;
-                    continue;
+                    self.take(reg)?;
+                    (reg, Kind::Other)
                 }
                 Op::JumpIfFalse { cond, skip } => {
-                    let closes = self.close();
-                    let test = self.take(cond)?;
-                    let (then_end, else_end) = arm_ends(stream, pc, skip)?;
-                    let then = self.arm(pc + 1, then_end - 1, cond);
-                    let otherwise = self.arm(then_end, else_end, cond);
-                    let expr = Expr {
-                        pc,
-                        read: None,
-                        reg: cond.0,
-                        kind: Kind::Cond {
-                            cond: Box::new(test),
-                            closes,
-                            then,
-                            otherwise,
-                        },
+                    self.open.clear();
+                    self.take(cond)?;
+                    let then_end = pc.checked_add(1)?.checked_add(skip)?;
+                    let Op::Jump { skip: rest } =
+                        *self.stream.ops.get(then_end.checked_sub(1)? as usize)?
+                    else {
+                        return None;
                     };
-                    self.define(cond, expr)?;
-                    pc = else_end;
+                    self.define(cond, Kind::Other)?;
+                    pc = then_end.checked_add(rest)?;
                     continue;
                 }
                 _ => return None,
             };
-            self.define(
-                reg,
-                Expr {
-                    pc,
-                    read,
-                    reg: reg.0,
-                    kind,
-                },
-            )?;
+            self.define(reg, kind)?;
             pc += 1;
         }
         Some(())
-    }
-
-    fn make(&mut self, make: Make, items: RegRange, pc: u32) -> Option<Kind> {
-        Some(Kind::Make {
-            ahead: units(&self.open),
-            make,
-            items: self.operands(items)?,
-            miss: self.miss(pc),
-        })
-    }
-
-    /// The invoke of nested action `act` on the registers `args`: an
-    /// operator's or a helper's, answered by its prepared entry, or a guest
-    /// call of a closure, the first operand, or of a declared function.
-    fn nested(&mut self, act: ActIx, args: RegRange) -> Option<Kind> {
-        let nested = self.stream.nested.get(act.ix())?;
-        let invoke = Invoke {
-            act: Some(act),
-            occurrence: nested.occurrence,
-            guest: nested.guest,
-            call: matches!(nested.kind, NestedKind::Call(_)),
-            operator: nested.operator,
-            checked: matches!(
-                nested.kind,
-                NestedKind::Call(NestedCallee::Import(..) | NestedCallee::CheckedHelper(_))
-            ),
-        };
-        if let Some(lib) = nested.kind.operator_lib() {
-            return Some(Kind::Operator {
-                lib,
-                invoke: Some(invoke),
-                args: self.operands(args)?,
-                closes: self.close(),
-            });
-        }
-        if matches!(
-            nested.kind,
-            NestedKind::Spawn(_)
-                | NestedKind::Perform { .. }
-                | NestedKind::Join
-                | NestedKind::JoinMany(_)
-                | NestedKind::Yield
-                | NestedKind::Cancel
-                | NestedKind::CancelEffect
-        ) {
-            return Some(Kind::Schedule {
-                act,
-                args: self.operands(args)?,
-                closes: self.close(),
-            });
-        }
-        let declared = match nested.kind {
-            NestedKind::Call(NestedCallee::Read) if args.len >= 1 => None,
-            NestedKind::Call(NestedCallee::Import(..)) => return None,
-            NestedKind::Call(NestedCallee::Declared(code)) => Some(code),
-            _ => return None,
-        };
-        let mut operands = self.operands(args)?.into_vec();
-        let callee = match declared {
-            Some(code) => Callee::Declared(code),
-            None => Callee::Read(Box::new(operands.remove(0))),
-        };
-        Some(Kind::Call {
-            invoke,
-            callee,
-            args: operands.into(),
-            closes: self.close(),
-            site: u32::MAX,
-        })
-    }
-
-    /// The arm of ops `start..end` of a conditional whose value goes to
-    /// `dst`: its value when its ops define that alone and end every
-    /// expression local they bind.
-    fn arm(&self, start: u32, end: u32, dst: Reg) -> Arm {
-        let mut reader = Reader::new(self.stream, self.scope.clone());
-        let value = reader.ops(start, end).and_then(|()| {
-            let value = reader.take(dst)?;
-            (reader.regs.iter().all(Option::is_none) && reader.lets.is_empty())
-                .then(|| Box::new(value))
-        });
-        let closes = match value {
-            Some(_) => reader.open.into(),
-            None => Closes::default(),
-        };
-        Arm { value, closes }
     }
 }

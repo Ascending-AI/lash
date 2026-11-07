@@ -7,10 +7,6 @@ pub(crate) struct SettledDebt {
     units: u64,
 }
 impl ChargeProgram {
-    pub(in crate::compile::room) fn through(&self) -> &Point {
-        &self.through
-    }
-
     pub(in crate::compile::room) fn belongs_to(&self, source: &Arc<Source>) -> bool {
         Arc::ptr_eq(&self.source, source)
     }

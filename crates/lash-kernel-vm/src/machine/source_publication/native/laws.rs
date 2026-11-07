@@ -251,14 +251,17 @@ impl KernelMachine {
         let scratch = |index| Owner::Value {
             task: doc::TaskId::MAIN,
             invocation: 1,
-            slot: Slot::Scratch(index),
+            slot: Slot::Scratch(
+                lash_kernel_state::kernel_internals::logical::SourceRole::NativeResource(index)
+                    .id(),
+            ),
         };
         assert!(matches!(events.as_slice(), [
             ScratchEvent::Begin { owner: a, bytes: 40 }, ScratchEvent::End { owner: b },
             ScratchEvent::Begin { owner: c, bytes: 20 }, ScratchEvent::Begin { owner: d, bytes: 30 },
             ScratchEvent::End { owner: e }, ScratchEvent::End { owner: f },
-        ] if *a == scratch(crate::laws::role_id(0)) && *b == scratch(crate::laws::role_id(0)) && *c == scratch(crate::laws::role_id(1))
-            && *d == scratch(crate::laws::role_id(2)) && *e == scratch(crate::laws::role_id(2)) && *f == scratch(crate::laws::role_id(1))));
+        ] if *a == scratch(0) && *b == scratch(0) && *c == scratch(1)
+            && *d == scratch(2) && *e == scratch(2) && *f == scratch(1)));
         assert_eq!(phases.peak_scratch_bytes(), Some(50));
         // 17-byte input + a 66-byte list + the 20-byte lease still live
         // during the entity allocation. The 30-byte lease ended beforehand.
@@ -332,7 +335,7 @@ impl KernelMachine {
         use crate::compile::room::charges::ChargeProgram;
         use crate::compile::room::publication::{ExactEvent, Successor};
         use crate::machine::source_publication::native_storage::SourceNative;
-        use lash_kernel_exec::{Op, OpRange};
+        use lash_kernel_exec::Op;
         let function = self.exe.lib(self.exe.library_lib(&id).unwrap());
         let LibRun::Native { native, .. } = &function.run else {
             panic!("installed native")
@@ -349,16 +352,7 @@ impl KernelMachine {
                 )
             })
             .unwrap();
-        let charges = ChargeProgram::compile(
-            &self.exe,
-            code,
-            statement,
-            OpRange {
-                start: stmt.ops.start,
-                len: pc + 1 - stmt.ops.start,
-            },
-        )
-        .unwrap();
+        let charges = ChargeProgram::native_completion(&self.exe, code, statement, pc).unwrap();
         let at = Point {
             site: (**stream.source_sites[pc as usize].as_ref().unwrap()).clone(),
             phase: Phase::Commit,

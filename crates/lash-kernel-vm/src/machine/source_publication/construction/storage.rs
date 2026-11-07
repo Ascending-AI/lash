@@ -40,23 +40,7 @@ pub(in crate::machine) struct Prepared {
     pub(in crate::machine) value: Value,
     pub(in crate::machine) holding: Holding,
 }
-enum BoundConstruction {
-    Ordinary(room::publication::BoundEvent),
-    Original(room::publication::OriginalBound),
-}
-enum ConstructionEvent<'a> {
-    Ordinary(room::publication::PreparedEvent<'a>),
-    Original(room::publication::OriginalPrepared<'a>),
-}
-type OriginalInput<'a> = (
-    &'a std::sync::Arc<room::charges::OriginalPrefix>,
-    &'a [Value],
-    Option<&'a room::charges::AcceptedOriginalPrefix>,
-);
-enum OriginalRequest<'a> {
-    Prefix(OriginalInput<'a>),
-    Remaining(&'a room::charges::AcceptedOriginalPrefix),
-}
+
 impl BoundaryPreparation for Construction<'_> {
     type Prepared = Prepared;
     fn prepare<'a>(
@@ -64,56 +48,15 @@ impl BoundaryPreparation for Construction<'_> {
         arena: &'a mut Arena,
         entry: ExternalEntry<'_>,
     ) -> Result<Option<(room::publication::PreparedEvent<'a>, Prepared)>, HeapFault> {
-        self.prepare_inner(arena, entry, None).map(|prepared| {
-            prepared.map(|(event, storage)| {
-                let ConstructionEvent::Ordinary(event) = event else {
-                    unreachable!("ordinary constructor requested")
-                };
-                (event, storage)
-            })
-        })
-    }
-    fn prepare_remaining<'a>(
-        self,
-        arena: &'a mut Arena,
-        entry: ExternalEntry<'_>,
-        original: &room::charges::AcceptedOriginalPrefix,
-    ) -> Result<Option<(room::publication::OriginalPrepared<'a>, Prepared)>, HeapFault> {
-        Ok(self
-            .prepare_inner(arena, entry, Some(OriginalRequest::Remaining(original)))?
-            .map(|(event, storage)| {
-                let ConstructionEvent::Original(event) = event else {
-                    unreachable!("remaining construction requested");
-                };
-                (event, storage)
-            }))
+        self.prepare_inner(arena, entry)
     }
 }
 impl Construction<'_> {
-    /// The same detached graph and source checks, with compiler-owned original
-    /// debt and recovery roles attached before the one external transaction.
-    pub(in crate::machine) fn prepare_original<'a>(
-        self,
-        arena: &'a mut Arena,
-        entry: ExternalEntry<'_>,
-        original: OriginalInput<'_>,
-    ) -> Result<Option<(room::publication::OriginalPrepared<'a>, Prepared)>, HeapFault> {
-        self.prepare_inner(arena, entry, Some(OriginalRequest::Prefix(original)))
-            .map(|prepared| {
-                prepared.map(|(event, storage)| {
-                    let ConstructionEvent::Original(event) = event else {
-                        unreachable!("original constructor requested")
-                    };
-                    (event, storage)
-                })
-            })
-    }
     fn prepare_inner<'a>(
         self,
         arena: &'a mut Arena,
         entry: ExternalEntry<'_>,
-        original: Option<OriginalRequest<'_>>,
-    ) -> Result<Option<(ConstructionEvent<'a>, Prepared)>, HeapFault> {
+    ) -> Result<Option<(room::publication::PreparedEvent<'a>, Prepared)>, HeapFault> {
         use room::publication::{ExactRoots, ExternalFacts};
         let ExternalEntry {
             event,
@@ -269,34 +212,6 @@ impl Construction<'_> {
             return Ok(None);
         };
 
-        let bound = match original {
-            None => BoundConstruction::Ordinary(bound),
-            Some(original) => {
-                let original = match original {
-                    OriginalRequest::Prefix((program, registers, previous)) => bound
-                        .with_original_prefix(
-                            frontier,
-                            ledger,
-                            graph.registration.arena(),
-                            heap,
-                            program,
-                            registers,
-                            previous,
-                        ),
-                    OriginalRequest::Remaining(original) => {
-                        let Some(debt) = debt.as_ref() else {
-                            return Ok(None);
-                        };
-                        bound.with_original_native(frontier, ledger, original, debt)
-                    }
-                };
-                match original {
-                    Ok(bound) => BoundConstruction::Original(bound),
-                    Err(PublicationError::Miss(_)) => return Ok(None),
-                    Err(PublicationError::Heap(error)) => return Err(error),
-                }
-            }
-        };
         let (transaction, mut storage) =
             graph.into_boundary(ledger, heap, &self.inputs, dependencies)?;
         let output = storage
@@ -306,14 +221,7 @@ impl Construction<'_> {
         // Each mutable body is summarized by the canonical construction owner.
         // Its source obligation was authenticated before consuming registration.
         debug_assert!(storage.members.len() <= 1);
-        let event = match bound {
-            BoundConstruction::Ordinary(bound) => bound
-                .finish_external(frontier, ledger, transaction)
-                .map(ConstructionEvent::Ordinary),
-            BoundConstruction::Original(bound) => bound
-                .finish_external(frontier, ledger, transaction)
-                .map(ConstructionEvent::Original),
-        };
+        let event = bound.finish_external(frontier, ledger, transaction);
         match event {
             Ok(prepared) => Ok(Some((
                 prepared,

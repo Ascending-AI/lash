@@ -73,7 +73,6 @@ impl Context<'_> {
             return Ok(false);
         };
         let memory_bound = match self.admission {
-            Admission::Envelope(bound) => bound,
             Admission::Exact(mut memory) => {
                 if memory.exceeded(prepared.peak()) {
                     prepared = prepared.collect(&ledger, self.heap)?;
@@ -98,96 +97,7 @@ impl Context<'_> {
                 PublicationError::Miss(reason) => malformed(reason),
             })?;
         self.logical_memory.set(balance.total()?);
-        #[cfg(any(test, feature = "testing"))]
-        crate::machine::islands::witness::source_loop_published(
-            &frontier.position().occurrence.loops,
-        );
-        Ok(true)
-    }
 
-    pub(in crate::machine) fn publish_external_remaining<S: BoundaryPreparation>(
-        self,
-        invocation: &Invocation,
-        frontier: &mut Option<Frontier>,
-        prefix: Prefix,
-        prepare: S,
-        semantic: impl FnOnce(&mut Arena, &mut Session, Vec<MemberEdit>, S::Prepared),
-        remaining: (
-            &mut Option<room::charges::AcceptedOriginalPrefix>,
-            Option<&crate::observe::ChargeTape>,
-        ),
-    ) -> Result<bool, Halt> {
-        let (receipt, tape) = remaining;
-        let Some(original) = receipt.as_ref() else {
-            return self.publish_external(invocation, frontier, prefix, prepare, semantic);
-        };
-        self.logical
-            .borrow_mut()
-            .transfer_source(self.arena, self.heap, &[], &[])?;
-        let store = self.logical.clone();
-        let Some(frontier) = frontier.as_mut() else {
-            return Ok(false);
-        };
-        if prefix.allowance.safe_point != *self.resources.charged
-            || !original.enter_event(
-                frontier,
-                &mut store.borrow_mut(),
-                prefix.start.clone(),
-                *self.resources.charged,
-            )?
-        {
-            return Ok(false);
-        }
-        let ledger = store.borrow();
-        let Ok(event) =
-            ExactEvent::compile(self.source, Arc::clone(&prefix.interval), Successor::Normal)
-        else {
-            return Ok(false);
-        };
-        let Some(resources) = self.resources.facts(&prefix.allowance) else {
-            return Ok(false);
-        };
-        let Some((mut prepared, storage)) = prepare.prepare_remaining(
-            self.arena,
-            ExternalEntry {
-                event: &event,
-                frontier,
-                ledger: &ledger,
-                heap: self.heap,
-                prefix,
-                resources,
-            },
-            original,
-        )?
-        else {
-            return Ok(false);
-        };
-        let bound = match self.admission {
-            Admission::Envelope(bound) => bound,
-            Admission::Exact(mut memory) => {
-                if memory.exceeded(prepared.peak()) {
-                    prepared = prepared.collect(&ledger, self.heap)?;
-                }
-                memory.admit(prepared.peak())?
-            }
-        };
-        let Some(accepted) = prepared.admit(frontier, &ledger, self.resources, bound)? else {
-            return Ok(false);
-        };
-        drop(ledger);
-        let balance = accepted
-            .publish_original_event(
-                frontier,
-                &mut store.borrow_mut(),
-                receipt,
-                |arena, edits| semantic(arena, self.session, edits, storage),
-                tape,
-            )
-            .map_err(|error| match error {
-                PublicationError::Heap(error) => error,
-                PublicationError::Miss(reason) => malformed(reason),
-            })?;
-        self.logical_memory.set(balance.total()?);
         Ok(true)
     }
 
@@ -281,7 +191,6 @@ impl Context<'_> {
             Err(PublicationError::Heap(error)) => return Err(error.into()),
         };
         let memory_bound = match self.admission {
-            Admission::Envelope(bound) => bound,
             Admission::Exact(mut memory) => {
                 if memory.exceeded(prepared.peak()) {
                     prepared = prepared.collect(&ledger, self.heap)?;
@@ -315,10 +224,7 @@ impl Context<'_> {
             next[family] += 1;
             counts.set(next);
         });
-        #[cfg(any(test, feature = "testing"))]
-        crate::machine::islands::witness::source_loop_published(
-            &frontier.position().occurrence.loops,
-        );
+
         Ok(true)
     }
 }

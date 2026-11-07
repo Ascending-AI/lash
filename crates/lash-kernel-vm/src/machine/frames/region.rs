@@ -43,7 +43,7 @@ impl Frame {
         pending.source = self.pending.source.clone();
         let mut image = Box::new(Self {
             source_action: self.source_action,
-            texts: Vec::new(),
+
             source_frontier: self
                 .source_frontier
                 .as_ref()

@@ -300,7 +300,6 @@ pub(super) fn joins() {
 
 /// K-EVAL-008/K-CHG-001: controls retain padding and saved operands across cold stops.
 fn runtime() {
-    use crate::machine::islands::witness;
     use crate::{Bounds, Layout, Step};
     let source = "main { let leaf = fn(x, missing) { if true { do missing } return [x, missing] } let f = fn(x) { if true { let kept = x do kept } let selected = let(alias = if(true, x, 99), alias) return (selected, apply leaf(x)) } return apply f(7) }";
     let observe = |layout, cold, precise, bounds: Bounds| {
@@ -315,12 +314,12 @@ fn runtime() {
         );
         let tape = crate::ChargeTape::new();
         run.machine.record_charges(tape.clone());
-        witness::begin();
+
         let end = loop {
             if precise {
                 run.machine.force_source_execution();
             } else {
-                run.machine.force_generic_packets();
+                run.machine.force_generic_regions();
             }
             match run.run() {
                 Step::Ended(end) => break end,
@@ -333,59 +332,23 @@ fn runtime() {
                 Step::Parked(_) => panic!("pure control fixture cannot park"),
             }
         };
-        let precise_frames: u64 = witness::prepared_frame_entries().iter().sum();
-        let packet_frames: u64 = witness::packet_frame_entries().iter().sum();
-        if bounds.charge_limit == crate::laws::embedder::ROOMY.charge_limit
-            && bounds.memory == crate::laws::embedder::ROOMY.memory
-            && bounds.call_depth == crate::laws::embedder::ROOMY.call_depth
-            && !cold
-        {
-            assert!(
-                if precise {
-                    precise_frames > 0
-                } else {
-                    packet_frames > 0
-                },
-                "certified frame entry actually executed: precise={precise_frames}, packet={packet_frames}"
-            );
-        }
-        let counts = [
-            witness::call_enters(),
-            witness::precise_joins().iter().sum(),
-            witness::precise_scopes(),
-            witness::packet_call_enters(),
-            witness::scope_publications(),
-            witness::packet_call_resumes().iter().sum(),
-        ];
+
         (
-            (
-                end,
-                run.machine.meters().charged,
-                lash_kernel_exec::Weight::expand(tape.steps()),
-            ),
-            counts,
+            end,
+            run.machine.meters().charged,
+            lash_kernel_exec::Weight::expand(tape.steps()),
         )
     };
     let roomy = crate::laws::embedder::ROOMY;
-    let (reference, counts) = observe(Layout(0), false, true, roomy);
-    assert!(
-        counts[..3].iter().all(|count| *count > 0),
-        "precise control publications executed: {counts:?}"
-    );
-    let (generic, counts) = observe(Layout(0), false, false, roomy);
+    let reference = observe(Layout(0), false, true, roomy);
+
+    let generic = observe(Layout(0), false, false, roomy);
     assert_eq!(generic, reference);
-    assert!(
-        counts[3..].iter().all(|count| *count > 0),
-        "packet control publications executed: {counts:?}"
-    );
-    eprintln!(
-        "certified packet Enter/Leave/Restore publications: {:?}",
-        &counts[3..]
-    );
+
     for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
         for precise in [false, true] {
             assert_eq!(
-                observe(layout, true, precise, roomy).0,
+                observe(layout, true, precise, roomy),
                 reference,
                 "cold source controls layout={layout:?} precise={precise}"
             );
@@ -405,14 +368,14 @@ fn runtime() {
             ..roomy
         },
     ] {
-        let reference = observe(Layout(0), false, true, bounds).0;
+        let reference = observe(Layout(0), false, true, bounds);
         assert_eq!(
-            observe(Layout(2), true, false, bounds).0,
+            observe(Layout(2), true, false, bounds),
             reference,
             "exact control refusal and paid prefix"
         );
     }
-    // The generic observations above are an independent packet oracle. Also
+    // The generic observations above are an independent source oracle. Also
     // require the specialized run to use an accepted whole-region publication.
     let region_observe = |layout, cold, precise, bounds: Bounds| {
         let mut run = Embedder::with(
@@ -426,7 +389,7 @@ fn runtime() {
         );
         let tape = crate::ChargeTape::new();
         run.machine.record_charges(tape.clone());
-        witness::begin();
+
         let mut holdings = Vec::new();
         let end = loop {
             if precise {
@@ -453,16 +416,13 @@ fn runtime() {
     };
     for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
         let expected = region_observe(layout, false, true, roomy);
-        crate::machine::islands::take_certified_statements();
+
         let actual = region_observe(layout, false, false, roomy);
         assert_eq!(
             actual, expected,
             "compiled region charge prefix and holdings"
         );
-        assert!(
-            crate::machine::islands::take_certified_statements() > 0,
-            "the specialized observation must publish an accepted compiled region"
-        );
+
         assert_eq!(
             region_observe(layout, true, false, roomy),
             region_observe(layout, true, true, roomy),

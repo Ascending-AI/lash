@@ -26,7 +26,7 @@ impl KernelMachine {
     ) -> Result<Option<(StmtId, u32)>, Halt> {
         self.logical_flush_controls(task_id, exe)?;
         self.publish_logical_meter()?;
-        let (source, link, invocation, roots, id, pc, at, occurrence, saved, cold, index, ordinal) = {
+        let (source, link, invocation, roots, id, pc, at, occurrence, saved, index, ordinal) = {
             let frame = self.frame(task_id)?;
             let (Some(id), Some(act), Some(pending), Some(logical)) = (
                 frame.awaiting,
@@ -149,7 +149,6 @@ impl KernelMachine {
                 },
                 occurrence,
                 saved,
-                frame.source_frontier.is_none(),
                 entry.occurrence,
                 ordinal,
             )
@@ -353,12 +352,9 @@ impl KernelMachine {
                 pending.take();
             },
         )?;
-        #[cfg(not(any(test, feature = "testing")))]
-        let _ = cold;
+
         if published {
             self.regs.bind_source_resume(&store.borrow());
-            #[cfg(any(test, feature = "testing"))]
-            crate::machine::islands::witness::call_resume_published(cold);
         }
         Ok(published.then_some((id, pc)))
     }

@@ -33,26 +33,4 @@ impl BoundaryPreparation for CellConstruction<'_> {
                 )
             }))
     }
-    fn prepare_remaining<'a>(
-        self,
-        arena: &'a mut Arena,
-        entry: ExternalEntry<'_>,
-        original: &room::charges::AcceptedOriginalPrefix,
-    ) -> Result<Option<(room::publication::OriginalPrepared<'a>, Self::Prepared)>, HeapFault> {
-        Ok(self
-            .construction
-            .prepare_remaining(arena, entry, original)?
-            .map(|(event, storage)| {
-                let doc::Value::ObjectRef(handle) = storage.value else {
-                    unreachable!("cell constructor changed its result kind");
-                };
-                (
-                    event,
-                    PreparedObjectConstruction {
-                        batch: storage.batch,
-                        handle,
-                    },
-                )
-            }))
-    }
 }

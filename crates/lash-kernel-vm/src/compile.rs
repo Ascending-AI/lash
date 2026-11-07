@@ -39,19 +39,17 @@ use lash_kernel_value::sites::Site;
 use lash_kernel_value::sites::Unit;
 use lash_kernel_value::types::Type;
 
-use crate::costs::Costs;
 use crate::functions::{MachineFunction, machine_function, machine_name};
 
 pub(crate) mod expr;
 mod formula;
-pub(crate) mod islands;
 mod library;
-pub(crate) use library::{Lib, LibRun, Resident};
+pub(crate) mod value_facts;
+pub(crate) use library::{Lib, LibRun};
 mod frame;
 mod holding_sites;
 mod lazy;
 pub use lazy::body_census;
-mod loop_plans;
 mod lower;
 mod occurrences;
 mod parameters;
@@ -66,13 +64,8 @@ pub(crate) use reads::{Field, PropertySlot, ReadSite, find as find_property};
 pub(crate) use template_meter::MeteredCharges;
 pub(crate) use templates::Entry;
 
-pub(crate) use crate::machine::islands::cx::{
-    Fresh, measured_formula, position, read_index, scalar,
-};
-pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source, TextCharge};
-pub(crate) use loop_plans::LoopPlan;
-#[cfg(test)]
-pub(crate) use loop_plans::{Event, Head, Lowered, Refused, RegionSlot, Step, Summary};
+pub(crate) use crate::compile::value_facts::{Fresh, position, scalar};
+pub(crate) use formula::{Charge, Fast, Plan, Source};
 
 /// How the executable is laid out. Layout `0` is the natural order; any
 /// other value permutes the code, block, statement and library tables and
@@ -327,49 +320,6 @@ impl PreparedLibrary {
         self.0.tables.verify_stream(&self.0)
     }
 
-    /// Cold kernel-law inspection of the active source-derived copy entries.
-    pub(crate) fn verify_bulk_rooms(&self) -> Result<(usize, bool, bool), String> {
-        let mut checked = 0;
-        let mut dense = false;
-        let mut concat = false;
-        for index in 0..self.0.libs.len() {
-            let lib = self.0.lib(LibId(index as u32));
-            let Some((Entry::Template { template, .. }, _)) = &lib.specialization.prepared else {
-                continue;
-            };
-            if template.heap.as_ref().and_then(|h| h.copy).is_none() {
-                continue;
-            }
-            let code = match lib.run {
-                LibRun::Body(c) | LibRun::Native { body: Some(c), .. } => c,
-                _ => return Err("copy entry has no exact source body".into()),
-            };
-            let source = &self
-                .0
-                .tables
-                .code(&self.0, code)
-                .ok_or("copy source is absent")?
-                .source_room;
-            source.verify().map_err(|e| format!("copy source: {e:?}"))?;
-            let mut understated = source.room.clone();
-            let bulk = understated
-                .bulk
-                .as_mut()
-                .ok_or("copy induction is absent")?;
-            dense |= bulk.dense;
-            concat |= !bulk.dense;
-            bulk.temporary_values = bulk
-                .temporary_values
-                .checked_sub(1)
-                .ok_or("copy induction has no temporary holdings")?;
-            if source.verify_room(&understated) != Err(room::Refused::Peak) {
-                return Err("understated copy holdings were accepted".into());
-            }
-            checked += 1;
-        }
-        Ok((checked, dense, concat))
-    }
-
     /// How many library functions are prepared.
     #[cfg(test)]
     pub(crate) fn prepared(&self) -> usize {
@@ -452,8 +402,6 @@ pub(crate) struct Executable {
 /// Immutable document tables, independent of any run or owning document.
 pub(crate) struct DocumentCode {
     tables: Tables,
-    /// The call islands lowering formed, by code.
-    pub(crate) islands: islands::Islands,
     pub(crate) block_ordinals: Vec<Option<u32>>,
     pub(crate) site_count: usize,
     pub(crate) action_ordinals: BTreeMap<Site, u32>,
@@ -586,13 +534,6 @@ impl Executable {
         let at = (id.0 as usize).checked_sub(self.stmt_base)?;
         let tables = &self.own.tables;
         Some((&tables.stream, &tables.stmts[at], tables.edges[at]))
-    }
-
-    /// The document's own stream, which its codes' statements and island
-    /// plans index.
-    #[inline]
-    pub(crate) fn document_stream(&self) -> &Stream {
-        &self.own.tables.stream
     }
 
     #[inline]
@@ -1060,10 +1001,6 @@ pub(crate) struct Nested {
     /// with a native entry or generated template, with exactly its
     /// parameters, whose entry answers inline what it can.
     pub(crate) operator: bool,
-    /// Whether the call may enter an island (`docs/design/kernel-regions.md`
-    /// §5 R4): a guest call of a closure, or of a declared function lowering
-    /// formed an island of.
-    pub(crate) island: bool,
     /// The op its statement resumes at, as an offset from the start of the
     /// statement's range.
     pub(crate) resume: u32,
@@ -1421,60 +1358,6 @@ struct Compiler<'a> {
 
 use document_code::compile_document;
 mod document_code;
-
-/// Forms and verifies the scalar loop plan of every `while` and `for` of
-/// the document's own `tables` that the register program owns and whose
-/// iterations allocate nothing: the typed kernel its header repeats.
-fn form_scalar_loops(
-    tables: &Tables,
-    library: &Prepared,
-    loop_test: u64,
-    island: &dyn Fn(CodeId) -> bool,
-    owns_loop: &dyn Fn(StmtId) -> bool,
-) -> Vec<LoopPlan> {
-    let (blocks, stmts) = (
-        library.tables.blocks.len() as u32,
-        library.tables.stmts.len() as u32,
-    );
-    let mut scalar = Vec::new();
-    let block = |id: BlockId| &tables.blocks[(id.0 - blocks) as usize];
-    let stmt = |id: StmtId| &tables.stmts[(id.0 - stmts) as usize];
-    let lib = |id: LibId| library.lib(id);
-    let lib_of = |function: &FunctionId| library.lib_of(function);
-    let lowered = || loop_plans::Lowered {
-        stream: &tables.stream,
-        block: &block,
-        stmt: &stmt,
-        lib: &lib,
-        lib_of: &lib_of,
-        island,
-    };
-    let formation = loop_plans::Formation {
-        lowered: lowered(),
-        loop_test,
-    };
-    for code in &tables.codes {
-        let mut pending = vec![code.body];
-        while let Some(id) = pending.pop() {
-            for id in &block(id).stmts {
-                let statement = stmt(*id);
-                pending.extend(statement.form.blocks());
-                if !matches!(statement.form, Form::While { .. } | Form::For { .. })
-                    || !owns_loop(*id)
-                {
-                    continue;
-                }
-                if let Some(plan) = formation.form(code, *id)
-                    && !plan.allocates
-                    && plan.verify(&lowered(), loop_test).is_ok()
-                {
-                    scalar.push(plan);
-                }
-            }
-        }
-    }
-    scalar
-}
 
 impl<'a> Compiler<'a> {
     fn new(

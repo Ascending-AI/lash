@@ -27,8 +27,6 @@ fn failure(message: impl std::fmt::Display) -> Error {
 pub struct Measurement {
     pub ns: f64,
     pub result: serde_json::Value,
-    /// Exact physical execution of the separate low-count diagnostic cell.
-    pub execution_census: Option<lash_kernel_vm::perf_witness::execution::Census>,
 }
 
 /// A linked cell whose VM program remains owned by the worker.
@@ -275,12 +273,6 @@ pub fn execute(
         let _scope = Scope::new("first_checkpoint", &mut phases);
         machine.checkpoint().map_err(failure)?;
     }
-    // The existing diagnostic cell owns counting. Quiet timing cells never
-    // enable it; both diagnostic counts and its extra instructions are fixed
-    // at the low trip count when compare's high factor changes.
-    if checkpoint {
-        machine.count_execution();
-    }
     let mut console = Console(Vec::new(), observe);
     loop {
         match machine.run(&mut console, u64::MAX).map_err(failure)? {
@@ -298,7 +290,6 @@ pub fn execute(
         }
         machine.take_path().map_err(failure)?;
     }
-    let execution_census = checkpoint.then(|| machine.take_execution_census());
     if console.0.len() != 1 {
         return Err(failure("workload must print exactly one result"));
     }
@@ -309,14 +300,7 @@ pub fn execute(
         )));
     };
     let result = serde_json::from_str(text)?;
-    Ok((
-        Measurement {
-            ns,
-            result,
-            execution_census,
-        },
-        phases,
-    ))
+    Ok((Measurement { ns, result }, phases))
 }
 
 // Scope clocks come from the existing perf-witness monotonic clock. These
@@ -479,7 +463,6 @@ console.log(JSON.stringify(benchmark(1000)));"#,
                     machine.publish_context(lash_kernel_vm::perf_witness::GuestContext::new());
                 }
                 machine.checkpoint().unwrap();
-                machine.count_execution();
                 let mut console = Console::default();
                 loop {
                     match machine.run(&mut console, u64::MAX).unwrap() {
@@ -488,18 +471,10 @@ console.log(JSON.stringify(benchmark(1000)));"#,
                         other => panic!("cell did not finish: {other:?}"),
                     }
                 }
-                (
-                    console.0,
-                    machine.meters().charged,
-                    machine.take_execution_census(),
-                )
+                (console.0, machine.meters().charged)
             };
             let quiet = run(false);
             let profiled = run(true);
-            println!(
-                "quiet and profiled census: {}",
-                serde_json::to_string(&quiet.2).unwrap()
-            );
             assert_eq!(profiled, quiet, "{source}");
         }
     }

@@ -5,46 +5,6 @@ use crate::interface::{CellStart, Finished, Target};
 use lash_kernel_doc::NewObject;
 use lash_kernel_state::paged::{AllocationCensus, CarryRoots, EditEpoch, KeyedRoot, PageSource};
 
-/// Resident session values tied to the publication revision that read them.
-pub(crate) struct SourceSessionReads {
-    stamp: lash_kernel_state::kernel_internals::logical::Stamp,
-    values: std::collections::BTreeMap<lash_kernel_value::Name, Value>,
-}
-impl SourceSessionReads {
-    pub(crate) fn value(
-        &self,
-        name: &lash_kernel_value::Name,
-        ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
-    ) -> Option<Value> {
-        ledger
-            .is_current(&self.stamp)
-            .then(|| self.values.get(name).copied())
-            .flatten()
-    }
-}
-impl Session {
-    pub(super) fn source_reads(
-        &self,
-        atoms: &[crate::compile::Atom],
-        ledger: &lash_kernel_state::kernel_internals::logical::Ledger,
-    ) -> SourceSessionReads {
-        SourceSessionReads {
-            stamp: ledger.stamp(),
-            values: atoms
-                .iter()
-                .filter_map(|atom| {
-                    let crate::compile::Atom::Var(crate::compile::Var::Session(binding)) = atom
-                    else {
-                        return None;
-                    };
-                    self.resident(&binding.key)
-                        .map(|value| (binding.name.clone(), value))
-                })
-                .collect(),
-        }
-    }
-}
-
 pub(super) fn empty_root() -> KeyedRoot {
     KeyedRoot::Empty
 }
@@ -172,7 +132,11 @@ pub(crate) fn start(
         region: None,
         slice_end: u64::MAX,
         sites: Default::default(),
-        islands: Default::default(),
+        #[cfg(any(test, feature = "testing"))]
+        source_only: false,
+        #[cfg(any(test, feature = "testing"))]
+        generic_regions: false,
+
         charged: 0,
         live_tasks: 1,
         regs: registers::Registers::default(),

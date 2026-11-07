@@ -372,23 +372,9 @@ fn refused_in_layout(
     if text == super::layout::ALLOCATING {
         super::observe::fully_observe(&mut embedder.machine);
     }
-    use crate::perf_witness::execution::Owner;
-    embedder.machine.count_execution();
+
     let end = embedder.run_to_end(&[]);
-    let census = embedder.machine.take_execution_census();
-    if text == super::layout::ALLOCATING
-        && layout == crate::Layout(0)
-        && bounds.charge_limit == ROOMY.charge_limit
-        && bounds.memory == ROOMY.memory
-    {
-        assert!(
-            census
-                .statements
-                .get(&Owner::RegisterProgram)
-                .is_some_and(|statements| *statements > 0),
-            "observed allocating limiter run executes in the register program: {census:?}"
-        );
-    }
+
     (trace(&embedder, end.clone()), end)
 }
 
@@ -563,20 +549,9 @@ fn scheduler_refusals() {
             );
             let limiter = Scripted::default();
             limited(&mut embedder, Which::Charge, ask.then_some(&limiter));
-            embedder.machine.count_execution();
+
             let end = embedder.run_to_end(&[]);
-            let census = embedder.machine.take_execution_census();
-            if layout == crate::Layout(0) && limit == ROOMY.charge_limit {
-                assert!(
-                    census
-                        .statements
-                        .get(&crate::perf_witness::execution::Owner::RegisterProgram)
-                        .copied()
-                        .unwrap_or(0)
-                        >= 6,
-                    "scheduler limiter run uses registers: {census:?}"
-                );
-            }
+
             (trace(&embedder, end), limiter.asked())
         };
         let (whole, _) = run(crate::Layout(0), ROOMY.charge_limit, false);
@@ -597,7 +572,6 @@ fn scheduler_refusals() {
 
 #[test]
 fn helper_refusals() {
-    use crate::perf_witness::execution::Owner;
     let source = super::layout::HELPERS;
     let (whole, _) = sealed_in_layout(source, ROOMY, Which::Charge, None, crate::Layout(0));
     for limit in 0..=whole.charged.unwrap() {
@@ -618,24 +592,4 @@ fn helper_refusals() {
         assert!(whole.asked.starts_with(&actual.0.asked));
         assert!(whole.printed.starts_with(&actual.0.printed));
     }
-    let mut embedder = Embedder::with(
-        source,
-        Setup {
-            layout: crate::Layout(0),
-            probes: Some(super::layout::helper_probes),
-            ..Setup::default()
-        },
-    );
-    embedder.machine.count_execution();
-    embedder.run_to_end(&[]);
-    let census = embedder.machine.take_execution_census();
-    assert!(
-        census
-            .statements
-            .get(&Owner::RegisterProgram)
-            .copied()
-            .unwrap_or(0)
-            > 0,
-        "helper frames reached the register program: {census:?}"
-    );
 }

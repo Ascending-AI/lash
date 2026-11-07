@@ -113,7 +113,7 @@ impl KernelMachine {
         host: &mut dyn crate::interface::Host,
     ) -> Result<bool, Halt> {
         #[cfg(any(test, feature = "testing"))]
-        if self.islands.source_only {
+        if self.source_only {
             return Ok(false);
         }
         if self.task(task)?.frames.is_empty() {
@@ -136,7 +136,7 @@ impl KernelMachine {
             self.refresh_charging(task)?;
             let code = self.exe.region(id).map_err(|error| halt(invalid(error)))?;
             #[cfg(any(test, feature = "testing"))]
-            let code = if self.islands.generic_only {
+            let code = if self.generic_regions {
                 code.as_generic()
             } else {
                 code

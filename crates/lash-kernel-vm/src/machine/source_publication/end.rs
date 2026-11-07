@@ -187,10 +187,7 @@ impl KernelMachine {
                 bank.publish();
             },
         )?;
-        #[cfg(any(test, feature = "testing"))]
-        if published {
-            crate::machine::islands::witness::precise_end_published(value.handle().is_some());
-        }
+
         Ok(published)
     }
 }

@@ -97,7 +97,7 @@ impl Running<'_> {
                 .transpose()?;
             Box::new(Frame {
                 source_action: None,
-                texts: Vec::new(),
+
                 source_frontier: None,
                 invocation: image.invocation,
                 logical: Some(

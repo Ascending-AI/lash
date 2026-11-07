@@ -84,8 +84,7 @@ impl KernelMachine {
         source.site.encode(&mut encoding);
         encoding.unsigned(call.given as u64);
         let rooted = self.task(task_id)?.frames.is_empty();
-        #[cfg(any(test, feature = "testing"))]
-        let has_caller = !rooted;
+
         let Some((caller, ordinal)) =
             self.prepare_frame_caller(task_id, exe, &CallerArguments::from(&call), &mut encoding)?
         else {
@@ -150,8 +149,7 @@ impl KernelMachine {
         };
         caller.authenticate(&bank)?;
         let capture = caller.pending(&bank, ordinal)?;
-        #[cfg(any(test, feature = "testing"))]
-        let captured_roles = capture.as_ref().map(|(_, pending)| pending.roles.len());
+
         let mut arguments = buffer(call.given)?;
         arguments.extend(bank.arguments());
         let mut inputs = buffer(call.given + usize::from(callee.is_some()) + caller.roles().len())?;
@@ -167,8 +165,7 @@ impl KernelMachine {
                 frame.restore_slot(param.at, SlotState::Value(value));
             }
         }
-        #[cfg(any(test, feature = "testing"))]
-        let shared = !shared_values.is_empty();
+
         let store = self.logical.clone();
         let ledger = store.borrow();
         let invocation = ledger.prospective_invocation(task_id);
@@ -366,14 +363,7 @@ impl KernelMachine {
         {
             self.storage.value_moves += call.given;
         }
-        #[cfg(any(test, feature = "testing"))]
-        if has_caller {
-            crate::machine::islands::witness::prepared_frame_entered(shared);
-        }
-        #[cfg(any(test, feature = "testing"))]
-        if let Some(roles) = captured_roles {
-            crate::machine::islands::witness::prepared_frame_captured(roles);
-        }
+
         self.observe(crate::observe::Event::Push {
             task: task_id,
             code: call.code,

@@ -307,7 +307,6 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
         ..ROOMY
     };
     for source in [true, false] {
-        crate::machine::islands::witness::begin();
         let mut machine =
             super::embedder::start_machine(program.clone(), bounds, start.clone()).unwrap();
         if source {
@@ -318,23 +317,6 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
                 assert_eq!((exceeded.bound, exceeded.limit), (Bound::Charge, 10_000));
             }
             other => panic!("the escaped closure's loop was not charged: {other:?}"),
-        }
-        let entries = crate::machine::islands::witness::prepared_frame_entries();
-        let returns = crate::machine::islands::witness::precise_returns();
-        let resumes = crate::machine::islands::witness::call_resumes();
-        if source {
-            assert!(
-                returns[0] > 0,
-                "the uncounted body return must publish its actual Invocation's departure and Leave: {returns:?}"
-            );
-            assert!(
-                resumes[0] > 0,
-                "the uncounted body result must restore its caller with no fabricated action ordinal: {resumes:?}"
-            );
-            assert!(
-                entries[1] > 0,
-                "the operation's body must install its captured parameter cell with the accepted frame: {entries:?}"
-            );
         }
     }
 }
@@ -419,7 +401,6 @@ main {
             super::layout::ExecutionMode::Generic,
             super::layout::ExecutionMode::Specialized,
         ] {
-            crate::machine::islands::witness::logical_entry_fallbacks();
             let mut run = Embedder::with(
                 &format!("main {{ {body} }}"),
                 Setup {
@@ -438,15 +419,11 @@ main {
             );
             match mode {
                 super::layout::ExecutionMode::Source => run.machine.force_source_execution(),
-                super::layout::ExecutionMode::Generic => run.machine.force_generic_packets(),
+                super::layout::ExecutionMode::Generic => run.machine.force_generic_regions(),
                 super::layout::ExecutionMode::Specialized => {}
             }
             let end = run.run_to_end(&[]);
-            assert_eq!(
-                crate::machine::islands::witness::logical_entry_fallbacks(),
-                0,
-                "the root enters through its accepted source entry: {body}, {bound:?}, {mode:?}"
-            );
+
             assert_eq!(
                 end,
                 End::Error(RunError::Bound(BoundExceeded {

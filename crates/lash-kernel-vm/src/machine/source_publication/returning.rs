@@ -17,9 +17,7 @@ impl KernelMachine {
             Op::Break | Op::Continue => None,
             _ => return Ok(None),
         };
-        #[cfg(any(test, feature = "testing"))]
-        let run_root =
-            running.task == doc::TaskId::MAIN && self.task(running.task)?.frames.len() == 1;
+
         let (source, link, invocation, loops) = {
             let frame = self.frame(running.task)?;
             let code = running.exe.code(frame.code);
@@ -95,14 +93,7 @@ impl KernelMachine {
             .last()
             .filter(|event| event.point.phase == room::Phase::Catch)
             .map(|event| event.point.site.clone());
-        #[cfg(test)]
-        if (suspend.is_some()
-            && crate::machine::islands::witness::take_suspended_departure_decline())
-            || (caught.is_some()
-                && crate::machine::islands::witness::take_caught_departure_decline())
-        {
-            return Ok(None);
-        }
+
         let cursor = {
             let arena = std::rc::Rc::clone(&self.arena);
             let frame = self.frame(running.task)?;
@@ -253,8 +244,7 @@ impl KernelMachine {
         let store = self.logical.clone();
         let ledger = store.borrow();
         let mut arena = self.arena.borrow_mut();
-        #[cfg(test)]
-        let loop_ordinal = loops.last().map(|(_, ordinal)| *ordinal);
+
         let Some(mut recipe) = (ReturnInput {
             source: &source,
             invocation: &invocation,
@@ -294,8 +284,7 @@ impl KernelMachine {
         if frame.invocation != invocation.id() {
             return Err(malformed("return preparation names another invocation").into());
         }
-        #[cfg(test)]
-        let scoped = frame.control.len() > 1;
+
         let logical = &mut frame.logical;
         let library = &mut frame.library;
         let mut completion = None;
@@ -359,27 +348,7 @@ impl KernelMachine {
             self.in_formula(lib, true, |_| ());
             self.observe_paid(units);
         }
-        #[cfg(test)]
-        if published && suspend.is_some() {
-            crate::machine::islands::witness::precise_suspended_departed();
-        }
-        #[cfg(test)]
-        if published && caught.is_some() {
-            crate::machine::islands::witness::precise_caught_departed();
-        }
-        #[cfg(any(test, feature = "testing"))]
-        if published && suspend.is_none() && caught.is_none() {
-            crate::machine::islands::witness::precise_return_published(run_root);
-            #[cfg(test)]
-            if let Some(ordinal) = loop_ordinal {
-                crate::machine::islands::witness::loop_returned(true, ordinal);
-            }
 
-            #[cfg(test)]
-            if scoped {
-                crate::machine::islands::witness::precise_scoped_returned();
-            }
-        }
         debug_assert_eq!(published, completion.is_some());
         Ok(completion)
     }

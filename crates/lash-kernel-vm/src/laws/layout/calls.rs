@@ -34,8 +34,6 @@ const FORMATTED_APPEND: &str = "let build = fn(n) { let text = \"\" let i = 0 wh
 const FORMATTED_MISS: &str = "let build = fn() { let text = \"old\" set text = text.concat(text, text.join([\"field=\", 1, \"; suffix\"], \"\")) return text } return apply build()";
 
 thread_local! {
-    static SOURCE_REPLAY_PUBLICATIONS: std::cell::Cell<[u64; 5]> = const { std::cell::Cell::new([0; 5]) };
-    static FORMAT_SOURCE_PHASES: std::cell::Cell<[bool; 3]> = const { std::cell::Cell::new([false; 3]) };
     // PreparedLibrary is an immutable, shareable fixture. Cold reopen still
     // constructs its own library in Embedder::reopen.
     static CALL_LIBRARIES: std::cell::RefCell<std::collections::BTreeMap<u64, crate::PreparedLibrary>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
@@ -65,7 +63,7 @@ fn observe_reopening(
     taped: bool,
     cold_slices: bool,
 ) -> Observed {
-    observe_source_or_register(
+    observe_source_or_region(
         source,
         layout,
         slice,
@@ -76,7 +74,7 @@ fn observe_reopening(
     )
 }
 
-fn observe_source_or_register(
+fn observe_source_or_region(
     source: &str,
     layout: Layout,
     slice: u64,
@@ -97,8 +95,6 @@ fn observe_source_or_register(
         }
     }
     let _context = Context(source, layout, slice, bounds, taped, mode);
-    crate::machine::islands::witness::begin();
-    crate::machine::islands::member_region::begin_statement_publications();
     let prepared = CALL_LIBRARIES.with_borrow_mut(|libraries| {
         libraries
             .entry(layout.0)
@@ -131,36 +127,14 @@ fn observe_source_or_register(
         embedder.machine.record_charges(tape.clone());
     }
     let (mut stops, mut checkpoints) = (Vec::new(), Vec::new());
-    let mut register_statements = 0;
-    let mut slab_calls = 0;
-    let (mut packets, mut specialized) = (0, 0);
+
     let end = loop {
-        if !taped {
-            embedder.machine.count_execution();
-        }
         match mode {
             Mode::Source => embedder.machine.force_source_execution(),
-            Mode::Generic => embedder.machine.force_generic_packets(),
+            Mode::Generic => embedder.machine.force_generic_regions(),
             Mode::Specialized => {}
         }
         let step = embedder.run();
-        let (dispatched, fused) = embedder.machine.take_packet_counts();
-        packets += dispatched;
-        specialized += fused;
-        slab_calls += embedder.machine.take_slab_calls();
-        assert!(
-            embedder.machine.execution_storage_released(),
-            "K-BND-003: a source boundary retains no physical slab holdings: {source}"
-        );
-        if !taped {
-            register_statements += embedder
-                .machine
-                .take_execution_census()
-                .statements
-                .get(&crate::perf_witness::execution::Owner::RegisterProgram)
-                .copied()
-                .unwrap_or(0);
-        }
         stops.push((
             match &step {
                 Step::Ended(_) => "ended",
@@ -197,622 +171,6 @@ fn observe_source_or_register(
             }
         }
     };
-    if mode == Mode::Source {
-        assert_eq!(packets, 0, "the source oracle cannot dispatch packets");
-    } else if !taped && bounds == super::super::embedder::ROOMY {
-        assert!(
-            packets > 0,
-            "the call law must exercise packet dispatch: {source}"
-        );
-    }
-    if mode == Mode::Generic {
-        assert_eq!(
-            specialized, 0,
-            "forced generic execution entered a specialized packet: {source}"
-        );
-    }
-    if !taped && mode == Mode::Source {
-        assert_eq!(slab_calls, 0, "the source oracle cannot place slab calls");
-        assert_eq!(
-            register_statements, 0,
-            "the source oracle cannot enter register code"
-        );
-    } else if !taped && bounds == super::super::embedder::ROOMY {
-        assert!(
-            register_statements > 0,
-            "paired call cases must run register statements: {source}"
-        );
-        if slice == u64::MAX
-            && (source.contains(SAVED_MEMBER)
-                || source.contains(SAVED_MEMBER_PARK)
-                || source.contains(SUPERSEDED_RETURN)
-                || source.contains(NESTED_RETURN))
-        {
-            assert!(
-                slab_calls > 0,
-                "the recovery examples must exercise direct slab placement: {source}"
-            );
-        }
-    }
-    let witnesses = crate::machine::islands::witness::take();
-    let sessions = crate::machine::islands::witness::session_publications();
-    let scopes = crate::machine::islands::witness::scope_publications();
-    let members = crate::machine::islands::witness::member_publications();
-    let private_members = crate::machine::islands::member_region::take_statement_publications();
-    let removals = crate::machine::islands::witness::list_removal_publications();
-    let table_members = crate::machine::islands::witness::table_member_publications();
-    let frame_captures = crate::machine::islands::witness::prepared_frame_captures();
-    let frame_entries = crate::machine::islands::witness::prepared_frame_entries();
-    let callee_reads = crate::machine::islands::witness::callee_reads();
-    let call_resumes = crate::machine::islands::witness::call_resumes();
-    let call_enters = crate::machine::islands::witness::call_enters();
-    let packet_enters = crate::machine::islands::witness::packet_call_enters();
-    let packet_frames = crate::machine::islands::witness::packet_frame_entries();
-    let precise_returns = crate::machine::islands::witness::precise_returns();
-    if mode != Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SAVED_MEMBER)
-    {
-        assert!(
-            packet_enters > 0,
-            "a packet call must publish its actual borrowed operands and occurrence before entering its callee: {packet_enters}"
-        );
-    }
-
-    let try_scopes = crate::machine::islands::witness::precise_try_scopes();
-    let try_reads = crate::machine::islands::witness::precise_try_reads();
-    let field_members = crate::machine::islands::witness::field_member_publications();
-    let constructions = crate::machine::islands::witness::construction_publications();
-    let native_reads = crate::machine::islands::witness::native_read_publications();
-    let native_graphs = crate::machine::islands::witness::native_graph_publications();
-    let immutable_natives = crate::machine::islands::witness::immutable_native_publications();
-    let prepared_natives = crate::machine::islands::witness::prepared_native_publications();
-    let native_lists = crate::machine::islands::witness::native_list_publications();
-    let native_tables = crate::machine::islands::witness::native_table_publications();
-    let empty_tuples = crate::machine::islands::witness::empty_tuple_constructions();
-    let precise_constructions = crate::machine::islands::witness::precise_constructions();
-    let precise_bindings = crate::machine::islands::witness::precise_bindings();
-    let precise_writes = crate::machine::islands::witness::precise_writes();
-    let session_reads = crate::machine::islands::witness::precise_session_reads();
-    let scoped_bindings = crate::machine::islands::witness::scoped_bindings();
-    let precise_joins = crate::machine::islands::witness::precise_joins();
-    let precise_tests = crate::machine::islands::witness::precise_tests();
-    let precise_reads = crate::machine::islands::witness::precise_reads();
-    let precise_literals = crate::machine::islands::witness::precise_literals();
-    let precise_scopes = crate::machine::islands::witness::precise_scopes();
-    let while_scopes = crate::machine::islands::witness::while_scopes();
-    let for_scopes = crate::machine::islands::witness::for_scopes();
-    let precise_ends = crate::machine::islands::witness::precise_ends();
-    let packet_reads = crate::machine::islands::witness::packet_reads();
-    let precise_branches = crate::machine::islands::witness::precise_branches();
-    let condition_iterations = crate::machine::islands::witness::precise_condition_iterations();
-    let precise_test_iterations = crate::machine::islands::witness::precise_test_iterations();
-    let loop_publications = crate::machine::islands::witness::source_loop_publications();
-    let replay = crate::machine::islands::witness::source_replay_publications();
-    let scoped_replay = mode == Mode::Source && source.contains(SOURCE_SCOPED_BINDINGS);
-    SOURCE_REPLAY_PUBLICATIONS.with(|total| {
-        let mut counts = total.get();
-        for (index, (sum, count)) in counts.iter_mut().zip(replay).enumerate() {
-            if scoped_replay || index == 4 {
-                *sum += count;
-            }
-        }
-        total.set(counts);
-    });
-    let precise_source = crate::machine::islands::witness::precise_source_publications();
-    let tuple_constructions = crate::machine::islands::witness::tuple_constructions();
-    let table_constructions = crate::machine::islands::witness::table_constructions();
-    let native_texts = crate::machine::islands::witness::native_text_publications();
-    let text_operations = crate::machine::islands::witness::text_operation_publications();
-    let returns = crate::machine::islands::witness::return_publications();
-    let cells = crate::machine::islands::witness::cell_publications();
-    let cell_constructions = crate::machine::islands::witness::cell_constructions();
-    let closure_constructions = crate::machine::islands::witness::closure_constructions();
-    construction::record(
-        precise_constructions,
-        table_constructions,
-        tuple_constructions,
-        constructions,
-        closure_constructions,
-        cell_constructions,
-    );
-    if mode != Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_SCOPED_BINDINGS)
-    {
-        assert!(
-            packet_reads > 0,
-            "packet reads must publish their actual source operands before their consumers: {mode:?} {packet_reads}"
-        );
-    }
-    if mode == Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_BAD_MEMBER)
-    {
-        assert!(
-            try_scopes[0] > 0 && try_scopes[1] >= 2 && try_scopes[2] > 0,
-            "normal try body, caught errors and normal finally must release their exact source scopes: {try_scopes:?}"
-        );
-        assert!(
-            try_reads.iter().all(|count| *count > 0),
-            "try body and catch reads must acquire actual source operands before any failed write: {try_reads:?}"
-        );
-    }
-    if mode == Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-    {
-        if source.contains(SOURCE_SCOPED_BINDINGS) || source.contains(SOURCE_SESSION) {
-            assert!(
-                loop_publications.len() >= 2
-                    && loop_publications
-                        .values()
-                        .any(|iterations| iterations.contains(&0) && iterations.contains(&1)),
-                "source publications must carry actual for and while iterations: {loop_publications:?}"
-            );
-        }
-        if source.contains(READ_ADD_WRITE) {
-            assert!(
-                precise_writes[0] > 0,
-                "precise scalar assignment must consume its actual RHS under source acceptance"
-            );
-        }
-        if source.contains(SOURCE_CONSTRUCTION) {
-            assert!(
-                precise_writes[1] > 0,
-                "precise reference assignment must consume its actual RHS under source acceptance"
-            );
-        }
-        if source.contains(SOURCE_CELL) {
-            assert!(
-                closure_constructions >= 2,
-                "precise closures must publish their prepared bodies and real captured cells: {closure_constructions}"
-            );
-            assert!(
-                cells >= 2,
-                "precise owning and captured cell writes must publish real member journals: {cells}"
-            );
-        }
-        if source.contains(SOURCE_SESSION) {
-            assert!(
-                sessions >= 2 && session_reads > 0,
-                "precise session writes and reads must publish their actual owners: {sessions}/{session_reads}"
-            );
-        }
-    }
-    if mode == Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_CONSTRUCTION)
-    {
-        assert!(
-            precise_bindings.iter().all(|count| *count > 0),
-            "precise scalar and reference bindings must consume their real RHS in the accepted journal: {precise_bindings:?}"
-        );
-        assert!(
-            empty_tuples[1] >= 2,
-            "both precise empty tuples must publish separate source occurrences: {empty_tuples:?}"
-        );
-        assert!(
-            precise_constructions.iter().all(|count| *count > 0) && precise_constructions[1] >= 2,
-            "precise list, nested tuple, map, set and record constructors must publish their prepared bodies: {precise_constructions:?}"
-        );
-        assert!(
-            precise_source > 0,
-            "the precise executor must publish actual source leaf acquisition before installing its register value"
-        );
-    }
-    if mode != Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_SESSION)
-    {
-        assert!(
-            sessions >= 2,
-            "both persistent session writes must publish: {sessions}"
-        );
-    }
-    if mode == Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_CELL)
-    {
-        assert!(
-            cell_constructions > 0,
-            "the precise shared binding must publish its prepared cell with the actual RHS transfer"
-        );
-    }
-    if mode == Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_CONSTRUCTION)
-    {
-        assert!(
-            precise_scopes > 0,
-            "the source nested scope must publish its genuine owner release before clearing bindings"
-        );
-        assert!(
-            native_texts >= 3,
-            "precise native text consumers must publish join, repeat and slice: {native_texts}"
-        );
-        assert!(
-            native_reads >= 2,
-            "precise native length and aliased reads must publish their real input/output journal: {native_reads}"
-        );
-        assert!(
-            immutable_natives >= 2,
-            "allocated immutable native results must publish their detached bodies: {immutable_natives}"
-        );
-        assert!(
-            native_graphs > 0,
-            "complete native graphs must publish all prepared bodies and their real identities: {native_graphs}"
-        );
-        assert!(
-            prepared_natives >= 3,
-            "precise prepared unary, binary and minimum answers must publish their actual source exit: {prepared_natives}"
-        );
-        assert!(
-            native_lists >= 2,
-            "precise native list consumers must publish both actual copies: {native_lists}"
-        );
-        assert!(
-            native_tables.iter().all(|count| *count > 0),
-            "precise map, set and record copies must publish their canonical graph: {native_tables:?}"
-        );
-    }
-    if layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_SCOPED_BINDINGS)
-    {
-        assert!(
-            while_scopes[usize::from(mode == Mode::Source)] > 0,
-            "the actual while body must publish its scope release before the next condition: {mode:?} {while_scopes:?}"
-        );
-    }
-    if layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && (source.contains(SOURCE_SCOPED_BINDINGS) || source.contains(SOURCE_SESSION))
-    {
-        assert!(
-            for_scopes[usize::from(mode == Mode::Source)]
-                .iter()
-                .all(|count| *count > 0),
-            "for-body release must publish its actual continued and exhausted cursor successors: {mode:?} {for_scopes:?}"
-        );
-    }
-    if mode == Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_SCOPED_BINDINGS)
-    {
-        assert!(
-            precise_branches.iter().flatten().all(|count| *count > 0),
-            "both expression and statement conditional outcomes must consume their actual source condition before control changes: {precise_branches:?}"
-        );
-        assert!(
-            precise_ends.iter().all(|count| *count > 0),
-            "do completion must release actual scalar and heap RHS owners through acceptance: {precise_ends:?}"
-        );
-        assert!(
-            precise_literals.iter().all(|count| *count > 0),
-            "deferred integer, text, bytes and genuine function literals must install through source acceptance: {precise_literals:?}"
-        );
-        assert!(
-            precise_reads.iter().all(|count| *count > 0),
-            "field and index reads must publish real inputs and their aliased result under source acceptance: {precise_reads:?}"
-        );
-        assert!(
-            precise_tests.iter().all(|count| *count > 0),
-            "both actual while outcomes must consume their condition through source acceptance: {precise_tests:?}"
-        );
-        assert_eq!(
-            precise_test_iterations,
-            [Some(1), Some(0)],
-            "the true first header and false next header have distinct actual source occurrences"
-        );
-        assert_eq!(
-            condition_iterations,
-            [Some(1), Some(0)],
-            "condition operands belong to the header being tested, before its body is entered"
-        );
-        assert!(
-            precise_joins.iter().all(|count| *count > 0),
-            "conditional and lexical expression joins must publish their actual operand transfers: {precise_joins:?}"
-        );
-        assert!(
-            scoped_bindings.iter().all(|count| *count > 0),
-            "ordinary and captured expression bindings must publish at their actual source Test: {scoped_bindings:?}"
-        );
-    }
-    if mode != Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_CELL)
-    {
-        assert!(
-            cells >= 2,
-            "both owning and borrowed captured-cell writes must publish: {cells}"
-        );
-        assert!(
-            cell_constructions > 0,
-            "the shared binding must install its prepared source cell"
-        );
-        assert!(
-            closure_constructions >= 2,
-            "both captured closures must install through source acceptance: {closure_constructions}"
-        );
-    }
-    if mode == Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && cold_slices
-        && slice == 3
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_CONSTRUCTION)
-    {
-        assert!(
-            call_resumes[1] > 0,
-            "a restored caller must retain its original action occurrence and adopt the accepted result bank: {call_resumes:?}"
-        );
-    }
-    if mode == Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SAVED_MEMBER)
-    {
-        assert!(
-            frame_captures[0] > 0 && frame_captures[1] >= 2,
-            "frame entry must prepare and commit its live callee/argument roles and pending caller together: {frame_captures:?}"
-        );
-    }
-    if mode != Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_SHARED_ENTRY)
-    {
-        assert!(
-            packet_frames[1] > 0 && packet_frames[1] + frame_entries[1] >= 2,
-            "both maker calls must install their complete cell batches under prospective entry, and the packet path must run: source={frame_entries:?}, packet={packet_frames:?}"
-        );
-    }
-    if mode == Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains("let make = fn(a, b) { return fn() { return (a, b) } }")
-    {
-        assert!(
-            frame_entries[1] >= 2,
-            "both shared-parameter batches, including the omitted argument, must install under accepted frame entry: {frame_entries:?}"
-        );
-    }
-    if mode == Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_MEMBER)
-    {
-        assert!(
-            frame_entries[0] > 0,
-            "callee frames must install their complete prepared entry under prospective source acceptance: {frame_entries:?}"
-        );
-        assert!(
-            callee_reads > 0,
-            "the value callee must acquire its source holding before the argument expressions: {callee_reads}"
-        );
-        assert!(
-            call_resumes[0] > 0,
-            "the returned call must restore its actual Incoming and continuation owners through prospective acceptance: {call_resumes:?}"
-        );
-        assert!(
-            call_enters > 0,
-            "nested call entry must preserve its borrowed source operands and publish its actual occurrence: {call_enters}"
-        );
-        assert!(
-            precise_returns[0] > 0,
-            "the precise callee return must transfer its actual operand and close the same source Invocation: {precise_returns:?}"
-        );
-        assert!(
-            precise_returns[1] > 0,
-            "the precise run-root return must publish only after its original copy-out check and charge: {precise_returns:?}"
-        );
-        assert!(
-            members >= 5,
-            "every precise append and replacement must publish its actual member journal: {members}"
-        );
-        assert!(
-            removals >= 3,
-            "precise list removals must publish their reserved member and operand edits: {removals}"
-        );
-        assert!(
-            table_members >= 10,
-            "precise map, set and record edits must publish their exact normalized members: {table_members}"
-        );
-        assert!(
-            field_members >= 6,
-            "static field writes and removals must publish their actual code keys and prepared storage: {field_members}"
-        );
-    }
-    if mode != Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_MEMBER)
-    {
-        // Four assignments write xs and one writes the caller-owned value.
-        // A private prefix covers its accepted source statement width; an
-        // exact member publication covers one write. Packing does not alter
-        // the five source obligations or their independent semantic oracle.
-        let covered = members
-            + private_members
-                .iter()
-                .map(|width| *width as u64)
-                .sum::<u64>();
-        assert!(
-            covered >= 5,
-            "all five list writes require accepted source publications: exact={members}, private={private_members:?}"
-        );
-    }
-    if mode != Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(SOURCE_CONSTRUCTION)
-    {
-        assert!(
-            empty_tuples[0] >= 2,
-            "both packet empty tuples must publish separate source occurrences: {empty_tuples:?}"
-        );
-        assert!(
-            // The inner and outer tuple each own one source occurrence,
-            // whether the packet or precise source path publishes it.
-            tuple_constructions + precise_constructions[1] >= 2,
-            "both nested tuples require accepted occurrences: packet={tuple_constructions}, precise={precise_constructions:?}"
-        );
-        assert!(
-            table_constructions
-                .iter()
-                .zip(&precise_constructions[2..])
-                .all(|(packet, precise)| packet + precise > 0),
-            "map, set and record literals each require an accepted body: packet={table_constructions:?}, precise={precise_constructions:?}"
-        );
-        assert!(
-            native_tables.iter().all(|count| *count > 0),
-            "map, set and record native copies must each publish their canonical graph: {native_tables:?}"
-        );
-        assert!(
-            native_lists >= 2,
-            "both fresh shallow native copies must publish their real entity and child graph: {native_lists}"
-        );
-        assert!(
-            prepared_natives >= 3,
-            "prepared unary, binary and minimum results must publish under source acceptance: {prepared_natives}"
-        );
-        assert!(
-            native_texts >= 3,
-            "join, repeat and slice must install their actual native results under source acceptance: {native_texts}"
-        );
-        assert!(
-            returns > 0,
-            "the closure must publish its return and defining Leave in the same Invocation"
-        );
-        assert!(
-            native_reads >= 2,
-            "length and aliased member natives must publish their real source consumers: {native_reads}"
-        );
-        assert!(
-            constructions >= 4,
-            "nested and aliased lists must install every prepared source construction: {constructions}"
-        );
-    }
-    if mode != Mode::Source
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains("let alias = value")
-    {
-        assert!(
-            scopes > 0,
-            "the nested alias scope must publish its real Leave without consuming the invocation"
-        );
-    }
-    if mode == Mode::Specialized
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains("let f = fn(x) { return 1 } return apply f(7)")
-    {
-        use crate::machine::islands::witness::{Exit, Family};
-        assert!(
-            witnesses
-                .get(&(Family::SourcePublication, Exit::Commit))
-                .copied()
-                .unwrap_or(0)
-                > 0,
-            "the parameterized call must publish its actual entered source suffix: {layout:?}, {witnesses:?}"
-        );
-    }
-    if mode == Mode::Specialized
-        && layout == Layout(0)
-        && !taped
-        && slice == u64::MAX
-        && bounds == super::super::embedder::ROOMY
-        && source.contains("if same(value, ())")
-    {
-        use crate::machine::islands::witness::{Exit, Family};
-        assert!(
-            witnesses
-                .get(&(Family::SourceUnit, Exit::Commit))
-                .copied()
-                .unwrap_or(0)
-                > 0,
-            "the aliased comparison must publish its source tuple operand: {witnesses:?}"
-        );
-    }
-    if mode != Mode::Specialized {
-        assert!(witnesses.is_empty());
-    }
-    if mode == Mode::Specialized
-        && layout == Layout(0)
-        && slice == u64::MAX
-        && !taped
-        && bounds == super::super::embedder::ROOMY
-        && source.contains(FORMATTED_APPEND)
-    {
-        // The three source iterations each contain one join and one append.
-        assert!(
-            text_operations.iter().all(|count| *count >= 3),
-            "three formatted appends require three accepted joins and appends: {text_operations:?}"
-        );
-    }
-    if mode == Mode::Specialized && layout == Layout(0) && source.contains(FORMATTED_APPEND) {
-        FORMAT_SOURCE_PHASES.with(|phases| {
-            let mut seen = phases.get();
-            // The parts list exists before its first unpaid join. A join-only
-            // prefix then precedes the append; all three iterations complete.
-            seen[0] |= constructions + precise_constructions[0] > 0 && text_operations == [0, 0];
-            seen[1] |= text_operations[1] > text_operations[0];
-            seen[2] |= text_operations.iter().all(|count| *count >= 3);
-            phases.set(seen);
-        });
-    }
     Observed {
         end,
         printed: embedder.world.printed,
@@ -838,7 +196,7 @@ fn direct_call_entry_agrees() {
         charge_limit: 21,
         ..super::super::embedder::ROOMY
     };
-    let refusal = observe_source_or_register(
+    let refusal = observe_source_or_region(
         loop_refusal,
         Layout(0),
         u64::MAX,
@@ -854,8 +212,7 @@ fn direct_call_entry_agrees() {
             "a refused callee-loop expression retains its actual source owners: {layout:?}"
         );
     }
-    SOURCE_REPLAY_PUBLICATIONS.with(|total| total.set([0; 5]));
-    FORMAT_SOURCE_PHASES.set([false; 3]);
+
     let definition = |signature: &str, body: &str| {
         let function = format!(
             "function {signature} -> Any\nkernel 1\nmetering statements\nbody {{ {body} }}"
@@ -870,14 +227,7 @@ fn direct_call_entry_agrees() {
         definition("typed(x: Int)", "return x"),
         definition("maker(a: Any, b?: Any)", "return fn() { return (a, b) }"),
     );
-    for body in [
-        SAVED_MEMBER,
-        SUPERSEDED_RETURN,
-        NESTED_RETURN,
-        NESTED_CALL_STORAGE,
-    ] {
-        placement_witness(&format!("{definitions}main {{ {body} }}"), body);
-    }
+
     let mut comparisons = 0;
     for body in [
         "let f = fn(x) { if flat.lt(x, 1) { throw x } return x } let i = 0 while flat.lt(i, 2) { try { print flat.add(7, apply f(i)) } catch err { print err } set i = flat.add(i, 1) } return i",
@@ -943,9 +293,7 @@ fn direct_call_entry_agrees() {
         "let a = 0 let b = 100 let f = fn(x) { set a = flat.add(a, x) do perform 0(a) as Any return a } let g = fn(x) { set b = flat.add(b, x) return b } let first = apply f(2) let second = apply g(3) return (first, second, apply f(4))",
     ] {
         let source = format!("{definitions}main {{ {body} }}");
-        if body == FORMATTED_APPEND {
-            verify_checkpoint_maps(&source);
-        }
+
         let bounds = super::super::embedder::ROOMY;
         let reference = observe(&source, Layout(1), u64::MAX, bounds, true);
         let natural = observe(&source, Layout(0), u64::MAX, bounds, true);
@@ -981,7 +329,7 @@ fn direct_call_entry_agrees() {
         let plain = observe(&source, Layout(0), u64::MAX, bounds, false);
         assert_eq!(
             plain,
-            observe_source_or_register(
+            observe_source_or_region(
                 &source,
                 Layout(0),
                 u64::MAX,
@@ -990,7 +338,7 @@ fn direct_call_entry_agrees() {
                 false,
                 Mode::Generic,
             ),
-            "generic packet calls: {body}"
+            "generic region calls: {body}"
         );
         if body == SAVED_MEMBER
             || body == SAVED_MEMBER_PARK
@@ -1013,7 +361,7 @@ fn direct_call_entry_agrees() {
             || body.contains("if same(value, ())")
             || body.contains("let alias = value")
         {
-            let source_only = observe_source_or_register(
+            let source_only = observe_source_or_region(
                 &source,
                 Layout(0),
                 u64::MAX,
@@ -1026,7 +374,7 @@ fn direct_call_entry_agrees() {
             if body == SOURCE_CONSTRUCTION || body == SOURCE_CELL || body == SOURCE_SCOPED_BINDINGS
             {
                 assert_eq!(
-                    observe_source_or_register(
+                    observe_source_or_region(
                         &source,
                         Layout(0),
                         3,
@@ -1133,7 +481,7 @@ fn direct_call_entry_agrees() {
                     memory,
                     ..super::super::embedder::ROOMY
                 };
-                let source_only = observe_source_or_register(
+                let source_only = observe_source_or_region(
                     &source,
                     Layout(0),
                     u64::MAX,
@@ -1145,7 +493,7 @@ fn direct_call_entry_agrees() {
                 refused |= source_only.end.contains("Memory");
                 for mode in [Mode::Generic, Mode::Specialized] {
                     assert_eq!(
-                        observe_source_or_register(
+                        observe_source_or_region(
                             &source,
                             Layout(0),
                             u64::MAX,
@@ -1187,7 +535,7 @@ fn direct_call_entry_agrees() {
                     charge_limit: limit,
                     ..super::super::embedder::ROOMY
                 };
-                let source_only = observe_source_or_register(
+                let source_only = observe_source_or_region(
                     &source,
                     Layout(0),
                     u64::MAX,
@@ -1198,7 +546,7 @@ fn direct_call_entry_agrees() {
                 );
                 for mode in [Mode::Generic, Mode::Specialized] {
                     assert_eq!(
-                        observe_source_or_register(
+                        observe_source_or_region(
                             &source,
                             Layout(0),
                             u64::MAX,
@@ -1214,13 +562,7 @@ fn direct_call_entry_agrees() {
                 comparisons += 1;
             }
         }
-        if body == SOURCE_SCOPED_BINDINGS {
-            let replay = SOURCE_REPLAY_PUBLICATIONS.with(|total| total.get());
-            assert!(
-                replay.iter().all(|count| *count > 0),
-                "finite charge prefixes must publish their leaves, ordinary/shared bindings, constructors and member reads before their unchanged typed stop: {replay:?}"
-            );
-        }
+
         for memory in [8192, 16384] {
             let bounds = Bounds { memory, ..bounds };
             assert_eq!(
@@ -1308,7 +650,7 @@ fn direct_call_entry_agrees() {
             {
                 assert_eq!(
                     natural,
-                    observe_source_or_register(
+                    observe_source_or_region(
                         &source,
                         Layout(0),
                         slice,
@@ -1317,11 +659,11 @@ fn direct_call_entry_agrees() {
                         true,
                         Mode::Generic,
                     ),
-                    "cold generic packets at slice {slice}: {body}"
+                    "cold generic regions at slice {slice}: {body}"
                 );
                 assert_eq!(
                     natural,
-                    observe_source_or_register(
+                    observe_source_or_region(
                         &source,
                         Layout(0),
                         slice,
@@ -1337,12 +679,7 @@ fn direct_call_entry_agrees() {
         }
     }
     println!("direct call entry: {comparisons} paired runs");
-    let format_phases = FORMAT_SOURCE_PHASES.get();
-    assert!(
-        format_phases.into_iter().all(|seen| seen),
-        "source formatting must reach parts-only, join-only and completed prefixes: {format_phases:?}"
-    );
-    println!("source formatting prefixes: {format_phases:?}");
+
     // K-CHG-001 / K-BND-003: a refused statement unit retains updated locals.
     {
         let source = format!("{definitions}main {{ {FORMATTED_APPEND} }}");
@@ -1350,7 +687,7 @@ fn direct_call_entry_agrees() {
             charge_limit: 157,
             ..super::super::embedder::ROOMY
         };
-        let reference = observe_source_or_register(
+        let reference = observe_source_or_region(
             &source,
             Layout(0),
             u64::MAX,
@@ -1359,7 +696,7 @@ fn direct_call_entry_agrees() {
             false,
             Mode::Source,
         );
-        let generic = observe_source_or_register(
+        let generic = observe_source_or_region(
             &source,
             Layout(0),
             u64::MAX,
@@ -1377,171 +714,4 @@ fn direct_call_entry_agrees() {
             generic.stops
         );
     }
-}
-
-fn placement_witness(source: &str, body: &str) {
-    // A direct return construction can finish entirely in source execution.
-    // Keep the original cases in the semantic corpus; this physical-placement
-    // probe needs a statement boundary after constructing the replacement.
-    let source = if body == SUPERSEDED_RETURN || body == NESTED_RETURN {
-        source.replace("return [9]", "let replacement = [9] return replacement")
-    } else {
-        source.to_owned()
-    };
-    let mut embedder = Embedder::with(
-        &source,
-        Setup {
-            probes: Some(helper_probes),
-            ..Setup::default()
-        },
-    );
-    embedder.machine.trace_slab_placements();
-    let mut placements = Vec::new();
-    loop {
-        let step = embedder.run();
-        placements.extend(embedder.machine.take_slab_placements());
-        assert!(embedder.machine.execution_storage_released());
-        match step {
-            Step::Ended(End::Finished(_)) => break,
-            Step::Ended(other) => panic!("placement example failed: {other:?}"),
-            Step::Slice => {}
-            Step::Parked(_) => embedder.deliver_next(),
-        }
-    }
-    assert!(!placements.is_empty(), "the slab must execute");
-    for stack in &placements {
-        for pair in stack.windows(2) {
-            assert!(
-                pair[0].pending.end <= pair[1].bindings.start,
-                "live frames cannot overlap: {stack:?}"
-            );
-        }
-        for frame in stack {
-            assert_eq!(frame.bindings.end, frame.operands.start);
-            assert_eq!(frame.operands.end, frame.pending.start);
-            for live in &frame.retained {
-                assert_eq!(live.at, frame.operands.start + live.role as usize);
-                assert!(frame.operands.contains(&live.at));
-            }
-            for departure in &frame.departures {
-                assert!(frame.pending.contains(&departure.at));
-            }
-        }
-    }
-    let saved = placements.iter().find(|stack| {
-        stack.iter().any(|frame| {
-            frame.waiting && frame.retained.iter().any(|live| live.value == Some(int(7)))
-        })
-    });
-    if body == SAVED_MEMBER {
-        let saved = saved.expect("a suspended caller retains argument 7 in its own slab range");
-        println!("saved argument slab placement: {saved:?}");
-        let completed = placements
-            .iter()
-            .rfind(|stack| {
-                stack.iter().any(|frame| {
-                    frame.waiting
-                        && frame.retained.iter().any(|live| live.value == Some(int(7)))
-                        && frame.retained.iter().any(|live| live.value == Some(int(2)))
-                })
-            })
-            .unwrap();
-        println!("placed call after mutation: {completed:?}");
-        println!(
-            "source/packet coordinates: {:?}",
-            completed
-                .iter()
-                .map(|frame| (frame.code, frame.packet))
-                .collect::<Vec<_>>()
-        );
-    } else if body == NESTED_CALL_STORAGE {
-        let reused = placements
-            .iter()
-            .find(|stack| {
-                stack.iter().any(|frame| {
-                    frame.waiting
-                        && frame.nested
-                        && frame.operands.len() < frame.source_operands
-                        && frame
-                            .departures
-                            .iter()
-                            .any(|held| held.value == Some(Datum::List(vec![int(7)])))
-                        && frame.retained.iter().any(|held| held.value == Some(int(7)))
-                })
-            })
-            .expect("the nested-call case must reuse its dead tail with both source owners live");
-        println!("nested call reuses its operand tail: {reused:?}");
-    } else {
-        let simultaneous = placements.iter().find(|stack| {
-            stack.iter().any(|frame| {
-                frame
-                    .departures
-                    .iter()
-                    .any(|held| held.value == Some(Datum::List(vec![int(7)])))
-                    && frame
-                        .retained
-                        .iter()
-                        .any(|live| live.value == Some(Datum::List(vec![int(9)])))
-            })
-        });
-        let simultaneous =
-            simultaneous.expect("the pending [7] outlives evaluation of replacement [9]");
-        println!("superseded return slab placement: {simultaneous:?}");
-        if body == NESTED_RETURN {
-            assert!(
-                placements.iter().any(|stack| stack.iter().any(|frame| {
-                    let a = frame
-                        .departures
-                        .iter()
-                        .find(|held| held.value == Some(Datum::List(vec![int(7)])));
-                    let b = frame
-                        .departures
-                        .iter()
-                        .find(|held| held.value == Some(Datum::List(vec![int(8)])));
-                    matches!((a, b), (Some(a), Some(b)) if a.at != b.at)
-                })),
-                "nested pending departures have distinct owner lifetimes"
-            );
-        }
-    }
-}
-
-fn verify_checkpoint_maps(source: &str) {
-    let (program, _) = Embedder::with(
-        source,
-        Setup {
-            probes: Some(helper_probes),
-            ..Setup::default()
-        },
-    )
-    .program(true);
-    let admitted = program
-        .library
-        .admit(&program.document, Default::default(), &program.selection)
-        .unwrap_or_else(|_| panic!("the checkpoint source is admitted"));
-    let exe = admitted
-        .executable(
-            &program.document,
-            &program.library,
-            &program.documents,
-            &program.functions,
-            &program.instances,
-        )
-        .unwrap_or_else(|_| panic!("the checkpoint source compiles"));
-    let mut checked = 0;
-    for plan in &exe.islands.plans {
-        let Some(mut code) = crate::machine::islands::Compiled::of(plan, &exe) else {
-            continue;
-        };
-        assert_eq!(code.verify_family_projections(plan, &exe), Ok(()));
-        if code.corrupt_family_roles() {
-            assert_eq!(
-                code.verify_family_projections(plan, &exe),
-                Err(crate::compile::islands::Refused::Calls),
-                "a family cannot omit a committed prefix's source roles"
-            );
-            checked += 1;
-        }
-    }
-    assert!(checked > 0, "the checkpoint must form a verified family");
 }

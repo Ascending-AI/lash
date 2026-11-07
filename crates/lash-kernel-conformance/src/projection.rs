@@ -138,38 +138,12 @@ thread_local! {
 }
 
 #[cfg(test)]
-thread_local! {
-    /// The execution census every plan's machine adds to while a law runs
-    /// [`counted`]: what it starts and what it opens alike.
-    static CENSUS: std::cell::RefCell<Option<Census>> = const { std::cell::RefCell::new(None) };
-}
-
-#[cfg(test)]
-type Census = lash_kernel_vm::perf_witness::execution::Census;
-
-/// Runs `run` with every plan's machine counting its physical execution,
-/// and gives what it answered and the census of every machine it started
-/// or opened.
-#[cfg(test)]
-pub(crate) fn counted<T>(run: impl FnOnce() -> T) -> (T, Census) {
-    CENSUS.with(|held| *held.borrow_mut() = Some(Census::default()));
-    let answered = run();
-    let census = CENSUS
-        .with(|held| held.borrow_mut().take())
-        .unwrap_or_default();
-    (answered, census)
-}
-
-#[cfg(test)]
 fn recorded(mut machine: lash_kernel_vm::KernelMachine) -> lash_kernel_vm::KernelMachine {
     TAPE.with(|held| {
         if let Some(tape) = held.borrow().as_ref() {
             machine.record_charges(tape.clone());
         }
     });
-    if CENSUS.with(|held| held.borrow().is_some()) {
-        machine.count_execution();
-    }
     machine
 }
 
@@ -180,31 +154,6 @@ fn recorded(machine: lash_kernel_vm::KernelMachine) -> lash_kernel_vm::KernelMac
 
 /// Test plans differ only in kernel layout; no second execution engine.
 pub(crate) struct Plan<const L: u64>(lash_kernel_vm::KernelMachine);
-#[cfg(test)]
-impl<const L: u64> Drop for Plan<L> {
-    fn drop(&mut self) {
-        let counting = CENSUS.with(|held| held.borrow().is_some());
-        if !counting {
-            return;
-        }
-        let census = self.0.take_execution_census();
-        CENSUS.with(|held| {
-            if let Some(total) = held.borrow_mut().as_mut() {
-                for (owner, n) in &census.statements {
-                    *total.statements.entry(*owner).or_default() += n;
-                }
-                for (owner, reasons) in &census.slow_exits {
-                    let into = total.slow_exits.entry(*owner).or_default();
-                    for (reason, n) in reasons {
-                        *into.entry(*reason).or_default() += n;
-                    }
-                }
-                total.register_entries += census.register_entries;
-                total.accumulated += census.accumulated;
-            }
-        });
-    }
-}
 impl<const L: u64> Plan<L> {
     #[cfg(test)]
     pub(crate) fn publish_context(

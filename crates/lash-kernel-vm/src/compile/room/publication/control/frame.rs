@@ -614,7 +614,7 @@ mod tests {
             depth: entry.depth,
             kind: NestedKind::Body(second),
             operator: entry.operator,
-            island: entry.island,
+
             resume: entry.resume,
             dst: entry.dst,
             roles: Box::default(),

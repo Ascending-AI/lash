@@ -1,4 +1,4 @@
-//! Precise native exits install the same detached storage as packet exits.
+//! Source native exits publish their detached storage at exact boundaries.
 use super::native_storage;
 use super::*;
 use crate::compile::room::{ExitKind, Measure, Phase, Point, publication::Occurrence};
@@ -33,8 +33,7 @@ impl KernelMachine {
         {
             return Ok(false);
         }
-        let text = function.text_join()
-            || function.header.signature.result == lash_kernel_value::Type::Text;
+
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
             return Ok(false);
         };
@@ -145,10 +144,7 @@ impl KernelMachine {
         }
         let output = bank.owner();
         let inputs = bank.owners();
-        let collection = contract
-            .events
-            .iter()
-            .any(|event| matches!(event, doc::NativeResourceEvent::Entity { .. }));
+
         let Some(called) = room::CheckedRoom::native(function.specialization.function, &contract)
         else {
             return Ok(false);
@@ -309,7 +305,6 @@ impl KernelMachine {
                     units,
                     storage.work(),
                     storage.known(),
-                    storage.allocated_immutable(),
                 ));
                 storage.publish(arena);
                 bank.publish(value, holding);
@@ -330,16 +325,9 @@ impl KernelMachine {
         })?;
         drop(arena);
         if published {
-            #[cfg(test)]
-            native_storage::published(false, &contract, (args.len as usize) < function.arity);
-            let (units, work, known, allocated) =
+            let (units, work, known) =
                 completion.ok_or_else(|| malformed("native publication has no completion"))?;
-            #[cfg(any(test, feature = "testing"))]
-            if allocated {
-                crate::machine::islands::witness::immutable_native_published();
-            }
-            #[cfg(not(any(test, feature = "testing")))]
-            let _ = allocated;
+
             if known {
                 self.observe(crate::observe::Event::NativeFast);
             }
@@ -350,22 +338,6 @@ impl KernelMachine {
                 if units != 0 {
                     self.observe_atomic(units);
                 }
-            }
-            #[cfg(any(test, feature = "testing"))]
-            if function.text_join() || function.text_append(running.exe).is_some() {
-                crate::machine::islands::witness::text_operation_published(function.text_join());
-            }
-            #[cfg(any(test, feature = "testing"))]
-            if collection {
-                crate::machine::islands::witness::native_collection_published(
-                    self.regs[args.start.ix()],
-                );
-            } else if text {
-                crate::machine::islands::witness::native_text_published();
-            } else if known {
-                crate::machine::islands::witness::prepared_native_published();
-            } else {
-                crate::machine::islands::witness::native_read_published();
             }
         }
         self.observe(crate::observe::Event::NativeExit);

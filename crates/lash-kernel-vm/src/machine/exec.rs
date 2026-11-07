@@ -749,7 +749,7 @@ impl KernelMachine {
     /// Drop all guest holdings before retaining the activation's storage.
     pub(super) fn recycle(&mut self, mut frame: Box<Frame>) {
         frame.source_frontier = None;
-        frame.texts.clear();
+
         frame.source_action = None;
         frame.invocation = 0;
         frame.logical = None;
@@ -949,7 +949,7 @@ impl KernelMachine {
                 self.storage.activation_records.push(code_id);
                 Box::new(Frame {
                     source_frontier: None,
-                    texts: Vec::new(),
+
                     source_action: None,
                     invocation: 0,
                     logical: None,
@@ -1132,8 +1132,7 @@ impl KernelMachine {
             ArgumentOwners::Operands => self.regs.take_source_arguments(base, given),
             ArgumentOwners::Control => Vec::new(),
         };
-        #[cfg(any(test, feature = "testing"))]
-        crate::machine::islands::witness::logical_entry_fallback();
+
         self.logical_enter_frame(task, exe, code_id, &inputs)?;
         Ok(())
     }

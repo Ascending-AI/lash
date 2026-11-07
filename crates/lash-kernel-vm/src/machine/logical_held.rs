@@ -110,13 +110,7 @@ impl KernelMachine {
             .set(self.heap.logical_balance()?.total()?);
         Ok(())
     }
-    pub(super) fn hold_value(&self, value: Value) -> Result<Held, HeapFault> {
-        Projection {
-            arena: &self.arena,
-            heap: &self.heap,
-        }
-        .hold(value)
-    }
+
     pub(super) fn take_source_role(
         &mut self,
         reg: lash_kernel_exec::Reg,

@@ -8,8 +8,6 @@ use lash_kernel_value::{FunctionId, Name};
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
-mod bulk;
-pub(crate) use bulk::{CollectionProgram, CollectionPublicationStorage, CollectionResult};
 pub(crate) mod charges;
 mod derive;
 mod evaluate;
@@ -27,13 +25,6 @@ pub(crate) enum TryScope {
     Body,
     Catch,
     Finally,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum TransferTarget {
-    Binding,
-    RootReturn,
-    NativeInput,
 }
 
 /// What a `for … via` walks once its `open` has answered (`K-ITER-005`):
@@ -368,7 +359,6 @@ pub(crate) struct Scratch {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceRoom {
     pub(crate) source: Site,
-    pub(crate) bulk: Option<bulk::Bulk>,
     pub(crate) events: BTreeMap<Point, Event>,
     pub(crate) scratch: Box<[Scratch]>,
     pub(crate) exits: Box<[Exit]>,
@@ -516,7 +506,6 @@ pub(crate) struct Description {
     pub(crate) shared: BTreeMap<(Site, Name), bool>,
     pub(crate) persistent: BTreeMap<Site, Name>,
     cell_assignments: Result<BTreeMap<Site, Name>, Refused>,
-    pub(super) bulk: Option<&'static doc::plan::CopyLoop>,
     pub(crate) calls: BTreeMap<FunctionId, CallSource>,
     pub(crate) room: SourceRoom,
     // Preserve the first exit and alternatives in their source-room order.
@@ -673,10 +662,6 @@ impl Source {
             },
         })
     }
-    #[cfg(test)]
-    pub(crate) fn is_derived(&self) -> bool {
-        self.description.get().is_some()
-    }
 
     pub(super) fn deferred(
         owner: doc::constant_pool::PoolOwner,
@@ -823,14 +808,6 @@ impl Source {
             }
             node.children_into(&mut pending);
         }
-        let bulk = match owner {
-            doc::constant_pool::PoolOwner::Function(function) if site.path.is_empty() => catalog
-                .registered(&function)
-                .and_then(|r| r.plan())
-                .filter(|p| p.function == function)
-                .and_then(|p| p.template.as_ref()?.heap.as_ref()?.copy),
-            _ => None,
-        };
         let mut source = Description {
             owner,
             site: site.clone(),
@@ -839,11 +816,9 @@ impl Source {
             shared,
             persistent,
             cell_assignments: Ok(BTreeMap::new()),
-            bulk,
             calls,
             room: SourceRoom {
                 source: site,
-                bulk: None,
                 events: BTreeMap::new(),
                 scratch: Box::new([]),
                 exits: Box::new([]),
@@ -967,18 +942,8 @@ impl Source {
         }
         Ok(())
     }
-    pub(crate) fn room_if_derived(&self) -> Option<&SourceRoom> {
-        self.description.get().map(|d| &d.room)
-    }
-    /// KIR formation does not consume memory authority in phase one. If a
-    /// consumer has requested that authority, retain its independent check.
-    pub(crate) fn verify_if_derived(&self) -> Result<(), Refused> {
-        if self.description.get().is_some() {
-            self.verify()
-        } else {
-            Ok(())
-        }
-    }
+
+    #[cfg(test)]
     pub(crate) fn verify_room(&self, room: &SourceRoom) -> Result<(), Refused> {
         self.verify_identity()?;
         // A changed projection is never covered by the immutable default's cache.
@@ -1008,49 +973,6 @@ impl Source {
         let point = first.0.ok_or(Refused::Path)?;
         cache.insert(at.clone(), point.clone());
         Ok(point)
-    }
-
-    /// The enclosing source consumer whose actual runtime journal must follow
-    /// an expression published as an operand.
-    pub(crate) fn transfer_target(&self, at: &Site) -> Option<TransferTarget> {
-        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
-            return None;
-        }
-        let mut node = doc::Node::Block(&self.body);
-        let mut site = self.site.clone();
-        let mut parents = Vec::new();
-        for index in &at.path[self.site.path.len()..] {
-            parents.push((node, site.clone()));
-            let child = node.children().get(*index as usize).copied()?;
-            node = child;
-            site = site.child(*index);
-        }
-        for (node, site) in parents.into_iter().rev() {
-            match node {
-                doc::Node::Expr(doc::Expr::List(_) | doc::Expr::Tuple(_)) => continue,
-                doc::Node::Expr(doc::Expr::Call { function, .. })
-                    if matches!(self.calls.get(function), Some(CallSource::Native(_))) =>
-                {
-                    return Some(TransferTarget::NativeInput);
-                }
-                doc::Node::Stmt(doc::Stmt::Let { .. }) => {
-                    return Some(TransferTarget::Binding);
-                }
-                doc::Node::Stmt(doc::Stmt::Assign {
-                    place: doc::Place::Variable(_),
-                    ..
-                }) => {
-                    return Some(TransferTarget::Binding);
-                }
-                doc::Node::Stmt(doc::Stmt::Return { .. })
-                    if site.path.len() == self.site.path.len() + 1 =>
-                {
-                    return Some(TransferTarget::RootReturn);
-                }
-                _ => return None,
-            }
-        }
-        None
     }
 
     /// The actual selected continuation of a while condition. Both endpoints
@@ -1175,10 +1097,6 @@ impl Source {
         }
     }
 
-    /// The first unpaid event after an expression, binding or assignment Commit.
-    /// Source syntax and the canonical walker determine the successor. A
-    /// required future branch/cursor decision declines instead of inventing it.
-    /// Whether the node at `at` is a native call act, which answers at its Enter.
     /// The source node at `at`, a site of this source.
     pub(crate) fn node_at(&self, at: &Site) -> Option<doc::Node<'_>> {
         if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
@@ -1190,6 +1108,7 @@ impl Source {
         }
         Some(node)
     }
+    /// Whether the source node is a native call act that answers at its Enter.
     pub(crate) fn answers_at_enter(&self, at: &Site) -> bool {
         if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
             return false;

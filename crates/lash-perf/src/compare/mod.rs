@@ -132,8 +132,6 @@ pub(crate) struct Row {
     pub(crate) instructions: Option<InstructionSlopes>,
     pub fixed_scopes_ns: BTreeMap<String, f64>,
     ratios: BTreeMap<String, f64>,
-    /// Census of the separate fresh diagnostic cell at trips[0].
-    execution_census: Option<lash_kernel_vm::perf_witness::execution::Census>,
 }
 #[derive(Serialize)]
 struct UnsupportedRow {
@@ -291,7 +289,6 @@ fn row(
         instructions,
         fixed_scopes_ns,
         ratios: BTreeMap::new(),
-        execution_census: None,
     })
 }
 fn lash(
@@ -366,7 +363,7 @@ fn lash(
     phases.extend(diagnostic);
     phases.insert("library_preparation_inclusive".into(), preparation.get());
     phases.insert("embedding_process_once".into(), kernel.setup_ns);
-    let mut row = row(
+    let row = row(
         Engine {
             name: "lash",
             binary_hash: &hash(&std::fs::read(std::env::current_exe()?)?),
@@ -380,11 +377,6 @@ fn lash(
     ensure!(
         same_result(&diagnostic_sample.result, &row.samples[0][0].result),
         "diagnostic result differs from quiet result"
-    );
-    row.execution_census = Some(
-        diagnostic_sample
-            .execution_census
-            .context("diagnostic census missing")?,
     );
     Ok(row)
 }
@@ -646,30 +638,7 @@ fn table(receipt: &Receipt) -> String {
             }
         }
     }
-    text.push_str("\nExact physical execution census: separate diagnostic cell at the low trip count, after its first checkpoint. Ordinary slope samples are uncounted. Scalar regions are separate from the continuous register program. Statement counts include helper-plan loop-test statement boundaries; region speculation counts only committed statements.\n\n");
-    text.push_str("| Dialect | Workload | Trips | Owner | Statements | Register entries (run) |\n|---|---|---:|---|---:|---:|\n");
-    for row in &receipt.rows {
-        if let Some(census) = &row.execution_census {
-            use std::fmt::Write as _;
-            for (owner, statements) in &census.statements {
-                let _ = writeln!(
-                    text,
-                    "| {} | {} | {} | {:?} | {} | {} |",
-                    row.dialect,
-                    row.workload,
-                    row.trips[0],
-                    owner,
-                    statements,
-                    census.register_entries
-                );
-            }
-            let _ = writeln!(
-                text,
-                "\n{} / {} transitions: `{:?}`; guard/slow exits: `{:?}`.\n",
-                row.dialect, row.workload, census.transitions, census.slow_exits
-            );
-        }
-    }
+
     for e in &receipt.errors {
         text.push_str(&format!("\nRefused: {e}\n"));
     }

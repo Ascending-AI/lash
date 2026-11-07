@@ -419,12 +419,6 @@ impl Continuation {
     }
 }
 
-impl Pending {
-    pub(super) fn with_occurrence(mut self, occurrence: Option<u64>) -> Self {
-        self.occurrence = occurrence;
-        self
-    }
-}
 impl KernelMachine {
     /// The continuation a frame saves where it stands at the action nested
     /// in its statement whose site is `site`, in `phase` (`K-EVAL-008`),

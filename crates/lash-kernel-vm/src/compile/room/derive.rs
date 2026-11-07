@@ -9,12 +9,6 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
     let calls = &authority.calls;
     let mut room = SourceRoom {
         source: source.clone(),
-        bulk: authority.bulk.and_then(|path| match authority.owner {
-            doc::constant_pool::PoolOwner::Function(function) => {
-                Some(bulk::Bulk::project(function, path))
-            }
-            _ => None,
-        }),
         events: BTreeMap::new(),
         scratch: Box::new([]),
         exits: Box::new([]),

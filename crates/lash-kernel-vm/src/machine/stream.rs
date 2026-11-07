@@ -9,10 +9,6 @@
 //! statement stands at it, its evaluated operands saved as roles, and its
 //! resume entry runs it on from the op after the action's (`K-EVAL-008`).
 
-#[cfg(any(test, feature = "perf-witness"))]
-use crate::perf_witness::execution;
-
-mod original;
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
@@ -141,21 +137,6 @@ impl KernelMachine {
         pc: usize,
     ) -> Eval<Ran> {
         self.oracle_only()?;
-        #[cfg(any(test, feature = "perf-witness"))]
-        if self.islands.counting {
-            return self.run_counted(host, running, pc);
-        }
-        self.run_stream(host, running, pc)
-    }
-
-    #[cfg(any(test, feature = "perf-witness"))]
-    #[cold]
-    fn run_counted(&mut self, host: &mut dyn Host, running: &Running<'_>, pc: usize) -> Eval<Ran> {
-        let _execution = execution::Scope::enter(
-            &self.islands.census,
-            execution::Owner::SourceEvaluator,
-            true,
-        );
         self.run_stream(host, running, pc)
     }
 
@@ -187,11 +168,6 @@ impl KernelMachine {
         loop {
             let source_pc = pc as u32;
             let op = ops[pc];
-            if matches!(op, Op::Operator { .. } | Op::Call { .. })
-                && let Some(ran) = self.register_native_suffix(host, running, pc)?
-            {
-                return Ok(ran);
-            }
             pc += 1;
             match op {
                 Op::Region { region, total } => {
@@ -242,12 +218,6 @@ impl KernelMachine {
                     {
                         if self.nested_invoke_operator(host, running, act, lib, args)? == Flow::Step
                         {
-                            return Ok(Ran::Step);
-                        }
-                    } else if nested.island
-                        && let Some(flow) = self.call_island(host, running, act, args)?
-                    {
-                        if flow == Flow::Step {
                             return Ok(Ran::Step);
                         }
                     } else if let Some(ran) = self.run_rare(host, running, op)? {
@@ -576,10 +546,6 @@ impl KernelMachine {
                 };
                 if accepted {
                     self.source_complete_joins(running, op_at as u32)?;
-                    #[cfg(any(test, feature = "testing"))]
-                    crate::machine::islands::witness::source_replay_published(
-                        running.stream.ops[op_at],
-                    );
                 } else {
                     self.source_complete(running, op_at as u32)?;
                 }

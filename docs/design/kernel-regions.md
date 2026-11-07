@@ -1,6 +1,7 @@
 # Kernel regions: guarded compiled synchronous regions
 
-Status: pinned design (FIG-6741) for the stage-4 follow-on of the kend spec
+Status: historical design (FIG-6741), retired by FIG-7631 and FIG-7667.
+It covered the stage-4 follow-on of the kend spec
 (`/workspace/notes/lash/tasks/lanes/kend/spec.md` §6: generated fused regions,
 selective continuation conversion, guarded typed loop batches, build-staged
 helper templates). It builds on [the kernel end state](kernel-end-state.md):
@@ -12,15 +13,12 @@ plans). Every number below was measured on a prototype applied to
 active task and frame cursor (FIG-6737) landed after these measurements, and
 they do not include it.
 
-Retired in part (FIG-7341). The register program (`machine/islands`) is now
-the only executor of statements: the region executor, its plans, the statement
-step of §2.5 and the source statement driver are deleted, and with them the
-regions-on/regions-off comparisons of §3.3. The PLAN-INDEP reference is the
-layout whose natives run their bodies. What survives of this design is call
-islands (§1, §5 R4), typed blocks (§2.4), which a scalar loop plan now
-feeds only to the register's typed repeat, the linear text accumulator (§3.5),
-which the register program runs, and the memory and session contracts of
-§3.5 and §3.6.
+Retired (FIG-7631, FIG-7667). Verified RegionCode now executes every program.
+The island register program, its plans and its exclusive publishers and
+witnesses are deleted. Statement stepping remains only as the guarded source
+oracle. The text below records the historical design; it does not describe
+the current executor. See [kernel design](../kernel/design.md) for the current
+architecture.
 
 The FIG-6730 attribution showed that the warm rows miss their goals even if
 every frame, allocation, memory, charge and projection instruction were free.

@@ -221,23 +221,7 @@ impl KernelMachine {
                 }
             },
         )?;
-        #[cfg(any(test, feature = "testing"))]
-        if published && !matches!(op, Op::Test { .. }) {
-            crate::machine::islands::witness::precise_branch_published(
-                matches!(op, Op::Branch { .. }),
-                taken,
-            );
-        }
-        #[cfg(any(test, feature = "testing"))]
-        if published && matches!(op, Op::Test { .. }) {
-            let Some(frontier) = &frame.source_frontier else {
-                unreachable!("a committed source test has a frontier");
-            };
-            let Some((_, iteration)) = frontier.position().occurrence.loops.last() else {
-                unreachable!("a committed source test has a while occurrence");
-            };
-            crate::machine::islands::witness::precise_test_published(taken, *iteration);
-        }
+
         Ok(published.then_some(taken))
     }
 }

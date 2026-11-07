@@ -43,7 +43,6 @@ type Observation = (
     Vec<Request>,
     [u64; 3],
 );
-type NativeObservation = (Observation, [u64; 5]);
 
 fn same(actual: &Observation, expected: &Observation, context: &str) {
     match (&actual.0, &expected.0) {
@@ -78,7 +77,7 @@ fn same(actual: &Observation, expected: &Observation, context: &str) {
 }
 
 pub(super) fn agree(
-    observe: &impl Fn(&str, ExecutionMode, Layout, bool, bool, Bounds) -> NativeObservation,
+    observe: &impl Fn(&str, ExecutionMode, Layout, bool, bool, Bounds) -> Observation,
 ) {
     let item = |id| record([("id", int(id))]);
     let examples = [
@@ -106,10 +105,9 @@ pub(super) fn agree(
         ),
     ];
     let roomy = super::super::embedder::ROOMY;
-    let mut witnesses = Vec::new();
     for taped in [false, true] {
-        for (source, expected, graphs) in &examples {
-            let (reference, counts) = observe(
+        for (source, expected, _graphs) in &examples {
+            let reference = observe(
                 source,
                 ExecutionMode::Source,
                 Layout(0),
@@ -122,10 +120,7 @@ pub(super) fn agree(
                 *expected,
                 "canonical native source result: {source}"
             );
-            witnesses.push((
-                counts[0] >= 2 && counts[2] >= *graphs && counts[3] >= 2,
-                format!("codec/sort source must publish its actual graphs and scratch: {counts:?}; {source}"),
-            ));
+
             for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
                 for cold in [false, true] {
                     for mode in [
@@ -133,7 +128,7 @@ pub(super) fn agree(
                         ExecutionMode::Generic,
                         ExecutionMode::Specialized,
                     ] {
-                        let (actual, counts) = observe(source, mode, layout, cold, taped, roomy);
+                        let actual = observe(source, mode, layout, cold, taped, roomy);
                         same(
                             &actual,
                             &reference,
@@ -141,17 +136,6 @@ pub(super) fn agree(
                                 "native codec/sort {mode:?}, {layout:?}, cold={cold}, taped={taped}: {source}"
                             ),
                         );
-                        if matches!(mode, ExecutionMode::Source) {
-                            witnesses.push((
-                                counts[0] >= 2 && counts[2] >= *graphs,
-                                format!("actual source graph acceptance, taped={taped}, {layout:?}, cold={cold}: {counts:?}; {source}"),
-                            ));
-                        } else if !cold {
-                            witnesses.push((
-                                counts[1] >= 2 && counts[2] >= *graphs,
-                                format!("actual packet graph acceptance, taped={taped}, {mode:?}, {layout:?}: {counts:?}; {source}"),
-                            ));
-                        }
                     }
                 }
             }
@@ -181,11 +165,10 @@ pub(super) fn agree(
                     false,
                     taped,
                     bounds,
-                )
-                .0;
+                );
                 for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
                     same(
-                        &observe(source, mode, Layout(2), true, taped, bounds).0,
+                        &observe(source, mode, Layout(2), true, taped, bounds),
                         &exact,
                         &format!("native codec/sort first refusal {mode:?}, {bounds:?}: {source}"),
                     );
@@ -193,9 +176,4 @@ pub(super) fn agree(
             }
         }
     }
-    let missing: Vec<_> = witnesses
-        .into_iter()
-        .filter_map(|(accepted, context)| (!accepted).then_some(context))
-        .collect();
-    assert!(missing.is_empty(), "{}", missing.join("\n"));
 }

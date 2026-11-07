@@ -191,11 +191,6 @@ pub(crate) struct CompiledInterval {
     whole: bool,
     return_loops: Option<Box<[Site]>>,
     resume: Option<Point>,
-    /// Whether this interval is a proven acquisition: decided once, since
-    /// an interval belongs to the one Source that compiled it.
-    acquires: std::sync::OnceLock<bool>,
-    /// Whether this interval is a proven native commit, decided once.
-    commits: std::sync::OnceLock<bool>,
 }
 impl Source {
     /// The event at `at` as its raise departs, when it may raise besides
@@ -260,8 +255,6 @@ impl Source {
             whole: false,
             return_loops: Some(Box::new([])),
             resume: None,
-            acquires: std::sync::OnceLock::new(),
-            commits: std::sync::OnceLock::new(),
         }))
     }
     fn suffix(
@@ -721,8 +714,6 @@ impl Source {
             whole: false,
             return_loops: Some(return_loops.into()),
             resume,
-            acquires: std::sync::OnceLock::new(),
-            commits: std::sync::OnceLock::new(),
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -808,8 +799,6 @@ impl Source {
             whole: false,
             return_loops: None,
             resume: None,
-            acquires: std::sync::OnceLock::new(),
-            commits: std::sync::OnceLock::new(),
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -951,8 +940,6 @@ impl Source {
             whole: false,
             return_loops: None,
             resume: None,
-            acquires: std::sync::OnceLock::new(),
-            commits: std::sync::OnceLock::new(),
         });
         match key {
             Some(key) => {
@@ -970,6 +957,7 @@ impl Source {
         }
         Ok(interval)
     }
+    #[cfg(test)]
     pub(crate) fn compile_interval(
         &self,
         at: &Site,
@@ -1022,8 +1010,6 @@ impl Source {
             whole: at == &self.site,
             return_loops: None,
             resume: None,
-            acquires: std::sync::OnceLock::new(),
-            commits: std::sync::OnceLock::new(),
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -1065,9 +1051,6 @@ impl evaluate::Events for Trace<'_> {
     }
 }
 impl CompiledInterval {
-    pub(super) fn selections(&self) -> &[Selection] {
-        &self.route
-    }
     pub(crate) fn return_loops(&self) -> Option<&[Site]> {
         self.return_loops.as_deref()
     }
@@ -1100,209 +1083,10 @@ impl CompiledInterval {
     pub(crate) fn events(&self) -> impl ExactSizeIterator<Item = &Event> {
         self.steps.iter().map(|step| &step.event)
     }
-    /// A proven pure acquisition: one normal event that only acquires its own
-    /// operand owner, with peak and retained delta exactly that owner's local
-    /// bytes, no inputs, releases, entities, members or scratch. For such an
-    /// interval the checked journal is fully determined by the value's holding,
-    /// so its shared admission is the memory envelope and charge window alone.
-    pub(crate) fn acquisition(&self, source: &Source) -> Option<&Owner> {
-        let owner = self.steps.first()?.event.output.as_ref()?;
-        self.acquires
-            .get_or_init(|| self.acquires_in(source))
-            .then_some(owner)
-    }
-    fn acquires_in(&self, source: &Source) -> bool {
-        let ([Selection::Event { .. }], [step]) = (self.route.as_ref(), self.steps.as_ref()) else {
-            return false;
-        };
-        let event = &step.event;
-        let publication = &step.publication;
-        let Some(owner) = event.output.as_ref() else {
-            return false;
-        };
-        let local = |amount: &Amount| {
-            amount.fixed == 0
-                && matches!(amount.terms.as_slice(), [(Measure::Local(at), 1)] if at == owner)
-        };
-        (matches!(owner, Owner::Operand(site) if *site == event.point.site)
-            && event.point.site != source.site
-            && step.selected == ExitKind::Normal
-            && step.normal == ExitKind::Normal
-            && event.inputs.is_empty()
-            && event.entities.is_empty()
-            && local(&event.peak)
-            && local(&event.delta)
-            && !publication.borrowed_inputs
-            && publication.restored_roles.is_none()
-            && publication.assignment.is_none()
-            && !publication.member
-            && publication.field.is_none()
-            && !source
-                .room
-                .scratch
-                .iter()
-                .any(|lease| lease.at == event.point))
-    }
-    /// A proven native commit: one normal Commit event whose output is its
-    /// own operand owner, whose peak is exactly the native call's peak (or,
-    /// for an operator act, its answer's holding) and whose retained delta is
-    /// that measure's delta less its consumed operands,
-    /// with no entity, member, field, cell or restored role. Its scratch
-    /// lease is the call's runtime scratch, which the caller requires to be
-    /// zero. For such an interval with a scalar answer the checked journal releases
-    /// the operands and holds the answer, so its shared admission is the
-    /// call's envelope, charge window and depth alone.
-    pub(crate) fn native_commit(&self, source: &Source) -> bool {
-        *self.commits.get_or_init(|| self.commits_natively(source))
-    }
-    fn commits_natively(&self, source: &Source) -> bool {
-        let ([Selection::Event { .. }], [step]) = (self.route.as_ref(), self.steps.as_ref()) else {
-            return false;
-        };
-        let event = &step.event;
-        let publication = &step.publication;
-        let site = &event.point.site;
-        // The callee's own peak, or the answer's holding for an operator
-        // act; the retained delta is that same measure less the consumed
-        // operands.
-        let produced = |measure: &Measure| match measure {
-            Measure::CallPeak {
-                at,
-                callee: CallSource::Native(_),
-            } => at == site,
-            Measure::Local(Owner::Operand(at)) => at == site,
-            _ => false,
-        };
-        let retained = |measure: &Measure| match measure {
-            Measure::CallDelta {
-                at,
-                callee: CallSource::Native(_),
-            } => at == site,
-            Measure::Local(Owner::Operand(at)) => at == site,
-            _ => false,
-        };
-        let consumed = |measure: &Measure| matches!(measure, Measure::Release(owners) if **owners == *event.inputs);
-        let peak = matches!(event.peak.terms.as_slice(), [(measure, 1)] if produced(measure));
-        let delta = match event.delta.terms.as_slice() {
-            [(measure, 1)] => retained(measure) && event.inputs.is_empty(),
-            [(first, 1), (second, -1)] => retained(first) && consumed(second),
-            [(first, -1), (second, 1)] => consumed(first) && retained(second),
-            _ => false,
-        };
-        // A native call act answers at its Enter.
-        let answers = match event.point.phase {
-            Phase::Commit => true,
-            Phase::Enter => matches!(
-                event.peak.terms.as_slice(),
-                [(
-                    Measure::CallPeak {
-                        callee: CallSource::Native(_),
-                        ..
-                    },
-                    1
-                )]
-            ),
-            _ => false,
-        };
-        answers
-            && event.point.site != source.site
-            && step.selected == ExitKind::Normal
-            && step.normal == ExitKind::Normal
-            && matches!(&event.output, Some(Owner::Operand(at)) if at == site)
-            && event.entities.is_empty()
-            && event.peak.fixed == 0
-            && event.delta.fixed == 0
-            && peak
-            && delta
-            && !publication.borrowed_inputs
-            && publication.restored_roles.is_none()
-            && publication.assignment.is_none()
-            && !publication.member
-            && publication.field.is_none()
-    }
-    /// A nested scope's Leave is a proven release when its one event only
-    /// releases that scope's own owner groups: no output, entity, input,
-    /// peak, scratch lease or publication role, and both exits normal.
-    pub(crate) fn scope_release(&self, source: &Source, closing: &Site) -> bool {
-        let ([Selection::Event { .. }], [step]) = (self.route.as_ref(), self.steps.as_ref()) else {
-            return false;
-        };
-        let event = &step.event;
-        let publication = &step.publication;
-        let release = Measure::Release(
-            vec![
-                Owner::Scope(closing.clone()),
-                Owner::Operands(closing.clone()),
-            ]
-            .into(),
-        );
-        event.point.site == *closing
-            && event.point.phase == Phase::Leave
-            && *closing != source.site
-            && step.selected == ExitKind::Normal
-            && step.normal == ExitKind::Normal
-            && event.output.is_none()
-            && event.inputs.is_empty()
-            && event.entities.is_empty()
-            && event.peak.fixed == 0
-            && event.peak.terms.is_empty()
-            && event.delta.fixed == 0
-            && matches!(event.delta.terms.as_slice(), [(measure, -1)] if *measure == release)
-            && !publication.borrowed_inputs
-            && publication.restored_roles.is_none()
-            && publication.assignment.is_none()
-            && !publication.member
-            && publication.field.is_none()
-            && !source
-                .room
-                .scratch
-                .iter()
-                .any(|lease| lease.at == event.point)
-    }
-    /// A local binding's Commit is a proven move when its one event moves the
-    /// RHS operand into its output owner, at most releasing that owner's
-    /// previous value: no entity, peak, scratch lease, cell or member edit,
-    /// and both exits normal. Returns the output selector.
-    pub(crate) fn binding_move(&self, source: &Source, rhs: &Site) -> Option<&Owner> {
-        let ([Selection::Event { .. }], [step]) = (self.route.as_ref(), self.steps.as_ref()) else {
-            return None;
-        };
-        let event = &step.event;
-        let publication = &step.publication;
-        let output = event.output.as_ref()?;
-        let releases_output = || {
-            event.delta.terms.len() == 1
-                && event.delta.terms.iter().all(|(measure, coefficient)| {
-                    *coefficient == -1
-                        && matches!(measure, Measure::Release(group) if **group == [output.clone()])
-                })
-        };
-        (event.point.phase == Phase::Commit
-            && step.selected == ExitKind::Normal
-            && step.normal == ExitKind::Normal
-            && *event.inputs == [Owner::Operand(rhs.clone())]
-            && event.entities.is_empty()
-            && event.peak.fixed == 0
-            && event.peak.terms.is_empty()
-            && event.delta.fixed == 0
-            && (event.delta.terms.is_empty() || releases_output())
-            && !publication.borrowed_inputs
-            && publication.restored_roles.is_none()
-            && publication
-                .assignment
-                .as_ref()
-                .is_none_or(|_| !source.assigns_cell(&event.point.site))
-            && !publication.member
-            && publication.field.is_none()
-            && !source
-                .room
-                .scratch
-                .iter()
-                .any(|lease| lease.at == event.point))
-        .then_some(output)
-    }
+
     /// Bind canonical event facts once, then evaluate indexed polynomials.
     /// No source node, child vector, or AST traversal is used here.
+    #[cfg(test)]
     pub(crate) fn evaluate_interval(
         &self,
         execution: &mut impl Execution,

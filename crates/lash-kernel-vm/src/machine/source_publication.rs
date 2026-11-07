@@ -155,20 +155,11 @@ pub(in crate::machine) trait BoundaryPreparation: Sized {
         arena: &'a mut Arena,
         entry: ExternalEntry<'_>,
     ) -> Result<Option<(room::publication::PreparedEvent<'a>, Self::Prepared)>, HeapFault>;
-    fn prepare_remaining<'a>(
-        self,
-        _arena: &'a mut Arena,
-        _entry: ExternalEntry<'_>,
-        _original: &room::charges::AcceptedOriginalPrefix,
-    ) -> Result<Option<(room::publication::OriginalPrepared<'a>, Self::Prepared)>, HeapFault> {
-        Ok(None)
-    }
 }
 
-/// An envelope miss leaves its island at the instruction for exact source.
+/// Source publication admits the exact source transition.
 /// Exact source is the run's verdict point.
 pub(in crate::machine) enum Admission<'a> {
-    Envelope(u64),
     Exact(MemoryLimit<'a>),
 }
 /// A metered run's memory bound and the limiter that may grow it.

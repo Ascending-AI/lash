@@ -118,7 +118,6 @@ impl PreparedLibrary {
                     sites: record(owner, 4),
                 },
                 tables: OnceLock::new(),
-                programs: OnceLock::new(),
                 closures: record(owner, 9) != 0,
             })?,
             body_of,

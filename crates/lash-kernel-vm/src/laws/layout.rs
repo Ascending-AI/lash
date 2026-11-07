@@ -583,21 +583,8 @@ type ScalarObserved = (
     Vec<lash_kernel_state::semantic::Checkpoint>,
 );
 
-fn observe_scalar(
-    source: &str,
-    layout: Layout,
-    record: bool,
-    cold: bool,
-    require_typed: bool,
-) -> ScalarObserved {
-    observe_scalar_bounded(
-        source,
-        layout,
-        record,
-        cold,
-        require_typed,
-        super::embedder::ROOMY,
-    )
+fn observe_scalar(source: &str, layout: Layout, record: bool, cold: bool) -> ScalarObserved {
+    observe_scalar_bounded(source, layout, record, cold, super::embedder::ROOMY)
 }
 
 fn observe_scalar_bounded(
@@ -605,7 +592,6 @@ fn observe_scalar_bounded(
     layout: Layout,
     record: bool,
     cold: bool,
-    require_typed: bool,
     bounds: Bounds,
 ) -> ScalarObserved {
     observe_scalar_selected(
@@ -613,7 +599,6 @@ fn observe_scalar_bounded(
         layout,
         record,
         cold,
-        require_typed,
         bounds,
         ScalarSelection {
             mode: ExecutionMode::Specialized,
@@ -642,7 +627,6 @@ fn observe_scalar_selected(
     layout: Layout,
     record: bool,
     cold: bool,
-    require_typed: bool,
     bounds: Bounds,
     selection: ScalarSelection,
 ) -> (ScalarObserved, ScalarStops) {
@@ -666,22 +650,14 @@ fn observe_scalar_selected(
     }
     let mut checkpoints = Vec::new();
     let mut stops = Vec::new();
-    let (mut packets, mut fused) = (0, 0);
-    let mut registered = 0;
+
     let end = loop {
-        if !record {
-            embedder.machine.count_execution();
-        }
         match selection.mode {
             ExecutionMode::Source => embedder.machine.force_source_execution(),
-            ExecutionMode::Generic => embedder.machine.force_generic_packets(),
+            ExecutionMode::Generic => embedder.machine.force_generic_regions(),
             ExecutionMode::Specialized => {}
         }
         let step = embedder.run();
-        let (dispatched, specialized) = embedder.machine.take_packet_counts();
-        packets += dispatched;
-        fused += specialized;
-        assert!(embedder.machine.execution_storage_released());
         if selection.detailed {
             let kind = match &step {
                 Step::Ended(_) => "ended",
@@ -705,15 +681,7 @@ fn observe_scalar_selected(
                 image,
             ));
         }
-        if !record {
-            registered += embedder
-                .machine
-                .take_execution_census()
-                .statements
-                .get(&crate::perf_witness::execution::Owner::RegisterProgram)
-                .copied()
-                .unwrap_or(0);
-        }
+
         match step {
             Step::Ended(end) => {
                 break match end {
@@ -741,28 +709,6 @@ fn observe_scalar_selected(
             }
         }
     };
-    if selection.mode == ExecutionMode::Source {
-        assert_eq!(packets, 0);
-        assert_eq!(registered, 0);
-    }
-    if selection.mode == ExecutionMode::Generic {
-        assert_eq!(fused, 0);
-    }
-    if !record && selection.mode != ExecutionMode::Source {
-        assert!(
-            registered > 0,
-            "expression corpus must run register statements: {source}"
-        );
-    }
-    if require_typed {
-        assert!(
-            {
-                let work = crate::kernel_internals::register_work(&tape);
-                work.blocks > 0 || work.typed_packets > 0
-            },
-            "the scalar layout must execute a fixed template or a typed packet: {source}"
-        );
-    }
     let events = tape
         .steps()
         .into_iter()
@@ -795,29 +741,19 @@ fn scalar_layouts_agree() {
     let prefix = scalar_document(
         "let first = 7 let second = first set first = second do perform 0(first) as Any return second",
     );
-    crate::machine::islands::take_certified_statements();
-    packet_modes(&prefix, super::embedder::ROOMY, u64::MAX, false, false);
-    let certified = crate::machine::islands::take_certified_statements();
-    assert!(
-        certified > 0,
-        "literal/copy prefixes must publish through the compiled certificate"
-    );
-    println!("compiled scalar prefixes published: {certified}");
+
+    region_modes(&prefix, super::embedder::ROOMY, u64::MAX, false, false);
+
     let arithmetic = scalar_document(
         "let answer = flat.add(3, flat.mul(2, 2)) do perform 0(answer) as Any return answer",
     );
-    packet_modes(&arithmetic, super::embedder::ROOMY, u64::MAX, false, false);
-    let arithmetic_certified = crate::machine::islands::take_certified_statements();
-    assert!(
-        arithmetic_certified > 0,
-        "the arithmetic binding must publish its whole expression certificate"
-    );
-    println!("compiled arithmetic prefixes published: {arithmetic_certified}");
+    region_modes(&arithmetic, super::embedder::ROOMY, u64::MAX, false, false);
+
     for slice in [1, 2, 3, 7] {
-        packet_modes(&arithmetic, super::embedder::ROOMY, slice, true, true);
+        region_modes(&arithmetic, super::embedder::ROOMY, slice, true, true);
     }
     for charge_limit in 0..24 {
-        packet_modes(
+        region_modes(
             &arithmetic,
             Bounds {
                 charge_limit,
@@ -829,10 +765,10 @@ fn scalar_layouts_agree() {
         );
     }
     for slice in [1, 2, 3, 7] {
-        packet_modes(&prefix, super::embedder::ROOMY, slice, true, true);
+        region_modes(&prefix, super::embedder::ROOMY, slice, true, true);
     }
     for charge_limit in 0..12 {
-        packet_modes(
+        region_modes(
             &prefix,
             Bounds {
                 charge_limit,
@@ -844,7 +780,7 @@ fn scalar_layouts_agree() {
         );
     }
     for memory in [128, 160, 192, 224, 256, 512] {
-        packet_modes(
+        region_modes(
             &prefix,
             Bounds {
                 memory,
@@ -855,9 +791,8 @@ fn scalar_layouts_agree() {
             true,
         );
     }
-    use crate::machine::islands::witness::{self, Exit, Family};
-    witness::begin();
-    for (case, body) in [
+
+    for body in [
         "let i = 0 let target = 0 let a = 0.1 let s = 0.0 while flat.lt(i, 5) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(a, a)) set a = flat.add(a, 1.1) } do perform 0((i, target, s, a)) as Any return (i, target, s, a)",
         "let i = 9223372036854775806 let target = 0 let s = -0.0 while flat.lt(i, 9223372036854775807) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(s, -0.0)) } return (i, target, s)",
         "let i = 0 let target = 0 let s = -0.0 while flat.lt(i, 3) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.div(0.0, 0.0)) } return (i, target, s)",
@@ -878,46 +813,36 @@ fn scalar_layouts_agree() {
         "let i = 0 let s = 9223372036854775806 try { while flat.lt(i, 3) { set s = flat.add(s, 1) set i = flat.add(i, 1) } } catch err { print (s, i) } return (s, i)",
         "let i = 0.0 let s = 1.5 try { while flat.lt(i, 3.0) { set i = flat.add(i, 1.0) set s = flat.rem(s, 2.0) } } catch err { print (s, i) } return (s, i)",
         "let logger = (fn(args) { print args[0] return args[0] },) let f = fn(value) { return let(saved = logger, let(args = [flat.identity(value)], let(callee = saved[0], apply callee(args)))) } return apply f(2)",
-    ].into_iter().enumerate() {
+    ] {
         let source = scalar_document(body);
         for record in [false, true] {
-            let reference = observe_scalar(&source, Layout(0), record, false, false);
+            let reference = observe_scalar(&source, Layout(0), record, false);
             for layout in [Layout(0), Layout(1), Layout(2), Layout(0x5eed)] {
-                assert_eq!(observe_scalar(&source, layout, record, false, record && case < 6 && layout.0 % 2 == 0), reference, "{body}, {layout:?}, tape={record}");
-                assert_eq!(observe_scalar(&source, layout, record, true, false), reference, "cold {body}, {layout:?}, tape={record}");
+                assert_eq!(
+                    observe_scalar(&source, layout, record, false),
+                    reference,
+                    "{body}, {layout:?}, tape={record}"
+                );
+                assert_eq!(
+                    observe_scalar(&source, layout, record, true),
+                    reference,
+                    "cold {body}, {layout:?}, tape={record}"
+                );
             }
         }
     }
-    let mut counts = witness::take();
     // K-CHG-001 / PLAN-INDEP: this straight-line scalar cannot hide in a
     // repeated graph. Every refused close retains the source operand owners.
     let source = scalar_document(
         "let left = 255 let right = 1 let answer = flat.add(left, right) do perform 0(answer) as Any return answer",
     );
-    let reference = observe_scalar(&source, Layout(0), false, false, false);
-    let mut collect = |actual: witness::Counts| {
-        for (event, count) in actual {
-            *counts.entry(event).or_default() += count;
-        }
-    };
-    collect(packet_modes(
-        &source,
-        super::embedder::ROOMY,
-        u64::MAX,
-        false,
-        false,
-    ));
+    let reference = observe_scalar(&source, Layout(0), false, false);
+    region_modes(&source, super::embedder::ROOMY, u64::MAX, false, false);
     for slice in [1, 3, 11] {
-        collect(packet_modes(
-            &source,
-            super::embedder::ROOMY,
-            slice,
-            true,
-            false,
-        ));
+        region_modes(&source, super::embedder::ROOMY, slice, true, false);
     }
     for charge_limit in 0..reference.4 {
-        collect(packet_modes(
+        region_modes(
             &source,
             Bounds {
                 charge_limit,
@@ -926,15 +851,8 @@ fn scalar_layouts_agree() {
             u64::MAX,
             false,
             true,
-        ));
-    }
-    for exit in [Exit::Commit, Exit::Guard, Exit::Prefix] {
-        assert!(
-            counts.get(&(Family::Scalar, exit)).copied().unwrap_or(0) > 0,
-            "scalar packets must reach {exit:?}: {counts:?}"
         );
     }
-    println!("scalar packet exits: {counts:?}");
 }
 
 fn call_probes(
@@ -982,7 +900,6 @@ main {
 /// refusals under every layout, warm or cold.
 #[test]
 fn allocating_operations_agree() {
-    crate::machine::islands::witness::begin();
     let mut witness = Embedder::with(
         ALLOCATING,
         Setup {
@@ -991,38 +908,26 @@ fn allocating_operations_agree() {
         },
     );
     super::observe::fully_observe(&mut witness.machine);
-    use crate::perf_witness::execution::Owner;
-    witness.machine.count_execution();
+
     let end = witness.run_to_end(&[]);
-    let census = witness.machine.take_execution_census();
+
     assert!(matches!(end, End::Finished(_)), "{end:?}");
-    assert!(
-        census
-            .statements
-            .get(&Owner::RegisterProgram)
-            .is_some_and(|statements| *statements > 0),
-        "observed allocating bodies execute in the register program: {census:?}"
-    );
+
     for record in [false, true] {
-        let reference = observe_scalar(ALLOCATING, Layout(0), record, false, false);
+        let reference = observe_scalar(ALLOCATING, Layout(0), record, false);
         for layout in [Layout(0), Layout(1), Layout(2), Layout(0x5eed)] {
             assert_eq!(
-                observe_scalar(ALLOCATING, layout, record, false, false),
+                observe_scalar(ALLOCATING, layout, record, false),
                 reference,
                 "allocating {layout:?}, tape={record}"
             );
             assert_eq!(
-                observe_scalar(ALLOCATING, layout, record, true, false),
+                observe_scalar(ALLOCATING, layout, record, true),
                 reference,
                 "cold allocating {layout:?}, tape={record}"
             );
         }
     }
-    assert_eq!(
-        crate::machine::islands::witness::logical_entry_fallbacks(),
-        0,
-        "every allocating body enters through its accepted source entry"
-    );
 }
 
 /// The same bodies and public signatures are authoritative for their
@@ -1211,11 +1116,11 @@ fn control_exits_agree() {
         "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, false) return flat.add(one, apply bump())",
     ] {
         let source = control_document(body);
-        let natural = observe_scalar(&source, Layout(0), true, false, false);
+        let natural = observe_scalar(&source, Layout(0), true, false);
         for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
             for cold in [false, true] {
                 assert_eq!(
-                    observe_scalar(&source, layout, true, cold, false),
+                    observe_scalar(&source, layout, true, cold),
                     natural,
                     "{body}, {layout:?}, cold={cold}"
                 );
@@ -1243,10 +1148,7 @@ fn free_cells_agree() {
         },
     );
     let (program, _) = initial.program(true);
-    assert!(
-        crate::kernel_internals::call_islands(&program).unwrap() > 0,
-        "the free-cell body must form a register program"
-    );
+
     let export = &program.document.exports[&lash_kernel_value::Name::new("free")];
     let lash_kernel_doc::Export::Function(export) = export else {
         panic!("function export");
@@ -1339,51 +1241,39 @@ fn capture_scopes_agree() {
         "definition {}\nmain {{ let run = call make_churn() return apply run(2200) }}",
         serde_json::to_string(&definition).unwrap()
     );
-    let reference = observe_scalar(&source, Layout(0), true, false, false);
+    let reference = observe_scalar(&source, Layout(0), true, false);
     assert_eq!(reference.0, format!("finished {:?}", int(1_211_100)));
     for layout in [Layout(0), Layout(2)] {
         assert_eq!(
-            observe_scalar(&source, layout, true, false, false),
+            observe_scalar(&source, layout, true, false),
             reference,
             "capture scope {layout:?}"
         );
     }
 }
 
-pub(super) fn packet_modes(
-    source: &str,
-    bounds: Bounds,
-    slice: u64,
-    cold: bool,
-    record: bool,
-) -> crate::machine::islands::witness::Counts {
-    use crate::machine::islands::witness;
+pub(super) fn region_modes(source: &str, bounds: Bounds, slice: u64, cold: bool, record: bool) {
     let run = |mode| {
-        witness::begin();
-        let observed = observe_scalar_selected(
+        observe_scalar_selected(
             source,
             Layout(0),
             record,
             cold,
-            false,
             bounds,
             ScalarSelection {
                 mode,
                 slice,
                 detailed: true,
             },
-        );
-        let counts = witness::take();
-        if mode != ExecutionMode::Specialized {
-            assert!(counts.is_empty());
-        }
-        (observed, counts)
+        )
     };
-    let source = run(ExecutionMode::Source).0;
-    assert_eq!(run(ExecutionMode::Generic).0, source, "generic packets");
-    let (specialized, counts) = run(ExecutionMode::Specialized);
-    assert_eq!(specialized, source, "specialized packets");
-    counts
+    let reference = run(ExecutionMode::Source);
+    assert_eq!(run(ExecutionMode::Generic), reference, "generic regions");
+    assert_eq!(
+        run(ExecutionMode::Specialized),
+        reference,
+        "specialized regions"
+    );
 }
 
 mod accumulation;

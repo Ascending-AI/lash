@@ -4,7 +4,6 @@ mod scalar;
 use lash_kernel_doc::NativeFunction;
 
 pub(crate) struct Lib {
-    pub(crate) index: LibId,
     pub(crate) shares_params: bool,
     pub(crate) operation: bool,
     /// Its definition's header: what a call reads of it without the body.
@@ -29,57 +28,10 @@ pub(crate) struct Specialization {
     pub(crate) function: FunctionId,
     pub(crate) prepared: Option<(Entry, Fast)>,
     pub(crate) native: lash_kernel_doc::NativeSpecialization,
-    /// Function-owned scalar facts, shared by every published call site.
-    pub(crate) kernels: std::sync::OnceLock<Kernels>,
     pub(crate) deepest: std::sync::OnceLock<u32>,
 }
 
-/// Derived once from the canonical entry, signature and formula.
-pub(crate) struct Kernels {
-    pub(crate) pairs: [Option<lash_kernel_doc::scalar::Pair>; 2],
-    pub(crate) texts: Option<lash_kernel_doc::scalar::ScalarOp>,
-    pub(crate) resident: Option<Resident>,
-    pub(crate) append: bool,
-    pub(crate) concat: Option<TextCharge>,
-    pub(crate) text_body: Option<std::sync::Arc<super::room::region::text::TextBody>>,
-}
-
-/// The installed native's certified resident answer and canonical formula.
-#[derive(Clone, Copy)]
-pub(crate) enum Resident {
-    Length(lash_kernel_doc::ValueKind, u64),
-    Item(lash_kernel_doc::ValueKind),
-    Member(lash_kernel_doc::plan::Table),
-    TextJoin,
-}
-
 impl Lib {
-    pub(crate) fn kernels(&self, exe: &Executable) -> &Kernels {
-        self.specialization.kernels.get_or_init(|| Kernels {
-            pairs: [
-                super::numeric_pair(self, false),
-                super::numeric_pair(self, true),
-            ],
-            texts: match self.run {
-                LibRun::Native { .. } => self.specialization.native.text_relation,
-                _ => None,
-            },
-            resident: self
-                .collection_length()
-                .map(|(kind, units)| Resident::Length(kind, units))
-                .or_else(|| self.item_read().map(Resident::Item))
-                .or_else(|| self.membership().map(Resident::Member))
-                .or_else(|| self.text_join().then_some(Resident::TextJoin)),
-            append: self.text_append(exe).is_some(),
-            text_body: super::room::region::text::TextBody::compile(exe, self.index)
-                .ok()
-                .map(std::sync::Arc::new),
-            concat: self
-                .text_append(exe)
-                .and_then(|_| self.charge.text_charge()),
-        })
-    }
-
     pub(crate) fn prepared_depth(&self, exe: &Executable) -> u32 {
         *self.specialization.deepest.get_or_init(|| {
             self.specialization
@@ -94,7 +46,7 @@ impl Lib {
     /// Every prepared, metered, typed, scalar, heap and joined-text entry uses
     /// this exact declaration. Inspecting its source is cold and preserves
     /// ordinary preparation's body laziness.
-    #[allow(dead_code, reason = "phase-one source projection inspected by laws")]
+    #[cfg(test)]
     pub(crate) fn source_room<'e>(&self, exe: &'e Executable) -> Option<&'e super::room::Source> {
         let code = match self.run {
             LibRun::Body(code)
@@ -123,136 +75,6 @@ impl Lib {
     /// Body-only calls reserve their ordinary frame at entry.
     pub(crate) fn operation(&self) -> bool {
         self.operation
-    }
-
-    /// Collection methods retain a call continuation after their mutation.
-    pub(crate) fn collection_method(&self) -> bool {
-        matches!(self.run, LibRun::Body(_))
-            && self.header.signature.result == lash_kernel_value::Type::Any
-            && matches!(
-                self.header.name.as_str(),
-                "ts.map.set" | "ts.map.get" | "ts.map.has" | "ts.set.add" | "ts.set.has"
-            )
-    }
-
-    /// A text addition forwards both operands to the kernel concat native.
-    /// The compiler derives the helper fact over every text representation.
-    pub(crate) fn text_append(&self, exe: &Executable) -> Option<LibId> {
-        let callee = match (&self.run, &self.specialization.prepared) {
-            (LibRun::Native { .. }, _) => self.index,
-            (LibRun::Body(_), Some((Entry::Template { template, .. }, _)))
-                if template.metered.is_none() =>
-            {
-                exe.library_lib(
-                    template
-                        .callees
-                        .get(usize::from(template.forwards.texts?))?,
-                )?
-            }
-            _ => return None,
-        };
-        let primitive = exe.lib(callee);
-        (primitive.specialization.native.text_append
-            && primitive.arity == 2
-            && primitive.limit.is_none()
-            && matches!(primitive.run, LibRun::Native { .. }))
-        .then_some(callee)
-    }
-
-    /// A resident join certified by the exact native implementation.
-    pub(crate) fn text_join(&self) -> bool {
-        self.specialization.native.text_join
-            && self.arity == 2
-            && self.limit.is_none()
-            && matches!(self.run, LibRun::Native { .. })
-    }
-
-    /// Whether it is the kernel's `same`, whose test of a value against the
-    /// empty tuple (`same(x, ())`, TypeScript's record guard and hole
-    /// test) is whether the value is a tuple of no members: a plan region
-    /// and an island answer that test without building the tuple.
-    pub(crate) fn is_same(&self) -> bool {
-        self.specialization.native.symbolic == Some(lash_kernel_doc::SymbolicNative::Same)
-            && matches!(self.run, LibRun::Native { .. })
-            && self.arity == 2
-    }
-
-    /// What a call of `list.len` charges, whose answer on a list is that
-    /// list's length: a region reads it from the arena where the list is
-    /// resident, as the native's own call reads it, and charges the units
-    /// of its formula, which measures nothing. `None` for every other
-    /// function.
-    pub(crate) fn length_read(&self) -> Option<u64> {
-        let (kind, units) = self.collection_length()?;
-        (kind == lash_kernel_doc::ValueKind::List).then_some(units)
-    }
-
-    /// A collection's primitive length and its constant native formula.
-    pub(crate) fn collection_length(&self) -> Option<(lash_kernel_doc::ValueKind, u64)> {
-        use lash_kernel_doc::ValueKind;
-        if !matches!(self.run, LibRun::Native { .. }) {
-            return None;
-        }
-        let Some(lash_kernel_doc::ResidentRead::Length(collection)) =
-            self.specialization.native.resident
-        else {
-            return None;
-        };
-        let kind = match collection {
-            lash_kernel_doc::plan::Collection::List => ValueKind::List,
-            lash_kernel_doc::plan::Collection::Tuple => ValueKind::Tuple,
-            lash_kernel_doc::plan::Collection::Map => ValueKind::Map,
-            lash_kernel_doc::plan::Collection::Set => ValueKind::Set,
-            lash_kernel_doc::plan::Collection::Record => ValueKind::Record,
-        };
-        (matches!(
-            kind,
-            ValueKind::List
-                | ValueKind::Tuple
-                | ValueKind::Map
-                | ValueKind::Set
-                | ValueKind::Record
-        ) && self.arity == 1
-            && self.limit.is_none()
-            && self.specialization.prepared.is_none()
-            && self.charge.measurements().is_empty())
-        .then(|| (kind, self.charge.evaluate(|_, _| 0)))
-    }
-
-    /// A sequence native whose successful answer is one resident item.
-    /// Invalid indices and cold chunks retain the native's own failure.
-    pub(crate) fn item_read(&self) -> Option<lash_kernel_doc::ValueKind> {
-        if !matches!(self.run, LibRun::Native { .. })
-            || self.arity != 2
-            || self.limit.is_some()
-            || self.specialization.prepared.is_some()
-        {
-            return None;
-        }
-        match self.specialization.native.resident {
-            Some(lash_kernel_doc::ResidentRead::Item(kind)) => Some(kind),
-            _ => None,
-        }
-    }
-
-    /// The table whose membership test it is (FIG-6820): `map.contains`,
-    /// `set.contains` and `record.contains`, unguarded, with no prepared
-    /// entry. Its answer is a lookup that builds and reserves nothing, so
-    /// an island answers it from the arena, as the native's own call looks
-    /// the key up, and charges its formula measured on the values. `None`
-    /// for every other function.
-    pub(crate) fn membership(&self) -> Option<lash_kernel_doc::plan::Table> {
-        if !matches!(self.run, LibRun::Native { .. })
-            || self.arity != 2
-            || self.limit.is_some()
-            || self.specialization.prepared.is_some()
-        {
-            return None;
-        }
-        match self.specialization.native.resident {
-            Some(lash_kernel_doc::ResidentRead::Membership(table)) => Some(table),
-            _ => None,
-        }
     }
 }
 

@@ -80,7 +80,7 @@ impl KernelMachine {
     }
 
     /// What the bound leaves past what the run holds: the room a native
-    /// call, a region or an island may take before the meter decides.
+    /// call or a region may take before the meter decides.
     pub(super) fn capacity_headroom(&self) -> u64 {
         if self.bounds.memory_meter == crate::MemoryMeter::Off {
             return u64::MAX;

@@ -24,11 +24,7 @@ impl KernelMachine {
         ) {
             return Ok(false);
         }
-        #[cfg(any(test, feature = "testing"))]
-        let output_register = op
-            .writes()
-            .ok_or_else(|| malformed("source construction has no output register"))?
-            .ix();
+
         let names = if let Op::MakeRecord { fields, .. } = op {
             let Some(names) = running.stream.field_lists[fields.ix()]
                 .iter()
@@ -221,14 +217,7 @@ impl KernelMachine {
             },
         )?;
         drop(arena);
-        if published {
-            #[cfg(any(test, feature = "testing"))]
-            if matches!(op, Op::MakeTuple { items } if items.len == 0) {
-                crate::machine::islands::witness::empty_tuple_constructed(true);
-            } else {
-                crate::machine::islands::witness::precise_constructed(self.regs[output_register]);
-            }
-        }
+
         Ok(published)
     }
 }

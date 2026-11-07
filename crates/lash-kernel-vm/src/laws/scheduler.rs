@@ -7,7 +7,6 @@ use lash_kernel_doc::Datum;
 /// effects, ordered operands, charge and durable continuation across a cold park.
 #[test]
 fn layouts_agree() {
-    use crate::perf_witness::execution::Owner;
     for cancel in [false, true] {
         let source = document(cancel);
         let run = |layout: Layout, cold: bool| {
@@ -18,7 +17,7 @@ fn layouts_agree() {
                     ..Setup::default()
                 },
             );
-            embedder.machine.count_execution();
+
             let tape = crate::ChargeTape::new();
             embedder.machine.record_charges(tape.clone());
             let mut saved = Vec::new();
@@ -41,26 +40,7 @@ fn layouts_agree() {
                     }
                 }
             };
-            let census = embedder.machine.take_execution_census();
-            if layout == Layout(0) && !cold {
-                assert!(
-                    census
-                        .slow_exits
-                        .get(&Owner::RegisterProgram)
-                        .is_none_or(|reasons| !reasons
-                            .contains_key(&crate::perf_witness::execution::Reason::ColdBranch)),
-                    "scheduler actions do not hand their operation to the source driver: {census:?}"
-                );
-                assert!(
-                    census
-                        .statements
-                        .get(&Owner::RegisterProgram)
-                        .copied()
-                        .unwrap_or(0)
-                        >= if cancel { 6 } else { 11 },
-                    "scheduler forms must run in the register program: {census:?}"
-                );
-            }
+
             (
                 end,
                 embedder.requests,

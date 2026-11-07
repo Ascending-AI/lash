@@ -195,48 +195,7 @@ impl KernelMachine {
                 bank.publish();
             },
         )?;
-        #[cfg(any(test, feature = "testing"))]
-        if published {
-            crate::machine::islands::witness::precise_source_published();
-            if at.phase == room::Phase::Open {
-                crate::machine::islands::witness::callee_read_published();
-            }
-            if let Some(phase) = frame
-                .control
-                .iter()
-                .rev()
-                .find_map(|control| match control {
-                    crate::machine::Control::Try { phase, .. } => Some(phase),
-                    _ => None,
-                })
-            {
-                match phase {
-                    crate::machine::TryPhase::Body => {
-                        crate::machine::islands::witness::precise_try_read(false)
-                    }
-                    crate::machine::TryPhase::Catch => {
-                        crate::machine::islands::witness::precise_try_read(true)
-                    }
-                    crate::machine::TryPhase::Finally(crate::machine::Completion::Normal) => {
-                        crate::machine::islands::witness::precise_try_finally_read()
-                    }
-                    crate::machine::TryPhase::Finally(_) => {}
-                }
-            }
 
-            if matches!(running.stmt.form, crate::compile::Form::While { .. })
-                && **site == running.stmt.site.child(0)
-                && let doc::Value::Bool(taken) = value
-                && let Some(frontier) = &frame.source_frontier
-                && let Some((loop_site, iteration)) = frontier.position().occurrence.loops.last()
-            {
-                assert_eq!(loop_site, &running.stmt.site);
-                crate::machine::islands::witness::precise_condition_published(taken, *iteration);
-            }
-            if matches!(op, Op::Session { .. }) {
-                crate::machine::islands::witness::precise_session_read_published();
-            }
-        }
         Ok(published)
     }
 }

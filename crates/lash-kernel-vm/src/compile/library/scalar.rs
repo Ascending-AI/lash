@@ -29,12 +29,6 @@ impl Lib {
         }
     }
 
-    pub(crate) fn prepared_scalar(&self, arena: &Arena, args: &[Value]) -> Option<Value> {
-        let (entry, _) = self.specialization.prepared.as_ref()?;
-        self.scalar_kernel(arena, args)
-            .unwrap_or_else(|| entry.call(args))
-    }
-
     /// An unavailable arena-dependent entry may use an explicit native contract.
     /// A kernel refusal or an actual disagreement must never do so.
     pub(crate) fn check_known_scalar(
@@ -60,37 +54,5 @@ impl Lib {
             return Err(());
         }
         Ok(Some(expected))
-    }
-
-    pub(crate) fn validate_known_scalar(
-        &self,
-        arena: &Arena,
-        args: &[Value],
-        expected: Value,
-    ) -> Option<Value> {
-        self.check_known_scalar(arena, args, expected)
-            .ok()
-            .flatten()
-    }
-
-    pub(crate) fn canonical_scalar_contract(
-        &self,
-        arena: &Arena,
-        args: &[Value],
-        expected: Value,
-    ) -> Result<Option<doc::NativeResourceContract>, doc::NativeError> {
-        let Some(value) = self.validate_known_scalar(arena, args, expected) else {
-            return Ok(None);
-        };
-        if !super::super::scalar(&value)
-            || !super::super::import_result_fits(&self.header.signature.result, value)
-        {
-            return Ok(None);
-        }
-        doc::NativeResourceContract::returned(
-            doc::Args::new(args, arena.objects(), &arena.semantics()),
-            &value,
-        )
-        .map(Some)
     }
 }

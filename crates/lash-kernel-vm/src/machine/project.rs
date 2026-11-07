@@ -195,15 +195,6 @@ pub(crate) fn project(
     project_in(arena, pages, value)
 }
 
-/// Project the exclusive prepared graph without publishing any guest body.
-pub(crate) fn project_prepared(
-    arena: &mut lash_kernel_state::arena::PreparedInstallation<'_>,
-    pages: &Access<'_>,
-    value: &Value,
-) -> Result<PageValue, HeapFault> {
-    project_in(arena, pages, value)
-}
-
 fn project_in<A: ProjectionArena>(
     arena: &mut A,
     pages: &Access<'_>,
@@ -472,57 +463,6 @@ pub(crate) fn admit(
         PageValue::Set(id) => Value::Set(arena.proxy(*id, ProxyKind::Set)),
         PageValue::Record(id) => Value::Record(arena.proxy(*id, ProxyKind::Record)),
         PageValue::Closure(id) => Value::Closure(arena.proxy(*id, ProxyKind::Closure)),
-    })
-}
-
-/// Restore an accepted source operand whose descriptor can still name ledger
-/// keys. Its immutable graph is semantic recovery data, not a durable page
-/// form: projection must reach its mutable children and assign their ids.
-pub(in crate::machine) fn restore_source(
-    arena: &mut Arena,
-    pages: &Access<'_>,
-    value: &PageValue,
-) -> Result<Value, HeapFault> {
-    Ok(match value {
-        PageValue::Tuple(tuple) => {
-            let members = page_reads::tuple(pages, tuple)?
-                .iter()
-                .map(|member| restore_source(arena, pages, member))
-                .collect::<Result<Vec<_>, _>>()?;
-            Value::Tuple(arena.immutable(
-                Body::Tuple(Sequence::whole(members)),
-                Summary {
-                    depth: tuple.summary.depth,
-                    task_edges: tuple.summary.task_edges,
-                    has_edges: tuple.summary.has_edges,
-                },
-                None,
-            ))
-        }
-        PageValue::Error(error) => {
-            let kind = admit_text(arena, &error.kind, &PageValue::Text(error.kind.clone()))?;
-            let message = admit_text(
-                arena,
-                &error.message,
-                &PageValue::Text(error.message.clone()),
-            )?;
-            let data = page_reads::error_data(pages, error)?;
-            let data = restore_source(arena, pages, &data)?;
-            Value::Error(arena.immutable(
-                Body::Error(ErrorBody {
-                    kind,
-                    message,
-                    data,
-                }),
-                Summary {
-                    depth: error.depth,
-                    task_edges: error.task_edges,
-                    has_edges: error.has_edges,
-                },
-                None,
-            ))
-        }
-        _ => admit(arena, pages, value)?,
     })
 }
 
@@ -1127,4 +1067,13 @@ fn stored(
         }
         Held::Cell(value) => StoredObject::Variable(project(arena, pages, &value)?),
     })
+}
+
+#[cfg(test)]
+pub(crate) fn project_prepared(
+    arena: &mut lash_kernel_state::arena::PreparedInstallation<'_>,
+    pages: &Access<'_>,
+    value: &Value,
+) -> Result<PageValue, HeapFault> {
+    project_in(arena, pages, value)
 }

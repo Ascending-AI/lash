@@ -4,8 +4,8 @@
 use lash_kernel_doc as doc;
 use lash_kernel_doc::Value;
 
+use crate::compile::value_facts::Fresh;
 use crate::data::{empty_measure, holds_nothing, immediate_measure, size_one};
-use crate::machine::islands::cx::Fresh;
 
 /// What a formula's operand measures: an argument by its position, the
 /// result, or a parameter the function does not have, which measures 0.
@@ -37,15 +37,6 @@ pub(crate) struct Plan {
     /// A sum of measurements, optionally with one pair combined by a
     /// minimum: the folded constant and the pair spare the program.
     linear: Option<Linear>,
-}
-
-/// A sum formula specialized to two texts and their concatenation. Its
-/// coefficients come from the formula's measurements, never a charge price.
-#[derive(Clone, Copy)]
-pub(crate) struct TextCharge {
-    fixed: u64,
-    left: u64,
-    right: u64,
 }
 
 /// An instruction of a plan's program. Each combining one takes the two
@@ -108,38 +99,6 @@ impl Plan {
             }
         });
         failure.map_or(Ok(units), Err)
-    }
-
-    /// A size minimum capped at one needs no collection measurement when
-    /// every value is resident. Other terms still require immediate measures.
-    pub(crate) fn resident_minimum(&self, args: &[Value], result: &Value) -> Option<u64> {
-        let Some(Linear::Minimum { constant, at }) = self.linear else {
-            return None;
-        };
-        let value = |source: Source| match source {
-            Source::Arg(index) => args.get(index),
-            Source::Result => Some(result),
-            Source::Nothing => None,
-        };
-        let measured = |(source, measure): &(Source, doc::Measure)| match *source {
-            Source::Nothing => Some(0),
-            _ => immediate_measure(value(*source)?, *measure),
-        };
-        let positive = |(source, measure): &(Source, doc::Measure)| {
-            *measure == doc::Measure::Size && value(*source).is_some()
-        };
-        let (left, right) = (&self.measurements[at], &self.measurements[at + 1]);
-        match (measured(left), measured(right)) {
-            (Some(1), None) if positive(right) => {}
-            (None, Some(1)) if positive(left) => {}
-            _ => return None,
-        }
-        self.measurements[..at]
-            .iter()
-            .chain(&self.measurements[at + 2..])
-            .try_fold(constant.saturating_add(1), |sum, item| {
-                Some(sum.saturating_add(measured(item)?))
-            })
     }
 
     /// Evaluate the exact linear formula using measurements carried by
@@ -385,34 +344,6 @@ impl Plan {
         self.ops.push(Op::Measure(index));
     }
 
-    /// K-CHG-003: text size and deep size are UTF-8 bytes plus one;
-    /// nested size and magnitude are zero. Concatenation adds the bytes.
-    pub(crate) fn text_charge(&self) -> Option<TextCharge> {
-        let Linear::Sum(fixed) = self.linear.as_ref()? else {
-            return None;
-        };
-        let mut charge = TextCharge {
-            fixed: *fixed,
-            left: 0,
-            right: 0,
-        };
-        for (source, measure) in &self.measurements {
-            if !matches!(measure, doc::Measure::Size | doc::Measure::DeepSize) {
-                continue;
-            }
-            let (left, right) = match source {
-                Source::Arg(0) => (1, 0),
-                Source::Arg(1) => (0, 1),
-                Source::Result => (1, 1),
-                _ => continue,
-            };
-            charge.fixed = charge.fixed.saturating_add(1);
-            charge.left += left;
-            charge.right += right;
-        }
-        Some(charge)
-    }
-
     /// The measurements the amount reads, each once.
     pub(crate) fn measurements(&self) -> &[(Source, doc::Measure)] {
         &self.measurements
@@ -596,11 +527,6 @@ impl ScalarTable {
             }
         }
         Some(mask)
-    }
-
-    /// The most any call charges.
-    pub(crate) fn max(&self) -> u64 {
-        self.units.iter().copied().max().unwrap_or(0)
     }
 }
 

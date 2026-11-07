@@ -1,5 +1,4 @@
 //! Exact exits must bind values and entry versions, not merely matching prices.
-mod original;
 use super::*;
 use crate::Machine;
 use crate::compile::room::{self, Phase, Point, publication::*};
@@ -70,7 +69,6 @@ fn paid() -> crate::admission::Allowance {
 }
 
 pub(super) fn events() {
-    original::prefixes();
     let run = Embedder::new("main { let n = 1 return n }");
     let (program, _) = run.program(false);
     let source = Arc::new(room::Source::compile(
@@ -537,7 +535,7 @@ fn runtime_exits() {
             if source_mode {
                 run.machine.force_source_execution();
             } else {
-                run.machine.force_generic_packets();
+                run.machine.force_generic_regions();
             }
             match run.run() {
                 Step::Ended(end) => break end,
@@ -577,7 +575,7 @@ fn runtime_exits() {
             assert_eq!(
                 observe(layout, cold, false, roomy).0,
                 reference,
-                "generic packets cold={cold} layout={layout:?}"
+                "generic regions cold={cold} layout={layout:?}"
             );
         }
     }

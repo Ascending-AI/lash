@@ -163,25 +163,10 @@ pub(crate) enum Event {
 #[derive(Clone, Debug, Default)]
 pub struct ChargeTape(Arc<std::sync::Mutex<Recorded>>);
 
-/// What a [`ChargeTape`] records: the charges, and the work the register
-/// program committed while it recorded.
+/// The ordered charges a [`ChargeTape`] records.
 #[derive(Debug, Default)]
 struct Recorded {
     steps: Vec<Weight>,
-    work: RegisterWork,
-}
-
-/// The work the register program committed in a recorded run: what tells a
-/// law that a run took the register's calls and typed runs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RegisterWork {
-    /// Calls an island entered: their frames, which the source evaluator
-    /// would push, it ran virtually.
-    pub calls: u64,
-    /// Typed runs a scalar loop ran whole.
-    pub blocks: u64,
-    /// Canonical typed arithmetic packets committed in the shared stream.
-    pub typed_packets: u64,
 }
 
 impl ChargeTape {
@@ -203,15 +188,6 @@ impl ChargeTape {
         self.lock().steps.is_empty()
     }
 
-    pub(crate) fn prepare_push(&self) -> Result<(), lash_kernel_doc::heap::HeapFault> {
-        self.lock()
-            .steps
-            .try_reserve(1)
-            .map_err(|_| lash_kernel_doc::heap::HeapFault::Exhausted {
-                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
-            })
-    }
-
     pub(crate) fn push(&self, weight: Weight) {
         // A one-unit atomic charge and one unit have the same event boundary
         // (Weight::expand). Author that event once where facts enter the tape,
@@ -223,37 +199,11 @@ impl ChargeTape {
         self.lock().steps.push(weight);
     }
 
-    /// The work the register program committed so far.
-    pub(crate) fn work(&self) -> RegisterWork {
-        self.lock().work
-    }
-
-    pub(crate) fn typed_packet(&self) {
-        self.lock().work.typed_packets += 1;
-    }
-
     fn lock(&self) -> std::sync::MutexGuard<'_, Recorded> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
-}
-
-/// The single register-entry event, projected into a semantic charge tape's
-/// existing work witness and, independently, an opt-in physical census.
-#[inline(always)]
-pub(crate) fn register_entry<const LITERAL: bool>(
-    #[cfg(any(test, feature = "perf-witness"))] census: &crate::perf_witness::execution::Recorder,
-    tape: Option<&ChargeTape>,
-    counting: bool,
-) {
-    #[cfg(not(any(test, feature = "perf-witness")))]
-    let _ = counting;
-    if let Some(tape) = tape {
-        tape.lock().work.calls += 1;
-    }
-    #[cfg(any(test, feature = "perf-witness"))]
-    crate::perf_witness::execution::register_entry::<LITERAL>(census, counting);
 }
 
 /// What one machine observes.

@@ -413,7 +413,11 @@ impl KernelMachine {
             region: None,
             slice_end: u64::MAX,
             sites: Default::default(),
-            islands: Default::default(),
+            #[cfg(any(test, feature = "testing"))]
+            source_only: false,
+            #[cfg(any(test, feature = "testing"))]
+            generic_regions: false,
+
             charged: root.meters.charged.unwrap_or(0),
             live_tasks: root.meters.live_tasks,
             census_refinements,

@@ -777,7 +777,7 @@ impl Compiler<'_> {
             depth: self.stmt_depth,
             kind,
             operator,
-            island: false,
+
             resume: ops.ops.len() as u32 + 1,
             dst,
             roles,

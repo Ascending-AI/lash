@@ -11,7 +11,6 @@ pub(super) struct Body {
     pub(super) base: Base,
     pub(super) tables: OnceLock<Tables>,
     pub(super) closures: bool,
-    pub(super) programs: OnceLock<islands::Islands>,
 }
 
 #[derive(Default)]
@@ -138,17 +137,6 @@ impl LibraryTables {
                 tables.stmts.len(),
                 self.stmts.iter().filter(|owner| **owner == at).count()
             );
-            let programs = islands::form(
-                &mut tables,
-                prepared,
-                (body.base.codes, body.base.blocks, body.base.stmts),
-                crate::costs::Costs::of(
-                    doc::KernelVersion::of(registered.header().kernel)
-                        .unwrap_or(doc::KernelVersion::NEWEST),
-                )
-                .loop_test,
-            );
-            let _ = body.programs.set(programs);
             #[cfg(feature = "perf-witness")]
             crate::perf_witness::preparation(crate::perf_witness::Preparation::End);
             tables
@@ -218,7 +206,6 @@ impl LibraryTables {
             base,
             tables: OnceLock::new(),
             closures: census.closures,
-            programs: OnceLock::new(),
         });
     }
 }
@@ -450,11 +437,6 @@ impl Prepared {
         slot.get_or_init(|| self.prepare_lib(id))
     }
 
-    /// Library function `id`, when the library numbers it.
-    pub(super) fn get_lib(&self, id: LibId) -> Option<&Lib> {
-        ((id.0 as usize) < self.libs.len()).then(|| self.lib(id))
-    }
-
     /// Library function `function`'s id in this layout, reached or not.
     pub(super) fn lib_of(&self, function: &FunctionId) -> Option<LibId> {
         let at = self.registry.position(function)?;
@@ -545,7 +527,6 @@ impl Prepared {
         };
         LibSlot {
             lib: Lib {
-                index: id,
                 shares_params: !shared_params.is_empty(),
                 operation: header.implementation == lash_kernel_doc::ImplementationKind::Both,
                 arity: params.len(),
@@ -558,7 +539,6 @@ impl Prepared {
                     resource,
                     prepared,
                     native,
-                    kernels: Default::default(),
                     deepest: Default::default(),
                 },
             },

@@ -66,7 +66,7 @@ fn kernel_case(name: &str, text: &str) -> Case {
 }
 
 /// The end, charge and final held bytes of `case` under `program` at
-/// `slice`, its census counting.
+/// `slice`.
 fn finished<const L: u64>(
     program: &Program,
     case: &Case,
@@ -105,8 +105,7 @@ fn finished<const L: u64>(
 const TIGHT: u64 = 96 * 1024;
 
 /// Every accumulator, in the kernel's own programs and in both dialects',
-/// extends its text in place, except the aliased-prefix control, whose
-/// every older version stays observed. Each makes the run its program states
+/// keeps its observed older versions. Each makes the run its program states
 /// under every slice, memory meter and bound and layout, the natural one
 /// beside one whose natives with kernel bodies run those bodies: the same
 /// end, charge and held bytes, and for the kernel's programs the value they
@@ -115,38 +114,24 @@ const TIGHT: u64 = 96 * 1024;
 fn linear_text_accumulators_keep_every_version_they_extend() {
     let registry = std::sync::Arc::new(super::corpus_registry());
     let kernel = lash_kernel_vm::kernel_internals::prepare_with_layout(registry, Layout(0));
-    let mut cases: Vec<(Case, PreparedLibrary, Option<Datum>, bool)> = kernel_programs()
+    let mut cases: Vec<(Case, PreparedLibrary, Option<Datum>)> = kernel_programs()
         .into_iter()
-        .map(|(name, text, value)| (kernel_case(name, text), kernel.clone(), Some(value), true))
+        .map(|(name, text, value)| (kernel_case(name, text), kernel.clone(), Some(value)))
         .collect();
     for (lowered, program) in crate::helper_plans::text_accumulator_programs() {
-        let extends = !lowered
-            .id
-            .ends_with(crate::helper_plans::ALIASED_ACCUMULATOR);
         let mut case = kernel_case(&lowered.id, "main { return null }");
         case.document = print_document(&program.document);
-        cases.push((case, program.library.clone(), None, extends));
+        cases.push((case, program.library.clone(), None));
     }
     let mut failures = Vec::new();
-    for (case, library, value, extends) in &cases {
+    for (case, library, value) in &cases {
         let natural = case_program(&in_layout(library, Layout(0)), case)
             .unwrap_or_else(|| panic!("{} is admitted", case.name));
         let bodies = Program {
             library: in_layout(library, Layout(3)),
             ..natural.clone()
         };
-        let (reference, census) =
-            crate::projection::counted(|| finished::<0>(&natural, case, u64::MAX));
-        println!(
-            "{}: accepted buffer transfers {}",
-            case.name, census.accumulated
-        );
-        if (census.accumulated > 0) != *extends {
-            failures.push(format!(
-                "{}: extended its text {} times: {census:?}",
-                case.name, census.accumulated
-            ));
-        }
+        let reference = finished::<0>(&natural, case, u64::MAX);
         if let Some(value) = value
             && reference.0 != ExpectedEnd::Finished(value.clone())
         {
@@ -204,12 +189,6 @@ fn bulk_array_copies_keep_charge_and_held_bytes() {
     else {
         panic!("the bulk-copy library lowers")
     };
-    let (described, dense, concat) =
-        lash_kernel_vm::kernel_internals::verify_bulk_source_rooms(&base.library).unwrap();
-    assert!(
-        described >= 2 && dense && concat,
-        "both source-derived copy policies have checked SourceRoom descriptions"
-    );
     let large = (0..513)
         .map(|i| i.to_string())
         .collect::<Vec<_>>()

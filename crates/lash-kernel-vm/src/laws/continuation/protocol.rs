@@ -32,6 +32,7 @@ fn hooks(
         .unwrap();
         out.push((name, registry.register(definition, None).unwrap()));
     };
+
     register("proto.open", "x: Any", "return x");
     register(
         "proto.next",

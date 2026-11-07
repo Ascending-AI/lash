@@ -146,10 +146,7 @@ impl KernelMachine {
                 bank.publish(prepared.value, prepared.holding);
             },
         )?;
-        #[cfg(any(test, feature = "testing"))]
-        if published {
-            crate::machine::islands::witness::precise_literal_published(literal);
-        }
+
         Ok(published)
     }
 }

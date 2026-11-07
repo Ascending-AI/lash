@@ -46,15 +46,12 @@ fn wide_windows_agree() {
             }
         };
         (
-            (
-                end,
-                embedder.world.printed,
-                embedder.requests,
-                embedder.machine.meters().charged.unwrap(),
-                lash_kernel_exec::Weight::expand(tape.steps()),
-                checkpoints,
-            ),
-            crate::kernel_internals::register_work(&tape).calls,
+            end,
+            embedder.world.printed,
+            embedder.requests,
+            embedder.machine.meters().charged.unwrap(),
+            lash_kernel_exec::Weight::expand(tape.steps()),
+            checkpoints,
         )
     };
     // The bound comes from the logical algebra, where each holding pays
@@ -81,7 +78,7 @@ fn wide_windows_agree() {
         "{}main {{ let recur = fn(self, n) {{ if flat.lt(n, 1) {{ return 0 }} return call operands({args}, apply self(self, flat.add(n, -1))) }} let answer = apply recur(recur, 100) print answer return answer }}",
         definition(&format!("operands({params})"), "return p259"),
     );
-    let reference = run(&source, Layout(0), false, bounds).0;
+    let reference = run(&source, Layout(0), false, bounds);
     assert_eq!(result(reference.0.clone()), int(0));
     let mut comparisons = 0;
     for width in [17, 260] {
@@ -104,20 +101,17 @@ fn wide_windows_agree() {
                 &format!("return flat.add(1000, call wide({args}))")
             ),
         );
-        let (natural, entered) = run(&source, Layout(0), false, super::super::embedder::ROOMY);
+        let natural = run(&source, Layout(0), false, super::super::embedder::ROOMY);
         assert_eq!(
             result(natural.0.clone()),
             int(1000 + width * (width - 1) / 2)
         );
-        assert!(
-            entered >= 2,
-            "the {width}-argument caller and callee must enter registers"
-        );
+
         for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
-            let reference = run(&source, layout, false, super::super::embedder::ROOMY).0;
+            let reference = run(&source, layout, false, super::super::embedder::ROOMY);
             for cold in [false, true] {
                 assert_eq!(
-                    run(&source, layout, cold, super::super::embedder::ROOMY).0,
+                    run(&source, layout, cold, super::super::embedder::ROOMY),
                     reference
                 );
                 comparisons += 1;
@@ -137,9 +131,9 @@ fn wide_windows_agree() {
                 &format!("{locals} return flat.add(x, v{})", width - 1),
             )
         );
-        let (natural, entered) = run(&simple, Layout(0), false, super::super::embedder::ROOMY);
+        let natural = run(&simple, Layout(0), false, super::super::embedder::ROOMY);
         assert_eq!(result(natural.0.clone()), int(width));
-        assert!(entered > 0, "a {width}-slot function must enter registers");
+
         let parked = format!(
             "{}{}main {{ return call wide(true) }}",
             definition(
@@ -171,10 +165,10 @@ fn wide_windows_agree() {
             ),
         );
         for source in [&simple, &parked, &recursive, &closure] {
-            let reference = run(source, Layout(0), false, super::super::embedder::ROOMY).0;
+            let reference = run(source, Layout(0), false, super::super::embedder::ROOMY);
             for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
                 assert_eq!(
-                    run(source, layout, false, super::super::embedder::ROOMY).0,
+                    run(source, layout, false, super::super::embedder::ROOMY),
                     reference
                 );
                 comparisons += 1;
@@ -182,7 +176,7 @@ fn wide_windows_agree() {
                 // Recursive budget exits are exercised whole above.
                 if source != &recursive {
                     assert_eq!(
-                        run(source, layout, true, super::super::embedder::ROOMY).0,
+                        run(source, layout, true, super::super::embedder::ROOMY),
                         reference
                     );
                     comparisons += 1;
@@ -206,7 +200,7 @@ fn wide_windows_agree() {
         memory: 256 << 10,
         ..super::super::embedder::ROOMY
     };
-    let (seen, _) = run(&source, Layout(0), false, bounds);
+    let seen = run(&source, Layout(0), false, bounds);
     assert!(matches!(
         seen.0,
         End::Error(crate::RunError::Bound(crate::BoundExceeded {

@@ -224,10 +224,7 @@ impl KernelMachine {
             },
         )
         .map_err(|halt| super::binding::native_commit_refusal(running, pc, src, halt))?;
-        #[cfg(any(test, feature = "testing"))]
-        if published {
-            crate::machine::islands::witness::session_published();
-        }
+
         Ok(published)
     }
 }

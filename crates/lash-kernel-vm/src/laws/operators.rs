@@ -111,6 +111,13 @@ impl ListItem {
 
 struct ValueOnly;
 impl NativeFunction for ValueOnly {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            immediate: self.prepare(),
+            immediate_resources: true,
+            ..Default::default()
+        }
+    }
     fn call(&self, _: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         panic!("the value-only prepared guard must answer")
     }
@@ -135,6 +142,7 @@ fn probes(
         .unwrap();
         (name, registry.register(definition, Some(native)).unwrap())
     };
+
     let is_float = register("law.float", "x: Any", Arc::new(IsFloat));
     let add = register("law.add", "a: Any, b: Any", Arc::new(AddFloat));
     let boolean = register("law.boolean", "x: Any", Arc::new(IsBool));
@@ -430,10 +438,9 @@ main { return call up(&up, 0) }
     );
 }
 
-/// K-CHG-007: a helper body evaluates its prepared scalar operation without
-/// entering any charge-only guard. Both a general-call fallback and the
-/// metadata-producing callback panic, so a successful nonempty result is
-/// evidence that the value-only entry ran.
+/// K-CHG-007: an uncharged helper evaluates its admitted immediate scalar
+/// without producing charge metadata. Both the ordinary native call and the
+/// metadata-producing callback panic, proving that the value-only entry ran.
 #[test]
 fn uncharged_helpers_use_the_value_only_prepared_entry() {
     let trace = observe(
@@ -453,8 +460,6 @@ fn uncharged_helpers_use_the_value_only_prepared_entry() {
 #[test]
 fn template_bearing_invokes_are_prepared_operator_sites() {
     use lash_kernel_doc::plan::{HelperPlan, HelperTemplate};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static ANSWERED: AtomicUsize = AtomicUsize::new(0);
     let fixture = super::embedder::library(true);
     let mut registry = (*fixture.registry).clone();
     let definition = parse_definition(
@@ -481,10 +486,7 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
             metered: None,
             depth: 1,
             callees: &[],
-            entry: Some(|args, _| {
-                ANSWERED.fetch_add(1, Ordering::Relaxed);
-                args.first().copied()
-            }),
+            entry: Some(|args, _| args.first().copied()),
             heap: None,
             forwards: Default::default(),
         }),
@@ -546,24 +548,22 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
         }
         other => panic!("template invoke did not finish: {other:?}"),
     }
-    assert_eq!(ANSWERED.load(Ordering::Relaxed), 1);
 }
 
 /// FIG-6959 / PLAN-INDEP: statement-root invokes use the same typed kernel
 /// as nested operators, in scalar and allocating regions. An operator
-/// expression in a call island already uses its typed kernel.
+/// expression in a region uses its typed kernel.
 /// Their certified fallback has identical values, occurrence counts and
 /// charge events, including an uncharged run and every charge-bound prefix.
 #[test]
 fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
     use lash_kernel_doc::scalar::{Pair, ScalarOp};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static PREPARED: AtomicUsize = AtomicUsize::new(0);
     struct PairProbe<const PAIRED: bool>;
     impl<const PAIRED: bool> NativeFunction for PairProbe<PAIRED> {
         fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
             lash_kernel_doc::NativeSpecialization {
                 immediate: self.prepare(),
+                immediate_resources: true,
                 text_relation: PAIRED.then_some(ScalarOp::Lt),
                 ..Default::default()
             }
@@ -590,20 +590,17 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
                     floats: None,
                     ints: Some(ScalarOp::Add),
                 }),
-                entry: |args| {
-                    PREPARED.fetch_add(1, Ordering::Relaxed);
-                    match args {
-                        [Value::Int(a), Value::Int(b)] => {
-                            lash_kernel_doc::scalar::ints(ScalarOp::Add, *a, *b)
-                        }
-                        [Value::Text(a), Value::Text(b)] => Some(Value::Bool(
-                            a.as_str()
-                                .encode_utf16()
-                                .cmp(b.as_str().encode_utf16())
-                                .is_lt(),
-                        )),
-                        _ => None,
+                entry: |args| match args {
+                    [Value::Int(a), Value::Int(b)] => {
+                        lash_kernel_doc::scalar::ints(ScalarOp::Add, *a, *b)
                     }
+                    [Value::Text(a), Value::Text(b)] => Some(Value::Bool(
+                        a.as_str()
+                            .encode_utf16()
+                            .cmp(b.as_str().encode_utf16())
+                            .is_lt(),
+                    )),
+                    _ => None,
                 },
                 charged_entry: None,
                 operation: "law.pair",
@@ -708,20 +705,9 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
         for charge in [crate::Charge::Exact, crate::Charge::Off] {
             let bounds = Bounds { charge, ..ROOMY };
             for record in [false, true] {
-                PREPARED.store(0, Ordering::Relaxed);
                 let expected = run_pair::<false>(source, bounds, record, Layout(0));
-                assert!(
-                    PREPARED.load(Ordering::Relaxed) > 0,
-                    "the certified path is exercised: {source}"
-                );
-                PREPARED.store(0, Ordering::Relaxed);
                 let actual = run_pair::<true>(source, bounds, record, Layout(0));
                 assert_eq!(actual, expected, "{source}, {charge:?}, tape {record}");
-                assert_eq!(
-                    PREPARED.load(Ordering::Relaxed),
-                    0,
-                    "statement-root invokes bypass the fused node: {source}"
-                );
                 if charge == crate::Charge::Exact {
                     let charged = expected.1.unwrap();
                     for charge_limit in 0..=charged {

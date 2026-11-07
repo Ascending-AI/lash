@@ -119,15 +119,7 @@ impl CompiledPublication {
     pub(in crate::compile::room) fn charges(&self) -> &[Arc<ChargeProgram>] {
         &self.charges
     }
-    #[cfg(test)]
-    pub(crate) fn start(&self, occurrence: Occurrence) -> Position {
-        Position {
-            at: self.first.clone(),
-            unpaid: Some(self.first.clone()),
-            recovery: self.recovery,
-            occurrence,
-        }
-    }
+
     pub(crate) fn exit(&self, occurrence: Occurrence) -> Position {
         Position {
             at: self.through.clone(),

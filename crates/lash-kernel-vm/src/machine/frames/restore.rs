@@ -388,7 +388,7 @@ pub(super) fn frame(
     }
     Ok(Box::new(Frame {
         source_frontier: None,
-        texts: Vec::new(),
+
         source_action: None,
         invocation: record.invocation,
         logical: None,

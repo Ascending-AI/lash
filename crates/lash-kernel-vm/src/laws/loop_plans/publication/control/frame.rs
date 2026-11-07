@@ -31,20 +31,17 @@ pub(super) fn entries() {
             &program.instances,
         )
         .unwrap_or_else(|_| panic!("frame executable"));
-    let code_id = exe
-        .islands
-        .plans
-        .iter()
-        .find(|plan| {
-            let code = exe.code(plan.code);
+    let code_id = (0..exe.code_count())
+        .map(|n| crate::compile::CodeId(n as u32))
+        .find(|code| {
+            let code = exe.code(*code);
             code.params.len() == 2
                 && code
                     .created
                     .as_ref()
                     .is_some_and(|site| site.path.first() == Some(&0))
         })
-        .unwrap()
-        .code;
+        .unwrap();
     let code = exe.code(code_id);
     let source = &code.source_room;
     let entry = FrameEntry::compile(&exe, code_id).unwrap();
@@ -93,20 +90,17 @@ pub(super) fn entries() {
         .continuation(&nested.roles[0].site, TaskId::MAIN, caller.id())
         .unwrap();
     let foreign = caller.owner(Slot::Argument(crate::laws::role_id(1)));
-    let creation = exe
-        .islands
-        .plans
-        .iter()
-        .find(|plan| {
-            let code = exe.code(plan.code);
+    let creation = (0..exe.code_count())
+        .map(|n| crate::compile::CodeId(n as u32))
+        .find(|code| {
+            let code = exe.code(*code);
             code.params.len() == 2
                 && code
                     .created
                     .as_ref()
                     .is_some_and(|site| site.path.first() == Some(&1))
         })
-        .unwrap()
-        .code;
+        .unwrap();
     let make_closure = |arena: &mut Arena, target| {
         let code = exe.code(target);
         let site = code.created.as_ref().unwrap();

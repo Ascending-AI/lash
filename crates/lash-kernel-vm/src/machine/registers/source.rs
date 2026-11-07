@@ -769,7 +769,7 @@ impl Operands {
         if self.remove_value(reg).is_some() {
             return Ok(());
         }
-        // A completed packet call, like a protocol open, has already
+        // A completed call, like a protocol open, has already
         // transferred these exact operands into its entered invocation.
         // Completion spends the receipt without releasing its former owner.
         if (matches!(op, Op::ForIn { iterable } if iterable == reg)

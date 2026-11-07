@@ -6,7 +6,6 @@ use lash_kernel_state::paged::{CheckpointRoot, PageSource};
 use std::sync::Arc;
 
 pub use crate::compile::Layout;
-pub use crate::observe::RegisterWork;
 use crate::{CellStart, KernelMachine, OpenError, PreparedLibrary, Program, StartError};
 
 /// Prepares `registry` under `layout`; library bodies compile on first use.
@@ -84,17 +83,6 @@ pub fn verify_library_stream(
     library.verify_stream()
 }
 
-/// Inspect active bulk descriptions and their understatement witnesses for
-/// kernel-owned laws. The tuple counts entries and the two membership policies.
-///
-/// # Errors
-///
-/// An absent or misstated source description, including its negative witness.
-#[doc(hidden)]
-pub fn verify_bulk_source_rooms(library: &PreparedLibrary) -> Result<(usize, bool, bool), String> {
-    library.verify_bulk_rooms()
-}
-
 /// The projected records inspected by kernel-owned format laws.
 pub fn sealed_root(sealed: &crate::SealedRoot) -> &CheckpointRoot {
     &sealed.root
@@ -134,38 +122,4 @@ pub fn immediate_charge(
     let params = &definition.signature.params;
     let plan = crate::compile::Plan::new(definition.charge()?, params);
     plan.immediate(args, crate::compile::Fresh::of(fresh), result)
-}
-
-/// How many call islands lowering forms for `program`'s document under its
-/// library's layout (`docs/design/kernel-regions.md` §5 R4): what the
-/// regions law checks its island-shaped programs form, and a layout
-/// without regions does not.
-///
-/// # Errors
-///
-/// [`crate::Machine::start`]'s admission refusals.
-pub fn call_islands(program: &Program) -> Result<usize, StartError> {
-    let admitted = program.library.admit(
-        &program.document,
-        lash_kernel_value::data_limits::KernelDataLimits::default(),
-        &program.selection,
-    )?;
-    let exe = admitted
-        .executable(
-            &program.document,
-            &program.library,
-            &program.documents,
-            &program.functions,
-            &program.instances,
-        )
-        .map_err(|missing| StartError::MissingFunction {
-            function: missing.0,
-        })?;
-    Ok(exe.islands.plans.len())
-}
-
-/// The work the register program committed while `tape` recorded: the
-/// calls islands entered and the typed runs scalar loops ran whole.
-pub fn register_work(tape: &crate::ChargeTape) -> RegisterWork {
-    tape.work()
 }

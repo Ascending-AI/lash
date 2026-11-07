@@ -232,10 +232,7 @@ impl KernelMachine {
                 }
             },
         )?;
-        #[cfg(any(test, feature = "testing"))]
-        if published {
-            crate::machine::islands::witness::precise_join_published(scope.is_some());
-        }
+
         Ok(published)
     }
 }

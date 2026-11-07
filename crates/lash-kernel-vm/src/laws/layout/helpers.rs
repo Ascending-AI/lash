@@ -859,9 +859,7 @@ fn helper_frames_agree() {
         .assert_external_native_boundary_law(external.library.ids["resident.optional"]);
     native_boundaries_agree();
     use super::ExecutionMode as Mode;
-    use crate::machine::islands::witness::{self, Exit, Family};
-    use crate::perf_witness::execution::{self, Owner};
-    let collection_exits = std::cell::RefCell::new(witness::Counts::new());
+
     let limits = std::cell::Cell::new(super::super::embedder::ROOMY);
     let cold_slice = std::cell::Cell::new(7);
     let fixture = super::super::embedder::library_with(false, Some(helper_probes));
@@ -882,7 +880,6 @@ fn helper_frames_agree() {
     let prepared =
         crate::PreparedLibrary::with_helpers(std::sync::Arc::clone(&fixture.registry), helpers);
     let run = |source: &str, layout, cold, taped, mode| {
-        witness::begin();
         let mut embedder = Embedder::try_over(
             source,
             Setup {
@@ -903,15 +900,13 @@ fn helper_frames_agree() {
         if taped {
             embedder.machine.record_charges(tape.clone());
         }
-        if ![REDUCTION, VISIT, SCAN, MERGE, LOOKALIKE_COUNTERS].contains(&source) {
-            embedder.machine.count_execution();
-        }
+
         let mut checkpoints = Vec::new();
         let mut stops = Vec::new();
         let end = loop {
             match mode {
                 Mode::Source => embedder.machine.force_source_execution(),
-                Mode::Generic => embedder.machine.force_generic_packets(),
+                Mode::Generic => embedder.machine.force_generic_regions(),
                 Mode::Specialized => {}
             }
             let step = embedder.try_run().unwrap_or_else(|error| {
@@ -963,30 +958,15 @@ fn helper_frames_agree() {
                 }
             }
         };
-        let exits = witness::take();
-        if mode == Mode::Specialized && layout == Layout(0) && !taped {
-            let mut counts = collection_exits.borrow_mut();
-            for (event, count) in exits {
-                *counts.entry(event).or_default() += count;
-            }
-        } else if mode != Mode::Specialized {
-            assert!(
-                exits.is_empty(),
-                "a forced path selected a collection family: {exits:?}"
-            );
-        }
-        let census = embedder.machine.take_execution_census();
+
         (
-            (
-                end,
-                embedder.world.printed,
-                embedder.requests,
-                embedder.machine.meters().charged,
-                lash_kernel_exec::Weight::expand(tape.steps()),
-                checkpoints,
-                stops,
-            ),
-            census,
+            end,
+            embedder.world.printed,
+            embedder.requests,
+            embedder.machine.meters().charged,
+            lash_kernel_exec::Weight::expand(tape.steps()),
+            checkpoints,
+            stops,
         )
     };
     const PAID_BODY: &str = "main { return helper.forward() }";
@@ -1038,10 +1018,10 @@ main { return call rooted() }
     ];
     for source in [REDUCTION, VISIT, SCAN, MERGE, LOOKALIKE_COUNTERS] {
         for cold in [false, true] {
-            let reference = run(source, Layout(0), cold, false, Mode::Source).0;
+            let reference = run(source, Layout(0), cold, false, Mode::Source);
             for mode in [Mode::Generic, Mode::Specialized] {
                 assert_eq!(
-                    run(source, Layout(0), cold, false, mode).0,
+                    run(source, Layout(0), cold, false, mode),
                     reference,
                     "quiet collection {mode:?}, cold={cold}: {source}"
                 );
@@ -1070,13 +1050,8 @@ main { return call rooted() }
         SORTS,
     ]) {
         for cold in [false, true] {
-            crate::machine::islands::COLLECTION_VISITS.with(|n| n.set(0));
-            let (actual, census) = run(source, Layout(0), cold, true, Mode::Specialized);
+            let actual = run(source, Layout(0), cold, true, Mode::Specialized);
             if source == VISIT && !cold {
-                assert!(
-                    crate::machine::islands::COLLECTION_VISITS.with(|n| n.get()) > 0,
-                    "K-ITER-005: the visitor must execute both relocated arm entries"
-                );
                 assert_eq!(
                     actual.0,
                     format!(
@@ -1099,8 +1074,7 @@ main { return call rooted() }
                     cold,
                     true,
                     Mode::Specialized,
-                )
-                .0;
+                );
                 assert_eq!(actual.0, reference.0, "helper result: {source}");
                 assert_eq!(actual.1, reference.1, "helper observations: {source}");
                 assert_eq!(actual.2, reference.2, "helper requests: {source}");
@@ -1157,68 +1131,14 @@ main { return call rooted() }
                     ]
                 );
             }
-            if !cold && ![REDUCTION, VISIT, SCAN, MERGE, LOOKALIKE_COUNTERS].contains(&source) {
-                if source == SORTS {
-                    assert!(
-                        census
-                            .operation_exits
-                            .values()
-                            .all(|ops| !ops.contains_key("helper.element")),
-                        "computed sort reads must stay in the register program: {census:?}"
-                    );
-                }
-                if source == PAID_BODY {
-                    assert_eq!(
-                        census
-                            .slow_exits
-                            .get(&Owner::RegisterProgram)
-                            .and_then(|reasons| reasons.get(&execution::Reason::Operator))
-                            .copied()
-                            .unwrap_or(0),
-                        0,
-                        "a partial prepared helper must retain its register body: {census:?}"
-                    );
-                }
-                if source == ROOT_CALL
-                    || source == PINNED_DOCUMENT
-                    || source == PINNED_APPEND
-                    || source == ROOT_CALLBACK
-                    || source == ROOT_BODY
-                    || source == NESTED_BODY
-                    || source == NESTED_NATIVE
-                    || source == NATIVE_EXPR
-                    || source == ROOT_NATIVE
-                    || source == CHARGED_ROOT
-                {
-                    assert_eq!(
-                        census
-                            .slow_exits
-                            .get(&Owner::RegisterProgram)
-                            .and_then(|reasons| reasons.get(&execution::Reason::ColdBranch))
-                            .copied()
-                            .unwrap_or(0),
-                        0,
-                        "root calls must execute their admitted operation: {source}; {census:?}"
-                    );
-                }
-                assert!(
-                    census
-                        .statements
-                        .get(&Owner::RegisterProgram)
-                        .copied()
-                        .unwrap_or(0)
-                        > 0,
-                    "helper statements must execute in the common loop: {source}; {census:?}"
-                );
-            }
         }
     }
     for source in [SCAN, MERGE, LOOKALIKE_COUNTERS] {
         for slice in [1, 31] {
             cold_slice.set(slice);
-            let source_only = run(source, Layout(0), true, false, Mode::Source).0;
+            let source_only = run(source, Layout(0), true, false, Mode::Source);
             for mode in [Mode::Generic, Mode::Specialized] {
-                let actual = run(source, Layout(0), true, false, mode).0;
+                let actual = run(source, Layout(0), true, false, mode);
                 assert_eq!(
                     (
                         &actual.0, &actual.1, &actual.2, &actual.3, &actual.4, &actual.5
@@ -1240,45 +1160,18 @@ main { return call rooted() }
             }
         }
     }
-    let counts = collection_exits.borrow();
-    for family in [
-        Family::CollectionAppend,
-        Family::Reduction,
-        Family::Placement,
-        Family::Visit,
-        Family::ReadSlot,
-        Family::Merge,
-    ] {
-        assert!(
-            counts.get(&(family, Exit::Commit)).copied().unwrap_or(0) > 0,
-            "the quiet helper must commit {family:?}: {counts:?}"
-        );
-        assert!(
-            counts.get(&(family, Exit::Guard)).copied().unwrap_or(0) > 0,
-            "the helper must reach {family:?}'s generic suffix: {counts:?}"
-        );
-    }
-    assert!(
-        counts
-            .get(&(Family::Merge, Exit::Callback))
-            .copied()
-            .unwrap_or(0)
-            > 0,
-        "the merge must publish its prefix before the actual guest callback: {counts:?}"
-    );
-    println!("quiet collection family exits: {counts:?}");
-    drop(counts);
+
     for source in [SCAN, MERGE, LOOKALIKE_COUNTERS] {
-        let reference = run(source, Layout(0), false, false, Mode::Source).0;
+        let reference = run(source, Layout(0), false, false, Mode::Source);
         for charge_limit in 0..=reference.3.expect("exact charge is enabled") {
             limits.set(Bounds {
                 charge_limit,
                 ..super::super::embedder::ROOMY
             });
-            let source_only = run(source, Layout(0), false, false, Mode::Source).0;
+            let source_only = run(source, Layout(0), false, false, Mode::Source);
             for mode in [Mode::Generic, Mode::Specialized] {
                 assert_eq!(
-                    run(source, Layout(0), false, false, mode).0,
+                    run(source, Layout(0), false, false, mode),
                     source_only,
                     "collection refusal {charge_limit}, {mode:?}: {source}"
                 );
@@ -1331,63 +1224,6 @@ fn collection_length_admission_uses_native_evidence() {
     }
 }
 
-/// K-BND-003: fresh parameter cells and physical registers use the one
-/// entry nursery; a source-owned call may already use most of that room.
-#[test]
-fn shared_parameters_claim_the_entry_nursery() {
-    use crate::perf_witness::execution::{Owner, Reason};
-    let width = 1400;
-    let params = (0..width)
-        .map(|i| format!("p{i}: Any"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let values = (0..width)
-        .map(|i| format!("p{i}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let args = vec!["0"; width].join(",");
-    let definition = format!(
-        "function shared({params}) -> Any\nkernel 1\nmetering statements\nbody {{ return fn() {{ return ({values}) }} }}"
-    );
-    let source = format!(
-        "definition {}\nmain {{ do perform 0(\"before\") as Any let held = call shared({args}) return apply held() }}",
-        serde_json::to_string(&definition).unwrap()
-    );
-    let run = |layout| {
-        let mut embedder = Embedder::with(
-            &source,
-            Setup {
-                layout,
-                ..Setup::default()
-            },
-        );
-        let tape = crate::ChargeTape::new();
-        embedder.machine.record_charges(tape.clone());
-        embedder.machine.count_execution();
-        let end = embedder.run_to_end(&[]);
-        let census = embedder.machine.take_execution_census();
-        (
-            result(end),
-            lash_kernel_exec::Weight::expand(tape.steps()),
-            census,
-        )
-    };
-    let actual = run(Layout(0));
-    assert_eq!(actual.0, Datum::Tuple(vec![int(0); width]));
-    assert!(
-        actual
-            .2
-            .slow_exits
-            .get(&Owner::RegisterProgram)
-            .and_then(|reasons| reasons.get(&Reason::Capacity))
-            .copied()
-            .unwrap_or(0)
-            > 0,
-        "shared parameters must claim nursery room before their call commits: {:?}",
-        actual.2
-    );
-}
-
 /// Native exact acceptance binds real operands and preserves paid closes,
 /// optional padding, graph/scratch peaks and durable cold source handoffs.
 fn native_boundaries_agree() {
@@ -1408,22 +1244,16 @@ fn native_boundaries_agree() {
         if taped {
             run.machine.record_charges(tape.clone());
         }
-        run.machine.take_native_publications();
-        let mut counts = [0; 5];
+
         let mut boundaries = Vec::new();
         let end = loop {
             match mode {
                 ExecutionMode::Source => run.machine.force_source_execution(),
-                ExecutionMode::Generic => run.machine.force_generic_packets(),
+                ExecutionMode::Generic => run.machine.force_generic_regions(),
                 ExecutionMode::Specialized => {}
             }
             let step = run.run();
-            for (total, value) in counts
-                .iter_mut()
-                .zip(run.machine.take_native_publications())
-            {
-                *total += value;
-            }
+
             if matches!(step, Step::Parked(_)) {
                 let balance = run
                     .machine
@@ -1465,23 +1295,20 @@ fn native_boundaries_agree() {
             .logical_balance()
             .expect("native final owner balance");
         (
-            (
-                end,
-                run.machine.meters().charged,
-                lash_kernel_exec::Weight::expand(tape.steps()),
-                boundaries,
-                run.requests,
-                [
-                    balance.entity_local_bytes,
-                    balance.root_and_control_bytes,
-                    balance.entities,
-                ],
-            ),
-            counts,
+            end,
+            run.machine.meters().charged,
+            lash_kernel_exec::Weight::expand(tape.steps()),
+            boundaries,
+            run.requests,
+            [
+                balance.entity_local_bytes,
+                balance.root_and_control_bytes,
+                balance.entities,
+            ],
         )
     };
     let roomy = super::super::embedder::ROOMY;
-    let (reference, source_counts) = observe(
+    let reference = observe(
         SOURCE,
         ExecutionMode::Source,
         Layout(0),
@@ -1493,10 +1320,7 @@ fn native_boundaries_agree() {
         result(reference.0.clone()),
         Datum::Tuple(vec![int(7), int(2), int(7)])
     );
-    assert!(
-        source_counts[0] > 0 && source_counts[2..].iter().all(|count| *count > 0),
-        "precise certified native graph, scratch and optional paths must execute: {source_counts:?}"
-    );
+
     for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
         for cold in [false, true] {
             for mode in [
@@ -1504,27 +1328,16 @@ fn native_boundaries_agree() {
                 ExecutionMode::Generic,
                 ExecutionMode::Specialized,
             ] {
-                let (actual, counts) = observe(SOURCE, mode, layout, cold, false, roomy);
+                let actual = observe(SOURCE, mode, layout, cold, false, roomy);
                 assert_eq!(
                     actual, reference,
                     "native boundary {mode:?}, {layout:?}, cold={cold}"
                 );
-                if matches!(mode, ExecutionMode::Source) {
-                    assert!(
-                        counts[0] > 0 && counts[2..].iter().all(|count| *count > 0),
-                        "cold/precise native certificates must execute: {counts:?}"
-                    );
-                } else if !cold {
-                    assert!(
-                        counts[1] > 0 && counts[2] > 0,
-                        "packet native certificates must actually execute: {counts:?}"
-                    );
-                }
             }
-            let taped = observe(SOURCE, ExecutionMode::Source, layout, cold, true, roomy).0;
+            let taped = observe(SOURCE, ExecutionMode::Source, layout, cold, true, roomy);
             for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
                 assert_eq!(
-                    observe(SOURCE, mode, layout, cold, true, roomy).0,
+                    observe(SOURCE, mode, layout, cold, true, roomy),
                     taped,
                     "native canonical cold charge tape"
                 );
@@ -1544,11 +1357,10 @@ fn native_boundaries_agree() {
             false,
             true,
             bounds,
-        )
-        .0;
+        );
         for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
             assert_eq!(
-                observe(SOURCE, mode, Layout(2), true, true, bounds).0,
+                observe(SOURCE, mode, Layout(2), true, true, bounds),
                 exact,
                 "native first charge refusal at {charge_limit}"
             );
@@ -1563,18 +1375,15 @@ fn native_boundaries_agree() {
             false,
             true,
             bounds,
-        )
-        .0;
+        );
         for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
             assert_eq!(
-                observe(SOURCE, mode, Layout(2), true, true, bounds).0,
+                observe(SOURCE, mode, Layout(2), true, true, bounds),
                 exact,
                 "native normalized first memory refusal at {memory}"
             );
         }
     }
-    println!(
-        "certified native runtime publications: precise {source_counts:?}; packet, graph, scratch, optional and cold witnesses checked"
-    );
+
     super::native_codecs::agree(&observe);
 }

@@ -413,25 +413,10 @@ measure different services and persistence guarantees. Omitted durable paths
 produce no durable observation. Runtime stores/snapshots belong in disposable
 run directories; retain receipts and logs as evidence.
 
-Every Lash row also includes `execution_census` from the separate diagnostic
-cell at `trips[0]`, after its first checkpoint. It counts physical statement
-executions by owner, owner-to-owner handoffs (including returns), register
-entries, and guard/slow exits by reason. Register entries count fresh virtual
-calls; resuming an existing semantic frame adds no entry. Absent map entries
-mean zero. Scalar
-loop regions are separate from the continuous register program. A resumed
-source continuation does not start another statement; speculative loop regions
-count committed statements, while helper plans count their statement boundaries,
-including loop-test statements and statements whose storage remains unopened.
-The VM's canonical execution facts also feed the existing register-entry witness.
-
-Counting enables no semantic observer and selects no different executor. The
-ordinary timed population has no execution census; the diagnostic is outside
-the scoped `--instructions` interval. Its instructions are fixed at the low
-count and cancel when comparing high-count factors with paired whole-process
-`perf stat -e instructions:u` samples. These counts describe
-the diagnostic cell's actual execution, not sampled coverage or a claim that
-all observation modes use one executor.
+The retired island executor's `execution_census` diagnostic is no longer emitted
+by the compare worker or included in compare receipts. Historical receipts
+retain their original fields. Use the current charge and timing observations
+for comparisons across region executions.
 
 `--observe` enables work counts, live guest context, statement paths and site
 counts and passive host-site callbacks in every timed and diagnostic Lash cell. The receipt records this choice

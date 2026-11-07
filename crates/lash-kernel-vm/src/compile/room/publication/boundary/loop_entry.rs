@@ -35,7 +35,7 @@ impl PaidLoopInput {
         let value = parsed.take(iterable)?;
         if !parsed.spent()
             || parsed.closes.as_ref() != [close]
-            || !matches!(value.kind, expr::Kind::Local { scoped: false, .. })
+            || !matches!(value, expr::Kind::Local { scoped: false, .. })
         {
             return None;
         }
@@ -62,7 +62,6 @@ enum Shape {
     For {
         input: Slot,
         item: Slot,
-        item_at: usize,
         read: Point,
         first: Path,
         next: Path,
@@ -210,7 +209,6 @@ impl LoopEntry {
                 Shape::For {
                     input,
                     item,
-                    item_at,
                     read,
                     first,
                     next,
@@ -336,12 +334,6 @@ impl LoopEntry {
         frontier.handoff(ledger, position)?;
         Ok(true)
     }
-    pub(crate) fn item_at(&self) -> Option<usize> {
-        match self.shape {
-            Shape::For { item_at, .. } => Some(item_at),
-            _ => None,
-        }
-    }
 
     #[expect(
         clippy::too_many_arguments,
@@ -389,7 +381,6 @@ impl LoopEntry {
             Shape::For {
                 input,
                 item,
-                item_at: _,
                 read,
                 first,
                 next,

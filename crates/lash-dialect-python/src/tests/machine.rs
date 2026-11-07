@@ -1872,7 +1872,7 @@ fn sequence_facts_reject_incompatible_or_unbound_definitions() {
 #[test]
 fn sequence_facts_agree_across_layouts_and_charge_bounds() {
     let started = std::time::Instant::now();
-    whole_path_packets_agree();
+    whole_path_regions_agree();
     println!(
         "whole Python packet checkpoint comparisons completed at {:?}",
         started.elapsed()
@@ -2031,34 +2031,29 @@ await build()
 
 // K-CHG-001 / CONT-EXACT / PLAN-INDEP: the actual dialect's complete
 // read/update and allocating format paths preserve every observed boundary.
-fn whole_path_packets_agree() {
+fn whole_path_regions_agree() {
     use lash_kernel_vm::testing::{self, ExecutionStrategy as Mode};
     let cases = [
         (
             "member read/update",
-            None,
             "def run(obj):\n    total = 1\n    total += obj['a']\n    return total\nprint(await host.echo(run({'a': 255})))\n",
         ),
         (
             "formatted append",
-            // Three loop iterations each publish one append and one join.
-            Some([3, 3]),
             "def build(n):\n    text = ''\n    for i in range(n):\n        text += f'Tool {i} value={i * 3}; status=ready\\n'\n    return text\nprint(await host.echo(build(3)))\n",
         ),
     ];
-    let cases = cases.map(|(label, texts, source)| {
+    let cases = cases.map(|(label, source)| {
         let lowered = lower(source).expect("the whole Python path lowers");
         let program = crate::tests::linked::program(
             Arc::clone(lowered.document.shared()),
             installed().prepared.clone(),
         );
-        (label, texts, source, program)
+        (label, source, program)
     });
     let observe = |program: &Program, bounds, rebuild, mode| {
-        testing::begin_family_witnesses();
         let mut stops = Vec::new();
         let mut cold = Vec::new();
-        let mut packets = (0, 0);
         let outcome = execution_observation_with_stops(
             program.clone(),
             bounds,
@@ -2066,9 +2061,6 @@ fn whole_path_packets_agree() {
             mode,
             &mut |_| {},
             &mut |step, machine| {
-                let counts = testing::take_packet_counts(machine);
-                packets.0 += counts.0;
-                packets.1 += counts.1;
                 stops.push((
                     match step {
                         Step::Ended(_) => "ended",
@@ -2086,45 +2078,21 @@ fn whole_path_packets_agree() {
                 }
             },
         );
-        let exits = testing::take_family_witnesses();
-        let texts = testing::take_text_operation_publications();
-        if mode == Mode::Source {
-            assert_eq!(packets.0, 0, "the Python source oracle dispatched packets");
-        }
-        if mode == Mode::GenericPackets {
-            assert_eq!(packets.1, 0, "the generic Python path selected a family");
-            assert!(exits.is_empty());
-        }
-        ((outcome, stops, cold), exits, packets, texts)
+        (outcome, stops, cold)
     };
-    for (label, required_texts, source, program) in &cases {
-        let (reference, _, _, _) = observe(program, BOUNDS, false, Mode::Source);
+    for (label, source, program) in &cases {
+        let reference = observe(program, BOUNDS, false, Mode::Source);
         assert!(matches!(reference.0.0.end, End::Finished(_)));
         let charged = reference.0.0.charged;
-        let (fused, exits, packets, texts) = observe(program, BOUNDS, false, Mode::Optimized);
+        let fused = observe(program, BOUNDS, false, Mode::Optimized);
         assert_eq!(fused, reference, "quiet Python {label}: {source}");
-        if let Some(required) = required_texts {
-            assert!(
-                texts
-                    .iter()
-                    .zip(required)
-                    .all(|(actual, expected)| actual >= expected),
-                "the real Python path must publish {required:?} append/join operations: {texts:?}\n{}",
-                kernel_text(source)
-            );
-        }
-        assert!(packets.0 > 0);
-        println!(
-            "real Python quiet {label}: charged={charged}, packets={packets:?}, exits={exits:?}, texts={texts:?}"
-        );
-        let (generic, _, packets, _) = observe(program, BOUNDS, false, Mode::GenericPackets);
+        let generic = observe(program, BOUNDS, false, Mode::GenericRegions);
         assert_eq!(generic, reference, "generic Python {label}");
-        assert!(packets.0 > 0);
 
         for rebuild in [false, true] {
-            let (reference, _, _, _) = observe(program, BOUNDS, rebuild, Mode::Source);
-            for mode in [Mode::GenericPackets, Mode::Optimized] {
-                let actual = observe(program, BOUNDS, rebuild, mode).0;
+            let reference = observe(program, BOUNDS, rebuild, Mode::Source);
+            for mode in [Mode::GenericRegions, Mode::Optimized] {
+                let actual = observe(program, BOUNDS, rebuild, mode);
                 assert_eq!(actual.2.len(), reference.2.len(), "cold boundary count");
                 for (at, (actual, expected)) in actual.2.iter().zip(&reference.2).enumerate() {
                     assert!(
@@ -2162,10 +2130,10 @@ fn whole_path_packets_agree() {
                 charge_limit,
                 ..BOUNDS
             };
-            let (reference, _, _, _) = observe(program, bounds, false, Mode::Source);
-            for mode in [Mode::GenericPackets, Mode::Optimized] {
+            let reference = observe(program, bounds, false, Mode::Source);
+            for mode in [Mode::GenericRegions, Mode::Optimized] {
                 assert_eq!(
-                    observe(program, bounds, false, mode).0,
+                    observe(program, bounds, false, mode),
                     reference,
                     "Python {label}, {mode:?}, charge={charge_limit}"
                 );

@@ -115,31 +115,6 @@ fn generated_scalar_contracts_agree_with_their_bodies() {
                     (native.entry)(&args).is_some(),
                     "{name}'s canonical native must answer"
                 );
-            } else if registered.native().is_none() {
-                // Exercise the general body independently of any scalar
-                // forwarding path, including unary identity forwarding.
-                let input = if matches!(*name, "ts.to_number" | "ts.to_numeric") {
-                    "true"
-                } else if dialect == "python" {
-                    "1"
-                } else {
-                    "1.0"
-                };
-                let args = vec![input; arity];
-                let source = format!(
-                    "kernel 1\nnumbers by_spelling\n# local definition op @{function}\nmain {{ let value = invoke @{function}({}) return value }}",
-                    args.join(", ")
-                );
-                let mut document = lash_kernel_doc::parse_document(&source).unwrap();
-                document.library.insert(*function);
-                let program = crate::linked::program(Arc::new(document), general.clone());
-                let (_, census) = crate::projection::counted(|| {
-                    run::<1>(&case, &program, &mut Projector::default())
-                });
-                assert!(
-                    census.register_entries > 0,
-                    "{name}'s non-forwarding body must enter the packet stream: {census:?}"
-                );
             }
             // Every depth near the elided helper frames uses the same
             // refusal point, charge prefix and function name as the body.

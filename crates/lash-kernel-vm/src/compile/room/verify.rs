@@ -11,7 +11,6 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
     {
         return Err(Refused::Source);
     }
-    bulk::verify(source, room)?;
     let mut exit_at = BTreeMap::new();
     for e in &room.exits {
         if exit_at.insert((e.point.clone(), e.kind), e).is_some() {

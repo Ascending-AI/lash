@@ -162,6 +162,7 @@ impl<'a> SourceResources<'a> {
     }
 }
 impl<'a, C> SourceAccepted<'a, C> {
+    #[cfg(test)]
     pub(crate) fn try_map<D, E>(
         self,
         map: impl FnOnce(C) -> Result<D, E>,

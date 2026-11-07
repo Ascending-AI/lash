@@ -335,28 +335,7 @@ impl KernelMachine {
                 bank.publish();
             },
         )?;
-        #[cfg(any(test, feature = "testing"))]
-        if published {
-            crate::machine::islands::witness::precise_scope_published();
-            match try_scope {
-                Some(TryScope::Body) => crate::machine::islands::witness::precise_try_scope(false),
-                Some(TryScope::Catch) => crate::machine::islands::witness::precise_try_scope(true),
-                Some(TryScope::Finally) => {
-                    crate::machine::islands::witness::precise_try_finally_scope()
-                }
-                None => {}
-            }
 
-            match loop_body {
-                Some(ScopeLoop::While) => {
-                    crate::machine::islands::witness::while_scope_published(true)
-                }
-                Some(ScopeLoop::For { continued }) => {
-                    crate::machine::islands::witness::for_scope_published(true, continued)
-                }
-                None => {}
-            }
-        }
         Ok(published)
     }
 }

@@ -245,10 +245,7 @@ impl KernelMachine {
             },
         )?;
         drop(arena);
-        if published {
-            #[cfg(any(test, feature = "testing"))]
-            crate::machine::islands::witness::closure_constructed();
-        }
+
         Ok(published)
     }
 }

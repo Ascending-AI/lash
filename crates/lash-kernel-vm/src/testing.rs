@@ -11,10 +11,10 @@ pub mod region_isa;
 pub enum ExecutionStrategy {
     #[default]
     Optimized,
-    /// The canonical source evaluator with packet entry disabled.
+    /// The independent canonical source evaluator.
     Source,
-    /// The shared packet executor with all grouped kernels disabled.
-    GenericPackets,
+    /// The region executor with specialized kernels disabled.
+    GenericRegions,
     /// Helper bodies with their native shortcuts disabled.
     Interpreted,
 }
@@ -22,7 +22,7 @@ pub enum ExecutionStrategy {
 impl ExecutionStrategy {
     fn layout(self) -> crate::compile::Layout {
         crate::compile::Layout(match self {
-            Self::Optimized | Self::Source | Self::GenericPackets => 0,
+            Self::Optimized | Self::Source | Self::GenericRegions => 0,
             Self::Interpreted => 3,
         })
     }
@@ -30,34 +30,11 @@ impl ExecutionStrategy {
     fn select(self, mut machine: KernelMachine) -> KernelMachine {
         match self {
             Self::Source => machine.force_source_execution(),
-            Self::GenericPackets => machine.force_generic_packets(),
+            Self::GenericRegions => machine.force_generic_regions(),
             Self::Optimized | Self::Interpreted => {}
         }
         machine
     }
-}
-
-pub use crate::machine::islands::witness::{Counts as FamilyCounts, Exit as FamilyExit, Family};
-
-/// Starts collecting actual grouped-kernel commits and exits on this thread.
-pub fn begin_family_witnesses() {
-    crate::machine::islands::witness::begin();
-}
-
-/// Takes the grouped-kernel events since the last collection began.
-pub fn take_family_witnesses() -> FamilyCounts {
-    crate::machine::islands::witness::take()
-}
-
-/// Takes accepted native text append and join publications, in that order.
-/// Number conversions and other text results do not count as either operation.
-pub fn take_text_operation_publications() -> [u64; 2] {
-    crate::machine::islands::witness::text_operation_publications()
-}
-
-/// Takes the dispatched packet and specialized packet counts for this machine.
-pub fn take_packet_counts(machine: &mut KernelMachine) -> (u64, u64) {
-    machine.take_packet_counts()
 }
 
 /// The source ledger's entity bytes, root/control bytes and entity count.

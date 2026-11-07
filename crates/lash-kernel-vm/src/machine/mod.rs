@@ -18,7 +18,6 @@ mod exec;
 mod export_abi;
 mod foreign;
 mod frames;
-pub(crate) mod islands;
 mod issued;
 mod limits;
 mod logical_held;
@@ -26,6 +25,9 @@ mod loops;
 mod observing;
 mod operation_entry;
 mod ops;
+#[cfg(any(test, feature = "testing"))]
+mod oracle;
+mod oracle_actions;
 mod origin;
 #[cfg(test)]
 mod park_laws;
@@ -37,7 +39,6 @@ mod refine;
 pub(crate) mod region_isa;
 pub(crate) mod registers;
 mod session;
-pub(crate) use session::SourceSessionReads;
 pub(crate) mod sites;
 mod source_publication;
 mod steps;
@@ -75,8 +76,6 @@ use loops::Cursor;
 use project::SharedArena;
 use session::{keyed, open_tree};
 
-/// The room an island reserves for a frame before its slots.
-const FRAME_BYTES: u64 = 64;
 /// What ends a run from inside a statement.
 /// Rare payloads are boxed so successful frame lookups carry a small result.
 #[derive(Debug)]
@@ -315,7 +314,6 @@ struct Storage {
 
 struct Frame {
     source_action: Option<(usize, u64)>,
-    texts: Vec<crate::compile::room::publication::text::TextOwnership>,
     source_frontier: Option<crate::compile::room::publication::Frontier>,
     invocation: u64,
     logical: Option<logical_held::FrameRoots>,
@@ -453,8 +451,11 @@ pub struct KernelMachine {
     /// The property read sites' caches: never saved, so a restore
     /// discards them.
     sites: sites::SiteCaches,
-    /// The call islands' reused buffers: never saved.
-    islands: islands::Scratch,
+    #[cfg(any(test, feature = "testing"))]
+    source_only: bool,
+    #[cfg(any(test, feature = "testing"))]
+    generic_regions: bool,
+
     /// The run's charge; with charge Off, its pace: one unit for each
     /// statement, loop test and action atom of charged code. Slices count
     /// it, and nothing reads the pace out.
@@ -949,7 +950,6 @@ impl KernelMachine {
     #[cfg(test)]
     pub(crate) fn force_cold(&mut self) {
         self.pins.force_cold = true;
-        self.islands.chilled = true;
     }
 
     /// How many times a native call answered `Retry::Cold`.
@@ -1158,7 +1158,7 @@ impl KernelMachine {
     /// outside the oracle is the machine's fault, never a fallback.
     pub(super) fn oracle_only(&self) -> Result<(), Halt> {
         #[cfg(any(test, feature = "testing"))]
-        if self.islands.source_only {
+        if self.source_only {
             return Ok(());
         }
         Err(fault("a statement ran outside its region"))
@@ -1173,16 +1173,9 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
     ) -> Result<(), Halt> {
-        let (link, program) = {
-            let frame = self.frame(task)?;
-            let program = exe
-                .island_of(frame.code)
-                .ok_or_else(|| fault("a frame's code has no register program"))?;
-            (frame.link, program)
-        };
-        self.active_link = link;
+        self.active_link = self.frame(task)?.link;
         self.tasks.protect(Some(task));
-        let result = self.step_protected(task, host, exe, program);
+        let result = self.step_protected(task, host, exe);
         // The prepared statement owns the kill set, including on park,
         // raise and halt exits. Clean up before the driver sees the result.
         self.retire_source_bank(&[])?;
@@ -1204,7 +1197,6 @@ impl KernelMachine {
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
-        program: u32,
     ) -> Result<(), Halt> {
         // What the run holds is published only where something can read
         // it: the slice's yield, park, end or seal, a native call handed
@@ -1221,7 +1213,7 @@ impl KernelMachine {
                 self.refresh_charging(task)?;
                 self.delivered(task, host, exe, incoming)
             }
-            None => self.advance_active(task, host, exe, program),
+            None => self.advance_source(task, host, exe),
         };
         self.settle(task, host, exe, outcome)
     }
@@ -1242,7 +1234,6 @@ impl KernelMachine {
         self.resumed(task, exe, ran)
     }
 
-    /// Inlined into the step: an island's exit is its only other caller.
     #[inline(always)]
     fn settle(
         &mut self,
@@ -1310,14 +1301,10 @@ impl KernelMachine {
 
     /// Runs tasks until none is ready, the run ends, or `slice` units of
     /// charge, or with charge Off of pace, have passed (`K-MACH-005`).
-    /// Pace, like charge, does not depend on the plan: a region or an
-    /// island counts it as the reference does, so a slice falls where it
-    /// would without them.
+    /// Pace, like charge, follows source boundaries under every region layout.
     fn run_slice(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
         let before = self.charged;
         self.slice_end = before.saturating_add(slice);
-        // A helper's callbacks run as islands only for a host that
-        // observes no sites.
         // The executable is the run's for its whole life.
         let exe = Arc::clone(&self.exe);
         loop {
@@ -1671,19 +1658,12 @@ fn operation_key(use_: &lash_kernel_value::names::OperationUse) -> Vec<u8> {
     key
 }
 
-#[cfg(any(test, feature = "perf-witness"))]
+#[cfg(any(test, feature = "testing"))]
 impl KernelMachine {
-    /// Begin a fresh physical execution census for this machine without
-    /// selecting semantic observation or a different executor.
-    pub fn count_execution(&mut self) {
-        self.islands.census.enable();
-        self.islands.counting = true;
+    pub(crate) fn force_source_execution(&mut self) {
+        self.source_only = true;
     }
-
-    /// Finish this machine's census and disable its producer, including
-    /// when the run refused. Other machines' collection is independent.
-    pub fn take_execution_census(&mut self) -> crate::perf_witness::execution::Census {
-        self.islands.counting = false;
-        self.islands.census.finish()
+    pub(crate) fn force_generic_regions(&mut self) {
+        self.generic_regions = true;
     }
 }

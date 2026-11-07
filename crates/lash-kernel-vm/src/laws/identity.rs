@@ -156,21 +156,11 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
             },
         );
         super::observe::fully_observe(&mut embedder.machine);
-        use crate::perf_witness::execution::Owner;
-        embedder.machine.count_execution();
+
         assert!(matches!(embedder.run(), Step::Parked(_)));
         embedder.deliver("built");
         assert!(matches!(embedder.run(), Step::Parked(_)));
-        let census = embedder.machine.take_execution_census();
-        if layout == Layout(0) {
-            assert!(
-                census
-                    .statements
-                    .get(&Owner::RegisterProgram)
-                    .is_some_and(|statements| *statements > 0),
-                "observed retained allocations execute in the register program: {census:?}"
-            );
-        }
+
         embedder
     };
     let mut whole = start(Layout(0));
@@ -309,9 +299,9 @@ fn scheduler_seals_agree() {
                     ..Setup::default()
                 },
             );
-            embedder.machine.count_execution();
+
             let mut saved = Vec::new();
-            let mut register = 0;
+
             let end = loop {
                 match embedder.run() {
                     Step::Ended(mut end) => {
@@ -322,12 +312,6 @@ fn scheduler_seals_agree() {
                     }
                     Step::Slice => (),
                     Step::Parked(_) => {
-                        let census = embedder.machine.take_execution_census();
-                        register += census
-                            .statements
-                            .get(&crate::perf_witness::execution::Owner::RegisterProgram)
-                            .copied()
-                            .unwrap_or(0);
                         if bounded {
                             assert!(
                                 embedder
@@ -362,17 +346,12 @@ fn scheduler_seals_agree() {
                         embedder.open_at(&root, certificate, layout, true);
                         assert_eq!(embedder.machine.semantic_checkpoint(), seen);
                         saved.push(seen);
-                        embedder.machine.count_execution();
+
                         embedder.deliver_next();
                     }
                 }
             };
-            if bounded {
-                assert!(
-                    register >= 4,
-                    "the scheduler and cleanup reached the register program: {register}"
-                );
-            }
+
             (
                 end,
                 saved,
@@ -387,14 +366,6 @@ fn scheduler_seals_agree() {
 }
 
 fn helper_seals_agree() {
-    use crate::perf_witness::execution::Owner;
-    let registered = |census: crate::perf_witness::execution::Census| {
-        census
-            .statements
-            .get(&Owner::RegisterProgram)
-            .copied()
-            .unwrap_or(0)
-    };
     let run = |layout, budgeted| {
         let mut embedder = Embedder::with(
             super::layout::HELPERS,
@@ -406,15 +377,13 @@ fn helper_seals_agree() {
         );
         let tape = crate::ChargeTape::new();
         embedder.machine.record_charges(tape.clone());
-        embedder.machine.count_execution();
-        let mut register = 0;
+
         let mut saved = Vec::new();
         let end = loop {
             match embedder.run() {
                 Step::Ended(end) => break result(end),
                 Step::Slice => (),
                 Step::Parked(_) => {
-                    register += registered(embedder.machine.take_execution_census());
                     if budgeted {
                         assert!(
                             embedder
@@ -450,13 +419,12 @@ fn helper_seals_agree() {
                     assert_eq!(embedder.machine.semantic_checkpoint(), seen);
                     saved.push(seen);
                     embedder.machine.record_charges(tape.clone());
-                    embedder.machine.count_execution();
+
                     embedder.deliver_next();
                 }
             }
         };
-        register += registered(embedder.machine.take_execution_census());
-        assert!(register > 0, "helper frames reached the register program");
+
         (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
     };
     let reference = run(Layout(0), false);

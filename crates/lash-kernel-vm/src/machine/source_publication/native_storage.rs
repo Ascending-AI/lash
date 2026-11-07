@@ -29,8 +29,6 @@ pub(in crate::machine) struct PreparedNative {
     pub(in crate::machine) work: u64,
     pub(in crate::machine) known: bool,
     pub(in crate::machine) batch: PreparedBatch,
-    pub(in crate::machine) allocated: bool,
-    graph_entities: usize,
     output: Owner,
     contract: doc::NativeResourceContract,
     function: lash_kernel_value::FunctionId,
@@ -63,50 +61,20 @@ pub(in crate::machine) struct SourceNative<'a> {
     pub(in crate::machine) inputs: Vec<Owner>,
     pub(in crate::machine) operands: Vec<Value>,
 }
-pub(in crate::machine) struct NativePublication<'program> {
+pub(in crate::machine) struct NativePublication {
     pub(in crate::machine) storage: PreparedNative,
     pub(in crate::machine) holding: lash_kernel_state::kernel_internals::logical::Holding,
     pub(in crate::machine) units: u64,
-    pub(in crate::machine) debt: room::charges::ChargeDebt<'program>,
 }
-enum NativeBinding {
-    Ordinary(room::publication::BoundEvent),
-    Original(room::publication::OriginalBound),
-}
-enum NativeEvent<'a> {
-    Ordinary(room::publication::PreparedEvent<'a>),
-    Original(room::publication::OriginalPrepared<'a>),
-}
+
 impl<'program> BoundaryPreparation for SourceNative<'program> {
-    type Prepared = NativePublication<'program>;
+    type Prepared = NativePublication;
     fn prepare<'a>(
         self,
         arena: &'a mut Arena,
         entry: ExternalEntry<'_>,
     ) -> Result<Option<(room::publication::PreparedEvent<'a>, Self::Prepared)>, HeapFault> {
-        Ok(self
-            .prepare_inner(arena, entry, None)?
-            .map(|(event, storage)| {
-                let NativeEvent::Ordinary(event) = event else {
-                    unreachable!("ordinary native requested");
-                };
-                (event, storage)
-            }))
-    }
-    fn prepare_remaining<'a>(
-        self,
-        arena: &'a mut Arena,
-        entry: ExternalEntry<'_>,
-        original: &room::charges::AcceptedOriginalPrefix,
-    ) -> Result<Option<(room::publication::OriginalPrepared<'a>, Self::Prepared)>, HeapFault> {
-        Ok(self
-            .prepare_inner(arena, entry, Some(original))?
-            .map(|(event, storage)| {
-                let NativeEvent::Original(event) = event else {
-                    unreachable!("remaining native requested");
-                };
-                (event, storage)
-            }))
+        self.prepare_inner(arena, entry)
     }
 }
 impl<'program> SourceNative<'program> {
@@ -114,8 +82,7 @@ impl<'program> SourceNative<'program> {
         self,
         arena: &'a mut Arena,
         entry: ExternalEntry<'_>,
-        original: Option<&room::charges::AcceptedOriginalPrefix>,
-    ) -> Result<Option<(NativeEvent<'a>, NativePublication<'program>)>, HeapFault> {
+    ) -> Result<Option<(room::publication::PreparedEvent<'a>, NativePublication)>, HeapFault> {
         use room::publication::{ExactRoots, ExternalFacts};
         let ExternalEntry {
             event,
@@ -186,15 +153,6 @@ impl<'program> SourceNative<'program> {
                 ) else {
                     return Ok(None);
                 };
-                let bound = if let Some(original) = original {
-                    match bound.with_original_native(frontier, ledger, original, &debt) {
-                        Ok(bound) => NativeBinding::Original(bound),
-                        Err(PublicationError::Miss(_)) => return Ok(None),
-                        Err(PublicationError::Heap(error)) => return Err(error),
-                    }
-                } else {
-                    NativeBinding::Ordinary(bound)
-                };
                 let holding = proof.holding(arena)?;
                 Ok(Some((bound, holding, debt)))
             },
@@ -202,14 +160,7 @@ impl<'program> SourceNative<'program> {
         else {
             return Ok(None);
         };
-        let prepared = match bound {
-            NativeBinding::Ordinary(bound) => bound
-                .finish_external(frontier, ledger, transaction)
-                .map(NativeEvent::Ordinary),
-            NativeBinding::Original(bound) => bound
-                .finish_external(frontier, ledger, transaction)
-                .map(NativeEvent::Original),
-        };
+        let prepared = bound.finish_external(frontier, ledger, transaction);
         match prepared {
             Ok(prepared) => Ok(Some((
                 prepared,
@@ -217,7 +168,6 @@ impl<'program> SourceNative<'program> {
                     storage,
                     holding,
                     units: debt.units(),
-                    debt,
                 },
             ))),
             Err(PublicationError::Miss(_)) => Ok(None),
@@ -414,7 +364,6 @@ impl NativeStorage<'_> {
             }
             (value, counter.spent(), 0, nursery.into_new())
         };
-        let allocated = !new.is_empty();
         let mut installation = arena.prepare_install(new).map_err(native_fault)?;
         // Retain the canonical changing formula inputs while the detached
         // graph is readable. A region must bind these facts to its compiled
@@ -462,7 +411,6 @@ impl NativeStorage<'_> {
             false,
         )?;
         let proof = graph.value(0);
-        let graph_entities = graph.entities().len();
         let (mut registration, batch) = installation.into_parts();
         let released = self.ledger.borrow().release_cost_preserving_graph(
             registration.arena(),
@@ -487,8 +435,6 @@ impl NativeStorage<'_> {
             storage: PreparedNative {
                 value,
                 batch,
-                allocated,
-                graph_entities,
                 output: self.output,
                 contract: self.contract,
                 function: self.function.specialization.function,
@@ -568,9 +514,7 @@ impl PreparedNative {
     pub(in crate::machine) fn known(&self) -> bool {
         self.known
     }
-    pub(in crate::machine) fn allocated_immutable(&self) -> bool {
-        self.allocated && self.graph_entities == 0
-    }
+
     pub(in crate::machine) fn value(&self) -> Value {
         self.value
     }
@@ -578,10 +522,6 @@ impl PreparedNative {
         self.work
     }
     pub(in crate::machine) fn publish(self, arena: &mut Arena) {
-        #[cfg(any(test, feature = "testing"))]
-        if self.graph_entities > 1 {
-            crate::machine::islands::witness::native_graph_published();
-        }
         self.batch.publish(arena);
     }
 }
@@ -708,40 +648,6 @@ pub(in crate::machine) fn scratch_events(
 }
 
 #[cfg(test)]
-thread_local! { static NATIVE_PUBLICATIONS: Cell<[u64; 5]> = const { Cell::new([0; 5]) }; }
-#[cfg(test)]
-pub(in crate::machine) fn published(
-    packet: bool,
-    contract: &doc::NativeResourceContract,
-    optional: bool,
-) {
-    NATIVE_PUBLICATIONS.with(|counts| {
-        let mut next = counts.get();
-        next[usize::from(packet)] += 1;
-        next[2] += u64::from(
-            contract
-                .events
-                .iter()
-                .any(|event| matches!(event, doc::NativeResourceEvent::Entity { .. })),
-        );
-        next[3] += u64::from(
-            contract
-                .events
-                .iter()
-                .any(|event| matches!(event, doc::NativeResourceEvent::Scratch { .. })),
-        );
-        next[4] += u64::from(optional);
-        counts.set(next);
-    });
-}
-#[cfg(test)]
-impl crate::machine::KernelMachine {
-    pub(crate) fn take_native_publications(&self) -> [u64; 5] {
-        NATIVE_PUBLICATIONS.with(|counts| counts.replace([0; 5]))
-    }
-}
-
-#[cfg(test)]
 mod scalar_validation_tests {
     use super::*;
     use crate::laws::embedder::{Embedder, Setup};
@@ -799,43 +705,59 @@ mod scalar_validation_tests {
         );
         let arena = Arena::new();
         assert!(matches!(
-            function.validate_known_scalar(&arena, &[Value::Int(3), Value::Int(4)], Value::Int(7)),
+            function
+                .check_known_scalar(&arena, &[Value::Int(3), Value::Int(4)], Value::Int(7))
+                .ok()
+                .flatten(),
             Some(Value::Int(7))
         ));
         assert!(
             function
-                .validate_known_scalar(&arena, &[Value::Int(3), Value::Int(4)], Value::Int(8))
+                .check_known_scalar(&arena, &[Value::Int(3), Value::Int(4)], Value::Int(8))
+                .ok()
+                .flatten()
                 .is_none()
         );
         assert!(
             function
-                .validate_known_scalar(
+                .check_known_scalar(
                     &arena,
                     &[Value::Int(i64::MAX), Value::Int(1)],
                     Value::Int(0)
                 )
+                .ok()
+                .flatten()
                 .is_none()
         );
         let float = |value| Value::Float(doc::Float::new(value));
         assert!(
             function
-                .validate_known_scalar(&arena, &[float(1.0), float(2.0)], float(3.0))
+                .check_known_scalar(&arena, &[float(1.0), float(2.0)], float(3.0))
+                .ok()
+                .flatten()
                 .is_some()
         );
         assert!(
             function
-                .validate_known_scalar(&arena, &[float(1.0), float(2.0)], float(4.0))
+                .check_known_scalar(&arena, &[float(1.0), float(2.0)], float(4.0))
+                .ok()
+                .flatten()
                 .is_none()
         );
         let text = |value: &str| Value::Text(doc::arena::ShortText::new(value).unwrap());
         let args = [text("😀"), text("\u{e000}")];
         assert!(matches!(
-            function.validate_known_scalar(&arena, &args, Value::Bool(true)),
+            function
+                .check_known_scalar(&arena, &args, Value::Bool(true))
+                .ok()
+                .flatten(),
             Some(Value::Bool(true))
         ));
         assert!(
             function
-                .validate_known_scalar(&arena, &args, Value::Bool(false))
+                .check_known_scalar(&arena, &args, Value::Bool(false))
+                .ok()
+                .flatten()
                 .is_none()
         );
     }

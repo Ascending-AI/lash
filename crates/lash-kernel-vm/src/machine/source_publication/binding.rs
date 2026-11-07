@@ -369,29 +369,7 @@ impl KernelMachine {
         }
         .map_err(|halt| native_commit_refusal(running, pc, src, halt))?;
         drop(arena);
-        #[cfg(any(test, feature = "testing"))]
-        if published && shared {
-            crate::machine::islands::witness::cell_constructed();
-        }
-        #[cfg(any(test, feature = "testing"))]
-        if published {
-            #[cfg(test)]
-            {
-                self.storage.value_moves += 1;
-            }
-            if assignment {
-                if member.is_some() {
-                    crate::machine::islands::witness::cell_published();
-                } else {
-                    crate::machine::islands::witness::precise_write_published(value);
-                }
-            } else {
-                crate::machine::islands::witness::precise_binding_published(value);
-            }
-            if scoped {
-                crate::machine::islands::witness::scoped_binding_published(shared);
-            }
-        }
+
         Ok(published)
     }
 }

@@ -222,7 +222,7 @@ pub(crate) fn program(exe: &Executable, code: CodeId) -> Result<Program, Refused
                         head: pc,
                         total,
                     };
-                    compile::islands::verify_close(Some(&close), stream)
+                    crate::compile::room::charges::verify_close(Some(&close), stream)
                         .map_err(|_| Refused::Source)?;
                     if !definition.charged {
                         continue;

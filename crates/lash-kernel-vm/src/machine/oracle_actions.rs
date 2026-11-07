@@ -1,173 +1,16 @@
-//! Scheduler instructions transfer the physical windows to the existing task
-//! owner before the first scheduler mutation. Only semantic source coordinates
-//! and ordered live operands cross this handoff; no physical cursor is saved.
-use super::super::ops::Flow;
-use super::super::stream::{Ran, Running};
-use super::super::{Completion, Eval, KernelMachine, fault};
-use crate::compile::{Action, ActionKind, Executable, Form, NestedKind, StmtId};
+//! Source-oracle action dispatch retains source ordering and occurrence identity.
+use super::ops::Flow;
+use super::stream::Running;
+use super::{KernelMachine, fault};
+use crate::compile::{Action, ActionKind, NestedKind};
 use crate::interface::Host;
 use crate::machine::actions::{Target, cancelled_here};
 use crate::machine::ops::{Reg, Status};
 use crate::machine::{Incoming, raise};
+use lash_kernel_doc::Value;
 use lash_kernel_doc::heap::PageValue;
-use lash_kernel_doc::{TaskId, Value};
-use lash_kernel_exec::Op;
 use lash_kernel_state::paged::ContinuationPhase;
 use lash_kernel_value::package::OperationMode;
-
-impl KernelMachine {
-    #[inline(always)]
-    pub(super) fn schedule_instruction(
-        &mut self,
-        host: &mut dyn Host,
-        task: TaskId,
-        exe: &Executable,
-        stmt: StmtId,
-        pc: u32,
-        values: Vec<(u32, Value)>,
-    ) -> Result<(), super::Halt> {
-        #[cfg(any(test, feature = "perf-witness"))]
-        if self.islands.counting {
-            return self.schedule_counted(host, task, exe, stmt, pc, values);
-        }
-        self.schedule_actions(host, task, exe, stmt, pc, values)
-    }
-
-    #[cfg(any(test, feature = "perf-witness"))]
-    #[cold]
-    #[inline(never)]
-    fn schedule_counted(
-        &mut self,
-        host: &mut dyn Host,
-        task: TaskId,
-        exe: &Executable,
-        stmt: StmtId,
-        pc: u32,
-        values: Vec<(u32, Value)>,
-    ) -> Result<(), super::Halt> {
-        let _execution = crate::perf_witness::execution::Scope::enter(
-            &self.islands.census,
-            crate::perf_witness::execution::Owner::RegisterProgram,
-            true,
-        );
-        self.schedule_actions(host, task, exe, stmt, pc, values)
-    }
-
-    fn schedule_actions(
-        &mut self,
-        host: &mut dyn Host,
-        task: TaskId,
-        exe: &Executable,
-        mut stmt: StmtId,
-        mut pc: u32,
-        mut values: Vec<(u32, Value)>,
-    ) -> Result<(), super::Halt> {
-        loop {
-            self.active_link = self.frame(task)?.link;
-            self.islands.held = false;
-            let running = Running::new(task, exe, stmt);
-            self.regs.statement(running.stmt.regs);
-            for (reg, value) in values {
-                self.put(reg as usize, value);
-            }
-            let _ = self.source_begin(running.task, running.stream, running.stmt, pc)?;
-            let outcome = (|| {
-                let flow = match running.stream.ops[pc as usize] {
-                    Op::Act => {
-                        let Form::Action(action) = &running.stmt.form else {
-                            return Err(fault("a scheduler instruction has no action").into());
-                        };
-                        self.act(host, &running, action, 0)?
-                    }
-                    Op::Nested { act, args } => self.nested_act(host, &running, act, args)?,
-                    _ => return Err(fault("a scheduler instruction names no source action").into()),
-                };
-                let ran = if flow == Flow::Step {
-                    Ran::Step
-                } else {
-                    self.source_complete(&running, pc)?;
-                    match self.register_suffix(host, &running, pc as usize + 1, true)? {
-                        Some(ran) => ran,
-                        None => self.run(host, &running, pc as usize + 1)?,
-                    }
-                };
-                self.resumed(task, exe, (stmt, ran))
-            })();
-            let next = self.islands.scheduled.take();
-            self.settle(task, host, exe, outcome)?;
-            match next {
-                Some((owner, next)) => {
-                    if owner != task {
-                        return Err(fault("a scheduler suffix changed its task owner"));
-                    }
-                    match next {
-                        super::RunsOn::Scheduling(id, at, regs) => {
-                            stmt = id;
-                            pc = at;
-                            values = regs;
-                        }
-                        next => return self.run_on(host, task, exe, next),
-                    }
-                }
-                None => return Ok(()),
-            }
-        }
-    }
-
-    /// A delivered action uses the same program suffix after a cold reopen.
-    /// Refusal of admission leaves the already evaluated operands untouched.
-    #[inline(always)]
-    pub(in crate::machine) fn register_action_suffix(
-        &mut self,
-        host: &mut dyn Host,
-        running: &Running<'_>,
-        pc: usize,
-    ) -> Eval<Option<Ran>> {
-        self.register_suffix(host, running, pc, false)
-    }
-
-    #[inline(always)]
-    fn register_suffix(
-        &mut self,
-        host: &mut dyn Host,
-        running: &Running<'_>,
-        pc: usize,
-        defer: bool,
-    ) -> Eval<Option<Ran>> {
-        let task = running.task;
-        let Some(plan) = running.exe.island_of(self.frame(task)?.code) else {
-            return Ok(None);
-        };
-        let Some(compiled) = running
-            .exe
-            .island_plan(plan)
-            .and_then(|program| self.islands.compiled(program, running.exe))
-        else {
-            return Ok(None);
-        };
-        let Some(after) = compiled.action_after(pc) else {
-            return Ok(None);
-        };
-        let gate = self.gate(task, host.observes_sites())?;
-        let suffix = Some(super::SourceSuffix {
-            inputs: None,
-            stmt: running.id,
-            source_pc: pc as u32,
-            after,
-            defer,
-        });
-        let completion = if gate.projecting {
-            self.resume_projecting::<true>(gate, task, host, running.exe, plan, suffix)?
-        } else {
-            self.resume_projecting::<false>(gate, task, host, running.exe, plan, suffix)?
-        };
-        Ok(completion.map(|completion| match completion {
-            Completion::Normal => Ran::Step,
-            departure => Ran::Depart(departure),
-        }))
-    }
-}
-
 impl KernelMachine {
     /// Action dispatch: starts the action of statement `stmt`, its
     /// arguments read into the registers from `out`. `Done` is one that
@@ -204,16 +47,7 @@ impl KernelMachine {
             ActionKind::Call { callee, args } => {
                 let target = self.callee(task, exe, callee)?;
                 self.put_atoms(task, exe, args, out)?;
-                if let Target::Code(code, cells, link) = &target
-                    && *link == self.current_link()
-                    && let Some(flow) =
-                        self.action_island(host, running, (*code, cells), out, args.len())?
-                {
-                    if let Target::Code(_, cells, _) = target {
-                        self.spent_captures(cells);
-                    }
-                    return Ok(flow);
-                }
+
                 self.call(task, exe, stmt, target, out, args.len())
             }
             ActionKind::Spawn { callee, args } => {

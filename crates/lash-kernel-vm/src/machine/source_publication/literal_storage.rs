@@ -1,4 +1,4 @@
-//! Detached literal storage shared by precise and packet source reads.
+//! Detached literal storage for exact source reads.
 use super::*;
 use lash_kernel_state::kernel_internals::logical::Owner;
 

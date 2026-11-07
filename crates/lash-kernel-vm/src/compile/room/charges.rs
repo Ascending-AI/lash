@@ -7,27 +7,15 @@ use lash_kernel_doc::{self as doc, Value};
 use lash_kernel_exec::{Op, OpRange, Weight};
 use lash_kernel_value::{FunctionId, sites::Site};
 use std::sync::Arc;
-pub(crate) mod composition;
-mod event_packet;
-pub(in crate::compile::room) mod settled;
-pub(in crate::compile::room) use event_packet::prefix::OriginalPayment;
-#[cfg(test)]
-pub(crate) use event_packet::prefix::OriginalReplay;
-pub(crate) use event_packet::prefix::{AcceptedOriginalPrefix, OriginalCompiler, OriginalPrefix};
 mod loop_header;
 mod native_completion;
 mod returning;
+pub(in crate::compile::room) mod settled;
 pub(crate) use returning::ReturnDebt;
 #[derive(Clone, Copy)]
 enum Coverage {
-    Span,
     LoopHeader(bool),
-    Callback(compile::CodeId),
     NativeCompletion,
-    NativePacket(Option<expr::Close>),
-    NativeAfterCloses,
-    EventPacket(Option<expr::Close>),
-    ConstructorPacket { unpaid: u32, quote: u64 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,7 +46,6 @@ pub(crate) struct ChargeProgram {
     source: Arc<Source>,
     coverage: Coverage,
     native_depth: Option<u64>,
-    native_occurrence: Option<usize>,
     statement: compile::StmtId,
     range: OpRange,
     closes: Box<[Close]>,
@@ -90,18 +77,14 @@ impl ChargeDebt<'_> {
             && &self.program.first == first
             && &self.program.through == through
     }
-    /// The suffix compiler owns strictness, the original pending close and
-    /// operation/template depth. Consumers cannot supply those independently.
+    /// The completion compiler authenticates operation depth and unpaid fees.
     pub(crate) fn native_allowance(&self, safe_point: u64) -> Option<crate::admission::Allowance> {
         let strict = match self.program.coverage {
-            Coverage::Span | Coverage::Callback(_) | Coverage::LoopHeader(_) => return None,
-            Coverage::NativeCompletion | Coverage::ConstructorPacket { .. } => false,
-            Coverage::NativePacket(_) | Coverage::NativeAfterCloses | Coverage::EventPacket(_) => {
-                true
-            }
+            Coverage::LoopHeader(_) => return None,
+            Coverage::NativeCompletion => false,
         };
         Some(crate::admission::Allowance {
-            occurrences: self.program.native_occurrence.into_iter().collect(),
+            occurrences: Vec::new(),
             before: 0,
             units: self.units,
             close: None,
@@ -113,78 +96,9 @@ impl ChargeDebt<'_> {
     pub(crate) fn units(&self) -> u64 {
         self.units
     }
-
-    pub(crate) fn record(&self, tape: &crate::observe::ChargeTape) {
-        if !self.program.recording {
-            return;
-        }
-        for close in &self.program.closes {
-            for event in &close.tape {
-                match *event {
-                    TapeEvent::Fixed(weight) => tape.push(weight),
-                    TapeEvent::Formula(index) => {
-                        let units = self.formulas[index];
-                        if units != 0 {
-                            tape.push(Weight::Atomic(units));
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 impl ChargeProgram {
-    /// Compile a straight-line statement or its canonical while-test range.
-    /// Branch/call composition selects multiple such spans; it never invents
-    /// a close or takes a fee total supplied by the packet emitter.
-    pub(crate) fn compile(
-        exe: &Executable,
-        code: compile::CodeId,
-        statement: compile::StmtId,
-        range: OpRange,
-    ) -> Result<Self, Refused> {
-        Self::compile_selected(exe, code, statement, range, None)
-    }
-
-    fn compile_selected(
-        exe: &Executable,
-        code: compile::CodeId,
-        statement: compile::StmtId,
-        range: OpRange,
-        target: Option<compile::CodeId>,
-    ) -> Result<Self, Refused> {
-        let source = Arc::clone(&exe.code(code).source_room);
-        source.verify()?;
-        let (closes, formulas) = derive_target(exe, code, statement, range, target)?;
-        let first = first_target(exe, code, statement, range, target)?;
-        let through = closes.last().ok_or(Refused::Exit)?.at.clone();
-        let fixed = closes
-            .iter()
-            .flat_map(|close| close.tape.iter())
-            .try_fold(0_u64, |sum, event| match event {
-                TapeEvent::Fixed(weight) => sum.checked_add(weight.units()),
-                TapeEvent::Formula(_) => Some(sum),
-            })
-            .ok_or(Refused::Facts)?;
-        let program = Self {
-            source,
-            coverage: target.map_or(Coverage::Span, Coverage::Callback),
-            native_depth: None,
-            native_occurrence: None,
-            statement,
-            range,
-            closes: closes.into(),
-            formulas: formulas.into(),
-            fixed,
-            recording: exe.charging(),
-            first,
-            through,
-        };
-        program.verify(exe, code)?;
-        Ok(program)
-    }
-
     /// Re-derive closes from the canonical stream, independently of reduced
     /// sums. Equal totals cannot authenticate a reordered or omitted close.
     pub(crate) fn verify(&self, exe: &Executable, code: compile::CodeId) -> Result<(), Refused> {
@@ -195,67 +109,19 @@ impl ChargeProgram {
         }
         let (closes, formulas, first) = match self.coverage {
             Coverage::LoopHeader(ending) => loop_header::derive(exe, code, self.statement, ending)?,
-            Coverage::Span => {
-                let (closes, formulas) = derive(exe, code, self.statement, self.range)?;
-                (
-                    closes,
-                    formulas,
-                    first(exe, code, self.statement, self.range)?,
-                )
-            }
-            Coverage::Callback(target) => {
-                let (closes, formulas) =
-                    derive_target(exe, code, self.statement, self.range, Some(target))?;
-                (
-                    closes,
-                    formulas,
-                    first_target(exe, code, self.statement, self.range, Some(target))?,
-                )
-            }
             Coverage::NativeCompletion => {
-                native_completion::derive(exe, code, self.statement, self.range, None)?
+                native_completion::derive(exe, code, self.statement, self.range)?
             }
-            Coverage::NativePacket(close) => {
-                native_completion::derive(exe, code, self.statement, self.range, Some(close))?
-            }
-            Coverage::NativeAfterCloses => native_completion::after_closes(
-                exe,
-                code,
-                self.statement,
-                self.range,
-                self.closes.first().ok_or(Refused::Source)?.regions.as_ref(),
-            )?,
-            Coverage::EventPacket(close) => {
-                event_packet::derive(exe, code, self.statement, self.range, close)?
-            }
-            Coverage::ConstructorPacket { unpaid, quote } => event_packet::constructor::derive(
-                exe,
-                code,
-                self.statement,
-                self.range,
-                unpaid,
-                quote,
-            )?,
         };
         let native_depth = match self.coverage {
-            Coverage::Span | Coverage::Callback(_) | Coverage::LoopHeader(_) => None,
-            Coverage::EventPacket(_) | Coverage::ConstructorPacket { .. } => Some(0),
+            Coverage::LoopHeader(_) => None,
             Coverage::NativeCompletion => Some(native_completion::depth(
                 exe,
                 self.statement,
                 self.range.start,
-                false,
             )?),
-            Coverage::NativePacket(_) | Coverage::NativeAfterCloses => Some(
-                native_completion::depth(exe, self.statement, self.range.start, true)?,
-            ),
         };
-        let native_occurrence = if matches!(self.coverage, Coverage::NativePacket(_)) {
-            native_completion::root_occurrence(exe, self.statement, self.range.start)?
-        } else {
-            None
-        };
-        if self.native_occurrence != native_occurrence || self.native_depth != native_depth {
+        if self.native_depth != native_depth {
             return Err(Refused::Source);
         }
         if first != self.first
@@ -285,10 +151,6 @@ impl ChargeProgram {
             return Err(Refused::Facts);
         }
         Ok(())
-    }
-
-    pub(crate) fn first(&self) -> &Point {
-        &self.first
     }
 
     pub(crate) fn formulas(&self) -> impl Iterator<Item = (&Point, FunctionId, usize)> {
@@ -354,16 +216,6 @@ impl ChargeProgram {
             formulas: measured,
             units,
         })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn corrupt_close_for_law(&mut self) {
-        let close = self
-            .closes
-            .iter_mut()
-            .find(|close| !close.regions.is_empty())
-            .unwrap_or_else(|| unreachable!("law has a canonical close"));
-        close.regions[0].total = close.regions[0].total.wrapping_add(1);
     }
 }
 
@@ -493,274 +345,6 @@ fn canonical_span_target(
     Ok(canonical)
 }
 
-fn first(
-    exe: &Executable,
-    code: compile::CodeId,
-    statement: compile::StmtId,
-    range: OpRange,
-) -> Result<Point, Refused> {
-    first_target(exe, code, statement, range, None)
-}
-
-fn first_target(
-    exe: &Executable,
-    code: compile::CodeId,
-    statement: compile::StmtId,
-    range: OpRange,
-    target: Option<compile::CodeId>,
-) -> Result<Point, Refused> {
-    let canonical = canonical_span_target(exe, code, statement, range, target)?;
-    let (stream, stmt, _) = exe.statement(statement);
-    let source = &exe.code(code).source_room;
-    if range.start == canonical.start {
-        return source.first_event(&if canonical == stmt.ops {
-            stmt.site.clone()
-        } else {
-            stmt.site.child(0)
-        });
-    }
-    for pc in range.start..range.end() {
-        let op = stream.ops[pc as usize];
-        if matches!(op, Op::Region { .. } | Op::Pin { .. }) {
-            continue;
-        }
-        let site = stream
-            .source_sites
-            .get(pc as usize)
-            .and_then(Option::as_deref)
-            .ok_or(Refused::Source)?;
-        return Ok(source_point(stream, site, op));
-    }
-    Err(Refused::Path)
-}
-
-/// This reads the original stream, not the optimizer's expression tree. Region
-/// identity, head, event ordering and total are checked by the canonical table.
-fn derive(
-    exe: &Executable,
-    code: compile::CodeId,
-    statement: compile::StmtId,
-    range: OpRange,
-) -> Result<(Vec<Close>, Vec<Formula>), Refused> {
-    derive_target(exe, code, statement, range, None)
-}
-
-fn derive_target(
-    exe: &Executable,
-    code: compile::CodeId,
-    statement: compile::StmtId,
-    range: OpRange,
-    target: Option<compile::CodeId>,
-) -> Result<(Vec<Close>, Vec<Formula>), Refused> {
-    let (stream, stmt, _) = exe.statement(statement);
-    let canonical = canonical_span_target(exe, code, statement, range, target)?;
-    let caller_code = code;
-    let code = exe.code(code);
-    let mut closes = Vec::new();
-    let mut formulas = Vec::new();
-    let mut open = Vec::new();
-    let mut tape = Vec::new();
-    if canonical == stmt.ops && range.start == stmt.ops.start && code.charged {
-        tape.push(TapeEvent::Fixed(Weight::Units(
-            doc::plan::FormCharge::Statement.measurement().0,
-        )));
-    }
-    if matches!(stmt.form, compile::Form::While { test, .. } if canonical == test && range.start == test.start)
-    {
-        // The source's canonical loop-test event is outside its expression
-        // region. Formula-metered helpers retain their declared loop meter.
-        let kernel = match code.source_room.owner {
-            doc::constant_pool::PoolOwner::Function(function) => {
-                exe.lib(exe.library_lib(&function).ok_or(Refused::Source)?)
-                    .header
-                    .kernel
-            }
-            doc::constant_pool::PoolOwner::Document(_) => exe.document.kernel(),
-        };
-        let metered = match stmt.form {
-            compile::Form::While { metered, .. } => metered,
-            _ => return Err(Refused::Source),
-        };
-        let units = if code.charged {
-            crate::costs::Costs::of(doc::KernelVersion::of(kernel).ok_or(Refused::Source)?)
-                .loop_test
-        } else {
-            0
-        }
-        .checked_add(metered)
-        .ok_or(Refused::Facts)?;
-        if units != 0 {
-            tape.push(TapeEvent::Fixed(Weight::Atomic(units)));
-        }
-    }
-    for pc in range.start..range.end() {
-        let op = *stream.ops.get(pc as usize).ok_or(Refused::Path)?;
-        if let Op::Region { region, total } = op {
-            let close = expr::Close {
-                region: region.0,
-                head: pc,
-                total,
-            };
-            compile::islands::verify_close(Some(&close), stream).map_err(|_| Refused::Exit)?;
-            open.push(close);
-            // Formula-metered bodies retain the original region identities,
-            // but their caller's completion formula covers these forms. The
-            // stream still contains expression events for cold recovery.
-            if code.charged {
-                tape.extend(
-                    stream
-                        .regions
-                        .events(region.0)
-                        .iter()
-                        .map(|event| TapeEvent::Fixed(event.weight)),
-                );
-            }
-            continue;
-        }
-        // Pin preserves the evaluated RHS while source target/index reads
-        // run. canonical_span verified its role; it has no charge close.
-        if matches!(op, Op::Pin { .. }) {
-            continue;
-        }
-        let site = stream
-            .source_sites
-            .get(pc as usize)
-            .and_then(Option::as_deref)
-            .ok_or(Refused::Source)?;
-        if !op.kind().in_region() {
-            match op {
-                Op::Operator { lib, args } | Op::Call { lib, args } => {
-                    completion(
-                        exe,
-                        LibId(lib.0),
-                        args.len as usize,
-                        source_point(stream, site, op),
-                        &mut formulas,
-                        &mut tape,
-                        code.charging,
-                    )?;
-                }
-                Op::Act => {
-                    let compile::Form::Action(action) = &stmt.form else {
-                        return Err(Refused::Source);
-                    };
-                    let compile::ActionKind::Call { callee, args } = &action.kind else {
-                        return Err(Refused::Source);
-                    };
-                    if pc != stmt.ops.start || action.site != *site {
-                        return Err(Refused::Source);
-                    }
-                    if code.charged {
-                        tape.extend(args.iter().map(|_| {
-                            TapeEvent::Fixed(Weight::Atomic(
-                                doc::plan::FormCharge::Argument.measurement().0,
-                            ))
-                        }));
-                    }
-                    match callee {
-                        compile::Callee::Library(lib) | compile::Callee::CheckedHelper(lib) => {
-                            completion(
-                                exe,
-                                *lib,
-                                args.len(),
-                                source_point(stream, site, op),
-                                &mut formulas,
-                                &mut tape,
-                                code.charging,
-                            )?
-                        }
-                        compile::Callee::Declared(_) => {}
-                        compile::Callee::Value(_) => {
-                            let resolved = super::region::calls::target::resolve(
-                                exe,
-                                caller_code,
-                                statement,
-                                pc,
-                                target,
-                            )?;
-                            if let Some(lib) = resolved.library {
-                                completion(
-                                    exe,
-                                    lib,
-                                    args.len(),
-                                    source_point(stream, site, op),
-                                    &mut formulas,
-                                    &mut tape,
-                                    code.charging,
-                                )?;
-                            }
-                        }
-                        _ => return Err(Refused::Source),
-                    }
-                }
-                Op::Nested { act, args } => {
-                    let nested = stream.nested.get(act.ix()).ok_or(Refused::Source)?;
-                    if let Some(lib) = nested.kind.operator_lib() {
-                        completion(
-                            exe,
-                            lib,
-                            args.len as usize,
-                            source_point(stream, site, op),
-                            &mut formulas,
-                            &mut tape,
-                            code.charging,
-                        )?;
-                    } else if matches!(
-                        nested.kind,
-                        compile::NestedKind::Call(compile::NestedCallee::Read)
-                    ) {
-                        let resolved = super::region::calls::target::resolve(
-                            exe,
-                            caller_code,
-                            statement,
-                            pc,
-                            target,
-                        )?;
-                        if let Some(lib) = resolved.library {
-                            completion(
-                                exe,
-                                lib,
-                                args.len.checked_sub(1).ok_or(Refused::Source)? as usize,
-                                source_point(stream, site, op),
-                                &mut formulas,
-                                &mut tape,
-                                code.charging,
-                            )?;
-                        }
-                    } else if !matches!(
-                        nested.kind,
-                        compile::NestedKind::Call(compile::NestedCallee::Declared(_))
-                    ) {
-                        return Err(Refused::Source);
-                    }
-                }
-                Op::Bind { .. }
-                | Op::WriteLocal { .. }
-                | Op::SetIndex { .. }
-                | Op::SetField { .. }
-                | Op::Field { .. }
-                | Op::Index { .. }
-                | Op::End
-                | Op::Test { .. }
-                | Op::Branch { .. }
-                | Op::Return { .. } => {}
-                // A source error/effect, guest call, dynamic branch, copy-out
-                // or body formula needs its own authenticated composition.
-                _ => return Err(Refused::Source),
-            }
-            closes.push(Close {
-                at: source_point(stream, site, op),
-                regions: std::mem::take(&mut open).into(),
-                tape: std::mem::take(&mut tape).into(),
-            });
-        }
-    }
-    if !open.is_empty() || !tape.is_empty() {
-        return Err(Refused::Exit);
-    }
-    Ok((closes, formulas))
-}
-
 fn completion(
     exe: &Executable,
     lib: LibId,
@@ -793,45 +377,34 @@ fn completion(
     Ok(())
 }
 
-impl crate::admission::Window {
-    #[cfg(test)]
-    /// A compiled charge prefix has already authenticated every close and
-    /// measured its canonical formulas. Quiet admission uses its reduced sum.
-    #[inline(always)]
-    pub(crate) fn admit_charges<C>(
-        self,
-        request: C,
-        debt: &crate::compile::room::charges::ChargeDebt<'_>,
-    ) -> Option<crate::admission::Accepted<C>> {
-        self.admit(request, 0, debt.units(), None, true)
+pub(crate) fn verify_close(
+    close: Option<&crate::compile::expr::Close>,
+    stream: &crate::compile::Stream,
+) -> Result<(), Refused> {
+    let Some(close) = close else {
+        return Ok(());
+    };
+    let refused = Refused::Exit;
+    if !matches!(
+        stream.ops.get(close.head as usize),
+        Some(Op::Region { region, total }) if region.0 == close.region && *total == close.total
+    ) {
+        return Err(refused);
+    }
+    let stated = stream
+        .regions
+        .summary(close.region)
+        .map_err(|_| Refused::Exit)?;
+    if stated.total() == u64::from(close.total) {
+        Ok(())
+    } else {
+        Err(refused)
     }
 }
 
-impl<'a> crate::admission::SourceResources<'a> {
-    #[cfg(test)]
-    /// Compiled prefixes spend one authenticated charge debt together with
-    /// their logical boundary. Resource staging is pure until commit.
-    pub(crate) fn admit_region<C>(
-        self,
-        debt: &crate::compile::room::charges::ChargeDebt<'_>,
-        occurrences: &[usize],
-        depth: u64,
-        safe_point: u64,
-        request: C,
-    ) -> Result<Option<crate::admission::SourceAccepted<'a, C>>, lash_kernel_doc::heap::HeapFault>
-    {
-        let need = crate::admission::Allowance {
-            occurrences: occurrences.to_vec(),
-            before: 0,
-            units: debt.units(),
-            close: None,
-            strict: true,
-            depth,
-            safe_point,
-        };
-        let Some(facts) = self.facts(&need) else {
-            return Ok(None);
-        };
-        self.admit_interval(&facts, &need, request)
+#[cfg(test)]
+impl ChargeProgram {
+    pub(crate) fn first(&self) -> &Point {
+        &self.first
     }
 }

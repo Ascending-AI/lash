@@ -1,35 +1,5 @@
-//! Header prices come from the verified, immutable source loop plan.
+//! Header prices come from the canonical loop and its kernel cost table.
 use super::*;
-use crate::compile::islands::{Block, Kind, Statement};
-
-fn find(block: &Block, id: compile::StmtId) -> Option<&Statement> {
-    for statement in &block.statements {
-        if statement.id == id {
-            return Some(statement);
-        }
-        let nested = match &statement.kind {
-            Kind::While {
-                body, otherwise, ..
-            }
-            | Kind::For {
-                body, otherwise, ..
-            } => find(body, id).or_else(|| otherwise.as_ref().and_then(|b| find(b, id))),
-            Kind::If { then_, else_, .. } => find(then_, id).or_else(|| find(else_, id)),
-            Kind::Try {
-                body,
-                catch,
-                finally,
-            } => find(body, id)
-                .or_else(|| catch.as_ref().and_then(|b| find(b, id)))
-                .or_else(|| finally.as_ref().and_then(|b| find(b, id))),
-            _ => None,
-        };
-        if nested.is_some() {
-            return nested;
-        }
-    }
-    None
-}
 pub(super) fn derive(
     exe: &Executable,
     code: compile::CodeId,
@@ -42,12 +12,29 @@ pub(super) fn derive(
     if exe.stmt_at(code, &stmt.site) != Some(statement) {
         return Err(Refused::Source);
     }
-    let plan = exe
-        .island_plan(exe.island_of(code).ok_or(Refused::Source)?)
-        .ok_or(Refused::Source)?;
-    let statement = find(&plan.body, statement).ok_or(Refused::Source)?;
-    let (cost, metered) = match statement.kind {
-        Kind::For { cost, metered, .. } | Kind::While { cost, metered, .. } => (cost, metered),
+    let kernel = match source.owner {
+        doc::constant_pool::PoolOwner::Function(function) => {
+            exe.lib(exe.library_lib(&function).ok_or(Refused::Source)?)
+                .header
+                .kernel
+        }
+        doc::constant_pool::PoolOwner::Document(_) => exe.document.kernel(),
+    };
+    let cost =
+        crate::costs::Costs::of(doc::KernelVersion::of(kernel).ok_or(Refused::Source)?).loop_test;
+    let metered = match (source.node_at(&stmt.site), &stmt.form) {
+        (
+            Some(doc::Node::Stmt(doc::Stmt::For { metered, .. })),
+            compile::Form::For {
+                metered: actual, ..
+            },
+        )
+        | (
+            Some(doc::Node::Stmt(doc::Stmt::While { metered, .. })),
+            compile::Form::While {
+                metered: actual, ..
+            },
+        ) if metered == actual => *metered,
         _ => return Err(Refused::Source),
     };
     let at = Point {
@@ -95,7 +82,6 @@ impl ChargeProgram {
             source: Arc::clone(&exe.code(code).source_room),
             coverage: Coverage::LoopHeader(ending),
             native_depth: None,
-            native_occurrence: None,
             statement,
             range: OpRange {
                 start: exe.stmt(statement).ops.start,

@@ -1,7 +1,5 @@
 use super::*;
 mod bodies;
-mod packets;
-mod regions;
 use crate::compile::room;
 struct Facts(std::collections::BTreeMap<room::Measure, i128>);
 impl room::Facts for Facts {
@@ -41,8 +39,6 @@ impl room::Execution for Execution<'_> {
 /// Equal-price field names cannot authorize each other's member journal.
 pub(super) fn names() {
     bodies::final_bodies();
-    regions::captures();
-    packets::prefixes();
     private_cell_storage();
     private_member_storage();
     indexed_members();

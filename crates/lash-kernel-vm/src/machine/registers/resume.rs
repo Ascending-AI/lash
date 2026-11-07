@@ -45,18 +45,6 @@ impl PreparedResume<'_> {
     }
 }
 impl Registers {
-    /// Only the physical mirror moves; live callers remain ledger-owned.
-    pub(in crate::machine) fn discard_replay_source_bank(
-        &mut self,
-        ledger: &Ledger,
-        heap: &lash_kernel_state::kernel_internals::PagedHeap,
-        current: &lash_kernel_state::kernel_internals::logical::Invocation,
-    ) -> Result<(), HeapFault> {
-        if self.source.replay_can_replace(ledger, heap, current)? {
-            self.source = source::Operands::default();
-        }
-        Ok(())
-    }
     pub(in crate::machine) fn prepare_source_resume(
         &mut self,
         at: ResumeAt,
@@ -146,20 +134,5 @@ impl Registers {
         ledger: &Ledger,
     ) -> Result<bool, HeapFault> {
         self.take_source_resume(task, invocation, statement, pc, ledger)
-    }
-    pub(in crate::machine) fn transfer_source_resume(
-        &mut self,
-        task: lash_kernel_doc::TaskId,
-        invocation: u64,
-        statement: &Site,
-        pc: u32,
-        ledger: &Ledger,
-    ) -> Result<(), HeapFault> {
-        if self.take_source_resume(task, invocation, statement, pc, ledger)? {
-            // The packet window adopts these same ledger owners. Dropping the
-            // bank mirror must not publish another release or reacquisition.
-            self.source = source::Operands::default();
-        }
-        Ok(())
     }
 }

@@ -148,18 +148,15 @@ fn guarded_mode(
         embedder.machine.record_charges(tape.clone());
     }
     let (mut stops, mut checkpoints) = (Vec::new(), Vec::new());
-    let (mut packets, mut specialized) = (0, 0);
+
     let end = loop {
         match mode {
             super::ExecutionMode::Source => embedder.machine.force_source_execution(),
-            super::ExecutionMode::Generic => embedder.machine.force_generic_packets(),
+            super::ExecutionMode::Generic => embedder.machine.force_generic_regions(),
             super::ExecutionMode::Specialized => {}
         }
         let step = embedder.run();
-        let (dispatched, fused) = embedder.machine.take_packet_counts();
-        packets += dispatched;
-        specialized += fused;
-        assert!(embedder.machine.execution_storage_released());
+
         let kind = match &step {
             Step::Ended(_) => "ended",
             Step::Slice => "slice",
@@ -204,12 +201,7 @@ fn guarded_mode(
             }
         }
     };
-    if mode == super::ExecutionMode::Source {
-        assert_eq!(packets, 0);
-    }
-    if mode == super::ExecutionMode::Generic {
-        assert_eq!(specialized, 0);
-    }
+
     (
         end,
         embedder.world.printed,
@@ -220,7 +212,7 @@ fn guarded_mode(
 }
 
 /// K-CHG-001 / K-MACH-008: guarded member source instructions preserve
-/// values, charges, stop points, held bytes and checkpoints across packet
+/// values, charges, stop points, held bytes and checkpoints across region
 /// modes, cold continuations, finite slices and interior charge limits.
 #[test]
 fn guarded_reads_agree() {
@@ -256,19 +248,14 @@ fn guarded_reads_agree() {
                 ..Setup::default()
             },
         );
-        run.machine.take_native_publications();
+
         if generic {
-            run.machine.force_generic_packets();
+            run.machine.force_generic_regions();
         }
         assert_eq!(
             result(run.run_to_end(&[])),
             Datum::Text("integer".into()),
             "canonical inline native, generic={generic}"
-        );
-        let publications = run.machine.take_native_publications();
-        assert!(
-            publications[1] > 0,
-            "inline native output must publish in its packet: {publications:?}"
         );
     }
     let natural = guarded(false, u64::MAX, super::super::embedder::ROOMY);
@@ -314,7 +301,7 @@ fn guarded_reads_agree() {
                     mode,
                     true
                 ),
-                "cold guarded packets at slice {slice}"
+                "cold guarded regions at slice {slice}"
             );
         }
     }
@@ -431,13 +418,12 @@ main {
   return (alias, xs[0], (1, 2))
 }
 "#;
-    let direct = || crate::machine::islands::DIRECT_COLLECTIONS.with(|n| n.replace(0));
-    direct();
+
     let reference = guarded_run(BUILD, true, u64::MAX, super::super::embedder::ROOMY);
-    assert_eq!(direct(), 0, "the tape retains the semantic heap context");
+
     assert!(reference.0.starts_with("finished"), "{}", reference.0);
     let natural = guarded_run(BUILD, false, u64::MAX, super::super::embedder::ROOMY);
-    assert!(direct() > 0, "the plain run uses resident collections");
+
     assert_eq!(natural, reference);
     for slice in [1, 2, 3, 5, 7, 11, 13, 17, 23, 31] {
         assert_eq!(
@@ -491,16 +477,11 @@ fn resident_native_items_agree() {
         let source = format!(
             "main {{ let xs = [absent, 4] let i = 0 let selected = absent while flat.lt(i, 5) {{ set selected = {expression} set i = flat.add(i, 1) }} do perform 0(\"park\") as Any return selected }}"
         );
-        crate::machine::islands::DIRECT_ITEMS.with(|n| n.set(0));
+
         let reference = guarded_run(&source, true, u64::MAX, super::super::embedder::ROOMY);
-        assert_eq!(crate::machine::islands::DIRECT_ITEMS.with(|n| n.get()), 0);
+
         let natural = guarded_run(&source, false, u64::MAX, super::super::embedder::ROOMY);
-        if reference.0.starts_with("finished") {
-            assert!(
-                crate::machine::islands::DIRECT_ITEMS.with(|n| n.get()) > 0,
-                "{expression}"
-            );
-        }
+
         assert_eq!(natural, reference, "{expression}");
         for slice in [1, 3, 7, 13, 31] {
             assert_eq!(
@@ -527,11 +508,10 @@ fn resident_native_items_agree() {
 /// K-COL / K-MACH-008: finite collection preparations preserve real lists,
 /// holes, saved callback values and exact source exits. Rejected, abandoned
 /// and stale append transactions publish no list edit or allocation ordinal.
-/// Accepted packets agree with Source at warm, cold and refused boundaries.
+/// Accepted regions agree with Source at warm, cold and refused boundaries.
 #[test]
 fn collection_region_preparations_preserve_source_and_storage() {
     collection_store_closes_charge_the_rhs_once();
-    use crate::machine::islands::witness::Family;
     const BODY: &str = r#"
         let out = [0, 0] let i = 0 let n = resident.len(values) let list = true
         for value in values { set out[resident.len(out)] = value }
@@ -660,7 +640,7 @@ fn collection_region_preparations_preserve_source_and_storage() {
                     ..Setup::default()
                 },
             );
-            runtime.machine.take_collection_acceptances();
+
             let tape = crate::ChargeTape::new();
             runtime.machine.record_charges(tape.clone());
             let mut stops = Vec::new();
@@ -668,11 +648,11 @@ fn collection_region_preparations_preserve_source_and_storage() {
             let end = loop {
                 match mode {
                     super::ExecutionMode::Source => runtime.machine.force_source_execution(),
-                    super::ExecutionMode::Generic => runtime.machine.force_generic_packets(),
+                    super::ExecutionMode::Generic => runtime.machine.force_generic_regions(),
                     super::ExecutionMode::Specialized => {}
                 }
                 let step = runtime.run();
-                assert!(runtime.machine.execution_storage_released());
+
                 let balance = runtime.machine.logical_balance().unwrap();
                 stops.push((
                     match &step {
@@ -695,9 +675,7 @@ fn collection_region_preparations_preserve_source_and_storage() {
                         if cold {
                             // Only publications after the first cold reopen count
                             // toward the cold witness, never its initial warm prefix.
-                            if reopened == 0 {
-                                runtime.machine.take_collection_acceptances();
-                            }
+
                             runtime.reopen(Layout(layout), true);
                             runtime.machine.record_charges(tape.clone());
                             reopened += 1;
@@ -708,7 +686,7 @@ fn collection_region_preparations_preserve_source_and_storage() {
                     }
                 }
             };
-            let counts = runtime.machine.take_collection_acceptances();
+
             let finished = matches!(&end, End::Finished(_));
             (
                 (
@@ -718,122 +696,37 @@ fn collection_region_preparations_preserve_source_and_storage() {
                     stops,
                     finished,
                 ),
-                counts,
                 reopened,
             )
         };
     let run = |mode, layout| {
-        let (observed, counts, reopened) =
+        let (observed, reopened) =
             observe(mode, layout, super::super::embedder::ROOMY, u64::MAX, false);
         assert_eq!(reopened, 0);
-        (observed, counts)
+        observed
     };
-    let embedder = Embedder::with(
-        source,
-        Setup {
-            probes: Some(probes),
-            ..Setup::default()
-        },
-    );
-    let (mut program, library) = embedder.program(false);
-    for layout in [0, 1, 42] {
-        program.library = crate::PreparedLibrary::with_layout(
-            std::sync::Arc::clone(&library.registry),
-            crate::Layout(layout),
-        );
-        let admitted = program
-            .library
-            .admit(&program.document, Default::default(), &program.selection)
-            .unwrap_or_else(|_| panic!("collection fixture admits"));
-        let exe = admitted
-            .executable(
-                &program.document,
-                &program.library,
-                &program.documents,
-                &program.functions,
-                &program.instances,
-            )
-            .unwrap_or_else(|_| panic!("collection fixture compiles"));
-        for generic in [false, true] {
-            let mut prepared = Vec::new();
-            for code in 0..exe.code_count() {
-                let Some(plan) = exe
-                    .island_of(crate::compile::CodeId(code as u32))
-                    .and_then(|index| exe.island_plan(index))
-                else {
-                    continue;
-                };
-                let compiled = if generic {
-                    plan.generic(&exe)
-                } else {
-                    plan.compiled(&exe)
-                };
-                if let Some(compiled) = compiled {
-                    prepared.extend(compiled.check_collection_preparations(
-                        &exe,
-                        embedder.machine.source_law_heap(),
-                        plan.slots,
-                    ));
-                }
-            }
-            for family in [
-                Family::CollectionAppend,
-                Family::Reduction,
-                Family::Placement,
-                Family::Visit,
-                Family::ReadSlot,
-                Family::Merge,
-            ] {
-                assert!(
-                    prepared.contains(&family),
-                    "layout {layout}, generic {generic}: a real recognized {family:?} preparation must execute: {prepared:?}"
-                );
-            }
-            println!(
-                "finite collection preparations: {} cases, {prepared:?}",
-                prepared.len()
-            );
-        }
-    }
-    let (reference, source_counts) = run(super::ExecutionMode::Source, 0);
+    let reference = run(super::ExecutionMode::Source, 0);
     assert!(
         reference.4,
         "the collection corpus finishes under roomy bounds"
     );
-    assert_eq!(source_counts, [0; 7]);
-    let mut actual_runs = Vec::new();
+
     for layout in [0, 1, 42] {
-        let (source_run, counts) = run(super::ExecutionMode::Source, layout);
-        assert_eq!(counts, [0; 7]);
+        let source_run = run(super::ExecutionMode::Source, layout);
+
         assert_eq!(source_run, reference, "source collection layout {layout}");
         for mode in [
             super::ExecutionMode::Specialized,
             super::ExecutionMode::Generic,
         ] {
-            let (actual, counts) = run(mode, layout);
+            let actual = run(mode, layout);
             assert_eq!(
                 actual, reference,
                 "accepted collection source/tape/holding agreement {mode:?}, layout {layout}"
             );
-            println!("actual affine collection publications {mode:?}, layout {layout}: {counts:?}");
-            actual_runs.push((mode, layout, counts));
         }
     }
-    for (mode, layout, counts) in &actual_runs {
-        assert!(
-            counts[6] > 0,
-            "the preceding assignment closes before the merge tail: {mode:?}, layout {layout}: {counts:?}"
-        );
-    }
-    for (mode, layout, counts) in actual_runs {
-        assert!(
-            counts.iter().all(|count| *count > 0),
-            "all six affine families and the separate tail execute: {mode:?}, layout {layout}: {counts:?}"
-        );
-    }
-
     for layout in [0, 1, 42] {
-        let mut accepted_after_reopen = [[0_u64; 7]; 2];
         for slice in [1, 3] {
             let expected = observe(
                 super::ExecutionMode::Source,
@@ -843,36 +736,21 @@ fn collection_region_preparations_preserve_source_and_storage() {
                 true,
             );
             assert!(expected.0.4, "cold Source collection run finishes");
-            assert!(expected.2 > 0, "the cold fixture must reopen");
-            assert_eq!(expected.1, [0; 7]);
-            for (index, mode) in [
+            assert!(expected.1 > 0, "the cold fixture must reopen");
+            for mode in [
                 super::ExecutionMode::Specialized,
                 super::ExecutionMode::Generic,
-            ]
-            .into_iter()
-            .enumerate()
-            {
+            ] {
                 let actual = observe(mode, layout, super::super::embedder::ROOMY, slice, true);
                 assert_eq!(
                     actual.0, expected.0,
                     "cold collection source/tape/checkpoint/holding agreement {mode:?}, layout {layout}, slice {slice}"
                 );
-                assert_eq!(actual.2, expected.2);
-                for (count, additional) in accepted_after_reopen[index].iter_mut().zip(actual.1) {
-                    *count += additional;
-                }
+                assert_eq!(actual.1, expected.1);
             }
         }
-        for (index, counts) in accepted_after_reopen.into_iter().enumerate() {
-            println!(
-                "cold affine collection publications mode {index}, layout {layout}: {counts:?}"
-            );
-            assert!(
-                counts.iter().all(|count| *count > 0),
-                "all six families and the separate tail publish after reopening: mode {index}, layout {layout}: {counts:?}"
-            );
-        }
     }
+
     let charged = reference.1.charged.unwrap();
     let mut refusals = 0;
     for layout in [0, 42] {
@@ -947,7 +825,6 @@ fn collection_region_preparations_preserve_source_and_storage() {
 /// K-CHG-002: a value-first indexed write has four fixed forms: its
 /// statement, RHS literal, target read and index literal. Pin costs nothing.
 fn collection_store_closes_charge_the_rhs_once() {
-    use crate::compile::room::charges::ChargeProgram;
     for layout in [0, 1, 42] {
         let run = Embedder::with(
             "main { let values = [1, 2] set values[0] = 3 return values }",
@@ -971,13 +848,14 @@ fn collection_store_closes_charge_the_rhs_once() {
                 &program.instances,
             )
             .unwrap_or_else(|_| panic!("collection close source compiles"));
-        let plan = exe
-            .islands
-            .plans
-            .iter()
-            .find(|plan| plan.params.is_empty() && plan.body.statements.len() == 3)
+        let plan = (0..exe.code_count())
+            .map(|n| crate::compile::CodeId(n as u32))
+            .find(|code| {
+                exe.code(*code).params.is_empty()
+                    && exe.block(exe.code(*code).body).stmts.len() == 3
+            })
             .unwrap();
-        let statement = plan.body.statements[1].id;
+        let statement = exe.block(exe.code(plan).body).stmts[1];
         let (stream, stmt, _) = exe.statement(statement);
         assert!(
             stream.ops[stmt.ops.start as usize..stmt.ops.end() as usize]
@@ -985,23 +863,27 @@ fn collection_store_closes_charge_the_rhs_once() {
                 .any(|op| matches!(op, lash_kernel_exec::Op::Pin { .. })),
             "the real value-first source span contains Pin"
         );
-        let charges = ChargeProgram::compile(&exe, plan.code, statement, stmt.ops).unwrap();
-        let debt = charges.bind(&[]).unwrap();
+        let charges = crate::compile::room::charges::region_isa::program(&exe, plan).unwrap();
+        let fixed: u64 = charges
+            .events
+            .iter()
+            .filter(|(at, _)| {
+                at.site.unit == stmt.site.unit && at.site.path.starts_with(&stmt.site.path)
+            })
+            .flat_map(|(_, closes)| closes.iter())
+            .flat_map(|close| close.tape.iter())
+            .map(|item| match item {
+                crate::compile::room::charges::region_isa::ChargeItem::Fixed { weight, .. } => {
+                    weight.units()
+                }
+                crate::compile::room::charges::region_isa::ChargeItem::Formula { .. } => {
+                    panic!("the indexed write has no formula")
+                }
+            })
+            .sum();
         assert_eq!(
-            debt.units(),
-            4,
+            fixed, 4,
             "statement + RHS literal + target read + index literal; Pin adds no fee"
         );
-        let tape = crate::ChargeTape::new();
-        debt.record(&tape);
-        assert_eq!(
-            tape.steps()
-                .iter()
-                .map(|weight| weight.units())
-                .sum::<u64>(),
-            4,
-            "the original source closes record the same four forms once"
-        );
-        assert_eq!(charges.verify(&exe, plan.code), Ok(()));
     }
 }

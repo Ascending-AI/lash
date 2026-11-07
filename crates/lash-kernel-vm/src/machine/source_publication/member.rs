@@ -452,18 +452,7 @@ impl KernelMachine {
             },
         )?;
         drop(arena);
-        if published {
-            #[cfg(any(test, feature = "testing"))]
-            if matches!(edit.member, Member::Field(_)) {
-                crate::machine::islands::witness::field_member_published();
-            } else if matches!(edit.member, Member::Table(_)) {
-                crate::machine::islands::witness::table_member_published();
-            } else if removing {
-                crate::machine::islands::witness::list_removal_published();
-            } else {
-                crate::machine::islands::witness::member_published();
-            }
-        }
+
         Ok(published)
     }
 }

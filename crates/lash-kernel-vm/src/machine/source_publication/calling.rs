@@ -156,10 +156,7 @@ impl KernelMachine {
                 *source_action = Some((entry.occurrence, occurrence));
             },
         )?;
-        #[cfg(any(test, feature = "testing"))]
-        if published {
-            crate::machine::islands::witness::call_enter_published();
-        }
+
         Ok(published.then_some(occurrence))
     }
 }
@@ -228,7 +225,6 @@ impl Context<'_> {
             return Ok(false);
         };
         let memory_bound = match self.admission {
-            Admission::Envelope(bound) => bound,
             Admission::Exact(mut memory) => {
                 if memory.exceeded(prepared.peak()) {
                     prepared = prepared.collect(&ledger, self.heap)?;
@@ -245,10 +241,7 @@ impl Context<'_> {
             semantic(arena, self.session, storage)
         })?;
         self.logical_memory.set(balance.total()?);
-        #[cfg(any(test, feature = "testing"))]
-        crate::machine::islands::witness::source_loop_published(
-            &frontier.position().occurrence.loops,
-        );
+
         Ok(true)
     }
 }

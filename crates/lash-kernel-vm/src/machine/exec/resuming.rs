@@ -24,10 +24,7 @@ impl KernelMachine {
             && let Some((id, pc)) = self.publish_source_call_resume(task, exe, value)?
         {
             let running = Running::new(task, exe, id);
-            let ran = match self.register_action_suffix(host, &running, pc as usize)? {
-                Some(ran) => ran,
-                None => self.run(host, &running, pc as usize)?,
-            };
+            let ran = self.run(host, &running, pc as usize)?;
             return Ok((id, ran));
         }
         let frame = self.frame(task)?;
@@ -87,9 +84,6 @@ impl KernelMachine {
                 lash_kernel_exec::Reg(0),
                 &value,
             )?;
-            if let Some(ran) = self.register_action_suffix(host, &running, running.stmt.resume())? {
-                return Ok((id, ran));
-            }
             return match self.run(host, &running, running.stmt.resume())? {
                 Ran::Done => Ok((id, Ran::Done)),
                 _ => Err(fault("an action's statement did not complete").into()),
@@ -128,10 +122,7 @@ impl KernelMachine {
         }
         let pc = running.stmt.ops.start as usize + entry.resume as usize;
         self.transfer_precise_result(&running, pc as u32, entry.dst, &value)?;
-        let ran = match self.register_action_suffix(host, &running, pc)? {
-            Some(ran) => ran,
-            None => self.run(host, &running, pc)?,
-        };
+        let ran = self.run(host, &running, pc)?;
         Ok((id, ran))
     }
 

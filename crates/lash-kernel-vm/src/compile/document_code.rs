@@ -212,35 +212,8 @@ pub(super) fn compile_document(
         .iter()
         .map(|(site, count)| (ordinals[site], *count))
         .collect();
-    let islands = {
-        let base = (
-            prepared.tables.codes.len() as u32,
-            prepared.tables.blocks.len() as u32,
-            prepared.tables.stmts.len() as u32,
-        );
-        let mut islands = islands::form(
-            &mut tables,
-            prepared,
-            base,
-            Costs::of_document(document).loop_test,
-        );
-        islands.scalar = form_scalar_loops(
-            &tables,
-            prepared,
-            Costs::of_document(document).loop_test,
-            &|code: CodeId| {
-                (code.0 as usize)
-                    .checked_sub(base.0 as usize)
-                    .and_then(|own| islands.by_code.get(own).copied().flatten())
-                    .is_some()
-            },
-            &|stmt| islands.owns_loop(stmt),
-        );
-        islands
-    };
     Ok(DocumentCode {
         tables,
-        islands,
         main,
         declared,
         native_starts,

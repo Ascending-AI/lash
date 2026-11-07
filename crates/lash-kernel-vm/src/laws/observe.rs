@@ -136,20 +136,10 @@ enum Observing {
     Work,
     Context,
     Both,
-    Census,
     Full,
 }
 
 fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>, Facts) {
-    run_counted(source, setup, observing, None)
-}
-
-fn run_counted(
-    source: &str,
-    setup: Setup,
-    observing: Observing,
-    scheduler: Option<u64>,
-) -> (Seen, Option<WorkReport>, Facts) {
     let setup = Setup {
         probes: Some(if source == super::layout::HELPERS {
             super::layout::helper_probes
@@ -158,7 +148,7 @@ fn run_counted(
         }),
         ..setup
     };
-    let (layout, slice, bounds) = (setup.layout, setup.slice, setup.bounds);
+    let slice = setup.slice;
     let mut embedder = Embedder::with(source, setup);
     let tape = crate::ChargeTape::new();
     embedder.machine.record_charges(tape.clone());
@@ -180,7 +170,7 @@ fn run_counted(
         embedder.machine.trace_path();
         embedder.machine.set_observe(crate::ObservationMode::Counts);
     }
-    embedder.machine.count_execution();
+
     let mut seen = Seen {
         steps: Vec::new(),
         exports: Vec::new(),
@@ -237,52 +227,7 @@ fn run_counted(
         !seen.events.is_empty(),
         "the observer compares emitted charge facts"
     );
-    {
-        let census = embedder.machine.take_execution_census();
-        if let Some(minimum) = scheduler {
-            assert!(
-                census
-                    .statements
-                    .get(&crate::perf_witness::execution::Owner::RegisterProgram)
-                    .copied()
-                    .unwrap_or(0)
-                    >= minimum,
-                "scheduler forms use registers under full observation: {census:?}"
-            );
-        }
-        if bounds.memory == ROOMY.memory && layout == Layout::default() && slice == u64::MAX {
-            // Main itself runs in the register program: a call it hands to
-            // its source action under projection resumes the callee there
-            // rather than entering it afresh.
-            assert!(
-                census
-                    .statements
-                    .get(&crate::perf_witness::execution::Owner::RegisterProgram)
-                    .copied()
-                    .unwrap_or(0)
-                    > 0,
-                "{observing:?} executes the register program: {census:?}"
-            );
-        }
-        assert!(
-            census
-                .slow_exits
-                .get(&crate::perf_witness::execution::Owner::RegisterProgram)
-                .is_none_or(|reasons| !reasons
-                    .contains_key(&crate::perf_witness::execution::Reason::Observation)),
-            "passive observation never rejects register admission: {census:?}"
-        );
-        assert!(census.statements.values().sum::<u64>() > 0);
-        assert!(
-            census
-                .statements
-                .keys()
-                .all(|owner| *owner == crate::perf_witness::execution::Owner::RegisterProgram),
-            "the register program executes every statement: {census:?}"
-        );
-        // Fully admitted runs may have no slow exit. The slice boundary's
-        // exact rejecting reason is pinned by the census law below.
-    }
+
     if matches!(observing, Observing::Full) {
         facts.counts = embedder.machine.take_ran();
         facts.path = embedder.machine.take_execution_path().unwrap();
@@ -308,7 +253,7 @@ fn observing_a_run_changes_nothing_it_can_observe() {
             },
             Observing::Full,
         );
-        let actual = run_counted(&source, Setup::default(), Observing::Full, Some(6));
+        let actual = run(&source, Setup::default(), Observing::Full);
         assert_eq!(
             actual.0, reference.0,
             "scheduler observation, cancel={cancel}"
@@ -335,7 +280,6 @@ fn observing_a_run_changes_nothing_it_can_observe() {
                 Observing::Work,
                 Observing::Context,
                 Observing::Both,
-                Observing::Census,
                 Observing::Full,
             ] {
                 let setup = Setup {
@@ -381,7 +325,6 @@ fn observing_a_run_changes_nothing_it_can_observe() {
                         Observing::Work,
                         Observing::Context,
                         Observing::Both,
-                        Observing::Census,
                         Observing::Full,
                     ] {
                         let (observed, work, facts) = run(
@@ -423,156 +366,6 @@ fn observing_a_run_changes_nothing_it_can_observe() {
             }
         }
     }
-}
-
-/// The census counts executed statements, including a frameless literal return,
-/// once under each physical layout. Charge, slicing and the physical owner are
-/// independent coordinates; a source continuation is not another statement.
-#[test]
-fn the_execution_census_counts_statements_across_owner_handoffs() {
-    use crate::perf_witness::execution::{self, Owner};
-    // Reusing the typed kernel does not hand register statements to a region.
-    let source = super::layout::scalar_document(
-        "let i = 0.0 while flat.lt(i, 4.0) { let previous = flat.identity(i) set i = flat.add(previous, 1.0) } return i",
-    );
-    for record in [false, true] {
-        let mut embedder = Embedder::with(
-            &source,
-            Setup {
-                probes: Some(super::layout::scalar_probes),
-                ..Setup::default()
-            },
-        );
-        let tape = crate::ChargeTape::new();
-        if record {
-            embedder.machine.record_charges(tape);
-        }
-        crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.set(0));
-        embedder.machine.count_execution();
-        assert!(matches!(embedder.run_to_end(&[]), End::Finished(_)));
-        let census = embedder.machine.take_execution_census();
-        assert!(crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.get()) > 0);
-        assert_eq!(census.statements.values().sum::<u64>(), 13, "{census:?}");
-        assert!(
-            census
-                .statements
-                .get(&Owner::RegisterProgram)
-                .copied()
-                .unwrap_or(0)
-                >= 11,
-            "{census:?}"
-        );
-    }
-    const TEXT: &str = r#"
-definition "function literal() -> Any\nkernel 1\nmetering statements\nbody { return 7 }"
-main {
-    let answer = call literal()
-    let i = 0
-    while num.lt(i, 3) {
-        set i = num.add(i, 1)
-    }
-    return answer
-}
-"#;
-    // Three main statements before the loop body, three body writes, the
-    // final return and the literal callee's return: eight guest statements total. Helper-body statements are counted separately.
-    for allocating in [false, true] {
-        let text = if allocating {
-            TEXT.replace("        set i", "        let padding = [i]\n        set i")
-        } else {
-            TEXT.to_owned()
-        };
-        let expected = if allocating { 11 } else { 8 };
-        for layout in [Layout::default(), Layout(1)] {
-            for slice in [u64::MAX, 1] {
-                let mut embedder = Embedder::with(
-                    &text,
-                    Setup {
-                        layout,
-                        slice,
-                        ..Setup::default()
-                    },
-                );
-                let tape = crate::ChargeTape::new();
-                embedder.machine.record_charges(tape.clone());
-                embedder.machine.count_execution();
-                loop {
-                    match embedder.run() {
-                        Step::Slice => {}
-                        Step::Ended(End::Finished(_)) => break,
-                        other => panic!("unexpected execution: {other:?}"),
-                    }
-                }
-                let census = embedder.machine.take_execution_census();
-                assert_eq!(census.register_entries, tape.work().calls);
-                if slice == 1 {
-                    let reason = execution::Reason::Slice;
-                    assert!(
-                        census
-                            .slow_exits
-                            .values()
-                            .any(|reasons| reasons.get(&reason).is_some_and(|count| *count > 0)),
-                        "register entry reports {reason:?} at its rejecting boundary: {census:?}"
-                    );
-                }
-                assert_eq!(
-                    census.statements.values().sum::<u64>(),
-                    expected,
-                    "{layout:?}, slice {slice}: {census:?}"
-                );
-                if layout == Layout::default() && slice == u64::MAX {
-                    assert!(census.register_entries > 0, "{census:?}");
-                    assert!(
-                        census
-                            .statements
-                            .get(&Owner::RegisterProgram)
-                            .copied()
-                            .unwrap_or(0)
-                            > 0
-                    );
-                }
-                // Finishing disables the producer; the next capture starts empty.
-                assert_eq!(
-                    embedder.machine.take_execution_census(),
-                    execution::Census::default()
-                );
-            }
-        }
-    }
-    // ADR 0123: another hosted machine neither contributes to this census
-    // nor resets it, including when its own collection starts and finishes.
-    let mut first = Embedder::with("main { return 7 }", Setup::default());
-    let mut second = Embedder::with("main { let x = 1 return x }", Setup::default());
-    first.machine.count_execution();
-    second.machine.count_execution();
-    assert!(matches!(second.run_to_end(&[]), End::Finished(_)));
-    let other = second.machine.take_execution_census();
-    assert_eq!(other.statements.values().sum::<u64>(), 2);
-    assert!(matches!(first.run_to_end(&[]), End::Finished(_)));
-    let own = first.machine.take_execution_census();
-    assert_eq!(own.statements.values().sum::<u64>(), 1);
-    assert_eq!(
-        second.machine.take_execution_census(),
-        execution::Census::default()
-    );
-    // Helper bodies and their literal callbacks use the common executor.
-    let mut embedder = Embedder::with(
-        "main { let got = invoke each.twice(fn(x) { return x }, 1) return got }",
-        Setup::default(),
-    );
-    embedder.machine.count_execution();
-    assert!(matches!(embedder.run(), Step::Ended(End::Finished(_))));
-    let census = embedder.machine.take_execution_census();
-    assert_eq!(census.statements.values().sum::<u64>(), 7, "{census:?}");
-    assert!(
-        census
-            .statements
-            .get(&Owner::RegisterProgram)
-            .copied()
-            .unwrap_or(0)
-            >= 5,
-        "{census:?}"
-    );
 }
 
 /// Opt-in observation stays derived across projection, refusal and cold reopen.

@@ -108,6 +108,7 @@ impl BindingPlacement {
 
     /// Validate a lowered source read against lexical resolution, rather than
     /// trusting a physical register which happens to hold a same-sized value.
+    #[cfg(test)]
     pub(crate) fn verify_read(&self, at: &Point, physical: u32) -> Result<(), Refused> {
         let super::region::ScalarInput::Binding(slot) = self
             .source
@@ -119,15 +120,6 @@ impl BindingPlacement {
             return Err(Refused::Source);
         }
         Ok(())
-    }
-    pub(crate) fn verify_literal(&self, at: &Point, actual: Value) -> Result<(), Refused> {
-        match self
-            .source
-            .scalar_input(self.source.owner_slots()?.as_ref(), at)?
-        {
-            super::region::ScalarInput::Literal(expected) if expected.same(&actual) => Ok(()),
-            _ => Err(Refused::Facts),
-        }
     }
 
     pub(crate) fn capture<'v>(

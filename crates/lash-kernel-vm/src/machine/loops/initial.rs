@@ -17,7 +17,7 @@ impl KernelMachine {
         paid: Option<&PaidLoopInput>,
     ) -> Result<bool, Halt> {
         #[cfg(any(test, feature = "testing"))]
-        if self.islands.source_only || self.islands.generic_only {
+        if self.source_only || self.generic_regions {
             return Ok(false);
         }
         let Some(Ok((next_cursor, Some(value)))) = cursor.resident_step(&self.arena.borrow())

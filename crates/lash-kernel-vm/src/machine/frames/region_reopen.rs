@@ -132,7 +132,6 @@ impl Frames {
                 &self.access,
             )?);
             frame.source_frontier = None;
-            frame.texts.clear();
         }
         Ok(())
     }

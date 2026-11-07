@@ -6,14 +6,11 @@ mod departure;
 mod entered;
 mod exact;
 mod fields;
-mod observers;
 mod resume;
-mod unit;
 
 /// The source publication protocol binds recovery, ownership, charge closes
 /// and an exclusive shared admission; equal byte deltas cannot replace them.
 pub(super) fn checked_source_publication() {
-    self::observers::isolation();
     exact::events();
     departure::exits();
     resume::calls();
@@ -21,7 +18,6 @@ pub(super) fn checked_source_publication() {
     control::joins();
     fields::names();
     construction::successors();
-    unit::comparisons();
     use crate::compile::room::{self, Phase, Point, Selection, publication::*};
     use lash_kernel_doc::{TaskId, Value};
     use lash_kernel_state::kernel_internals::logical::{
@@ -666,17 +662,12 @@ fn persistent_assignment_publication() {
     let source = "main { let saved = [7] set saved = [saved, saved] for ignored in [0, 1] { set saved = saved } let active = true while active { set saved = saved set active = false } return saved }";
     for record in [false, true] {
         for slice in [3, u64::MAX] {
-            super::super::layout::packet_modes(
+            super::super::layout::region_modes(
                 source,
                 super::super::embedder::ROOMY,
                 slice,
                 slice != u64::MAX,
                 record,
-            );
-            let sessions = crate::machine::islands::witness::session_publications();
-            assert!(
-                sessions >= 2,
-                "both persistent writes must use exact source boundaries: {sessions}, tape={record}, slice={slice}"
             );
         }
     }

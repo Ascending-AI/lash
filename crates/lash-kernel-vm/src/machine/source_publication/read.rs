@@ -184,13 +184,7 @@ impl KernelMachine {
                 bank.publish(value, holding);
             },
         )?;
-        #[cfg(any(test, feature = "testing"))]
-        if published {
-            crate::machine::islands::witness::precise_read_published(matches!(
-                op,
-                Op::Index { .. }
-            ));
-        }
+
         Ok(published)
     }
 }
