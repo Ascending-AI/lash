@@ -3,23 +3,11 @@ use super::super::{NameRef, SiteRef};
 use super::*;
 use lash_kernel_value::names::Name;
 use lash_kernel_value::sites::Site;
-use std::any::{Any, TypeId};
+use std::any::TypeId;
 use std::rc::Rc;
 
-type CacheKey = (PageId, TypeId, Option<FamilyId>, bool);
-struct Decoded {
-    node: Box<dyn Any>,
-    summary: Summary,
-    encoded: usize,
-}
-#[derive(Default)]
-pub(super) struct DecodedResidency {
-    nodes: BTreeMap<CacheKey, Decoded>,
-    pub(super) bytes: usize,
-    names: BTreeMap<(usize, usize), (Name, NameRef)>,
-    sites: BTreeMap<Site, SiteRef>,
-    projected_names: BTreeMap<(PageId, u64, u64, u64), Name>,
-}
+use super::cache::{Held, Slot};
+
 impl Access<'_> {
     pub(super) fn decoded_node<T: Cell>(
         &self,
@@ -27,19 +15,26 @@ impl Access<'_> {
         branch: &Branch<T>,
         sequence: bool,
     ) -> Result<Option<Rc<Node<T>>>, HeapFault> {
-        let cache = self.decoded.borrow();
-        let Some(entry) = cache
-            .nodes
-            .get(&(page.id, TypeId::of::<T>(), branch.family, sequence))
+        let mut resident = self.resident.borrow_mut();
+        let Some(Held::Node {
+            node,
+            summary,
+            encoded,
+        }) = resident.get(&Slot::Node(
+            page.id,
+            TypeId::of::<T>(),
+            branch.family,
+            sequence,
+        ))
         else {
             return Ok(None);
         };
-        let Some(node) = entry.node.downcast_ref::<Rc<Node<T>>>() else {
+        let Some(node) = node.downcast_ref::<Rc<Node<T>>>() else {
             return Ok(None);
         };
         if branch
             .encoded_bytes
-            .is_some_and(|bytes| bytes != entry.encoded as u64)
+            .is_some_and(|bytes| bytes != *encoded as u64)
         {
             return Err(corrupt(page, "tree root byte count mismatch"));
         }
@@ -49,7 +44,7 @@ impl Access<'_> {
         {
             return Err(corrupt(page, "tree root kind mismatch"));
         }
-        validate_summary(branch, entry.summary, page)?;
+        validate_summary(branch, *summary, page)?;
         Ok(Some(Rc::clone(node)))
     }
     pub(super) fn retain_decoded<T: Cell>(
@@ -61,49 +56,44 @@ impl Access<'_> {
         summary: Summary,
         encoded: usize,
     ) {
-        let weight = decoded_weight(node, encoded);
-        if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
-            self.clear();
-        }
-        let mut cache = self.decoded.borrow_mut();
-        cache.bytes += weight;
-        cache.nodes.insert(
-            (page.id, TypeId::of::<T>(), family, sequence),
-            Decoded {
+        self.resident.borrow_mut().insert(
+            Slot::Node(page.id, TypeId::of::<T>(), family, sequence),
+            Held::Node {
                 node: Box::new(Rc::clone(node)),
                 summary,
                 encoded,
             },
+            decoded_weight(node, encoded),
         );
     }
     pub(crate) fn metadata_name(&self, name: &Name) -> Option<NameRef> {
-        self.decoded
-            .borrow()
-            .names
-            .get(&(name.as_str().as_ptr() as usize, name.as_str().len()))
-            .map(|(_, value)| value.clone())
+        match self.resident.borrow_mut().get(&Slot::Name(
+            name.as_str().as_ptr() as usize,
+            name.as_str().len(),
+        )) {
+            Some(Held::Name { value, .. }) => Some(value.clone()),
+            _ => None,
+        }
     }
     pub(crate) fn retain_metadata_name(&self, name: &Name, value: &NameRef) {
         let weight = name.as_str().len()
             + encode_body(value).len() * 16
             + std::mem::size_of::<NameRef>()
             + 512;
-        if weight > 64 << 20 {
-            return;
-        }
-        if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
-            self.clear();
-        }
-        let mut cache = self.decoded.borrow_mut();
-        cache.bytes += weight;
-        // Retain the input Arc so pointer reuse cannot alias a later name.
-        cache.names.insert(
-            (name.as_str().as_ptr() as usize, name.as_str().len()),
-            (name.clone(), value.clone()),
+        self.resident.borrow_mut().insert(
+            Slot::Name(name.as_str().as_ptr() as usize, name.as_str().len()),
+            Held::Name {
+                _name: name.clone(),
+                value: value.clone(),
+            },
+            weight,
         );
     }
     pub(crate) fn metadata_site(&self, site: &Site) -> Option<SiteRef> {
-        self.decoded.borrow().sites.get(site).cloned()
+        match self.resident.borrow_mut().get(&Slot::Site(site.clone())) {
+            Some(Held::Site(value)) => Some(value.clone()),
+            _ => None,
+        }
     }
     /// Retains a self-contained site reference, so a frame or binding that
     /// names a site again does not build its path tree again (FIG-6318).
@@ -112,28 +102,26 @@ impl Access<'_> {
             + encode_body(value).len() * 16
             + std::mem::size_of::<SiteRef>()
             + 512;
-        if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
-            self.clear();
-        }
-        let mut cache = self.decoded.borrow_mut();
-        cache.bytes += weight;
-        cache.sites.insert(site.clone(), value.clone());
+        self.resident.borrow_mut().insert(
+            Slot::Site(site.clone()),
+            Held::Site(value.clone()),
+            weight,
+        );
     }
     pub(crate) fn projected_name(
         &self,
         page: PageRef,
         summary: lash_kernel_doc::heap::TextSummary,
     ) -> Option<Name> {
-        self.decoded
-            .borrow()
-            .projected_names
-            .get(&(
-                page.id,
-                summary.utf8_bytes,
-                summary.chars,
-                summary.utf16_units,
-            ))
-            .cloned()
+        match self.resident.borrow_mut().get(&Slot::Projected(
+            page.id,
+            summary.utf8_bytes,
+            summary.chars,
+            summary.utf16_units,
+        )) {
+            Some(Held::Projected(name)) => Some(name.clone()),
+            _ => None,
+        }
     }
     pub(crate) fn retain_projected_name(
         &self,
@@ -142,22 +130,15 @@ impl Access<'_> {
         name: &Name,
     ) {
         let weight = name.as_str().len() + std::mem::size_of::<Name>() + 128;
-        if weight > 64 << 20 {
-            return;
-        }
-        if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
-            self.clear();
-        }
-        let mut cache = self.decoded.borrow_mut();
-        cache.bytes += weight;
-        cache.projected_names.insert(
-            (
+        self.resident.borrow_mut().insert(
+            Slot::Projected(
                 page.id,
                 summary.utf8_bytes,
                 summary.chars,
                 summary.utf16_units,
             ),
-            name.clone(),
+            Held::Projected(name.clone()),
+            weight,
         );
     }
 }

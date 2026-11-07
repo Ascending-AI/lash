@@ -14,6 +14,7 @@ use {
     lash_kernel_value::tokens::decode_body, lash_kernel_value::tokens::encode_body,
 };
 
+mod cache;
 mod canonical;
 #[cfg(test)]
 pub(crate) use canonical::boundary_hash;
@@ -62,30 +63,24 @@ pub trait Cell: TokenCodec + Clone + 'static {
 #[derive(Clone)]
 pub struct Access<'a> {
     source: Rc<RefCell<SourcePort<'a>>>,
-    cache: Rc<RefCell<BTreeMap<PageId, PageAnswer>>>,
-    bytes: Rc<RefCell<usize>>,
+    resident: Rc<RefCell<cache::Residency>>,
     dirty: Rc<RefCell<residency::DirtyResidency>>,
-    decoded: Rc<RefCell<decoded::DecodedResidency>>,
     sizing: Rc<RefCell<TokenWriter>>,
 }
 impl<'a> Access<'a> {
     pub fn new(source: Box<dyn PageSource>) -> Self {
         Self {
             source: Rc::new(RefCell::new(SourcePort::Owned(source))),
-            cache: Rc::new(RefCell::new(BTreeMap::new())),
-            bytes: Rc::new(RefCell::new(0)),
+            resident: Default::default(),
             dirty: Default::default(),
-            decoded: Default::default(),
             sizing: Default::default(),
         }
     }
     pub fn borrowed(source: &'a mut dyn PageSource) -> Self {
         Self {
             source: Rc::new(RefCell::new(SourcePort::Borrowed(source))),
-            cache: Rc::new(RefCell::new(BTreeMap::new())),
-            bytes: Rc::new(RefCell::new(0)),
+            resident: Default::default(),
             dirty: Default::default(),
-            decoded: Default::default(),
             sizing: Default::default(),
         }
     }
@@ -104,8 +99,8 @@ impl<'a> Access<'a> {
     pub fn read(&self, page: PageRef) -> Result<PageAnswer, HeapFault> {
         #[cfg(feature = "perf-witness")]
         crate::perf_witness::sealing(|w| w.seal_pages_read += 1);
-        if let Some(answer) = self.cache.borrow().get(&page.id) {
-            return Ok(answer.clone());
+        if let Some(answer) = self.resident_page(page.id) {
+            return Ok(answer);
         }
         let mut answers = self.source.borrow_mut().read(&[page])?;
         if answers.len() != 1 {
@@ -128,13 +123,17 @@ impl<'a> Access<'a> {
             + answer.children.capacity() * std::mem::size_of::<PageRef>()
             + std::mem::size_of::<PageAnswer>()
             + 64;
-        if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
-            self.clear();
+        self.resident.borrow_mut().insert(
+            cache::Slot::Page(answer.page.id),
+            cache::Held::Page(answer.clone()),
+            weight,
+        );
+    }
+    fn resident_page(&self, page: PageId) -> Option<PageAnswer> {
+        match self.resident.borrow_mut().get(&cache::Slot::Page(page)) {
+            Some(cache::Held::Page(answer)) => Some(answer.clone()),
+            _ => None,
         }
-        *self.bytes.borrow_mut() += weight;
-        self.cache
-            .borrow_mut()
-            .insert(answer.page.id, answer.clone());
     }
     /// Only explicitly demanded siblings enter this bounded read. Results
     /// stay in request order, including faults; decoding consumes them in
@@ -152,7 +151,7 @@ impl<'a> Access<'a> {
         }
         let cached: Vec<_> = pages
             .iter()
-            .map(|page| self.cache.borrow().get(&page.id).cloned())
+            .map(|page| self.resident_page(page.id))
             .collect();
         let mut missing: Vec<PageRef> = Vec::new();
         for (page, held) in pages.iter().zip(&cached) {
@@ -229,10 +228,9 @@ impl<'a> Access<'a> {
     ) -> Result<T, HeapFault> {
         f(&mut *self.source.borrow_mut())
     }
+    /// Drops every read page and decoding; later reads fetch them again.
     pub fn clear(&self) {
-        self.cache.borrow_mut().clear();
-        *self.bytes.borrow_mut() = 0;
-        *self.decoded.borrow_mut() = Default::default();
+        *self.resident.borrow_mut() = Default::default();
     }
 }
 

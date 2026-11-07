@@ -85,6 +85,49 @@ pub(super) fn fresh() -> (PagedHeap, Rc<RefCell<Pages>>) {
     .expect("install census");
     (heap, pages)
 }
+/// Admission evicts by weight, never the whole residency: a working set
+/// re-read between rounds of first reads stays resident while it fits the
+/// shared budget, so each page is fetched once (FIG-7679).
+#[test]
+fn a_cold_scan_does_not_evict_the_reread_working_set() {
+    let pages = Rc::new(RefCell::new(Pages::default()));
+    let tokens: Arc<[u8]> = vec![0; 8192].into();
+    let page = |n: u64| {
+        let mut id = [0; 32];
+        id[..8].copy_from_slice(&n.to_be_bytes());
+        PageRef {
+            id: PageId(id),
+            grant: PageGrant::NONE,
+        }
+    };
+    let (hot, rounds, scan) = (7_000, 32, 128);
+    for n in 0..hot + rounds * scan {
+        pages.borrow_mut().pages.insert(
+            page(n).id,
+            PageAnswer {
+                page: page(n),
+                kind: PageKind::PAYLOAD_LEAF,
+                tokens: Arc::clone(&tokens),
+                children: vec![],
+            },
+        );
+    }
+    let access = tree::Access::new(Box::new(Source(Rc::clone(&pages))));
+    for n in 0..hot {
+        access.read(page(n)).expect("hot page");
+    }
+    for round in 0..rounds {
+        for n in 0..scan {
+            access
+                .read(page(hot + round * scan + n))
+                .expect("cold page");
+        }
+        for n in 0..hot {
+            access.read(page(n)).expect("hot page");
+        }
+    }
+    assert_eq!(pages.borrow().reads, hot + rounds * scan);
+}
 /// Writes positions `range` of `list`, each `value(position)`, through the
 /// heap's card store as a projection writes a list's dirty cards: a range
 /// past the length appends.
