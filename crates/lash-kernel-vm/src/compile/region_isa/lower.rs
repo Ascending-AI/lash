@@ -504,12 +504,11 @@ pub(super) fn reg(
     {
         return Reg::new(roles.len());
     }
-    let slot = resources::role(source, owner).ok_or(Refused::Facts)?;
+    let role = resources::role(source, owner).ok_or(Refused::Facts)?;
     roles
-        .iter()
-        .find(|(candidate, _)| *candidate == slot)
-        .map(|(_, reg)| *reg)
-        .ok_or(Refused::Facts)
+        .binary_search_by(|(candidate, _)| candidate.cmp(&role))
+        .map(|index| roles[index].1)
+        .map_err(|_| Refused::Facts)
 }
 
 pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Refused> {
@@ -1428,13 +1427,14 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
         .into_iter()
         .enumerate()
         {
-            let roles: Box<[_]> = draft
-                .roles
+            let roles: Box<[_]> = live
                 .iter()
-                .filter_map(|(role, reg)| {
-                    role.slot()
-                        .filter(|slot| live.contains(slot))
-                        .map(|slot| (slot, *reg))
+                .filter_map(|slot| {
+                    draft
+                        .roles
+                        .binary_search_by(|(role, _)| role.cmp(&Role::Slot(*slot)))
+                        .ok()
+                        .map(|index| (*slot, draft.roles[index].1))
                 })
                 .collect();
             let operands = roles

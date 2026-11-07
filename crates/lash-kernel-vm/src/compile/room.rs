@@ -488,8 +488,14 @@ pub(crate) struct Description {
     pub(super) bulk: Option<&'static doc::plan::CopyLoop>,
     pub(crate) calls: BTreeMap<FunctionId, CallSource>,
     pub(crate) room: SourceRoom,
+    // Preserve the first exit and alternatives in their source-room order.
+    exit_kinds: BTreeMap<Point, Vec<ExitKind>>,
 }
 impl Description {
+    fn exits_at(&self, at: &Point) -> &[ExitKind] {
+        self.exit_kinds.get(at).map_or(&[], Vec::as_slice)
+    }
+
     pub(crate) fn assigns_cell(&self, at: &Site) -> bool {
         self.cell_assignments
             .as_ref()
@@ -811,9 +817,17 @@ impl Source {
                 scratch: Box::new([]),
                 exits: Box::new([]),
             },
+            exit_kinds: BTreeMap::new(),
         };
         source.cell_assignments = root_owners::cell_assignments(&source);
         source.room = derive::body(&source);
+        for exit in &source.room.exits {
+            source
+                .exit_kinds
+                .entry(exit.point.clone())
+                .or_default()
+                .push(exit.kind);
+        }
         source
     }
     pub(crate) fn verify(&self) -> Result<(), Refused> {

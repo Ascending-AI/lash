@@ -168,12 +168,10 @@ impl Step {
             peak: Linear::compile(&event.peak, &indices),
             delta: Linear::compile(&event.delta, &indices),
             normal: source
-                .room
-                .exits
-                .iter()
-                .find(|exit| exit.point == event.point)
-                .ok_or(Refused::Exit)?
-                .kind,
+                .exits_at(&event.point)
+                .first()
+                .copied()
+                .ok_or(Refused::Exit)?,
             variables: indices.into_iter().collect(),
             event,
             selected,
@@ -204,11 +202,10 @@ impl Source {
     /// taking its own exit: a delivered action's Commit, a call's Restore,
     /// or a step the machine serves or refuses before it runs.
     pub(crate) fn raising(&self, at: &Point) -> Option<Event> {
-        let exits = || self.room.exits.iter().filter(|exit| exit.point == *at);
-        (exits().any(|exit| exit.kind == ExitKind::Raise)
-            && exits().any(|exit| exit.kind != ExitKind::Raise))
-        .then(|| self.room.events.get(at)?.raised(&self.site))
-        .flatten()
+        let exits = self.exits_at(at);
+        (exits.contains(&ExitKind::Raise) && exits.iter().any(|exit| *exit != ExitKind::Raise))
+            .then(|| self.room.events.get(at)?.raised(&self.site))
+            .flatten()
     }
     /// An issued Return leaves its entered ordinary blocks, then its Source.
     /// Its authored path proves enclosing if choices; earlier children have
@@ -934,12 +931,7 @@ impl Source {
                 _ => return Err(Refused::Path),
             }
         }
-        if !self
-            .room
-            .exits
-            .iter()
-            .any(|exit| exit.point == *at && exit.kind == selected)
-        {
+        if !self.exits_at(at).contains(&selected) {
             return Err(Refused::Exit);
         }
         let mut event = self.room.events.get(at).ok_or(Refused::Path)?.clone();
@@ -1053,14 +1045,7 @@ impl evaluate::Events for Trace<'_> {
         let Some(Selection::Event { at, exit }) = self.selected.get(self.cursor) else {
             return Err(Refused::Path);
         };
-        if *at != expected
-            || !self
-                .source
-                .room
-                .exits
-                .iter()
-                .any(|allowed| allowed.point == *at && allowed.kind == *exit)
-        {
+        if *at != expected || !self.source.exits_at(at).contains(exit) {
             return Err(Refused::Exit);
         }
         let event = self.source.room.events.get(at).ok_or(Refused::Path)?;

@@ -25,10 +25,9 @@ fn register(draft: &RegionDraft, owner: &Owner) -> Result<Reg<LeaseValue>, Refus
     };
     draft
         .roles
-        .iter()
-        .find(|(actual, _)| *actual == role)
-        .map(|(_, reg)| *reg)
-        .ok_or(Refused::Facts)
+        .binary_search_by(|(actual, _)| actual.cmp(&role))
+        .map(|index| draft.roles[index].1)
+        .map_err(|_| Refused::Facts)
 }
 fn source_next(source: &Source, at: &Point) -> Result<Option<Point>, Refused> {
     let node = resources::node(source, &at.site)?;
@@ -1422,13 +1421,14 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                 (step.after, &after, incoming_after, incoming_after),
             ] {
                 let map = draft.recovery.get(prefix.offset()).ok_or(Refused::Exit)?;
-                let expected_roles: Vec<_> = draft
-                    .roles
+                let expected_roles: Vec<_> = expected
                     .iter()
-                    .filter_map(|(role, reg)| {
-                        role.slot()
-                            .filter(|slot| expected.contains(slot))
-                            .map(|slot| (slot, *reg))
+                    .filter_map(|slot| {
+                        draft
+                            .roles
+                            .binary_search_by(|(role, _)| role.cmp(&Role::Slot(*slot)))
+                            .ok()
+                            .map(|index| (*slot, draft.roles[index].1))
                     })
                     .collect();
                 if !map.graph.check(
