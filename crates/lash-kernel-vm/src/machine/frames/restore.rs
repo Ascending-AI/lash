@@ -95,8 +95,10 @@ pub(super) fn frame(
         awaiting = Some(stmt);
     }
     // A run-root cleanup has left every source scope: the frame stands at
-    // its body, holding the departure the cleanup returns to.
-    let cleaning = if *site == code.site
+    // its body, holding the departure the cleanup returns to. A source
+    // continuation says where its frame stands itself.
+    let cleaning = if source.is_none()
+        && *site == code.site
         && arrival == Arrival::Returned
         && pending.is_none()
         && (record.convention.as_ref().is_some_and(|convention| {
