@@ -46,7 +46,7 @@ lash_store_sql::statements! {
         bind_inputs = "UPDATE pending_turn_inputs SET admitted_run = ?3, admitted_by = ?3
             WHERE session_id = ?1 AND input_id IN (SELECT value FROM json_each(?2))
               AND (admitted_run IS NULL OR admitted_run = ?3)
-              AND state IN ('deferred_next_turn', 'pending_active') RETURNING input_id";
+              AND {{undelivered_turn_input_state(state)}} RETURNING input_id";
         bind_batches = "UPDATE queued_work_batches SET admitted_run = ?3, admitted_by = ?3
             WHERE session_id = ?1 AND batch_id IN (SELECT value FROM json_each(?2))
               AND (admitted_run IS NULL OR admitted_run = ?3)
