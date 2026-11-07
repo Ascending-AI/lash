@@ -90,7 +90,10 @@ pub(super) fn comparisons() {
                     &mut arena,
                     heap.pages(),
                     &[],
-                    &[(Slot::Binding(0), RootValue::Value(&value))],
+                    &[(
+                        Slot::Binding(crate::laws::role_id(0)),
+                        RootValue::Value(&value),
+                    )],
                 )
                 .unwrap();
             store

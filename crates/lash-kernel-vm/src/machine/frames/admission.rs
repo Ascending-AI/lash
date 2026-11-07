@@ -51,7 +51,7 @@ pub(super) fn admit_roles(
                 value: admit(arena, access, &role.value)?,
                 site: match role.coordinate {
                     RoleCoordinate::Expression(site) => site.into(),
-                    RoleCoordinate::Slot(_) => {
+                    RoleCoordinate::Source { .. } => {
                         return Err(malformed("an action retained a non-expression role"));
                     }
                 },

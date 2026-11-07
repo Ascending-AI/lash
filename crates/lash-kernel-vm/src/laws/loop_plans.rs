@@ -402,9 +402,9 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                             task: lash_kernel_doc::TaskId::MAIN,
                             invocation: 73,
                             slot: if borrowed {
-                                Slot::Capture(slot as u32)
+                                Slot::Capture(crate::laws::role_id(slot as u32))
                             } else {
-                                Slot::Binding(slot as u32)
+                                Slot::Binding(crate::laws::role_id(slot as u32))
                             }
                         })
                     );
@@ -1150,8 +1150,8 @@ fn source_room_exits_preserve_charge_prefix_and_holdings() {
                 .chain(event.entities.iter())
             {
                 assert!(
-                    slots.get(owner).is_some(),
-                    "every concrete source owner has an index"
+                    slots.contains(owner),
+                    "every concrete source owner is in the owner table"
                 );
             }
         }

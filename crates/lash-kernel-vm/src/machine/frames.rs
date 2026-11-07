@@ -808,7 +808,12 @@ impl Frame {
         }
         if !self.pending.projected() {
             stored.pending = if let Some(source) = &self.pending.source {
-                Some(source.project(self.invocation, arena, access)?)
+                let owners = exe
+                    .code(self.code)
+                    .source_room
+                    .owner_slots()
+                    .map_err(|_| malformed("a frame's source has no owner table"))?;
+                Some(source.project(self.invocation, &owners, arena, access)?)
             } else {
                 match &self.pending.pending {
                     Some(pending) => Some(

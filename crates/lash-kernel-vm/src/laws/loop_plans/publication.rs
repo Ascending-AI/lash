@@ -876,8 +876,14 @@ fn shared_cell_publication() {
                 heap.pages(),
                 &[],
                 &[
-                    (Slot::Binding(0), RootValue::Value(&first_ref)),
-                    (Slot::Binding(1), RootValue::Value(&second_ref)),
+                    (
+                        Slot::Binding(crate::laws::role_id(0)),
+                        RootValue::Value(&first_ref),
+                    ),
+                    (
+                        Slot::Binding(crate::laws::role_id(1)),
+                        RootValue::Value(&second_ref),
+                    ),
                 ],
             )
             .unwrap();
@@ -1162,7 +1168,10 @@ fn shared_cell_publication() {
         );
         assert!(matches!(arena.cell(first).unwrap(), Value::Int(256)));
         assert!(matches!(arena.cell(second).unwrap(), Value::Int(1)));
-        for owner in [caller.owner(Slot::Binding(0)), visible] {
+        for owner in [
+            caller.owner(Slot::Binding(crate::laws::role_id(0))),
+            visible,
+        ] {
             let mut edges = Vec::new();
             ledger_store
                 .borrow()

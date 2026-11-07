@@ -52,9 +52,18 @@ pub(super) fn final_bodies() {
                 heap.pages(),
                 &[],
                 &[
-                    (Slot::Binding(0), RootValue::Value(&value)),
-                    (Slot::Binding(1), RootValue::Value(&value)),
-                    (Slot::Binding(2), RootValue::Value(&child)),
+                    (
+                        Slot::Binding(crate::laws::role_id(0)),
+                        RootValue::Value(&value),
+                    ),
+                    (
+                        Slot::Binding(crate::laws::role_id(1)),
+                        RootValue::Value(&value),
+                    ),
+                    (
+                        Slot::Binding(crate::laws::role_id(2)),
+                        RootValue::Value(&child),
+                    ),
                 ],
             )
             .unwrap();
@@ -268,7 +277,10 @@ pub(super) fn final_bodies() {
             );
         }
         assert!(arena.item(child_handle, 1).unwrap().unwrap().same(&child));
-        for slot in [Slot::Binding(0), Slot::Binding(1)] {
+        for slot in [
+            Slot::Binding(crate::laws::role_id(0)),
+            Slot::Binding(crate::laws::role_id(1)),
+        ] {
             assert!(
                 ledger
                     .holding(invocation.owner(slot), heap.pages())
@@ -324,8 +336,14 @@ fn shared_batch_child() {
             heap.pages(),
             &[],
             &[
-                (Slot::Binding(0), RootValue::Value(&first_value)),
-                (Slot::Binding(1), RootValue::Value(&second_value)),
+                (
+                    Slot::Binding(crate::laws::role_id(0)),
+                    RootValue::Value(&first_value),
+                ),
+                (
+                    Slot::Binding(crate::laws::role_id(1)),
+                    RootValue::Value(&second_value),
+                ),
             ],
         )
         .unwrap();

@@ -2,12 +2,33 @@
 //! Registers and frame-cache positions do not participate in these identities.
 use super::*;
 use lash_kernel_doc::TaskId;
-use lash_kernel_state::kernel_internals::logical::{Owner as Root, Slot};
+use lash_kernel_state::kernel_internals::logical::{Owner as Root, RoleId, Slot, SourceRole};
 use std::collections::BTreeSet;
 
 type Scopes = BTreeMap<Owner, Site>;
 type Aliases = BTreeMap<Owner, Owner>;
-type Resolution = (Scopes, Aliases, BTreeMap<Owner, (u32, bool)>);
+type Resolution = (Scopes, Aliases, BTreeMap<Owner, (RoleId, bool)>);
+
+/// The persisted discriminator of an owner a frame slot can name.
+pub(super) fn source_role(owner: &Owner) -> Option<SourceRole> {
+    Some(match owner {
+        Owner::Operand(at) => SourceRole::Operand(at.clone()),
+        Owner::Selected(at) => SourceRole::Selected(at.clone()),
+        Owner::Atom { at, index } => SourceRole::Atom {
+            at: at.clone(),
+            index: *index,
+        },
+        Owner::LoopCursor(at) => SourceRole::LoopCursor(at.clone()),
+        Owner::LoopHeader(at) => SourceRole::LoopHeader(at.clone()),
+        Owner::PendingDeparture(at) => SourceRole::PendingDeparture(at.clone()),
+        Owner::ActiveDeparture(at) => SourceRole::ActiveDeparture(at.clone()),
+        Owner::Binding { declared, name } => SourceRole::Binding {
+            declared: declared.clone(),
+            name: name.clone(),
+        },
+        _ => return None,
+    })
+}
 pub(super) fn form(source: &Source, owners: &BTreeSet<Owner>) -> Result<Resolution, Refused> {
     let binding_slots: BTreeMap<_, _> = source
         .bindings
@@ -18,7 +39,14 @@ pub(super) fn form(source: &Source, owners: &BTreeSet<Owner>) -> Result<Resoluti
                     declared: binding.declared.clone(),
                     name: binding.name.clone(),
                 },
-                (binding.index, binding.borrowed),
+                (
+                    SourceRole::Binding {
+                        declared: binding.declared.clone(),
+                        name: binding.name.clone(),
+                    }
+                    .id(),
+                    binding.borrowed,
+                ),
             )
         })
         .collect();
@@ -217,6 +245,40 @@ pub(super) fn cell_assignments(source: &Description) -> Result<BTreeMap<Site, Na
         .collect())
 }
 impl OwnerSlots {
+    /// The slot a resolved (non-alias) owner names in a frame of this body.
+    fn slot(&self, owner: &Owner) -> Option<Slot> {
+        let (id, borrowed) = match self.binding_slots.get(owner) {
+            Some(&(id, borrowed)) => (id, borrowed),
+            None => (self.get(owner)?, false),
+        };
+        Some(match owner {
+            Owner::Operand(_) | Owner::Selected(_) | Owner::Atom { .. } => Slot::Operand(id),
+            Owner::Binding { .. } if borrowed => Slot::Capture(id),
+            Owner::Binding { .. } => Slot::Binding(id),
+            Owner::LoopCursor(_) | Owner::LoopHeader(_) => Slot::Control(id),
+            Owner::PendingDeparture(_) | Owner::ActiveDeparture(_) => Slot::Departure(id),
+            _ => return None,
+        })
+    }
+    /// Every slot this body names with its source role; two roles under one
+    /// slot refuse the body (Q4: the table is injective).
+    pub(super) fn role_table(&self) -> Result<BTreeMap<Slot, SourceRole>, Refused> {
+        let mut roles = BTreeMap::new();
+        let mut insert = |slot: Slot, role: SourceRole| match roles.insert(slot, role.clone()) {
+            Some(other) if other != role => Err(Refused::Facts),
+            _ => Ok(()),
+        };
+        for owner in self.slots.keys().chain(self.binding_slots.keys()) {
+            let (Some(slot), Some(role)) = (self.slot(owner), source_role(owner)) else {
+                continue;
+            };
+            if let Owner::Operand(_) = owner {
+                insert(Slot::Continuation(slot.id()), role.clone())?;
+            }
+            insert(slot, role)?;
+        }
+        Ok(roles)
+    }
     /// The source name of the durable main session cell with this owner digest.
     pub(crate) fn session_name(&self, digest: &[u8; 32]) -> Option<&Name> {
         self.slots
@@ -232,11 +294,11 @@ impl OwnerSlots {
             })
     }
     pub(crate) fn continuation(&self, site: &Site, task: TaskId, invocation: u64) -> Option<Root> {
-        let index = self.get(&Owner::Operand(site.clone()))?;
+        let id = self.get(&Owner::Operand(site.clone()))?;
         Some(Root::Value {
             task,
             invocation,
-            slot: Slot::Continuation(index),
+            slot: Slot::Continuation(id),
         })
     }
     pub(crate) fn root(&self, owner: &Owner, task: TaskId, invocation: u64) -> Option<Root> {
@@ -248,35 +310,15 @@ impl OwnerSlots {
             return Some(Root::session(name));
         }
         if matches!(owner, Owner::Incoming(_)) {
-            return self.get(owner).map(|_| Root::Incoming(task));
+            return self.contains(owner).then_some(Root::Incoming(task));
         }
         if let Owner::Frame(at) = owner {
             return (at == &self.source).then_some(Root::Frame { task, invocation });
         }
-        let index = self
-            .binding_slots
-            .get(owner)
-            .map(|(index, _)| *index)
-            .or_else(|| self.get(owner))?;
-        let slot = match owner {
-            Owner::Operand(_) | Owner::Selected(_) | Owner::Atom { .. } => Slot::Operand(index),
-            Owner::Binding { .. }
-                if self
-                    .binding_slots
-                    .get(owner)
-                    .is_some_and(|(_, borrowed)| *borrowed) =>
-            {
-                Slot::Capture(index)
-            }
-            Owner::Binding { .. } => Slot::Binding(index),
-            Owner::LoopCursor(_) | Owner::LoopHeader(_) => Slot::Control(index),
-            Owner::PendingDeparture(_) | Owner::ActiveDeparture(_) => Slot::Departure(index),
-            _ => return None,
-        };
         Some(Root::Value {
             task,
             invocation,
-            slot,
+            slot: self.slot(owner)?,
         })
     }
     /// A group's members are fixed by this immutable body; only the

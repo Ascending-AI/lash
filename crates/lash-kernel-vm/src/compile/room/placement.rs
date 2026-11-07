@@ -19,16 +19,12 @@ pub(crate) struct BindingPlacement {
 struct PlacementLayout {
     slots: Box<[Slot]>,
     shared: Box<[bool]>,
-    bindings: Box<[Option<u32>]>,
-    captures: Box<[Option<u32>]>,
+    /// Each binding or capture slot's physical position.
+    homes: std::collections::BTreeMap<Slot, u32>,
 }
 impl PlacementLayout {
     fn physical(&self, slot: Slot) -> Option<u32> {
-        match slot {
-            Slot::Binding(index) => self.bindings.get(index as usize).copied().flatten(),
-            Slot::Capture(index) => self.captures.get(index as usize).copied().flatten(),
-            _ => None,
-        }
+        self.homes.get(&slot).copied()
     }
 }
 
@@ -61,8 +57,7 @@ impl BindingPlacement {
         let mut seen = std::collections::BTreeSet::new();
         let mut slots = Vec::with_capacity(body.slots.len());
         let mut shared = Vec::with_capacity(body.slots.len());
-        let mut bindings = Vec::new();
-        let mut captures = Vec::new();
+        let mut homes = std::collections::BTreeMap::new();
         for &index in body.slots_by_at.iter() {
             if !seen.insert(index) {
                 return Err(Refused::Source);
@@ -84,16 +79,9 @@ impl BindingPlacement {
             else {
                 return Err(Refused::Source);
             };
-            let homes = match slot {
-                Slot::Binding(_) => &mut bindings,
-                Slot::Capture(_) => &mut captures,
-                _ => return Err(Refused::Source),
-            };
-            let (Slot::Binding(index) | Slot::Capture(index)) = slot else {
-                unreachable!();
-            };
-            homes.resize(homes.len().max(index as usize + 1), None);
-            if homes[index as usize].replace(slots.len() as u32).is_some() {
+            if !matches!(slot, Slot::Binding(_) | Slot::Capture(_))
+                || homes.insert(slot, slots.len() as u32).is_some()
+            {
                 return Err(Refused::Source);
             }
             slots.push(slot);
@@ -105,8 +93,7 @@ impl BindingPlacement {
             layout: Arc::new(PlacementLayout {
                 slots: slots.into(),
                 shared: shared.into(),
-                bindings: bindings.into(),
-                captures: captures.into(),
+                homes,
             }),
         })
     }

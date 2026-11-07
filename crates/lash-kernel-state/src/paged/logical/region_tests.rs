@@ -141,7 +141,7 @@ fn region_lease_excludes_alias_writers_and_sibling_invocations() {
         [
             (active.frame(), PublicationValue::Frame),
             (
-                active.owner(Slot::Binding(0)),
+                active.owner(Slot::Binding(RoleId([0; 16]))),
                 PublicationValue::Native(Value::Int(7)),
             ),
         ],
@@ -1220,7 +1220,7 @@ fn call_and_measure_views() {
     let capture_owner = Owner::Value {
         task: TaskId::MAIN,
         invocation: 0,
-        slot: Slot::Capture(0),
+        slot: Slot::Capture(RoleId([0; 16])),
     };
     assert_eq!(
         accept(

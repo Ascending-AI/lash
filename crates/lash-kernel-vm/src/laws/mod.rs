@@ -25,3 +25,10 @@ mod scheduler;
 mod stream;
 mod tasks;
 mod verdict;
+
+/// A distinct role identity for law fixtures.
+pub(crate) fn role_id(n: u32) -> lash_kernel_state::kernel_internals::logical::RoleId {
+    let mut id = [0; 16];
+    id[..4].copy_from_slice(&n.to_be_bytes());
+    lash_kernel_state::kernel_internals::logical::RoleId(id)
+}

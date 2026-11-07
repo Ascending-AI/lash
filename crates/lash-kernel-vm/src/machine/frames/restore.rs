@@ -51,7 +51,18 @@ pub(super) fn frame(
         .as_ref()
         .filter(|pending| pending.unpaid.is_some())
         .map(|pending| {
-            source::SourceContinuation::restore(pending, record.invocation, &site, arena, access)
+            let owners = code
+                .source_room
+                .owner_slots()
+                .map_err(|_| malformed("a frame's source has no owner table"))?;
+            source::SourceContinuation::restore(
+                pending,
+                record.invocation,
+                &owners,
+                &site,
+                arena,
+                access,
+            )
         })
         .transpose()?;
     let pending = match record.pending.as_ref().filter(|_| source.is_none()) {

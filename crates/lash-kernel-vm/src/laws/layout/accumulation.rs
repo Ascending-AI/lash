@@ -1024,8 +1024,14 @@ fn prepared_text_bodies() {
         arena.text("é😀"),
     ];
     let roots = [
-        (Slot::Binding(0), RootValue::Value(&values[0])),
-        (Slot::Binding(1), RootValue::Value(&values[1])),
+        (
+            Slot::Binding(crate::laws::role_id(0)),
+            RootValue::Value(&values[0]),
+        ),
+        (
+            Slot::Binding(crate::laws::role_id(1)),
+            RootValue::Value(&values[1]),
+        ),
     ];
     let (invocation, entered) = ledger
         .prepare_enter(

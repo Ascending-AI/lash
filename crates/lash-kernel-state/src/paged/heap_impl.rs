@@ -76,6 +76,50 @@ pub fn header_root(page: PageRef, answer: &PageAnswer) -> Result<HeapRoot, HeapF
     Ok(root)
 }
 
+/// The heap header `page` with its ledger's carried value owners rekeyed
+/// ([`LedgerRoot::rekey_values`](super::logical::LedgerRoot::rekey_values)):
+/// a version carry's new header, or `page` itself when no owner moves.
+pub fn rekey_header_values<E: From<HeapFault>>(
+    access: &Access<'_>,
+    page: PageRef,
+    rekey: impl FnMut(super::logical::Owner) -> Result<super::logical::Owner, E>,
+    collision: impl Fn(super::logical::Owner) -> E,
+) -> Result<PageRef, E> {
+    let answer = access.read(page)?;
+    let mut root = header_root(page, &answer)?;
+    for tree in [
+        &mut root.directory,
+        &mut root.families,
+        &mut root.logical.owners,
+        &mut root.logical.execution,
+        &mut root.logical.ended,
+        &mut root.logical.entities,
+    ] {
+        if let Some(page) = tree.page_mut() {
+            super::tree::grant(page, &answer.children)?;
+        }
+    }
+    let Some(logical) = root.logical.rekey_values(access, rekey, collision)? else {
+        return Ok(page);
+    };
+    root.logical = logical;
+    let mut out = TokenWriter::new();
+    out.sum(0, 1);
+    root.encode(&mut out);
+    let children = [
+        root.directory.page(),
+        root.families.page(),
+        root.logical.owners.page(),
+        root.logical.execution.page(),
+        root.logical.ended.page(),
+        root.logical.entities.page(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    Ok(access.seal(PageKind::KEYED_LEAF, out.into_bytes(), children)?)
+}
+
 /// The persisted accounting of the heap whose header is `page` (S7): what
 /// an embedder restores its census from before it opens a root or a
 /// carried session over that heap. One page read.

@@ -27,7 +27,11 @@ fn owner(n: u32) -> Owner {
     Owner::Value {
         task: TaskId::MAIN,
         invocation: 0,
-        slot: Slot::Binding(n),
+        slot: Slot::Binding({
+            let mut id = [0; 16];
+            id[..4].copy_from_slice(&n.to_be_bytes());
+            RoleId(id)
+        }),
     }
 }
 fn frame() -> Owner {
@@ -301,7 +305,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
     let capture = Owner::Value {
         task: TaskId::MAIN,
         invocation: 0,
-        slot: Slot::Capture(0),
+        slot: Slot::Capture(RoleId([0; 16])),
     };
     let cell = arena.new_cell(lash_kernel_doc::Value::Int(7));
     assert_eq!(arena.identify(cell).unwrap(), id(2));
@@ -346,7 +350,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
                     Owner::Value {
                         task: TaskId::MAIN,
                         invocation: 0,
-                        slot: Slot::Capture(1)
+                        slot: Slot::Capture(RoleId([1; 16]))
                     },
                     RootValue::Capture(child_handle)
                 ),]
@@ -525,7 +529,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
                 arena.registration().unwrap(),
                 access,
                 &[],
-                &[(Slot::Binding(0), RootValue::Value(value))],
+                &[(Slot::Binding(RoleId([0; 16])), RootValue::Value(value))],
             )
             .unwrap()
     }
@@ -545,7 +549,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
             &access,
             &[(
                 Owner::Ended(TaskId::MAIN),
-                RootValue::Existing(first.owner(Slot::Binding(0))),
+                RootValue::Existing(first.owner(Slot::Binding(RoleId([0; 16])))),
             )],
         )
         .unwrap();
@@ -578,7 +582,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
     );
     assert_eq!(
         frames.invocation_owners(&second, &access).unwrap(),
-        [second.frame(), second.owner(Slot::Binding(0))]
+        [second.frame(), second.owner(Slot::Binding(RoleId([0; 16])))]
     );
     // The live heap owns the ledger. A cached physical certificate cannot
     // hide a newer source-root publication when sealing the same heap again.
@@ -599,7 +603,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
                 &live,
                 &[],
                 &[(
-                    Slot::Binding(0),
+                    Slot::Binding(RoleId([0; 16])),
                     PublicationValue::Native(lash_kernel_doc::Value::Int(7)),
                 )],
             )
@@ -611,9 +615,9 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
             .transfer_source(
                 &mut arena,
                 &live,
-                &[invocation.owner(Slot::Binding(0))],
+                &[invocation.owner(Slot::Binding(RoleId([0; 16])))],
                 &[(
-                    invocation.owner(Slot::Binding(0)),
+                    invocation.owner(Slot::Binding(RoleId([0; 16]))),
                     RootValue::Value(&lash_kernel_doc::Value::Int(0)),
                 )],
             )
@@ -666,8 +670,11 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
             .transfer_source(
                 &mut arena,
                 &live,
-                &[invocation.owner(Slot::Binding(0))],
-                &[(invocation.owner(Slot::Binding(0)), RootValue::Value(&cycle))],
+                &[invocation.owner(Slot::Binding(RoleId([0; 16])))],
+                &[(
+                    invocation.owner(Slot::Binding(RoleId([0; 16]))),
+                    RootValue::Value(&cycle),
+                )],
             )
             .unwrap();
         store
@@ -684,9 +691,9 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
             .transfer_source(
                 &mut arena,
                 &live,
-                &[invocation.owner(Slot::Binding(0))],
+                &[invocation.owner(Slot::Binding(RoleId([0; 16])))],
                 &[(
-                    invocation.owner(Slot::Binding(0)),
+                    invocation.owner(Slot::Binding(RoleId([0; 16]))),
                     RootValue::Value(&lash_kernel_doc::Value::Null),
                 )],
             )
@@ -1116,7 +1123,7 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
     let scratch = Owner::Value {
         task: TaskId::MAIN,
         invocation: 0,
-        slot: Slot::Scratch(2),
+        slot: Slot::Scratch(RoleId([2; 16])),
     };
     admit(
         &mut ledger,

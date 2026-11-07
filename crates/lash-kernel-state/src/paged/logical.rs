@@ -52,19 +52,171 @@ pub use warming::WarmFact;
 mod values;
 pub(crate) use values::stream_value_edges;
 
-/// An index in the exact source unit, assigned before register placement.
+/// A source role's identity: the first 16 bytes of the digest of its full
+/// canonical discriminator ([`SourceRole`]), domain-separated by the page
+/// format. No compiler numbering takes part, so a role keeps its identity
+/// across compilations of the same source and carries by correspondence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RoleId(pub [u8; 16]);
+
+/// A frame's role, by kind and source identity. Register placement maps it
+/// through its code's table; the ledger keys `Owner::Value` by it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Slot {
-    Binding(u32),
-    Operand(u32),
-    Control(u32),
-    Argument(u32),
-    Departure(u32),
-    Continuation(u32),
-    Scratch(u32),
+    Binding(RoleId),
+    Operand(RoleId),
+    Control(RoleId),
+    Argument(RoleId),
+    Departure(RoleId),
+    Continuation(RoleId),
+    Scratch(RoleId),
     /// A frame's borrowed reach to a captured variable cell. The declaring
     /// binding and closure entity own the priced occurrences.
-    Capture(u32),
+    Capture(RoleId),
+}
+
+/// The kind half of a [`Slot`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SlotKind {
+    Binding,
+    Operand,
+    Control,
+    Argument,
+    Departure,
+    Continuation,
+    Scratch,
+    Capture,
+}
+
+impl Slot {
+    pub fn new(kind: SlotKind, id: RoleId) -> Self {
+        match kind {
+            SlotKind::Binding => Self::Binding(id),
+            SlotKind::Operand => Self::Operand(id),
+            SlotKind::Control => Self::Control(id),
+            SlotKind::Argument => Self::Argument(id),
+            SlotKind::Departure => Self::Departure(id),
+            SlotKind::Continuation => Self::Continuation(id),
+            SlotKind::Scratch => Self::Scratch(id),
+            SlotKind::Capture => Self::Capture(id),
+        }
+    }
+    pub fn kind(self) -> SlotKind {
+        self.parts().0
+    }
+    pub fn id(self) -> RoleId {
+        self.parts().1
+    }
+    fn parts(self) -> (SlotKind, RoleId) {
+        match self {
+            Self::Binding(id) => (SlotKind::Binding, id),
+            Self::Operand(id) => (SlotKind::Operand, id),
+            Self::Control(id) => (SlotKind::Control, id),
+            Self::Argument(id) => (SlotKind::Argument, id),
+            Self::Departure(id) => (SlotKind::Departure, id),
+            Self::Continuation(id) => (SlotKind::Continuation, id),
+            Self::Scratch(id) => (SlotKind::Scratch, id),
+            Self::Capture(id) => (SlotKind::Capture, id),
+        }
+    }
+}
+
+/// The full canonical discriminator of a source role (Q4). Sites are whole
+/// source sites; a version carry maps them by correspondence and recomputes
+/// the [`RoleId`].
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SourceRole {
+    Operand(lash_kernel_value::sites::Site),
+    Selected(lash_kernel_value::sites::Site),
+    Atom {
+        at: lash_kernel_value::sites::Site,
+        index: u32,
+    },
+    LoopCursor(lash_kernel_value::sites::Site),
+    LoopHeader(lash_kernel_value::sites::Site),
+    PendingDeparture(lash_kernel_value::sites::Site),
+    ActiveDeparture(lash_kernel_value::sites::Site),
+    Binding {
+        declared: lash_kernel_value::sites::Site,
+        name: lash_kernel_value::Name,
+    },
+    /// An entry argument, by position.
+    Argument(u32),
+    /// A native call's resource owner, by its contract index.
+    NativeResource(u32),
+}
+
+impl SourceRole {
+    /// The identity of positional argument `index`; the low positions are
+    /// derived once per process, since every call names them.
+    pub fn argument(index: u32) -> RoleId {
+        static LOW: std::sync::OnceLock<Box<[RoleId]>> = std::sync::OnceLock::new();
+        Self::positional(&LOW, index, SourceRole::Argument)
+    }
+    /// The identity of native resource `index`.
+    pub fn native_resource(index: u32) -> RoleId {
+        static LOW: std::sync::OnceLock<Box<[RoleId]>> = std::sync::OnceLock::new();
+        Self::positional(&LOW, index, SourceRole::NativeResource)
+    }
+    /// The positional role a low argument or native resource slot names.
+    pub fn positional_of(slot: Slot) -> Option<SourceRole> {
+        type Positional = (fn(u32) -> SourceRole, fn(u32) -> RoleId);
+        let (role, of): Positional = match slot {
+            Slot::Argument(_) => (SourceRole::Argument, Self::argument),
+            Slot::Scratch(_) => (SourceRole::NativeResource, Self::native_resource),
+            _ => return None,
+        };
+        (0..64).find(|index| of(*index) == slot.id()).map(role)
+    }
+    fn positional(
+        low: &std::sync::OnceLock<Box<[RoleId]>>,
+        index: u32,
+        role: fn(u32) -> SourceRole,
+    ) -> RoleId {
+        const LOW: u32 = 64;
+        if index < LOW {
+            low.get_or_init(|| (0..LOW).map(|index| role(index).id()).collect())[index as usize]
+        } else {
+            role(index).id()
+        }
+    }
+    pub fn id(&self) -> RoleId {
+        let mut out = lash_kernel_value::tokens::TokenWriter::new();
+        out.seq(3);
+        out.text("lash.source-role");
+        out.unsigned(u64::from(super::source::PAGE_FORMAT));
+        lash_kernel_value::tokens::TokenCodec::encode(self, &mut out);
+        let digest = lash_kernel_value::tokens::logical_digest(&out.into_bytes());
+        let mut id = [0; 16];
+        id.copy_from_slice(&digest[..16]);
+        RoleId(id)
+    }
+    /// The same role with each site mapped, for a version carry.
+    pub fn map_sites<E>(
+        &self,
+        mut map: impl FnMut(
+            &lash_kernel_value::sites::Site,
+        ) -> Result<lash_kernel_value::sites::Site, E>,
+    ) -> Result<Self, E> {
+        Ok(match self {
+            Self::Operand(at) => Self::Operand(map(at)?),
+            Self::Selected(at) => Self::Selected(map(at)?),
+            Self::Atom { at, index } => Self::Atom {
+                at: map(at)?,
+                index: *index,
+            },
+            Self::LoopCursor(at) => Self::LoopCursor(map(at)?),
+            Self::LoopHeader(at) => Self::LoopHeader(map(at)?),
+            Self::PendingDeparture(at) => Self::PendingDeparture(map(at)?),
+            Self::ActiveDeparture(at) => Self::ActiveDeparture(map(at)?),
+            Self::Binding { declared, name } => Self::Binding {
+                declared: map(declared)?,
+                name: name.clone(),
+            },
+            Self::Argument(index) => Self::Argument(*index),
+            Self::NativeResource(index) => Self::NativeResource(*index),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -353,6 +505,66 @@ pub struct LedgerRoot {
 }
 
 impl LedgerRoot {
+    /// Rekeys the value owners a version carry renames, keeping each holding.
+    /// `rekey` names each value owner's successor, refusing an owner it cannot
+    /// name; a successor two owners would share refuses through `collision`.
+    /// The receiver is untouched, so a refused carry keeps its checkpoint;
+    /// `None` when no owner moves.
+    pub fn rekey_values<E: From<HeapFault>>(
+        self,
+        access: &Access<'_>,
+        mut rekey: impl FnMut(Owner) -> Result<Owner, E>,
+        collision: impl Fn(Owner) -> E,
+    ) -> Result<Option<Self>, E> {
+        let mut execution = Tree::<RootHolding>::of_keyed(&self.execution);
+        let mut rows = Vec::new();
+        execution.visit(access, &mut |_, row| {
+            rows.push(row.clone());
+            true
+        })?;
+        let mut moved = Vec::new();
+        for row in rows {
+            if !matches!(row.owner, Owner::Value { .. }) {
+                continue;
+            }
+            let to = rekey(row.owner)?;
+            if to != row.owner {
+                moved.push((row, to));
+            }
+        }
+        if moved.is_empty() {
+            return Ok(None);
+        }
+        // Remove every renamed owner first, so a swap is not a collision.
+        for (row, _) in &moved {
+            execution.remove(&owner_key(row.owner), access)?;
+        }
+        for (row, to) in moved {
+            let key = owner_key(to);
+            if execution.get(&key, access)?.is_some() {
+                return Err(collision(to));
+            }
+            execution.write(
+                key,
+                RootHolding {
+                    owner: to,
+                    value: row.value,
+                },
+                access,
+            )?;
+        }
+        execution.seal(
+            access,
+            &mut SealWork::new(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            }),
+        )?;
+        Ok(Some(Self {
+            execution: execution.keyed_root()?,
+            ..self
+        }))
+    }
     /// Authenticated source balance from root summaries; no physical residency
     /// counter or previous capacity certificate participates in this value.
     pub fn balance(self) -> Result<Balance, HeapFault> {
@@ -1028,7 +1240,7 @@ impl Ledger {
                         return Err(invalid("continuation names another frame invocation"));
                     }
                     for role in record.roles(access)? {
-                        let super::RoleCoordinate::Slot(slot) = role.coordinate else {
+                        let Some(slot) = role.coordinate.slot() else {
                             return Err(invalid(
                                 "canonical source continuation has an expression role",
                             ));

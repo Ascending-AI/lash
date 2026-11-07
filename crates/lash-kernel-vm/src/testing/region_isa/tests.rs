@@ -29,7 +29,7 @@ fn binding(slot: u32) -> Owner {
     Owner::Value {
         task: TaskId(0),
         invocation: 0,
-        slot: Slot::Binding(slot),
+        slot: Slot::Binding(crate::laws::role_id(slot)),
     }
 }
 
@@ -229,7 +229,7 @@ fn snapshot(
         let owner = Owner::Value {
             task: TaskId(0),
             invocation: origin.at.invocation.id,
-            slot: Slot::Operand(0),
+            slot: Slot::Operand(crate::laws::role_id(0)),
         };
         values.push((owner, value.clone(), origin.value));
         origins.push(origin.clone());

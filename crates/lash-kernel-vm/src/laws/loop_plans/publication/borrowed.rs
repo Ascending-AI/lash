@@ -70,7 +70,7 @@ pub(super) fn entry() {
         .map(|selector| slots.root(selector, TaskId::MAIN, invocation.id()).unwrap())
         .collect();
     assert!(!owners.is_empty());
-    let foreign = invocation.owner(Slot::Argument(123));
+    let foreign = invocation.owner(Slot::Argument(crate::laws::role_id(123)));
     let value = Value::Int(1);
     let values: Vec<_> = owners
         .iter()

@@ -161,9 +161,9 @@ pub(super) fn isolation() {
             Owner::Saved([2; 32]),
             Owner::Incoming(TaskId::MAIN),
             Owner::Ended(TaskId::MAIN),
-            invocation.owner(Slot::Continuation(9)),
-            invocation.owner(Slot::Departure(3)),
-            invocation.owner(Slot::Capture(4)),
+            invocation.owner(Slot::Continuation(crate::laws::role_id(9))),
+            invocation.owner(Slot::Departure(crate::laws::role_id(3))),
+            invocation.owner(Slot::Capture(crate::laws::role_id(4))),
         ] {
             let nested = arena.tuple(vec![value], 128).unwrap();
             let root = if matches!(

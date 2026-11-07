@@ -886,7 +886,7 @@ fn check_native(
     let owner = |index: doc::NativeResourceOwner| logical::Owner::Value {
         task,
         invocation,
-        slot: logical::Slot::Scratch(index.0),
+        slot: logical::Slot::Scratch(logical::SourceRole::native_resource(index.0)),
     };
     let mut active = Vec::new();
     let mut scratch = Vec::new();

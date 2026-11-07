@@ -375,10 +375,20 @@ pub(crate) struct Source {
 pub(crate) struct OwnerSlots {
     pub(crate) owner: doc::constant_pool::PoolOwner,
     pub(crate) source: Site,
-    slots: BTreeMap<Owner, u32>,
+    /// Every concrete owner, with its role identity (the digest of its full
+    /// discriminator) where a frame slot can name it.
+    slots: BTreeMap<Owner, Option<lash_kernel_state::kernel_internals::logical::RoleId>>,
     pub(crate) scopes: BTreeMap<Owner, Site>,
     aliases: BTreeMap<Owner, Owner>,
-    binding_slots: BTreeMap<Owner, (u32, bool)>,
+    /// Each binding's role identity and whether the frame borrows it.
+    binding_slots: BTreeMap<Owner, (lash_kernel_state::kernel_internals::logical::RoleId, bool)>,
+    /// The per-code role table (Q4): every slot this body names, with the
+    /// source role it names. Built injective; a checkpoint persists the role
+    /// and restore maps it back through this table.
+    roles: BTreeMap<
+        lash_kernel_state::kernel_internals::logical::Slot,
+        lash_kernel_state::kernel_internals::logical::SourceRole,
+    >,
     groups: std::sync::Mutex<
         std::collections::HashMap<
             Owner,
@@ -400,8 +410,25 @@ impl PartialEq for OwnerSlots {
 }
 impl Eq for OwnerSlots {}
 impl OwnerSlots {
-    pub(crate) fn get(&self, owner: &Owner) -> Option<u32> {
-        self.slots.get(owner).copied()
+    pub(crate) fn get(
+        &self,
+        owner: &Owner,
+    ) -> Option<lash_kernel_state::kernel_internals::logical::RoleId> {
+        self.slots.get(owner).copied().flatten()
+    }
+    pub(crate) fn contains(&self, owner: &Owner) -> bool {
+        self.slots.contains_key(owner)
+    }
+    /// The source role a slot of this body names.
+    pub(crate) fn role(
+        &self,
+        slot: lash_kernel_state::kernel_internals::logical::Slot,
+    ) -> Option<lash_kernel_state::kernel_internals::logical::SourceRole> {
+        use lash_kernel_state::kernel_internals::logical::SourceRole;
+        self.roles
+            .get(&slot)
+            .cloned()
+            .or_else(|| SourceRole::positional_of(slot))
     }
 }
 
@@ -592,15 +619,20 @@ impl Source {
         task: doc::TaskId,
         invocation: u64,
     ) -> Option<lash_kernel_state::kernel_internals::logical::Owner> {
-        use lash_kernel_state::kernel_internals::logical::{Owner as Root, Slot};
+        use lash_kernel_state::kernel_internals::logical::{Owner as Root, Slot, SourceRole};
         let binding = self.bindings.get(index as usize)?;
+        let id = SourceRole::Binding {
+            declared: binding.declared.clone(),
+            name: binding.name.clone(),
+        }
+        .id();
         (binding.index == index).then_some(Root::Value {
             task,
             invocation,
             slot: if binding.borrowed {
-                Slot::Capture(index)
+                Slot::Capture(id)
             } else {
-                Slot::Binding(index)
+                Slot::Binding(id)
             },
         })
     }
@@ -860,20 +892,23 @@ impl Source {
                 let (scopes, aliases, binding_slots) = root_owners::form(self, &owners)?;
                 let slots = owners
                     .into_iter()
-                    .enumerate()
-                    .map(|(index, owner)| {
-                        Ok((owner, u32::try_from(index).map_err(|_| Refused::Facts)?))
+                    .map(|owner| {
+                        let id = root_owners::source_role(&owner).map(|role| role.id());
+                        (owner, id)
                     })
-                    .collect::<Result<BTreeMap<_, _>, Refused>>()?;
-                Ok(Arc::new(OwnerSlots {
+                    .collect::<BTreeMap<_, _>>();
+                let mut table = OwnerSlots {
                     owner: self.owner,
                     source: self.site.clone(),
                     slots,
                     scopes,
                     aliases,
                     binding_slots,
+                    roles: BTreeMap::new(),
                     groups: Default::default(),
-                }))
+                };
+                table.roles = table.role_table()?;
+                Ok(Arc::new(table))
             })
             .clone()
     }

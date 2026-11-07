@@ -59,6 +59,7 @@ impl SourceContinuation {
     pub(super) fn project(
         &self,
         invocation: u64,
+        owners: &crate::compile::room::OwnerSlots,
         arena: &mut Arena,
         access: &Access<'_>,
     ) -> Result<ContinuationRecord, HeapFault> {
@@ -66,8 +67,16 @@ impl SourceContinuation {
             .roles
             .iter()
             .map(|(slot, value)| {
+                // A checkpoint names each role by its full discriminator, so a
+                // carry can map its sites and derive the new identity.
+                let role = owners
+                    .role(*slot)
+                    .ok_or_else(|| malformed("a source continuation role has no source role"))?;
                 Ok(RoleRecord {
-                    coordinate: RoleCoordinate::Slot(*slot),
+                    coordinate: RoleCoordinate::Source {
+                        kind: slot.kind(),
+                        role,
+                    },
                     value: project(arena, access, value)?,
                 })
             })
@@ -118,6 +127,7 @@ impl SourceContinuation {
     pub(super) fn restore(
         record: &ContinuationRecord,
         invocation: u64,
+        owners: &crate::compile::room::OwnerSlots,
         root: &Site,
         arena: &mut Arena,
         access: &Access<'_>,
@@ -150,11 +160,20 @@ impl SourceContinuation {
             .ok_or_else(|| malformed("source continuation has no unpaid phase"))?;
         let mut roles = Vec::new();
         for role in record.roles(access)? {
-            let RoleCoordinate::Slot(slot) = role.coordinate else {
+            let Some(slot) = role.coordinate.slot() else {
                 return Err(malformed(
                     "source continuation holds an action expression role",
                 ));
             };
+            // The role must name a slot of this exact body (Q4).
+            let RoleCoordinate::Source { role: source, .. } = &role.coordinate else {
+                unreachable!();
+            };
+            if owners.role(slot).as_ref() != Some(source) {
+                return Err(malformed(
+                    "source continuation role is not a role of its body",
+                ));
+            }
             if roles.iter().any(|(actual, _)| *actual == slot)
                 || matches!(slot, Slot::Binding(_) | Slot::Capture(_))
             {

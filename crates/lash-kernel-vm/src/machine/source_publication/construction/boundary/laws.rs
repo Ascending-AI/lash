@@ -40,10 +40,10 @@ pub(super) fn prepared_graphs(machine: &crate::machine::KernelMachine) {
         ]));
         // The last allocated mutable body is the first binding live-out.
         let outputs = [
-            (owner(0), record),
-            (owner(1), tuple),
-            (owner(2), map),
-            (owner(3), set),
+            (owner(crate::laws::role_id(0)), record),
+            (owner(crate::laws::role_id(1)), tuple),
+            (owner(crate::laws::role_id(2)), map),
+            (owner(crate::laws::role_id(3)), set),
         ];
         let new = nursery.into_new();
         let graph = boundary::prepare_collections(&mut arena, heap, new, &outputs, 128)
@@ -166,7 +166,7 @@ pub(super) fn prepared_literals_and_captures(
             arena.registration().unwrap(),
             heap,
             &[],
-            &[(owner(0), RootValue::Value(&declaring))],
+            &[(owner(crate::laws::role_id(0)), RootValue::Value(&declaring))],
         )
         .unwrap()
         .admit(u64::MAX)
@@ -181,7 +181,7 @@ pub(super) fn prepared_literals_and_captures(
         Arc::clone(&identity),
         vec![cell],
         code,
-        owner(1),
+        owner(crate::laws::role_id(1)),
     )
     .unwrap();
     let abandoned = graph.outputs[0].value;
@@ -192,25 +192,47 @@ pub(super) fn prepared_literals_and_captures(
         .unwrap();
     assert!(
         graph
-            .into_boundary(&ledger, heap, &[owner(0)], dependencies)
+            .into_boundary(
+                &ledger,
+                heap,
+                &[owner(crate::laws::role_id(0))],
+                dependencies
+            )
             .is_err(),
         "a changed capture invalidates the entire detached proof before admission"
     );
     assert_eq!(arena.next_provisional(), before);
     assert!(arena.body(abandoned.handle().unwrap()).is_err());
     let dependencies = Dependencies::capture(&ledger, &arena, &[cell]).unwrap();
-    let graph =
-        boundary::prepare_closure(&mut arena, heap, identity, vec![cell], code, owner(1)).unwrap();
+    let graph = boundary::prepare_closure(
+        &mut arena,
+        heap,
+        identity,
+        vec![cell],
+        code,
+        owner(crate::laws::role_id(1)),
+    )
+    .unwrap();
     let closure = graph.outputs[0].value;
     let (transaction, storage) = graph
-        .into_boundary(&ledger, heap, &[owner(0)], dependencies)
+        .into_boundary(
+            &ledger,
+            heap,
+            &[owner(crate::laws::role_id(0))],
+            dependencies,
+        )
         .unwrap();
     transaction
         .admit(u64::MAX)
         .unwrap_or_else(|_| panic!("capture fits"))
         .publish(&mut ledger, |arena, _| storage.batch.publish(arena))
         .unwrap();
-    assert!(ledger.holding(owner(0), heap.pages()).unwrap().is_none());
+    assert!(
+        ledger
+            .holding(owner(crate::laws::role_id(0)), heap.pages())
+            .unwrap()
+            .is_none()
+    );
     arena.release(&mut |visit| visit(&closure));
     assert!(
         arena.cell(cell).unwrap().same(&Value::Int(8)),
@@ -230,9 +252,14 @@ pub(super) fn prepared_literals_and_captures(
     .enumerate()
     {
         let dependencies = Dependencies::capture(&ledger, &arena, &[]).unwrap();
-        let graph =
-            boundary::prepare_literal(&mut arena, heap, &literal, link, owner(slot as u32 + 2))
-                .unwrap();
+        let graph = boundary::prepare_literal(
+            &mut arena,
+            heap,
+            &literal,
+            link,
+            owner(crate::laws::role_id(slot as u32 + 2)),
+        )
+        .unwrap();
         assert!(
             graph.proof.entities().is_empty(),
             "an immutable literal consumes no entity ordinal"
@@ -250,7 +277,7 @@ pub(super) fn prepared_literals_and_captures(
             .unwrap();
         assert_eq!(
             ledger
-                .holding(owner(slot as u32 + 2), heap.pages())
+                .holding(owner(crate::laws::role_id(slot as u32 + 2)), heap.pages())
                 .unwrap()
                 .unwrap()
                 .bytes(),
@@ -383,7 +410,7 @@ fn graph_execution(projected: bool, shape: u8, bound: u64) -> (u64, bool, Option
             arena.registration().unwrap(),
             heap,
             &[],
-            &[(owner(99), RootValue::Value(&alias))],
+            &[(owner(crate::laws::role_id(99)), RootValue::Value(&alias))],
         )
         .unwrap()
         .admit(u64::MAX)
@@ -448,7 +475,7 @@ fn graph_execution(projected: bool, shape: u8, bound: u64) -> (u64, bool, Option
     let outputs: Vec<_> = values
         .iter()
         .enumerate()
-        .map(|(index, value)| (owner(index as u32), *value))
+        .map(|(index, value)| (owner(crate::laws::role_id(index as u32)), *value))
         .collect();
     let allocations: Vec<_> = new
         .iter()
@@ -507,11 +534,22 @@ fn graph_execution(projected: bool, shape: u8, bound: u64) -> (u64, bool, Option
         let roots: Vec<_> = pages
             .iter()
             .enumerate()
-            .map(|(index, page)| (owner(index as u32), RootValue::Page(page)))
+            .map(|(index, page)| {
+                (
+                    owner(crate::laws::role_id(index as u32)),
+                    RootValue::Page(page),
+                )
+            })
             .collect();
         let (registration, batch) = installation.into_parts();
         let (transaction, _) = ledger
-            .prepare_construction_boundary(registration, heap, &[owner(99)], &roots, &entities)
+            .prepare_construction_boundary(
+                registration,
+                heap,
+                &[owner(crate::laws::role_id(99))],
+                &roots,
+                &entities,
+            )
             .unwrap();
         (transaction, batch)
     } else {
@@ -520,7 +558,12 @@ fn graph_execution(projected: bool, shape: u8, bound: u64) -> (u64, bool, Option
             .unwrap()
             .unwrap();
         let (transaction, storage) = graph
-            .into_boundary(&ledger, heap, &[owner(99)], dependencies)
+            .into_boundary(
+                &ledger,
+                heap,
+                &[owner(crate::laws::role_id(99))],
+                dependencies,
+            )
             .unwrap();
         (transaction, storage.batch)
     };
@@ -572,7 +615,10 @@ fn graph_execution(projected: bool, shape: u8, bound: u64) -> (u64, bool, Option
     let roots = (0..4)
         .map(|index| {
             holding_view(
-                &ledger.holding(owner(index), heap.pages()).unwrap().unwrap(),
+                &ledger
+                    .holding(owner(crate::laws::role_id(index)), heap.pages())
+                    .unwrap()
+                    .unwrap(),
                 heap,
             )
         })
@@ -644,7 +690,7 @@ fn detached_proofs_reject_stale_foreign_and_substituted_batches() {
     let output = Owner::Value {
         task: TaskId::MAIN,
         invocation: 0,
-        slot: Slot::Binding(0),
+        slot: Slot::Binding(crate::laws::role_id(0)),
     };
     let make = |arena: &mut Arena| {
         let mut nursery = Nursery::unaccounted(arena.objects());
@@ -791,7 +837,7 @@ fn a_cold_shared_empty_tuple_keeps_its_constructor_facts() {
     let output = Owner::Value {
         task: doc::TaskId::MAIN,
         invocation: 0,
-        slot: Slot::Binding(0),
+        slot: Slot::Binding(crate::laws::role_id(0)),
     };
     let before = (arena.allocations(), arena.next_provisional());
     let mut graph =

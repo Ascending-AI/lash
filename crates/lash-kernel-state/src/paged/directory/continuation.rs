@@ -82,11 +82,25 @@ pub struct RoleRecord {
     pub value: PageValue,
 }
 
-/// Source identity of a retained value. Logical slots precede ISA placement.
+/// Source identity of a retained value: an action's operand by its path
+/// under the statement, or a region role by kind and full source
+/// discriminator, never by a compiler's numbering (Q4).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RoleCoordinate {
     Expression(Vec<u32>),
-    Slot(crate::paged::logical::Slot),
+    Source {
+        kind: crate::paged::logical::SlotKind,
+        role: crate::paged::logical::SourceRole,
+    },
+}
+impl RoleCoordinate {
+    /// The slot a source role names.
+    pub fn slot(&self) -> Option<crate::paged::logical::Slot> {
+        match self {
+            Self::Expression(_) => None,
+            Self::Source { kind, role } => Some(crate::paged::logical::Slot::new(*kind, role.id())),
+        }
+    }
 }
 
 /// Already paid source charges and quoted completion work whose input roles
@@ -390,18 +404,22 @@ impl TokenCodec for RoleCoordinate {
                 out.sum(0, 1);
                 site.encode(out);
             }
-            Self::Slot(slot) => {
-                out.sum(1, 1);
-                slot.encode(out);
+            Self::Source { kind, role } => {
+                out.sum(1, 2);
+                kind.encode(out);
+                role.encode(out);
             }
         }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         let (tag, fields) = input.sum()?;
-        TokenReader::expect_fields(fields, 1)?;
+        TokenReader::expect_fields(fields, if tag == 1 { 2 } else { 1 })?;
         match tag {
             0 => Ok(Self::Expression(Vec::<u32>::decode(input)?)),
-            1 => Ok(Self::Slot(crate::paged::logical::Slot::decode(input)?)),
+            1 => Ok(Self::Source {
+                kind: crate::paged::logical::SlotKind::decode(input)?,
+                role: crate::paged::logical::SourceRole::decode(input)?,
+            }),
             _ => Err(TokenError::UnsupportedVariant { variant: tag }),
         }
     }

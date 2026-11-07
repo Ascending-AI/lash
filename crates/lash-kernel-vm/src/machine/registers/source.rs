@@ -389,7 +389,11 @@ impl Operands {
             let owner = Owner::Value {
                 task: lash_kernel_doc::TaskId::MAIN,
                 invocation: 0,
-                slot: Slot::Argument(index as u32),
+                slot: Slot::Argument(
+                    lash_kernel_state::kernel_internals::logical::SourceRole::argument(
+                        index as u32,
+                    ),
+                ),
             };
             if !inputs.contains(&owner) && ledger.holding(owner, projection.heap.pages())?.is_some()
             {

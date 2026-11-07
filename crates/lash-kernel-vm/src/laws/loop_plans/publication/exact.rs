@@ -174,7 +174,7 @@ pub(super) fn events() {
     for (owner, value, position, allowance) in [
         (output, Value::Int(2), next.clone(), paid()),
         (
-            invocation.owner(logical::Slot::Argument(0)),
+            invocation.owner(logical::Slot::Argument(crate::laws::role_id(0))),
             Value::Int(1),
             next.clone(),
             paid(),
