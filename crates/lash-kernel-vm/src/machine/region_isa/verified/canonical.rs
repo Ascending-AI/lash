@@ -73,6 +73,7 @@ impl Running<'_> {
                 .ok_or_else(|| invalid(Refused::Facts))?;
             let library = plan
                 .library()
+                .filter(|_| !compiled.charged)
                 .map(|lib| {
                     let mut args: Vec<_> = call
                         .arguments
