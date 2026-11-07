@@ -394,6 +394,8 @@ pub(crate) enum CheckedArgument {
     Held(Slot),
     /// The content of the cell a role the frame holds.
     Cell(Slot),
+    /// A lease-wide session root, identified independently of frame slots.
+    Session([u8; 32]),
     /// An inline literal the call loads.
     Constant(Value),
     /// A long text literal the call allocates when it loads; only its type
@@ -783,7 +785,14 @@ impl RegionCode {
                 .find_map(|(role, actual)| (actual == reg).then_some(role.slot()))
                 .flatten()
         };
-        let held = |reg: &Reg<LeaseValue>| slot(reg).map(CheckedArgument::Held);
+        let held = |reg: &Reg<LeaseValue>| {
+            self.draft.roles.iter().find_map(|(role, actual)| {
+                (actual == reg).then_some(match role {
+                    Role::Slot(slot) => CheckedArgument::Held(*slot),
+                    Role::Session(digest) => CheckedArgument::Session(*digest),
+                })
+            })
+        };
         let arguments = call
             .arguments
             .iter()

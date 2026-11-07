@@ -354,6 +354,20 @@ impl KernelMachine {
                 CheckedArgument::Held(slot) => {
                     self.role_values(task, std::slice::from_ref(slot))?[0]
                 }
+                CheckedArgument::Session(digest) => {
+                    let code = self.frame(task)?.code;
+                    let name = self
+                        .exe
+                        .code(code)
+                        .source_room
+                        .owner_slots()
+                        .map_err(|_| fault("a checked call has invalid owners"))?
+                        .session_name(digest)
+                        .ok_or_else(|| fault("a checked call names no session cell"))?
+                        .clone();
+                    self.session_get(&crate::compile::BindingName::new(name))?
+                        .ok_or_else(|| fault("a checked call reads an unbound session cell"))?
+                }
                 // A captured cell is read through already; a shared
                 // binding's role holds its cell.
                 CheckedArgument::Cell(slot) => {
