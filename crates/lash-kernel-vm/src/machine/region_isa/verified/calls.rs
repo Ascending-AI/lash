@@ -106,9 +106,12 @@ impl Running<'_> {
                 self.stop = Some(RegionStop::Boundary);
                 return Ok(None);
             };
-            if binding
-                .entity()
-                .is_some_and(|entity| self.saved.binary_search(&entity).is_ok())
+            // A saved function's call takes fresh instances of its frozen
+            // captures (`K-SES-004`), which the region does not make.
+            if !binding.plan().captures().is_empty()
+                && binding
+                    .entity()
+                    .is_some_and(|entity| self.saved.binary_search(&entity).is_ok())
             {
                 self.stop = Some(RegionStop::Boundary);
                 return Ok(None);
