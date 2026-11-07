@@ -318,10 +318,20 @@ impl KernelMachine {
         }
         let batch = self.native_batch(task, &exe, lib, function, &operands, &at.site.unit);
         self.regs.clear_range(0..used);
+        let batch = batch?;
+        // Serving can project other tasks' frames and identify their held
+        // objects. Publish those source identity changes before reacquiring
+        // the lease. The native's detached batch is still unaccepted.
+        self.logical.borrow_mut().transfer_source(
+            &mut self.arena.borrow_mut(),
+            &self.heap,
+            &[],
+            &[],
+        )?;
         self.served = Some(super::Served {
             task,
             at,
-            answer: Some(batch?),
+            answer: Some(batch),
         });
         Ok(())
     }
