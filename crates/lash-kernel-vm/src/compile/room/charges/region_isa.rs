@@ -259,6 +259,41 @@ pub(crate) fn program(exe: &Executable, code: CodeId) -> Result<Program, Refused
                         );
                     }
                 }
+                // Statement actions read their atom arguments outside expression
+                // regions. Their Enter owns those unit charges, just as `atom`
+                // does in the source executor (K-CHG-002).
+                if op == Op::Act && definition.charged {
+                    let Form::Action(action) = &stmt.form else {
+                        return Err(Refused::Source);
+                    };
+                    let arguments = match &action.kind {
+                        compile::ActionKind::Call { args, .. }
+                        | compile::ActionKind::Perform { args, .. }
+                        | compile::ActionKind::Spawn { args, .. } => args.len(),
+                        compile::ActionKind::Join(_)
+                        | compile::ActionKind::JoinMany(_, _)
+                        | compile::ActionKind::Cancel(_)
+                        | compile::ActionKind::CancelEffect(_) => 1,
+                        compile::ActionKind::Yield => 0,
+                    };
+                    if arguments != 0 {
+                        emit(
+                            &mut events,
+                            fixed(
+                                Point {
+                                    site: action.site.clone(),
+                                    phase: super::super::Phase::Enter,
+                                },
+                                ChargeEvent::AtomArg,
+                                Weight::Units(arguments as u64),
+                                ChargeOrigin::Call {
+                                    statement: *statement,
+                                    pc,
+                                },
+                            ),
+                        );
+                    }
+                }
                 if !definition.charged {
                     continue;
                 }
@@ -266,6 +301,13 @@ pub(crate) fn program(exe: &Executable, code: CodeId) -> Result<Program, Refused
                     Op::Call { lib, args } | Op::Operator { lib, args } => {
                         Some((compile::LibId(lib.0), args.len as usize))
                     }
+                    Op::Act => match &stmt.form {
+                        Form::Action(compile::Action {
+                            kind: compile::ActionKind::Call { callee, args },
+                            ..
+                        }) => callee.library().map(|lib| (lib, args.len())),
+                        _ => None,
+                    },
                     Op::Nested { act, args } => stream
                         .nested
                         .get(act.ix())
