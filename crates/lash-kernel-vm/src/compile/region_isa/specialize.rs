@@ -368,7 +368,7 @@ pub(super) fn specialize(exe: &Executable, draft: &mut RegionDraft) -> Result<()
     for index in 0..draft.ops.len() {
         // This optional scalar formula requires stable source retention.
         // Other lifetimes use actual lease graph facts at the same ISA prefix.
-        draft.steps[index].scalar_resources = match &draft.ops[index] {
+        let scalar = match &draft.ops[index] {
             RegionOp::Constant { .. } | RegionOp::IntBinary { .. } | RegionOp::Branch { .. } => {
                 true
             }
@@ -405,7 +405,26 @@ pub(super) fn specialize(exe: &Executable, draft: &mut RegionDraft) -> Result<()
             },
             RegionOp::Read { spec, .. } => spec.retained.is_some(),
             _ => false,
-        } && draft.steps[index].event.entities.is_empty();
+        };
+        draft.steps[index].scalar_resources =
+            scalar
+                && draft.steps[index].event.entities.is_empty()
+                && draft.steps[index]
+                    .peak
+                    .terms
+                    .iter()
+                    .chain(draft.steps[index].delta.terms.iter())
+                    .all(|(input, _)| match input {
+                        ResourceInput::Release(regs) => regs.iter().all(|reg| {
+                            matches!(
+                                draft.registers[reg.offset()],
+                                RegisterKind::Int | RegisterKind::Float | RegisterKind::Bool
+                            ) || draft.steps[index].event.inputs.iter().any(|owner| {
+                                lower::reg(&draft.roles, &draft.source, owner) == Ok(*reg)
+                            })
+                        }),
+                        _ => true,
+                    });
     }
     Ok(())
 }
