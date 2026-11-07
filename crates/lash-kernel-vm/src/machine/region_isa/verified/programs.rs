@@ -1,13 +1,71 @@
-//! Bind each reachable callee once: every static target, and each dynamic
-//! target a run has reached or the lease's stack stands in. Recursive edges
-//! retain code indexes.
+//! Cache each root's reachable callees for its exact parked stack edges.
+//! Newly reached targets extend its binding without rebinding other callers.
 use super::super::*;
 use super::Code;
 use crate::compile::room::region::calls::region_isa::CalleePlan;
+use std::collections::{BTreeMap, BTreeSet};
 
+#[derive(Default)]
+pub(super) struct Cache(BTreeMap<CodeId, Cached>);
+
+struct Cached {
+    root: Arc<Code>,
+    reached: usize,
+    parked: BTreeSet<(CodeId, CodeId)>,
+    programs: Arc<Programs>,
+}
+
+impl Cached {
+    fn matches(&self, parked: impl Iterator<Item = (CodeId, CodeId)> + Clone) -> bool {
+        parked.clone().all(|pair| self.parked.contains(&pair))
+            && self
+                .parked
+                .iter()
+                .all(|known| parked.clone().any(|pair| pair == *known))
+    }
+}
+
+impl Cache {
+    pub(super) fn get(
+        &mut self,
+        entry: &Arc<Code>,
+        parked: impl Iterator<Item = (CodeId, CodeId)> + Clone,
+        bound: &super::bind::BoundCodes,
+    ) -> Result<Arc<Programs>, RegionError> {
+        let root = entry.program.code();
+        let reached = entry.exe.dynamic_target_count().map_err(invalid)?;
+        if let Some(cached) = self.0.get(&root)
+            && Arc::ptr_eq(&cached.root, entry)
+            && cached.reached == reached
+            && cached.matches(parked.clone())
+        {
+            return Ok(Arc::clone(&cached.programs));
+        }
+        // A refused extension is never published as a complete binding.
+        let mut cached = match self.0.remove(&root) {
+            Some(cached) if Arc::ptr_eq(&cached.root, entry) && cached.matches(parked.clone()) => {
+                cached
+            }
+            _ => Cached {
+                root: Arc::clone(entry),
+                reached: 0,
+                parked: parked.collect(),
+                programs: Arc::new(Programs::new(entry.exe.code_count())?),
+            },
+        };
+        Arc::make_mut(&mut cached.programs).extend(entry, &cached.parked, bound)?;
+        cached.reached = reached;
+        let programs = Arc::clone(&cached.programs);
+        self.0.insert(root, cached);
+        Ok(programs)
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct Programs {
-    codes: Box<[Option<Arc<Code>>]>,
-    calls: Box<[Option<super::call_bind::Calls>]>,
+    codes: Vec<Option<Arc<Code>>>,
+    calls: Vec<Option<Arc<super::call_bind::Calls>>>,
+    plans: Vec<Vec<Vec<Arc<CalleePlan>>>>,
     pub(super) registers: usize,
     pub(super) arguments: usize,
     pub(super) transfer_width: usize,
@@ -15,42 +73,23 @@ pub(super) struct Programs {
     pub(super) loops: usize,
     pub(super) parameters: usize,
     pub(super) captures: usize,
-    /// The session cells any bound code names, by lease-wide bank cell:
-    /// the lease's one cell per digest.
-    pub(super) sessions: Box<[Option<super::bind::SessionCell>]>,
+    pub(super) sessions: Vec<Option<super::bind::SessionCell>>,
 }
 
 impl Programs {
-    /// `stack` holds the codes of the lease's frames, outermost first: a
-    /// parked call enters the next frame's code.
-    pub(super) fn bind(
-        entry: &Arc<Code>,
-        stack: &[CodeId],
-        bound: &super::bind::BoundCodes,
-    ) -> Result<Arc<Self>, RegionError> {
-        let exe = &entry.exe;
-        let mut codes = Vec::new();
-        codes
-            .try_reserve_exact(exe.code_count())
-            .map_err(|_| invalid(Refused::Scratch))?;
-        codes.resize_with(exe.code_count(), || None);
-        let slot = codes
-            .get_mut(entry.program.code().0 as usize)
-            .ok_or_else(|| invalid(Refused::Source))?;
-        *slot = Some(Arc::clone(entry));
-        let mut pending = Vec::new();
-        pending
-            .try_reserve_exact(exe.code_count())
-            .map_err(|_| invalid(Refused::Scratch))?;
-        pending.push(Arc::clone(entry));
-        let mut targets: Vec<Vec<Vec<Arc<CalleePlan>>>> = Vec::new();
-        targets
-            .try_reserve_exact(exe.code_count())
-            .map_err(|_| invalid(Refused::Scratch))?;
-        targets.resize_with(exe.code_count(), Vec::new);
-        let mut result = Self {
-            codes: Box::new([]),
-            calls: Box::new([]),
+    fn new(count: usize) -> Result<Self, RegionError> {
+        fn table<T>(count: usize, empty: impl FnMut() -> T) -> Result<Vec<T>, RegionError> {
+            let mut table = Vec::new();
+            table
+                .try_reserve_exact(count)
+                .map_err(|_| invalid(Refused::Scratch))?;
+            table.resize_with(count, empty);
+            Ok(table)
+        }
+        Ok(Self {
+            codes: table(count, || None)?,
+            calls: table(count, || None)?,
+            plans: table(count, Vec::new)?,
             registers: 0,
             arguments: 0,
             transfer_width: 0,
@@ -58,110 +97,129 @@ impl Programs {
             loops: 0,
             parameters: 0,
             captures: 0,
-            sessions: Box::new([]),
-        };
-        let mut sessions: Vec<Option<super::bind::SessionCell>> = Vec::new();
+            sessions: Vec::new(),
+        })
+    }
+
+    fn include(&mut self, code: Arc<Code>) -> Result<(), RegionError> {
+        for (bank, cell) in &code.sessions {
+            let bank = *bank as usize;
+            if bank >= self.sessions.len() {
+                self.sessions
+                    .try_reserve(bank + 1 - self.sessions.len())
+                    .map_err(|_| invalid(Refused::Scratch))?;
+                self.sessions.resize(bank + 1, None);
+            }
+            match &self.sessions[bank] {
+                Some(known) if known.digest != cell.digest => return Err(invalid(Refused::Facts)),
+                Some(_) => {}
+                None => self.sessions[bank] = Some(cell.clone()),
+            }
+        }
+        self.registers = self.registers.max(code.program.registers().len());
+        self.arguments = self.arguments.max(code.arguments);
+        self.captures = self.captures.max(code.captures);
+        self.transfer_width = self.transfer_width.max(code.transfer_width);
+        self.quotes = self.quotes.max(code.quotes);
+        let mut loops = 0;
+        while code.program.loop_info(loops).is_some() {
+            loops = loops
+                .checked_add(1)
+                .ok_or_else(|| invalid(Refused::Facts))?;
+        }
+        self.loops = self.loops.max(loops as usize);
+        let index = code.program.code().0 as usize;
+        self.plans
+            .get_mut(index)
+            .ok_or_else(|| invalid(Refused::Source))?
+            .resize_with(code.calls.len(), Vec::new);
+        *self
+            .codes
+            .get_mut(index)
+            .ok_or_else(|| invalid(Refused::Source))? = Some(code);
+        Ok(())
+    }
+
+    fn extend(
+        &mut self,
+        entry: &Arc<Code>,
+        parked: &BTreeSet<(CodeId, CodeId)>,
+        bound: &super::bind::BoundCodes,
+    ) -> Result<(), RegionError> {
+        let exe = &entry.exe;
+        if self
+            .codes
+            .get(entry.program.code().0 as usize)
+            .is_none_or(Option::is_none)
+        {
+            self.include(Arc::clone(entry))?;
+        }
+        let mut pending = Vec::new();
+        pending
+            .try_reserve_exact(exe.code_count())
+            .map_err(|_| invalid(Refused::Scratch))?;
+        pending.extend(self.codes.iter().flatten().cloned());
+        let mut changed = BTreeSet::new();
         while let Some(code) = pending.pop() {
-            for (bank, cell) in &code.sessions {
-                let bank = *bank as usize;
-                if bank >= sessions.len() {
-                    sessions
-                        .try_reserve(bank + 1 - sessions.len())
-                        .map_err(|_| invalid(Refused::Scratch))?;
-                    sessions.resize(bank + 1, None);
-                }
-                match &sessions[bank] {
-                    Some(known) if known.digest != cell.digest => {
-                        return Err(invalid(Refused::Facts));
-                    }
-                    Some(_) => {}
-                    None => sessions[bank] = Some(cell.clone()),
-                }
-            }
-            result.registers = result.registers.max(code.program.registers().len());
-            result.arguments = result.arguments.max(code.arguments);
-            result.captures = result.captures.max(code.captures);
-            result.transfer_width = result.transfer_width.max(code.transfer_width);
-            result.quotes = result.quotes.max(code.quotes);
-            let mut loops = 0;
-            while code.program.loop_info(loops).is_some() {
-                loops = loops
-                    .checked_add(1)
-                    .ok_or_else(|| invalid(Refused::Facts))?;
-            }
-            result.loops = result.loops.max(loops as usize);
             let caller = code.program.code();
-            let mut sites = Vec::with_capacity(code.calls.len());
+            let index = caller.0 as usize;
+            if self.calls[index].is_none() {
+                changed.insert(index);
+            }
             for (site, call) in code.calls.iter().enumerate() {
-                let Some(call) = call else {
-                    sites.push(Vec::new());
-                    continue;
-                };
+                let Some(call) = call else { continue };
                 let mut plans = Vec::new();
                 if call.plan.dynamic() {
-                    let site = u32::try_from(site).map_err(|_| invalid(Refused::Path))?;
-                    let parked = stack
-                        .windows(2)
-                        .filter(|pair| pair[0] == caller)
-                        .map(|pair| pair[1]);
-                    let mut reached = exe.dynamic_targets(caller, site);
-                    reached.extend(parked);
+                    let site_id = u32::try_from(site).map_err(|_| invalid(Refused::Path))?;
+                    let mut reached = exe.dynamic_targets(caller, site_id);
+                    reached.extend(
+                        parked
+                            .range((caller, CodeId(0))..=(caller, CodeId(u32::MAX)))
+                            .map(|&(_, target)| target),
+                    );
                     reached.sort_unstable();
                     reached.dedup();
                     plans.extend(
                         reached
                             .into_iter()
+                            .filter(|target| {
+                                !self.plans[index][site]
+                                    .iter()
+                                    .any(|plan| plan.code() == *target)
+                            })
                             .filter_map(|target| call.plan.target(exe, target)),
                     );
-                } else if let Some(plan) = call.plan.static_target() {
+                } else if self.plans[index][site].is_empty()
+                    && let Some(plan) = call.plan.static_target()
+                {
                     plans.push(Arc::clone(plan));
                 }
-                for plan in &plans {
-                    let slot = codes
-                        .get_mut(plan.code().0 as usize)
+                for plan in plans {
+                    let target = self
+                        .codes
+                        .get(plan.code().0 as usize)
                         .ok_or_else(|| invalid(Refused::Source))?;
-                    if slot.is_some() {
-                        continue;
+                    if target.is_none() {
+                        let program = exe.region(plan.code()).map_err(invalid)?;
+                        let callee = bound.get(exe, &program)?;
+                        self.include(Arc::clone(&callee))?;
+                        pending.push(callee);
                     }
-                    let program = exe.region(plan.code()).map_err(invalid)?;
-                    let code = bound.get(exe, &program)?;
-                    *slot = Some(Arc::clone(&code));
-                    pending.push(code);
+                    self.plans[index][site].push(plan);
+                    changed.insert(index);
                 }
-                sites.push(plans);
             }
-            *targets
-                .get_mut(caller.0 as usize)
-                .ok_or_else(|| invalid(Refused::Source))? = sites;
         }
-        result.calls = codes
-            .iter()
-            .zip(&targets)
-            .map(|(code, targets)| {
-                code.as_ref()
-                    .map(|code| super::call_bind::Calls::bind(code, targets, &codes))
-                    .transpose()
-            })
-            .collect::<Result<_, RegionError>>()?;
-        result.parameters = result
-            .calls
-            .iter()
-            .flatten()
-            .map(super::call_bind::Calls::width)
-            .max()
-            .unwrap_or(0);
-        result.captures = result.captures.max(
-            result
-                .calls
-                .iter()
-                .flatten()
-                .map(super::call_bind::Calls::captures)
-                .max()
-                .unwrap_or(0),
-        );
-        result.codes = codes.into();
-        result.sessions = sessions.into();
-        Ok(Arc::new(result))
+        for index in changed {
+            let code = self.codes[index]
+                .as_ref()
+                .ok_or_else(|| invalid(Refused::Source))?;
+            let calls = super::call_bind::Calls::bind(code, &self.plans[index], &self.codes)?;
+            self.parameters = self.parameters.max(calls.width());
+            self.captures = self.captures.max(calls.captures());
+            self.calls[index] = Some(Arc::new(calls));
+        }
+        Ok(())
     }
 
     pub(super) fn code(&self, id: CodeId) -> Result<&Arc<Code>, RegionError> {
@@ -184,7 +242,6 @@ impl Programs {
             .target(site, target)
     }
 
-    /// Whether the lease bound `target` at `caller`'s call `site`.
     pub(super) fn binds(&self, caller: CodeId, site: u32, target: CodeId) -> bool {
         self.calls
             .get(caller.0 as usize)

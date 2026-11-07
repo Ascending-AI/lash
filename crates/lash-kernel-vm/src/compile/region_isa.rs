@@ -614,6 +614,15 @@ impl Executable {
             .is_ok_and(|mut reached| reached.insert((caller, site, target)))
     }
 
+    /// Reached targets only accumulate, so their count invalidates bound
+    /// programs without a second version counter or a per-entry target scan.
+    pub(crate) fn dynamic_target_count(&self) -> Result<usize, Refused> {
+        self.dynamic_targets
+            .lock()
+            .map(|targets| targets.len())
+            .map_err(|_| Refused::Source)
+    }
+
     /// The lease-wide bank cell of session `digest`: every code naming the
     /// digest shares it.
     fn session_bank(&self, digest: [u8; 32]) -> Result<u32, Refused> {

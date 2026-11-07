@@ -98,15 +98,29 @@ pub(super) fn physical_index(code: &RegionCode, index: u32) -> Result<Register, 
 /// machine's executable, which never changes, and the code's verified
 /// region, which the executable keeps.
 #[derive(Default)]
-pub(in crate::machine) struct BoundCodes(std::sync::Mutex<BTreeMap<CodeId, Arc<Code>>>);
+pub(in crate::machine) struct BoundCodes {
+    codes: std::sync::Mutex<BTreeMap<CodeId, Arc<Code>>>,
+    programs: std::sync::Mutex<super::programs::Cache>,
+}
 
 impl BoundCodes {
+    pub(super) fn programs(
+        &self,
+        entry: &Arc<Code>,
+        parked: impl Iterator<Item = (CodeId, CodeId)> + Clone,
+    ) -> Result<Arc<super::programs::Programs>, RegionError> {
+        self.programs
+            .lock()
+            .map_err(|_| invalid(Refused::Facts))?
+            .get(entry, parked, self)
+    }
+
     pub(in crate::machine::region_isa) fn get(
         &self,
         exe: &Arc<crate::compile::Executable>,
         program: &Arc<RegionCode>,
     ) -> Result<Arc<Code>, RegionError> {
-        let mut bound = self.0.lock().map_err(|_| invalid(Refused::Facts))?;
+        let mut bound = self.codes.lock().map_err(|_| invalid(Refused::Facts))?;
         if let Some(code) = bound.get(&program.code())
             && Arc::ptr_eq(&code.exe, exe)
             && Arc::ptr_eq(&code.program, program)

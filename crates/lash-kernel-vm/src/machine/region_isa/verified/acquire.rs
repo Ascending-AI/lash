@@ -52,8 +52,10 @@ impl<'m> RegionLease<'m> {
                 .bound
                 .get(&exe, &exe.region(root.code).map_err(invalid)?)?
         };
-        let codes: Vec<CodeId> = stack.iter().map(|frame| frame.code).collect();
-        let programs = super::programs::Programs::bind(&root_code, &codes, &machine.bound)?;
+        let programs = machine.bound.programs(
+            &root_code,
+            stack.windows(2).map(|pair| (pair[0].code, pair[1].code)),
+        )?;
         let mut positions = Vec::new();
         let mut dependencies = Vec::new();
         let mut inputs = Vec::new();

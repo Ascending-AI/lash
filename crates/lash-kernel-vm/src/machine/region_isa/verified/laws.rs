@@ -1410,3 +1410,81 @@ fn acquire(
     let limits = Limits::machine(machine)?;
     RegionLease::acquire_verified(machine, tables, limits)
 }
+/// K-FN-004: a newly reached callable extends the root's binding, preserving
+/// earlier targets and using the new callee's actual parameter substitutions.
+#[test]
+fn a_new_dynamic_target_extends_the_cached_callee_bindings() {
+    let mut run = call_expression(
+        "let f = fn(first, unused) { return first } let g = fn(unused, second) { return second } return apply g(7, 9)",
+    );
+    let machine = &mut run.machine;
+    machine.current = Some(TaskId::MAIN);
+    let root = machine.frame(TaskId::MAIN).unwrap().code;
+    let program = machine.exe.region(root).unwrap();
+    let code = machine.bound.get(&machine.exe, &program).unwrap();
+    let site = code
+        .calls
+        .iter()
+        .position(|call| call.as_ref().is_some_and(|call| call.plan.dynamic()))
+        .unwrap() as u32;
+    let link = machine.frame(TaskId::MAIN).unwrap().link;
+    let find = |names: [&str; 2]| {
+        let candidate = (0..machine.exe.code_count())
+            .map(|index| crate::compile::CodeId(index as u32))
+            .find(|id| {
+                machine.exe.code(*id).source_room.params.as_ref()
+                    == names.map(lash_kernel_value::Name::new)
+            })
+            .unwrap();
+        let body = machine.exe.code(candidate);
+        let at = body.created.as_ref().unwrap();
+        let origin = lash_kernel_doc::snapshot::closure_at(
+            machine.exe.instances.get(&link).unwrap(),
+            at,
+            link,
+            machine.exe.helpers(),
+            machine.exe.selection(),
+        )
+        .unwrap();
+        machine
+            .exe
+            .closure_at(&origin.function, link, at, &body.capture_names)
+            .unwrap()
+    };
+    let first = find(["first", "unused"]);
+    let second = find(["unused", "second"]);
+    assert!(machine.exe.reach_dynamic_target(root, site, first));
+    let before = machine.bound.programs(&code, std::iter::empty()).unwrap();
+    assert!(before.binds(root, site, first));
+    assert!(!before.binds(root, site, second));
+    let unchanged = machine.bound.programs(&code, std::iter::empty()).unwrap();
+    assert!(Arc::ptr_eq(&before, &unchanged));
+    let parked = machine
+        .bound
+        .programs(&code, std::iter::once((root, second)))
+        .unwrap();
+    assert!(parked.binds(root, site, first));
+    assert!(parked.binds(root, site, second));
+    let unparked = machine.bound.programs(&code, std::iter::empty()).unwrap();
+    assert!(unparked.binds(root, site, first));
+    assert!(!unparked.binds(root, site, second));
+    assert!(machine.exe.reach_dynamic_target(root, site, second));
+    let after = machine.bound.programs(&code, std::iter::empty()).unwrap();
+    assert!(after.binds(root, site, first));
+    assert!(after.binds(root, site, second));
+    assert_eq!(after.code(second).unwrap().program.code(), second);
+    assert!(!before.binds(root, site, second));
+    let mut lease = acquire(machine, program).unwrap();
+    assert_eq!(
+        lease.run(StopAt::NextBoundary).unwrap(),
+        RegionStop::Complete
+    );
+    let prefix = lease.materialize().unwrap();
+    assert!(
+        prefix
+            .reconstruction()
+            .payload
+            .unwrap()
+            .same(&Value::Int(9))
+    );
+}
