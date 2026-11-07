@@ -230,9 +230,9 @@ impl Running<'_> {
             self.stop = Some(RegionStop::Refusal);
             return Ok(None);
         }
-        // The caller's depth counts its own frame: a guest call is admitted
-        // while that depth, with any prepared operation depth, is in bound.
-        let required_depth = self.counters.depth.checked_add(step.depth);
+        // A body call reserves its own unit before entry. An operation's
+        // prepared depth already includes that same unit (K-BND-002).
+        let required_depth = self.counters.depth.checked_add(step.depth.max(1));
         if required_depth.is_none_or(|depth| depth > self.limits.depth) {
             self.refusal = Some(crate::Bound::CallDepth);
             self.attempted = Some(step.at.clone());

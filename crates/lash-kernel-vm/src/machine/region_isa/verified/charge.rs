@@ -181,6 +181,7 @@ mod laws {
                         charge_enabled: true,
                         entry_depth: 1,
                         record_charges: true,
+                        root_call: true,
                     };
                     let mut actual = Payment {
                         counters: Counters {

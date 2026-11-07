@@ -23,6 +23,8 @@ pub(super) struct Limits {
     pub(super) entry_depth: u32,
     #[cfg(any(test, feature = "testing"))]
     pub(super) record_charges: bool,
+    /// An entry or spawned root is a call; the session main body is not.
+    pub(super) root_call: bool,
 }
 impl Limits {
     pub(super) fn machine(machine: &mut KernelMachine) -> Result<Self, RegionError> {
@@ -37,6 +39,7 @@ impl Limits {
             .len();
         let entry_depth = frames
             .checked_add(below)
+            .and_then(|n| n.checked_sub(1))
             .and_then(|n| u32::try_from(n).ok())
             .ok_or_else(|| invalid(Refused::Facts))?;
         Ok(Self {
@@ -66,6 +69,7 @@ impl Limits {
                 .observer
                 .as_ref()
                 .is_some_and(|observer| observer.charges.is_some()),
+            root_call: below != 0,
         })
     }
 }

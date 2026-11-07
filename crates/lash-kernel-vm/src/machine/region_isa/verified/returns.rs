@@ -221,11 +221,18 @@ impl Running<'_> {
             return Err(invalid(Refused::Path));
         }
         self.registers.clear(self.frame_index())?;
-        self.counters.depth = self
-            .counters
-            .depth
-            .checked_sub(1)
-            .ok_or_else(|| invalid(Refused::Facts))?;
+        let main = self.parked.is_empty() && !self.held_caller && !self.limits.root_call;
+        if main {
+            if self.counters.depth != 0 {
+                return Err(invalid(Refused::Facts));
+            }
+        } else {
+            self.counters.depth = self
+                .counters
+                .depth
+                .checked_sub(1)
+                .ok_or_else(|| invalid(Refused::Facts))?;
+        }
         let Some(parked) = self.parked.pop() else {
             self.returning = Some(Incoming {
                 value: departing.value,
