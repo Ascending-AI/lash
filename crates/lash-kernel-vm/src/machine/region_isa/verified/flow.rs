@@ -122,15 +122,15 @@ impl Flow {
             .filter(|(slot, _)| !moving_departure || !matches!(slot, Slot::Departure(_)))
             .map(|(slot, reg)| root(*slot, *reg))
             .collect::<Result<_, RegionError>>()?;
-        if before.graph.incoming() != after.graph.incoming() {
-            if let Some(reg) = before.graph.incoming() {
+        if before.incoming != after.incoming {
+            if let Some(reg) = before.incoming {
                 releases.push(Root {
                     register: super::bind::physical(code, reg)?,
                     capture: false,
                     session: None,
                 });
             }
-            if let Some(reg) = after.graph.incoming() {
+            if let Some(reg) = after.incoming {
                 holds.push(Root {
                     register: super::bind::physical(code, reg)?,
                     capture: false,
@@ -203,8 +203,7 @@ impl Flow {
                         )) => Fact::Local(super::bind::physical(
                             code,
                             before
-                                .graph
-                                .incoming()
+                                .incoming
                                 .ok_or_else(|| invalid(Refused::Facts))?,
                         )?),
                         ResourceInput::SourceFact(Measure::CallPeak { at, callee })
@@ -356,10 +355,7 @@ fn release_roots(
                 continue;
             }
             Owner::Incoming(_) => (
-                before
-                    .graph
-                    .incoming()
-                    .ok_or_else(|| invalid(Refused::Facts))?,
+                before.incoming.ok_or_else(|| invalid(Refused::Facts))?,
                 false,
                 None,
             ),

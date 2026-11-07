@@ -1435,14 +1435,11 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                 .transpose()?,
             _ => draft.steps[index].event.output.as_ref().map(|_| sink),
         };
-        for (phase, (live, pending, incoming)) in [
+        for (live, pending, incoming) in [
             (&before, incoming_before, incoming_before),
             (&pending_live, pending, incoming_pending),
             (&after, incoming_after, incoming_after),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        ] {
             let roles: Box<[_]> = live
                 .iter()
                 .filter_map(|slot| {
@@ -1453,26 +1450,9 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         .map(|index| (*slot, draft.roles[index].1))
                 })
                 .collect();
-            let operands = roles
-                .iter()
-                .filter(|(slot, _)| {
-                    matches!(
-                        slot,
-                        Slot::Operand(_) | Slot::Continuation(_) | Slot::Argument(_)
-                    )
-                })
-                .map(|(_, reg)| *reg)
-                .collect();
             maps.push(RecoveryMap {
-                graph: GraphRecovery::from_roles(
-                    &draft.steps[index].at,
-                    &roles,
-                    pending,
-                    phase as u32,
-                    incoming,
-                ),
                 roles,
-                operands,
+                incoming,
                 pending,
                 continuation: draft.steps[index].at.clone(),
             });

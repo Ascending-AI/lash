@@ -98,13 +98,9 @@ impl<'m> Running<'m> {
                             .map(|(slot, value)| Ok((slot, operands::Operand::Dynamic(value))))
                     }))
                     .collect::<Result<_, RegionError>>()?,
-                operands: map
-                    .operands
-                    .iter()
-                    .map(|reg| read(*reg))
-                    .collect::<Result<_, _>>()?,
+                operands: map.operands().map(read).collect::<Result<_, _>>()?,
                 incoming: depth == self.parked.len()
-                    && (self.returning.is_some() || map.graph.incoming().is_some()),
+                    && (self.returning.is_some() || map.incoming.is_some()),
                 pending: if depth == self.parked.len() && self.returning.is_some() {
                     self.returning
                         .as_ref()

@@ -792,7 +792,7 @@ fn a_returned_call_restores_its_result_after_releasing_the_callee() {
         entered |= execution.frame_index() == 1;
         if entered && execution.frame_index() == 0 && execution.returning.is_none() {
             let map = execution.code.program.recovery(execution.prefix).unwrap();
-            if map.graph.incoming().is_none() {
+            if map.incoming.is_none() {
                 assert!(map.roles.iter().any(|(_, reg)| {
                     execution
                         .read(*reg)

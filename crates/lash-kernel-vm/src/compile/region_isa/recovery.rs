@@ -23,91 +23,28 @@ impl Role {
     }
 }
 
+/// Untrusted inside RegionDraft; verified only as part of immutable RegionCode.
+/// This description grants no state or semantic authority on its own.
 #[derive(Clone)]
 pub(crate) struct RecoveryMap {
-    pub(crate) roles: Box<[(Slot, Reg<LeaseValue>)]>,
-    pub(crate) operands: Box<[Reg<LeaseValue>]>,
-    pub(crate) pending: Option<Reg<LeaseValue>>,
     pub(crate) continuation: Point,
-    pub(crate) graph: super::GraphRecovery,
+    pub(crate) roles: Box<[(Slot, Reg<LeaseValue>)]>,
+    pub(crate) pending: Option<Reg<LeaseValue>>,
+    /// The canonical task Incoming holding, distinct from a frame Slot or an
+    /// unaccepted computed result.
+    pub(crate) incoming: Option<Reg<LeaseValue>>,
 }
-
-/// Untrusted inside RegionDraft; verified only as part of immutable RegionCode.
-/// These tables grant no state or semantic authority on their own.
-#[derive(Clone)]
-pub(crate) struct GraphRecovery {
-    source: Point,
-    roles: Box<[(Slot, Reg<LeaseValue>)]>,
-    pending: Option<Reg<LeaseValue>>,
-    incoming: Option<Reg<LeaseValue>>,
-    scratch: Box<[Reg<LeaseValue>]>,
-    release_phase: u32,
-    versions: Box<[(Reg<LeaseValue>, u32)]>,
-    identities: Box<[(Reg<LeaseValue>, u32)]>,
-}
-impl GraphRecovery {
-    pub(super) fn from_roles(
-        source: &Point,
-        roles: &[(Slot, Reg<LeaseValue>)],
-        pending: Option<Reg<LeaseValue>>,
-        phase: u32,
-        incoming: Option<Reg<LeaseValue>>,
-    ) -> Self {
-        Self {
-            source: source.clone(),
-            roles: roles.into(),
-            pending,
-            incoming,
-            scratch: pending.into_iter().collect(),
-            release_phase: phase,
-            versions: roles
-                .iter()
-                .map(|(_, reg)| (*reg, reg.index()))
-                .chain(pending.map(|reg| (reg, reg.index())))
-                .collect(),
-            identities: roles
-                .iter()
-                .map(|(_, reg)| (*reg, reg.index()))
-                .chain(pending.map(|reg| (reg, reg.index())))
-                .collect(),
-        }
-    }
-    pub(super) fn check(
-        &self,
-        source: &Point,
-        roles: &[(Slot, Reg<LeaseValue>)],
-        pending: Option<Reg<LeaseValue>>,
-        phase: u32,
-        incoming: Option<Reg<LeaseValue>>,
-    ) -> bool {
-        self.source == *source
-            && self.roles.as_ref() == roles
-            && self.pending == pending
-            && self.incoming == incoming
-            && self.release_phase == phase
-            && self.scratch.iter().copied().eq(pending)
-            && self.versions.iter().copied().eq(roles
-                .iter()
-                .map(|(_, reg)| (*reg, reg.index()))
-                .chain(pending.map(|reg| (reg, reg.index()))))
-            && self.identities.iter().copied().eq(roles
-                .iter()
-                .map(|(_, reg)| (*reg, reg.index()))
-                .chain(pending.map(|reg| (reg, reg.index()))))
-    }
-
-    /// This pending register is the canonical task Incoming holding, rather
-    /// than an extra frame Slot or an unaccepted computed result.
-    pub(crate) fn incoming(&self) -> Option<Reg<LeaseValue>> {
-        self.incoming
-    }
-    #[cfg(test)]
-    pub(super) fn substitute_identity(&mut self) -> bool {
-        let Some((_, binding)) = self.identities.first_mut() else {
-            return false;
-        };
-        *binding = binding.checked_add(1).expect("fixture binding");
-        true
+impl RecoveryMap {
+    pub(crate) fn operands(&self) -> impl Iterator<Item = Reg<LeaseValue>> + '_ {
+        self.roles
+            .iter()
+            .filter(|(slot, _)| {
+                matches!(
+                    slot,
+                    Slot::Operand(_) | Slot::Continuation(_) | Slot::Argument(_)
+                )
+            })
+            .map(|(_, reg)| *reg)
     }
 }
 

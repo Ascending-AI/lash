@@ -254,7 +254,7 @@ impl Running<'_> {
                     .code
                     .program
                     .recovery(step.before)
-                    .and_then(|map| map.graph.incoming())
+                    .and_then(|map| map.incoming)
                     .ok_or_else(|| invalid(Refused::Exit))?;
                 let destination = self
                     .code

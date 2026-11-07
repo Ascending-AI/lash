@@ -220,14 +220,19 @@ fn rejects_an_untyped_branch_register() {
 
 /// Amendment 2: a recovery map must retain its actual source-to-local binding.
 #[test]
-fn rejects_a_substituted_graph_identity_binding() {
+fn rejects_a_substituted_recovery_register_binding() {
     fixture(|exe, code, mut draft| {
-        assert!(
-            draft
-                .recovery
-                .iter_mut()
-                .any(|map| map.graph.substitute_identity())
-        );
+        let live = recovery::liveness(&draft).unwrap();
+        assert!(draft.recovery.iter_mut().enumerate().any(|(index, map)| {
+            if live[index / 3].is_none() {
+                return false;
+            }
+            let Some((_, reg)) = map.roles.first_mut() else {
+                return false;
+            };
+            *reg = Reg::new(draft.roles.len()).unwrap();
+            true
+        }));
         assert_eq!(
             verify_region(exe, code, draft, &[]).err(),
             Some(Refused::Exit)

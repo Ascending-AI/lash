@@ -1262,12 +1262,8 @@ fn verify_layout(
         {
             let map = draft.recovery.get(prefix.offset()).ok_or(Refused::Exit)?;
             if map.continuation != step.at
-                || !map.graph.check(
-                    &step.at,
-                    &map.roles,
-                    map.pending,
-                    phase as u32,
-                    if (phase < 2
+                || map.incoming
+                    != if (phase < 2
                         && step
                             .event
                             .inputs
@@ -1282,8 +1278,7 @@ fn verify_layout(
                         Some(Reg::new(draft.roles.len())?)
                     } else {
                         None
-                    },
-                )
+                    }
             {
                 return Err(Refused::Exit);
             }
@@ -1446,29 +1441,11 @@ fn check_maps(draft: &RegionDraft) -> Result<(), Refused> {
                             .map(|index| (*slot, draft.roles[index].1))
                     })
                     .collect();
-                if !map.graph.check(
-                    &step.at,
-                    &expected_roles,
-                    map.pending,
-                    (prefix.offset() % 3) as u32,
-                    incoming,
-                ) || map.roles.as_ref() != expected_roles.as_slice()
+                if map.roles.as_ref() != expected_roles.as_slice()
                     || map.continuation != step.at
                     || map.pending != pending
+                    || map.incoming != incoming
                 {
-                    return Err(Refused::Exit);
-                }
-                let operands: Vec<_> = expected_roles
-                    .iter()
-                    .filter(|(slot, _)| {
-                        matches!(
-                            slot,
-                            Slot::Operand(_) | Slot::Continuation(_) | Slot::Argument(_)
-                        )
-                    })
-                    .map(|(_, reg)| *reg)
-                    .collect();
-                if map.operands.as_ref() != operands.as_slice() {
                     return Err(Refused::Exit);
                 }
             }
