@@ -1,7 +1,6 @@
 use super::*;
 mod borrowed;
 mod boundary;
-mod callback;
 mod construction;
 mod control;
 mod departure;
@@ -16,7 +15,6 @@ mod unit;
 /// and an exclusive shared admission; equal byte deltas cannot replace them.
 pub(super) fn checked_source_publication() {
     self::boundary::exits();
-    self::callback::identities();
     self::observers::isolation();
     exact::events();
     departure::exits();

@@ -15,16 +15,6 @@ pub(super) trait Events {
     fn walked(&mut self, _: &Site) -> Result<Walk, Refused> {
         Err(Refused::Facts)
     }
-    /// Only a descriptor issued from an actual VerifiedCall may bridge a
-    /// call. Ordinary source evaluation keeps its genuine action departure.
-    fn resume_call(
-        &mut self,
-        _: &Source,
-        _: &Point,
-        _: ExitKind,
-    ) -> Result<Option<region::calls::CallCompletion>, Refused> {
-        Ok(None)
-    }
     fn selected_end(&self) -> bool {
         false
     }
@@ -213,18 +203,7 @@ impl<E: Events> Run<'_, E> {
             }
             return self.step(&resume.site, resume.phase);
         }
-        let Some(completion) = self
-            .events
-            .resume_call(self.source, &point(site, phase), exit)?
-        else {
-            return Ok(exit);
-        };
-        let resume = completion.resume();
-        if resume.site != *site {
-            return Err(Refused::Source.into());
-        }
-        self.step(&resume.site, resume.phase)?;
-        Ok(completion.after_return())
+        Ok(exit)
     }
     fn choose(&mut self, site: &Site) -> Result<bool, Stop> {
         self.events.choose(site).map_err(Stop::Refused)

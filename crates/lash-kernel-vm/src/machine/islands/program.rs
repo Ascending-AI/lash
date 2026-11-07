@@ -518,7 +518,6 @@ impl<'e> Build<'e> {
                         )
                         .ok()
                     }),
-                    repeat: None,
                     id: statement.id,
                     cost: *cost,
                     metered: *metered,
@@ -554,23 +553,6 @@ impl<'e> Build<'e> {
                     header,
                     texts,
                 };
-                let repeat = self.fused.then_some(()).and_then(|_| {
-                    Some(Box::new(RepeatSite {
-                        run: super::super::code::repeat::Repeat::of(
-                            statement,
-                            self.shared,
-                            self.exe,
-                            std::sync::Arc::clone(self.placement.as_ref()?),
-                        )?,
-                        iteration_max: self
-                            .exe
-                            .islands
-                            .scalar
-                            .iter()
-                            .find(|plan| plan.stmt == statement.id && !plan.allocates)
-                            .map(|plan| plan.iteration_max),
-                    }))
-                });
                 self.ops[header].op = Op::Header {
                     entry: self.placement.as_ref().and_then(|p| {
                         crate::compile::room::publication::boundary::LoopEntry::compile(
@@ -580,7 +562,6 @@ impl<'e> Build<'e> {
                         )
                         .ok()
                     }),
-                    repeat,
                     id: statement.id,
                     cost: *cost,
                     metered: *metered,
@@ -638,7 +619,6 @@ impl<'e> Build<'e> {
                         )
                         .ok()
                     }),
-                    repeat: None,
                     id: statement.id,
                     cost: *cost,
                     metered: *metered,
@@ -669,7 +649,6 @@ impl<'e> Build<'e> {
                         )
                         .ok()
                     }),
-                    repeat: None,
                     id: statement.id,
                     cost: *cost,
                     metered: *metered,

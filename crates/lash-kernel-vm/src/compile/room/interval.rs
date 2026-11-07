@@ -1,11 +1,8 @@
 //! A selected source path compiled once into indexed logical algebra. Selection
 //! validation walks source control only on a cache miss, never per execution.
 use super::*;
-mod composed;
 #[path = "publication/exact/construction.rs"]
 pub(in crate::compile::room) mod construction;
-mod continuation;
-pub(crate) use composed::ComposedInterval;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Selection {

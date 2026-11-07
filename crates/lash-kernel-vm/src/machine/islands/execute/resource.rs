@@ -6,15 +6,10 @@ use crate::admission::SourceResources;
 use crate::compile::room::publication::Occurrence;
 
 #[cfg(test)]
-thread_local! { static COMPOSED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; static CERTIFIED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
+thread_local! { static CERTIFIED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
 #[cfg(test)]
 pub(crate) fn take_certified_statements() -> u64 {
     CERTIFIED.with(|count| count.replace(0))
-}
-
-#[cfg(test)]
-pub(crate) fn take_composed_statements() -> u64 {
-    COMPOSED.with(|count| count.replace(0))
 }
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
@@ -72,7 +67,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             result,
             bound,
             debt,
-            composed,
             prepared_natives,
         } = evaluated;
         let callee = frame.state.callee;
@@ -179,12 +173,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         for _ in 0..prepared_natives {
             crate::machine::islands::witness::prepared_native_published();
         }
-        #[cfg(test)]
-        if composed {
-            COMPOSED.with(|count| count.set(count.get().saturating_add(1)));
-        }
-        #[cfg(not(test))]
-        let _ = composed;
         #[cfg(test)]
         CERTIFIED.with(|count| count.set(count.get().saturating_add(1)));
         #[cfg(any(test, feature = "perf-witness"))]

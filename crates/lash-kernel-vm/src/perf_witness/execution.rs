@@ -208,21 +208,6 @@ pub(crate) fn statements(recorder: &Recorder, owner: Owner, n: u64, counting: bo
     }
 }
 
-/// Reused typed kernels execute under their caller's physical owner scope.
-#[inline(always)]
-pub(crate) fn statements_here(recorder: &Recorder, n: u64, counting: bool) {
-    if counting
-        && n != 0
-        && let Some(counts) = &recorder.inner
-    {
-        let owner = counts
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .owner;
-        produce(counts, Fact::Statements(owner, n));
-    }
-}
-
 #[inline(always)]
 pub(crate) fn register_entry<const LITERAL: bool>(recorder: &Recorder, counting: bool) {
     if counting && let Some(counts) = &recorder.inner {

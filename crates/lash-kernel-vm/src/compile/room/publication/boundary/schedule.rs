@@ -1,12 +1,6 @@
-//! Compiler-owned statement order joins one actual affine call prefix.
+//! Compiler-owned statement order of one boundary's scalar statements.
 use super::*;
-use crate::compile::room::{
-    charges::composition::StatementDebt,
-    region::calls::{
-        VerifiedCall,
-        scope::{ScopedPrefix, ScopedPrefixParts},
-    },
-};
+use crate::compile::room::charges::composition::StatementDebt;
 use crate::compile::{CodeId, Executable};
 pub(super) mod sealed {
     pub trait Sealed {}
@@ -43,41 +37,21 @@ impl BoundaryCharges for StatementCharges<'_> {
 }
 pub(in crate::compile::room) enum StatementSite {
     Scalar(Arc<ChargeProgram>),
-    Call {
-        first: Point,
-        through: Point,
-        call: Arc<VerifiedCall>,
-        continuation: Box<[Selection]>,
-        prefix: Option<Arc<ChargeProgram>>,
-        suffix: Option<Arc<ChargeProgram>>,
-    },
 }
 impl StatementSite {
     fn first(&self) -> &Point {
         match self {
             Self::Scalar(p) => p.first(),
-            Self::Call { first, .. } => first,
         }
     }
     fn through(&self) -> &Point {
         match self {
             Self::Scalar(p) => p.through(),
-            Self::Call { through, .. } => through,
-        }
-    }
-    fn call(&self) -> Option<&Arc<VerifiedCall>> {
-        match self {
-            Self::Scalar(_) => None,
-            Self::Call { call, .. } => Some(call),
         }
     }
 }
 pub(in crate::compile::room) enum StatementWork<'a> {
     Scalar(ChargeDebt<'a>),
-    Call {
-        prefix: Option<ChargeDebt<'a>>,
-        suffix: Option<ChargeDebt<'a>>,
-    },
 }
 pub(super) struct StatementSchedule(Box<[StatementSite]>);
 impl CompiledPublication {
@@ -96,70 +70,17 @@ impl CompiledPublication {
         branches: &[(Site, bool)],
     ) -> Result<Arc<Self>, Refused> {
         let source = &exe.code(code).source_room;
-        let calls: Vec<_> = sites
-            .iter()
-            .filter_map(StatementSite::call)
-            .cloned()
-            .collect();
-        if calls.is_empty() {
-            if !branches.is_empty()
-                || sites.first().map(StatementSite::first) != Some(&first)
-                || sites.last().map(StatementSite::through) != Some(&through)
-                || sites.windows(2).any(|pair| {
-                    source
-                        .exact_successor(pair[0].through(), Successor::Normal)
-                        .as_ref()
-                        != Ok(pair[1].first())
-                })
-            {
-                return Err(Refused::Source);
-            }
-        } else {
-            let route = super::super::sort::caller::source_route(
-                exe,
-                code,
-                first.clone(),
-                through.clone(),
-                branches,
-                &calls,
-            )?;
-            let closes: Vec<_> = route
-                .events()
-                .filter_map(|event| {
-                    if !matches!(event.point.phase, Phase::Commit | Phase::Test)
-                        && !(event.point == through
-                            && event.point.phase == Phase::Restore
-                            && calls.iter().any(|call| call.at().site == event.point.site))
-                    {
-                        return None;
-                    }
-                    if event.point.phase == Phase::Restore {
-                        return Some(&event.point);
-                    }
-                    if event.point == through
-                        && calls.iter().any(|call| {
-                            call.root_arguments().is_some() && call.at().site == event.point.site
-                        })
-                    {
-                        return Some(&event.point);
-                    }
-                    let stmt = exe.stmt(exe.stmt_at(code, &event.point.site)?);
-                    if event.point.phase == Phase::Commit
-                        && matches!(stmt.form, crate::compile::Form::If { .. })
-                    {
-                        return None;
-                    }
-                    Some(&event.point)
-                })
-                .collect();
-            if closes.len() != sites.len()
-                || closes
-                    .iter()
-                    .zip(&sites)
-                    .any(|(at, site)| *at != site.through())
-            {
-                return Err(Refused::Source);
-            }
+        if !branches.is_empty()
+            || sites.first().map(StatementSite::first) != Some(&first)
+            || sites.last().map(StatementSite::through) != Some(&through)
+            || sites.windows(2).any(|pair| {
+                source
+                    .exact_successor(pair[0].through(), Successor::Normal)
+                    .as_ref()
+                    != Ok(pair[1].first())
+            })
+        {
+            return Err(Refused::Source);
         }
         for site in &sites {
             match site {
@@ -167,66 +88,6 @@ impl CompiledPublication {
                     program.verify(exe, code)?;
                     if !program.belongs_to(source) {
                         return Err(Refused::Source);
-                    }
-                }
-                StatementSite::Call {
-                    call,
-                    through,
-                    continuation,
-                    prefix,
-                    suffix,
-                    ..
-                } => {
-                    call.verify(exe)?;
-                    if !call.belongs_to(source, code) {
-                        return Err(Refused::Source);
-                    }
-                    if through.phase == Phase::Restore || call.root_arguments().is_some() {
-                        let completion = call.completion(
-                            source,
-                            call.at(),
-                            if call.at().phase == Phase::Enter {
-                                ExitKind::Action
-                            } else {
-                                ExitKind::Normal
-                            },
-                        )?;
-                        if completion.resume() == through {
-                            if !continuation.is_empty() {
-                                return Err(Refused::Source);
-                            }
-                        } else if call.root_arguments().is_some() {
-                            if through.phase != Phase::Commit
-                                || exe.stmt_at(code, &through.site) != Some(call.caller_statement())
-                                || !call.at().site.path.starts_with(&through.site.path)
-                            {
-                                return Err(Refused::Source);
-                            }
-                            let route = super::super::sort::caller::source_route(
-                                exe,
-                                code,
-                                first.clone(),
-                                through.clone(),
-                                branches,
-                                &calls,
-                            )?;
-                            let resume = route.selections().iter().position(|selection| matches!(selection, Selection::Event { at, .. } if at == completion.resume())).ok_or(Refused::Source)?;
-                            let end = route.selections().iter().position(|selection| matches!(selection, Selection::Event { at, .. } if at == through)).ok_or(Refused::Source)?;
-                            if route.selections().get(resume + 1..=end) != Some(&**continuation) {
-                                return Err(Refused::Source);
-                            }
-                            route.scalar(resume + 1, end + 1)?;
-                        } else {
-                            return Err(Refused::Source);
-                        }
-                    } else {
-                        call.compile_continuation(exe, through, continuation)?;
-                    }
-                    for program in prefix.iter().chain(suffix.iter()) {
-                        program.verify(exe, code)?;
-                        if !program.belongs_to(source) {
-                            return Err(Refused::Source);
-                        }
                     }
                 }
             }
@@ -246,9 +107,8 @@ impl CompiledPublication {
         ledger: &Ledger,
         arena: &Arena,
         heap: &PagedHeap,
-        mut evidence: BoundaryEvidence,
+        evidence: BoundaryEvidence,
         work: Vec<StatementWork<'plan>>,
-        prefix: Option<ScopedPrefix<'plan>>,
         proposed: Position,
     ) -> Result<Option<BoundPublication<StatementCharges<'plan>>>, HeapFault> {
         let Some(schedule) = &self.statements else {
@@ -257,26 +117,7 @@ impl CompiledPublication {
         if work.len() != schedule.0.len() {
             return Ok(None);
         }
-        let mut needs = self.needs.clone();
-        let (range, mut calls) = if let Some(prefix) = prefix {
-            if !Arc::ptr_eq(prefix.source(), &self.source)
-                || prefix.caller() != &evidence.invocation
-                || !prefix.current(ledger, arena, frontier)
-            {
-                return Ok(None);
-            }
-            let ScopedPrefixParts {
-                range,
-                completed,
-                dependencies,
-                calls,
-            } = prefix.into_parts();
-            evidence.dependencies.extend(dependencies)?;
-            needs.invocations = completed;
-            (Some((range, completed)), calls.into_iter())
-        } else {
-            (None, Vec::new().into_iter())
-        };
+        let needs = self.needs.clone();
         let mut debts = Vec::new();
         for (site, work) in schedule.0.iter().zip(work) {
             let debt = match (site, work) {
@@ -285,51 +126,9 @@ impl CompiledPublication {
                 {
                     StatementDebt::Scalar(debt)
                 }
-                (
-                    StatementSite::Call {
-                        call,
-                        prefix,
-                        suffix,
-                        ..
-                    },
-                    StatementWork::Call {
-                        prefix: before,
-                        suffix: after,
-                    },
-                ) => {
-                    if !matches_optional(prefix, &before) || !matches_optional(suffix, &after) {
-                        return Ok(None);
-                    }
-                    let Some(actual) = calls.next() else {
-                        return Ok(None);
-                    };
-                    if !std::ptr::eq(actual.call, &**call) || !call.owns_debt(&actual.debt) {
-                        return Ok(None);
-                    }
-                    needs.depth = needs.depth.max(actual.depth);
-                    needs.occurrences.extend(actual.occurrences);
-                    match (before, after) {
-                        (Some(prefix), Some(suffix)) => StatementDebt::PrefixCall {
-                            prefix,
-                            call: actual.debt,
-                            suffix,
-                        },
-                        (None, Some(suffix)) => StatementDebt::Call {
-                            call: actual.debt,
-                            suffix,
-                        },
-                        (prefix, None) => StatementDebt::ThroughCall {
-                            prefix,
-                            call: actual.debt,
-                        },
-                    }
-                }
                 _ => return Ok(None),
             };
             debts.push(debt);
-        }
-        if calls.next().is_some() {
-            return Ok(None);
         }
         let Some(mut bound) = self.bind_checked(
             frontier,
@@ -344,17 +143,7 @@ impl CompiledPublication {
             return Ok(None);
         };
         bound.needs = needs;
-        Ok(match range {
-            Some((range, completed)) => bound.with_invocations(ledger, range, completed),
-            None => Some(bound),
-        })
-    }
-}
-fn matches_optional(program: &Option<Arc<ChargeProgram>>, debt: &Option<ChargeDebt<'_>>) -> bool {
-    match (program, debt) {
-        (None, None) => true,
-        (Some(program), Some(debt)) => program.owns_debt(debt),
-        _ => false,
+        Ok(Some(bound))
     }
 }
 impl StatementSchedule {
@@ -370,7 +159,6 @@ impl StatementSchedule {
                         program.owns_debt(debt)
                             && debt.matches(source, site.first(), site.through())
                     }
-                    _ => false,
                 })
     }
 }
@@ -450,7 +238,6 @@ impl BoundPublication {
             heap,
             self.evidence,
             debts,
-            None,
             self.cursor.next,
         )
     }

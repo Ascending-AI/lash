@@ -23,14 +23,6 @@ use std::sync::Arc;
 #[path = "resource/expression.rs"]
 mod expression;
 use expression::{Expression, NativeValues};
-#[path = "resource/call.rs"]
-mod call;
-use call::CallPlan;
-
-enum Evaluation {
-    Scalar(Expression),
-    Call(Box<CallPlan>),
-}
 
 pub(crate) struct CertifiedStatement {
     executable: u64,
@@ -39,7 +31,7 @@ pub(crate) struct CertifiedStatement {
     pub(in crate::machine::islands) source_pc: u32,
     pub(in crate::machine::islands) target: u32,
     placement: Arc<BindingPlacement>,
-    evaluation: Evaluation,
+    expression: Expression,
     through: Point,
     region: ScalarRegion,
     pub(in crate::machine::islands) exit: CompiledExit,
@@ -50,7 +42,6 @@ pub(in crate::machine::islands) struct EvaluatedStatement<'a> {
     pub(in crate::machine::islands) result: Value,
     pub(in crate::machine::islands) bound: room::region::BoundScalarRegion<'a>,
     pub(in crate::machine::islands) debt: StatementDebt<'a>,
-    pub(in crate::machine::islands) composed: bool,
     pub(in crate::machine::islands) prepared_natives: usize,
 }
 
@@ -85,9 +76,8 @@ impl CertifiedStatement {
             site: statement.site.clone(),
             phase: Phase::Commit,
         };
-        let (evaluation, region, charges, exit) = if let Some(mut expression) =
-            Expression::compile(exe, stream, &placement, &value)
-        {
+        let (expression, region, charges, exit) = {
+            let mut expression = Expression::compile(exe, stream, &placement, &value)?;
             let route: Vec<_> = expression
                 .points()
                 .chain(std::iter::once(&through))
@@ -103,11 +93,7 @@ impl CertifiedStatement {
             expression.bind_facts(exe, &region)?;
             let exit = CompiledExit::scalar(exe, &region).ok()?;
             let charges = ChargeProgram::compile(exe, placement.code(), id, statement.ops).ok()?;
-            (Evaluation::Scalar(expression), region, charges, exit)
-        } else {
-            let (call, region, charges, exit) =
-                CallPlan::compile(exe, &placement, id, &value, &through)?;
-            (Evaluation::Call(Box::new(call)), region, charges, exit)
+            (expression, region, charges, exit)
         };
         let output = region
             .interval()
@@ -149,7 +135,7 @@ impl CertifiedStatement {
             source_pc: statement.ops.start,
             target,
             placement,
-            evaluation,
+            expression,
             through,
             region,
             exit,
@@ -175,10 +161,7 @@ impl CertifiedStatement {
         {
             return Err(room::Refused::Source);
         }
-        match &self.evaluation {
-            Evaluation::Scalar(expression) => expression.verify(stream, &self.placement),
-            Evaluation::Call(call) => call.verify(stream, &self.placement),
-        }
+        self.expression.verify(stream, &self.placement)
     }
 
     pub(in crate::machine::islands) fn evaluate<'a>(
@@ -199,22 +182,7 @@ impl CertifiedStatement {
         else {
             return Ok(None);
         };
-        if let Evaluation::Call(call) = &self.evaluation {
-            return call.evaluate(
-                exe,
-                &activation,
-                slots,
-                invocation,
-                ledger,
-                arena,
-                heap,
-                &self.region,
-                &self.charges,
-            );
-        }
-        let Evaluation::Scalar(expression) = &self.evaluation else {
-            unreachable!()
-        };
+        let expression = &self.expression;
         let mut values = entry_values(&self.region, &activation)?;
         if values.len() != self.region.fact_count() {
             return Ok(None);
@@ -243,7 +211,6 @@ impl CertifiedStatement {
             result: evaluated.result,
             bound,
             debt: StatementDebt::Scalar(debt),
-            composed: false,
             prepared_natives: evaluated.formulas.len(),
         }))
     }

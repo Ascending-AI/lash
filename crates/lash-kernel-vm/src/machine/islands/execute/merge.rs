@@ -7,8 +7,6 @@ use super::*;
 pub(super) mod region;
 
 #[cfg(test)]
-thread_local! { static CALLBACK_ACCEPTED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
-#[cfg(test)]
 thread_local! { static ACCEPTED: std::cell::Cell<[u64; 7]> = const { std::cell::Cell::new([0; 7]) }; }
 #[cfg(test)]
 pub(super) fn source_publication_accepted(index: usize) {
@@ -20,9 +18,6 @@ pub(super) fn source_publication_accepted(index: usize) {
 }
 #[cfg(test)]
 impl crate::machine::KernelMachine {
-    pub(crate) fn take_callback_acceptances(&self) -> u64 {
-        CALLBACK_ACCEPTED.with(|count| count.replace(0))
-    }
     pub(crate) fn take_collection_acceptances(&self) -> [u64; 7] {
         ACCEPTED.with(|counts| counts.replace([0; 7]))
     }

@@ -177,13 +177,6 @@ impl Controls {
         self.removed.clear();
         self.marked.fill(false);
     }
-    #[cfg(test)]
-    pub(super) fn replace(&mut self, values: Vec<Control>) {
-        self.clear();
-        for value in values {
-            self.push(value);
-        }
-    }
     pub(super) fn flush(
         &mut self,
         mut visit: impl FnMut(Roles, bool) -> Result<(), HeapFault>,

@@ -15,7 +15,6 @@ pub(crate) mod boundary;
 mod control;
 #[cfg(test)]
 pub(crate) mod oracle;
-pub(crate) mod sort;
 pub(crate) use control::{ControlExit, ControlRoots, FrameCaller, FrameEntry};
 mod departure;
 pub(crate) use departure::DepartureExit;

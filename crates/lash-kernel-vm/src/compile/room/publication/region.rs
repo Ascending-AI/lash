@@ -16,7 +16,6 @@ pub(crate) struct CompiledExit {
     unpaid: Point,
     recovery: [u8; 32],
     depth: u64,
-    call: Option<Point>,
 }
 
 impl CompiledExit {
@@ -58,24 +57,7 @@ impl CompiledExit {
             unpaid,
             recovery: logical_digest(&encoding.into_bytes()),
             depth,
-            call: None,
         })
-    }
-    pub(crate) fn composed(
-        exe: &crate::compile::Executable,
-        region: &ScalarRegion,
-        first: Point,
-        call: &super::super::region::calls::VerifiedCall,
-    ) -> Result<Self, Refused> {
-        let mut exit = Self::scalar(exe, region)?;
-        if exit.interval.events().next().map(|event| &event.point)
-            != exit.source.next_after_commit(&call.at().site).ok().as_ref()
-        {
-            return Err(Refused::Source);
-        }
-        exit.first = first;
-        exit.call = Some(call.at().clone());
-        Ok(exit)
     }
     pub(crate) fn start(&self, occurrence: Occurrence) -> Position {
         Position {
@@ -116,13 +98,7 @@ impl Frontier {
             || !Arc::ptr_eq(bound.region().interval(), &exit.interval)
             || self.position.unpaid.as_ref() != Some(&exit.first)
             || self.position.occurrence.invocation != bound.invocation().id()
-            || !debt.matches(
-                &exit.source,
-                &exit.first,
-                &exit.through,
-                exit.call.as_ref(),
-                bound.composed_source(),
-            )
+            || !debt.matches(&exit.source, &exit.first, &exit.through)
         {
             return Ok(None);
         }
@@ -132,8 +108,6 @@ impl Frontier {
             recovery: exit.recovery,
             occurrence: self.position.occurrence.clone(),
         };
-        let occurrences = bound.occurrences().to_vec();
-        let depth = bound.depth().max(exit.depth);
         let Some(transaction) = bound.prepare_boundary(ledger, registration, heap)? else {
             return Ok(None);
         };
@@ -142,8 +116,8 @@ impl Frontier {
         }
         resources.admit_statement(
             debt,
-            &occurrences,
-            depth,
+            &[],
+            exit.depth,
             PreparedRegion {
                 frontier: std::rc::Rc::clone(&self.identity),
                 revision: self.revision,

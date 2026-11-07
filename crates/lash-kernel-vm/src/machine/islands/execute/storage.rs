@@ -64,24 +64,6 @@ impl IndexMut<usize> for Operands<'_> {
     }
 }
 
-impl Values<'_, '_> {
-    #[inline(always)]
-    pub(super) fn value(&self, at: u32) -> Option<Value> {
-        if self.state.callee.plan.captures.contains(&at) {
-            return None;
-        }
-        match self.slots.get(at as usize)? {
-            SlotState::Value(value) => Some(*value),
-            SlotState::Empty | SlotState::Cell(_) => None,
-        }
-    }
-
-    #[inline(always)]
-    pub(super) fn assign(&mut self, at: u32, value: Value) {
-        self.slots[at as usize] = SlotState::Value(value);
-    }
-}
-
 impl Slab {
     #[cfg(any(test, feature = "testing"))]
     pub(super) fn dispatched(&mut self, packet: Packet, code: &super::super::code::Code) {
@@ -101,7 +83,6 @@ impl Slab {
                 matches!(site.inputs, super::super::code::OperatorInputs::Scalar(_))
                     || matches!(site.to, Destination::Write(_))
             }
-            Opcode::Header => code.sites.header[packet.x as usize].repeat.is_some(),
             _ => false,
         };
         self.specialized += u64::from(specialized);

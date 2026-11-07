@@ -100,7 +100,6 @@ impl BoundScalarRegion<'_> {
             })?
             .point;
         if !ledger.is_current(&self.stamp)
-            || self.transfer.is_some()
             || !plan.authenticates(&self.region.source, first, through)
             || plan.charges().len() != formulas.len()
         {

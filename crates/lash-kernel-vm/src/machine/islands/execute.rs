@@ -18,14 +18,13 @@ mod dispatch;
 pub(crate) mod member_region;
 mod resource;
 #[cfg(test)]
-pub(crate) use resource::{take_certified_statements, take_composed_statements};
+pub(crate) use resource::take_certified_statements;
 mod merge;
 pub(super) use merge::region::direct::{CollectionSite, MergeTail};
 mod numeric;
 mod pending;
 use pending::{Departing, Departure, Phase};
 mod format;
-mod repeat;
 pub(super) mod source;
 mod storage;
 #[cfg(test)]

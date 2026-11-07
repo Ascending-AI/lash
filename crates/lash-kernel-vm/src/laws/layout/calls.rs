@@ -1,5 +1,4 @@
 //! Call-owned frame entry preserves source operands and continuations.
-mod composed;
 mod construction;
 
 const SOURCE_SHARED_ENTRY: &str = "let makers = (call maker(3, 9), call maker(4)) let first = makers[0] let second = makers[1] return (apply first(), apply second())";
@@ -863,7 +862,6 @@ fn direct_call_entry_agrees() {
         );
         format!("definition {}\n", serde_json::to_string(&function).unwrap())
     };
-    composed::entry(&definition);
     let definitions = format!(
         "{}{}{}{}{}",
         definition("literal(x: Any)", "return 1"),

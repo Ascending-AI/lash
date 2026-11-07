@@ -3,10 +3,7 @@
 use super::super::charges::{ChargeDebt, ChargeProgram, settled::SettledDebt};
 pub(in crate::compile::room) mod schedule;
 use super::*;
-mod entry;
 mod loop_entry;
-pub(crate) use entry::CallEntry;
-pub(in crate::compile::room) use entry::ScopeEntry;
 use lash_kernel_state::{
     arena::Arena,
     kernel_internals::logical::{Dependencies, PublicationValue, RootValue},

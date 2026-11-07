@@ -7,8 +7,6 @@ mod affine;
 #[path = "calls.rs"]
 pub(crate) mod calls;
 mod captures;
-#[path = "region/continuation.rs"]
-mod continuation;
 pub(crate) mod text;
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_state::{
@@ -696,7 +694,6 @@ pub(crate) struct BoundScalarRegion<'a> {
     values: Vec<Value>,
     peak: u64,
     delta: i128,
-    transfer: Option<continuation::Transfer>,
 }
 impl ScalarRegion {
     fn branch_guards(&self, recovery: &[Recovery]) -> Result<Vec<(ScalarFact, bool)>, Refused> {
@@ -1153,7 +1150,6 @@ impl ScalarRegion {
             values: values.values.to_vec(),
             peak,
             delta,
-            transfer: None,
         }))
     }
 }
@@ -1178,42 +1174,30 @@ impl BoundScalarRegion<'_> {
         if !ledger.is_current(&self.stamp) {
             return Ok(None);
         }
-        let default_inputs;
-        let default_outputs;
-        let (inputs, outputs) = if let Some(transfer) = &self.transfer {
-            (&transfer.inputs, &transfer.outputs)
-        } else {
-            default_inputs = self.region.entries.iter().map(|entry| entry.slot).collect();
-            default_outputs = self
-                .region
-                .survivors
-                .iter()
-                .map(|(slot, live)| (*slot, self.values[live.fact.0], live.entry))
-                .collect();
-            (&default_inputs, &default_outputs)
-        };
-        let inputs: Vec<_> = inputs
+        let inputs: Vec<_> = self
+            .region
+            .entries
             .iter()
-            .map(|slot| self.invocation.owner(*slot))
+            .map(|entry| self.invocation.owner(entry.slot))
             .collect();
-        let outputs: Vec<_> = outputs
+        let outputs: Vec<_> = self
+            .region
+            .survivors
             .iter()
-            .map(|(slot, value, entry)| {
+            .map(|(slot, live)| {
                 (
                     self.invocation.owner(*slot),
-                    entry.map_or(RootValue::Value(value), |entry| {
-                        RootValue::Existing(self.invocation.owner(entry))
-                    }),
+                    live.entry
+                        .map_or(RootValue::Value(&self.values[live.fact.0]), |entry| {
+                            RootValue::Existing(self.invocation.owner(entry))
+                        }),
                 )
             })
             .collect();
         // Preparing authenticates result holdings through the canonical source
         // projection. No naked retained-byte delta authorizes this transfer.
         let before = ledger.balance()?.total()?;
-        let mut prepared = ledger.prepare_source_boundary(registration, heap, &inputs, &outputs)?;
-        if let Some(transfer) = self.transfer {
-            prepared = prepared.complete_invocations(transfer.reservation, 1, heap.pages())?;
-        }
+        let prepared = ledger.prepare_source_boundary(registration, heap, &inputs, &outputs)?;
         let after = prepared.balance()?.total()?;
         if i128::from(after) - i128::from(before) != self.delta {
             return Ok(None);
