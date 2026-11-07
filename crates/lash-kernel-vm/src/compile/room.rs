@@ -66,6 +66,8 @@ pub(crate) enum Phase {
     Commit,
     Fallthrough,
     Leave,
+    /// A `return via`'s policy call, after every finally of its frame.
+    Policy,
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Point {
@@ -782,13 +784,19 @@ impl Source {
                     },
                 );
             }
-            if let doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) = node {
-                for target in [&via.open]
+            // A protocol `for`'s hooks and a `return via`'s policy are calls.
+            let targets: Vec<&doc::FunctionTarget> = match node {
+                doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) => [&via.open]
                     .into_iter()
                     .chain(via.next.iter())
                     .chain(via.check.iter())
                     .chain(via.item.iter())
-                {
+                    .collect(),
+                doc::Node::Stmt(doc::Stmt::ReturnVia { policy, .. }) => vec![policy],
+                _ => Vec::new(),
+            };
+            {
+                for target in targets {
                     if let doc::FunctionTarget::Local(function) = target {
                         let has_body = catalog.header(function).is_some_and(|h| {
                             matches!(
@@ -1380,10 +1388,11 @@ fn inputs(site: &Site, node: doc::Node<'_>) -> Box<[Owner]> {
 /// Whether an event at `node`'s `phase` can raise besides taking its own
 /// exit: an expression or action may raise, a protocol hook's callee may
 /// raise, a plain `for` may refuse what it cannot walk, and a condition may
-/// refuse a non-bool.
+/// refuse a non-bool. A `return via`'s policy may raise at its call.
 fn raises(node: doc::Node<'_>, phase: Phase) -> bool {
     matches!(node, doc::Node::Expr(_) | doc::Node::Action(_))
         || hook_raises(node, phase)
+        || (matches!(node, doc::Node::Stmt(doc::Stmt::ReturnVia { .. })) && phase == Phase::Policy)
         || (matches!(node, doc::Node::Stmt(doc::Stmt::For { via: None, .. }))
             && phase == Phase::Enter)
         || (matches!(
@@ -1441,7 +1450,10 @@ pub(crate) fn hooks(via: &doc::Protocol) -> impl Iterator<Item = (Phase, &doc::F
     .filter_map(|(phase, target)| Some((phase, target?)))
 }
 
-fn hook(target: &doc::FunctionTarget, calls: &BTreeMap<FunctionId, CallSource>) -> CallSource {
+pub(crate) fn hook(
+    target: &doc::FunctionTarget,
+    calls: &BTreeMap<FunctionId, CallSource>,
+) -> CallSource {
     match target {
         doc::FunctionTarget::Local(f) => calls[f],
         doc::FunctionTarget::Import(_) => CallSource::Dynamic,

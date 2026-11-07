@@ -416,15 +416,19 @@ impl Compiler<'_> {
             }
             return Ok(());
         }
+        // The body's Leave lets the frame go, unless a `return via`'s policy
+        // still runs in it.
+        let frame = event.delta.fixed;
         let root_leave = event.point.site == self.source.site
             && event.point.phase == Phase::Leave
             && event.inputs.is_empty()
             && event.output.is_none()
             && event.entities.is_empty()
             && event.peak == Amount::default()
+            && (frame == -i128::from(Cost::FRAME) || frame == 0)
             && event.delta
                 == Amount {
-                    fixed: -i128::from(Cost::FRAME),
+                    fixed: frame,
                     terms: vec![(
                         Measure::Release(
                             vec![
@@ -462,7 +466,7 @@ impl Compiler<'_> {
                 }
             }
             if root_leave {
-                self.delta.fixed -= i128::from(Cost::FRAME);
+                self.delta.fixed += frame;
             }
             return Ok(());
         }

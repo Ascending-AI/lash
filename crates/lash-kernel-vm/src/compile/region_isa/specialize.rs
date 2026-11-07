@@ -121,9 +121,7 @@ fn kinds(exe: &Executable, draft: &RegionDraft) -> Result<Box<[RegisterKind]>, R
                     departure: Some(departure),
                     ..
                 } => extra.push((departure.offset(), known[value.offset()])),
-                RegionOp::Raise { dst, src } | RegionOp::ReturnVia { dst, src } => {
-                    extra.push((dst.offset(), known[src.offset()]))
-                }
+                RegionOp::Raise { dst, src } => extra.push((dst.offset(), known[src.offset()])),
                 _ => {}
             }
             for (dst, kind) in extra {

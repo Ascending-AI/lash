@@ -47,7 +47,8 @@ pub(crate) struct CallPlan {
     checked: Option<LibId>,
     /// Whether the caller holds the arguments across the call.
     rooted: bool,
-    /// The protocol `for` hook this call runs, at that phase of its loop.
+    /// The protocol `for` hook this call runs, at that phase of its loop, or
+    /// a `return via` policy at `Phase::Policy`.
     hook: Option<Phase>,
 }
 
@@ -198,9 +199,19 @@ impl CallPlan {
         source.verify()?;
         let (resolved, pc) = resolved_hook(exe, caller, statement, phase)?;
         let site = resolved.at.site.clone();
-        let cursor = slot(&source, &Owner::LoopCursor(site.clone()))?;
-        let header = slot(&source, &Owner::LoopHeader(site.clone()))?;
+        // A `return via` policy takes the frame's departing value; its result
+        // reaches the caller as the frame's return.
+        let (cursor, header) = if phase == Phase::Policy {
+            let departure = slot(&source, &Owner::ActiveDeparture(source.site.clone()))?;
+            (departure, departure)
+        } else {
+            (
+                slot(&source, &Owner::LoopCursor(site.clone()))?,
+                slot(&source, &Owner::LoopHeader(site.clone()))?,
+            )
+        };
         let arguments: Box<[_]> = match phase {
+            Phase::Policy => Box::new([Argument::Role(cursor)]),
             Phase::Open => Box::new([Argument::Role(slot(
                 &source,
                 &Owner::Operand(site.child(0)),
@@ -225,10 +236,10 @@ impl CallPlan {
             at: resolved.at.clone(),
             resume: Point {
                 site: site.clone(),
-                phase: if phase == Phase::Item {
-                    Phase::Test
-                } else {
-                    phase
+                phase: match phase {
+                    Phase::Item => Phase::Test,
+                    Phase::Policy => Phase::Restore,
+                    phase => phase,
                 },
             },
             arguments: arguments
@@ -245,7 +256,7 @@ impl CallPlan {
             occurrence: None,
             result: CallRole::new(header),
             checked: None,
-            rooted: phase != Phase::Open,
+            rooted: resolved.rooted,
             hook: Some(phase),
         })
     }

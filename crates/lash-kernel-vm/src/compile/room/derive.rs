@@ -318,6 +318,49 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                         delta,
                     ));
                 }
+                // A `return via` calls its policy once every cleanup of the
+                // frame has run and its scopes are left, the frame still
+                // held; what the policy returned leaves the frame from its
+                // Restore.
+                doc::Node::Stmt(doc::Stmt::ReturnVia { policy, .. }) => {
+                    let callee = hook(policy, calls);
+                    let departure = Owner::ActiveDeparture(source.clone());
+                    let mut delta = Amount::default().term(
+                        Measure::CallDelta {
+                            at: site.clone(),
+                            callee,
+                        },
+                        1,
+                    );
+                    if matches!(callee, CallSource::Native(_) | CallSource::Dynamic) {
+                        delta = delta.term(release([departure.clone()]), -1);
+                    }
+                    events.push(event(
+                        &site,
+                        Phase::Policy,
+                        vec![departure.clone()].into(),
+                        None,
+                        Amount::fixed(Cost::FRAME).term(
+                            Measure::CallPeak {
+                                at: site.clone(),
+                                callee,
+                            },
+                            1,
+                        ),
+                        delta,
+                    ));
+                    events.push(event(
+                        &site,
+                        Phase::Restore,
+                        vec![Owner::Incoming(site.clone())].into(),
+                        Some(departure),
+                        Amount::default(),
+                        Amount {
+                            fixed: -i128::from(Cost::FRAME),
+                            ..Amount::default()
+                        },
+                    ));
+                }
                 _ => {}
             }
             // A loop takes the value-less departure its body broke or
@@ -602,6 +645,10 @@ fn exit(node: doc::Node<'_>, phase: Phase, calls: &BTreeMap<FunctionId, CallSour
         && native_act(node, calls).is_none()
     {
         return ExitKind::Action;
+    }
+    // What a `return via`'s policy returned leaves the frame.
+    if phase == Phase::Restore && matches!(node, doc::Node::Stmt(doc::Stmt::ReturnVia { .. })) {
+        return ExitKind::Return;
     }
     if phase != Phase::Commit {
         return ExitKind::Normal;

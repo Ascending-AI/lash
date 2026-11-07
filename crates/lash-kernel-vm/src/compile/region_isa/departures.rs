@@ -118,8 +118,8 @@ fn shaped(events: &[&Event], exit: ExitKind, restored: bool) -> bool {
         .all(|event| matches!(event.point.phase, Phase::Leave | Phase::Supersede))
         && match last.point.phase {
             Phase::Suspend => true,
-            Phase::Leave => exit == ExitKind::Return,
-            Phase::Catch => exit != ExitKind::Return,
+            Phase::Leave => matches!(exit, ExitKind::Return | ExitKind::ReturnVia),
+            Phase::Catch => !matches!(exit, ExitKind::Return | ExitKind::ReturnVia),
             _ => false,
         }
 }
@@ -143,7 +143,7 @@ fn routed(
 
 /// Whether a restored exit may leave the frame from its Restore.
 fn escapes(exit: ExitKind) -> bool {
-    matches!(exit, ExitKind::Raise | ExitKind::ReturnVia)
+    exit == ExitKind::Raise
 }
 
 /// Where a segment's last row goes.
@@ -153,6 +153,8 @@ enum End {
     Escape,
     /// A Return's frame Leave exits.
     Exit,
+    /// A ReturnVia's frame Leave calls its policy, at the policy's row.
+    Policy(Pc),
     /// A Catch resumes its loop or takes the raise.
     Resume(Pc),
     /// A Suspend runs its cleanup, from the cleanup's first row.
@@ -174,6 +176,7 @@ fn base(draft: &RegionDraft, point: &Point) -> Result<Pc, Refused> {
 fn end(
     draft: &RegionDraft,
     exit: ExitKind,
+    origin: &Site,
     interval: &CompiledInterval,
     last: &Event,
 ) -> Result<End, Refused> {
@@ -181,6 +184,13 @@ fn end(
         Phase::Restore if escapes(exit) => End::Escape,
         Phase::Suspend => End::Suspend(base(draft, interval.resume().ok_or(Refused::Path)?)?),
         _ if exit == ExitKind::Return => End::Exit,
+        _ if exit == ExitKind::ReturnVia => End::Policy(base(
+            draft,
+            &Point {
+                site: origin.clone(),
+                phase: Phase::Policy,
+            },
+        )?),
         _ => End::Resume(resume(draft, exit, interval.resume(), &last.point)?),
     })
 }
@@ -231,11 +241,9 @@ fn departing(draft: &RegionDraft, index: usize) -> Result<Option<ExitKind>, Refu
             RegionOp::Move { .. } | RegionOp::Raise { .. }
         )
         .then_some(ExitKind::Raise),
-        doc::Node::Stmt(doc::Stmt::ReturnVia { .. }) => matches!(
-            draft.ops[index],
-            RegionOp::Move { .. } | RegionOp::ReturnVia { .. }
-        )
-        .then_some(ExitKind::ReturnVia),
+        doc::Node::Stmt(doc::Stmt::ReturnVia { .. }) => {
+            matches!(draft.ops[index], RegionOp::Move { .. }).then_some(ExitKind::ReturnVia)
+        }
         _ => None,
     })
 }
@@ -263,25 +271,6 @@ pub(super) fn uncaught(source: &Source, at: &Point) -> Result<bool, Refused> {
     Ok(true)
 }
 
-/// Whether no `finally` of the frame runs after a ReturnVia at `at`: no
-/// try with one holds it in its body or catch block.
-pub(super) fn unguarded(source: &Source, at: &Point) -> Result<bool, Refused> {
-    if at.site.unit != source.site.unit || !at.site.path.starts_with(&source.site.path) {
-        return Err(Refused::Path);
-    }
-    let mut site = at.site.clone();
-    while site.path.len() > source.site.path.len() {
-        let child = site.path.pop().ok_or(Refused::Path)?;
-        if let doc::Node::Stmt(doc::Stmt::Try(scope)) = resources::node(source, &site)?
-            && scope.finally.is_some()
-            && (child == 0 || (scope.catch.is_some() && child == 1))
-        {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 /// Whether the event a base row commits may raise toward a try of the
 /// frame besides taking its own exit: a delivered action's Commit, a
 /// call's Restore, or a step the machine serves or refuses before it runs.
@@ -290,8 +279,10 @@ fn raising(draft: &RegionDraft, index: usize) -> Result<bool, Refused> {
     let Some(step) = draft.steps.get(index) else {
         return Ok(false);
     };
+    // A policy's raise leaves the frame: every try of it has been left.
     if index >= draft.source.room.events.len()
         || step.stage.is_some()
+        || step.at.phase == Phase::Policy
         || draft.source.raising(&step.at).is_none()
     {
         return Ok(false);
@@ -531,14 +522,6 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
             ops[index] = RegionOp::Raise { dst, src };
             continue;
         }
-        // A ReturnVia no cleanup of the frame follows leaves to its policy.
-        if exit == ExitKind::ReturnVia && unguarded(&draft.source, &steps[index].at)? {
-            let RegionOp::Move { dst, src, .. } = ops[index] else {
-                return Err(Refused::Source);
-            };
-            ops[index] = RegionOp::ReturnVia { dst, src };
-            continue;
-        }
         let interval = match draft.source.compile_departure_suffix(&steps[index].at) {
             Err(Refused::Path) if exit == ExitKind::Raise => None,
             interval => Some(interval?),
@@ -666,10 +649,11 @@ fn route_rows(
 ) -> Result<(Box<[Pc]>, Box<[(Site, Box<[Pc]>)]>), Refused> {
     let mut leaves = Vec::new();
     let mut restores = Vec::new();
+    let origin = segments.first().ok_or(Refused::Path)?.start();
     for (position, interval) in segments.iter().enumerate() {
         let events = segment_events(interval, position);
         let last = events.last().ok_or(Refused::Path)?;
-        let end = end(draft, exit, interval, last)?;
+        let end = end(draft, exit, origin, interval, last)?;
         let rows = leave_rows(draft, ops, steps, &events, exit, end, position > 0, sink)?;
         if position == 0 {
             leaves = rows;
@@ -747,6 +731,7 @@ fn segment_op(
     } else {
         match end {
             End::Exit => RegionOp::Exit { prefix: step.after },
+            End::Policy(next) => phase(next),
             End::Escape => return Err(Refused::Path),
             End::Resume(next) if exit == ExitKind::Raise => catch(draft, step, row, next)?,
             End::Resume(next) => phase(next),
@@ -857,7 +842,7 @@ pub(super) fn verify(
         // check_op verifies an uncaught raise against its event.
         if matches!(
             draft.ops[index],
-            RegionOp::Boundary { .. } | RegionOp::Raise { .. } | RegionOp::ReturnVia { .. }
+            RegionOp::Boundary { .. } | RegionOp::Raise { .. }
         ) {
             continue;
         }
@@ -893,7 +878,7 @@ pub(super) fn verify(
         }
         check_route(draft, charges, route, &segments, exit, &mut cursor)?;
         let last = route.rows().last().ok_or(Refused::Exit)?;
-        if exit == ExitKind::Return
+        if matches!(exit, ExitKind::Return | ExitKind::ReturnVia)
             && draft.steps[last.offset()].at
                 != (Point {
                     site: draft.source.site.clone(),
@@ -952,6 +937,7 @@ fn check_route(
     if route.restores.len() + 1 != segments.len() {
         return Err(Refused::Path);
     }
+    let origin = segments.first().ok_or(Refused::Path)?.start();
     for (position, interval) in segments.iter().enumerate() {
         let events = segment_events(interval, position);
         let rows: &[Pc] = match position.checked_sub(1) {
@@ -965,7 +951,7 @@ fn check_route(
             }
         };
         let last = events.last().ok_or(Refused::Path)?;
-        let end = end(draft, exit, interval, last)?;
+        let end = end(draft, exit, origin, interval, last)?;
         check_rows(
             draft,
             charges,
@@ -1078,9 +1064,10 @@ pub(super) fn check_edge(draft: &RegionDraft, index: usize) -> Result<(), Refuse
             Some(next) => Some(*next),
             None => {
                 let last = interval.events().last().ok_or(Refused::Path)?;
-                match end(draft, exit, interval, last)? {
+                let origin = segments.first().ok_or(Refused::Path)?.start();
+                match end(draft, exit, origin, interval, last)? {
                     End::Exit | End::Escape => None,
-                    End::Resume(next) | End::Suspend(next) => Some(next),
+                    End::Resume(next) | End::Suspend(next) | End::Policy(next) => Some(next),
                 }
             }
         }

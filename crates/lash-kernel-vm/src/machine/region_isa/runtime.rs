@@ -130,7 +130,7 @@ impl KernelMachine {
             let outcome = lease.run(request);
             // The point the region stopped at, and, standing before a step
             // the machine serves, the slots its frame holds its operands in.
-            let (at, native, effect, returning, checked) = match &lease.execution {
+            let (at, native, effect, checked) = match &lease.execution {
                 Executing::Machine(execution) => (
                     execution
                         .code
@@ -139,15 +139,10 @@ impl KernelMachine {
                         .map(|step| step.at.clone()),
                     execution.code.program.native_arguments(execution.pc),
                     execution.code.program.effect_argument(execution.pc),
-                    execution
-                        .code
-                        .program
-                        .return_via_site(execution.pc)
-                        .cloned(),
                     execution.code.program.checked_call(execution.pc),
                 ),
                 #[cfg(test)]
-                Executing::Fixture(_) => (None, None, None, None, None),
+                Executing::Fixture(_) => (None, None, None, None),
             };
             let stop = outcome.map_err(|error| match error {
                 RegionError::Heap(error) => error.into(),
@@ -276,13 +271,6 @@ impl KernelMachine {
                 RegionStop::Leave => {
                     self.regs.clear();
                     self.leave_from_region(task, host)?;
-                }
-                // A ReturnVia past every cleanup of its frame returns the
-                // value its departure holds through the statement's policy.
-                RegionStop::ReturnVia => {
-                    self.regs.clear();
-                    let at = returning.ok_or_else(|| fault("a ReturnVia stop has no statement"))?;
-                    self.return_via_from_region(task, host, &at)?;
                 }
                 RegionStop::Boundary => {
                     return Err(fault(&format!(

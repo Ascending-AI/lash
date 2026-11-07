@@ -39,53 +39,28 @@ impl KernelMachine {
         task: TaskId,
         host: &mut dyn crate::interface::Host,
     ) -> Result<(), Halt> {
-        let value = self
+        let source = self
             .frame(task)?
             .pending
             .source
             .as_ref()
-            .ok_or_else(|| fault("a leaving frame has no source continuation"))?
-            .roles
-            .iter()
-            .find_map(|(slot, value)| matches!(slot, Slot::Departure(_)).then_some(*value))
-            .ok_or_else(|| fault("a leaving frame holds no departure"))?;
+            .ok_or_else(|| fault("a leaving frame has no source continuation"))?;
+        // A `return via` returns what its policy gave, the task's incoming.
+        let value = if source.at.phase == crate::compile::room::Phase::Restore {
+            let Some(crate::machine::Incoming::Value(value)) = self.task(task)?.take_incoming()
+            else {
+                return Err(fault("a leaving policy return has no incoming result"));
+            };
+            self.admit_page(&value)?
+        } else {
+            source
+                .roles
+                .iter()
+                .find_map(|(slot, value)| matches!(slot, Slot::Departure(_)).then_some(*value))
+                .ok_or_else(|| fault("a leaving frame holds no departure"))?
+        };
         let exe = Arc::clone(&self.exe);
         self.complete(task, host, &exe, Completion::Return(Box::new(value)))
-    }
-
-    /// A ReturnVia at `at` the region left past every cleanup of its frame:
-    /// its departure holds the value the frame returns through the policy.
-    pub(super) fn return_via_from_region(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn crate::interface::Host,
-        at: &crate::compile::room::Point,
-    ) -> Result<(), Halt> {
-        let frame = self.frame(task)?;
-        let value = frame
-            .pending
-            .source
-            .as_ref()
-            .ok_or_else(|| fault("an uncaught ReturnVia has no source continuation"))?
-            .roles
-            .iter()
-            .find_map(|(slot, value)| matches!(slot, Slot::Departure(_)).then_some(*value))
-            .ok_or_else(|| fault("an uncaught ReturnVia holds no departure"))?;
-        let code = frame.code;
-        let stmt = self
-            .exe
-            .stmt_at(code, &at.site)
-            .ok_or_else(|| fault("an uncaught ReturnVia is no statement"))?;
-        let exe = Arc::clone(&self.exe);
-        self.complete(
-            task,
-            host,
-            &exe,
-            Completion::ReturnVia {
-                value: Box::new(value),
-                stmt,
-            },
-        )
     }
 
     /// A step the machine served for `task`'s top frame raised: an action,

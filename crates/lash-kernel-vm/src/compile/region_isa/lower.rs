@@ -285,12 +285,18 @@ pub(super) fn connect(
         }
         // A raise moves its operand into the departure; its route is
         // appended with the departures and ends at the catching try. A
-        // ReturnVia's Commit holds its operand for the machine's policy.
+        // ReturnVia's route ends at its policy call, whose result the frame
+        // returns at Restore.
         doc::Node::Stmt(
             doc::Stmt::Return { value }
             | doc::Stmt::Throw { value }
             | doc::Stmt::ReturnVia { value, .. },
         ) => {
+            if matches!(node, doc::Node::Stmt(doc::Stmt::ReturnVia { .. })) {
+                let restore = point(site, Phase::Restore);
+                graph.insert(point(site, Phase::Policy), Edge::Next(restore.clone()));
+                graph.insert(restore, Edge::Stop);
+            }
             graph.insert(commit.clone(), Edge::Stop);
             connect(
                 doc::Node::Expr(value),
@@ -1083,11 +1089,26 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                         ),
                     }
                 }
+                // A ReturnVia's frame returns what its policy gave.
+                (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Restore, None, _, Ok(_)) => {
+                    RegionOp::Exit {
+                        prefix: PrefixId(
+                            u32::try_from(steps.len() * 3 + 2).map_err(|_| Refused::Facts)?,
+                        ),
+                    }
+                }
                 // A protocol `for`'s hook is a call whose result its header
                 // takes; a hook the region cannot call stops it.
                 (
                     doc::Node::Stmt(doc::Stmt::For { via: Some(_), .. }),
                     Phase::Open | Phase::Next | Phase::Check | Phase::Item,
+                    Some(next),
+                    None,
+                    Ok(_),
+                )
+                | (
+                    doc::Node::Stmt(doc::Stmt::ReturnVia { .. }),
+                    Phase::Policy,
                     Some(next),
                     None,
                     Ok(_),
@@ -1099,7 +1120,8 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                             let pc = plan.pc();
                             let site =
                                 CallId(u32::try_from(calls.len()).map_err(|_| Refused::Facts)?);
-                            let cursor = reg(&roles, &source, &Owner::LoopCursor(at.site.clone()))?;
+                            let cursor =
+                                || reg(&roles, &source, &Owner::LoopCursor(at.site.clone()));
                             calls.push(CallSite {
                                 at: at.clone(),
                                 origin: KirOrigin {
@@ -1109,16 +1131,21 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                                 },
                                 atoms: Box::new([]),
                                 arguments: match at.phase {
+                                    Phase::Policy => Box::new([reg(
+                                        &roles,
+                                        &source,
+                                        &Owner::ActiveDeparture(source.site.clone()),
+                                    )?]),
                                     Phase::Open => Box::new([reg(
                                         &roles,
                                         &source,
                                         &Owner::Operand(at.site.child(0)),
                                     )?]),
                                     Phase::Item => Box::new([
-                                        cursor,
+                                        cursor()?,
                                         reg(&roles, &source, &Owner::LoopHeader(at.site.clone()))?,
                                     ]),
-                                    _ => Box::new([cursor]),
+                                    _ => Box::new([cursor()?]),
                                 },
                                 result: sink,
                                 hook: Some(at.phase),

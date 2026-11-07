@@ -298,6 +298,15 @@ fn place(
         let info = code.program.loop_info(index as u32)?;
         (info.site == statement.site && state.active).then_some((info, state))
     });
+    // A `return via`'s policy runs, and its result leaves, once every block
+    // of the frame has been left (`K-FORM-017`).
+    if point.site == statement.site
+        && matches!(point.phase, Phase::Policy | Phase::Restore)
+        && matches!(statement.form, Form::ReturnVia { .. })
+    {
+        values.clear();
+        return Ok(());
+    }
     // A try stands open in its body, at its Catch and in its catch block.
     let catching = point.site == statement.site
         && point.phase == Phase::Catch

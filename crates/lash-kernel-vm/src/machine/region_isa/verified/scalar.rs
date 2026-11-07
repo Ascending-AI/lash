@@ -150,8 +150,6 @@ impl Running<'_> {
             RegionOp::Move { dst, src, next } => (Some((*dst, self.read(*src)?)), *next),
             // The region stops once an uncaught raise is accepted, at its row.
             RegionOp::Raise { dst, src } => (Some((*dst, self.read(*src)?)), self.pc),
-            // An unguarded ReturnVia moves its operand into the departure.
-            RegionOp::ReturnVia { dst, src } => (Some((*dst, self.read(*src)?)), self.pc),
             RegionOp::IntBinary {
                 kernel,
                 lhs,
@@ -234,6 +232,40 @@ impl Running<'_> {
                         })
                         .transpose()?,
                     next: next.unwrap_or(self.pc),
+                    formula: None,
+                    native: None,
+                }));
+            }
+            // A `return via`'s Restore moves what its policy gave into the
+            // departure the frame returns.
+            RegionOp::Exit { .. }
+                if self
+                    .code
+                    .program
+                    .step(self.pc)
+                    .is_some_and(|step| step.at.phase == crate::compile::room::Phase::Restore) =>
+            {
+                let step = self
+                    .code
+                    .program
+                    .step(self.pc)
+                    .ok_or_else(|| invalid(Refused::Path))?;
+                let incoming = self
+                    .code
+                    .program
+                    .recovery(step.before)
+                    .and_then(|map| map.graph.incoming())
+                    .ok_or_else(|| invalid(Refused::Exit))?;
+                let destination = self
+                    .code
+                    .flows
+                    .get(self.pc.index())
+                    .and_then(Option::as_ref)
+                    .and_then(|flow| flow.destination)
+                    .ok_or_else(|| invalid(Refused::Facts))?;
+                return Ok(Some(ScalarAnswer {
+                    write: Some((destination, self.read(incoming)?)),
+                    next: self.pc,
                     formula: None,
                     native: None,
                 }));

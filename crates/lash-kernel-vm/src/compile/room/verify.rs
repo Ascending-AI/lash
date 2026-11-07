@@ -66,6 +66,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
             doc::Node::Stmt(doc::Stmt::While { .. } | doc::Stmt::For { .. }) => {
                 phases.extend([Phase::Test, Phase::Catch]);
             }
+            doc::Node::Stmt(doc::Stmt::ReturnVia { .. }) => {
+                phases.extend([Phase::Policy, Phase::Restore]);
+            }
             _ => {}
         }
         if let doc::Node::Stmt(doc::Stmt::For { via: None, .. }) = node {
@@ -179,6 +182,13 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     expected_inputs = vec![Owner::PendingDeparture(site.clone())].into();
                     output = None;
                 }
+                (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Policy) => {
+                    expected_inputs = vec![Owner::ActiveDeparture(source.site.clone())].into();
+                    output = None;
+                }
+                (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Restore) => {
+                    expected_inputs = vec![Owner::Incoming(site.clone())].into();
+                }
                 (doc::Node::Expr(doc::Expr::Let { name, .. }), Phase::Test) => {
                     expected_inputs = vec![operand(&child(&site, 0))].into();
                     output = Some(Owner::Binding {
@@ -234,6 +244,7 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Commit) => {
                     ExitKind::ReturnVia
                 }
+                (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Restore) => ExitKind::Return,
                 (doc::Node::Stmt(doc::Stmt::Return { .. }), Phase::Commit) => ExitKind::Return,
                 (doc::Node::Stmt(doc::Stmt::Throw { .. }), Phase::Commit) => ExitKind::Raise,
                 (doc::Node::Stmt(doc::Stmt::Finish { .. }), Phase::Commit) => ExitKind::Finish,
@@ -274,6 +285,14 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
         }
         if let Some(function) = native_act(node, &source.calls) {
             expected_scratch.push((point(&site, Phase::Enter), function));
+        }
+        if let doc::Node::Stmt(doc::Stmt::ReturnVia {
+            policy: doc::FunctionTarget::Local(function),
+            ..
+        }) = node
+            && matches!(source.calls.get(function), Some(CallSource::Native(_)))
+        {
+            expected_scratch.push((point(&site, Phase::Policy), *function));
         }
         if let doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) = node {
             for (phase, target) in [
@@ -439,6 +458,32 @@ fn obligations(
         }
         (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Supersede) => {
             delta.push((release([Owner::PendingDeparture(site.clone())]), -1));
+        }
+        // A policy is called with the frame still held.
+        (doc::Node::Stmt(doc::Stmt::ReturnVia { policy, .. }), Phase::Policy) => {
+            let callee = super::hook(policy, &source.calls);
+            p = i128::from(Cost::FRAME);
+            peak.push((
+                Measure::CallPeak {
+                    at: site.clone(),
+                    callee,
+                },
+                1,
+            ));
+            delta.push((
+                Measure::CallDelta {
+                    at: site.clone(),
+                    callee,
+                },
+                1,
+            ));
+            if matches!(callee, CallSource::Native(_) | CallSource::Dynamic) {
+                delta.push((release([Owner::ActiveDeparture(source.site.clone())]), -1));
+            }
+        }
+        // What the policy returned leaves the frame, which goes with it.
+        (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Restore) => {
+            d = -i128::from(Cost::FRAME);
         }
         (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Suspend | Phase::Restore) => {}
         (doc::Node::Expr(doc::Expr::Act(act)), Phase::Open)

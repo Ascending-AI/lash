@@ -61,7 +61,6 @@ impl Flow {
             RegionOp::Constant { dst, .. }
             | RegionOp::Move { dst, .. }
             | RegionOp::Raise { dst, .. }
-            | RegionOp::ReturnVia { dst, .. }
             | RegionOp::Read { dst, .. } => Some(dst.index()),
             RegionOp::IntBinary { dst, .. } => Some(dst.index()),
             RegionOp::Checked { kernel, dst, .. }
@@ -83,10 +82,16 @@ impl Flow {
                 departure: Some(dst),
                 ..
             } => Some(dst.index()),
-            RegionOp::Return { .. } => after
-                .roles
-                .iter()
-                .find_map(|(slot, reg)| matches!(slot, Slot::Departure(_)).then_some(reg.index())),
+            // A Return, or a `return via`'s Restore, holds the frame's value
+            // in its departure.
+            RegionOp::Return { .. } | RegionOp::Exit { .. }
+                if !matches!(code.op(pc), Some(RegionOp::Exit { .. }))
+                    || step.at.phase == crate::compile::room::Phase::Restore =>
+            {
+                after.roles.iter().find_map(|(slot, reg)| {
+                    matches!(slot, Slot::Departure(_)).then_some(reg.index())
+                })
+            }
             _ => None,
         };
         let root = |slot: Slot, reg| {
@@ -294,9 +299,12 @@ impl Flow {
             _ => None,
         };
         Ok(Self {
+            // The frame goes as it exits: at the body's Leave, or at a
+            // `return via`'s Restore once its policy returned.
             frame_delta: if matches!(code.op(pc), Some(RegionOp::Exit { .. }))
-                && step.at.site == code.source().site
-                && step.at.phase == crate::compile::room::Phase::Leave
+                && ((step.at.site == code.source().site
+                    && step.at.phase == crate::compile::room::Phase::Leave)
+                    || step.at.phase == crate::compile::room::Phase::Restore)
             {
                 -i128::from(lash_kernel_doc::LogicalHeldV1::FRAME)
             } else {

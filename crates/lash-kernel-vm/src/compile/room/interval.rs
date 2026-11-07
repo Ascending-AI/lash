@@ -406,14 +406,6 @@ impl Source {
                 _ => return Err(Refused::Path),
             }
         }
-        // A ReturnVia departs only toward a cleanup: past the outermost one
-        // the machine runs its policy.
-        if departing == ExitKind::ReturnVia && suspend.is_none() {
-            return match restoring {
-                Some(_) => self.escape(at, departing),
-                None => Err(Refused::Path),
-            };
-        }
         // A break or continue whose target loop holds no cleanup inside it
         // ends at that loop's Catch, which takes the value-less record.
         if matches!(departing, ExitKind::Break | ExitKind::Continue) {
@@ -687,10 +679,16 @@ impl Source {
                 let Selection::Event { at, exit } = selection else {
                     return Err(Refused::Path);
                 };
-                let event = match (&raising, position) {
+                let mut event = match (&raising, position) {
                     (Some(raising), 0) => raising.clone(),
                     _ => self.room.events.get(at).ok_or(Refused::Path)?.clone(),
                 };
+                // A `return via`'s frame is still held while its policy
+                // runs: the body's Leave lets its scopes go, and the
+                // policy's Restore lets the frame go.
+                if departing == ExitKind::ReturnVia && *at == point(&self.site, Phase::Leave) {
+                    event.delta.fixed += i128::from(Cost::FRAME);
+                }
                 Step::compile(self, event, *exit, &mut variables)
             })
             .collect::<Result<Box<[_]>, Refused>>()?;

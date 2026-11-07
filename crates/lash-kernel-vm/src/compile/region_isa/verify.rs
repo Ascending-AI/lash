@@ -73,6 +73,16 @@ fn source_next(source: &Source, at: &Point) -> Result<Option<Point>, Refused> {
     {
         return Ok(None);
     }
+    // A `return via`'s policy returns to its Restore, where the frame exits.
+    if matches!(node, doc::Node::Stmt(doc::Stmt::ReturnVia { .. }))
+        && matches!(at.phase, Phase::Policy | Phase::Restore)
+    {
+        let site = at.site.clone();
+        return Ok((at.phase == Phase::Policy).then_some(Point {
+            site,
+            phase: Phase::Restore,
+        }));
+    }
     // A protocol `for`'s Test starts the pass it binds.
     if at.phase == Phase::Test
         && matches!(node, doc::Node::Stmt(doc::Stmt::For { via: Some(_), .. }))
@@ -659,21 +669,6 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 return Err(Refused::Source);
             }
         }
-        // An unguarded ReturnVia moves its operand into the departure.
-        RegionOp::ReturnVia { dst, src } => {
-            value_reg(*src)?;
-            value_reg(*dst)?;
-            if step.at.phase != Phase::Commit
-                || !matches!(node, doc::Node::Stmt(doc::Stmt::ReturnVia { .. }))
-                || index >= draft.source.room.events.len()
-                || !super::departures::unguarded(&draft.source, &step.at)?
-                || expected_inputs.as_deref() != Ok(&[*src])
-                || expected_output != Some(*dst)
-                || !step.event.entities.is_empty()
-            {
-                return Err(Refused::Source);
-            }
-        }
         RegionOp::IntBinary {
             kernel,
             lhs,
@@ -1030,7 +1025,11 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
             }
         }
         RegionOp::Exit { prefix } => {
-            if step.at.site != source.site || step.at.phase != Phase::Leave || *prefix != step.after
+            // The body's Leave, or a `return via`'s Restore after its policy.
+            let returned = step.at.phase == Phase::Restore
+                && matches!(node, doc::Node::Stmt(doc::Stmt::ReturnVia { .. }));
+            if !(returned || (step.at.site == source.site && step.at.phase == Phase::Leave))
+                || *prefix != step.after
             {
                 return Err(Refused::Exit);
             }

@@ -385,7 +385,22 @@ impl Running<'_> {
                         .ok_or_else(|| invalid(Refused::Facts))?,
                 },
             };
-            let departure = if matches!(op, RegionOp::Exit { .. }) && self.departing.is_none() {
+            let departure = if matches!(op, RegionOp::Exit { .. })
+                && self.departing.is_none()
+                && step.at.phase == crate::compile::room::Phase::Restore
+            {
+                // A `return via` returns what its policy gave.
+                let value = answer
+                    .write
+                    .ok_or_else(|| invalid(Refused::Facts))?
+                    .1
+                    .bind(&mut self.view)
+                    .map_err(RegionError::Heap)?;
+                if !self.export_return(value)? {
+                    return self.halt(RegionStop::Refusal);
+                }
+                Some(self.quote_return(value)?)
+            } else if matches!(op, RegionOp::Exit { .. }) && self.departing.is_none() {
                 let map = code
                     .program
                     .recovery(step.before)
@@ -546,20 +561,13 @@ impl Running<'_> {
             if matches!(op, RegionOp::Raise { .. }) {
                 return self.halt(RegionStop::Throw);
             }
-            // An accepted unguarded ReturnVia leaves through its policy: the
-            // machine returns the value its departure holds.
-            if matches!(op, RegionOp::ReturnVia { .. }) {
-                return self.halt(RegionStop::ReturnVia);
-            }
-            // An accepted Escape restored an exit no try of the frame takes:
-            // the machine carries it out of the frame, or a ReturnVia
-            // through its policy.
+            // An accepted Escape restored a raise no try of the frame takes:
+            // the machine carries it out of the frame.
             if let RegionOp::Checked { kernel, .. } = op
                 && let crate::compile::region_isa::CheckedKind::Escape { exit, .. } = kernel.kind()
             {
                 return match exit {
                     crate::compile::room::ExitKind::Raise => self.halt(RegionStop::Throw),
-                    crate::compile::room::ExitKind::ReturnVia => self.halt(RegionStop::ReturnVia),
                     _ => Err(invalid(Refused::Facts)),
                 };
             }

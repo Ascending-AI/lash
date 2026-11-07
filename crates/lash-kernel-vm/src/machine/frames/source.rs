@@ -36,6 +36,7 @@ pub(in crate::machine) fn phase(tag: u32) -> Result<Phase, HeapFault> {
         10 => Phase::Commit,
         11 => Phase::Fallthrough,
         12 => Phase::Leave,
+        13 => Phase::Policy,
         _ => return Err(malformed("unknown canonical source phase")),
     })
 }

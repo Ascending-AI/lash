@@ -354,7 +354,8 @@ impl TokenCodec for ContinuationPhase {
         if matches!(tag, 0 | 5 | 6) {
             TokenReader::expect_fields(fields, if tag == 5 { 2 } else { 1 })?;
             let phase = u32::decode(input)?;
-            if phase > 12 {
+            // Phases 0..=13; 13 is a `return via`'s policy call.
+            if phase > 13 {
                 return Err(TokenError::Invalid("invalid canonical source phase".into()));
             }
             return Ok(match tag {

@@ -213,7 +213,10 @@ impl Running<'_> {
             .program
             .step(self.pc)
             .ok_or_else(|| invalid(Refused::Path))?;
-        if step.at.site != self.code.program.source().site {
+        // The body's Leave, or a `return via`'s Restore after its policy.
+        if step.at.site != self.code.program.source().site
+            && step.at.phase != crate::compile::room::Phase::Restore
+        {
             return Err(invalid(Refused::Path));
         }
         self.registers.clear(self.frame_index())?;

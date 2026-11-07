@@ -510,14 +510,6 @@ pub(crate) enum RegionOp {
         dst: Reg<LeaseValue>,
         src: Reg<LeaseValue>,
     },
-    /// An unguarded ReturnVia's Commit: no `finally` of the frame runs
-    /// after it. The step moves the operand into the frame's departure and
-    /// is accepted; the region then stops, and the machine returns the
-    /// value out of the frame through the statement's policy.
-    ReturnVia {
-        dst: Reg<LeaseValue>,
-        src: Reg<LeaseValue>,
-    },
     Boundary {
         spec: BoundarySpec,
     },
@@ -840,31 +832,6 @@ impl RegionCode {
             .iter()
             .find_map(|(role, actual)| (actual == value).then_some(role.slot()))
             .flatten()
-    }
-    /// The ReturnVia statement whose policy the machine runs once the row
-    /// at `pc` is accepted: an unguarded ReturnVia's own Commit, or the
-    /// origin of the route an Escape of a ReturnVia ends.
-    pub(crate) fn return_via_site(&self, pc: Pc) -> Option<&Point> {
-        match self.op(pc)? {
-            RegionOp::ReturnVia { .. } => Some(&self.step(pc)?.at),
-            RegionOp::Checked { kernel, .. }
-                if matches!(
-                    kernel.kind(),
-                    CheckedKind::Escape {
-                        exit: crate::compile::room::ExitKind::ReturnVia,
-                        ..
-                    }
-                ) =>
-            {
-                let route = self
-                    .draft
-                    .departures
-                    .iter()
-                    .find(|route| route.rows().any(|row| row == pc))?;
-                Some(&self.draft.steps[route.origin.offset()].at)
-            }
-            _ => None,
-        }
     }
     /// The loop of the statement at `site`.
     pub(crate) fn loop_at(&self, site: &Site) -> Option<u32> {

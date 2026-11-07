@@ -1179,7 +1179,7 @@ definition "function work() -> Any\nkernel 1\nmetering statements\nbody { \n  tr
 
 main { let value = call work() return value }
 "#;
-    exact(
+    let seen = exact(
         Drive {
             probes: return_policy,
             ..Drive::new(u64::MAX, false)
@@ -1188,6 +1188,77 @@ main { let value = call work() return value }
         &[],
         &int(7),
         &[text("evaluated"), text("finally"), text("adopt")],
+    );
+    // Some reopen stood inside the waiting policy, its frame at the policy
+    // call.
+    assert!(
+        seen.phases.contains(&ContinuationPhase::Call { phase: 13 }),
+        "the reopens saw {:?}",
+        seen.phases
+    );
+}
+
+/// The policies below: one raises, one calls the closure it is given.
+fn policies(
+    registry: &mut FunctionRegistry,
+    ids: &BTreeMap<&'static str, FunctionId>,
+) -> Vec<(&'static str, FunctionId)> {
+    let mut probes = bodies(registry, ids);
+    for (name, text) in [
+        (
+            "body.reject",
+            "function body.reject(x: Any) -> Any\nkernel 1\ncharge 0\nbody { print \"reject\" throw \"rejected\" }",
+        ),
+        (
+            "body.call",
+            "function body.call(x: Any) -> Any\nkernel 1\ncharge 0\nbody { print \"call\" let value = apply x() return value }",
+        ),
+    ] {
+        let definition = parse_definition(text).unwrap();
+        probes.push((name, registry.register(definition, None).unwrap()));
+    }
+    probes
+}
+
+/// K-FORM-017: the policy runs once the frame's handlers are gone, so what
+/// it raises leaves the frame past its own catch, after its finally.
+#[test]
+fn a_return_policy_raise_leaves_its_frame() {
+    let source = r#"
+definition "function work() -> Any\nkernel 1\nmetering statements\nbody { \n  try { return 5 via body.reject }\n  catch e { return \"inside\" }\n  finally { print \"finally\" }\n }"
+
+main { let r = "none" try { let v = call work() set r = v } catch e { set r = e } return r }
+"#;
+    exact(
+        Drive {
+            probes: policies,
+            ..Drive::new(u64::MAX, false)
+        },
+        source,
+        &[],
+        &text("rejected"),
+        &[text("finally"), text("reject")],
+    );
+}
+
+/// K-FORM-017: the frame's bindings are gone when its policy runs; a
+/// closure over one keeps the binding's cell.
+#[test]
+fn a_return_policy_calls_a_closure_over_a_released_binding() {
+    let source = r#"
+definition "function work() -> Any\nkernel 1\nmetering statements\nbody { \n  let n = 41\n  let f = fn() { return num.add(n, 1) }\n  try { return f via body.call }\n  finally { print \"finally\" }\n }"
+
+main { let value = call work() return value }
+"#;
+    exact(
+        Drive {
+            probes: policies,
+            ..Drive::new(u64::MAX, false)
+        },
+        source,
+        &[],
+        &int(42),
+        &[text("finally"), text("call")],
     );
 }
 

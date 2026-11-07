@@ -259,19 +259,29 @@ pub(in crate::compile::room) fn resolved_hook(
     if exe.stmt_at(caller, &stmt.site) != Some(statement) {
         return Err(Refused::Source);
     }
-    let compile::Form::For { via: Some(via), .. } = &stmt.form else {
-        return Err(Refused::Source);
-    };
-    let pc = (stmt.ops.start..stmt.ops.end())
-        .find(|pc| matches!(stream.ops.get(*pc as usize), Some(Op::ForIn { .. })))
-        .ok_or(Refused::Source)?;
-    let (hook, kinds): (_, &[Type]) = match phase {
-        Phase::Open => (Some(via.open), &[Type::Any]),
-        Phase::Next => (via.next, &[Type::Any]),
-        Phase::Check => (via.check, &[Type::Any, Type::Int, Type::Int, Type::Bool]),
-        Phase::Item => (via.item, &[Type::Any, Type::Any]),
+    // A `return via` policy takes the departing value; a protocol `for`'s
+    // hooks take what the loop gives them.
+    let (hook, kinds, anchor): (_, &[Type], fn(&Op) -> bool) = match (&stmt.form, phase) {
+        (compile::Form::ReturnVia { policy, .. }, Phase::Policy) => {
+            (Some(*policy), &[Type::Any], |op| {
+                matches!(op, Op::ReturnVia { .. })
+            })
+        }
+        (compile::Form::For { via: Some(via), .. }, _) => {
+            let (hook, kinds): (_, &[Type]) = match phase {
+                Phase::Open => (Some(via.open), &[Type::Any]),
+                Phase::Next => (via.next, &[Type::Any]),
+                Phase::Check => (via.check, &[Type::Any, Type::Int, Type::Int, Type::Bool]),
+                Phase::Item => (via.item, &[Type::Any, Type::Any]),
+                _ => return Err(Refused::Source),
+            };
+            (hook, kinds, |op| matches!(op, Op::ForIn { .. }))
+        }
         _ => return Err(Refused::Source),
     };
+    let pc = (stmt.ops.start..stmt.ops.end())
+        .find(|pc| stream.ops.get(*pc as usize).is_some_and(anchor))
+        .ok_or(Refused::Source)?;
     let Some(compile::LinkedHook::Library(id)) = hook else {
         return Err(Refused::Source);
     };
@@ -303,7 +313,7 @@ pub(in crate::compile::room) fn resolved_hook(
             },
             arguments: kinds.len(),
             occurrence: None,
-            rooted: phase != Phase::Open,
+            rooted: !matches!(phase, Phase::Open | Phase::Policy),
             dynamic: false,
             checked: false,
         },
