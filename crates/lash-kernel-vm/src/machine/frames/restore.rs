@@ -130,6 +130,14 @@ pub(super) fn frame(
         let (controls, standing) = crate::machine::region_isa::restore_source_controls(
             bound, exe, code_id, source, record, &values, access,
         )?;
+        admission::source_arrival(
+            exe,
+            source,
+            standing
+                .as_ref()
+                .map(|standing| (standing.statement, standing.act)),
+            arrival,
+        )?;
         control = controls.iter().cloned().collect();
         // A frame standing at a delivering action waits in it.
         if let Some(standing) = standing {

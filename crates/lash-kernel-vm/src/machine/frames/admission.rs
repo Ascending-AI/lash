@@ -132,3 +132,86 @@ pub(super) fn continuation(
     coord::admit(&entry, &saved, arrival)?;
     Ok(act)
 }
+
+/// Region recovery checks source roles separately; task arrival must still
+/// agree with the action whose accepted Enter the continuation retains.
+pub(super) fn source_arrival(
+    exe: &Executable,
+    source: &source::SourceContinuation,
+    standing: Option<(StmtId, Option<ActIx>)>,
+    arrival: Arrival,
+) -> Result<(), RestoreRefusal> {
+    // A slice can stop after Enter, before the machine serves the action.
+    // Such a ready frame has no delivered input to authenticate yet.
+    if arrival == Arrival::Fresh && source.progress != 3 {
+        return Ok(());
+    }
+    let action = site_path(&source.at.site);
+    let (kind, phase) = if source.progress == 3 {
+        (ActionKind::Call, ActionPhase::Called)
+    } else if let Some((statement, act)) = standing {
+        let kind = if let Some(act) = act {
+            let (stream, _, _) = exe.statement(statement);
+            let nested = &stream.nested[act.ix()].kind;
+            if matches!(nested, NestedKind::Cancel | NestedKind::CancelEffect) {
+                return inline_arrival(action, arrival);
+            }
+            action_kind(nested)
+        } else {
+            use crate::compile::ActionKind as Kind;
+            match &exe.stmt(statement).form {
+                Form::Action(action) => Some(match action.kind {
+                    Kind::Call { .. } => ActionKind::Call,
+                    Kind::Perform { then_yield, .. } => ActionKind::Perform { then_yield },
+                    Kind::Yield => ActionKind::Yield,
+                    Kind::Spawn { .. } => ActionKind::Spawn,
+                    Kind::Join(_) => ActionKind::Join,
+                    Kind::JoinMany(..) => ActionKind::JoinMany,
+                    Kind::Cancel(_) | Kind::CancelEffect(_) => {
+                        return inline_arrival(site_path(&exe.stmt(statement).site), arrival);
+                    }
+                }),
+                _ => None,
+            }
+        }
+        .ok_or_else(|| RestoreRefusal::UnknownSite {
+            action: action.clone(),
+        })?;
+        let phase = match kind {
+            ActionKind::Call | ActionKind::Body => ActionPhase::Called,
+            ActionKind::Perform { .. } => ActionPhase::Waiting,
+            ActionKind::Yield => ActionPhase::Yielded,
+            ActionKind::Spawn => ActionPhase::Spawned,
+            ActionKind::Join | ActionKind::JoinMany => ActionPhase::Joining,
+        };
+        (kind, phase)
+    } else {
+        return if matches!(arrival, Arrival::Fresh | Arrival::Raised) {
+            Ok(())
+        } else {
+            Err(RestoreRefusal::TaskState { action })
+        };
+    };
+    // The independent region verifier owns the exact RoleKey set. Use the
+    // coordinate grammar's arrival relation without inventing expression roles.
+    let entry = ActionEntry {
+        action: action.clone(),
+        kind,
+        roles: Box::new([]),
+    };
+    let saved = StatementCoordinate::Nested {
+        action,
+        phase,
+        roles: Box::new([]),
+    };
+    coord::admit(&entry, &saved, arrival)
+}
+
+// Cancellation answers synchronously with null, or raises, without a turn.
+fn inline_arrival(action: SitePath, arrival: Arrival) -> Result<(), RestoreRefusal> {
+    if matches!(arrival, Arrival::Valued { handle: false } | Arrival::Raised) {
+        Ok(())
+    } else {
+        Err(RestoreRefusal::TaskState { action })
+    }
+}
