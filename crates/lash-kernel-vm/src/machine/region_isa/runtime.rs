@@ -93,7 +93,11 @@ impl KernelMachine {
                         .map(|step| step.at.clone()),
                     execution.code.program.native_arguments(execution.pc),
                     execution.code.program.effect_argument(execution.pc),
-                    execution.code.program.return_via_argument(execution.pc),
+                    execution
+                        .code
+                        .program
+                        .return_via_site(execution.pc)
+                        .cloned(),
                     execution.code.program.checked_call(execution.pc),
                 ),
                 #[cfg(test)]
@@ -222,14 +226,12 @@ impl KernelMachine {
                     self.regs.clear();
                     self.raise_from_region(task, host)?;
                 }
-                // An uncaught ReturnVia returns the operand its role holds
-                // out of the frame through the statement's policy.
+                // A ReturnVia past every cleanup of its frame returns the
+                // value its departure holds through the statement's policy.
                 RegionStop::ReturnVia => {
                     self.regs.clear();
-                    let slot =
-                        returning.ok_or_else(|| fault("a ReturnVia stop holds no operand"))?;
-                    let at = at.ok_or_else(|| fault("a ReturnVia stop has no point"))?;
-                    self.return_via_from_region(task, host, &at, slot)?;
+                    let at = returning.ok_or_else(|| fault("a ReturnVia stop has no statement"))?;
+                    self.return_via_from_region(task, host, &at)?;
                 }
                 RegionStop::Boundary => {
                     return Err(fault(&format!(

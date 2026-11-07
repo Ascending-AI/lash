@@ -116,6 +116,7 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 }
                 doc::Node::Stmt(
                     doc::Stmt::Return { .. }
+                    | doc::Stmt::ReturnVia { .. }
                     | doc::Stmt::Throw { .. }
                     | doc::Stmt::Finish { .. }
                     | doc::Stmt::Fail { .. },
@@ -230,7 +231,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 {
                     ExitKind::Action
                 }
-                (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Commit) => ExitKind::Action,
+                (doc::Node::Stmt(doc::Stmt::ReturnVia { .. }), Phase::Commit) => {
+                    ExitKind::ReturnVia
+                }
                 (doc::Node::Stmt(doc::Stmt::Return { .. }), Phase::Commit) => ExitKind::Return,
                 (doc::Node::Stmt(doc::Stmt::Throw { .. }), Phase::Commit) => ExitKind::Raise,
                 (doc::Node::Stmt(doc::Stmt::Finish { .. }), Phase::Commit) => ExitKind::Finish,

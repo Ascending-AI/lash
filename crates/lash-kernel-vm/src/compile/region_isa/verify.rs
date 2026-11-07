@@ -615,7 +615,9 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 }
                 // A raise moves its operand into the departure, and the
                 // catching try's Catch moves the departure into its binding.
-                doc::Node::Stmt(doc::Stmt::Throw { .. }) if step.at.phase == Phase::Commit => {
+                doc::Node::Stmt(doc::Stmt::Throw { .. } | doc::Stmt::ReturnVia { .. })
+                    if step.at.phase == Phase::Commit =>
+                {
                     expected_output
                 }
                 doc::Node::Stmt(doc::Stmt::Try(_)) if step.at.phase == Phase::Catch => {
@@ -657,16 +659,16 @@ fn check_op(exe: &Executable, draft: &RegionDraft, index: usize) -> Result<(), R
                 return Err(Refused::Source);
             }
         }
-        // An uncaught ReturnVia's Commit leaves its operand held at its
-        // role for the machine's policy exit; it writes nothing.
-        RegionOp::ReturnVia { value } => {
-            value_reg(*value)?;
+        // An unguarded ReturnVia moves its operand into the departure.
+        RegionOp::ReturnVia { dst, src } => {
+            value_reg(*src)?;
+            value_reg(*dst)?;
             if step.at.phase != Phase::Commit
                 || !matches!(node, doc::Node::Stmt(doc::Stmt::ReturnVia { .. }))
                 || index >= draft.source.room.events.len()
-                || !super::departures::uncaught(&draft.source, &step.at)?
-                || expected_inputs.as_deref() != Ok(&[*value])
-                || expected_output.is_some()
+                || !super::departures::unguarded(&draft.source, &step.at)?
+                || expected_inputs.as_deref() != Ok(&[*src])
+                || expected_output != Some(*dst)
                 || !step.event.entities.is_empty()
             {
                 return Err(Refused::Source);

@@ -61,6 +61,7 @@ impl Flow {
             RegionOp::Constant { dst, .. }
             | RegionOp::Move { dst, .. }
             | RegionOp::Raise { dst, .. }
+            | RegionOp::ReturnVia { dst, .. }
             | RegionOp::Read { dst, .. } => Some(dst.index()),
             RegionOp::IntBinary { dst, .. } => Some(dst.index()),
             RegionOp::Checked { kernel, dst, .. }

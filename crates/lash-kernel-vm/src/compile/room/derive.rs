@@ -45,6 +45,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
             }
             doc::Node::Stmt(
                 doc::Stmt::Return { .. }
+                | doc::Stmt::ReturnVia { .. }
                 | doc::Stmt::Throw { .. }
                 | doc::Stmt::Finish { .. }
                 | doc::Stmt::Fail { .. },
@@ -607,7 +608,7 @@ fn exit(node: doc::Node<'_>, phase: Phase, calls: &BTreeMap<FunctionId, CallSour
     }
     match node {
         doc::Node::Stmt(doc::Stmt::Return { .. }) => ExitKind::Return,
-        doc::Node::Stmt(doc::Stmt::ReturnVia { .. }) => ExitKind::Action,
+        doc::Node::Stmt(doc::Stmt::ReturnVia { .. }) => ExitKind::ReturnVia,
         doc::Node::Stmt(doc::Stmt::Throw { .. }) => ExitKind::Raise,
         doc::Node::Stmt(doc::Stmt::Finish { .. }) => ExitKind::Finish,
         doc::Node::Stmt(doc::Stmt::Fail { .. }) => ExitKind::Fail,

@@ -261,6 +261,9 @@ pub(crate) enum ExitKind {
     Fail,
     Break,
     Continue,
+    /// A ReturnVia departs as a Return does through each `finally` of its
+    /// frame; past the outermost one the machine runs its policy.
+    ReturnVia,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Event {

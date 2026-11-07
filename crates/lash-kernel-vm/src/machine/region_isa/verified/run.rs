@@ -538,18 +538,20 @@ impl Running<'_> {
             if matches!(op, RegionOp::Raise { .. }) {
                 return self.halt(RegionStop::Throw);
             }
-            // An accepted uncaught ReturnVia leaves through its policy: the
-            // machine returns the operand its role still holds.
+            // An accepted unguarded ReturnVia leaves through its policy: the
+            // machine returns the value its departure holds.
             if matches!(op, RegionOp::ReturnVia { .. }) {
                 return self.halt(RegionStop::ReturnVia);
             }
             // An accepted Escape restored an exit no try of the frame takes:
-            // the machine carries it out of the frame.
+            // the machine carries it out of the frame, or a ReturnVia
+            // through its policy.
             if let RegionOp::Checked { kernel, .. } = op
                 && let crate::compile::region_isa::CheckedKind::Escape { exit, .. } = kernel.kind()
             {
                 return match exit {
                     crate::compile::room::ExitKind::Raise => self.halt(RegionStop::Throw),
+                    crate::compile::room::ExitKind::ReturnVia => self.halt(RegionStop::ReturnVia),
                     _ => Err(invalid(Refused::Facts)),
                 };
             }

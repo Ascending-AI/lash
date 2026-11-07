@@ -189,6 +189,27 @@ struct Run<'a, E> {
     budget: usize,
 }
 impl<E: Events> Run<'_, E> {
+    /// Whether a `try` of the frame with a `finally` guards `site`: it
+    /// lies in that try's body or catch block.
+    fn guarded(&self, site: &Site) -> bool {
+        if site.unit != self.source.site.unit || !site.path.starts_with(&self.source.site.path) {
+            return false;
+        }
+        let mut node = doc::Node::Block(&self.source.body);
+        for index in &site.path[self.source.site.path.len()..] {
+            if let doc::Node::Stmt(doc::Stmt::Try(t)) = node
+                && t.finally.is_some()
+                && (*index == 0 || (t.catch.is_some() && *index == 1))
+            {
+                return true;
+            }
+            let Some(next) = node.children().get(*index as usize).copied() else {
+                return false;
+            };
+            node = next;
+        }
+        false
+    }
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Stop> {
         self.step_departure(site, phase, None)
     }
@@ -250,7 +271,9 @@ impl<E: Events> Run<'_, E> {
             }
             // A suspension preserves all ordinary source holdings. Cleanup is
             // performed by the resumed source suffix, not by a scratch lease.
-            if exit == ExitKind::Action {
+            // A ReturnVia no `finally` still guards leaves to the machine's
+            // policy the same way.
+            if exit == ExitKind::Action || (exit == ExitKind::ReturnVia && !self.guarded(site)) {
                 return Ok(exit);
             }
             if exit == ExitKind::Normal && *site == self.source.site {

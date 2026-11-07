@@ -668,7 +668,7 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                 // The raise route is appended below; its first Leave
                 // replaces `next`.
                 (
-                    doc::Node::Stmt(doc::Stmt::Throw { .. }),
+                    doc::Node::Stmt(doc::Stmt::Throw { .. } | doc::Stmt::ReturnVia { .. }),
                     Phase::Commit,
                     None,
                     Some(dst),
@@ -678,19 +678,6 @@ pub(super) fn compile(exe: &Executable, code: CodeId) -> Result<RegionDraft, Ref
                     src: args[0],
                     next: pc(at)?,
                 },
-                // An uncaught ReturnVia stops the region once accepted.
-                (
-                    doc::Node::Stmt(doc::Stmt::ReturnVia { .. }),
-                    Phase::Commit,
-                    None,
-                    None,
-                    Ok(args),
-                ) if args.len() == 1
-                    && event.entities.is_empty()
-                    && super::departures::uncaught(&source, at)? =>
-                {
-                    RegionOp::ReturnVia { value: args[0] }
-                }
                 // The route is appended below; its first Leave replaces `next`.
                 (
                     doc::Node::Stmt(doc::Stmt::Break | doc::Stmt::Continue),

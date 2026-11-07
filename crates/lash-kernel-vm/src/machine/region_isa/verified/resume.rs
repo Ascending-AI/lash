@@ -318,7 +318,31 @@ pub(in crate::machine) fn restore_source_controls(
             EnteredRecord::Continue => Completion::Continue,
             EnteredRecord::Return => Completion::Return(value()?),
             EnteredRecord::Throw => Completion::Throw(value()?),
-            EnteredRecord::ReturnVia(_) => return Err(malformed()),
+            // A suspended ReturnVia names the statement its origin commits.
+            EnteredRecord::ReturnVia(via) => {
+                let via = via.resolve(access)?;
+                let origin = source
+                    .suspended
+                    .get(suspensions.len())
+                    .map(|(origin, _)| &origin.site);
+                if origin != Some(via.as_ref()) {
+                    return Err(malformed());
+                }
+                let stmt = code
+                    .exe
+                    .stmt_at(code.program.code(), &via)
+                    .filter(|stmt| {
+                        matches!(
+                            code.exe.stmt(*stmt).form,
+                            crate::compile::Form::ReturnVia { .. }
+                        )
+                    })
+                    .ok_or_else(malformed)?;
+                Completion::ReturnVia {
+                    value: value()?,
+                    stmt,
+                }
+            }
         };
         suspensions.push((row.site.resolve(access)?.as_ref().clone(), completion));
     }
@@ -435,6 +459,7 @@ pub(in crate::machine) fn restore_source_controls(
                 | (EnteredRecord::Continue, Completion::Continue)
                 | (EnteredRecord::Return, Completion::Return(_))
                 | (EnteredRecord::Throw, Completion::Throw(_))
+                | (EnteredRecord::ReturnVia(_), Completion::ReturnVia { .. })
         ) || row.site.resolve(access)?.as_ref() != site
         {
             return Err(malformed());

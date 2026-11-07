@@ -510,12 +510,13 @@ pub(crate) enum RegionOp {
         dst: Reg<LeaseValue>,
         src: Reg<LeaseValue>,
     },
-    /// An uncaught ReturnVia's Commit: no try of the frame encloses it.
-    /// The step is accepted with its operand still held at its role, as an
-    /// action's atoms are; the region then stops, and the machine returns
-    /// the value out of the frame through the statement's policy.
+    /// An unguarded ReturnVia's Commit: no `finally` of the frame runs
+    /// after it. The step moves the operand into the frame's departure and
+    /// is accepted; the region then stops, and the machine returns the
+    /// value out of the frame through the statement's policy.
     ReturnVia {
-        value: Reg<LeaseValue>,
+        dst: Reg<LeaseValue>,
+        src: Reg<LeaseValue>,
     },
     Boundary {
         spec: BoundarySpec,
@@ -840,17 +841,30 @@ impl RegionCode {
             .find_map(|(role, actual)| (actual == value).then_some(role.slot()))
             .flatten()
     }
-    /// The source slot holding the value of the ReturnVia at `pc`, which
-    /// the machine returns through the policy once the step is accepted.
-    pub(crate) fn return_via_argument(&self, pc: Pc) -> Option<Slot> {
-        let RegionOp::ReturnVia { value } = self.op(pc)? else {
-            return None;
-        };
-        self.draft
-            .roles
-            .iter()
-            .find_map(|(role, actual)| (actual == value).then_some(role.slot()))
-            .flatten()
+    /// The ReturnVia statement whose policy the machine runs once the row
+    /// at `pc` is accepted: an unguarded ReturnVia's own Commit, or the
+    /// origin of the route an Escape of a ReturnVia ends.
+    pub(crate) fn return_via_site(&self, pc: Pc) -> Option<&Point> {
+        match self.op(pc)? {
+            RegionOp::ReturnVia { .. } => Some(&self.step(pc)?.at),
+            RegionOp::Checked { kernel, .. }
+                if matches!(
+                    kernel.kind(),
+                    CheckedKind::Escape {
+                        exit: crate::compile::room::ExitKind::ReturnVia,
+                        ..
+                    }
+                ) =>
+            {
+                let route = self
+                    .draft
+                    .departures
+                    .iter()
+                    .find(|route| route.rows().any(|row| row == pc))?;
+                Some(&self.draft.steps[route.origin.offset()].at)
+            }
+            _ => None,
+        }
     }
     /// The loop of the statement at `site`.
     pub(crate) fn loop_at(&self, site: &Site) -> Option<u32> {
@@ -945,10 +959,12 @@ impl RegionCode {
             doc::Node::Stmt(doc::Stmt::Continue) => false,
             // A raise is carried like a loop departure; its value stays
             // in the departure role until its Catch takes it.
-            doc::Node::Stmt(doc::Stmt::Throw { .. }) if route.origin == pc => {
+            doc::Node::Stmt(doc::Stmt::Throw { .. } | doc::Stmt::ReturnVia { .. })
+                if route.origin == pc =>
+            {
                 return Some(LoopDeparture::Origin(origin.clone()));
             }
-            doc::Node::Stmt(doc::Stmt::Throw { .. }) => {
+            doc::Node::Stmt(doc::Stmt::Throw { .. } | doc::Stmt::ReturnVia { .. }) => {
                 return Some(LoopDeparture::End { exits: None });
             }
             _ => return None,

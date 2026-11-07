@@ -60,7 +60,9 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                     _ => RegisterKind::Value,
                 })
             }
-            RegionOp::Move { dst, src, .. } | RegionOp::Raise { dst, src } => {
+            RegionOp::Move { dst, src, .. }
+            | RegionOp::Raise { dst, src }
+            | RegionOp::ReturnVia { dst, src } => {
                 state[dst.offset()] = Some(read(&state, src.offset())?)
             }
             RegionOp::IntBinary { lhs, rhs, dst, .. } => {
@@ -233,9 +235,6 @@ pub(super) fn verify(exe: &Executable, draft: &RegionDraft) -> Result<(), Refuse
                 let kind = read(&state, value.offset())?;
                 let output = step.event.output.as_ref().ok_or(Refused::Facts)?;
                 state[register(draft, output)?.offset()] = Some(kind);
-            }
-            RegionOp::ReturnVia { value } => {
-                read(&state, value.offset())?;
             }
             RegionOp::Effect {
                 value, departure, ..

@@ -77,6 +77,10 @@ impl Running<'_> {
                 let completion = match entry.exit {
                     ExitKind::Return => crate::machine::Completion::Return(value()?),
                     ExitKind::Raise => crate::machine::Completion::Throw(value()?),
+                    ExitKind::ReturnVia => crate::machine::Completion::ReturnVia {
+                        value: value()?,
+                        stmt: return_via(&self.code, &entry.origin)?,
+                    },
                     ExitKind::Break => crate::machine::Completion::Break,
                     ExitKind::Continue => crate::machine::Completion::Continue,
                     _ => return Err(invalid(Refused::Facts)),
@@ -270,6 +274,19 @@ impl Running<'_> {
     }
 }
 
+/// The ReturnVia statement whose Commit is `origin`.
+fn return_via(code: &super::Code, origin: &Point) -> Result<crate::compile::StmtId, RegionError> {
+    code.exe
+        .stmt_at(code.program.code(), &origin.site)
+        .filter(|stmt| {
+            matches!(
+                code.exe.stmt(*stmt).form,
+                crate::compile::Form::ReturnVia { .. }
+            )
+        })
+        .ok_or_else(|| invalid(Refused::Facts))
+}
+
 /// An exit a saved frame's cleanup suspended: its try, its kind, its
 /// value, its origin and its quoted completion debt.
 pub(super) type Reopened = (Site, ExitKind, Option<Value>, Point, u64);
@@ -295,20 +312,24 @@ pub(super) fn reopened(
         else {
             continue;
         };
-        let (exit, value) = match completion {
+        let (exit, value, via) = match completion {
             crate::machine::Completion::Normal => continue,
-            crate::machine::Completion::Break => (ExitKind::Break, None),
-            crate::machine::Completion::Continue => (ExitKind::Continue, None),
-            crate::machine::Completion::Return(value) => (ExitKind::Return, Some(**value)),
-            crate::machine::Completion::Throw(value) => (ExitKind::Raise, Some(**value)),
-            crate::machine::Completion::ReturnVia { .. } => {
-                return Err(invalid(Refused::Facts));
+            crate::machine::Completion::Break => (ExitKind::Break, None, None),
+            crate::machine::Completion::Continue => (ExitKind::Continue, None, None),
+            crate::machine::Completion::Return(value) => (ExitKind::Return, Some(**value), None),
+            crate::machine::Completion::Throw(value) => (ExitKind::Raise, Some(**value), None),
+            crate::machine::Completion::ReturnVia { value, stmt } => {
+                (ExitKind::ReturnVia, Some(**value), Some(*stmt))
             }
         };
         let crate::compile::Form::Try { site, .. } = &code.exe.stmt(*stmt).form else {
             return Err(invalid(Refused::Facts));
         };
         let (origin, completion) = saved.next().ok_or_else(|| invalid(Refused::Facts))?;
+        // A suspended ReturnVia's statement is its origin's.
+        if via.is_some_and(|via| return_via(code, origin).ok() != Some(via)) {
+            return Err(invalid(Refused::Facts));
+        }
         if exit != ExitKind::Return && *completion != 0 {
             return Err(invalid(Refused::Facts));
         }

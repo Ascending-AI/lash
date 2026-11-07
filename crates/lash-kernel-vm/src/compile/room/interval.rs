@@ -373,6 +373,7 @@ impl Source {
                 match restoring {
                     Some(
                         exit @ (ExitKind::Return
+                        | ExitKind::ReturnVia
                         | ExitKind::Raise
                         | ExitKind::Break
                         | ExitKind::Continue),
@@ -383,6 +384,7 @@ impl Source {
             _ if restoring.is_some() => return Err(Refused::Path),
             _ if raising.is_some() => ExitKind::Raise,
             doc::Node::Stmt(doc::Stmt::Return { .. }) => ExitKind::Return,
+            doc::Node::Stmt(doc::Stmt::ReturnVia { .. }) => ExitKind::ReturnVia,
             doc::Node::Stmt(doc::Stmt::Break) => ExitKind::Break,
             doc::Node::Stmt(doc::Stmt::Continue) => ExitKind::Continue,
             doc::Node::Stmt(doc::Stmt::Throw { .. }) => ExitKind::Raise,
@@ -403,6 +405,14 @@ impl Source {
                 (None, None) if restoring.is_some() => return self.escape(at, departing),
                 _ => return Err(Refused::Path),
             }
+        }
+        // A ReturnVia departs only toward a cleanup: past the outermost one
+        // the machine runs its policy.
+        if departing == ExitKind::ReturnVia && suspend.is_none() {
+            return match restoring {
+                Some(_) => self.escape(at, departing),
+                None => Err(Refused::Path),
+            };
         }
         // A break or continue whose target loop holds no cleanup inside it
         // ends at that loop's Catch, which takes the value-less record.

@@ -30,7 +30,10 @@ impl Departure {
 
 /// Whether an exit carries a value in the frame's active departure.
 pub(super) fn valued(exit: ExitKind) -> bool {
-    matches!(exit, ExitKind::Return | ExitKind::Raise)
+    matches!(
+        exit,
+        ExitKind::Return | ExitKind::Raise | ExitKind::ReturnVia
+    )
 }
 
 /// The rows that restore an exit suspended at the try at `at`.
@@ -140,7 +143,7 @@ fn routed(
 
 /// Whether a restored exit may leave the frame from its Restore.
 fn escapes(exit: ExitKind) -> bool {
-    exit == ExitKind::Raise
+    matches!(exit, ExitKind::Raise | ExitKind::ReturnVia)
 }
 
 /// Where a segment's last row goes.
@@ -228,6 +231,11 @@ fn departing(draft: &RegionDraft, index: usize) -> Result<Option<ExitKind>, Refu
             RegionOp::Move { .. } | RegionOp::Raise { .. }
         )
         .then_some(ExitKind::Raise),
+        doc::Node::Stmt(doc::Stmt::ReturnVia { .. }) => matches!(
+            draft.ops[index],
+            RegionOp::Move { .. } | RegionOp::ReturnVia { .. }
+        )
+        .then_some(ExitKind::ReturnVia),
         _ => None,
     })
 }
@@ -250,6 +258,25 @@ pub(super) fn uncaught(source: &Source, at: &Point) -> Result<bool, Refused> {
             if !finally_body && !(catch_body && scope.finally.is_none()) {
                 return Ok(false);
             }
+        }
+    }
+    Ok(true)
+}
+
+/// Whether no `finally` of the frame runs after a ReturnVia at `at`: no
+/// try with one holds it in its body or catch block.
+pub(super) fn unguarded(source: &Source, at: &Point) -> Result<bool, Refused> {
+    if at.site.unit != source.site.unit || !at.site.path.starts_with(&source.site.path) {
+        return Err(Refused::Path);
+    }
+    let mut site = at.site.clone();
+    while site.path.len() > source.site.path.len() {
+        let child = site.path.pop().ok_or(Refused::Path)?;
+        if let doc::Node::Stmt(doc::Stmt::Try(scope)) = resources::node(source, &site)?
+            && scope.finally.is_some()
+            && (child == 0 || (scope.catch.is_some() && child == 1))
+        {
+            return Ok(false);
         }
     }
     Ok(true)
@@ -502,6 +529,14 @@ pub(super) fn append(draft: &mut RegionDraft, sink: Reg<LeaseValue>) -> Result<(
                 return Err(Refused::Source);
             };
             ops[index] = RegionOp::Raise { dst, src };
+            continue;
+        }
+        // A ReturnVia no cleanup of the frame follows leaves to its policy.
+        if exit == ExitKind::ReturnVia && unguarded(&draft.source, &steps[index].at)? {
+            let RegionOp::Move { dst, src, .. } = ops[index] else {
+                return Err(Refused::Source);
+            };
+            ops[index] = RegionOp::ReturnVia { dst, src };
             continue;
         }
         let interval = match draft.source.compile_departure_suffix(&steps[index].at) {
@@ -822,7 +857,7 @@ pub(super) fn verify(
         // check_op verifies an uncaught raise against its event.
         if matches!(
             draft.ops[index],
-            RegionOp::Boundary { .. } | RegionOp::Raise { .. }
+            RegionOp::Boundary { .. } | RegionOp::Raise { .. } | RegionOp::ReturnVia { .. }
         ) {
             continue;
         }
@@ -837,20 +872,23 @@ pub(super) fn verify(
             return Err(Refused::Source);
         }
         let segments = routed(&draft.source, exit, interval)?.ok_or(Refused::Path)?;
-        if exit == ExitKind::Raise && !matches!(draft.ops[index], RegionOp::Move { .. }) {
+        if matches!(exit, ExitKind::Raise | ExitKind::ReturnVia)
+            && !matches!(draft.ops[index], RegionOp::Move { .. })
+        {
             return Err(Refused::Source);
         }
-        if !matches!(exit, ExitKind::Return | ExitKind::Raise)
-            && !matches!(
-                &draft.ops[index],
-                RegionOp::Checked { kernel, args, dst, .. }
-                    if kernel.kind == CheckedKind::Phase
-                        && args.is_empty()
-                        && dst.offset() == draft.roles.len()
-                        && draft.steps[index].event.entities.is_empty()
-                        && draft.steps[index].event.inputs.is_empty()
-            )
-        {
+        if !matches!(
+            exit,
+            ExitKind::Return | ExitKind::Raise | ExitKind::ReturnVia
+        ) && !matches!(
+            &draft.ops[index],
+            RegionOp::Checked { kernel, args, dst, .. }
+                if kernel.kind == CheckedKind::Phase
+                    && args.is_empty()
+                    && dst.offset() == draft.roles.len()
+                    && draft.steps[index].event.entities.is_empty()
+                    && draft.steps[index].event.inputs.is_empty()
+        ) {
             return Err(Refused::Source);
         }
         check_route(draft, charges, route, &segments, exit, &mut cursor)?;

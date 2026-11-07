@@ -31,14 +31,13 @@ impl KernelMachine {
         self.complete(task, host, &exe, Completion::Throw(Box::new(value)))
     }
 
-    /// An uncaught ReturnVia the region accepted at `at`: its operand is
-    /// still held at `slot`, and the frame returns it through the policy.
+    /// A ReturnVia at `at` the region left past every cleanup of its frame:
+    /// its departure holds the value the frame returns through the policy.
     pub(super) fn return_via_from_region(
         &mut self,
         task: TaskId,
         host: &mut dyn crate::interface::Host,
         at: &crate::compile::room::Point,
-        slot: Slot,
     ) -> Result<(), Halt> {
         let frame = self.frame(task)?;
         let value = frame
@@ -48,8 +47,8 @@ impl KernelMachine {
             .ok_or_else(|| fault("an uncaught ReturnVia has no source continuation"))?
             .roles
             .iter()
-            .find_map(|(held, value)| (*held == slot).then_some(*value))
-            .ok_or_else(|| fault("an uncaught ReturnVia holds no operand"))?;
+            .find_map(|(slot, value)| matches!(slot, Slot::Departure(_)).then_some(*value))
+            .ok_or_else(|| fault("an uncaught ReturnVia holds no departure"))?;
         let code = frame.code;
         let stmt = self
             .exe
