@@ -1022,8 +1022,9 @@ impl KernelMachine {
     /// Runs `native` over registers `args..`, as often as it asks: a cold
     /// read warms and runs it again, and room is reserved as it asks for it.
     /// Its answer comes with the logical bytes its nursery held and what it
-    /// built, uninstalled (`detach` gives the built objects' slots back to
-    /// the arena), and the work it spent.
+    /// built, uninstalled (`detach` gives a successful answer's slots back
+    /// to the arena), and the work it spent. A raised value keeps its
+    /// installed body for the machine's raise route.
     #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     pub(super) fn run_native(
         &mut self,
@@ -1060,7 +1061,7 @@ impl KernelMachine {
                 match &answer {
                     Ok(_) | Err(NativeError::Raised(_)) => {
                         let held = nursery.held().0;
-                        let new = if detach {
+                        let new = if detach && answer.is_ok() {
                             nursery.detach()
                         } else {
                             nursery.into_new()
@@ -1103,7 +1104,12 @@ impl KernelMachine {
                                     .refused_at_commit(exe, lib, function, args, halt)
                                     .into());
                             }
-                            Some((held, new))
+                            if detach && matches!(answer, Err(NativeError::Raised(_))) {
+                                self.install(new)?;
+                                None
+                            } else {
+                                Some((held, new))
+                            }
                         }
                         None => None,
                     };
