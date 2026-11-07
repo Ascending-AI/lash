@@ -177,6 +177,9 @@ impl Lifter<'_> {
         {
             return self.regexp(args);
         }
+        if let Some(builtin) = self.positional_builtin(&name, args) {
+            return builtin;
+        }
         if name == "ts.to_property_key"
             && let [value] = args
         {
@@ -677,6 +680,27 @@ impl Lifter<'_> {
         Ok(callee)
     }
 
+    /// Positional built-ins may lower to either native expressions or actions.
+    /// Both forms use the lowerer's table, including its float specializations.
+    fn positional_builtin(&mut self, name: &str, args: &[k::Expr]) -> Option<Lift<Expr>> {
+        let (path, _) = lash_ext_ts_helpers::builtins::table()
+            .positional
+            .iter()
+            .find(|(_, declaration)| {
+                declaration.arity == args.len()
+                    && (declaration.helper == name || declaration.float == Some(name))
+            })?;
+        Some((|| {
+            let callee = builtin_path(path)
+                .ok_or_else(|| "a builtin path TypeScript cannot spell".to_owned())?;
+            let args = args
+                .iter()
+                .map(|value| self.expr(value))
+                .collect::<Lift<_>>()?;
+            Ok(Expr::Call(Box::new(callee), args))
+        })())
+    }
+
     /// A dialect helper's call, as the source operator or built-in it
     /// implements.
     fn helper(&mut self, name: &str, args: &[k::Expr]) -> Lift<Expr> {
@@ -689,12 +713,26 @@ impl Lifter<'_> {
         }
 
         if let Some(value) = crate::constructs::numbers::BIGINT_INPUT.named(name, args) {
+            // BigInt exponentiation checks its result; Math.pow uses the same
+            // helper without that result check. Keep the operator's full shape.
+            let exponent = crate::constructs::operators::binary(crate::adapter::BinaryOp::Exponent);
+            if self.style.operators
+                && let k::Expr::Act(act) = value
+                && let k::ActKind::Call(k::Callee::Local(id)) = &act.kind
+                && self.is(id, exponent.helper)
+                && let [left, right] = act.args.as_slice()
+            {
+                return self.binary(exponent.token, left, right);
+            }
             let value = self.expr(value)?;
             return Ok(if self.style.operators {
                 value
             } else {
                 Expr::As(Box::new(value), source::Type::Word("bigint"))
             });
+        }
+        if let Some(builtin) = self.positional_builtin(name, args) {
+            return builtin;
         }
         if let [value] = args
             && let Some((class, _)) = lash_ext_ts_helpers::builtins::table()
@@ -903,25 +941,7 @@ impl Lifter<'_> {
                     args,
                 ))
             }
-            (name, _) => {
-                let Some((path, _)) = lash_ext_ts_helpers::builtins::table()
-                    .positional
-                    .iter()
-                    .find(|(_, declaration)| {
-                        declaration.arity == args.len()
-                            && (declaration.helper == name || declaration.float == Some(name))
-                    })
-                else {
-                    return refuse(format!("`{name}` has no source spelling"));
-                };
-                let callee = builtin_path(path)
-                    .ok_or_else(|| "a builtin path TypeScript cannot spell".to_owned())?;
-                let args = args
-                    .iter()
-                    .map(|value| self.expr(value))
-                    .collect::<Lift<_>>()?;
-                Ok(Expr::Call(Box::new(callee), args))
-            }
+            (name, _) => refuse(format!("`{name}` has no source spelling")),
         }
     }
 }

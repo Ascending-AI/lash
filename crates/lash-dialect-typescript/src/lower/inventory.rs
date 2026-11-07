@@ -30,15 +30,17 @@ pub(crate) fn collect<T>(run: impl FnOnce() -> T) -> (T, Inventory) {
 
 pub(crate) fn forms() -> Vec<(String, String)> {
     let mut forms = Vec::new();
-    for annotation in ["any", "number", "string"] {
+    for annotation in ["any", "number", "string", "bigint", "boolean"] {
         for operator in crate::constructs::operators::BINARY {
-            forms.push((
-                format!("{annotation} {}", operator.token),
-                format!(
-                    "export function demo(x: {annotation}): any {{ return x {} x; }}",
-                    operator.token
-                ),
-            ));
+            for right in ["any", "number", "string", "bigint", "boolean"] {
+                forms.push((
+                    format!("{annotation} {} {right}", operator.token),
+                    format!(
+                        "export function demo(x: {annotation}, y: {right}): any {{ return x {} y; }}",
+                        operator.token
+                    ),
+                ));
+            }
         }
         for operator in crate::constructs::operators::UNARY {
             forms.push((
@@ -48,6 +50,19 @@ pub(crate) fn forms() -> Vec<(String, String)> {
                     operator.token
                 ),
             ));
+        }
+    }
+    for (path, declaration) in lash_ext_ts_helpers::builtins::table().positional.iter() {
+        for annotation in ["any", "number", "string", "bigint", "boolean"] {
+            for expression in ["x", "x + 1", "1"] {
+                let args = vec![expression; declaration.arity].join(", ");
+                forms.push((
+                    format!("{path}({args}), {annotation}"),
+                    format!(
+                        "export function demo(x: {annotation}): any {{ return {path}({args}); }}"
+                    ),
+                ));
+            }
         }
     }
     for (class, _) in lash_ext_ts_helpers::builtins::table().constructors.iter() {
@@ -105,7 +120,10 @@ pub(crate) fn forms() -> Vec<(String, String)> {
     forms.extend(
         corpus
             .into_iter()
-            .filter(|case| case.name.starts_with("FIG-7664") && !case.cell)
+            .filter(|case| {
+                (case.name.starts_with("FIG-7664") || case.name.starts_with("FIG-7666"))
+                    && !case.cell
+            })
             .map(|case| (case.name, case.source)),
     );
     // Pin the complete front end's admission boundary, including its AST check.

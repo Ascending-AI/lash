@@ -278,5 +278,37 @@
     "name": "FIG-7664 cenote exact matchAll refusal cell",
     "source": "const smoke_read_f61778e453e6_1 = await cenote.readDocument({\"document\": {\"doc_id\": \"01a1b10e-296d-779b-b0ba-e1c3197d1de9\"}}); console.log(JSON.stringify(smoke_read_f61778e453e6_1.ok ? {ok:true,data:{document:smoke_read_f61778e453e6_1.data.document,items:smoke_read_f61778e453e6_1.data.items.filter(i=>i.text).map(i=>({text:i.text}))}} : smoke_read_f61778e453e6_1));\nconst docForChart = smoke_read_f61778e453e6_1.data.document; try { const created = await workflows.create({name:'signups-f61778e453e6',run:async ():Promise<unknown>=>{const page=await cenote.readDocument({document:docForChart}); const text=page.data.items.map(i=>i.text||'').join(' '); const found=[...text.matchAll(/Week\\s+(\\d+):\\s*(\\d+)/g)]; return views.card('Weekly signups',[views.barChart(found.map(m=>({week:'Week '+m[1],signups:Number(m[2])})),'week','signups','Weekly signups'),views.action('click','Click',{})]);},actions:{click:async ():Promise<unknown>=>({clicked:true})}}); console.log(JSON.stringify({workflow_id:created.data.workflow.workflow_id,version:created.data.version})); } catch(e) { console.log(JSON.stringify({code:e.code,details:e.data?.raw?.error?.details,message:e.message})); }",
     "cell": true
+  },
+  {
+    "name": "FIG-7666 number concatenation",
+    "source": "export function demo(count: number): string { return 'Week ' + (count + 1) + ':'; }"
+  },
+  {
+    "name": "FIG-7666 number template",
+    "source": "export function demo(count: number): string { return `Week ${count + 1}:`; }"
+  },
+  {
+    "name": "FIG-7666 saved number concatenation",
+    "source": "const run = async (): Promise<unknown> => { const count = 2; return 'Week ' + (count + 1) + ':'; };",
+    "cell": true,
+    "materialize": true
+  },
+  {
+    "name": "FIG-7666 RegExp filter",
+    "source": "const run = async (): Promise<unknown> => { const n = 2; return ['Week 2:'].filter(line => new RegExp('Week\\\\s*' + n + '\\\\s*:', 'i').test(line)); };",
+    "cell": true,
+    "materialize": true
+  },
+  {
+    "name": "FIG-7666 RegExp literal filter",
+    "source": "const run = async (): Promise<unknown> => ['Week 2:'].filter(line => /Week\\s*2\\s*:/i.test(line));",
+    "cell": true,
+    "materialize": true
+  },
+  {
+    "name": "FIG-7666 reduced RegExp argument diagnostic",
+    "source": "const run = async (): Promise<unknown> => { const pattern = /Week/; return [pattern, String(1)]; };",
+    "cell": true,
+    "materialize": true
   }
 ]

@@ -99,16 +99,26 @@ pub(crate) fn forms() -> Vec<(String, String)> {
             format!("def demo(x: Any) -> Any:\n    {body}\n"),
         ));
     }
-    for annotation in ["Any", "int", "str"] {
+    for annotation in ["Any", "int", "float", "str", "bool"] {
+        for expression in ["f'{x}'", "f'value {x}!'", "str(x)", "repr(x)", "ascii(x)"] {
+            forms.push((
+                format!("{annotation} {expression}"),
+                format!("def demo(x: {annotation}) -> Any:\n    return {expression}\n"),
+            ));
+        }
         for operator in crate::constructs::operators::BINARY
             .iter()
             .filter_map(|row| row.token())
             .collect::<std::collections::BTreeSet<_>>()
         {
-            forms.push((
-                format!("{annotation} {operator}"),
-                format!("def demo(x: {annotation}) -> Any:\n    return x {operator} x\n"),
-            ));
+            for right in ["Any", "int", "float", "str", "bool"] {
+                forms.push((
+                    format!("{annotation} {operator} {right}"),
+                    format!(
+                        "def demo(x: {annotation}, y: {right}) -> Any:\n    return x {operator} y\n"
+                    ),
+                ));
+            }
         }
         for operator in crate::constructs::operators::UNARY {
             forms.push((
