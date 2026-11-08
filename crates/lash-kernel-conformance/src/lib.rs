@@ -7,6 +7,7 @@
 
 pub mod captions;
 mod case;
+pub mod compat;
 mod coverage;
 mod machine;
 mod native;

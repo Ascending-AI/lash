@@ -860,6 +860,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-facade-tests:facade_turns__test__fv_1a0bed29": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-http-transport:lash-http-transport__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-kernel-check:lash-kernel-check__unit_test": {"cpu_count": 1, "memory_kb": 262144},
+    "//crates/lash-kernel-conformance:continuation_compat__bin__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-kernel-dialect:lash-kernel-dialect__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-kernel-doc:document_example__test": {"cpu_count": 1, "memory_kb": 262144},
