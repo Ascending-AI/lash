@@ -1424,13 +1424,18 @@ impl Checkout {
     }
     /// Discards the worker after `error`: the run's own typed end, a limit
     /// of its own or a refusal of its own inputs, is no failure of the
-    /// pool's and spends nothing of its restart window (FIG-6786).
+    /// pool's and spends nothing of its restart window (FIG-6786). Nor is a
+    /// breach every attempt meets again, such as a service request that does
+    /// not decode (FIG-7690).
     fn discard_after(&mut self, error: &PoolError) {
         let own = match error {
             PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded { limit }) => {
                 !limit.is_host_verdict()
             }
             PoolError::Infrastructure(InfrastructureOutcome::RunRefused { .. }) => true,
+            PoolError::Infrastructure(
+                outcome @ InfrastructureOutcome::ProtocolViolation { .. },
+            ) => !outcome.is_retryable(),
             _ => false,
         };
         self.discard_for(!own, Some(error));
