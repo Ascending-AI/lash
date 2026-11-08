@@ -43,8 +43,9 @@ pub(crate) trait Heap {
     /// Installs what a native call built, in reservation order.
     fn install(&mut self, built: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError>;
 
-    /// An error value of `kind` and `message` with null data (`K-ERR-001`).
-    fn error(&mut self, kind: &str, message: &str) -> Result<Value, NativeError>;
+    /// An error value of `kind`, `message` and `data` (`K-ERR-001`),
+    /// already admitted.
+    fn error(&mut self, kind: &str, message: &str, data: Value) -> Result<Value, NativeError>;
 
     /// A new cell holding `value` (`K-CLO-001`).
     fn cell(&mut self, value: Value) -> ArenaHandle;

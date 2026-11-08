@@ -20,7 +20,7 @@ use lash_kernel_value::types::Type;
 
 use super::compile::{Compiler, Fun, LoopCtx, Result, Scope, Var, unsupported};
 use super::op::Op;
-use super::program::{ActionSite, Callee, LoopSite};
+use super::program::{ActionSite, Callee, LoopMark, LoopSite};
 
 impl Compiler<'_> {
     /// Lowers `block` in a scope of its own (`K-FORM-003`).
@@ -111,6 +111,14 @@ impl Compiler<'_> {
     // --- Statements.
 
     fn stmt(&mut self, f: &mut Fun, stmt: &Stmt) -> Result<()> {
+        let site = f.site();
+        let outer = std::mem::replace(&mut f.statement, site);
+        let lowered = self.statement(f, stmt);
+        f.statement = outer;
+        lowered
+    }
+
+    fn statement(&mut self, f: &mut Fun, stmt: &Stmt) -> Result<()> {
         f.mark = true;
         f.units(1);
         f.pace();
@@ -175,11 +183,13 @@ impl Compiler<'_> {
                 body,
                 else_block,
             } => {
+                let started = Self::enter_loop(f);
                 let head = f.label();
                 self.loop_test(f, *metered);
                 self.child(f, 0, condition)?;
                 let test = f.emit(Op::WhileFalse(0));
                 f.leader();
+                f.quiet(Op::Pass(started));
                 f.loops.push(LoopCtx {
                     head,
                     breaks: Vec::new(),
@@ -188,6 +198,7 @@ impl Compiler<'_> {
                 let ctx = f.loops.pop();
                 lowered?;
                 Self::exit(f, Op::Jump(head));
+                f.enclosing.pop();
                 let exhausted = f.label();
                 f.patch(test, exhausted);
                 if !else_block.is_empty() {
@@ -285,6 +296,18 @@ impl Compiler<'_> {
         Ok(())
     }
 
+    /// Enters a loop at the statement being lowered: its pass counter is
+    /// zeroed, and it encloses what is lowered until its else block.
+    fn enter_loop(f: &mut Fun) -> u16 {
+        let started = f.temp();
+        f.quiet(Op::LoopStart(started));
+        f.enclosing.push(LoopMark {
+            site: f.statement.clone(),
+            started,
+        });
+        started
+    }
+
     /// A loop's continuation test: its unit, then its `metered` units,
     /// which charge under a cover too (`K-CHG-002`, `K-CHG-007`).
     fn loop_test(&mut self, f: &mut Fun, metered: u64) {
@@ -355,6 +378,7 @@ impl Compiler<'_> {
             join: None,
             site: f.site(),
         });
+        let started = Self::enter_loop(f);
         f.emit(Op::ForOpen(index));
         let head = f.label();
         self.loop_test(f, metered);
@@ -363,12 +387,14 @@ impl Compiler<'_> {
         if f.boxed.contains(binding) {
             f.emit(Op::Box(binding_slot));
         }
+        f.quiet(Op::Pass(started));
         f.loops.push(LoopCtx {
             head,
             breaks: Vec::new(),
         });
         self.child_block(f, 1, body)?;
         Self::exit(f, Op::Jump(head));
+        f.enclosing.pop();
         let exit = f.label();
         f.loop_sites[index as usize].exit = exit;
         Ok(())
@@ -399,6 +425,7 @@ impl Compiler<'_> {
             hook(&protocol.check)?,
         );
         let site = f.site();
+        let started = Self::enter_loop(f);
         let callee = self.callee(f, open)?;
         self.call(f, callee, 1, site.clone());
         // walked, cursor, size, remaining, raw item, more.
@@ -446,6 +473,7 @@ impl Compiler<'_> {
         if f.boxed.contains(binding) {
             f.emit(Op::Box(binding_slot));
         }
+        f.quiet(Op::Pass(started));
         f.leader();
         f.loops.push(LoopCtx {
             head,
@@ -467,6 +495,7 @@ impl Compiler<'_> {
             }
             None => None,
         };
+        f.enclosing.pop();
         let exit = f.label();
         let loop_site = &mut f.loop_sites[index as usize];
         loop_site.exit = exit;
@@ -620,20 +649,20 @@ impl Compiler<'_> {
             }
             Action::Join { task } => {
                 self.atoms(f, std::slice::from_ref(task), false)?;
-                Self::task_action(f, ActionSite::Join { site });
+                self.task_action(f, ActionSite::Join { site });
             }
             Action::JoinMany { mode, tasks } => {
                 self.atoms(f, std::slice::from_ref(tasks), false)?;
-                Self::task_action(f, ActionSite::JoinMany { mode: *mode, site });
+                self.task_action(f, ActionSite::JoinMany { mode: *mode, site });
             }
-            Action::Yield => Self::task_action(f, ActionSite::Yield { site }),
+            Action::Yield => self.task_action(f, ActionSite::Yield { site }),
             Action::Cancel { task } => {
                 self.atoms(f, std::slice::from_ref(task), false)?;
-                Self::task_action(f, ActionSite::Cancel { site });
+                self.task_action(f, ActionSite::Cancel { site });
             }
             Action::CancelEffect { task } => {
                 self.atoms(f, std::slice::from_ref(task), false)?;
-                Self::task_action(f, ActionSite::CancelEffect { site });
+                self.task_action(f, ActionSite::CancelEffect { site });
             }
             Action::Spawn { callee, args } => {
                 self.callee_value(f, callee);
@@ -709,7 +738,7 @@ impl Compiler<'_> {
         then_yield: bool,
         site: Site,
     ) {
-        Self::task_action(
+        self.task_action(
             f,
             ActionSite::Perform {
                 owner: f.owner,
@@ -730,7 +759,7 @@ impl Compiler<'_> {
         };
         let unit = self.stub(f, target, argc as u8)?;
         let values = argc as u8 + u8::from(target.is_none());
-        Self::task_action(
+        self.task_action(
             f,
             ActionSite::Spawn {
                 unit,
@@ -743,9 +772,11 @@ impl Compiler<'_> {
 
     /// An action other than a call: it ends its block, so a task resumes
     /// at a block head (`K-EVAL-008`).
-    fn task_action(f: &mut Fun, action: ActionSite) {
+    fn task_action(&mut self, f: &mut Fun, action: ActionSite) {
         let at = f.actions.len() as u32;
+        let mark = self.mark(f, action.site());
         f.actions.push(action);
+        f.action_marks.push(mark);
         f.emit(Op::Action(at));
         f.leader();
     }
@@ -855,15 +886,13 @@ impl Compiler<'_> {
                         then_yield,
                     } => self.perform(f, slot, argc, result, *then_yield, site),
                     ActKind::Spawn(callee) => self.spawn(f, callee, argc, site)?,
-                    ActKind::Join => Self::task_action(f, ActionSite::Join { site }),
+                    ActKind::Join => self.task_action(f, ActionSite::Join { site }),
                     ActKind::JoinMany(mode) => {
-                        Self::task_action(f, ActionSite::JoinMany { mode: *mode, site })
+                        self.task_action(f, ActionSite::JoinMany { mode: *mode, site })
                     }
-                    ActKind::Yield => Self::task_action(f, ActionSite::Yield { site }),
-                    ActKind::Cancel => Self::task_action(f, ActionSite::Cancel { site }),
-                    ActKind::CancelEffect => {
-                        Self::task_action(f, ActionSite::CancelEffect { site })
-                    }
+                    ActKind::Yield => self.task_action(f, ActionSite::Yield { site }),
+                    ActKind::Cancel => self.task_action(f, ActionSite::Cancel { site }),
+                    ActKind::CancelEffect => self.task_action(f, ActionSite::CancelEffect { site }),
                     ActKind::Await(policy) => {
                         let policy = Self::local_target(policy, "an await policy")?;
                         let callee = self.callee(f, policy)?;

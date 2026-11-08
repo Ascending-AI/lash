@@ -23,7 +23,7 @@ use super::names::Names;
 use super::op::Op;
 use super::program::{
     ActionSite, Block, CallSite, Callee, Capture, ClosureSite, Constant, Event, FunctionEntry,
-    LoopSite, NativeEntry, Program, Unit, UnitId, UnitKind,
+    LoopMark, LoopSite, Mark, NativeEntry, Program, Unit, UnitId, UnitKind,
 };
 use crate::functions::{MachineFunction, machine_function};
 
@@ -110,6 +110,11 @@ pub(crate) struct Fun {
     pub calls: Vec<CallSite>,
     pub loop_sites: Vec<LoopSite>,
     pub actions: Vec<ActionSite>,
+    pub action_marks: Vec<Arc<Mark>>,
+    /// The statement being lowered.
+    pub statement: Site,
+    /// The loops that enclose the code being lowered, outermost first.
+    pub enclosing: Vec<LoopMark>,
     pub site: SiteUnit,
     pub path: Vec<u32>,
 }
@@ -144,6 +149,9 @@ impl Fun {
             calls: Vec::new(),
             loop_sites: Vec::new(),
             actions: Vec::new(),
+            action_marks: Vec::new(),
+            statement: Site::new(site.clone(), Vec::new()),
+            enclosing: Vec::new(),
             site,
             path: Vec::new(),
         }
@@ -181,6 +189,15 @@ impl Fun {
         if !self.covered {
             self.pending_pace += 1;
         }
+    }
+
+    /// Emits `op`, which bills nothing, leaving pending events and the
+    /// step mark to the op after it.
+    pub(crate) fn quiet(&mut self, op: Op) {
+        self.ops.push(op);
+        self.event.push(Event::default());
+        self.pace.push(0);
+        self.step.push(false);
     }
 
     pub(crate) fn emit(&mut self, op: Op) -> usize {
@@ -257,6 +274,8 @@ pub(crate) struct Compiler<'a> {
     bodies: HashMap<(FunctionId, bool), UnitId>,
     pub stubs: HashMap<(Option<FunctionId>, u8), UnitId>,
     free: HashMap<FunctionId, BTreeSet<Name>>,
+    /// Each action site's occurrence counter index (`K-EFF-008`).
+    occurrences: HashMap<Site, u32>,
 }
 
 impl<'a> Compiler<'a> {
@@ -278,6 +297,7 @@ impl<'a> Compiler<'a> {
             bodies: HashMap::new(),
             stubs: HashMap::new(),
             free: HashMap::new(),
+            occurrences: HashMap::new(),
         }
     }
 
@@ -670,11 +690,28 @@ impl<'a> Compiler<'a> {
     /// call that pushes a frame ends its block.
     pub(crate) fn call(&mut self, f: &mut Fun, callee: Callee, argc: u8, site: Site) {
         let at = f.calls.len() as u32;
-        f.calls.push(CallSite { callee, argc, site });
+        let mark = self.mark(f, &site);
+        f.calls.push(CallSite {
+            callee,
+            argc,
+            site,
+            mark,
+        });
         f.emit(Op::Call(at));
         if !matches!(callee, Callee::Native { .. } | Callee::Machine { .. }) {
             f.leader();
         }
+    }
+
+    /// Where `f` stands at the call or action at `site`.
+    pub(crate) fn mark(&mut self, f: &Fun, site: &Site) -> Arc<Mark> {
+        let next = self.occurrences.len() as u32;
+        let occurrence = *self.occurrences.entry(site.clone()).or_insert(next);
+        Arc::new(Mark {
+            statement: f.statement.clone(),
+            loops: f.enclosing.iter().cloned().collect(),
+            occurrence,
+        })
     }
 
     /// `spawn`'s stub: its parameters are the call's arguments (a value
@@ -760,9 +797,16 @@ impl<'a> Compiler<'a> {
             calls,
             loop_sites,
             actions,
+            action_marks,
             site,
             ..
         } = f;
+        let authored = !covered
+            && match &kind {
+                UnitKind::Main | UnitKind::Declared(_) => true,
+                UnitKind::Closure(id) => self.document.functions.contains_key(id),
+                UnitKind::Body(_) | UnitKind::Spawn => false,
+            };
         let mut blocks = Vec::new();
         let mut through = vec![0u64; ops.len()];
         let mut pace_through = vec![0u64; ops.len()];
@@ -828,6 +872,8 @@ impl<'a> Compiler<'a> {
             calls,
             loops: loop_sites,
             actions,
+            action_marks,
+            authored,
             name,
             site: Site::new(site, Vec::new()),
         }

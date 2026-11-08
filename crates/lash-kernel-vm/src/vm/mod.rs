@@ -17,13 +17,14 @@ pub(crate) mod loops;
 pub(crate) mod machine;
 pub(crate) mod members;
 pub(crate) mod plans;
+pub(crate) mod tasks;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::arena::native::{NativeError, NewObject};
-use lash_kernel_doc::{Datum, Measure, TaskId, Value};
+use lash_kernel_doc::{Datum, Document, Measure, Value};
 use lash_kernel_value::data_limits::KernelDataLimits;
 use lash_kernel_value::names::FunctionId;
 use lash_kernel_value::sites::Site;
@@ -47,9 +48,16 @@ pub(crate) enum Stop {
     Finish(Datum),
     /// `fail` ended the run with this copied-out value.
     Fail(Datum),
-    /// The top frame stands after action `n` of its unit, the action's
-    /// operands on the stack (`K-EVAL-008`).
-    Action(u32),
+    /// No task is ready and some wait: the embedder holds the requests
+    /// (`K-MACH-006`).
+    Park(crate::interface::Park),
+    /// No task is ready and nothing can wake one: the tasks still waiting
+    /// (`K-TASK-024`).
+    Deadlock(Vec<lash_kernel_value::sites::TaskLabel>),
+    /// A read the host answered with a fault.
+    Host(crate::HostFault),
+    /// The embedder asked to cancel the run while it was idle.
+    Cancelled,
     /// The slice ended at a step's end (`K-MACH-002`).
     Slice,
     /// A bound refused the run.
@@ -103,7 +111,7 @@ pub(crate) fn value_depth() -> usize {
 
 /// The machine state of one instance over a heap `H`: the program, the
 /// heap, the meter and the running task's context. The scheduler keeps the
-/// other tasks' contexts in [`Vm::parked`] and swaps them in.
+/// other tasks' contexts in [`Vm::tasks`] and swaps them in.
 pub(crate) struct Vm<H: Heap> {
     /// The instance's own program, shared only so the dispatch loop can
     /// borrow it beside the machine's mutable state.
@@ -115,8 +123,10 @@ pub(crate) struct Vm<H: Heap> {
     pub globals: Vec<Value>,
     /// The running task's frames and stack.
     pub cx: Context,
-    /// The contexts of the tasks not running, for the collector.
-    pub parked: Vec<Context>,
+    /// Every task, and what waits between them.
+    pub tasks: tasks::Tasks,
+    /// The document the program runs, for decoding what crosses into it.
+    pub document: Arc<Document>,
     /// Values the scheduler holds outside any context (results, operands
     /// of issued actions), for the collector.
     pub held: Vec<Value>,
@@ -135,8 +145,6 @@ pub(crate) struct Vm<H: Heap> {
     closures: HashMap<FunctionId, UnitId>,
     /// Each function value's trampoline.
     functions: HashMap<FunctionId, UnitId>,
-    /// The other unfinished tasks, for `tasks.unfinished` (`K-TASK-021`).
-    pub unfinished: Vec<TaskId>,
 }
 
 impl<H: Heap> Vm<H> {
@@ -144,6 +152,7 @@ impl<H: Heap> Vm<H> {
     /// admitted. `limit` is the charge limit under `Charge::Exact`;
     /// `paced` selects `Charge::Off`.
     pub(crate) fn new(
+        document: Arc<Document>,
         program: Arc<Program>,
         mut heap: H,
         used: u64,
@@ -189,7 +198,8 @@ impl<H: Heap> Vm<H> {
             constants,
             globals,
             cx: Context::default(),
-            parked: Vec::new(),
+            tasks: tasks::Tasks::new(),
+            document,
             held: Vec::new(),
             meter: Meter::new(used, if paced { u64::MAX } else { limit }),
             paced,
@@ -200,7 +210,6 @@ impl<H: Heap> Vm<H> {
             refused: None,
             closures,
             functions,
-            unfinished: Vec::new(),
         })
     }
 
@@ -414,7 +423,7 @@ impl<H: Heap> Vm<H> {
             constants,
             globals,
             cx,
-            parked,
+            tasks,
             held,
             ..
         } = self;
@@ -423,9 +432,7 @@ impl<H: Heap> Vm<H> {
             globals.iter().for_each(&mut *visit);
             held.iter().for_each(&mut *visit);
             cx.roots(&mut *visit);
-            for other in parked.iter() {
-                other.roots(&mut *visit);
-            }
+            tasks.roots(&mut *visit);
         });
     }
 
@@ -449,7 +456,7 @@ impl<H: Heap> Vm<H> {
         if let Err(flow) = self.admit(crate::heap::slots::ERROR) {
             return flow;
         }
-        match self.heap.error(kind, message) {
+        match self.heap.error(kind, message, Value::Null) {
             Ok(value) => Flow::Raise(value),
             Err(error) => fault(error.to_string()),
         }
@@ -602,44 +609,35 @@ impl<H: Heap> Vm<H> {
         }
     }
 
-    /// The action's result arrives: the top frame continues with it.
-    pub(crate) fn resume(&mut self, value: Value) {
-        self.push(value);
-    }
-
-    /// The action raised: the top frame unwinds from it.
-    pub(crate) fn resume_raise(&mut self, value: Value) -> Result<(), Stop> {
-        match self.raise(value) {
-            Ok(()) => Ok(()),
-            Err(Flow::Stop(stop)) => Err(*stop),
-            Err(Flow::Raise(_)) => Err(Stop::Fault("a raise while raising".into())),
-        }
-    }
-
     // --- The dispatch loop.
 
-    /// Runs the running context until it stops: its bottom frame returns,
-    /// it reaches an action, the slice of `slice` units ends, or the run
-    /// ends.
+    /// Runs the tasks until the run stops: it parks, the slice of `slice`
+    /// units ends, or the run ends.
     pub(crate) fn run(&mut self, host: &mut dyn Host, slice: u64) -> Stop {
         self.meter.slice(slice);
         self.fresh = true;
+        let mut next = if self.tasks.installed {
+            Ok(None)
+        } else {
+            self.schedule(host)
+        };
         loop {
-            match self.dispatch(host) {
-                Ok(stop) => return stop,
-                Err(Flow::Raise(value)) => {
-                    if let Err(flow) = self.raise(value) {
-                        return match flow {
-                            Flow::Stop(stop) => *stop,
-                            Flow::Raise(_) => Stop::Fault("a raise while raising".into()),
-                        };
-                    }
-                }
+            next = match next {
+                Ok(Some(stop)) => return stop,
+                Ok(None) => self.dispatch(host).map(Some),
+                Err(Flow::Raise(value)) => self.raise(value).map(|()| None),
                 Err(Flow::Stop(stop)) => {
                     self.cancel();
-                    return *stop;
+                    match *stop {
+                        // A task other than `main` ends with its raise
+                        // (`K-TASK-008`).
+                        Stop::Uncaught(value) if self.tasks.running != tasks::MAIN => {
+                            self.end_task(host, Err(value))
+                        }
+                        stop => return stop,
+                    }
                 }
-            }
+            };
         }
     }
 
@@ -836,12 +834,12 @@ impl<H: Heap> Vm<H> {
                 Op::Call(site) => self.call(&program, unit, site)?,
                 Op::Return => {
                     let value = self.pop();
-                    if let Some(stop) = self.ret(value, true)? {
+                    if let Some(stop) = self.ret(host, value, true)? {
                         return Ok(stop);
                     }
                 }
                 Op::Fall => {
-                    if let Some(stop) = self.ret(Value::Null, false)? {
+                    if let Some(stop) = self.ret(host, Value::Null, false)? {
                         return Ok(stop);
                     }
                 }
@@ -872,7 +870,16 @@ impl<H: Heap> Vm<H> {
                 Op::Action(n) => {
                     self.meter.leave();
                     self.exact = true;
-                    return Ok(Stop::Action(n));
+                    if let Some(stop) = self.act(host, unit, n)? {
+                        return Ok(stop);
+                    }
+                }
+                Op::LoopStart(n) => self.cx.stack[base + usize::from(n)] = Value::Int(0),
+                Op::Pass(n) => {
+                    let at = base + usize::from(n);
+                    if let Value::Int(count) = self.cx.stack[at] {
+                        self.cx.stack[at] = Value::Int(count.saturating_add(1));
+                    }
                 }
                 Op::Print => {
                     let value = self.pop();
@@ -902,18 +909,20 @@ impl<H: Heap> Vm<H> {
     }
 
     /// Returns `value` from the running frame, billing the call's
-    /// completion formula. Gives the stop when the task's bottom frame
-    /// returned.
-    fn ret(&mut self, value: Value, explicit: bool) -> Run<Option<Stop>> {
+    /// completion formula. Gives the stop when `main`'s bottom frame
+    /// returned; another task's bottom frame ends the task.
+    fn ret(&mut self, host: &mut dyn Host, value: Value, explicit: bool) -> Run<Option<Stop>> {
         self.meter.leave();
         self.exact = true;
+        let bottom = self.cx.frames.len() == 1;
+        let main = self.tasks.running == tasks::MAIN;
         // A return that leaves the run copies its value out where it
         // stands, so a raise of the copy is caught by the frame's own
-        // handlers; falling off the end copies nothing.
-        let leaving = match self.cx.frames.len() {
-            1 if explicit => Some(self.copy_out(&value)?),
-            1 => Some(Datum::Null),
-            _ => None,
+        // handlers; falling off the end copies nothing (`K-FORM-015`).
+        let leaving = match (bottom && main, explicit) {
+            (true, true) => Some(self.copy_out(&value)?),
+            (true, false) => Some(Datum::Null),
+            (false, _) => None,
         };
         let Some(frame) = self.cx.frames.pop() else {
             return Err(fault("a return with no frame"));
@@ -925,6 +934,9 @@ impl<H: Heap> Vm<H> {
         self.cx.stack.truncate(frame.base as usize);
         if let Some(datum) = leaving {
             return Ok(Some(Stop::Returned(datum)));
+        }
+        if bottom {
+            return self.end_task(host, Ok(value));
         }
         self.push(value);
         Ok(None)

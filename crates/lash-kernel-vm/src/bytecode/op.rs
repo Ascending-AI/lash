@@ -127,6 +127,12 @@ pub enum Op {
     // --- Actions (`K-EVAL-008`): each ends its block.
     /// Action `n` of the unit: perform, spawn, join, cancel, yield.
     Action(u32),
+    /// A loop is entered: its pass counter, local `n`, is zero. Bills
+    /// nothing.
+    LoopStart(u16),
+    /// A loop's pass begins: its counter, local `n`, counts it. Bills
+    /// nothing.
+    Pass(u16),
     Print,
     Finish,
     Fail,

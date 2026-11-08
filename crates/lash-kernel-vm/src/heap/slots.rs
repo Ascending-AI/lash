@@ -127,8 +127,8 @@ impl Heap for SlotHeap {
         Ok(())
     }
 
-    fn error(&mut self, kind: &str, message: &str) -> Result<Value, NativeError> {
-        let value = self.arena.error(kind, message, Value::Null)?;
+    fn error(&mut self, kind: &str, message: &str, data: Value) -> Result<Value, NativeError> {
+        let value = self.arena.error(kind, message, data)?;
         if let Some(handle) = value.handle() {
             self.place(handle, ERROR);
         }

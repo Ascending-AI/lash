@@ -5,11 +5,18 @@
 //! Sealing and opening wait on the durable heap (handoff to L2): until it
 //! lands, `seal` and `open` refuse as faults.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, Decoder, Document, Value};
 use lash_kernel_state::paged::{Checkpoint, PageSource, SealBudget};
 use lash_kernel_value::names::{FunctionName, Name};
+use lash_kernel_value::package::OperationMode;
+use lash_kernel_value::types::Type;
+use lash_kernel_value::{HelperOperationId, OperationSlot};
+
+use super::tasks::{Committed, Operation, Operations};
+use crate::bytecode::program::ActionSite;
 
 use super::{Stop, Vm, value_depth};
 use crate::heap::Heap;
@@ -91,7 +98,9 @@ impl Machine for CoreMachine {
         let code = crate::bytecode::compile::compile(&document, &registry, program.link, entry)
             .map_err(linked)?;
         let paced = matches!(bounds.charge, Charge::Off);
+        let operations = operations(&program, &code, start.modes)?;
         let mut vm = Vm::new(
+            Arc::clone(&document),
             Arc::new(code),
             SlotHeap::new(bounds.memory),
             0,
@@ -100,6 +109,10 @@ impl Machine for CoreMachine {
             bounds.call_depth,
         )
         .map_err(|stop| linked(format!("{stop:?}")))?;
+        vm.tasks.operations = operations;
+        vm.tasks.live_limit = bounds.live_tasks;
+        vm.tasks.requests_limit = bounds.requests_per_park;
+        vm.tasks.join_limit = bounds.join_members;
         let decoder = Decoder {
             max_depth: value_depth(),
             policy: document.numbers,
@@ -170,21 +183,45 @@ impl Machine for CoreMachine {
         if self.ended {
             return Err(MachineError::Ended);
         }
-        let _ = &self.document;
         match self.vm.run(host, slice) {
-            Stop::Returned(result) => self.ended(End::Finished(Box::new(Finished {
+            Stop::Returned(result) => self.concluded(
+                None,
+                |result| {
+                    End::Finished(Box::new(Finished {
+                        result,
+                        finish: false,
+                        carry: None,
+                        not_carried: Vec::new(),
+                    }))
+                },
                 result,
-                finish: false,
-                carry: None,
-                not_carried: Vec::new(),
-            }))),
-            Stop::Finish(result) => self.ended(End::Finished(Box::new(Finished {
-                result,
-                finish: true,
-                carry: None,
-                not_carried: Vec::new(),
-            }))),
-            Stop::Fail(datum) => self.ended(End::Failed(datum)),
+            ),
+            Stop::Finish(result) => {
+                let ender = Some(self.vm.tasks.running);
+                self.concluded(
+                    ender,
+                    |result| {
+                        End::Finished(Box::new(Finished {
+                            result,
+                            finish: true,
+                            carry: None,
+                            not_carried: Vec::new(),
+                        }))
+                    },
+                    result,
+                )
+            }
+            Stop::Fail(datum) => {
+                let ender = Some(self.vm.tasks.running);
+                self.concluded(ender, End::Failed, datum)
+            }
+            Stop::Park(park) => Ok(Step::Parked(park)),
+            Stop::Deadlock(waiting) => self.ended(End::Error(RunError::Deadlock { waiting })),
+            Stop::Cancelled => self.ended(End::Cancelled),
+            Stop::Host(fault) => {
+                self.ended = true;
+                Err(MachineError::Host(fault))
+            }
             Stop::Uncaught(value) => self.uncaught(value),
             Stop::Slice => {
                 if host.cancel_requested() {
@@ -193,9 +230,6 @@ impl Machine for CoreMachine {
                 Ok(Step::Slice)
             }
             Stop::Bound(exceeded) => self.ended(Self::exceeded(*exceeded)),
-            Stop::Action(_) => Err(MachineError::Fault {
-                problem: "the bytecode core runs no action before its task layer lands".into(),
-            }),
             Stop::Fault(problem) => {
                 self.ended = true;
                 Err(MachineError::Fault { problem })
@@ -203,11 +237,25 @@ impl Machine for CoreMachine {
         }
     }
 
-    fn deliver(&mut self, wait: WaitId, _outcome: Outcome) -> Result<Delivered, DeliverError> {
+    fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<Delivered, DeliverError> {
         if self.ended {
             return Err(DeliverError::Ended);
         }
-        Err(DeliverError::UnknownWait { wait })
+        let document = &self.document;
+        let n = lash_kernel_doc::kernel_internals::wait_number(wait);
+        self.vm.tasks.deliver(n, |result| match outcome {
+            Outcome::Completed(datum) => match super::tasks::decode(document, &datum, result) {
+                Ok(decoded) => Committed::Completed(decoded),
+                Err(refusal) => Committed::Rejected(refusal),
+            },
+            Outcome::Failed(error) => {
+                let datum = Datum::Error(Box::new(error));
+                match super::tasks::decode(document, &datum, &Type::Any) {
+                    Ok(decoded) => Committed::Failed(decoded),
+                    Err(refusal) => Committed::Rejected(refusal),
+                }
+            }
+        })
     }
 
     fn seal(&mut self, _budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
@@ -223,12 +271,26 @@ impl Machine for CoreMachine {
         Meters {
             charged: (!self.vm.paced()).then(|| self.vm.charged()),
             memory: self.vm.heap.held(),
-            live_tasks: 1,
+            live_tasks: self.vm.tasks.live,
         }
     }
 }
 
 impl CoreMachine {
+    /// The run reached its end: an error when tasks other than `main` and
+    /// `ender` are outstanding (`K-TASK-018`), else `end` of `result`.
+    fn concluded(
+        &mut self,
+        ender: Option<usize>,
+        end: impl FnOnce(Datum) -> End,
+        result: Datum,
+    ) -> Result<Step, MachineError> {
+        match self.vm.tasks.outstanding(ender, &self.vm.program.units) {
+            Some(error) => self.ended(End::Error(error)),
+            None => self.ended(end(result)),
+        }
+    }
+
     fn uncaught(&mut self, value: Value) -> Result<Step, MachineError> {
         match crate::data::copy_out(self.vm.heap.arena(), value_depth(), &value) {
             Ok(error) => self.ended(End::Error(RunError::Uncaught { error, site: None })),
@@ -240,4 +302,64 @@ impl CoreMachine {
             }
         }
     }
+}
+
+/// Resolves every `perform`'s operation in `code` against the program's
+/// Link, and which the run binds as reads (`K-EFF-012`).
+fn operations(
+    program: &Program,
+    code: &crate::bytecode::program::Program,
+    modes: crate::interface::EffectModes,
+) -> Result<Operations, StartError> {
+    let mut reads = HashSet::new();
+    for (use_, mode) in modes {
+        let declared = program
+            .instances
+            .get(&use_.link)
+            .and_then(|instance| instance.operation(use_.slot));
+        if !matches!(declared, Some(found) if found == use_) {
+            return Err(StartError::UndeclaredRead { use_ });
+        }
+        if mode == OperationMode::Read {
+            reads.insert(use_);
+        }
+    }
+    let link = program.link;
+    let instance = program.instances.get(&link);
+    let document = &program.document;
+    let mut operations = HashMap::new();
+    for unit in &code.units {
+        for action in &unit.actions {
+            let ActionSite::Perform { owner, slot, .. } = action else {
+                continue;
+            };
+            operations.entry((*owner, *slot)).or_insert_with(|| {
+                let instance = instance.ok_or("the program's Link is not loaded")?;
+                let key = match owner {
+                    Some(function) if !document.functions.contains_key(function) => {
+                        let registered = program
+                            .helpers()
+                            .registered(function)
+                            .or_else(|| program.library.registry().get(function))
+                            .ok_or("helper operation body is not loaded")?;
+                        let import = registered
+                            .imports()
+                            .get(slot)
+                            .ok_or("helper does not declare this operation")?;
+                        OperationSlot::Helper(HelperOperationId::of_import(import))
+                    }
+                    _ => (*slot).into(),
+                };
+                let use_ = instance
+                    .operation(key)
+                    .filter(|use_| use_.link == link && use_.slot == key)
+                    .ok_or("perform has no explicit operation fill in its defining Link")?;
+                Ok(Operation {
+                    read: reads.contains(&use_),
+                    use_,
+                })
+            });
+        }
+    }
+    Ok(operations)
 }

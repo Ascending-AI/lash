@@ -118,6 +118,11 @@ pub struct Unit {
     pub calls: Vec<CallSite>,
     pub loops: Vec<LoopSite>,
     pub actions: Vec<ActionSite>,
+    /// Where each action stands, parallel to `actions`.
+    pub action_marks: Vec<Arc<Mark>>,
+    /// The unit is document code run charged: its frames are where an
+    /// effect's origin is read (`K-EFF-008`).
+    pub authored: bool,
     /// The function's name, for bound errors.
     pub name: Arc<str>,
     /// The unit's site root.
@@ -177,6 +182,28 @@ pub struct CallSite {
     pub callee: Callee,
     pub argc: u8,
     pub site: Site,
+    /// Where the calling frame stands while the callee runs.
+    pub mark: Arc<Mark>,
+}
+
+/// Where a frame stands at a call or an action (`K-EVAL-008`,
+/// `K-EFF-008`): its statement, the loops of its unit that enclose it,
+/// outermost first, and the action site's index among the program's
+/// occurrence counters.
+#[derive(Clone, Debug)]
+pub struct Mark {
+    pub statement: Site,
+    pub loops: Arc<[LoopMark]>,
+    /// The program-wide index of the site, for occurrence counts.
+    pub occurrence: u32,
+}
+
+/// A loop that encloses a mark: its site and the hidden local that counts
+/// the passes it has begun.
+#[derive(Clone, Debug)]
+pub struct LoopMark {
+    pub site: Site,
+    pub started: u16,
 }
 
 /// A loop's state: hidden locals from `slot`.
@@ -234,6 +261,20 @@ pub enum ActionSite {
     CancelEffect {
         site: Site,
     },
+}
+
+impl ActionSite {
+    pub fn site(&self) -> &Site {
+        match self {
+            Self::Perform { site, .. }
+            | Self::Spawn { site, .. }
+            | Self::Join { site }
+            | Self::JoinMany { site, .. }
+            | Self::Yield { site }
+            | Self::Cancel { site }
+            | Self::CancelEffect { site } => site,
+        }
+    }
 }
 
 /// A native a call site names: the implementation, its argument count and

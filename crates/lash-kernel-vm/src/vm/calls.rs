@@ -11,10 +11,10 @@
 //! Completion formulas are dynamic fees (`K-CHG-003`): a call bills its
 //! formula once, at return, or at raise with a result of size 0.
 
+use lash_kernel_doc::Value;
 use lash_kernel_doc::WorkCounter;
 use lash_kernel_doc::arena::native::{Args, NativeCall, NativeError, NewObject, Nursery};
 use lash_kernel_doc::heap::LogicalBytes;
-use lash_kernel_doc::{TaskId, Value};
 
 use super::frames::Bill;
 use super::{Exceeded, Flow, Run, Stop, Vm, fault, value_depth};
@@ -274,7 +274,7 @@ impl<H: Heap> Vm<H> {
                 }
             }
             MachineFunction::TasksUnfinished => {
-                let tasks: Vec<Value> = self.unfinished.iter().copied().map(task_value).collect();
+                let tasks = self.tasks.unfinished();
                 self.alloc(NewObject::List(tasks))?
             }
             MachineFunction::BrandBuilt => {
@@ -295,8 +295,4 @@ impl<H: Heap> Vm<H> {
         }
         Ok(())
     }
-}
-
-fn task_value(task: TaskId) -> Value {
-    Value::Task(task)
 }
