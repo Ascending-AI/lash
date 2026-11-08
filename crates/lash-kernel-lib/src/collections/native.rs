@@ -505,7 +505,14 @@ impl NativeFunction for Aux {
         self.1
     }
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        use lash_kernel_doc::arena::native::{InlineNative, InlineOperation};
         lash_kernel_doc::NativeSpecialization {
+            inline: matches!(self.2, Some(lash_kernel_doc::SymbolicNative::Not)).then_some(
+                InlineNative {
+                    native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                    operation: InlineOperation::Not,
+                },
+            ),
             immediate: self.prepare(),
             symbolic: self.2,
             ..Default::default()
@@ -763,20 +770,30 @@ impl NativeFunction for Native {
         resources::collection(self, args)
     }
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        use lash_kernel_doc::arena::native::{InlineNative, InlineOperation};
         use lash_kernel_doc::{
             ResidentRead,
             plan::{Collection, Table},
         };
+        let collection = match self.kind {
+            Kind::List => Collection::List,
+            Kind::Tuple => Collection::Tuple,
+            Kind::Map => Collection::Map,
+            Kind::Set => Collection::Set,
+            Kind::Record => Collection::Record,
+        };
         lash_kernel_doc::NativeSpecialization {
+            inline: matches!(
+                (self.kind, self.op),
+                (Kind::List | Kind::Tuple | Kind::Map, Op::Len)
+            )
+            .then_some(InlineNative {
+                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                operation: InlineOperation::Length(collection),
+            }),
             immediate: self.prepare(),
             resident: match (self.kind, self.op) {
-                (kind, Op::Len) => Some(ResidentRead::Length(match kind {
-                    Kind::List => Collection::List,
-                    Kind::Tuple => Collection::Tuple,
-                    Kind::Map => Collection::Map,
-                    Kind::Set => Collection::Set,
-                    Kind::Record => Collection::Record,
-                })),
+                (_, Op::Len) => Some(ResidentRead::Length(collection)),
                 (Kind::List, Op::Get) => Some(ResidentRead::Item(lash_kernel_doc::ValueKind::List)),
                 (Kind::Tuple, Op::Get) => {
                     Some(ResidentRead::Item(lash_kernel_doc::ValueKind::Tuple))

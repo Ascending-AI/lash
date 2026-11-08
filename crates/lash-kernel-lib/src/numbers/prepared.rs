@@ -15,6 +15,8 @@ pub(super) fn inline(
         InlineNative, InlineOperation, IntegerTextDomain, ScalarDomain,
     };
     let operation = match operation {
+        Operation::Kind if matches!(domain, Domain::Any) => InlineOperation::Kind,
+        Operation::Same if matches!(domain, Domain::Any) => InlineOperation::Same,
         Operation::ToText if matches!(domain, Domain::Number) => {
             InlineOperation::IntegerText(IntegerTextDomain::Decimal)
         }

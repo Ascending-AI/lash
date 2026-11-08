@@ -957,25 +957,37 @@ impl InlineNative {
     /// the output and retains the call's charge and depth obligations.
     #[inline]
     pub fn scalar_answer(self, native_version: u32, args: &[Value]) -> Option<Value> {
-        let operation = self.for_version(native_version)?;
-        if !operation.accepts(args) {
-            return None;
-        }
-        let InlineOperation::Scalar { operation, .. } = operation else {
-            return None;
-        };
-        match args {
-            [Value::Int(a), Value::Int(b)] => crate::scalar::ints(operation, *a, *b),
-            [Value::Float(a), Value::Float(b)] => crate::scalar::floats(operation, *a, *b),
-            _ => None,
+        self.for_version(native_version)?.answer(args)
+    }
+
+    /// Answers through the native's borrowed views, under the version that
+    /// made the declaration. Cold or malformed views retain the native error.
+    pub fn answer_read(
+        self,
+        native_version: u32,
+        args: Args<'_>,
+    ) -> Result<Option<Value>, NativeError> {
+        match self.for_version(native_version) {
+            Some(operation) => operation.answer_read(args),
+            None => Ok(None),
         }
     }
 }
 
 /// The operation and its exact argument-kind domain. Unlisted kinds and
-/// arities always use the ordinary call, including mixed numeric pairs.
+/// arities use the ordinary call. Numeric kernels require homogeneous pairs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InlineOperation {
+    /// One value of any kind. Reads its tag only and returns its inline name.
+    Kind,
+    /// Shallow identity: inline values, differing kinds, and mutable-object
+    /// identities. Immutable bodies needing structural reads run normally.
+    Same,
+    /// One boolean, with no coercion.
+    Not,
+    /// One collection of the declared kind, read through the native views.
+    /// Cold reads and lengths that cannot be answered inline run normally.
+    Length(crate::plan::Collection),
     Scalar {
         operation: crate::scalar::ScalarOp,
         domain: ScalarDomain,
@@ -992,6 +1004,17 @@ impl InlineOperation {
     #[inline]
     pub fn accepts(self, args: &[Value]) -> bool {
         match (self, args) {
+            (Self::Kind, [_]) => true,
+            (Self::Same, [left, right]) => shallow_same(left, right).is_some(),
+            (Self::Not, [Value::Bool(_)]) => true,
+            (Self::Length(kind), [value]) => matches!(
+                (kind, value),
+                (crate::plan::Collection::List, Value::List(_))
+                    | (crate::plan::Collection::Tuple, Value::Tuple(_))
+                    | (crate::plan::Collection::Map, Value::Map(_))
+                    | (crate::plan::Collection::Set, Value::Set(_))
+                    | (crate::plan::Collection::Record, Value::Record(_))
+            ),
             (Self::Scalar { domain, .. }, [Value::Int(_), Value::Int(_)]) => {
                 matches!(domain, ScalarDomain::Words | ScalarDomain::WordsOrFloats)
             }
@@ -1009,6 +1032,79 @@ impl InlineOperation {
             }
             _ => false,
         }
+    }
+
+    /// The allocation-free answer within this operation's immediate domain.
+    /// `None` retains the ordinary call, including any allocation admission.
+    #[inline]
+    pub fn answer(self, args: &[Value]) -> Option<Value> {
+        match (self, args) {
+            (Self::Kind, [value]) => {
+                ShortText::new(crate::ValueKind::NAMES[value.kind() as usize].1).map(Value::Text)
+            }
+            (Self::Same, [left, right]) => shallow_same(left, right).map(Value::Bool),
+            (Self::Not, [Value::Bool(value)]) => Some(Value::Bool(!value)),
+            (Self::Scalar { operation, .. }, [Value::Int(a), Value::Int(b)])
+                if self.accepts(args) =>
+            {
+                crate::scalar::ints(operation, *a, *b)
+            }
+            (Self::Scalar { operation, .. }, [Value::Float(a), Value::Float(b)])
+                if self.accepts(args) =>
+            {
+                crate::scalar::floats(operation, *a, *b)
+            }
+            _ => None,
+        }
+    }
+
+    /// Allocation-free answers using the same zero-copy views as the native.
+    pub fn answer_read(self, args: Args<'_>) -> Result<Option<Value>, NativeError> {
+        if !self.accepts(args.values()) {
+            return Ok(None);
+        }
+        if let Self::Length(kind) = self {
+            let [value] = args.values() else {
+                return Ok(None);
+            };
+            let length = match kind {
+                crate::plan::Collection::List | crate::plan::Collection::Tuple => {
+                    args.sequence(value)?.map(|view| view.len())
+                }
+                crate::plan::Collection::Map
+                | crate::plan::Collection::Set
+                | crate::plan::Collection::Record => args.table(value)?.map(|view| view.len()),
+            };
+            return Ok(length
+                .and_then(|length| usize::try_from(length).ok())
+                .and_then(|length| i64::try_from(length).ok())
+                .map(Value::Int));
+        }
+        Ok(self.answer(args.values()))
+    }
+}
+
+fn shallow_same(left: &Value, right: &Value) -> Option<bool> {
+    if left.kind() != right.kind() {
+        return Some(false);
+    }
+    match (left, right) {
+        (Value::Null, Value::Null)
+        | (Value::Absent, Value::Absent)
+        | (Value::Bool(_), Value::Bool(_))
+        | (Value::Int(_), Value::Int(_))
+        | (Value::Float(_), Value::Float(_))
+        | (Value::Text(_), Value::Text(_))
+        | (Value::Timestamp(_), Value::Timestamp(_))
+        | (Value::Task(_), Value::Task(_))
+        | (Value::TaskRef(_), Value::TaskRef(_))
+        | (Value::ObjectRef(_), Value::ObjectRef(_))
+        | (Value::List(_), Value::List(_))
+        | (Value::Map(_), Value::Map(_))
+        | (Value::Set(_), Value::Set(_))
+        | (Value::Record(_), Value::Record(_))
+        | (Value::Closure(_), Value::Closure(_)) => Some(left.same(right)),
+        _ => None,
     }
 }
 

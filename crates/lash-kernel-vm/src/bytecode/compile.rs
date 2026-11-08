@@ -673,7 +673,13 @@ impl<'a> Compiler<'a> {
             .and_then(|inline| inline.for_version(definition.native_version))
         {
             // A guarded native's answer stays the call's, under its guard.
-            scalar @ Some(InlineOperation::Scalar { .. }) if guard.is_none() => scalar,
+            scalar @ Some(
+                InlineOperation::Scalar { .. }
+                | InlineOperation::Kind
+                | InlineOperation::Same
+                | InlineOperation::Not
+                | InlineOperation::Length(_),
+            ) if guard.is_none() => scalar,
             _ => None,
         };
         let at = self.natives.len() as u32;

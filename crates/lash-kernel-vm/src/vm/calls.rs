@@ -127,11 +127,18 @@ impl<H: Heap> Vm<H> {
             let from = self.cx.stack.len() - argc;
             let fee = if charged && !self.paced {
                 let args = &self.cx.stack[from..];
-                let sized = |value: &Value| crate::data::immediate_size(value).unwrap_or(0);
-                let sizes = [sized(&args[0]), sized(&args[1]), sized(&value)];
-                match program.charges[entry.charge as usize].pair(sizes) {
-                    Some(units) => Some(units),
-                    None => Some(self.formula(entry.charge, args, Some(&value))?),
+                match inline {
+                    InlineOperation::Kind | InlineOperation::Not | InlineOperation::Length(_) => {
+                        Some(self.formula(entry.charge, args, Some(&value))?)
+                    }
+                    _ => {
+                        let sized = |value: &Value| crate::data::immediate_size(value).unwrap_or(0);
+                        let sizes = [sized(&args[0]), sized(&args[1]), sized(&value)];
+                        match program.charges[entry.charge as usize].pair(sizes) {
+                            Some(units) => Some(units),
+                            None => Some(self.formula(entry.charge, args, Some(&value))?),
+                        }
+                    }
                 }
             } else {
                 None
@@ -299,6 +306,23 @@ impl<H: Heap> Vm<H> {
     /// has an immediate answer.
     #[inline]
     fn scalar(&self, inline: InlineOperation, argc: usize, params: usize) -> Option<Value> {
+        match inline {
+            InlineOperation::Kind | InlineOperation::Not if argc == 1 && params == 1 => {
+                return inline.answer(&self.cx.stack[self.cx.stack.len() - argc..]);
+            }
+            InlineOperation::Length(_) if argc == 1 && params == 1 => {
+                let args = &self.cx.stack[self.cx.stack.len() - argc..];
+                let semantics = self.heap.semantics();
+                return inline
+                    .answer_read(Args::new(args, self.heap.objects(), &semantics))
+                    .ok()
+                    .flatten();
+            }
+            InlineOperation::Same if argc == 2 && params == 2 => {
+                return inline.answer(&self.cx.stack[self.cx.stack.len() - argc..]);
+            }
+            _ => {}
+        }
         let InlineOperation::Scalar { operation, .. } = inline else {
             return None;
         };

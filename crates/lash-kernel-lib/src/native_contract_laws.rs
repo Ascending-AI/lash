@@ -3,6 +3,72 @@
 //! from the input-only declaration evaluator and its native-view cost adapter.
 use crate::testsupport::{Bench, decode, heap};
 
+mod allocations {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<Option<usize>> = const { Cell::new(None) };
+    }
+
+    fn record() {
+        let _ = COUNT.try_with(|count| {
+            if let Some(value) = count.get() {
+                count.set(Some(value + 1));
+            }
+        });
+    }
+
+    struct Counter;
+    #[global_allocator]
+    static ALLOCATOR: Counter = Counter;
+
+    #[expect(
+        unsafe_code,
+        reason = "test allocation counter forwards the GlobalAlloc contract unchanged to System"
+    )]
+    unsafe impl GlobalAlloc for Counter {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            record();
+            // SAFETY: The caller's valid layout is passed unchanged to System.
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            record();
+            // SAFETY: The caller's valid layout is passed unchanged to System.
+            unsafe { System.alloc_zeroed(layout) }
+        }
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            // SAFETY: System allocated this pointer with the same layout.
+            unsafe { System.dealloc(pointer, layout) }
+        }
+        unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            record();
+            // SAFETY: The caller's pointer, layout and new size are unchanged.
+            unsafe { System.realloc(pointer, layout, size) }
+        }
+    }
+
+    struct Active;
+    impl Drop for Active {
+        fn drop(&mut self) {
+            COUNT.with(|count| count.set(None));
+        }
+    }
+
+    pub(super) fn during<T>(body: impl FnOnce() -> T) -> (T, usize) {
+        COUNT.with(|count| {
+            assert!(count.get().is_none());
+            count.set(Some(0));
+        });
+        let active = Active;
+        let value = body();
+        let count = COUNT.with(|count| count.take().unwrap());
+        drop(active);
+        (value, count)
+    }
+}
+
 thread_local! {
     static OBSERVED_NAMES: std::cell::RefCell<std::collections::BTreeSet<String>> = const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
     static SORTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -313,6 +379,179 @@ fn int(value: i64) -> Datum {
 }
 fn text(value: &str) -> Datum {
     Datum::Text(value.into())
+}
+
+/// R8: a kind tag and shallow identity need no traversal workspace. In
+/// particular, `same` must not allocate a pending-pair Vec before inspecting
+/// two inline texts, which the Python call wrapper compares on every call.
+#[test]
+fn call_wrapper_leaf_natives_answer_without_allocating() {
+    use lash_kernel_doc::{Float, NativeCall, WorkCounter};
+    let mut bench = heap();
+    let list = decode(&mut bench, Datum::List(vec![]));
+    let other = decode(&mut bench, Datum::List(vec![]));
+    let pair = decode(&mut bench, Datum::Tuple(vec![int(7), int(8)]));
+    let map = decode(&mut bench, Datum::Map(vec![(text("x"), int(7))]));
+    let short = |value| Value::Text(lash_kernel_doc::arena::ShortText::new(value).unwrap());
+    let cases: &[(&str, &[Value], Value)] = &[
+        ("kind", &[list], short("list")),
+        (
+            "same",
+            &[short("py.function"), short("py.function")],
+            Value::Bool(true),
+        ),
+        (
+            "same",
+            &[short("py.function"), short("py.builtin")],
+            Value::Bool(false),
+        ),
+        ("same", &[Value::Int(3), Value::Int(3)], Value::Bool(true)),
+        (
+            "same",
+            &[
+                Value::Float(Float::new(-0.0)),
+                Value::Float(Float::new(0.0)),
+            ],
+            Value::Bool(false),
+        ),
+        (
+            "same",
+            &[
+                Value::Float(Float::new(f64::NAN)),
+                Value::Float(Float::new(f64::NAN)),
+            ],
+            Value::Bool(true),
+        ),
+        ("same", &[list, list], Value::Bool(true)),
+        ("same", &[list, other], Value::Bool(false)),
+        ("same", &[list, Value::Absent], Value::Bool(false)),
+        ("bool.not", &[Value::Bool(true)], Value::Bool(false)),
+        ("bool.not", &[Value::Bool(false)], Value::Bool(true)),
+        ("list.len", &[list], Value::Int(0)),
+        ("tuple.len", &[pair], Value::Int(2)),
+        ("map.len", &[map], Value::Int(1)),
+    ];
+    for &(name, values, expected) in cases {
+        let native = crate::native(name).unwrap();
+        let mut counter = WorkCounter::new(Some(0));
+        let ((answer, count), usage) = bench
+            .run(values, 0, |args, new| {
+                allocations::during(|| {
+                    native.call(NativeCall {
+                        args,
+                        new,
+                        counter: &mut counter,
+                    })
+                })
+            })
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "{name} {values:?}: a shallow answer needs no workspace"
+        );
+        assert!(answer.unwrap().same(&expected));
+        assert_eq!(counter.spent(), 0);
+        assert_eq!(usage.reserved(), 0);
+        assert_eq!(usage.grown, 0);
+        let inline = native.specialization().inline.unwrap();
+        let ((answer, count), _) = bench
+            .run(values, 0, |args, _| {
+                allocations::during(|| inline.answer_read(1, args))
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        assert!(answer.unwrap().unwrap().same(&expected));
+        assert!(inline.for_version(2).is_none());
+    }
+    let tuple = decode(&mut bench, Datum::Tuple(vec![int(3)]));
+    let same = crate::native("same")
+        .unwrap()
+        .specialization()
+        .inline
+        .unwrap();
+    assert!(same.scalar_answer(1, &[tuple, tuple]).is_none());
+
+    // Force the same registered implementations through the ordinary call,
+    // including unary completion billing and refusals at the last fee.
+    struct Ordinary(std::sync::Arc<dyn lash_kernel_doc::NativeFunction>);
+    impl lash_kernel_doc::NativeFunction for Ordinary {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            self.0.call(call)
+        }
+        fn resource_contract(
+            &self,
+            args: lash_kernel_doc::Args<'_>,
+        ) -> Result<Option<Contract>, NativeError> {
+            self.0.resource_contract(args)
+        }
+    }
+    let mut catalog = FunctionRegistry::new();
+    lash_kernel_vm::register_machine_functions(&mut catalog).unwrap();
+    crate::register_numbers(&mut catalog).unwrap();
+    crate::register_collections(&mut catalog).unwrap();
+    let run = |inline: bool, limit: u64| {
+        use lash_kernel_vm::{Bounds, Charge, CoreMachine, Machine, PreparedLibrary};
+        let mut registry = FunctionRegistry::new();
+        for (_, registered) in catalog.iter().filter(|(_, registered)| {
+            matches!(
+                registered.name(),
+                "kind" | "same" | "bool.not" | "list.len" | "tuple.len" | "map.len"
+            )
+        }) {
+            let definition = (**registered.definition()).clone();
+            let native = std::sync::Arc::clone(registered.native().unwrap());
+            let native: std::sync::Arc<dyn lash_kernel_doc::NativeFunction> = if inline {
+                native
+            } else {
+                std::sync::Arc::new(Ordinary(native))
+            };
+            registry.register(definition, Some(native)).unwrap();
+        }
+        let document = std::sync::Arc::new(crate::testsupport::document(
+            "kernel 1\nnumbers by_spelling\nmain { let xs = [] let pair = (7, 8) let kw = map{\"x\": 7} return (kind(xs), same(\"py.function\", \"py.function\"), same(-0.0, 0.0), same(xs, xs), list.len(xs), tuple.len(pair), map.len(kw), bool.not(false)) }",
+            &registry,
+        ));
+        let program = crate::testsupport::program(
+            document,
+            PreparedLibrary::new(std::sync::Arc::new(registry)),
+        );
+        let mut machine = CoreMachine::start(
+            program,
+            Bounds {
+                memory_meter: lash_kernel_vm::MemoryMeter::On,
+                charge: Charge::Exact,
+                charge_limit: limit,
+                memory: 64 << 20,
+                call_depth: 1,
+                live_tasks: 100,
+                requests_per_park: 100,
+                join_members: 100,
+            },
+            lash_kernel_vm::CellStart {
+                owner: lash_kernel_doc::heap::PageId([9; 32]),
+                target: lash_kernel_vm::Target::Main,
+                args: vec![],
+                session: None,
+                modes: Default::default(),
+                host: vec![],
+            },
+            Box::<crate::testsupport::Source>::default(),
+        )
+        .unwrap();
+        let step = machine
+            .run(&mut crate::testsupport::World::default(), u64::MAX)
+            .unwrap();
+        (step, machine.meters())
+    };
+    let ordinary = run(false, u64::MAX);
+    assert!(matches!(
+        ordinary.0,
+        lash_kernel_vm::Step::Ended(lash_kernel_vm::End::Finished(_))
+    ));
+    let total = ordinary.1.charged.unwrap();
+    for limit in [0, 1, total - 1, total, u64::MAX] {
+        assert_eq!(run(true, limit), run(false, limit), "charge limit {limit}");
+    }
 }
 
 /// R8/K-LIB-006: the declared word/binary64 kernel is the registered
