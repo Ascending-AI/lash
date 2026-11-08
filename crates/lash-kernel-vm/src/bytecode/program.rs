@@ -65,24 +65,24 @@ pub enum UnitKind {
 }
 
 /// One op's fixed charge, billed at its start (`K-CHG-002`): `units`
-/// one-unit events (statement, expression nodes, atoms, loop tests,
-/// `metered` units) and then `members`, a construction's members written,
-/// as one atomic event.
+/// one-unit events (statement, expression nodes, atoms, loop tests) and
+/// then `atomic`, one event billed whole (a construction's members
+/// written, or a loop test's `metered` units).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Event {
     pub units: u64,
-    pub members: u64,
+    pub atomic: u64,
 }
 
 impl Event {
     #[inline]
     pub fn total(self) -> u64 {
-        self.units.saturating_add(self.members)
+        self.units.saturating_add(self.atomic)
     }
 
     #[inline]
     pub fn is_none(self) -> bool {
-        self.units == 0 && self.members == 0
+        self.units == 0 && self.atomic == 0
     }
 }
 
@@ -127,6 +127,28 @@ pub struct Unit {
     pub name: Arc<str>,
     /// The unit's site root.
     pub site: Site,
+    /// What an observer sees at an op, by op index, in op order: the
+    /// document's statement starts, empty-block entries, `while` tests and
+    /// action issues. Read only while the run is observed.
+    pub points: Vec<(u32, Point)>,
+}
+
+/// What an observed run records before an op runs (`observe/`).
+#[derive(Clone, Debug)]
+pub enum Point {
+    /// The document statement at this site starts.
+    Start(Site),
+    /// An `if` tests its condition: an empty branch it takes is entered
+    /// and left at once.
+    Branch {
+        then: Option<Site>,
+        otherwise: Option<Site>,
+    },
+    /// The `while` statement at this site tests its condition.
+    Test(Site),
+    /// The document action at this site issues, after its operands:
+    /// a call, perform, spawn or task action.
+    Action(Site),
 }
 
 /// A block (contract §3): its events are billed by its ops in order, and

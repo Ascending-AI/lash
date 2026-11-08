@@ -756,6 +756,7 @@ impl<H: Heap> Vm<H> {
         result: &Type,
     ) -> Run<()> {
         let origin = self.origin(unit, site);
+        self.report(host);
         match host.perform(use_, args, &site.position(), &origin) {
             Ok(Ok(answer)) => {
                 let value = match self.decode(&answer, result) {

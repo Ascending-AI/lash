@@ -1568,7 +1568,8 @@ PACKAGE_DEPS = {
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_releases": "//crates/lash-kernel-releases:lash-kernel-releases",
             "lash_kernel_services": "//crates/lash-kernel-services:lash-kernel-services",
-            "lash_kernel_view": "//crates/lash-kernel-view:lash-kernel-view"
+            "lash_kernel_view": "//crates/lash-kernel-view:lash-kernel-view",
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         },
         "normal": {
             "arbitrary": "//third-party/rust:p0012",

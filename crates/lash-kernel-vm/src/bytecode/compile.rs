@@ -23,7 +23,7 @@ use super::names::Names;
 use super::op::Op;
 use super::program::{
     ActionSite, Block, CallSite, Callee, Capture, ClosureSite, Constant, Event, FunctionEntry,
-    LoopMark, LoopSite, Mark, NativeEntry, Program, Unit, UnitId, UnitKind,
+    LoopMark, LoopSite, Mark, NativeEntry, Point, Program, Unit, UnitId, UnitKind,
 };
 use crate::functions::{MachineFunction, machine_function};
 
@@ -90,6 +90,9 @@ pub(crate) struct Fun {
     pending_pace: u32,
     /// The next op starts a step (a statement's start).
     pub mark: bool,
+    /// What an observer sees before the next op: a statement start.
+    pub start: Option<Point>,
+    pub points: Vec<(u32, Point)>,
     pub slots: HashMap<Name, u16>,
     pub locals: u16,
     pub boxed: BTreeSet<Name>,
@@ -134,6 +137,8 @@ impl Fun {
             pending: Event::default(),
             pending_pace: 0,
             mark: false,
+            start: None,
+            points: Vec::new(),
             slots: HashMap::new(),
             locals: 0,
             boxed: BTreeSet::new(),
@@ -162,6 +167,19 @@ impl Fun {
         Site::new(self.site.clone(), self.path.clone())
     }
 
+    /// Whether the unit is the document's own code, which an observer
+    /// sees (`observe/`): library code (`K-LIB-010`) never is.
+    pub(crate) fn observed(&self) -> bool {
+        !self.covered && self.owner.is_none()
+    }
+
+    /// Records what an observer sees before the op at `at`.
+    pub(crate) fn point(&mut self, at: u32, point: Point) {
+        if self.observed() {
+            self.points.push((at, point));
+        }
+    }
+
     /// `n` one-unit events of uncovered code (statement, expression node,
     /// atom, loop test), billed by the next op.
     pub(crate) fn units(&mut self, n: u64) {
@@ -170,16 +188,22 @@ impl Fun {
         }
     }
 
-    /// One-unit events that charge in covered code too: `metered` loop
-    /// units and the atoms of a `perform` or `spawn` (`K-CHG-007`).
+    /// One-unit events that charge in covered code too: the atoms of a
+    /// `perform` or `spawn` (`K-CHG-007`).
     pub(crate) fn always(&mut self, n: u64) {
         self.pending.units = self.pending.units.saturating_add(n);
+    }
+
+    /// A `metered N` loop test's units: one declared event of `n`, billed
+    /// whole and in covered code too (`K-CHG-007`).
+    pub(crate) fn metered(&mut self, n: u64) {
+        self.pending.atomic = self.pending.atomic.saturating_add(n);
     }
 
     /// A construction's members, one atomic event on the next op.
     pub(crate) fn members(&mut self, n: u64) {
         if !self.covered {
-            self.pending.members = self.pending.members.saturating_add(n);
+            self.pending.atomic = self.pending.atomic.saturating_add(n);
         }
     }
 
@@ -201,6 +225,9 @@ impl Fun {
     }
 
     pub(crate) fn emit(&mut self, op: Op) -> usize {
+        if let Some(point) = self.start.take() {
+            self.points.push((self.here(), point));
+        }
         self.ops.push(op);
         self.event.push(std::mem::take(&mut self.pending));
         self.pace.push(std::mem::take(&mut self.pending_pace));
@@ -799,8 +826,12 @@ impl<'a> Compiler<'a> {
             actions,
             action_marks,
             site,
+            mut points,
             ..
         } = f;
+        // Points are recorded in lowering order; an `if`'s test and a
+        // loop's head may be recorded after ops past them.
+        points.sort_by_key(|(at, _)| *at);
         let authored = !covered
             && match &kind {
                 UnitKind::Main | UnitKind::Declared(_) => true,
@@ -876,6 +907,7 @@ impl<'a> Compiler<'a> {
             authored,
             name,
             site: Site::new(site, Vec::new()),
+            points,
         }
     }
 

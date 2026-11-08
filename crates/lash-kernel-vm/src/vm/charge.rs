@@ -33,7 +33,7 @@ pub(crate) struct Refused {
 pub(crate) enum Rest {
     /// One-unit events, billed one at a time.
     Units(u64),
-    /// One atomic event (construction members, a fee).
+    /// One atomic event (construction members, `metered` units, a fee).
     Atomic(u64),
 }
 

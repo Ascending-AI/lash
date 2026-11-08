@@ -20,7 +20,7 @@ use lash_kernel_value::types::Type;
 
 use super::compile::{Compiler, Fun, LoopCtx, Result, Scope, Var, unsupported};
 use super::op::Op;
-use super::program::{ActionSite, Callee, LoopMark, LoopSite};
+use super::program::{ActionSite, Callee, LoopMark, LoopSite, Point};
 
 impl Compiler<'_> {
     /// Lowers `block` in a scope of its own (`K-FORM-003`).
@@ -119,6 +119,9 @@ impl Compiler<'_> {
     }
 
     fn statement(&mut self, f: &mut Fun, stmt: &Stmt) -> Result<()> {
+        if f.observed() {
+            f.start = Some(Point::Start(f.statement.clone()));
+        }
         f.mark = true;
         f.units(1);
         f.pace();
@@ -163,6 +166,13 @@ impl Compiler<'_> {
             } => {
                 self.child(f, 0, condition)?;
                 let test = f.emit(Op::JumpIfFalse(0));
+                // An empty branch is entered and left as the test is taken.
+                let empty = |index, block: &[Stmt]| block.is_empty().then(|| f.site().child(index));
+                let point = Point::Branch {
+                    then: empty(1, then_block),
+                    otherwise: empty(2, else_block),
+                };
+                f.point(test as u32, point);
                 f.leader();
                 self.child_block(f, 1, then_block)?;
                 if else_block.is_empty() {
@@ -185,7 +195,12 @@ impl Compiler<'_> {
             } => {
                 let started = Self::enter_loop(f);
                 let head = f.label();
+                f.point(head, Point::Test(f.statement.clone()));
                 self.loop_test(f, *metered);
+                if *metered != 0 {
+                    // The metered event comes before the condition's.
+                    f.emit(Op::Nop);
+                }
                 self.child(f, 0, condition)?;
                 let test = f.emit(Op::WhileFalse(0));
                 f.leader();
@@ -308,11 +323,12 @@ impl Compiler<'_> {
         started
     }
 
-    /// A loop's continuation test: its unit, then its `metered` units,
-    /// which charge under a cover too (`K-CHG-002`, `K-CHG-007`).
+    /// A loop's continuation test: its unit, then its `metered` event,
+    /// which charges under a cover too (`K-CHG-002`, `K-CHG-007`). The
+    /// next op bills both.
     fn loop_test(&mut self, f: &mut Fun, metered: u64) {
         f.units(1);
-        f.always(metered);
+        f.metered(metered);
         f.pace();
     }
 
@@ -725,6 +741,7 @@ impl Compiler<'_> {
             DocCallee::Local(id) => self.callee(f, *id)?,
             DocCallee::Import(_) => return unsupported("a call of an imported function"),
         };
+        f.point(f.here(), Point::Action(site.clone()));
         self.call(f, target, argc as u8, site);
         Ok(())
     }
@@ -777,7 +794,11 @@ impl Compiler<'_> {
         let mark = self.mark(f, action.site());
         f.actions.push(action);
         f.action_marks.push(mark);
-        f.emit(Op::Action(at));
+        let pc = f.emit(Op::Action(at));
+        f.point(
+            pc as u32,
+            Point::Action(f.actions[at as usize].site().clone()),
+        );
         f.leader();
     }
 
@@ -896,6 +917,7 @@ impl Compiler<'_> {
                     ActKind::Await(policy) => {
                         let policy = Self::local_target(policy, "an await policy")?;
                         let callee = self.callee(f, policy)?;
+                        f.point(f.here(), Point::Action(site.clone()));
                         self.call(f, callee, 1, site);
                     }
                 }

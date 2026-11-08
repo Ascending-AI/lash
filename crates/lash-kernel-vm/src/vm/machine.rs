@@ -18,6 +18,7 @@ use lash_kernel_value::{HelperOperationId, OperationSlot};
 use super::tasks::{Committed, Operation, Operations};
 use crate::bytecode::program::ActionSite;
 
+use super::watch::Watch;
 use super::{Stop, Vm, value_depth};
 use crate::heap::Heap;
 use crate::heap::slots::SlotHeap;
@@ -26,7 +27,7 @@ use crate::interface::{
     RunError, StartError, Step, Target, WaitId,
 };
 use crate::paged::{CellStart, Finished, Machine, MachineError, OpenError, SealError, SealedRoot};
-use crate::{ExecutionPath, MachineOptions, SiteCounts};
+use crate::{ChargeTape, ExecutionPath, MachineOptions, SiteCounts};
 
 /// One run of one document on the bytecode core.
 pub struct CoreMachine {
@@ -42,6 +43,19 @@ fn linked(problem: impl ToString) -> StartError {
 }
 
 impl CoreMachine {
+    /// Records every charge the run makes from here on in `tape`, in order
+    /// (`K-CHG-002`); recording changes no result, charge or slice return.
+    pub fn record_charges(&mut self, tape: ChargeTape) {
+        match self.vm.watch.as_deref_mut() {
+            Some(watch) => watch.tape = Some(tape),
+            None => {
+                self.vm.watch =
+                    Watch::new(&self.document, &self.vm.program, false, false, Some(tape))
+                        .map(Box::new);
+            }
+        }
+    }
+
     /// Builds `datum` into the run's heap, every mutable object fresh.
     fn copy_in(vm: &mut Vm<SlotHeap>, datum: &Datum) -> Result<Value, StartError> {
         let built = super::datum::copy_in(vm, datum);
@@ -165,14 +179,30 @@ impl Machine for CoreMachine {
 
     fn set_options(&mut self, options: MachineOptions) {
         self.vm.limiter = options.charge_limiter;
+        let tape = self.vm.watch.take().and_then(|watch| watch.tape);
+        self.vm.watch = Watch::new(
+            &self.document,
+            &self.vm.program,
+            !options.observation.is_off(),
+            options.trace_path,
+            tape,
+        )
+        .map(Box::new);
     }
 
     fn take_counts(&mut self) -> SiteCounts {
-        SiteCounts::default()
+        self.vm
+            .watch
+            .as_deref_mut()
+            .map(Watch::take_counts)
+            .unwrap_or_default()
     }
 
     fn take_path(&mut self) -> Result<ExecutionPath, lash_kernel_doc::heap::HeapFault> {
-        Ok(ExecutionPath::default())
+        self.vm
+            .watch
+            .as_deref_mut()
+            .map_or_else(|| Ok(ExecutionPath::default()), Watch::take_path)
     }
 
     fn take_caught(&mut self) -> Vec<WaitId> {

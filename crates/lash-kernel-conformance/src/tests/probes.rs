@@ -5,11 +5,21 @@
 //! coverage per `K-CHG-007` and R5, and no slice return without a ready
 //! task (`K-MACH-005`).
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use lash_kernel_exec::Weight;
+use lash_kernel_state::paged::{Checkpoint, PageSource, SealBudget};
+use lash_kernel_value::observation::{ExecutionPath, RunObservation, SiteCounts};
 use lash_kernel_value::package::{Fill, Link};
-use lash_kernel_vm::{Charge, CoreMachine, PreparedLibrary, Program};
+use lash_kernel_vm::{
+    Bounds, CellStart, Charge, ChargeTape, CoreMachine, DeliverError, Delivered, Host,
+    KernelMachine, Machine, MachineError, MachineOptions, Meters, OpenError, Outcome,
+    PreparedLibrary, Program, SealError, SealedRoot, StartError, Step, WaitId,
+};
 
+use crate::machine::{Run, run_program_in};
 use crate::{Shard, check_program};
 
 const PROBE_FILES: &[(&str, &str)] = &[
@@ -176,6 +186,201 @@ fn every_r56_probe_holds_on_the_bytecode_core() {
             });
             if let Err(why) = checked {
                 failures.push(format!("{file} {}: {why}", case.name));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+thread_local! {
+    /// What the observed runs on this thread saw: counts by ordinal, and
+    /// the statement path.
+    static SEEN: RefCell<(BTreeMap<u32, u64>, ExecutionPath)> = RefCell::default();
+    /// The charges the observed run on this thread recorded.
+    static TAPE: RefCell<ChargeTape> = RefCell::default();
+}
+
+/// A machine that records its charges on a tape.
+trait Taped {
+    fn record_charges(&mut self, tape: ChargeTape);
+}
+
+impl Taped for CoreMachine {
+    fn record_charges(&mut self, tape: ChargeTape) {
+        CoreMachine::record_charges(self, tape);
+    }
+}
+
+impl Taped for KernelMachine {
+    fn record_charges(&mut self, tape: ChargeTape) {
+        KernelMachine::record_charges(self, tape);
+    }
+}
+
+/// `M` observed: counts and the statement path on from its start, taken
+/// at every run return into [`SEEN`], and its charges on [`TAPE`].
+struct Watched<M>(M);
+
+impl<M: Machine + Taped> Watched<M> {
+    fn watching(mut machine: M) -> Self {
+        machine.set_options(MachineOptions {
+            observation: RunObservation::Counts,
+            trace_path: true,
+            ..Default::default()
+        });
+        machine.record_charges(TAPE.with_borrow(Clone::clone));
+        Self(machine)
+    }
+}
+
+impl<M: Machine + Taped> Machine for Watched<M> {
+    fn start(
+        program: Program,
+        bounds: Bounds,
+        start: CellStart,
+        source: Box<dyn PageSource>,
+    ) -> Result<Self, StartError> {
+        M::start(program, bounds, start, source).map(Self::watching)
+    }
+    fn open(
+        program: Program,
+        bounds: Bounds,
+        root: &Checkpoint,
+        source: Box<dyn PageSource>,
+    ) -> Result<Self, OpenError> {
+        M::open(program, bounds, root, source).map(Self)
+    }
+    fn set_options(&mut self, options: MachineOptions) {
+        self.0.set_options(options);
+    }
+    fn take_counts(&mut self) -> SiteCounts {
+        self.0.take_counts()
+    }
+    fn take_path(&mut self) -> Result<ExecutionPath, lash_kernel_doc::heap::HeapFault> {
+        self.0.take_path()
+    }
+    fn take_caught(&mut self) -> Vec<WaitId> {
+        self.0.take_caught()
+    }
+    fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
+        let step = self.0.run(host, slice);
+        let counts = self.0.take_counts();
+        let path = self.0.take_path().expect("the path");
+        SEEN.with_borrow_mut(|(seen, held)| {
+            for (ordinal, count) in counts.iter() {
+                *seen.entry(*ordinal).or_default() += count;
+            }
+            held.append(path);
+        });
+        step
+    }
+    fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<Delivered, DeliverError> {
+        self.0.deliver(wait, outcome)
+    }
+    fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
+        self.0.seal(budget)
+    }
+    fn meters(&self) -> Meters {
+        self.0.meters()
+    }
+}
+
+/// What the last observed run saw, its charges as the events a bound
+/// tells apart.
+fn seen() -> (
+    BTreeMap<u32, u64>,
+    lash_kernel_value::observation::ReplayPath,
+    Vec<Weight>,
+) {
+    let (counts, path) = SEEN.take();
+    (counts, path.replay(), Weight::expand(TAPE.take().steps()))
+}
+
+// Observation changes no result (`observe/`): every probe holds on the
+// observed core, and its site counts and per-task statement path are the
+// base Source executor's, the oracle for what is seen. Its charge tape
+// sums to the probe's literal charge, and is the base's event for event
+// where the literal is the base's charge (probes/README.md).
+#[test]
+fn observing_the_bytecode_core_changes_nothing_and_sees_what_the_base_sees() {
+    let release = lash_kernel_releases::helper_release().expect("helper release");
+    let library = PreparedLibrary::with_helpers(
+        Arc::new(crate::installed_functions().expect("installed functions")),
+        Arc::clone(&release.helpers),
+    );
+    let mut failures = Vec::new();
+    for (file, text) in PROBE_FILES {
+        let shard: Shard = serde_json::from_str(text).expect(file);
+        for case in &shard.cases {
+            let program = linked(&library, &case.document).expect(file);
+            SEEN.take();
+            TAPE.take();
+            let observed =
+                match check_program::<Watched<CoreMachine>>(program.clone(), case, Charge::Exact) {
+                    Ok(observed) => observed,
+                    Err(why) => {
+                        failures.push(format!("{file} {}: observed: {why}", case.name));
+                        continue;
+                    }
+                };
+            let core = seen();
+            let taped: u64 = core.2.iter().map(|weight| weight.units()).sum();
+            if Some(taped) != observed.charged {
+                failures.push(format!(
+                    "{file} {}: tape sums to {taped}, charged {:?}",
+                    case.name, observed.charged
+                ));
+            }
+            let mut start = |program, bounds, start, source: &crate::pages::Source| {
+                lash_kernel_vm::testing::start(
+                    program,
+                    bounds,
+                    start,
+                    lash_kernel_vm::testing::ExecutionStrategy::Source,
+                    Box::new(source.clone()),
+                )
+                .map(Watched::<KernelMachine>::watching)
+            };
+            let run = Run {
+                start: &mut start,
+                printed: &mut || {},
+                charge: None,
+            };
+            let based = match run_program_in(program, case, run, &mut |at| Ok(at.machine), None) {
+                Ok(based) => based,
+                Err(why) => {
+                    failures.push(format!("{file} {}: base: {why}", case.name));
+                    continue;
+                }
+            };
+            let base = seen();
+            if based.charged == observed.charged && core.2 != base.2 {
+                let at = core
+                    .2
+                    .iter()
+                    .zip(&base.2)
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                failures.push(format!(
+                    "{file} {}: tape != base at event {at} of {}/{}: {:?} != {:?}",
+                    case.name,
+                    core.2.len(),
+                    base.2.len(),
+                    &core.2[at.saturating_sub(3)..(at + 4).min(core.2.len())],
+                    &base.2[at.saturating_sub(3)..(at + 4).min(base.2.len())],
+                ));
+            }
+            if core.0 != base.0 {
+                failures.push(format!(
+                    "{file} {}: counts {:?} != base {:?}",
+                    case.name, core.0, base.0
+                ));
+            }
+            if core.1 != base.1 {
+                failures.push(format!(
+                    "{file} {}: path {:?} != base {:?}",
+                    case.name, core.1, base.1
+                ));
             }
         }
     }

@@ -18,6 +18,7 @@ pub(crate) mod machine;
 pub(crate) mod members;
 pub(crate) mod plans;
 pub(crate) mod tasks;
+pub(crate) mod watch;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -34,8 +35,9 @@ use crate::bytecode::op::Op;
 use crate::bytecode::program::{Constant, Program, Unit, UnitId, UnitKind};
 use crate::heap::{Heap, MemoryRefused};
 use crate::{Bound, ChargeLimiter, Host, LimitDecision};
-use charge::{Meter, Refused};
+use charge::{Meter, Refused, Rest};
 use frames::{Bill, Context, Frame, Handler};
+use lash_kernel_exec::Weight;
 
 /// Why [`Vm::run`] returned.
 #[derive(Debug)]
@@ -145,6 +147,8 @@ pub(crate) struct Vm<H: Heap> {
     closures: HashMap<FunctionId, UnitId>,
     /// Each function value's trampoline.
     functions: HashMap<FunctionId, UnitId>,
+    /// What observes the run; an observed run takes the exact path.
+    pub watch: Option<Box<watch::Watch>>,
 }
 
 impl<H: Heap> Vm<H> {
@@ -210,6 +214,7 @@ impl<H: Heap> Vm<H> {
             refused: None,
             closures,
             functions,
+            watch: None,
         })
     }
 
@@ -278,7 +283,20 @@ impl<H: Heap> Vm<H> {
             match decision {
                 LimitDecision::Grow(more) if more > 0 => {
                     self.meter.grow(more);
-                    match self.meter.retry(refused.rest) {
+                    let retried = self.meter.retry(refused.rest);
+                    // The tape holds a refused unit run's passing unit
+                    // already; an atomic event, whole.
+                    if let (Some(watch), Rest::Units(units)) = (&self.watch, refused.rest) {
+                        let left = match &retried {
+                            Ok(()) => 1,
+                            Err(again) => match again.rest {
+                                Rest::Units(left) => left,
+                                Rest::Atomic(_) => units,
+                            },
+                        };
+                        watch.charge(Weight::Units(units - left));
+                    }
+                    match retried {
                         Ok(()) => return Ok(()),
                         Err(again) => refused = again,
                     }
@@ -321,15 +339,49 @@ impl<H: Heap> Vm<H> {
             return Ok(());
         }
         let event = unit.event[pc];
+        if self.watch.is_some() {
+            return self.bill_watched(event);
+        }
         if event.units != 0
             && let Err(refused) = self.meter.units(event.units)
         {
             self.refusal(refused)?;
         }
-        if event.members != 0
-            && let Err(refused) = self.meter.atomic(event.members)
+        if event.atomic != 0
+            && let Err(refused) = self.meter.atomic(event.atomic)
         {
             self.refusal(refused)?;
+        }
+        Ok(())
+    }
+
+    /// [`Self::bill`] onto the charge tape: each unit run whole, or the
+    /// units that fit and then the one that passes, and each atomic event
+    /// whole before the bound is checked.
+    #[cold]
+    #[inline(never)]
+    fn bill_watched(&mut self, event: crate::bytecode::program::Event) -> Run<()> {
+        let tape = |vm: &Self, weight| {
+            if let Some(watch) = &vm.watch {
+                watch.charge(weight);
+            }
+        };
+        if event.units != 0 {
+            match self.meter.units(event.units) {
+                Ok(()) => tape(self, Weight::Units(event.units)),
+                Err(refused) => {
+                    if let Rest::Units(rest) = refused.rest {
+                        tape(self, Weight::Units(event.units - rest + 1));
+                    }
+                    self.refusal(refused)?;
+                }
+            }
+        }
+        if event.atomic != 0 {
+            tape(self, Weight::Atomic(event.atomic));
+            if let Err(refused) = self.meter.atomic(event.atomic) {
+                self.refusal(refused)?;
+            }
         }
         Ok(())
     }
@@ -339,6 +391,9 @@ impl<H: Heap> Vm<H> {
     pub(crate) fn fee(&mut self, units: u64) -> Run<()> {
         if self.paced {
             return Ok(());
+        }
+        if let Some(watch) = &self.watch {
+            watch.charge(Weight::Atomic(units));
         }
         let through = self.through();
         self.exact = true;
@@ -647,8 +702,8 @@ impl<H: Heap> Vm<H> {
             let Some(frame) = self.cx.frames.last() else {
                 return Err(fault("a context with no frame ran"));
             };
-            let (unit, pc, base) = (frame.unit, frame.pc as usize, frame.base as usize);
-            let unit = &program.units[unit as usize];
+            let (id, pc, base) = (frame.unit, frame.pc as usize, frame.base as usize);
+            let unit = &program.units[id as usize];
             let op = unit.ops[pc];
             let fresh = std::mem::take(&mut self.fresh);
             if let Op::Block(_) = op {
@@ -668,6 +723,9 @@ impl<H: Heap> Vm<H> {
                     return Ok(Stop::Slice);
                 }
                 self.bill(unit, pc)?;
+                if self.watch.is_some() && !unit.points.is_empty() {
+                    self.see(id, unit, pc);
+                }
             }
             if let Some(frame) = self.cx.frames.last_mut() {
                 frame.pc += 1;
@@ -676,7 +734,7 @@ impl<H: Heap> Vm<H> {
                 Op::Block(block) => {
                     let block = &unit.blocks[block as usize];
                     let cost = if self.paced { block.pace } else { block.charge };
-                    self.exact = !self.meter.enter(cost);
+                    self.exact = self.watch.is_some() || !self.meter.enter(cost);
                 }
                 Op::Nop => {}
                 Op::Const(n) => self.push(self.constants[n as usize]),
@@ -911,6 +969,34 @@ impl<H: Heap> Vm<H> {
                     return Err(fault(reason));
                 }
             }
+        }
+    }
+
+    /// What op `pc` of unit `id`'s points see, before it runs.
+    #[cold]
+    #[inline(never)]
+    fn see(&mut self, id: UnitId, unit: &Unit, pc: usize) {
+        let running = self.tasks.running;
+        if let Some(watch) = self.watch.as_deref_mut() {
+            watch.see(
+                id as usize,
+                &unit.points,
+                pc,
+                &self.cx.stack,
+                running,
+                &self.tasks.all[running].identity,
+            );
+        }
+    }
+
+    /// Hands the counts so far to a host that reads them live, before it
+    /// is asked something.
+    pub(crate) fn report(&mut self, host: &mut dyn Host) {
+        if let Some(watch) = self.watch.as_deref_mut()
+            && watch.counting()
+            && let Some(observer) = host.observer()
+        {
+            observer.counts(&watch.take_counts());
         }
     }
 
