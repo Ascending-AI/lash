@@ -20,8 +20,16 @@ const FIXED: u64 = 32;
 /// Schedule units per value an object holds.
 const PER_VALUE: u64 = 16;
 
+/// Schedule units of a closure over `captures` cells.
+pub(crate) fn closure_units(captures: usize) -> u64 {
+    FIXED.saturating_add(PER_VALUE.saturating_mul(captures as u64))
+}
+
 /// Schedule units of a cell.
 pub(crate) const CELL: u64 = FIXED + PER_VALUE;
+
+/// An error value: its kind, message and data (`K-ERR-001`).
+pub(crate) const ERROR: u64 = FIXED + 3 * PER_VALUE;
 
 /// The schedule units `object` costs once placed.
 pub(crate) fn schedule(object: &NewObject) -> u64 {
@@ -122,7 +130,7 @@ impl Heap for SlotHeap {
     fn error(&mut self, kind: &str, message: &str) -> Result<Value, NativeError> {
         let value = self.arena.error(kind, message, Value::Null)?;
         if let Some(handle) = value.handle() {
-            self.place(handle, FIXED.saturating_add(PER_VALUE.saturating_mul(3)));
+            self.place(handle, ERROR);
         }
         Ok(value)
     }
@@ -139,6 +147,27 @@ impl Heap for SlotHeap {
 
     fn cell_set(&mut self, cell: ArenaHandle, value: Value) -> Result<(), NativeError> {
         self.arena.cell_set(cell, value)
+    }
+
+    fn closure(
+        &mut self,
+        identity: std::sync::Arc<lash_kernel_doc::arena::ClosureIdentity>,
+        captures: Vec<ArenaHandle>,
+    ) -> ArenaHandle {
+        let units = closure_units(captures.len());
+        let handle = self.arena.new_closure(identity, captures);
+        self.place(handle, units);
+        handle
+    }
+
+    #[inline]
+    fn arena(&self) -> &Arena {
+        &self.arena
+    }
+
+    #[inline]
+    fn arena_mut(&mut self) -> &mut Arena {
+        &mut self.arena
     }
 
     fn collect(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) {

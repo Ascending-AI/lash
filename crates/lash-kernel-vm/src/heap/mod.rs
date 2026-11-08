@@ -11,7 +11,7 @@ pub(crate) mod slots;
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::native::{NativeError, NewObject};
 use lash_kernel_doc::arena::{ArenaHandle, Objects};
-use lash_kernel_state::arena::{ArenaSemantics, Visit};
+use lash_kernel_state::arena::{Arena, ArenaSemantics, Visit};
 
 /// An allocation the memory bound does not admit, after one collection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +52,20 @@ pub(crate) trait Heap {
     fn cell_get(&self, cell: ArenaHandle) -> Result<Value, NativeError>;
 
     fn cell_set(&mut self, cell: ArenaHandle, value: Value) -> Result<(), NativeError>;
+
+    /// A closure of `identity` over `captures` (`K-CLO-001`), admitted.
+    fn closure(
+        &mut self,
+        identity: std::sync::Arc<lash_kernel_doc::arena::ClosureIdentity>,
+        captures: Vec<ArenaHandle>,
+    ) -> ArenaHandle;
+
+    /// The objects, for the member operations and the measures
+    /// (`K-CHG-005`) the dispatcher reads in place.
+    fn arena(&self) -> &Arena;
+
+    /// The objects, for a member write the dispatcher makes in place.
+    fn arena_mut(&mut self) -> &mut Arena;
 
     /// Frees every object `roots` does not reach.
     fn collect(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>));

@@ -1,19 +1,22 @@
 //! A compiled document (cutover contract §1): one [`Program`] per machine
 //! instance, never cached across instances. It holds code for each unit
-//! (main, every declared function, every kernel-code body, every closure
-//! body), the constant pool, each block's charge and pace tables (§3) and
-//! each unit's resume and role tables (§5).
+//! (main, every declared function, every kernel-code body reached, every
+//! closure body and spawn stub), the constant pool, each block's charge
+//! and pace tables (§3) and each unit's side tables.
 //!
 //! A `Program` is built by the compiler and checked once by the validator;
 //! nothing at run time re-checks its structure.
 
 use std::sync::Arc;
 
-use lash_kernel_doc::Integer;
-use lash_kernel_doc::Value;
-use lash_kernel_doc::arena::native::{NativeFunction, NativeSpecialization};
-use lash_kernel_value::names::FunctionId;
+use lash_kernel_doc::arena::ClosureIdentity;
+use lash_kernel_doc::arena::native::NativeFunction;
+use lash_kernel_doc::{Integer, JoinMode, Value};
+use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot, Name};
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::types::Type;
 
+use super::charge_tables::Charge;
 use super::op::Op;
 
 /// Index of a unit in [`Program::units`].
@@ -24,6 +27,12 @@ pub struct Program {
     pub units: Vec<Unit>,
     pub constants: Vec<Constant>,
     pub natives: Vec<NativeEntry>,
+    /// Completion formulas and guard limits, by index.
+    pub charges: Vec<Charge>,
+    /// The functions a function value may name, by index.
+    pub functions: Vec<FunctionEntry>,
+    /// The host bindings main's free names read (`CellStart::host`).
+    pub globals: Vec<Name>,
     /// The unit a `Main` start runs.
     pub main: UnitId,
 }
@@ -34,11 +43,11 @@ pub struct Program {
 #[derive(Clone, Debug)]
 pub enum Constant {
     Immediate(Value),
-    LongText(Arc<str>),
+    Text(Arc<str>),
     BigInt(Integer),
     Bytes(Arc<[u8]>),
-    /// A field name read or written by `Field`/`SetMember`.
-    Field(Arc<str>),
+    /// A function value (`Literal::Function`).
+    Function(CallableId),
 }
 
 /// What a unit is, for frames and diagnostics.
@@ -51,74 +60,201 @@ pub enum UnitKind {
     Body(FunctionId),
     /// A closure's body, by its own identity.
     Closure(FunctionId),
+    /// A spawn's stub: it makes the spawned call (`K-TASK-002`).
+    Spawn,
 }
 
-/// How a unit's own calls are charged.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Metering {
-    /// Guest code, closures and statement-metered bodies: statements and
-    /// expressions bill their `K-CHG-002` events.
-    Statements,
-    /// A formula-metered body: covered (`K-CHG-007`), its outermost
-    /// uncovered call bills formula `n` of the program at completion.
-    Formula(u32),
+/// One op's fixed charge, billed at its start (`K-CHG-002`): `units`
+/// one-unit events (statement, expression nodes, atoms, loop tests,
+/// `metered` units) and then `members`, a construction's members written,
+/// as one atomic event.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Event {
+    pub units: u64,
+    pub members: u64,
+}
+
+impl Event {
+    #[inline]
+    pub fn total(self) -> u64 {
+        self.units.saturating_add(self.members)
+    }
+
+    #[inline]
+    pub fn is_none(self) -> bool {
+        self.units == 0 && self.members == 0
+    }
 }
 
 /// One unit's code and tables.
 pub struct Unit {
     pub kind: UnitKind,
-    pub metering: Metering,
+    /// The unit runs inside a covered library extent (`K-CHG-007`): its
+    /// event table holds only what charges there, and it creates no step.
+    pub covered: bool,
     pub params: u16,
     /// Locals, parameters first.
     pub locals: u16,
-    /// The deepest operand stack the unit's code reaches, proved by the
-    /// validator.
-    pub max_stack: u16,
+    /// Locals a closure shares, parameters included: each is boxed into
+    /// a cell at entry (`K-CLO-001`).
+    pub boxed: Vec<u16>,
     pub ops: Vec<Op>,
-    pub blocks: Vec<Block>,
-    /// For each op, the fixed charge billed by the ops of its block up to
-    /// and including it. With the block's cost it gives
-    /// `rest(o) = cost - through[o]` (contract §3).
+    /// Each op's fixed charge under `Charge::Exact`.
+    pub event: Vec<Event>,
+    /// Each op's pace units under `Charge::Off`.
+    pub pace: Vec<u32>,
+    /// Whether the slice is tested before the op (`K-MACH-002`): a
+    /// statement's start or a loop's back edge.
+    pub step: Vec<bool>,
+    /// For each op, the fixed charge its block's ops bill up to and
+    /// including it: `rest(o) = cost - through[o]` (contract §3). `None`
+    /// past an unrepresentable sum.
     pub through: Vec<u64>,
-    /// For each op, the fixed charge its own start bills (`K-CHG-002`).
-    pub event: Vec<u64>,
-    pub handlers: Vec<Handler>,
+    /// The same for pace.
+    pub pace_through: Vec<u64>,
+    pub blocks: Vec<Block>,
+    pub records: Vec<Arc<[u32]>>,
+    pub closures: Vec<ClosureSite>,
+    pub calls: Vec<CallSite>,
+    pub loops: Vec<LoopSite>,
+    pub actions: Vec<ActionSite>,
+    /// The function's name, for bound errors.
+    pub name: Arc<str>,
+    /// The unit's site root.
+    pub site: Site,
 }
 
-/// A block (contract §3): its events are billed by its ops in source
-/// order, and it ends at every step end, action, call, back edge and
-/// handler boundary.
+/// A block (contract §3): its events are billed by its ops in order, and
+/// it ends at every action, frame call, jump and handler boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Block {
     pub start: u32,
     pub end: u32,
-    /// The sum of the block's fixed charge events, or `None` when it is
-    /// not representable in `u64`: such a block always runs event by
-    /// event.
+    /// The sum of the block's fixed events, `None` when it is not
+    /// representable in `u64`: such a block always runs event by event.
     pub charge: Option<u64>,
-    /// The block's pace units under `Charge::Off`: one per statement, loop
-    /// continuation test and action atom of guest code and closures.
-    pub pace: u64,
+    /// The block's pace units.
+    pub pace: Option<u64>,
 }
 
-/// A handler a `TryEnter` installs.
+/// A closure a `MakeClosure` makes.
+#[derive(Clone, Debug)]
+pub struct ClosureSite {
+    pub unit: UnitId,
+    pub identity: Arc<ClosureIdentity>,
+    pub captures: Vec<Capture>,
+}
+
+/// Where a closure's captured variable comes from in its maker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Handler {
-    /// Where a caught raise continues, if the try has a catch.
-    pub catch: Option<u32>,
-    /// Where a `finally` body starts, if the try has one.
-    pub finally: Option<u32>,
-    /// The operand stack depth the handler restores.
-    pub depth: u16,
+pub enum Capture {
+    /// The cell in the maker's local.
+    Local(u16),
+    /// The maker's own capture.
+    Capture(u16),
+}
+
+/// What a call site calls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Callee {
+    /// A registered native (`natives[n]`); `charged` when the call bills
+    /// the native's formula (an uncovered call, `K-CHG-007`).
+    Native { native: u32, charged: bool },
+    /// A unit. `charge` is the completion formula the call bills when it
+    /// returns or raises (an outermost uncovered library call), if any.
+    Unit { unit: UnitId, charge: Option<u32> },
+    /// The value below the arguments: a closure or a function value.
+    Value,
+    /// A function the machine answers itself; `charge` as for a unit.
+    Machine {
+        function: crate::functions::MachineFunction,
+        charge: Option<u32>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct CallSite {
+    pub callee: Callee,
+    pub argc: u8,
+    pub site: Site,
+}
+
+/// A loop's state: hidden locals from `slot`.
+#[derive(Clone, Debug)]
+pub struct LoopSite {
+    /// `slot` holds what the loop walks and `slot + 1` its cursor; a
+    /// protocol loop also keeps the size, what remains, the raw item and
+    /// whether the step gave one at `slot + 2 ..= slot + 5`.
+    pub slot: u16,
+    /// The local each pass binds (plain loops).
+    pub binding: u16,
+    /// Where the loop goes when it is exhausted.
+    pub exit: u32,
+    /// A protocol loop: its driver's `next` call, or `None`.
+    pub driver: Option<u32>,
+    /// A protocol loop: where its step continues after `next` or
+    /// `check` (the more test).
+    pub join: Option<u32>,
+    pub site: Site,
+}
+
+/// An action other than a call.
+#[derive(Clone, Debug)]
+pub enum ActionSite {
+    Perform {
+        /// The library function whose body performs, `None` in document
+        /// code: the slot is in that body's imports.
+        owner: Option<FunctionId>,
+        slot: ImportSlot,
+        argc: u8,
+        result: Type,
+        then_yield: bool,
+        site: Site,
+    },
+    /// `spawn` through stub `unit`, `argc` values (a value callee
+    /// included) on the stack.
+    Spawn {
+        unit: UnitId,
+        argc: u8,
+        site: Site,
+    },
+    Join {
+        site: Site,
+    },
+    JoinMany {
+        mode: JoinMode,
+        site: Site,
+    },
+    Yield {
+        site: Site,
+    },
+    Cancel {
+        site: Site,
+    },
+    CancelEffect {
+        site: Site,
+    },
 }
 
 /// A native a call site names: the implementation, its argument count and
-/// the specialization it declared, resolved once at compile (R8).
+/// the definition's formulas, resolved once at compile.
 pub struct NativeEntry {
     pub function: FunctionId,
-    pub argc: u8,
+    pub name: Arc<str>,
+    pub params: u8,
     pub native: Arc<dyn NativeFunction>,
-    pub specialization: NativeSpecialization,
-    /// The definition's kernel body, for a Decline (K-LIB-006).
+    /// The completion formula.
+    pub charge: u32,
+    /// The guard's limit, if the definition states one (`K-LIB-008`).
+    pub guard: Option<u32>,
+    /// The definition's kernel body, covered, for a Decline (K-LIB-006).
     pub body: Option<UnitId>,
+}
+
+/// A function a function value names: applying it calls `unit`, a
+/// trampoline that makes the ordinary charged call.
+#[derive(Clone, Debug)]
+pub struct FunctionEntry {
+    pub function: FunctionId,
+    pub unit: UnitId,
 }
