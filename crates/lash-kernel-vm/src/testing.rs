@@ -118,14 +118,18 @@ pub fn compile_document(
     document: &lash_kernel_doc::Document,
     registry: &lash_kernel_doc::FunctionRegistry,
     link: lash_kernel_value::LinkId,
-    entry: Option<lash_kernel_value::FunctionId>,
+    entry: Option<&lash_kernel_doc::FunctionExport>,
 ) -> Result<BytecodeProgram, StartError> {
-    let code =
-        crate::bytecode::compile::compile(document, registry, link, entry).map_err(|problem| {
-            StartError::Linked {
-                problem: problem.to_string(),
-            }
-        })?;
+    let code = crate::bytecode::conventions::compile_selected(
+        document,
+        registry,
+        link,
+        entry.map(|export| export.function),
+        entry.map(|export| &export.convention),
+    )
+    .map_err(|problem| StartError::Linked {
+        problem: problem.to_string(),
+    })?;
     crate::bytecode::validate::validate(&code).map_err(|problem| StartError::Linked {
         problem: problem.to_string(),
     })?;

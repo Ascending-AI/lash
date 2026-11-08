@@ -137,6 +137,26 @@
         ]
       },
       "name": "ts_direct absent result ends with null"
+    },
+    {
+      "document": "kernel 1\nnumbers float\nexport start \"{\\\"kind\\\":\\\"function\\\",\\\"value\\\":{\\\"function\\\":\\\"1d7991b7b8f0211dedc87e037feb5f9094f933b353abb2957b307922d8fe7e0e\\\",\\\"signature\\\":{\\\"params\\\":[{\\\"name\\\":\\\"input\\\",\\\"ty\\\":\\\"any\\\"}],\\\"result\\\":\\\"any\\\"},\\\"convention\\\":{\\\"kind\\\":\\\"ts_direct\\\",\\\"value\\\":{\\\"await_fn\\\":{\\\"kind\\\":\\\"local\\\",\\\"value\\\":\\\"7431216d0b427d5e29a825f3c08debb7fe36669a109f6d39e73be02816c8c4fb\\\"}}},\\\"asynchronous\\\":false,\\\"rest\\\":false}}\"\ndefinition \"function start(a: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return absent\\n}\\n\"\ndefinition \"function settle(value: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  print value\\n  return value\\n}\\n\"\nexport a_direct \"{\\\"kind\\\":\\\"function\\\",\\\"value\\\":{\\\"function\\\":\\\"1d7991b7b8f0211dedc87e037feb5f9094f933b353abb2957b307922d8fe7e0e\\\",\\\"signature\\\":{\\\"params\\\":[{\\\"name\\\":\\\"input\\\",\\\"ty\\\":\\\"any\\\"}],\\\"result\\\":\\\"any\\\"},\\\"convention\\\":{\\\"kind\\\":\\\"direct\\\"},\\\"asynchronous\\\":false,\\\"rest\\\":false}}\"\n",
+      "environment": {
+        "args": [
+          {
+            "number": "7"
+          }
+        ],
+        "entry": "start"
+      },
+      "expected": {
+        "end": {
+          "finished": "null"
+        },
+        "prints": [
+          "absent"
+        ]
+      },
+      "name": "ts_direct selected export settles when another export shares its body"
     }
   ]
 }

@@ -274,7 +274,7 @@ pub(super) fn compile_on_core(
     }
     for export in document.exports.values() {
         if let lash_kernel_doc::Export::Function(export) = export {
-            compile(Some(export.function));
+            compile(Some(export));
         }
     }
 }

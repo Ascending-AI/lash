@@ -21,8 +21,8 @@ fn ts_entry_conventions_and_live_iteration_follow_their_literals() {
         .collect();
     assert_eq!(
         cases.len(),
-        4,
-        "three entry rules and the live iterator rule"
+        5,
+        "four entry rules and the live iterator rule"
     );
     for case in cases {
         let document =

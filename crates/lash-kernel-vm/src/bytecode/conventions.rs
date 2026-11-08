@@ -13,6 +13,30 @@ use super::op::Op;
 use super::program::{Block, CallSite, Event, Unit, UnitId, UnitKind};
 use crate::StartError;
 
+/// Compiles the convention of the selected export. Several exports may name
+/// one body with different start signatures and conventions (`K-DOC-003`).
+/// Only the export lookup is narrowed; code identities still use the original
+/// Link, and every body, import and constant is unchanged.
+pub(crate) fn compile_selected(
+    document: &Document,
+    registry: &lash_kernel_doc::FunctionRegistry,
+    link: lash_kernel_value::LinkId,
+    entry: Option<FunctionId>,
+    convention: Option<&StartConvention>,
+) -> Result<super::program::Program> {
+    let mut selected = std::borrow::Cow::Borrowed(document);
+    if let (Some(entry), Some(convention)) = (entry, convention)
+        && document.exports.values().any(|export| {
+            matches!(export, Export::Function(export) if export.function == entry && &export.convention != convention)
+        })
+    {
+        selected.to_mut().exports.retain(|_, export| {
+            !matches!(export, Export::Function(export) if export.function == entry && &export.convention != convention)
+        });
+    }
+    super::compile::compile(&selected, registry, link, entry)
+}
+
 /// Selects an entry's unit, retaining the existing path for other conventions.
 pub(crate) fn entry(compiler: &mut Compiler<'_>, id: FunctionId) -> Result<UnitId> {
     let convention = compiler
