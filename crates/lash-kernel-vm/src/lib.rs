@@ -125,11 +125,17 @@
 //!   `paged_carry::a_paged_carry_commits_one_consistent_side_and_resumes_after_retirement_on_sqlite`.
 
 mod admission;
+/// The bytecode core's compiler output (FIG-7688 cutover).
+#[allow(dead_code)]
+mod bytecode;
 mod compile;
 mod costs;
 mod crossing;
 mod data;
 mod functions;
+/// The bytecode core's heap (FIG-7688 cutover).
+#[allow(dead_code)]
+mod heap;
 pub mod interface;
 mod machine;
 mod observe;
@@ -140,6 +146,9 @@ mod paged;
 pub mod perf_witness;
 mod save;
 mod session_editor;
+/// The bytecode core's dispatcher (FIG-7688 cutover).
+#[allow(dead_code)]
+mod vm;
 
 #[cfg(test)]
 mod laws;
