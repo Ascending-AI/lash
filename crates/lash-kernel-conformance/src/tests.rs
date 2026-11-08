@@ -12,6 +12,7 @@ mod contract_cases;
 mod accumulators;
 mod captions;
 mod charge;
+mod probes;
 mod protocol;
 
 // These three owning-library shards fill rules this corpus does not own.
