@@ -22,7 +22,7 @@ pub use case::{
     PerformAnswer, ScriptOutcome, Shard, Trace,
 };
 pub use coverage::{CoverageError, PendingRule, check_coverage, load_corpus, rule_ids};
-pub use machine::MachineRunner;
+pub use machine::{MachineRunner, check_program};
 pub use native::check_native;
 
 /// A reader, interpreter or front end capable of running a kernel document.

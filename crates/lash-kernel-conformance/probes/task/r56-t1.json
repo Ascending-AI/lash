@@ -1,0 +1,652 @@
+{
+  "rule": "K-TASK-001",
+  "cases": [
+    {
+      "name": "r56-t1 at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t11(t15, t16, t17)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t3(t7, t8, t9)\\n}\\n\"\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.mul = @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nbody {\\n  let t1 = invoke py.bind(\\\"work\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)\\n  let n = t1[0]\\n  do invoke py.sleep(invoke py.mul(0.01, n))\\n  print invoke py.print_text((\\\"work\\\", n), (\\\" \\\", absent, absent))\\n  return invoke py.mul(n, 10)\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @3b80b79edd4d6859eced25cd1b0a64b4e8dcce180e8ba603c3738943bcaa0944\\nuse local.function = @5bc98e168299300e1e24559d6bb4ec593063177b7784b07ff466a3cb5f430e1d\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.gather = @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nbody {\\n  let t21 = invoke py.bind(\\\"main\\\", (), positional2, keywords2, false)\\n  let a = let(t3 = work[1], let(t4 = [2], let(t5 = map{}, let(t6 = absent, let(t7 = t4, let(t8 = t5, let(t9 = t6, let(t10 = fn @5bc98e168299300e1e24559d6bb4ec593063177b7784b07ff466a3cb5f430e1d, spawn invoke py.task.run(t10)))))))))\\n  let b = let(t11 = work[1], let(t12 = [1], let(t13 = map{}, let(t14 = absent, let(t15 = t12, let(t16 = t13, let(t17 = t14, let(t18 = fn @3b80b79edd4d6859eced25cd1b0a64b4e8dcce180e8ba603c3738943bcaa0944, spawn invoke py.task.run(t18)))))))))\\n  print invoke py.print_text((\\\"spawned\\\",), (\\\" \\\", absent, absent))\\n  let r = let(t19 = a, let(t20 = b, invoke py.gather([t19, t20], false)))\\n  print invoke py.print_text((r,), (\\\" \\\", absent, absent))\\n}\\n\"\nmain {\n  let `main` = absent\n  let work = absent\n  try {\n    set work = let(t2 = fn @96a192e8968ccfb88c30128bcc550a73f9d6f7e844e1810bc4b3286e75e5bfdd presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t2, ((\"n\", 1, false),), \"work\", (\"py.callable\", true)))\n    set `main` = let(t22 = fn @9fead0d8c88b6b23c4760cd4357215b78478dc124c423f2d2f59933a648af624 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t22, (), \"main\", (\"py.callable\", true)))\n    let t23 = `main`[1]\n    let t24 = apply t23([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 1,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "spawned"
+          },
+          {
+            "text": "work 2"
+          },
+          {
+            "text": "work 1"
+          },
+          {
+            "text": "[20, 10]"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "9fead0d8c88b6b23c4760cd4357215b78478dc124c423f2d2f59933a648af624"
+                      },
+                      "path": [
+                        1,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 0
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "20"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "9fead0d8c88b6b23c4760cd4357215b78478dc124c423f2d2f59933a648af624"
+                      },
+                      "path": [
+                        2,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 0
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "10"
+                }
+              ],
+              "result": "null"
+            }
+          }
+        ],
+        "charged": 2183,
+        "parks": 1,
+        "returns": [
+          2,
+          4,
+          5,
+          31,
+          49,
+          53,
+          58,
+          65,
+          67,
+          69,
+          71,
+          73,
+          75,
+          80,
+          84,
+          96,
+          100,
+          109,
+          111,
+          134,
+          157,
+          211,
+          226,
+          229,
+          231,
+          236,
+          251,
+          253,
+          255,
+          257,
+          259,
+          261,
+          266,
+          268,
+          272,
+          276,
+          298,
+          315,
+          319,
+          329,
+          337,
+          345,
+          352,
+          358,
+          361,
+          365,
+          389,
+          393,
+          402,
+          404,
+          408,
+          423,
+          428,
+          443,
+          445,
+          447,
+          449,
+          451,
+          453,
+          458,
+          460,
+          464,
+          468,
+          490,
+          507,
+          511,
+          521,
+          529,
+          537,
+          544,
+          550,
+          553,
+          557,
+          581,
+          585,
+          594,
+          596,
+          600,
+          1128,
+          1182,
+          1202,
+          1715,
+          1769,
+          1789,
+          1795,
+          1801,
+          1813,
+          1825,
+          1834,
+          1845,
+          1856,
+          1867,
+          1878,
+          1889,
+          1900,
+          1911,
+          1913,
+          1924,
+          1935,
+          1938,
+          1940,
+          1952,
+          1963,
+          1974,
+          1988,
+          1997,
+          2003,
+          2004,
+          2006,
+          2018,
+          2029,
+          2040,
+          2054,
+          2063,
+          2069,
+          2070,
+          2171,
+          2177,
+          2183
+        ]
+      }
+    },
+    {
+      "name": "r56-t1 at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t11(t15, t16, t17)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t3(t7, t8, t9)\\n}\\n\"\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.mul = @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nbody {\\n  let t1 = invoke py.bind(\\\"work\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)\\n  let n = t1[0]\\n  do invoke py.sleep(invoke py.mul(0.01, n))\\n  print invoke py.print_text((\\\"work\\\", n), (\\\" \\\", absent, absent))\\n  return invoke py.mul(n, 10)\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @3b80b79edd4d6859eced25cd1b0a64b4e8dcce180e8ba603c3738943bcaa0944\\nuse local.function = @5bc98e168299300e1e24559d6bb4ec593063177b7784b07ff466a3cb5f430e1d\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.gather = @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nbody {\\n  let t21 = invoke py.bind(\\\"main\\\", (), positional2, keywords2, false)\\n  let a = let(t3 = work[1], let(t4 = [2], let(t5 = map{}, let(t6 = absent, let(t7 = t4, let(t8 = t5, let(t9 = t6, let(t10 = fn @5bc98e168299300e1e24559d6bb4ec593063177b7784b07ff466a3cb5f430e1d, spawn invoke py.task.run(t10)))))))))\\n  let b = let(t11 = work[1], let(t12 = [1], let(t13 = map{}, let(t14 = absent, let(t15 = t12, let(t16 = t13, let(t17 = t14, let(t18 = fn @3b80b79edd4d6859eced25cd1b0a64b4e8dcce180e8ba603c3738943bcaa0944, spawn invoke py.task.run(t18)))))))))\\n  print invoke py.print_text((\\\"spawned\\\",), (\\\" \\\", absent, absent))\\n  let r = let(t19 = a, let(t20 = b, invoke py.gather([t19, t20], false)))\\n  print invoke py.print_text((r,), (\\\" \\\", absent, absent))\\n}\\n\"\nmain {\n  let `main` = absent\n  let work = absent\n  try {\n    set work = let(t2 = fn @96a192e8968ccfb88c30128bcc550a73f9d6f7e844e1810bc4b3286e75e5bfdd presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t2, ((\"n\", 1, false),), \"work\", (\"py.callable\", true)))\n    set `main` = let(t22 = fn @9fead0d8c88b6b23c4760cd4357215b78478dc124c423f2d2f59933a648af624 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t22, (), \"main\", (\"py.callable\", true)))\n    let t23 = `main`[1]\n    let t24 = apply t23([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 1,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "spawned"
+          },
+          {
+            "text": "work 2"
+          },
+          {
+            "text": "work 1"
+          },
+          {
+            "text": "[20, 10]"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "9fead0d8c88b6b23c4760cd4357215b78478dc124c423f2d2f59933a648af624"
+                      },
+                      "path": [
+                        1,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 0
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "20"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "9fead0d8c88b6b23c4760cd4357215b78478dc124c423f2d2f59933a648af624"
+                      },
+                      "path": [
+                        2,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 0
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "10"
+                }
+              ],
+              "result": "null"
+            }
+          }
+        ],
+        "charged": 2183,
+        "parks": 1,
+        "returns": [
+          31,
+          49,
+          58,
+          65,
+          73,
+          80,
+          96,
+          109,
+          134,
+          157,
+          211,
+          226,
+          236,
+          251,
+          259,
+          266,
+          276,
+          298,
+          315,
+          329,
+          337,
+          345,
+          352,
+          361,
+          389,
+          402,
+          423,
+          443,
+          451,
+          458,
+          468,
+          490,
+          507,
+          521,
+          529,
+          537,
+          544,
+          553,
+          581,
+          594,
+          1128,
+          1182,
+          1202,
+          1715,
+          1769,
+          1789,
+          1801,
+          1813,
+          1825,
+          1834,
+          1845,
+          1856,
+          1867,
+          1878,
+          1889,
+          1900,
+          1911,
+          1924,
+          1935,
+          1952,
+          1963,
+          1974,
+          1988,
+          1997,
+          2004,
+          2018,
+          2029,
+          2040,
+          2054,
+          2063,
+          2070,
+          2171,
+          2183
+        ]
+      }
+    },
+    {
+      "name": "r56-t1 at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t11(t15, t16, t17)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t3(t7, t8, t9)\\n}\\n\"\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.mul = @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nbody {\\n  let t1 = invoke py.bind(\\\"work\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)\\n  let n = t1[0]\\n  do invoke py.sleep(invoke py.mul(0.01, n))\\n  print invoke py.print_text((\\\"work\\\", n), (\\\" \\\", absent, absent))\\n  return invoke py.mul(n, 10)\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @3b80b79edd4d6859eced25cd1b0a64b4e8dcce180e8ba603c3738943bcaa0944\\nuse local.function = @5bc98e168299300e1e24559d6bb4ec593063177b7784b07ff466a3cb5f430e1d\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.gather = @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nbody {\\n  let t21 = invoke py.bind(\\\"main\\\", (), positional2, keywords2, false)\\n  let a = let(t3 = work[1], let(t4 = [2], let(t5 = map{}, let(t6 = absent, let(t7 = t4, let(t8 = t5, let(t9 = t6, let(t10 = fn @5bc98e168299300e1e24559d6bb4ec593063177b7784b07ff466a3cb5f430e1d, spawn invoke py.task.run(t10)))))))))\\n  let b = let(t11 = work[1], let(t12 = [1], let(t13 = map{}, let(t14 = absent, let(t15 = t12, let(t16 = t13, let(t17 = t14, let(t18 = fn @3b80b79edd4d6859eced25cd1b0a64b4e8dcce180e8ba603c3738943bcaa0944, spawn invoke py.task.run(t18)))))))))\\n  print invoke py.print_text((\\\"spawned\\\",), (\\\" \\\", absent, absent))\\n  let r = let(t19 = a, let(t20 = b, invoke py.gather([t19, t20], false)))\\n  print invoke py.print_text((r,), (\\\" \\\", absent, absent))\\n}\\n\"\nmain {\n  let `main` = absent\n  let work = absent\n  try {\n    set work = let(t2 = fn @96a192e8968ccfb88c30128bcc550a73f9d6f7e844e1810bc4b3286e75e5bfdd presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t2, ((\"n\", 1, false),), \"work\", (\"py.callable\", true)))\n    set `main` = let(t22 = fn @9fead0d8c88b6b23c4760cd4357215b78478dc124c423f2d2f59933a648af624 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t22, (), \"main\", (\"py.callable\", true)))\n    let t23 = `main`[1]\n    let t24 = apply t23([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 1,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "spawned"
+          },
+          {
+            "text": "work 2"
+          },
+          {
+            "text": "work 1"
+          },
+          {
+            "text": "[20, 10]"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "9fead0d8c88b6b23c4760cd4357215b78478dc124c423f2d2f59933a648af624"
+                      },
+                      "path": [
+                        1,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 0
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "20"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "9fead0d8c88b6b23c4760cd4357215b78478dc124c423f2d2f59933a648af624"
+                      },
+                      "path": [
+                        2,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 0
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "10"
+                }
+              ],
+              "result": "null"
+            }
+          }
+        ],
+        "charged": 2183,
+        "parks": 1,
+        "returns": [
+          53,
+          109,
+          211,
+          261,
+          315,
+          365,
+          423,
+          490,
+          544,
+          594,
+          1128,
+          1182,
+          1715,
+          1769,
+          1825,
+          1878,
+          1935,
+          1988,
+          2040,
+          2171
+        ]
+      }
+    }
+  ]
+}

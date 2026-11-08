@@ -61,6 +61,7 @@ fn kernel_case(name: &str, text: &str) -> Case {
             trace: Vec::new(),
             charged: None,
             parks: None,
+            returns: None,
         },
     }
 }

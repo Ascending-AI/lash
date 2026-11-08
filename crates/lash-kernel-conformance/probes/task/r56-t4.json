@@ -1,0 +1,2452 @@
+{
+  "rule": "K-TASK-001",
+  "cases": [
+    {
+      "name": "r56-t4 at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\nlibrary @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\nlibrary @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\nlibrary @5197ef1323f4881de48293180126c445312ca21cbdf13590ac1878ad82e765b1\nlibrary @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\nlibrary @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\nlibrary @a7d5ed92a8b90f21dd462f6786cada35cfa6ae6dab06df289b61b25dfe6e01b5\nlibrary @b997f5567a697759d5708b4600a6629f1cca66d1cf9a1cf39ba949591340f638\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nlibrary @ce5f37cc6b116ff37620812d1ec9bda8feea204241bb140a535a8469892d6f35\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @daac05a8cbd3f7aa3a503662e56a92b10514afed312e2ad70ca355f817d6c2ee\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse add = @5197ef1323f4881de48293180126c445312ca21cbdf13590ac1878ad82e765b1\\nuse bool.not = @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\\nuse eq = @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\\nuse int.add = @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\\nuse int.lt = @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse local.function = @5d66734778dcca2d2dc27816f9d36ad173f8a71bb18d778fe2559c61581ecf4a\\nuse local.function = @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6\\nuse py.args.extend = @ce5f37cc6b116ff37620812d1ec9bda8feea204241bb140a535a8469892d6f35\\nuse py.await = @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse py.for_in.check = @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\\nuse py.for_in.open = @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\\nuse py.gather = @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\\nuse py.gather.options = @b997f5567a697759d5708b4600a6629f1cca66d1cf9a1cf39ba949591340f638\\nuse py.iterator.step = @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\\nuse py.number.iadd = @a7d5ed92a8b90f21dd462f6786cada35cfa6ae6dab06df289b61b25dfe6e01b5\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.range = @daac05a8cbd3f7aa3a503662e56a92b10514afed312e2ad70ca355f817d6c2ee\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nuse text.join = @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\\nbody {\\n  let t27 = invoke py.bind(\\\"main\\\", (), positional2, keywords2, false)\\n  let i = absent\\n  let ts = absent\\n  let total = 0\\n  if bool.not(same(kind(0), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(0), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(4), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(4), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(1), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(1), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if eq(1, 0) {\\n    do invoke py.fail(\\\"ValueError\\\", \\\"range() arg 3 must not be zero\\\")\\n  }\\n  let t3 = 0\\n  while int.lt(t3, 4) {\\n    set i = t3\\n    set t3 = int.add(t3, 1)\\n    let t4 = []\\n    for j_1 in invoke py.range(add(i, 1), absent, absent) via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n      set t4[list.len(t4)] = let(t6 = w[1], let(t7 = [j_1], let(t8 = map{}, let(t9 = absent, let(t10 = t7, let(t11 = t8, let(t12 = t9, let(t13 = fn @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6, spawn invoke py.task.run(t13)))))))))\\n    }\\n    set ts = t4\\n    for t in ts via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n      set total = py.number.iadd(total, await(t) via py.await)\\n    }\\n    do invoke py.sleep(0)\\n  }\\n  let t15 = []\\n  let t16 = []\\n  for k_1 in invoke py.range(3, absent, absent) via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n    set t16[list.len(t16)] = let(t18 = w[1], let(t19 = [k_1], let(t20 = map{}, let(t21 = absent, let(t22 = t19, let(t23 = t20, let(t24 = t21, let(t25 = fn @5d66734778dcca2d2dc27816f9d36ad173f8a71bb18d778fe2559c61581ecf4a, spawn invoke py.task.run(t25)))))))))\\n  }\\n  do invoke py.args.extend(t15, t16)\\n  let t26 = map{}\\n  let xs = invoke py.gather(t15, invoke py.gather.options(t26))\\n  print invoke py.print_text((total, xs), (\\\" \\\", absent, absent))\\n}\\n\"\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nbody {\\n  let t1 = invoke py.bind(\\\"w\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)\\n  let n = t1[0]\\n  do invoke py.sleep(n)\\n  return n\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t18(t22, t23, t24)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t6(t10, t11, t12)\\n}\\n\"\nmain {\n  let `main` = absent\n  let w = absent\n  try {\n    set w = let(t2 = fn @583421cb24364c6580d7021557862250838b4cd5fe9c592a80e96a12f8c00a07 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t2, ((\"n\", 1, false),), \"w\", (\"py.callable\", true)))\n    set `main` = let(t28 = fn @05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t28, (), \"main\", (\"py.callable\", true)))\n    let t29 = `main`[1]\n    let t30 = apply t29([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ],
+          [
+            {
+              "request": 1,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 2,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ],
+          [
+            {
+              "request": 3,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 4,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 5,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ],
+          [
+            {
+              "request": 6,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 7,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "10 [0, 1, 2]"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 2
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 4
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 5
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "2000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 7
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 8
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "2000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 9
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "3000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        12,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 1
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        12,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 2
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "2000"
+                }
+              ],
+              "result": "null"
+            }
+          }
+        ],
+        "charged": 12839,
+        "parks": 4,
+        "returns": [
+          2,
+          4,
+          5,
+          31,
+          49,
+          53,
+          58,
+          65,
+          67,
+          69,
+          71,
+          73,
+          75,
+          80,
+          84,
+          96,
+          100,
+          109,
+          111,
+          113,
+          115,
+          117,
+          143,
+          169,
+          195,
+          210,
+          212,
+          228,
+          230,
+          240,
+          242,
+          266,
+          289,
+          293,
+          294,
+          296,
+          303,
+          308,
+          313,
+          328,
+          330,
+          332,
+          334,
+          336,
+          338,
+          343,
+          345,
+          349,
+          353,
+          375,
+          392,
+          396,
+          406,
+          414,
+          422,
+          429,
+          435,
+          438,
+          442,
+          466,
+          470,
+          479,
+          481,
+          485,
+          488,
+          1000,
+          1008,
+          1020,
+          1021,
+          1024,
+          1536,
+          1558,
+          1560,
+          1571,
+          1573,
+          1599,
+          1622,
+          1626,
+          1627,
+          1650,
+          1654,
+          1655,
+          1657,
+          1664,
+          1669,
+          1674,
+          1689,
+          1691,
+          1693,
+          1695,
+          1697,
+          1699,
+          1704,
+          1706,
+          1710,
+          1714,
+          1736,
+          1753,
+          1757,
+          1767,
+          1775,
+          1783,
+          1790,
+          1796,
+          1799,
+          1803,
+          1827,
+          1831,
+          1840,
+          1842,
+          1846,
+          1849,
+          1854,
+          1869,
+          1871,
+          1873,
+          1875,
+          1877,
+          1879,
+          1884,
+          1886,
+          1890,
+          1894,
+          1916,
+          1933,
+          1937,
+          1947,
+          1955,
+          1963,
+          1970,
+          1976,
+          1979,
+          1983,
+          2007,
+          2011,
+          2020,
+          2022,
+          2026,
+          2031,
+          2543,
+          2551,
+          2563,
+          2564,
+          3082,
+          3090,
+          3103,
+          3104,
+          3107,
+          3619,
+          3641,
+          3643,
+          3654,
+          3656,
+          3683,
+          3706,
+          3710,
+          3711,
+          3734,
+          3738,
+          3739,
+          3762,
+          3766,
+          3767,
+          3769,
+          3776,
+          3781,
+          3786,
+          3801,
+          3803,
+          3805,
+          3807,
+          3809,
+          3811,
+          3816,
+          3818,
+          3822,
+          3826,
+          3848,
+          3865,
+          3869,
+          3879,
+          3887,
+          3895,
+          3902,
+          3908,
+          3911,
+          3915,
+          3939,
+          3943,
+          3952,
+          3954,
+          3958,
+          3961,
+          3966,
+          3981,
+          3983,
+          3985,
+          3987,
+          3989,
+          3991,
+          3996,
+          3998,
+          4002,
+          4006,
+          4028,
+          4045,
+          4049,
+          4059,
+          4067,
+          4075,
+          4082,
+          4088,
+          4091,
+          4095,
+          4119,
+          4123,
+          4132,
+          4134,
+          4138,
+          4143,
+          4148,
+          4163,
+          4165,
+          4167,
+          4169,
+          4171,
+          4173,
+          4178,
+          4180,
+          4184,
+          4188,
+          4210,
+          4227,
+          4231,
+          4241,
+          4249,
+          4257,
+          4264,
+          4270,
+          4273,
+          4277,
+          4301,
+          4305,
+          4314,
+          4316,
+          4320,
+          4325,
+          4837,
+          4845,
+          4858,
+          4859,
+          5377,
+          5385,
+          5898,
+          5906,
+          5920,
+          5921,
+          5926,
+          5940,
+          5941,
+          5944,
+          6456,
+          6478,
+          6480,
+          6491,
+          6493,
+          6521,
+          6544,
+          6548,
+          6549,
+          6572,
+          6576,
+          6577,
+          6600,
+          6604,
+          6605,
+          6628,
+          6632,
+          6633,
+          6635,
+          6642,
+          6647,
+          6652,
+          6667,
+          6669,
+          6671,
+          6673,
+          6675,
+          6677,
+          6682,
+          6684,
+          6688,
+          6692,
+          6714,
+          6731,
+          6735,
+          6745,
+          6753,
+          6761,
+          6768,
+          6774,
+          6777,
+          6781,
+          6805,
+          6809,
+          6818,
+          6820,
+          6824,
+          6827,
+          6832,
+          6847,
+          6849,
+          6851,
+          6853,
+          6855,
+          6857,
+          6862,
+          6864,
+          6868,
+          6872,
+          6894,
+          6911,
+          6915,
+          6925,
+          6933,
+          6941,
+          6948,
+          6954,
+          6957,
+          6961,
+          6985,
+          6989,
+          6998,
+          7000,
+          7004,
+          7009,
+          7014,
+          7029,
+          7031,
+          7033,
+          7035,
+          7037,
+          7039,
+          7044,
+          7046,
+          7050,
+          7054,
+          7076,
+          7093,
+          7097,
+          7107,
+          7115,
+          7123,
+          7130,
+          7136,
+          7139,
+          7143,
+          7167,
+          7171,
+          7180,
+          7182,
+          7186,
+          7191,
+          7196,
+          7211,
+          7213,
+          7215,
+          7217,
+          7219,
+          7221,
+          7226,
+          7228,
+          7232,
+          7236,
+          7258,
+          7275,
+          7279,
+          7289,
+          7297,
+          7305,
+          7312,
+          7318,
+          7321,
+          7325,
+          7349,
+          7353,
+          7362,
+          7364,
+          7368,
+          7373,
+          7885,
+          7893,
+          7906,
+          7907,
+          8425,
+          8433,
+          8946,
+          8954,
+          9467,
+          9475,
+          9489,
+          9490,
+          9495,
+          9509,
+          9510,
+          9515,
+          9529,
+          9530,
+          9533,
+          10045,
+          10067,
+          10069,
+          10071,
+          10089,
+          10112,
+          10116,
+          10117,
+          10140,
+          10144,
+          10145,
+          10168,
+          10172,
+          10173,
+          10177,
+          10191,
+          10196,
+          10202,
+          10205,
+          10211,
+          10214,
+          10220,
+          10223,
+          10225,
+          10227,
+          10242,
+          10245,
+          10248,
+          10250,
+          10255,
+          10270,
+          10272,
+          10274,
+          10276,
+          10278,
+          10280,
+          10285,
+          10287,
+          10291,
+          10295,
+          10317,
+          10334,
+          10338,
+          10348,
+          10356,
+          10364,
+          10371,
+          10377,
+          10380,
+          10384,
+          10408,
+          10412,
+          10421,
+          10423,
+          10427,
+          10430,
+          10435,
+          10450,
+          10452,
+          10454,
+          10456,
+          10458,
+          10460,
+          10465,
+          10467,
+          10471,
+          10475,
+          10497,
+          10514,
+          10518,
+          10528,
+          10536,
+          10544,
+          10551,
+          10557,
+          10560,
+          10564,
+          10588,
+          10592,
+          10601,
+          10603,
+          10607,
+          10612,
+          10617,
+          10632,
+          10634,
+          10636,
+          10638,
+          10640,
+          10642,
+          10647,
+          10649,
+          10653,
+          10657,
+          10679,
+          10696,
+          10700,
+          10710,
+          10718,
+          10726,
+          10733,
+          10739,
+          10742,
+          10746,
+          10770,
+          10774,
+          10783,
+          10785,
+          10789,
+          10794,
+          11306,
+          11314,
+          11833,
+          11841,
+          12354,
+          12362,
+          12368,
+          12374,
+          12388,
+          12402,
+          12411,
+          12422,
+          12433,
+          12444,
+          12455,
+          12466,
+          12477,
+          12488,
+          12490,
+          12501,
+          12512,
+          12515,
+          12517,
+          12529,
+          12540,
+          12551,
+          12565,
+          12572,
+          12578,
+          12579,
+          12581,
+          12593,
+          12604,
+          12615,
+          12629,
+          12637,
+          12643,
+          12644,
+          12646,
+          12658,
+          12669,
+          12680,
+          12694,
+          12702,
+          12708,
+          12709,
+          12827,
+          12833,
+          12839
+        ]
+      }
+    },
+    {
+      "name": "r56-t4 at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\nlibrary @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\nlibrary @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\nlibrary @5197ef1323f4881de48293180126c445312ca21cbdf13590ac1878ad82e765b1\nlibrary @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\nlibrary @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\nlibrary @a7d5ed92a8b90f21dd462f6786cada35cfa6ae6dab06df289b61b25dfe6e01b5\nlibrary @b997f5567a697759d5708b4600a6629f1cca66d1cf9a1cf39ba949591340f638\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nlibrary @ce5f37cc6b116ff37620812d1ec9bda8feea204241bb140a535a8469892d6f35\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @daac05a8cbd3f7aa3a503662e56a92b10514afed312e2ad70ca355f817d6c2ee\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse add = @5197ef1323f4881de48293180126c445312ca21cbdf13590ac1878ad82e765b1\\nuse bool.not = @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\\nuse eq = @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\\nuse int.add = @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\\nuse int.lt = @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse local.function = @5d66734778dcca2d2dc27816f9d36ad173f8a71bb18d778fe2559c61581ecf4a\\nuse local.function = @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6\\nuse py.args.extend = @ce5f37cc6b116ff37620812d1ec9bda8feea204241bb140a535a8469892d6f35\\nuse py.await = @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse py.for_in.check = @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\\nuse py.for_in.open = @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\\nuse py.gather = @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\\nuse py.gather.options = @b997f5567a697759d5708b4600a6629f1cca66d1cf9a1cf39ba949591340f638\\nuse py.iterator.step = @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\\nuse py.number.iadd = @a7d5ed92a8b90f21dd462f6786cada35cfa6ae6dab06df289b61b25dfe6e01b5\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.range = @daac05a8cbd3f7aa3a503662e56a92b10514afed312e2ad70ca355f817d6c2ee\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nuse text.join = @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\\nbody {\\n  let t27 = invoke py.bind(\\\"main\\\", (), positional2, keywords2, false)\\n  let i = absent\\n  let ts = absent\\n  let total = 0\\n  if bool.not(same(kind(0), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(0), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(4), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(4), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(1), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(1), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if eq(1, 0) {\\n    do invoke py.fail(\\\"ValueError\\\", \\\"range() arg 3 must not be zero\\\")\\n  }\\n  let t3 = 0\\n  while int.lt(t3, 4) {\\n    set i = t3\\n    set t3 = int.add(t3, 1)\\n    let t4 = []\\n    for j_1 in invoke py.range(add(i, 1), absent, absent) via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n      set t4[list.len(t4)] = let(t6 = w[1], let(t7 = [j_1], let(t8 = map{}, let(t9 = absent, let(t10 = t7, let(t11 = t8, let(t12 = t9, let(t13 = fn @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6, spawn invoke py.task.run(t13)))))))))\\n    }\\n    set ts = t4\\n    for t in ts via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n      set total = py.number.iadd(total, await(t) via py.await)\\n    }\\n    do invoke py.sleep(0)\\n  }\\n  let t15 = []\\n  let t16 = []\\n  for k_1 in invoke py.range(3, absent, absent) via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n    set t16[list.len(t16)] = let(t18 = w[1], let(t19 = [k_1], let(t20 = map{}, let(t21 = absent, let(t22 = t19, let(t23 = t20, let(t24 = t21, let(t25 = fn @5d66734778dcca2d2dc27816f9d36ad173f8a71bb18d778fe2559c61581ecf4a, spawn invoke py.task.run(t25)))))))))\\n  }\\n  do invoke py.args.extend(t15, t16)\\n  let t26 = map{}\\n  let xs = invoke py.gather(t15, invoke py.gather.options(t26))\\n  print invoke py.print_text((total, xs), (\\\" \\\", absent, absent))\\n}\\n\"\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nbody {\\n  let t1 = invoke py.bind(\\\"w\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)\\n  let n = t1[0]\\n  do invoke py.sleep(n)\\n  return n\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t18(t22, t23, t24)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t6(t10, t11, t12)\\n}\\n\"\nmain {\n  let `main` = absent\n  let w = absent\n  try {\n    set w = let(t2 = fn @583421cb24364c6580d7021557862250838b4cd5fe9c592a80e96a12f8c00a07 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t2, ((\"n\", 1, false),), \"w\", (\"py.callable\", true)))\n    set `main` = let(t28 = fn @05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t28, (), \"main\", (\"py.callable\", true)))\n    let t29 = `main`[1]\n    let t30 = apply t29([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ],
+          [
+            {
+              "request": 1,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 2,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ],
+          [
+            {
+              "request": 3,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 4,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 5,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ],
+          [
+            {
+              "request": 6,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 7,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "10 [0, 1, 2]"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 2
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 4
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 5
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "2000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 7
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 8
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "2000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 9
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "3000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        12,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 1
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        12,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 2
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "2000"
+                }
+              ],
+              "result": "null"
+            }
+          }
+        ],
+        "charged": 12839,
+        "parks": 4,
+        "returns": [
+          31,
+          49,
+          58,
+          65,
+          73,
+          80,
+          96,
+          109,
+          117,
+          143,
+          169,
+          195,
+          210,
+          228,
+          240,
+          266,
+          289,
+          296,
+          303,
+          313,
+          328,
+          336,
+          343,
+          353,
+          375,
+          392,
+          406,
+          414,
+          422,
+          429,
+          438,
+          466,
+          479,
+          488,
+          1000,
+          1008,
+          1020,
+          1536,
+          1558,
+          1571,
+          1599,
+          1622,
+          1650,
+          1657,
+          1664,
+          1674,
+          1689,
+          1697,
+          1704,
+          1714,
+          1736,
+          1753,
+          1767,
+          1775,
+          1783,
+          1790,
+          1799,
+          1827,
+          1840,
+          1849,
+          1869,
+          1877,
+          1884,
+          1894,
+          1916,
+          1933,
+          1947,
+          1955,
+          1963,
+          1970,
+          1979,
+          2007,
+          2020,
+          2031,
+          2543,
+          2551,
+          2563,
+          3082,
+          3090,
+          3103,
+          3619,
+          3641,
+          3654,
+          3683,
+          3706,
+          3734,
+          3762,
+          3769,
+          3776,
+          3786,
+          3801,
+          3809,
+          3816,
+          3826,
+          3848,
+          3865,
+          3879,
+          3887,
+          3895,
+          3902,
+          3911,
+          3939,
+          3952,
+          3961,
+          3981,
+          3989,
+          3996,
+          4006,
+          4028,
+          4045,
+          4059,
+          4067,
+          4075,
+          4082,
+          4091,
+          4119,
+          4132,
+          4143,
+          4163,
+          4171,
+          4178,
+          4188,
+          4210,
+          4227,
+          4241,
+          4249,
+          4257,
+          4264,
+          4273,
+          4301,
+          4314,
+          4325,
+          4837,
+          4845,
+          4858,
+          5377,
+          5385,
+          5898,
+          5906,
+          5920,
+          5940,
+          6456,
+          6478,
+          6491,
+          6521,
+          6544,
+          6572,
+          6600,
+          6628,
+          6635,
+          6642,
+          6652,
+          6667,
+          6675,
+          6682,
+          6692,
+          6714,
+          6731,
+          6745,
+          6753,
+          6761,
+          6768,
+          6777,
+          6805,
+          6818,
+          6827,
+          6847,
+          6855,
+          6862,
+          6872,
+          6894,
+          6911,
+          6925,
+          6933,
+          6941,
+          6948,
+          6957,
+          6985,
+          6998,
+          7009,
+          7029,
+          7037,
+          7044,
+          7054,
+          7076,
+          7093,
+          7107,
+          7115,
+          7123,
+          7130,
+          7139,
+          7167,
+          7180,
+          7191,
+          7211,
+          7219,
+          7226,
+          7236,
+          7258,
+          7275,
+          7289,
+          7297,
+          7305,
+          7312,
+          7321,
+          7349,
+          7362,
+          7373,
+          7885,
+          7893,
+          7906,
+          8425,
+          8433,
+          8946,
+          8954,
+          9467,
+          9475,
+          9489,
+          9509,
+          9529,
+          10045,
+          10067,
+          10089,
+          10112,
+          10140,
+          10168,
+          10177,
+          10191,
+          10202,
+          10211,
+          10220,
+          10227,
+          10242,
+          10250,
+          10270,
+          10278,
+          10285,
+          10295,
+          10317,
+          10334,
+          10348,
+          10356,
+          10364,
+          10371,
+          10380,
+          10408,
+          10421,
+          10430,
+          10450,
+          10458,
+          10465,
+          10475,
+          10497,
+          10514,
+          10528,
+          10536,
+          10544,
+          10551,
+          10560,
+          10588,
+          10601,
+          10612,
+          10632,
+          10640,
+          10647,
+          10657,
+          10679,
+          10696,
+          10710,
+          10718,
+          10726,
+          10733,
+          10742,
+          10770,
+          10783,
+          10794,
+          11306,
+          11314,
+          11833,
+          11841,
+          12354,
+          12362,
+          12374,
+          12388,
+          12402,
+          12411,
+          12422,
+          12433,
+          12444,
+          12455,
+          12466,
+          12477,
+          12488,
+          12501,
+          12512,
+          12529,
+          12540,
+          12551,
+          12565,
+          12572,
+          12579,
+          12593,
+          12604,
+          12615,
+          12629,
+          12637,
+          12644,
+          12658,
+          12669,
+          12680,
+          12694,
+          12702,
+          12709,
+          12827,
+          12839
+        ]
+      }
+    },
+    {
+      "name": "r56-t4 at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\nlibrary @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\nlibrary @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\nlibrary @5197ef1323f4881de48293180126c445312ca21cbdf13590ac1878ad82e765b1\nlibrary @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\nlibrary @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\nlibrary @a7d5ed92a8b90f21dd462f6786cada35cfa6ae6dab06df289b61b25dfe6e01b5\nlibrary @b997f5567a697759d5708b4600a6629f1cca66d1cf9a1cf39ba949591340f638\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nlibrary @ce5f37cc6b116ff37620812d1ec9bda8feea204241bb140a535a8469892d6f35\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @daac05a8cbd3f7aa3a503662e56a92b10514afed312e2ad70ca355f817d6c2ee\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse add = @5197ef1323f4881de48293180126c445312ca21cbdf13590ac1878ad82e765b1\\nuse bool.not = @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\\nuse eq = @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\\nuse int.add = @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\\nuse int.lt = @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse local.function = @5d66734778dcca2d2dc27816f9d36ad173f8a71bb18d778fe2559c61581ecf4a\\nuse local.function = @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6\\nuse py.args.extend = @ce5f37cc6b116ff37620812d1ec9bda8feea204241bb140a535a8469892d6f35\\nuse py.await = @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse py.for_in.check = @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\\nuse py.for_in.open = @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\\nuse py.gather = @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\\nuse py.gather.options = @b997f5567a697759d5708b4600a6629f1cca66d1cf9a1cf39ba949591340f638\\nuse py.iterator.step = @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\\nuse py.number.iadd = @a7d5ed92a8b90f21dd462f6786cada35cfa6ae6dab06df289b61b25dfe6e01b5\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.range = @daac05a8cbd3f7aa3a503662e56a92b10514afed312e2ad70ca355f817d6c2ee\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nuse text.join = @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\\nbody {\\n  let t27 = invoke py.bind(\\\"main\\\", (), positional2, keywords2, false)\\n  let i = absent\\n  let ts = absent\\n  let total = 0\\n  if bool.not(same(kind(0), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(0), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(4), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(4), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(1), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(1), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if eq(1, 0) {\\n    do invoke py.fail(\\\"ValueError\\\", \\\"range() arg 3 must not be zero\\\")\\n  }\\n  let t3 = 0\\n  while int.lt(t3, 4) {\\n    set i = t3\\n    set t3 = int.add(t3, 1)\\n    let t4 = []\\n    for j_1 in invoke py.range(add(i, 1), absent, absent) via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n      set t4[list.len(t4)] = let(t6 = w[1], let(t7 = [j_1], let(t8 = map{}, let(t9 = absent, let(t10 = t7, let(t11 = t8, let(t12 = t9, let(t13 = fn @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6, spawn invoke py.task.run(t13)))))))))\\n    }\\n    set ts = t4\\n    for t in ts via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n      set total = py.number.iadd(total, await(t) via py.await)\\n    }\\n    do invoke py.sleep(0)\\n  }\\n  let t15 = []\\n  let t16 = []\\n  for k_1 in invoke py.range(3, absent, absent) via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n    set t16[list.len(t16)] = let(t18 = w[1], let(t19 = [k_1], let(t20 = map{}, let(t21 = absent, let(t22 = t19, let(t23 = t20, let(t24 = t21, let(t25 = fn @5d66734778dcca2d2dc27816f9d36ad173f8a71bb18d778fe2559c61581ecf4a, spawn invoke py.task.run(t25)))))))))\\n  }\\n  do invoke py.args.extend(t15, t16)\\n  let t26 = map{}\\n  let xs = invoke py.gather(t15, invoke py.gather.options(t26))\\n  print invoke py.print_text((total, xs), (\\\" \\\", absent, absent))\\n}\\n\"\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nbody {\\n  let t1 = invoke py.bind(\\\"w\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)\\n  let n = t1[0]\\n  do invoke py.sleep(n)\\n  return n\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t18(t22, t23, t24)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t6(t10, t11, t12)\\n}\\n\"\nmain {\n  let `main` = absent\n  let w = absent\n  try {\n    set w = let(t2 = fn @583421cb24364c6580d7021557862250838b4cd5fe9c592a80e96a12f8c00a07 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t2, ((\"n\", 1, false),), \"w\", (\"py.callable\", true)))\n    set `main` = let(t28 = fn @05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t28, (), \"main\", (\"py.callable\", true)))\n    let t29 = `main`[1]\n    let t30 = apply t29([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ],
+          [
+            {
+              "request": 1,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 2,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ],
+          [
+            {
+              "request": 3,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 4,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 5,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ],
+          [
+            {
+              "request": 6,
+              "outcome": {
+                "completed": "null"
+              }
+            },
+            {
+              "request": 7,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "10 [0, 1, 2]"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 2
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 4
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 5
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "2000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 7
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 8
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "2000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        9,
+                        1,
+                        3,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 9
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "3000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        12,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 1
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          },
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "05e5f31c75cfc18146583a78cc04a81e85821b88967ae17cb4b0c61c7f0758c3"
+                      },
+                      "path": [
+                        12,
+                        1,
+                        0,
+                        2,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1
+                      ]
+                    },
+                    "occurrence": 2
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "2000"
+                }
+              ],
+              "result": "null"
+            }
+          }
+        ],
+        "charged": 12839,
+        "parks": 4,
+        "returns": [
+          53,
+          109,
+          169,
+          228,
+          289,
+          343,
+          396,
+          466,
+          1000,
+          1536,
+          1599,
+          1650,
+          1704,
+          1757,
+          1827,
+          1877,
+          1933,
+          1983,
+          2543,
+          3082,
+          3619,
+          3683,
+          3734,
+          3786,
+          3848,
+          3902,
+          3952,
+          4002,
+          4059,
+          4119,
+          4169,
+          4227,
+          4277,
+          4837,
+          5377,
+          5898,
+          6456,
+          6521,
+          6572,
+          6628,
+          6682,
+          6735,
+          6805,
+          6855,
+          6911,
+          6961,
+          7014,
+          7076,
+          7130,
+          7180,
+          7232,
+          7289,
+          7349,
+          7885,
+          8425,
+          8946,
+          9467,
+          9529,
+          10045,
+          10112,
+          10168,
+          10220,
+          10270,
+          10334,
+          10384,
+          10435,
+          10497,
+          10551,
+          10601,
+          10653,
+          10710,
+          10770,
+          11306,
+          11833,
+          12354,
+          12411,
+          12466,
+          12517,
+          12572,
+          12629,
+          12680,
+          12827
+        ]
+      }
+    }
+  ]
+}

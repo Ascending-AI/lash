@@ -202,6 +202,7 @@ fn every_corpus_charge_bound_ends_where_the_per_unit_reference_charger_ends() {
                                         .to_vec(),
                                     charged: Some(charged),
                                     parks: parks.len(),
+                                    returns: None,
                                 },
                                 program: program[..=event].to_vec(),
                             }

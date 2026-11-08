@@ -1,0 +1,190 @@
+{
+  "rule": "K-FORM-001",
+  "cases": [
+    {
+      "name": "r56-e4c at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\nlibrary @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\nlibrary @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 0), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"g\\\", (), positional1, keywords1, false)), apply body1(active1))\\n}\\n\"\ndefinition \"function local.function(active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse bool.not = @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\\nuse eq = @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\\nuse int.add = @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\\nuse int.lt = @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nuse text.join = @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\\nbody {\\n  let i = absent\\n  let out = []\\n  if bool.not(same(kind(0), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(0), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(3), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(3), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(1), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(1), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if eq(1, 0) {\\n    do invoke py.fail(\\\"ValueError\\\", \\\"range() arg 3 must not be zero\\\")\\n  }\\n  let t1 = 0\\n  while int.lt(t1, 3) {\\n    set i = t1\\n    set t1 = int.add(t1, 1)\\n    set out[list.len(out)] = i\\n  }\\n  return out\\n}\\n\"\nprivate body1, t2\nmain {\n  let t2 = fn @c68a2d5690183860586f36c6a5d36489bb80a6a3f2caa95bfdb9de55c704ad4e\n  let body1 = t2\n  let g = let(t4 = fn @bb7a84d1d457877d3e7ff2908b7649d83c31a410df2dcb3c15abbad8292a3f1e presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t4, (), \"g\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body1(absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "[0, 1, 2]"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 690,
+        "parks": 0,
+        "returns": [
+          2,
+          4,
+          22,
+          27,
+          29,
+          31,
+          57,
+          83,
+          109,
+          124,
+          126,
+          142,
+          144,
+          154,
+          160,
+          182,
+          184,
+          195,
+          201,
+          223,
+          225,
+          236,
+          242,
+          264,
+          274,
+          283,
+          294,
+          305,
+          316,
+          327,
+          338,
+          349,
+          360,
+          362,
+          373,
+          384,
+          387,
+          389,
+          401,
+          412,
+          423,
+          437,
+          444,
+          450,
+          451,
+          453,
+          465,
+          476,
+          487,
+          501,
+          509,
+          515,
+          516,
+          518,
+          530,
+          541,
+          552,
+          566,
+          574,
+          580,
+          581,
+          690
+        ]
+      }
+    },
+    {
+      "name": "r56-e4c at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\nlibrary @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\nlibrary @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 0), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"g\\\", (), positional1, keywords1, false)), apply body1(active1))\\n}\\n\"\ndefinition \"function local.function(active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse bool.not = @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\\nuse eq = @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\\nuse int.add = @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\\nuse int.lt = @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nuse text.join = @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\\nbody {\\n  let i = absent\\n  let out = []\\n  if bool.not(same(kind(0), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(0), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(3), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(3), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(1), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(1), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if eq(1, 0) {\\n    do invoke py.fail(\\\"ValueError\\\", \\\"range() arg 3 must not be zero\\\")\\n  }\\n  let t1 = 0\\n  while int.lt(t1, 3) {\\n    set i = t1\\n    set t1 = int.add(t1, 1)\\n    set out[list.len(out)] = i\\n  }\\n  return out\\n}\\n\"\nprivate body1, t2\nmain {\n  let t2 = fn @c68a2d5690183860586f36c6a5d36489bb80a6a3f2caa95bfdb9de55c704ad4e\n  let body1 = t2\n  let g = let(t4 = fn @bb7a84d1d457877d3e7ff2908b7649d83c31a410df2dcb3c15abbad8292a3f1e presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t4, (), \"g\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body1(absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "[0, 1, 2]"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 690,
+        "parks": 0,
+        "returns": [
+          22,
+          29,
+          57,
+          83,
+          109,
+          124,
+          142,
+          154,
+          182,
+          195,
+          223,
+          236,
+          264,
+          274,
+          283,
+          294,
+          305,
+          316,
+          327,
+          338,
+          349,
+          360,
+          373,
+          384,
+          401,
+          412,
+          423,
+          437,
+          444,
+          451,
+          465,
+          476,
+          487,
+          501,
+          509,
+          516,
+          530,
+          541,
+          552,
+          566,
+          574,
+          581,
+          690
+        ]
+      }
+    },
+    {
+      "name": "r56-e4c at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\nlibrary @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\nlibrary @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 0), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"g\\\", (), positional1, keywords1, false)), apply body1(active1))\\n}\\n\"\ndefinition \"function local.function(active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse bool.not = @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\\nuse eq = @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\\nuse int.add = @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\\nuse int.lt = @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nuse text.join = @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\\nbody {\\n  let i = absent\\n  let out = []\\n  if bool.not(same(kind(0), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(0), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(3), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(3), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(1), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(1), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if eq(1, 0) {\\n    do invoke py.fail(\\\"ValueError\\\", \\\"range() arg 3 must not be zero\\\")\\n  }\\n  let t1 = 0\\n  while int.lt(t1, 3) {\\n    set i = t1\\n    set t1 = int.add(t1, 1)\\n    set out[list.len(out)] = i\\n  }\\n  return out\\n}\\n\"\nprivate body1, t2\nmain {\n  let t2 = fn @c68a2d5690183860586f36c6a5d36489bb80a6a3f2caa95bfdb9de55c704ad4e\n  let body1 = t2\n  let g = let(t4 = fn @bb7a84d1d457877d3e7ff2908b7649d83c31a410df2dcb3c15abbad8292a3f1e presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t4, (), \"g\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body1(absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "[0, 1, 2]"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 690,
+        "parks": 0,
+        "returns": [
+          57,
+          109,
+          160,
+          223,
+          274,
+          327,
+          384,
+          437,
+          487,
+          541,
+          690
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+{
+  "rule": "K-TASK-001",
+  "cases": [
+    {
+      "name": "r56-t3 at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.new = @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\\nbody {\\n  let t1 = invoke py.bind(\\\"bad\\\", (), positional1, keywords1, false)\\n  throw invoke py.exc.new(\\\"ValueError\\\", (\\\"lost\\\",), null, false)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t3(t7, t8, t9)\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @5bc98e168299300e1e24559d6bb4ec593063177b7784b07ff466a3cb5f430e1d\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nbody {\\n  let t11 = invoke py.bind(\\\"main\\\", (), positional2, keywords2, false)\\n  let t = let(t3 = bad[1], let(t4 = [], let(t5 = map{}, let(t6 = absent, let(t7 = t4, let(t8 = t5, let(t9 = t6, let(t10 = fn local.function, spawn invoke py.task.run(t10)))))))))\\n  do invoke py.sleep(0)\\n  print invoke py.print_text((\\\"done\\\",), (\\\" \\\", absent, absent))\\n}\\n\"\nmain {\n  let bad = absent\n  let `main` = absent\n  try {\n    set bad = let(t2 = fn @2c86fe95f93e12fa8bc9b5e8f60fa068855f6dea9d79c36700e08cea224aa143 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t2, (), \"bad\", (\"py.callable\", true)))\n    set `main` = let(t12 = fn @c2af54cb8fcdeeea0f571c4232d89063d867d39fade2374187f1f71505bf00e1 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t12, (), \"main\", (\"py.callable\", true)))\n    let t13 = `main`[1]\n    let t14 = apply t13([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "done"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 783,
+        "parks": 0,
+        "returns": [
+          2,
+          4,
+          5,
+          23,
+          41,
+          45,
+          50,
+          57,
+          59,
+          61,
+          63,
+          65,
+          67,
+          72,
+          76,
+          88,
+          92,
+          101,
+          103,
+          124,
+          127,
+          132,
+          139,
+          141,
+          143,
+          145,
+          147,
+          149,
+          154,
+          158,
+          170,
+          174,
+          183,
+          185,
+          214,
+          726,
+          771,
+          777,
+          783
+        ]
+      }
+    },
+    {
+      "name": "r56-t3 at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.new = @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\\nbody {\\n  let t1 = invoke py.bind(\\\"bad\\\", (), positional1, keywords1, false)\\n  throw invoke py.exc.new(\\\"ValueError\\\", (\\\"lost\\\",), null, false)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t3(t7, t8, t9)\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @5bc98e168299300e1e24559d6bb4ec593063177b7784b07ff466a3cb5f430e1d\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nbody {\\n  let t11 = invoke py.bind(\\\"main\\\", (), positional2, keywords2, false)\\n  let t = let(t3 = bad[1], let(t4 = [], let(t5 = map{}, let(t6 = absent, let(t7 = t4, let(t8 = t5, let(t9 = t6, let(t10 = fn local.function, spawn invoke py.task.run(t10)))))))))\\n  do invoke py.sleep(0)\\n  print invoke py.print_text((\\\"done\\\",), (\\\" \\\", absent, absent))\\n}\\n\"\nmain {\n  let bad = absent\n  let `main` = absent\n  try {\n    set bad = let(t2 = fn @2c86fe95f93e12fa8bc9b5e8f60fa068855f6dea9d79c36700e08cea224aa143 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t2, (), \"bad\", (\"py.callable\", true)))\n    set `main` = let(t12 = fn @c2af54cb8fcdeeea0f571c4232d89063d867d39fade2374187f1f71505bf00e1 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t12, (), \"main\", (\"py.callable\", true)))\n    let t13 = `main`[1]\n    let t14 = apply t13([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "done"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 783,
+        "parks": 0,
+        "returns": [
+          23,
+          41,
+          50,
+          57,
+          65,
+          72,
+          88,
+          101,
+          124,
+          132,
+          139,
+          147,
+          154,
+          170,
+          183,
+          214,
+          726,
+          771,
+          783
+        ]
+      }
+    },
+    {
+      "name": "r56-t3 at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.new = @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\\nbody {\\n  let t1 = invoke py.bind(\\\"bad\\\", (), positional1, keywords1, false)\\n  throw invoke py.exc.new(\\\"ValueError\\\", (\\\"lost\\\",), null, false)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t3(t7, t8, t9)\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @5bc98e168299300e1e24559d6bb4ec593063177b7784b07ff466a3cb5f430e1d\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nbody {\\n  let t11 = invoke py.bind(\\\"main\\\", (), positional2, keywords2, false)\\n  let t = let(t3 = bad[1], let(t4 = [], let(t5 = map{}, let(t6 = absent, let(t7 = t4, let(t8 = t5, let(t9 = t6, let(t10 = fn local.function, spawn invoke py.task.run(t10)))))))))\\n  do invoke py.sleep(0)\\n  print invoke py.print_text((\\\"done\\\",), (\\\" \\\", absent, absent))\\n}\\n\"\nmain {\n  let bad = absent\n  let `main` = absent\n  try {\n    set bad = let(t2 = fn @2c86fe95f93e12fa8bc9b5e8f60fa068855f6dea9d79c36700e08cea224aa143 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t2, (), \"bad\", (\"py.callable\", true)))\n    set `main` = let(t12 = fn @c2af54cb8fcdeeea0f571c4232d89063d867d39fade2374187f1f71505bf00e1 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t12, (), \"main\", (\"py.callable\", true)))\n    let t13 = `main`[1]\n    let t14 = apply t13([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "done"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 783,
+        "parks": 0,
+        "returns": [
+          50,
+          101,
+          154,
+          214,
+          726,
+          777
+        ]
+      }
+    }
+  ]
+}

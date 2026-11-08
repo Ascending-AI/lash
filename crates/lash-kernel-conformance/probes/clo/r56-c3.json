@@ -1,0 +1,167 @@
+{
+  "rule": "K-CLO-001",
+  "cases": [
+    {
+      "name": "r56-c3 at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @0df1a87f8cdbc2ebb96465b82ac97c9ecf57961901df2b66ec27aa51818d5552\nlibrary @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de\nlibrary @5e4f58dbb2b9765eff6b24441b775ce817223dcf95c9cbc32afbeae5f8c11f2d\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nbody {\\n  let t1 = invoke py.bind(\\\"inc\\\", (), positional1, keywords1, false)\\n  set n_local1 = invoke py.add(n_local1, 1)\\n  return n_local1\\n}\\n\"\ndefinition \"function local.function(active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @170692557bb89f5e7856c3db88df6c5f9ea0d090d5b2e65e1f4c73b247e55ae1\\nuse local.function = @b0815a8ccb497a58217217eb5098cfd27e8378a61c59c0936d6fb119cb2277ec\\nbody {\\n  let n_local1 = 0\\n  let inc = let(t2 = fn @170692557bb89f5e7856c3db88df6c5f9ea0d090d5b2e65e1f4c73b247e55ae1 presentation() -> Any token(\\\"py.function\\\", 1) py_args(0), (\\\"py.function\\\", t2, (), \\\"inc\\\", (\\\"py.callable\\\", false)))\\n  let get = let(t3 = fn @b0815a8ccb497a58217217eb5098cfd27e8378a61c59c0936d6fb119cb2277ec presentation() -> Any token(\\\"py.function\\\", 1) py_args(0), (\\\"py.function\\\", t3, (), \\\"get\\\", (\\\"py.callable\\\", false)))\\n  return (inc, get)\\n}\\n\"\ndefinition \"function local.function(positional4: Any, keywords4: Any, active4: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound3 = if(if(same(list.len(positional4), 0), same(map.len(keywords4), 0), false), positional4, invoke py.bind(\\\"g\\\", (), positional4, keywords4, false)), apply body2(active4))\\n}\\n\"\ndefinition \"function local.function(active4: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @df267035254f0a5ed2e90289c3175a0e3811a14a29e25e55e19843d43cb17b6f\\nuse py.call = @0df1a87f8cdbc2ebb96465b82ac97c9ecf57961901df2b66ec27aa51818d5552\\nuse py.unpack = @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de\\nbody {\\n  let t7 = invoke py.unpack(apply body1(active4), 2)\\n  let inc = t7[0]\\n  let get = t7[1]\\n  do let(t8 = inc, let(t9 = fn local.function, invoke py.call(t8, [], map{}, active4, t9)))\\n  do let(t10 = inc, let(t11 = fn local.function, invoke py.call(t10, [], map{}, active4, t11)))\\n  return let(t12 = get, let(t13 = fn local.function, invoke py.call(t12, [], map{}, active4, t13)))\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active3: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional2), 0), same(map.len(keywords2), 0), false), positional2, invoke py.bind(\\\"get\\\", (), positional2, keywords2, false)), n_local1)\\n}\\n\"\ndefinition \"function local.function(positional3: Any, keywords3: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound2 = if(if(same(list.len(positional3), 0), same(map.len(keywords3), 0), false), positional3, invoke py.bind(\\\"counter\\\", (), positional3, keywords3, false)), apply body1(active1))\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nuse py.namespace = @5e4f58dbb2b9765eff6b24441b775ce817223dcf95c9cbc32afbeae5f8c11f2d\\nbody {\\n  return invoke py.namespace(map{\\\"get\\\": get, \\\"inc\\\": inc})\\n}\\n\"\nprivate body1, body2, t14, t4\nmain {\n  let t4 = fn @3b6990db304b6105e36fb56710482792d3fad7c5b85de66c1072c9b412641556\n  let body1 = t4\n  let counter = let(t6 = fn @d437f30e8da75fe903b66ca31e21612672770c5e3e7bd9f7383628a5cf0a2639 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t6, (), \"counter\", (\"py.callable\", false)))\n  let t14 = fn @ae866974c79d5d65d30fcfb100cb674c75bde105b949dc963c254ec5d6d87653\n  let body2 = t14\n  let g = let(t16 = fn @4fe3cb3a74186c25fea8359621ffc0c6c00ce2663c981bc4dfb5f93ec13fdf59 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t16, (), \"g\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body2(absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "2"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 439,
+        "parks": 0,
+        "returns": [
+          2,
+          4,
+          22,
+          24,
+          26,
+          44,
+          49,
+          53,
+          55,
+          73,
+          91,
+          105,
+          109,
+          113,
+          124,
+          130,
+          154,
+          158,
+          165,
+          167,
+          169,
+          171,
+          173,
+          175,
+          180,
+          184,
+          196,
+          200,
+          209,
+          211,
+          221,
+          223,
+          225,
+          236,
+          242,
+          266,
+          270,
+          277,
+          279,
+          281,
+          283,
+          285,
+          287,
+          292,
+          296,
+          308,
+          312,
+          321,
+          323,
+          334,
+          336,
+          338,
+          349,
+          355,
+          379,
+          383,
+          405,
+          439
+        ]
+      }
+    },
+    {
+      "name": "r56-c3 at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @0df1a87f8cdbc2ebb96465b82ac97c9ecf57961901df2b66ec27aa51818d5552\nlibrary @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de\nlibrary @5e4f58dbb2b9765eff6b24441b775ce817223dcf95c9cbc32afbeae5f8c11f2d\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nbody {\\n  let t1 = invoke py.bind(\\\"inc\\\", (), positional1, keywords1, false)\\n  set n_local1 = invoke py.add(n_local1, 1)\\n  return n_local1\\n}\\n\"\ndefinition \"function local.function(active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @170692557bb89f5e7856c3db88df6c5f9ea0d090d5b2e65e1f4c73b247e55ae1\\nuse local.function = @b0815a8ccb497a58217217eb5098cfd27e8378a61c59c0936d6fb119cb2277ec\\nbody {\\n  let n_local1 = 0\\n  let inc = let(t2 = fn @170692557bb89f5e7856c3db88df6c5f9ea0d090d5b2e65e1f4c73b247e55ae1 presentation() -> Any token(\\\"py.function\\\", 1) py_args(0), (\\\"py.function\\\", t2, (), \\\"inc\\\", (\\\"py.callable\\\", false)))\\n  let get = let(t3 = fn @b0815a8ccb497a58217217eb5098cfd27e8378a61c59c0936d6fb119cb2277ec presentation() -> Any token(\\\"py.function\\\", 1) py_args(0), (\\\"py.function\\\", t3, (), \\\"get\\\", (\\\"py.callable\\\", false)))\\n  return (inc, get)\\n}\\n\"\ndefinition \"function local.function(positional4: Any, keywords4: Any, active4: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound3 = if(if(same(list.len(positional4), 0), same(map.len(keywords4), 0), false), positional4, invoke py.bind(\\\"g\\\", (), positional4, keywords4, false)), apply body2(active4))\\n}\\n\"\ndefinition \"function local.function(active4: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @df267035254f0a5ed2e90289c3175a0e3811a14a29e25e55e19843d43cb17b6f\\nuse py.call = @0df1a87f8cdbc2ebb96465b82ac97c9ecf57961901df2b66ec27aa51818d5552\\nuse py.unpack = @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de\\nbody {\\n  let t7 = invoke py.unpack(apply body1(active4), 2)\\n  let inc = t7[0]\\n  let get = t7[1]\\n  do let(t8 = inc, let(t9 = fn local.function, invoke py.call(t8, [], map{}, active4, t9)))\\n  do let(t10 = inc, let(t11 = fn local.function, invoke py.call(t10, [], map{}, active4, t11)))\\n  return let(t12 = get, let(t13 = fn local.function, invoke py.call(t12, [], map{}, active4, t13)))\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active3: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional2), 0), same(map.len(keywords2), 0), false), positional2, invoke py.bind(\\\"get\\\", (), positional2, keywords2, false)), n_local1)\\n}\\n\"\ndefinition \"function local.function(positional3: Any, keywords3: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound2 = if(if(same(list.len(positional3), 0), same(map.len(keywords3), 0), false), positional3, invoke py.bind(\\\"counter\\\", (), positional3, keywords3, false)), apply body1(active1))\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nuse py.namespace = @5e4f58dbb2b9765eff6b24441b775ce817223dcf95c9cbc32afbeae5f8c11f2d\\nbody {\\n  return invoke py.namespace(map{\\\"get\\\": get, \\\"inc\\\": inc})\\n}\\n\"\nprivate body1, body2, t14, t4\nmain {\n  let t4 = fn @3b6990db304b6105e36fb56710482792d3fad7c5b85de66c1072c9b412641556\n  let body1 = t4\n  let counter = let(t6 = fn @d437f30e8da75fe903b66ca31e21612672770c5e3e7bd9f7383628a5cf0a2639 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t6, (), \"counter\", (\"py.callable\", false)))\n  let t14 = fn @ae866974c79d5d65d30fcfb100cb674c75bde105b949dc963c254ec5d6d87653\n  let body2 = t14\n  let g = let(t16 = fn @4fe3cb3a74186c25fea8359621ffc0c6c00ce2663c981bc4dfb5f93ec13fdf59 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t16, (), \"g\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body2(absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "2"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 439,
+        "parks": 0,
+        "returns": [
+          22,
+          44,
+          53,
+          73,
+          91,
+          105,
+          113,
+          124,
+          154,
+          165,
+          173,
+          180,
+          196,
+          209,
+          221,
+          236,
+          266,
+          277,
+          285,
+          292,
+          308,
+          321,
+          334,
+          349,
+          379,
+          405,
+          439
+        ]
+      }
+    },
+    {
+      "name": "r56-c3 at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @0df1a87f8cdbc2ebb96465b82ac97c9ecf57961901df2b66ec27aa51818d5552\nlibrary @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de\nlibrary @5e4f58dbb2b9765eff6b24441b775ce817223dcf95c9cbc32afbeae5f8c11f2d\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nbody {\\n  let t1 = invoke py.bind(\\\"inc\\\", (), positional1, keywords1, false)\\n  set n_local1 = invoke py.add(n_local1, 1)\\n  return n_local1\\n}\\n\"\ndefinition \"function local.function(active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @170692557bb89f5e7856c3db88df6c5f9ea0d090d5b2e65e1f4c73b247e55ae1\\nuse local.function = @b0815a8ccb497a58217217eb5098cfd27e8378a61c59c0936d6fb119cb2277ec\\nbody {\\n  let n_local1 = 0\\n  let inc = let(t2 = fn @170692557bb89f5e7856c3db88df6c5f9ea0d090d5b2e65e1f4c73b247e55ae1 presentation() -> Any token(\\\"py.function\\\", 1) py_args(0), (\\\"py.function\\\", t2, (), \\\"inc\\\", (\\\"py.callable\\\", false)))\\n  let get = let(t3 = fn @b0815a8ccb497a58217217eb5098cfd27e8378a61c59c0936d6fb119cb2277ec presentation() -> Any token(\\\"py.function\\\", 1) py_args(0), (\\\"py.function\\\", t3, (), \\\"get\\\", (\\\"py.callable\\\", false)))\\n  return (inc, get)\\n}\\n\"\ndefinition \"function local.function(positional4: Any, keywords4: Any, active4: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound3 = if(if(same(list.len(positional4), 0), same(map.len(keywords4), 0), false), positional4, invoke py.bind(\\\"g\\\", (), positional4, keywords4, false)), apply body2(active4))\\n}\\n\"\ndefinition \"function local.function(active4: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @df267035254f0a5ed2e90289c3175a0e3811a14a29e25e55e19843d43cb17b6f\\nuse py.call = @0df1a87f8cdbc2ebb96465b82ac97c9ecf57961901df2b66ec27aa51818d5552\\nuse py.unpack = @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de\\nbody {\\n  let t7 = invoke py.unpack(apply body1(active4), 2)\\n  let inc = t7[0]\\n  let get = t7[1]\\n  do let(t8 = inc, let(t9 = fn local.function, invoke py.call(t8, [], map{}, active4, t9)))\\n  do let(t10 = inc, let(t11 = fn local.function, invoke py.call(t10, [], map{}, active4, t11)))\\n  return let(t12 = get, let(t13 = fn local.function, invoke py.call(t12, [], map{}, active4, t13)))\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active3: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional2), 0), same(map.len(keywords2), 0), false), positional2, invoke py.bind(\\\"get\\\", (), positional2, keywords2, false)), n_local1)\\n}\\n\"\ndefinition \"function local.function(positional3: Any, keywords3: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound2 = if(if(same(list.len(positional3), 0), same(map.len(keywords3), 0), false), positional3, invoke py.bind(\\\"counter\\\", (), positional3, keywords3, false)), apply body1(active1))\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nuse py.namespace = @5e4f58dbb2b9765eff6b24441b775ce817223dcf95c9cbc32afbeae5f8c11f2d\\nbody {\\n  return invoke py.namespace(map{\\\"get\\\": get, \\\"inc\\\": inc})\\n}\\n\"\nprivate body1, body2, t14, t4\nmain {\n  let t4 = fn @3b6990db304b6105e36fb56710482792d3fad7c5b85de66c1072c9b412641556\n  let body1 = t4\n  let counter = let(t6 = fn @d437f30e8da75fe903b66ca31e21612672770c5e3e7bd9f7383628a5cf0a2639 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t6, (), \"counter\", (\"py.callable\", false)))\n  let t14 = fn @ae866974c79d5d65d30fcfb100cb674c75bde105b949dc963c254ec5d6d87653\n  let body2 = t14\n  let g = let(t16 = fn @4fe3cb3a74186c25fea8359621ffc0c6c00ce2663c981bc4dfb5f93ec13fdf59 presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t16, (), \"g\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body2(absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "2"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 439,
+        "parks": 0,
+        "returns": [
+          53,
+          105,
+          158,
+          209,
+          266,
+          321,
+          379,
+          439
+        ]
+      }
+    }
+  ]
+}

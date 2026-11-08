@@ -26,6 +26,7 @@ fn case(name: &str, document: String) -> Case {
             trace: vec![],
             charged: None,
             parks: None,
+            returns: None,
         },
     }
 }

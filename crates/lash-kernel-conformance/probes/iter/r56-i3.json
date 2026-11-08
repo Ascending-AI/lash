@@ -1,0 +1,174 @@
+{
+  "rule": "K-ITER-001",
+  "cases": [
+    {
+      "name": "r56-i3 at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @13cce8218d1f8ce81ffdf513d9e690655bb5556eda81eb939e233ecca2e78049\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\nlibrary @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nmain {\n  let e = absent\n  let k = absent\n  let d = map{\"a\": 1, \"b\": 2}\n  try {\n    for t2 in d via (open @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017, next @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43, check @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77) {\n      set k = t2\n      do invoke @13cce8218d1f8ce81ffdf513d9e690655bb5556eda81eb939e233ecca2e78049(d, \"b\")\n    }\n  } catch t1 {\n    if invoke @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02(t1, (\"NotImplementedError\", \"RecursionError\", \"RuntimeError\")) {\n      set e = t1\n      try {\n        print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((\"err\", invoke @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b(e)), (\" \", absent, absent))\n      } finally {\n        set e = absent\n      }\n    } else {\n      throw t1\n    }\n  }\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((d,), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "err dictionary changed size during iteration"
+          },
+          {
+            "text": "{'a': 1}"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 943,
+        "parks": 0,
+        "returns": [
+          2,
+          4,
+          12,
+          13,
+          24,
+          26,
+          38,
+          43,
+          63,
+          65,
+          66,
+          446,
+          448,
+          460,
+          468,
+          478,
+          488,
+          498,
+          508,
+          518,
+          528,
+          538,
+          540,
+          550,
+          560,
+          570,
+          580,
+          590,
+          593,
+          595,
+          604,
+          615,
+          626,
+          637,
+          648,
+          659,
+          741,
+          743,
+          747,
+          749,
+          761,
+          772,
+          783,
+          797,
+          805,
+          841,
+          842,
+          943
+        ]
+      }
+    },
+    {
+      "name": "r56-i3 at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @13cce8218d1f8ce81ffdf513d9e690655bb5556eda81eb939e233ecca2e78049\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\nlibrary @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nmain {\n  let e = absent\n  let k = absent\n  let d = map{\"a\": 1, \"b\": 2}\n  try {\n    for t2 in d via (open @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017, next @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43, check @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77) {\n      set k = t2\n      do invoke @13cce8218d1f8ce81ffdf513d9e690655bb5556eda81eb939e233ecca2e78049(d, \"b\")\n    }\n  } catch t1 {\n    if invoke @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02(t1, (\"NotImplementedError\", \"RecursionError\", \"RuntimeError\")) {\n      set e = t1\n      try {\n        print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((\"err\", invoke @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b(e)), (\" \", absent, absent))\n      } finally {\n        set e = absent\n      }\n    } else {\n      throw t1\n    }\n  }\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((d,), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "err dictionary changed size during iteration"
+          },
+          {
+            "text": "{'a': 1}"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 943,
+        "parks": 0,
+        "returns": [
+          12,
+          24,
+          38,
+          63,
+          446,
+          460,
+          468,
+          478,
+          488,
+          498,
+          508,
+          518,
+          528,
+          538,
+          550,
+          560,
+          570,
+          580,
+          590,
+          604,
+          615,
+          626,
+          637,
+          648,
+          659,
+          741,
+          749,
+          761,
+          772,
+          783,
+          797,
+          805,
+          841,
+          943
+        ]
+      }
+    },
+    {
+      "name": "r56-i3 at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @13cce8218d1f8ce81ffdf513d9e690655bb5556eda81eb939e233ecca2e78049\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\nlibrary @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nmain {\n  let e = absent\n  let k = absent\n  let d = map{\"a\": 1, \"b\": 2}\n  try {\n    for t2 in d via (open @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017, next @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43, check @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77) {\n      set k = t2\n      do invoke @13cce8218d1f8ce81ffdf513d9e690655bb5556eda81eb939e233ecca2e78049(d, \"b\")\n    }\n  } catch t1 {\n    if invoke @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02(t1, (\"NotImplementedError\", \"RecursionError\", \"RuntimeError\")) {\n      set e = t1\n      try {\n        print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((\"err\", invoke @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b(e)), (\" \", absent, absent))\n      } finally {\n        set e = absent\n      }\n    } else {\n      throw t1\n    }\n  }\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((d,), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "err dictionary changed size during iteration"
+          },
+          {
+            "text": "{'a': 1}"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 943,
+        "parks": 0,
+        "returns": [
+          63,
+          446,
+          498,
+          550,
+          604,
+          659,
+          741,
+          797,
+          943
+        ]
+      }
+    }
+  ]
+}

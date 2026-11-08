@@ -1,0 +1,189 @@
+{
+  "rule": "K-ERR-001",
+  "cases": [
+    {
+      "name": "r56-exc1 at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\nlibrary @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\nlibrary @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\nlibrary @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\nlibrary @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c5e11ab254e431ef1b1598e5d9128ac25d78dfd0e14c7e91ae5a01591d068899\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"f\\\", ((\\\"x\\\", 1, false),), positional1, keywords1, false)), let(x = bound1[0], if(same(x, absent), invoke py.fail(\\\"TypeError\\\", \\\"f() missing a required positional argument\\\"), apply body1(x, active1))))\\n}\\n\"\ndefinition \"function local.function(x: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse gt = @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.exc.new = @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\\nbody {\\n  if gt(x, 2) {\\n    throw invoke py.exc.new(\\\"ValueError\\\", (\\\"big\\\",), null, false)\\n  }\\n  return invoke py.add(x, 1)\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound2 = if(if(same(list.len(positional2), 1), same(map.len(keywords2), 0), false), positional2, invoke py.bind(\\\"g\\\", ((\\\"n\\\", 1, false),), positional2, keywords2, false)), let(n = bound2[0], if(same(n, absent), invoke py.fail(\\\"TypeError\\\", \\\"g() missing a required positional argument\\\"), apply body2(n, active2))))\\n}\\n\"\ndefinition \"function local.function(n: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse bool.not = @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\\nuse eq = @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\\nuse int.add = @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\\nuse int.lt = @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.exc.matches = @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse py.int = @c5e11ab254e431ef1b1598e5d9128ac25d78dfd0e14c7e91ae5a01591d068899\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nuse text.join = @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\\nbody {\\n  let e = absent\\n  let i = absent\\n  let total = 0\\n  let t4 = n\\n  if bool.not(same(kind(0), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(0), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(t4), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(t4), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(1), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(1), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if eq(1, 0) {\\n    do invoke py.fail(\\\"ValueError\\\", \\\"range() arg 3 must not be zero\\\")\\n  }\\n  let t5 = invoke py.int(t4)\\n  let t6 = 0\\n  while int.lt(t6, t5) {\\n    set i = t6\\n    set t6 = int.add(t6, 1)\\n    try {\\n      set total = invoke py.add(total, apply body1(i, active2))\\n    } catch t7 {\\n      if invoke py.exc.matches(t7, (\\\"ValueError\\\",)) {\\n        set e = t7\\n        try {\\n          set total = invoke py.add(total, 100)\\n        } finally {\\n          set e = absent\\n        }\\n      } else {\\n        throw t7\\n      }\\n    }\\n  }\\n  return total\\n}\\n\"\nprivate body1, body2, t1, t8\nmain {\n  let t1 = fn @86df1ffff0e56aa5da232a9eb1aa372b71008f6ba4381b36aed9444f379cc978\n  let body1 = t1\n  let f = let(t3 = fn @4ae57cefa87900fa912d2737c6b2287fd16296b3adbf3629d8dd0728e47ab9c5 presentation(x: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t3, ((\"x\", 1, false),), \"f\", (\"py.callable\", false)))\n  let t8 = fn @cb2f57ecd4fa3364395773b1a93e7cba9dade86028f113ffebc1e50168ebd5c3\n  let body2 = t8\n  let g = let(t10 = fn @8c63b8d3ebe353b0454709946f3b8c69093552ee59ba5e83697dfdc85e9e0ad9 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t10, ((\"n\", 1, false),), \"g\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body2(5, absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "206"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 707,
+        "parks": 0,
+        "returns": [
+          2,
+          4,
+          30,
+          32,
+          34,
+          60,
+          66,
+          68,
+          70,
+          72,
+          74,
+          100,
+          126,
+          152,
+          167,
+          177,
+          179,
+          195,
+          197,
+          207,
+          208,
+          214,
+          229,
+          247,
+          269,
+          271,
+          282,
+          283,
+          289,
+          311,
+          331,
+          353,
+          355,
+          366,
+          367,
+          373,
+          395,
+          415,
+          437,
+          439,
+          450,
+          451,
+          457,
+          479,
+          501,
+          515,
+          517,
+          518,
+          529,
+          531,
+          553,
+          555,
+          566,
+          567,
+          573,
+          595,
+          617,
+          631,
+          633,
+          634,
+          645,
+          647,
+          669,
+          707
+        ]
+      }
+    },
+    {
+      "name": "r56-exc1 at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\nlibrary @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\nlibrary @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\nlibrary @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\nlibrary @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c5e11ab254e431ef1b1598e5d9128ac25d78dfd0e14c7e91ae5a01591d068899\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"f\\\", ((\\\"x\\\", 1, false),), positional1, keywords1, false)), let(x = bound1[0], if(same(x, absent), invoke py.fail(\\\"TypeError\\\", \\\"f() missing a required positional argument\\\"), apply body1(x, active1))))\\n}\\n\"\ndefinition \"function local.function(x: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse gt = @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.exc.new = @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\\nbody {\\n  if gt(x, 2) {\\n    throw invoke py.exc.new(\\\"ValueError\\\", (\\\"big\\\",), null, false)\\n  }\\n  return invoke py.add(x, 1)\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound2 = if(if(same(list.len(positional2), 1), same(map.len(keywords2), 0), false), positional2, invoke py.bind(\\\"g\\\", ((\\\"n\\\", 1, false),), positional2, keywords2, false)), let(n = bound2[0], if(same(n, absent), invoke py.fail(\\\"TypeError\\\", \\\"g() missing a required positional argument\\\"), apply body2(n, active2))))\\n}\\n\"\ndefinition \"function local.function(n: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse bool.not = @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\\nuse eq = @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\\nuse int.add = @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\\nuse int.lt = @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.exc.matches = @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse py.int = @c5e11ab254e431ef1b1598e5d9128ac25d78dfd0e14c7e91ae5a01591d068899\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nuse text.join = @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\\nbody {\\n  let e = absent\\n  let i = absent\\n  let total = 0\\n  let t4 = n\\n  if bool.not(same(kind(0), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(0), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(t4), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(t4), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(1), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(1), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if eq(1, 0) {\\n    do invoke py.fail(\\\"ValueError\\\", \\\"range() arg 3 must not be zero\\\")\\n  }\\n  let t5 = invoke py.int(t4)\\n  let t6 = 0\\n  while int.lt(t6, t5) {\\n    set i = t6\\n    set t6 = int.add(t6, 1)\\n    try {\\n      set total = invoke py.add(total, apply body1(i, active2))\\n    } catch t7 {\\n      if invoke py.exc.matches(t7, (\\\"ValueError\\\",)) {\\n        set e = t7\\n        try {\\n          set total = invoke py.add(total, 100)\\n        } finally {\\n          set e = absent\\n        }\\n      } else {\\n        throw t7\\n      }\\n    }\\n  }\\n  return total\\n}\\n\"\nprivate body1, body2, t1, t8\nmain {\n  let t1 = fn @86df1ffff0e56aa5da232a9eb1aa372b71008f6ba4381b36aed9444f379cc978\n  let body1 = t1\n  let f = let(t3 = fn @4ae57cefa87900fa912d2737c6b2287fd16296b3adbf3629d8dd0728e47ab9c5 presentation(x: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t3, ((\"x\", 1, false),), \"f\", (\"py.callable\", false)))\n  let t8 = fn @cb2f57ecd4fa3364395773b1a93e7cba9dade86028f113ffebc1e50168ebd5c3\n  let body2 = t8\n  let g = let(t10 = fn @8c63b8d3ebe353b0454709946f3b8c69093552ee59ba5e83697dfdc85e9e0ad9 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t10, ((\"n\", 1, false),), \"g\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body2(5, absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "206"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 707,
+        "parks": 0,
+        "returns": [
+          30,
+          60,
+          68,
+          100,
+          126,
+          152,
+          167,
+          177,
+          195,
+          207,
+          214,
+          229,
+          247,
+          269,
+          282,
+          289,
+          311,
+          331,
+          353,
+          366,
+          373,
+          395,
+          415,
+          437,
+          450,
+          457,
+          479,
+          501,
+          515,
+          529,
+          553,
+          566,
+          573,
+          595,
+          617,
+          631,
+          645,
+          669,
+          707
+        ]
+      }
+    },
+    {
+      "name": "r56-exc1 at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\nlibrary @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\nlibrary @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\nlibrary @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\nlibrary @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c5e11ab254e431ef1b1598e5d9128ac25d78dfd0e14c7e91ae5a01591d068899\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"f\\\", ((\\\"x\\\", 1, false),), positional1, keywords1, false)), let(x = bound1[0], if(same(x, absent), invoke py.fail(\\\"TypeError\\\", \\\"f() missing a required positional argument\\\"), apply body1(x, active1))))\\n}\\n\"\ndefinition \"function local.function(x: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse gt = @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.exc.new = @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\\nbody {\\n  if gt(x, 2) {\\n    throw invoke py.exc.new(\\\"ValueError\\\", (\\\"big\\\",), null, false)\\n  }\\n  return invoke py.add(x, 1)\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound2 = if(if(same(list.len(positional2), 1), same(map.len(keywords2), 0), false), positional2, invoke py.bind(\\\"g\\\", ((\\\"n\\\", 1, false),), positional2, keywords2, false)), let(n = bound2[0], if(same(n, absent), invoke py.fail(\\\"TypeError\\\", \\\"g() missing a required positional argument\\\"), apply body2(n, active2))))\\n}\\n\"\ndefinition \"function local.function(n: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse bool.not = @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\\nuse eq = @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\\nuse int.add = @3a1e60624e2cec90f48a48881cb7e1e0faf36059870a1772975a471f4ae7c920\\nuse int.lt = @a2ac11f2ed1d8a02c799bcb52654c75981f49714a439ac396f905cfe7d8defb8\\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.exc.matches = @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse py.int = @c5e11ab254e431ef1b1598e5d9128ac25d78dfd0e14c7e91ae5a01591d068899\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nuse text.join = @5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4\\nbody {\\n  let e = absent\\n  let i = absent\\n  let total = 0\\n  let t4 = n\\n  if bool.not(same(kind(0), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(0), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(t4), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(t4), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if bool.not(same(kind(1), \\\"integer\\\")) {\\n    do invoke py.fail(\\\"TypeError\\\", text.join([\\\"'\\\", invoke py.type(1), \\\"' object cannot be interpreted as an integer\\\"], \\\"\\\"))\\n  }\\n  if eq(1, 0) {\\n    do invoke py.fail(\\\"ValueError\\\", \\\"range() arg 3 must not be zero\\\")\\n  }\\n  let t5 = invoke py.int(t4)\\n  let t6 = 0\\n  while int.lt(t6, t5) {\\n    set i = t6\\n    set t6 = int.add(t6, 1)\\n    try {\\n      set total = invoke py.add(total, apply body1(i, active2))\\n    } catch t7 {\\n      if invoke py.exc.matches(t7, (\\\"ValueError\\\",)) {\\n        set e = t7\\n        try {\\n          set total = invoke py.add(total, 100)\\n        } finally {\\n          set e = absent\\n        }\\n      } else {\\n        throw t7\\n      }\\n    }\\n  }\\n  return total\\n}\\n\"\nprivate body1, body2, t1, t8\nmain {\n  let t1 = fn @86df1ffff0e56aa5da232a9eb1aa372b71008f6ba4381b36aed9444f379cc978\n  let body1 = t1\n  let f = let(t3 = fn @4ae57cefa87900fa912d2737c6b2287fd16296b3adbf3629d8dd0728e47ab9c5 presentation(x: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t3, ((\"x\", 1, false),), \"f\", (\"py.callable\", false)))\n  let t8 = fn @cb2f57ecd4fa3364395773b1a93e7cba9dade86028f113ffebc1e50168ebd5c3\n  let body2 = t8\n  let g = let(t10 = fn @8c63b8d3ebe353b0454709946f3b8c69093552ee59ba5e83697dfdc85e9e0ad9 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t10, ((\"n\", 1, false),), \"g\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body2(5, absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "206"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 707,
+        "parks": 0,
+        "returns": [
+          60,
+          126,
+          177,
+          229,
+          282,
+          353,
+          415,
+          479,
+          529,
+          595,
+          645,
+          707
+        ]
+      }
+    }
+  ]
+}

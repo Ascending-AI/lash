@@ -75,6 +75,35 @@ impl<M: Machine> DocumentRunner for MachineRunner<M> {
     }
 }
 
+/// Runs `case` on `program`, already linked by its caller, under the
+/// case's script and charge `charge`, and checks its expectations. For
+/// documents a dialect lowered, whose helper library and Link the corpus
+/// registry does not provide.
+///
+/// # Errors
+/// The run's harness failure, or the first expectation it misses.
+pub fn check_program<M: Machine>(
+    program: Program,
+    case: &Case,
+    charge: lash_kernel_vm::Charge,
+) -> Result<Observations, HarnessError> {
+    let mut start =
+        |program, mut bounds: lash_kernel_vm::Bounds, start, source: &crate::pages::Source| {
+            bounds.charge = charge;
+            M::start(program, bounds, start, Box::new(source.clone()))
+        };
+    let run = Run {
+        start: &mut start,
+        printed: &mut || {},
+        charge: None,
+    };
+    let actual = run_program_in::<M>(program, case, run, &mut |at| Ok(at.machine), None)?;
+    case.expected
+        .check(&actual)
+        .map_err(|error| HarnessError(format!("{}: {error}", case.name)))?;
+    Ok(actual)
+}
+
 /// A run at one of its parks, after the park's requests are recorded and
 /// before its scripted outcomes are delivered.
 pub(crate) struct Park<'a, M> {
@@ -158,6 +187,7 @@ fn refused() -> Observations {
         trace: Vec::new(),
         charged: None,
         parks: 0,
+        returns: None,
     }
 }
 
@@ -307,6 +337,7 @@ pub(crate) fn run_program_in<M: Machine>(
     let mut waits = Vec::new();
     let mut trace = Vec::new();
     let mut parks = 0;
+    let mut returns = Vec::new();
     if env.slice == 0 && projection.is_none() {
         return Err(HarnessError("a corpus slice must be positive".into()));
     }
@@ -329,12 +360,14 @@ pub(crate) fn run_program_in<M: Machine>(
                     trace,
                     charged: machine.meters().charged,
                     parks,
+                    returns: Some(returns),
                 });
             }
             Err(error) => return Err(HarnessError(error.to_string())),
         };
         match step {
             Step::Slice => {
+                returns.extend(machine.meters().charged);
                 if let Some(p) = &mut projection {
                     p.at(&mut machine, &program, bounds, &source)?;
                 }
@@ -354,6 +387,7 @@ pub(crate) fn run_program_in<M: Machine>(
                     trace,
                     charged: machine.meters().charged,
                     parks,
+                    returns: Some(returns),
                 });
             }
             Step::Parked(park) => {

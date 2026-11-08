@@ -486,6 +486,7 @@ fn check(id: &str, case: &Case, observed: &Observed) -> Result<(), HarnessError>
             .iter()
             .filter(|step| step.phase == Phase::Park)
             .count(),
+        returns: None,
     };
     case.expected
         .check(&actual)

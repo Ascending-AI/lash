@@ -1,0 +1,63 @@
+{
+  "rule": "K-FN-001",
+  "cases": [
+    {
+      "name": "r56-empty at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"benchmark\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)), let(n = bound1[0], if(same(n, absent), invoke py.fail(\\\"TypeError\\\", \\\"benchmark() missing a required positional argument\\\"), 0)))\\n}\\n\"\nmain {\n  let benchmark = let(t1 = fn local.function presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t1, ((\"n\", 1, false),), \"benchmark\", (\"py.callable\", false)))\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 26,
+        "parks": 0,
+        "returns": [
+          26
+        ]
+      }
+    },
+    {
+      "name": "r56-empty at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"benchmark\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)), let(n = bound1[0], if(same(n, absent), invoke py.fail(\\\"TypeError\\\", \\\"benchmark() missing a required positional argument\\\"), 0)))\\n}\\n\"\nmain {\n  let benchmark = let(t1 = fn local.function presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t1, ((\"n\", 1, false),), \"benchmark\", (\"py.callable\", false)))\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 26,
+        "parks": 0,
+        "returns": [
+          26
+        ]
+      }
+    },
+    {
+      "name": "r56-empty at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"benchmark\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)), let(n = bound1[0], if(same(n, absent), invoke py.fail(\\\"TypeError\\\", \\\"benchmark() missing a required positional argument\\\"), 0)))\\n}\\n\"\nmain {\n  let benchmark = let(t1 = fn local.function presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t1, ((\"n\", 1, false),), \"benchmark\", (\"py.callable\", false)))\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 26,
+        "parks": 0,
+        "returns": []
+      }
+    }
+  ]
+}

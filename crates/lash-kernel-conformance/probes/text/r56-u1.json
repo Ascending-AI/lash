@@ -1,0 +1,322 @@
+{
+  "rule": "K-TEXT-001",
+  "cases": [
+    {
+      "name": "r56-u1 at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @11f9e17af9f58ec911ae69bf0b3f4ee7b9f2e003bfd46b1d557db268ea90e572\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f\nlibrary @395d658a4d5e27cdf57fe865cbce90db97ac6cdf0a03fe8fd1c4533b5c2a3fe1\nlibrary @514be5c5b0a131d779fddc957caf25a25e0734d6d29cfddca3d93ac3f4fc1b97\nlibrary @51f1b8544daa46eef44805761008ea0f097029fc3272aea4484ed3fbf9871437\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @63de75d11843990ecaa27cc98d04bfc6c3a417ad5dda88c59fab030e30b7d180\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @7f6dead6140534c052bec7fd8b5b0a597100aaef33f580a6b5a1836e932a8e9f\nlibrary @99f0004471225203b17f40429565a21850d8e1f577ee48ab63308e07f0844b02\nlibrary @b01521c323ea322a9d34ba9c461451fa5e2a6bfca12f5a32e3e943cec1b8eb44\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c465c09ece845c69ce53afd2ec7f8355cd9c014dd4f3a94771067111d2377bba\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nmain {\n  let ch = absent\n  let s = \"héllo, wörld ✓ 𝄞 ﬁ\"\n  let out = []\n  for t1 in s via (open @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017, next @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43, check @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77) {\n    set ch = t1\n    set out[@d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4(out)] = ch\n  }\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f(s), invoke @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f(out), invoke @7f6dead6140534c052bec7fd8b5b0a597100aaef33f580a6b5a1836e932a8e9f(out, -3), invoke @b01521c323ea322a9d34ba9c461451fa5e2a6bfca12f5a32e3e943cec1b8eb44(s, null, null, -1)), (\" \", absent, absent))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @514be5c5b0a131d779fddc957caf25a25e0734d6d29cfddca3d93ac3f4fc1b97(s), invoke @11f9e17af9f58ec911ae69bf0b3f4ee7b9f2e003bfd46b1d557db268ea90e572(s, \"ö\"), invoke @51f1b8544daa46eef44805761008ea0f097029fc3272aea4484ed3fbf9871437(s, \", \")), (\" \", absent, absent))\n  let t = invoke @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32(\"ab\", 5000)\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f(invoke @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3(t, t)), invoke @b01521c323ea322a9d34ba9c461451fa5e2a6bfca12f5a32e3e943cec1b8eb44(invoke @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3(t, \"x\"), -2, null, null)), (\" \", absent, absent))\n  let d = map{s: 1, \"é\": 2}\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @c465c09ece845c69ce53afd2ec7f8355cd9c014dd4f3a94771067111d2377bba(d, s), invoke @99f0004471225203b17f40429565a21850d8e1f577ee48ab63308e07f0844b02(d, \"é\"), invoke @63de75d11843990ecaa27cc98d04bfc6c3a417ad5dda88c59fab030e30b7d180(\"é\", \"é\")), (\" \", absent, absent))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @395d658a4d5e27cdf57fe865cbce90db97ac6cdf0a03fe8fd1c4533b5c2a3fe1(\"a\\n\\t\\\"'\\u{0}​\"),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "18 18 𝄞 ﬁ 𝄞 ✓ dlröw ,olléh"
+          },
+          {
+            "text": "HÉLLO, WÖRLD ✓ 𝄞 FI 8 ['héllo', 'wörld ✓ 𝄞 ﬁ']"
+          },
+          {
+            "text": "20000 bx"
+          },
+          {
+            "text": "1 2 False"
+          },
+          {
+            "text": "'a\\n\\t\"\\'\\x00\\u200b'"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 53139,
+        "parks": 0,
+        "returns": [
+          2,
+          4,
+          6,
+          13,
+          15,
+          21,
+          22,
+          24,
+          30,
+          31,
+          33,
+          39,
+          40,
+          42,
+          48,
+          49,
+          51,
+          57,
+          58,
+          60,
+          66,
+          67,
+          69,
+          75,
+          76,
+          78,
+          84,
+          85,
+          87,
+          93,
+          94,
+          96,
+          102,
+          103,
+          105,
+          111,
+          112,
+          114,
+          120,
+          121,
+          123,
+          129,
+          130,
+          132,
+          138,
+          139,
+          141,
+          147,
+          148,
+          150,
+          156,
+          157,
+          159,
+          165,
+          166,
+          168,
+          174,
+          175,
+          417,
+          611,
+          620,
+          631,
+          642,
+          653,
+          664,
+          675,
+          686,
+          697,
+          699,
+          710,
+          721,
+          724,
+          726,
+          735,
+          746,
+          757,
+          768,
+          779,
+          790,
+          1042,
+          1044,
+          1050,
+          1051,
+          1053,
+          1062,
+          1073,
+          1084,
+          1095,
+          1106,
+          1117,
+          1811,
+          1813,
+          1819,
+          1820,
+          2183,
+          12196,
+          52291,
+          52299,
+          52352,
+          52354,
+          52372,
+          52374,
+          52376,
+          52394,
+          52396,
+          52405,
+          52423,
+          52488,
+          52497,
+          52508,
+          52519,
+          52521,
+          52568,
+          52573,
+          52582,
+          52593,
+          52604,
+          52615,
+          52626,
+          52637,
+          53009,
+          53139
+        ]
+      }
+    },
+    {
+      "name": "r56-u1 at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @11f9e17af9f58ec911ae69bf0b3f4ee7b9f2e003bfd46b1d557db268ea90e572\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f\nlibrary @395d658a4d5e27cdf57fe865cbce90db97ac6cdf0a03fe8fd1c4533b5c2a3fe1\nlibrary @514be5c5b0a131d779fddc957caf25a25e0734d6d29cfddca3d93ac3f4fc1b97\nlibrary @51f1b8544daa46eef44805761008ea0f097029fc3272aea4484ed3fbf9871437\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @63de75d11843990ecaa27cc98d04bfc6c3a417ad5dda88c59fab030e30b7d180\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @7f6dead6140534c052bec7fd8b5b0a597100aaef33f580a6b5a1836e932a8e9f\nlibrary @99f0004471225203b17f40429565a21850d8e1f577ee48ab63308e07f0844b02\nlibrary @b01521c323ea322a9d34ba9c461451fa5e2a6bfca12f5a32e3e943cec1b8eb44\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c465c09ece845c69ce53afd2ec7f8355cd9c014dd4f3a94771067111d2377bba\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nmain {\n  let ch = absent\n  let s = \"héllo, wörld ✓ 𝄞 ﬁ\"\n  let out = []\n  for t1 in s via (open @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017, next @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43, check @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77) {\n    set ch = t1\n    set out[@d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4(out)] = ch\n  }\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f(s), invoke @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f(out), invoke @7f6dead6140534c052bec7fd8b5b0a597100aaef33f580a6b5a1836e932a8e9f(out, -3), invoke @b01521c323ea322a9d34ba9c461451fa5e2a6bfca12f5a32e3e943cec1b8eb44(s, null, null, -1)), (\" \", absent, absent))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @514be5c5b0a131d779fddc957caf25a25e0734d6d29cfddca3d93ac3f4fc1b97(s), invoke @11f9e17af9f58ec911ae69bf0b3f4ee7b9f2e003bfd46b1d557db268ea90e572(s, \"ö\"), invoke @51f1b8544daa46eef44805761008ea0f097029fc3272aea4484ed3fbf9871437(s, \", \")), (\" \", absent, absent))\n  let t = invoke @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32(\"ab\", 5000)\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f(invoke @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3(t, t)), invoke @b01521c323ea322a9d34ba9c461451fa5e2a6bfca12f5a32e3e943cec1b8eb44(invoke @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3(t, \"x\"), -2, null, null)), (\" \", absent, absent))\n  let d = map{s: 1, \"é\": 2}\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @c465c09ece845c69ce53afd2ec7f8355cd9c014dd4f3a94771067111d2377bba(d, s), invoke @99f0004471225203b17f40429565a21850d8e1f577ee48ab63308e07f0844b02(d, \"é\"), invoke @63de75d11843990ecaa27cc98d04bfc6c3a417ad5dda88c59fab030e30b7d180(\"é\", \"é\")), (\" \", absent, absent))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @395d658a4d5e27cdf57fe865cbce90db97ac6cdf0a03fe8fd1c4533b5c2a3fe1(\"a\\n\\t\\\"'\\u{0}​\"),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "18 18 𝄞 ﬁ 𝄞 ✓ dlröw ,olléh"
+          },
+          {
+            "text": "HÉLLO, WÖRLD ✓ 𝄞 FI 8 ['héllo', 'wörld ✓ 𝄞 ﬁ']"
+          },
+          {
+            "text": "20000 bx"
+          },
+          {
+            "text": "1 2 False"
+          },
+          {
+            "text": "'a\\n\\t\"\\'\\x00\\u200b'"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 53139,
+        "parks": 0,
+        "returns": [
+          13,
+          21,
+          30,
+          39,
+          48,
+          57,
+          66,
+          75,
+          84,
+          93,
+          102,
+          111,
+          120,
+          129,
+          138,
+          147,
+          156,
+          165,
+          174,
+          417,
+          611,
+          620,
+          631,
+          642,
+          653,
+          664,
+          675,
+          686,
+          697,
+          710,
+          721,
+          735,
+          746,
+          757,
+          768,
+          779,
+          790,
+          1042,
+          1050,
+          1062,
+          1073,
+          1084,
+          1095,
+          1106,
+          1117,
+          1811,
+          1819,
+          2183,
+          12196,
+          52291,
+          52299,
+          52352,
+          52372,
+          52394,
+          52405,
+          52423,
+          52488,
+          52497,
+          52508,
+          52519,
+          52568,
+          52582,
+          52593,
+          52604,
+          52615,
+          52626,
+          52637,
+          53009,
+          53139
+        ]
+      }
+    },
+    {
+      "name": "r56-u1 at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @11f9e17af9f58ec911ae69bf0b3f4ee7b9f2e003bfd46b1d557db268ea90e572\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f\nlibrary @395d658a4d5e27cdf57fe865cbce90db97ac6cdf0a03fe8fd1c4533b5c2a3fe1\nlibrary @514be5c5b0a131d779fddc957caf25a25e0734d6d29cfddca3d93ac3f4fc1b97\nlibrary @51f1b8544daa46eef44805761008ea0f097029fc3272aea4484ed3fbf9871437\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @63de75d11843990ecaa27cc98d04bfc6c3a417ad5dda88c59fab030e30b7d180\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @7f6dead6140534c052bec7fd8b5b0a597100aaef33f580a6b5a1836e932a8e9f\nlibrary @99f0004471225203b17f40429565a21850d8e1f577ee48ab63308e07f0844b02\nlibrary @b01521c323ea322a9d34ba9c461451fa5e2a6bfca12f5a32e3e943cec1b8eb44\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c465c09ece845c69ce53afd2ec7f8355cd9c014dd4f3a94771067111d2377bba\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nmain {\n  let ch = absent\n  let s = \"héllo, wörld ✓ 𝄞 ﬁ\"\n  let out = []\n  for t1 in s via (open @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017, next @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43, check @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77) {\n    set ch = t1\n    set out[@d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4(out)] = ch\n  }\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f(s), invoke @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f(out), invoke @7f6dead6140534c052bec7fd8b5b0a597100aaef33f580a6b5a1836e932a8e9f(out, -3), invoke @b01521c323ea322a9d34ba9c461451fa5e2a6bfca12f5a32e3e943cec1b8eb44(s, null, null, -1)), (\" \", absent, absent))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @514be5c5b0a131d779fddc957caf25a25e0734d6d29cfddca3d93ac3f4fc1b97(s), invoke @11f9e17af9f58ec911ae69bf0b3f4ee7b9f2e003bfd46b1d557db268ea90e572(s, \"ö\"), invoke @51f1b8544daa46eef44805761008ea0f097029fc3272aea4484ed3fbf9871437(s, \", \")), (\" \", absent, absent))\n  let t = invoke @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32(\"ab\", 5000)\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f(invoke @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3(t, t)), invoke @b01521c323ea322a9d34ba9c461451fa5e2a6bfca12f5a32e3e943cec1b8eb44(invoke @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3(t, \"x\"), -2, null, null)), (\" \", absent, absent))\n  let d = map{s: 1, \"é\": 2}\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @c465c09ece845c69ce53afd2ec7f8355cd9c014dd4f3a94771067111d2377bba(d, s), invoke @99f0004471225203b17f40429565a21850d8e1f577ee48ab63308e07f0844b02(d, \"é\"), invoke @63de75d11843990ecaa27cc98d04bfc6c3a417ad5dda88c59fab030e30b7d180(\"é\", \"é\")), (\" \", absent, absent))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((invoke @395d658a4d5e27cdf57fe865cbce90db97ac6cdf0a03fe8fd1c4533b5c2a3fe1(\"a\\n\\t\\\"'\\u{0}​\"),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "18 18 𝄞 ﬁ 𝄞 ✓ dlröw ,olléh"
+          },
+          {
+            "text": "HÉLLO, WÖRLD ✓ 𝄞 FI 8 ['héllo', 'wörld ✓ 𝄞 ﬁ']"
+          },
+          {
+            "text": "20000 bx"
+          },
+          {
+            "text": "1 2 False"
+          },
+          {
+            "text": "'a\\n\\t\"\\'\\x00\\u200b'"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 53139,
+        "parks": 0,
+        "returns": [
+          51,
+          102,
+          156,
+          417,
+          611,
+          664,
+          721,
+          779,
+          1042,
+          1095,
+          1811,
+          2183,
+          12196,
+          52291,
+          52352,
+          52405,
+          52488,
+          52568,
+          52626,
+          53009,
+          53139
+        ]
+      }
+    }
+  ]
+}

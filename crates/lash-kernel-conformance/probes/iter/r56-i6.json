@@ -1,0 +1,222 @@
+{
+  "rule": "K-ITER-001",
+  "cases": [
+    {
+      "name": "r56-i6 at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @1ef9c746081943e0827c23bd592bda6f58aa91df05923dcf4070e1bb568f6cfa\nlibrary @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @4d0a0b9aa6fa0cbbae86910fc69ff3507417484c3a2ec87c779c653f1623ac23\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"first_big\\\", ((\\\"xs\\\", 1, false),), positional1, keywords1, false)), let(xs = bound1[0], if(same(xs, absent), invoke py.fail(\\\"TypeError\\\", \\\"first_big() missing a required positional argument\\\"), apply body1(xs, active1))))\\n}\\n\"\ndefinition \"function local.function(xs: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse gt = @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\\nuse py.for_in.check = @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\\nuse py.for_in.open = @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\\nuse py.iterator.step = @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\\nuse py.mul = @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\\nbody {\\n  for x in xs via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n    for y in xs via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n      if gt(invoke py.mul(x, y), 6) {\\n        return (x, y)\\n      }\\n    }\\n  }\\n  return null\\n}\\n\"\nprivate body1, t3\nmain {\n  let k = absent\n  let v = absent\n  let t3 = fn @356031a142cbfb3f318ced92118e531ce81185cd7ce921c3eea41feb6b9eebef\n  let body1 = t3\n  let first_big = let(t5 = fn @12304d948ff0378cf5925b247eaf2de03ce8f4eda0005eb9ca1d5e7a96b4612a presentation(xs: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t5, ((\"xs\", 1, false),), \"first_big\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body1([1, 2, 3, 4], absent),), (\" \", absent, absent))\n  let t = 0\n  for t6 in map{\"a\": 1, \"b\": 2} via (open @1ef9c746081943e0827c23bd592bda6f58aa91df05923dcf4070e1bb568f6cfa, item @4d0a0b9aa6fa0cbbae86910fc69ff3507417484c3a2ec87c779c653f1623ac23, check @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77) {\n    let t7 = invoke @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de(t6, 2)\n    set k = t7[0]\n    set v = t7[1]\n    set t = invoke @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3(t, v)\n  }\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((t,), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "(2, 4)"
+          },
+          {
+            "text": "3"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 935,
+        "parks": 0,
+        "returns": [
+          2,
+          4,
+          6,
+          8,
+          34,
+          48,
+          55,
+          62,
+          96,
+          97,
+          131,
+          132,
+          166,
+          167,
+          201,
+          202,
+          203,
+          210,
+          244,
+          245,
+          279,
+          280,
+          314,
+          315,
+          349,
+          363,
+          373,
+          384,
+          395,
+          407,
+          419,
+          430,
+          442,
+          454,
+          456,
+          468,
+          479,
+          491,
+          515,
+          539,
+          563,
+          566,
+          568,
+          580,
+          591,
+          602,
+          616,
+          624,
+          630,
+          631,
+          633,
+          645,
+          656,
+          667,
+          681,
+          689,
+          695,
+          696,
+          720,
+          809,
+          811,
+          830,
+          840,
+          844,
+          848,
+          858,
+          865,
+          875,
+          879,
+          883,
+          894,
+          899,
+          935
+        ]
+      }
+    },
+    {
+      "name": "r56-i6 at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @1ef9c746081943e0827c23bd592bda6f58aa91df05923dcf4070e1bb568f6cfa\nlibrary @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @4d0a0b9aa6fa0cbbae86910fc69ff3507417484c3a2ec87c779c653f1623ac23\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"first_big\\\", ((\\\"xs\\\", 1, false),), positional1, keywords1, false)), let(xs = bound1[0], if(same(xs, absent), invoke py.fail(\\\"TypeError\\\", \\\"first_big() missing a required positional argument\\\"), apply body1(xs, active1))))\\n}\\n\"\ndefinition \"function local.function(xs: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse gt = @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\\nuse py.for_in.check = @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\\nuse py.for_in.open = @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\\nuse py.iterator.step = @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\\nuse py.mul = @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\\nbody {\\n  for x in xs via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n    for y in xs via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n      if gt(invoke py.mul(x, y), 6) {\\n        return (x, y)\\n      }\\n    }\\n  }\\n  return null\\n}\\n\"\nprivate body1, t3\nmain {\n  let k = absent\n  let v = absent\n  let t3 = fn @356031a142cbfb3f318ced92118e531ce81185cd7ce921c3eea41feb6b9eebef\n  let body1 = t3\n  let first_big = let(t5 = fn @12304d948ff0378cf5925b247eaf2de03ce8f4eda0005eb9ca1d5e7a96b4612a presentation(xs: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t5, ((\"xs\", 1, false),), \"first_big\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body1([1, 2, 3, 4], absent),), (\" \", absent, absent))\n  let t = 0\n  for t6 in map{\"a\": 1, \"b\": 2} via (open @1ef9c746081943e0827c23bd592bda6f58aa91df05923dcf4070e1bb568f6cfa, item @4d0a0b9aa6fa0cbbae86910fc69ff3507417484c3a2ec87c779c653f1623ac23, check @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77) {\n    let t7 = invoke @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de(t6, 2)\n    set k = t7[0]\n    set v = t7[1]\n    set t = invoke @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3(t, v)\n  }\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((t,), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "(2, 4)"
+          },
+          {
+            "text": "3"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 935,
+        "parks": 0,
+        "returns": [
+          8,
+          34,
+          48,
+          55,
+          62,
+          96,
+          131,
+          166,
+          201,
+          210,
+          244,
+          279,
+          314,
+          349,
+          363,
+          373,
+          384,
+          395,
+          407,
+          419,
+          430,
+          442,
+          454,
+          468,
+          479,
+          491,
+          515,
+          539,
+          563,
+          580,
+          591,
+          602,
+          616,
+          624,
+          631,
+          645,
+          656,
+          667,
+          681,
+          689,
+          696,
+          720,
+          809,
+          830,
+          840,
+          848,
+          858,
+          865,
+          875,
+          883,
+          894,
+          935
+        ]
+      }
+    },
+    {
+      "name": "r56-i6 at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @1ef9c746081943e0827c23bd592bda6f58aa91df05923dcf4070e1bb568f6cfa\nlibrary @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de\nlibrary @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @4d0a0b9aa6fa0cbbae86910fc69ff3507417484c3a2ec87c779c653f1623ac23\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"first_big\\\", ((\\\"xs\\\", 1, false),), positional1, keywords1, false)), let(xs = bound1[0], if(same(xs, absent), invoke py.fail(\\\"TypeError\\\", \\\"first_big() missing a required positional argument\\\"), apply body1(xs, active1))))\\n}\\n\"\ndefinition \"function local.function(xs: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse gt = @dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d\\nuse py.for_in.check = @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\\nuse py.for_in.open = @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\\nuse py.iterator.step = @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\\nuse py.mul = @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\\nbody {\\n  for x in xs via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n    for y in xs via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\\n      if gt(invoke py.mul(x, y), 6) {\\n        return (x, y)\\n      }\\n    }\\n  }\\n  return null\\n}\\n\"\nprivate body1, t3\nmain {\n  let k = absent\n  let v = absent\n  let t3 = fn @356031a142cbfb3f318ced92118e531ce81185cd7ce921c3eea41feb6b9eebef\n  let body1 = t3\n  let first_big = let(t5 = fn @12304d948ff0378cf5925b247eaf2de03ce8f4eda0005eb9ca1d5e7a96b4612a presentation(xs: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t5, ((\"xs\", 1, false),), \"first_big\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body1([1, 2, 3, 4], absent),), (\" \", absent, absent))\n  let t = 0\n  for t6 in map{\"a\": 1, \"b\": 2} via (open @1ef9c746081943e0827c23bd592bda6f58aa91df05923dcf4070e1bb568f6cfa, item @4d0a0b9aa6fa0cbbae86910fc69ff3507417484c3a2ec87c779c653f1623ac23, check @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77) {\n    let t7 = invoke @2804b363ce891cc8c041d0d6551a32816d9644a88b874764fb956298f1d278de(t6, 2)\n    set k = t7[0]\n    set v = t7[1]\n    set t = invoke @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3(t, v)\n  }\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((t,), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "(2, 4)"
+          },
+          {
+            "text": "3"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 935,
+        "parks": 0,
+        "returns": [
+          55,
+          131,
+          201,
+          279,
+          349,
+          407,
+          468,
+          539,
+          591,
+          645,
+          695,
+          809,
+          865,
+          935
+        ]
+      }
+    }
+  ]
+}

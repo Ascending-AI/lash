@@ -658,7 +658,13 @@ impl<H: Heap> Vm<H> {
                 self.exact = true;
             }
             if self.exact {
-                if unit.step[pc] && !fresh && self.meter.spent() {
+                // The slice is tested after each step of any frame
+                // (`K-MACH-002`): at the next step's start, and where a
+                // stepped frame's last statement ends by falling off its
+                // body. A `return` statement's step runs on into its
+                // caller's continuation; dispatching it is no step.
+                let tested = unit.step[pc] || (matches!(op, Op::Fall) && !unit.covered);
+                if tested && !fresh && self.meter.spent() {
                     return Ok(Stop::Slice);
                 }
                 self.bill(unit, pc)?;

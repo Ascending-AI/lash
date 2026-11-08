@@ -1,0 +1,601 @@
+{
+  "rule": "K-TASK-001",
+  "cases": [
+    {
+      "name": "r56-t2 at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f\nlibrary @3ac1f9105391dda895b356e0bf69e8d4ef980b7ca9828615ad642667a720e40a\nlibrary @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\nlibrary @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\nlibrary @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function(positional3: Any, keywords3: Any, active3: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6\\nuse local.function = @6b9a95a329eeac3289e34dfae6d028ef8658b473b1ba9b284eabcb739840aada\\nuse local.function = @80ed90e1d277fee474c3f7658fa762a39c47ca375cecd1e7b279e3ba4204629b\\nuse local.function = @db4551e7b3a3e95b9ddeb1d5337c3d5114e4809b92c976297d7fabb768698b4b\\nuse py.await = @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.matches = @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\\nuse py.gather = @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\\nuse py.getitem = @0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4\\nuse py.length = @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f\\nuse py.method.cancel = @3ac1f9105391dda895b356e0bf69e8d4ef980b7ca9828615ad642667a720e40a\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nbody {\\n  let t42 = invoke py.bind(\\\"main\\\", (), positional3, keywords3, false)\\n  let e = absent\\n  let s = let(t6 = sleeper[1], let(t7 = [5], let(t8 = map{}, let(t9 = absent, let(t10 = t7, let(t11 = t8, let(t12 = t9, let(t13 = fn @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6, spawn invoke py.task.run(t13)))))))))\\n  let b = let(t14 = bad[1], let(t15 = [1], let(t16 = map{}, let(t17 = absent, let(t18 = t15, let(t19 = t16, let(t20 = t17, let(t21 = fn @db4551e7b3a3e95b9ddeb1d5337c3d5114e4809b92c976297d7fabb768698b4b, spawn invoke py.task.run(t21)))))))))\\n  do invoke py.sleep(0)\\n  do invoke py.method.cancel(s)\\n  try {\\n    do await(s) via py.await\\n  } catch t22 {\\n    if invoke py.exc.matches(t22, (\\\"CancelledError\\\",)) {\\n      print invoke py.print_text((\\\"main saw cancel\\\",), (\\\" \\\", absent, absent))\\n    } else {\\n      throw t22\\n    }\\n  }\\n  let r = let(t23 = bad[1], let(t24 = [2], let(t25 = map{}, let(t26 = absent, let(t27 = t24, let(t28 = t25, let(t29 = t26, let(t30 = fn @6b9a95a329eeac3289e34dfae6d028ef8658b473b1ba9b284eabcb739840aada, let(t31 = spawn invoke py.task.run(t30), let(t32 = sleeper[1], let(t33 = [1], let(t34 = map{}, let(t35 = absent, let(t36 = t33, let(t37 = t34, let(t38 = t35, let(t39 = fn @80ed90e1d277fee474c3f7658fa762a39c47ca375cecd1e7b279e3ba4204629b, let(t40 = spawn invoke py.task.run(t39), invoke py.gather([t31, t40], true)))))))))))))))))))\\n  print invoke py.print_text((invoke py.length(r), invoke py.type(invoke py.getitem(r, 0)), invoke py.getitem(r, 1)), (\\\" \\\", absent, absent))\\n  try {\\n    do await(b) via py.await\\n  } catch t41 {\\n    if invoke py.exc.matches(t41, (\\\"ValueError\\\",)) {\\n      set e = t41\\n      try {\\n        print invoke py.print_text((\\\"caught\\\", e), (\\\" \\\", absent, absent))\\n      } finally {\\n        set e = absent\\n      }\\n    } else {\\n      throw t41\\n    }\\n  }\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t6(t10, t11, t12)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t23(t27, t28, t29)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t32(t36, t37, t38)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t14(t18, t19, t20)\\n}\\n\"\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.matches = @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nbody {\\n  let t2 = invoke py.bind(\\\"sleeper\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)\\n  let n = t2[0]\\n  try {\\n    do invoke py.sleep(n)\\n    return n\\n  } catch t1 {\\n    if invoke py.exc.matches(t1, (\\\"CancelledError\\\",)) {\\n      print invoke py.print_text((\\\"cancelled\\\", n), (\\\" \\\", absent, absent))\\n      throw t1\\n    } else {\\n      throw t1\\n    }\\n  }\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.new = @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.str = @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b\\nuse text.concat = @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f\\nbody {\\n  let t4 = invoke py.bind(\\\"bad\\\", ((\\\"n\\\", 1, false),), positional2, keywords2, false)\\n  let n = t4[0]\\n  do invoke py.sleep(0)\\n  throw invoke py.exc.new(\\\"ValueError\\\", (text.concat(\\\"bad \\\", invoke py.str(n)),), null, false)\\n}\\n\"\nmain {\n  let bad = absent\n  let `main` = absent\n  let sleeper = absent\n  try {\n    set sleeper = let(t3 = fn @e0035a11e1404988e0c8b7d7b9b5aebe7d4e68f85c2ee1daf902ad89d1137c19 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t3, ((\"n\", 1, false),), \"sleeper\", (\"py.callable\", true)))\n    set bad = let(t5 = fn @fd15ee275d5a5a9f4415a18ae6ad975f65f43d5fff2aa7e66a18231db2206d27 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t5, ((\"n\", 1, false),), \"bad\", (\"py.callable\", true)))\n    set `main` = let(t43 = fn @3120f4305c53699af0a0dd60e9abaace74710b9307da717691f03b3f04d8123d presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t43, (), \"main\", (\"py.callable\", true)))\n    let t44 = `main`[1]\n    let t45 = apply t44([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "cancelled 5"
+          },
+          {
+            "text": "main saw cancel"
+          },
+          {
+            "text": "2 ValueError 1"
+          },
+          {
+            "text": "caught bad 1"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "3120f4305c53699af0a0dd60e9abaace74710b9307da717691f03b3f04d8123d"
+                      },
+                      "path": [
+                        7,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        0
+                      ]
+                    },
+                    "occurrence": 0
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          }
+        ],
+        "charged": 4180,
+        "parks": 1,
+        "returns": [
+          2,
+          4,
+          6,
+          7,
+          33,
+          59,
+          77,
+          81,
+          86,
+          93,
+          95,
+          97,
+          99,
+          101,
+          103,
+          108,
+          112,
+          124,
+          128,
+          137,
+          139,
+          141,
+          164,
+          187,
+          190,
+          195,
+          210,
+          212,
+          214,
+          216,
+          218,
+          220,
+          225,
+          227,
+          231,
+          235,
+          257,
+          274,
+          278,
+          288,
+          296,
+          304,
+          311,
+          317,
+          320,
+          324,
+          348,
+          352,
+          361,
+          363,
+          367,
+          368,
+          373,
+          378,
+          393,
+          395,
+          397,
+          399,
+          401,
+          403,
+          408,
+          410,
+          414,
+          418,
+          440,
+          457,
+          461,
+          471,
+          479,
+          487,
+          494,
+          500,
+          503,
+          507,
+          531,
+          535,
+          544,
+          546,
+          550,
+          553,
+          1065,
+          1068,
+          1072,
+          1073,
+          1076,
+          1588,
+          1647,
+          2159,
+          2173,
+          2242,
+          2250,
+          2256,
+          2270,
+          2348,
+          2372,
+          2395,
+          2405,
+          2408,
+          2410,
+          2415,
+          2430,
+          2432,
+          2434,
+          2436,
+          2438,
+          2440,
+          2445,
+          2447,
+          2451,
+          2455,
+          2477,
+          2494,
+          2498,
+          2508,
+          2516,
+          2524,
+          2531,
+          2537,
+          2540,
+          2544,
+          2568,
+          2572,
+          2581,
+          2583,
+          2587,
+          2590,
+          2595,
+          2610,
+          2612,
+          2614,
+          2616,
+          2618,
+          2620,
+          2625,
+          2627,
+          2631,
+          2635,
+          2657,
+          2674,
+          2678,
+          2688,
+          2696,
+          2704,
+          2711,
+          2717,
+          2720,
+          2724,
+          2748,
+          2752,
+          2761,
+          2763,
+          2767,
+          2768,
+          2773,
+          3285,
+          3344,
+          3863,
+          3871,
+          3877,
+          3895,
+          4020,
+          4021,
+          4024,
+          4030,
+          4044,
+          4046,
+          4047,
+          4166,
+          4168,
+          4174,
+          4180
+        ]
+      }
+    },
+    {
+      "name": "r56-t2 at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f\nlibrary @3ac1f9105391dda895b356e0bf69e8d4ef980b7ca9828615ad642667a720e40a\nlibrary @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\nlibrary @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\nlibrary @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function(positional3: Any, keywords3: Any, active3: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6\\nuse local.function = @6b9a95a329eeac3289e34dfae6d028ef8658b473b1ba9b284eabcb739840aada\\nuse local.function = @80ed90e1d277fee474c3f7658fa762a39c47ca375cecd1e7b279e3ba4204629b\\nuse local.function = @db4551e7b3a3e95b9ddeb1d5337c3d5114e4809b92c976297d7fabb768698b4b\\nuse py.await = @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.matches = @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\\nuse py.gather = @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\\nuse py.getitem = @0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4\\nuse py.length = @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f\\nuse py.method.cancel = @3ac1f9105391dda895b356e0bf69e8d4ef980b7ca9828615ad642667a720e40a\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nbody {\\n  let t42 = invoke py.bind(\\\"main\\\", (), positional3, keywords3, false)\\n  let e = absent\\n  let s = let(t6 = sleeper[1], let(t7 = [5], let(t8 = map{}, let(t9 = absent, let(t10 = t7, let(t11 = t8, let(t12 = t9, let(t13 = fn @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6, spawn invoke py.task.run(t13)))))))))\\n  let b = let(t14 = bad[1], let(t15 = [1], let(t16 = map{}, let(t17 = absent, let(t18 = t15, let(t19 = t16, let(t20 = t17, let(t21 = fn @db4551e7b3a3e95b9ddeb1d5337c3d5114e4809b92c976297d7fabb768698b4b, spawn invoke py.task.run(t21)))))))))\\n  do invoke py.sleep(0)\\n  do invoke py.method.cancel(s)\\n  try {\\n    do await(s) via py.await\\n  } catch t22 {\\n    if invoke py.exc.matches(t22, (\\\"CancelledError\\\",)) {\\n      print invoke py.print_text((\\\"main saw cancel\\\",), (\\\" \\\", absent, absent))\\n    } else {\\n      throw t22\\n    }\\n  }\\n  let r = let(t23 = bad[1], let(t24 = [2], let(t25 = map{}, let(t26 = absent, let(t27 = t24, let(t28 = t25, let(t29 = t26, let(t30 = fn @6b9a95a329eeac3289e34dfae6d028ef8658b473b1ba9b284eabcb739840aada, let(t31 = spawn invoke py.task.run(t30), let(t32 = sleeper[1], let(t33 = [1], let(t34 = map{}, let(t35 = absent, let(t36 = t33, let(t37 = t34, let(t38 = t35, let(t39 = fn @80ed90e1d277fee474c3f7658fa762a39c47ca375cecd1e7b279e3ba4204629b, let(t40 = spawn invoke py.task.run(t39), invoke py.gather([t31, t40], true)))))))))))))))))))\\n  print invoke py.print_text((invoke py.length(r), invoke py.type(invoke py.getitem(r, 0)), invoke py.getitem(r, 1)), (\\\" \\\", absent, absent))\\n  try {\\n    do await(b) via py.await\\n  } catch t41 {\\n    if invoke py.exc.matches(t41, (\\\"ValueError\\\",)) {\\n      set e = t41\\n      try {\\n        print invoke py.print_text((\\\"caught\\\", e), (\\\" \\\", absent, absent))\\n      } finally {\\n        set e = absent\\n      }\\n    } else {\\n      throw t41\\n    }\\n  }\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t6(t10, t11, t12)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t23(t27, t28, t29)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t32(t36, t37, t38)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t14(t18, t19, t20)\\n}\\n\"\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.matches = @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nbody {\\n  let t2 = invoke py.bind(\\\"sleeper\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)\\n  let n = t2[0]\\n  try {\\n    do invoke py.sleep(n)\\n    return n\\n  } catch t1 {\\n    if invoke py.exc.matches(t1, (\\\"CancelledError\\\",)) {\\n      print invoke py.print_text((\\\"cancelled\\\", n), (\\\" \\\", absent, absent))\\n      throw t1\\n    } else {\\n      throw t1\\n    }\\n  }\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.new = @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.str = @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b\\nuse text.concat = @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f\\nbody {\\n  let t4 = invoke py.bind(\\\"bad\\\", ((\\\"n\\\", 1, false),), positional2, keywords2, false)\\n  let n = t4[0]\\n  do invoke py.sleep(0)\\n  throw invoke py.exc.new(\\\"ValueError\\\", (text.concat(\\\"bad \\\", invoke py.str(n)),), null, false)\\n}\\n\"\nmain {\n  let bad = absent\n  let `main` = absent\n  let sleeper = absent\n  try {\n    set sleeper = let(t3 = fn @e0035a11e1404988e0c8b7d7b9b5aebe7d4e68f85c2ee1daf902ad89d1137c19 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t3, ((\"n\", 1, false),), \"sleeper\", (\"py.callable\", true)))\n    set bad = let(t5 = fn @fd15ee275d5a5a9f4415a18ae6ad975f65f43d5fff2aa7e66a18231db2206d27 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t5, ((\"n\", 1, false),), \"bad\", (\"py.callable\", true)))\n    set `main` = let(t43 = fn @3120f4305c53699af0a0dd60e9abaace74710b9307da717691f03b3f04d8123d presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t43, (), \"main\", (\"py.callable\", true)))\n    let t44 = `main`[1]\n    let t45 = apply t44([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "cancelled 5"
+          },
+          {
+            "text": "main saw cancel"
+          },
+          {
+            "text": "2 ValueError 1"
+          },
+          {
+            "text": "caught bad 1"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "3120f4305c53699af0a0dd60e9abaace74710b9307da717691f03b3f04d8123d"
+                      },
+                      "path": [
+                        7,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        0
+                      ]
+                    },
+                    "occurrence": 0
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          }
+        ],
+        "charged": 4180,
+        "parks": 1,
+        "returns": [
+          7,
+          33,
+          59,
+          77,
+          86,
+          93,
+          101,
+          108,
+          124,
+          137,
+          164,
+          187,
+          195,
+          210,
+          218,
+          225,
+          235,
+          257,
+          274,
+          288,
+          296,
+          304,
+          311,
+          320,
+          348,
+          361,
+          368,
+          378,
+          393,
+          401,
+          408,
+          418,
+          440,
+          457,
+          471,
+          479,
+          487,
+          494,
+          503,
+          531,
+          544,
+          553,
+          1065,
+          1072,
+          1588,
+          1647,
+          2159,
+          2173,
+          2242,
+          2250,
+          2270,
+          2348,
+          2372,
+          2395,
+          2405,
+          2415,
+          2430,
+          2438,
+          2445,
+          2455,
+          2477,
+          2494,
+          2508,
+          2516,
+          2524,
+          2531,
+          2540,
+          2568,
+          2581,
+          2590,
+          2610,
+          2618,
+          2625,
+          2635,
+          2657,
+          2674,
+          2688,
+          2696,
+          2704,
+          2711,
+          2720,
+          2748,
+          2761,
+          2768,
+          3285,
+          3344,
+          3863,
+          3871,
+          3895,
+          4020,
+          4030,
+          4044,
+          4166,
+          4174
+        ]
+      }
+    },
+    {
+      "name": "r56-t2 at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4\nlibrary @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\nlibrary @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f\nlibrary @3ac1f9105391dda895b356e0bf69e8d4ef980b7ca9828615ad642667a720e40a\nlibrary @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\nlibrary @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\nlibrary @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\nlibrary @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\nlibrary @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b\nlibrary @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\nlibrary @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3\ndefinition \"function local.function(positional3: Any, keywords3: Any, active3: Any) -> Any\\nkernel 1\\nmetering statements\\nuse local.function = @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6\\nuse local.function = @6b9a95a329eeac3289e34dfae6d028ef8658b473b1ba9b284eabcb739840aada\\nuse local.function = @80ed90e1d277fee474c3f7658fa762a39c47ca375cecd1e7b279e3ba4204629b\\nuse local.function = @db4551e7b3a3e95b9ddeb1d5337c3d5114e4809b92c976297d7fabb768698b4b\\nuse py.await = @4a8b134ea86f03a8b1140c57c0d27c89aa74d8dff3e35d5b9f307b3dc3bfa8d6\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.matches = @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\\nuse py.gather = @9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167\\nuse py.getitem = @0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4\\nuse py.length = @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f\\nuse py.method.cancel = @3ac1f9105391dda895b356e0bf69e8d4ef980b7ca9828615ad642667a720e40a\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.task.run = @92b2ea0cfe3fcb53b887b871b83f259890e1a74f8fd467b069d93327c622998b\\nuse py.type = @c5efc1ddcae641c7be6350ca34f1479a76cd293a6c6500cf34fa6b430cafc5bb\\nbody {\\n  let t42 = invoke py.bind(\\\"main\\\", (), positional3, keywords3, false)\\n  let e = absent\\n  let s = let(t6 = sleeper[1], let(t7 = [5], let(t8 = map{}, let(t9 = absent, let(t10 = t7, let(t11 = t8, let(t12 = t9, let(t13 = fn @6a9ab530db411c682a1851590481f21832fdd777e8ea3ea7cf3e5c45a786deb6, spawn invoke py.task.run(t13)))))))))\\n  let b = let(t14 = bad[1], let(t15 = [1], let(t16 = map{}, let(t17 = absent, let(t18 = t15, let(t19 = t16, let(t20 = t17, let(t21 = fn @db4551e7b3a3e95b9ddeb1d5337c3d5114e4809b92c976297d7fabb768698b4b, spawn invoke py.task.run(t21)))))))))\\n  do invoke py.sleep(0)\\n  do invoke py.method.cancel(s)\\n  try {\\n    do await(s) via py.await\\n  } catch t22 {\\n    if invoke py.exc.matches(t22, (\\\"CancelledError\\\",)) {\\n      print invoke py.print_text((\\\"main saw cancel\\\",), (\\\" \\\", absent, absent))\\n    } else {\\n      throw t22\\n    }\\n  }\\n  let r = let(t23 = bad[1], let(t24 = [2], let(t25 = map{}, let(t26 = absent, let(t27 = t24, let(t28 = t25, let(t29 = t26, let(t30 = fn @6b9a95a329eeac3289e34dfae6d028ef8658b473b1ba9b284eabcb739840aada, let(t31 = spawn invoke py.task.run(t30), let(t32 = sleeper[1], let(t33 = [1], let(t34 = map{}, let(t35 = absent, let(t36 = t33, let(t37 = t34, let(t38 = t35, let(t39 = fn @80ed90e1d277fee474c3f7658fa762a39c47ca375cecd1e7b279e3ba4204629b, let(t40 = spawn invoke py.task.run(t39), invoke py.gather([t31, t40], true)))))))))))))))))))\\n  print invoke py.print_text((invoke py.length(r), invoke py.type(invoke py.getitem(r, 0)), invoke py.getitem(r, 1)), (\\\" \\\", absent, absent))\\n  try {\\n    do await(b) via py.await\\n  } catch t41 {\\n    if invoke py.exc.matches(t41, (\\\"ValueError\\\",)) {\\n      set e = t41\\n      try {\\n        print invoke py.print_text((\\\"caught\\\", e), (\\\" \\\", absent, absent))\\n      } finally {\\n        set e = absent\\n      }\\n    } else {\\n      throw t41\\n    }\\n  }\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t6(t10, t11, t12)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t23(t27, t28, t29)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t32(t36, t37, t38)\\n}\\n\"\ndefinition \"function local.function() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return apply t14(t18, t19, t20)\\n}\\n\"\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.matches = @903a889dff69683ef8f600bc35b8ffc1f8b73307c92216716734733ef98e0d02\\nuse py.print_text = @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nbody {\\n  let t2 = invoke py.bind(\\\"sleeper\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)\\n  let n = t2[0]\\n  try {\\n    do invoke py.sleep(n)\\n    return n\\n  } catch t1 {\\n    if invoke py.exc.matches(t1, (\\\"CancelledError\\\",)) {\\n      print invoke py.print_text((\\\"cancelled\\\", n), (\\\" \\\", absent, absent))\\n      throw t1\\n    } else {\\n      throw t1\\n    }\\n  }\\n}\\n\"\ndefinition \"function local.function(positional2: Any, keywords2: Any, active2: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.exc.new = @6331c1b56f5c3f4be4b5a883f3cf65c14d78c427bf76e145b97ab63fa6b2e239\\nuse py.sleep = @1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48\\nuse py.str = @bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b\\nuse text.concat = @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f\\nbody {\\n  let t4 = invoke py.bind(\\\"bad\\\", ((\\\"n\\\", 1, false),), positional2, keywords2, false)\\n  let n = t4[0]\\n  do invoke py.sleep(0)\\n  throw invoke py.exc.new(\\\"ValueError\\\", (text.concat(\\\"bad \\\", invoke py.str(n)),), null, false)\\n}\\n\"\nmain {\n  let bad = absent\n  let `main` = absent\n  let sleeper = absent\n  try {\n    set sleeper = let(t3 = fn @e0035a11e1404988e0c8b7d7b9b5aebe7d4e68f85c2ee1daf902ad89d1137c19 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t3, ((\"n\", 1, false),), \"sleeper\", (\"py.callable\", true)))\n    set bad = let(t5 = fn @fd15ee275d5a5a9f4415a18ae6ad975f65f43d5fff2aa7e66a18231db2206d27 presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t5, ((\"n\", 1, false),), \"bad\", (\"py.callable\", true)))\n    set `main` = let(t43 = fn @3120f4305c53699af0a0dd60e9abaace74710b9307da717691f03b3f04d8123d presentation() -> Any token(\"py.function\", 1) py_args(0), (\"py.function\", t43, (), \"main\", (\"py.callable\", true)))\n    let t44 = `main`[1]\n    let t45 = apply t44([], map{}, absent)\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  } finally {\n    do invoke @e8054d140e8613ea32fd966eee24de4bfbad3339f5aad7c7846ae74ced73a1d3()\n  }\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "cancelled 5"
+          },
+          {
+            "text": "main saw cancel"
+          },
+          {
+            "text": "2 ValueError 1"
+          },
+          {
+            "text": "caught bad 1"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "identity": {
+                "task": {
+                  "spawned": {
+                    "parent": "main",
+                    "site": {
+                      "unit": {
+                        "library": "3120f4305c53699af0a0dd60e9abaace74710b9307da717691f03b3f04d8123d"
+                      },
+                      "path": [
+                        7,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        0
+                      ]
+                    },
+                    "occurrence": 0
+                  }
+                },
+                "site": {
+                  "unit": {
+                    "library": "1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48"
+                  },
+                  "path": [
+                    1,
+                    1,
+                    4,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              },
+              "effect": "python.sleep",
+              "args": [
+                {
+                  "int": "1000"
+                }
+              ],
+              "result": "null"
+            }
+          }
+        ],
+        "charged": 4180,
+        "parks": 1,
+        "returns": [
+          59,
+          112,
+          164,
+          214,
+          274,
+          324,
+          378,
+          440,
+          494,
+          544,
+          1065,
+          1588,
+          1647,
+          2159,
+          2242,
+          2348,
+          2405,
+          2455,
+          2508,
+          2568,
+          2618,
+          2674,
+          2724,
+          3285,
+          3344,
+          3863,
+          4020,
+          4166
+        ]
+      }
+    }
+  ]
+}

@@ -261,6 +261,7 @@ fn case(name: &str) -> Case {
             trace: Vec::new(),
             charged: None,
             parks: None,
+            returns: None,
         },
     }
 }

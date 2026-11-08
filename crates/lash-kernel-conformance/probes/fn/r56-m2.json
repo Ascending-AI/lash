@@ -1,0 +1,84 @@
+{
+  "rule": "K-FN-001",
+  "cases": [
+    {
+      "name": "r56-m2 at slice 1",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"benchmark\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)), let(n = bound1[0], if(same(n, absent), invoke py.fail(\\\"TypeError\\\", \\\"benchmark() missing a required positional argument\\\"), apply body1(n, active1))))\\n}\\n\"\ndefinition \"function local.function(n: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.mul = @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\\nbody {\\n  let y = invoke py.add(n, 1)\\n  return invoke py.mul(y, 2)\\n}\\n\"\nprivate body1, t1\nmain {\n  let t1 = fn @b987588df815b529de186a1ca818838fd52b92e39d18aa75d1d925960a1df330\n  let body1 = t1\n  let benchmark = let(t3 = fn @7a1c2ec5c56ed6e5591d7c8982dc7b225ac66e00428875f908b444fcff9e7e7d presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t3, ((\"n\", 1, false),), \"benchmark\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body1(3, absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 1,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "8"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 93,
+        "parks": 0,
+        "returns": [
+          2,
+          4,
+          30,
+          36,
+          47,
+          93
+        ]
+      }
+    },
+    {
+      "name": "r56-m2 at slice 7",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"benchmark\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)), let(n = bound1[0], if(same(n, absent), invoke py.fail(\\\"TypeError\\\", \\\"benchmark() missing a required positional argument\\\"), apply body1(n, active1))))\\n}\\n\"\ndefinition \"function local.function(n: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.mul = @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\\nbody {\\n  let y = invoke py.add(n, 1)\\n  return invoke py.mul(y, 2)\\n}\\n\"\nprivate body1, t1\nmain {\n  let t1 = fn @b987588df815b529de186a1ca818838fd52b92e39d18aa75d1d925960a1df330\n  let body1 = t1\n  let benchmark = let(t3 = fn @7a1c2ec5c56ed6e5591d7c8982dc7b225ac66e00428875f908b444fcff9e7e7d presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t3, ((\"n\", 1, false),), \"benchmark\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body1(3, absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 7,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "8"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 93,
+        "parks": 0,
+        "returns": [
+          30,
+          47,
+          93
+        ]
+      }
+    },
+    {
+      "name": "r56-m2 at slice 50",
+      "document": "kernel 1\nnumbers by_spelling\nlibrary @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nlibrary @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\nlibrary @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186\nlibrary @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nlibrary @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nlibrary @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nlibrary @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nlibrary @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\nbody {\\n  return let(bound1 = if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\\\"benchmark\\\", ((\\\"n\\\", 1, false),), positional1, keywords1, false)), let(n = bound1[0], if(same(n, absent), invoke py.fail(\\\"TypeError\\\", \\\"benchmark() missing a required positional argument\\\"), apply body1(n, active1))))\\n}\\n\"\ndefinition \"function local.function(n: Any, active1: Any) -> Any\\nkernel 1\\nmetering statements\\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\\nuse py.mul = @607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32\\nbody {\\n  let y = invoke py.add(n, 1)\\n  return invoke py.mul(y, 2)\\n}\\n\"\nprivate body1, t1\nmain {\n  let t1 = fn @b987588df815b529de186a1ca818838fd52b92e39d18aa75d1d925960a1df330\n  let body1 = t1\n  let benchmark = let(t3 = fn @7a1c2ec5c56ed6e5591d7c8982dc7b225ac66e00428875f908b444fcff9e7e7d presentation(n: Any) -> Any token(\"py.function\", 1) py_args(1), (\"py.function\", t3, ((\"n\", 1, false),), \"benchmark\", (\"py.callable\", false)))\n  print invoke @78fe38bc7d27131b281139cdd6145b9c951726d7093a42a847b6be0ce5666186((apply body1(3, absent),), (\" \", absent, absent))\n}\n",
+      "environment": {
+        "slice": 50,
+        "max_steps": 100000
+      },
+      "expected": {
+        "prints": [
+          {
+            "text": "8"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 93,
+        "parks": 0,
+        "returns": [
+          93
+        ]
+      }
+    }
+  ]
+}

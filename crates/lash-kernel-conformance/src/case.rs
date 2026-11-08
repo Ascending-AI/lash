@@ -249,9 +249,16 @@ pub struct Expected {
     pub charged: Option<u64>,
     #[serde(default)]
     pub parks: Option<usize>,
+    /// The charge at each slice return of a run at the case's slice
+    /// (`K-MACH-002`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returns: Option<Vec<u64>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// What a run showed. Equality leaves out `returns`: slice returns are a
+/// case's literal expectation ([`Expected::check`]), and two runs of one
+/// program may slice it differently.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Observations {
     pub prints: Vec<Datum>,
@@ -259,6 +266,19 @@ pub struct Observations {
     pub trace: Vec<Trace>,
     pub charged: Option<u64>,
     pub parks: usize,
+    /// The charge at each slice return, where the runner observed them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returns: Option<Vec<u64>>,
+}
+
+impl PartialEq for Observations {
+    fn eq(&self, other: &Self) -> bool {
+        self.prints == other.prints
+            && self.end == other.end
+            && self.trace == other.trace
+            && self.charged == other.charged
+            && self.parks == other.parks
+    }
 }
 
 impl Expected {
@@ -278,6 +298,7 @@ impl Expected {
                 .charged
                 .is_some_and(|actual| self.charged.is_some_and(|charge| charge != actual))
             || self.parks.is_some_and(|parks| parks != actual.parks)
+            || matches!((&self.returns, &actual.returns), (Some(expected), Some(seen)) if expected != seen)
         {
             return Err(HarnessError(format!(
                 "expected {self:?}, observed {actual:?}"
