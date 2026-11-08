@@ -221,6 +221,18 @@ impl NativeFunction for Relate {
         use lash_kernel_doc::scalar::ScalarOp;
         lash_kernel_doc::NativeSpecialization {
             immediate: self.prepare(),
+            inline: Some(lash_kernel_doc::arena::native::InlineNative {
+                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                operation: lash_kernel_doc::arena::native::InlineOperation::Scalar {
+                    operation: match self.relation {
+                        Relation::Lt => ScalarOp::Lt,
+                        Relation::Le => ScalarOp::Le,
+                        Relation::Gt => ScalarOp::Gt,
+                        Relation::Ge => ScalarOp::Ge,
+                    },
+                    domain: lash_kernel_doc::arena::native::ScalarDomain::Floats,
+                },
+            }),
             text_relation: Some(match self.relation {
                 Relation::Lt => ScalarOp::Lt,
                 Relation::Le => ScalarOp::Le,
@@ -307,6 +319,19 @@ struct Subtract {
     native: Arc<dyn NativeFunction>,
 }
 impl NativeFunction for Subtract {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            inline: Some(lash_kernel_doc::arena::native::InlineNative {
+                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                operation: lash_kernel_doc::arena::native::InlineOperation::Scalar {
+                    operation: lash_kernel_doc::scalar::ScalarOp::Sub,
+                    domain: lash_kernel_doc::arena::native::ScalarDomain::Floats,
+                },
+            }),
+            ..Default::default()
+        }
+    }
+
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         match call.args.values() {
             // The call's two arguments are the kernel function's.

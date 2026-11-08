@@ -505,6 +505,8 @@ fn lower_beside_result(
     // holds, are declared in the cell's own document, with what they
     // require.
     lowerer.declared_notes.extend(lowerer.local_notes);
+    #[cfg(test)]
+    crate::tests::compile_on_core(&document);
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
     let layers = lash_kernel_dialect::site_layers(
         &document,

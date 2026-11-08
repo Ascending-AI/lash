@@ -154,6 +154,29 @@ pub(super) fn program(
     .unwrap_or_else(|error| panic!("linked fixture admission: {error:?}"));
     // A worker/custom helper compiler may install a narrower closed build image.
     program.selection = lash_kernel_doc::Selection::Fresh;
+    #[cfg(test)]
+    {
+        let compile = |entry| {
+            lash_kernel_vm::testing::compile_document(
+                &document,
+                program.library.registry(),
+                root,
+                entry,
+            )
+            .unwrap_or_else(|error| {
+                panic!("{error}\n{}", lash_kernel_doc::print_document(&document))
+            });
+        };
+        if document.main.is_some() {
+            compile(None);
+        }
+        for export in document.exports.values() {
+            if let lash_kernel_doc::Export::Function(export) = export {
+                compile(Some(export.function));
+            }
+        }
+    }
+
     OPERATIONS.with(|operations| {
         let mut operations = operations.borrow_mut();
         for (link, instance) in &program.instances {

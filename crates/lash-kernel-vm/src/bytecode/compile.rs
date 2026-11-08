@@ -51,7 +51,7 @@ pub fn compile(
 ) -> Result<Program> {
     let mut compiler = Compiler::new(document, registry, link);
     let main = match entry {
-        Some(entry) => compiler.body(entry, false)?,
+        Some(entry) => super::conventions::entry(&mut compiler, entry)?,
         None => compiler.main()?,
     };
     compiler.finish(main)

@@ -50,6 +50,93 @@
         ],
         "resume": false
       }
+    },
+    {
+      "document": "kernel 1\nnumbers float\nnative @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nexport start \"{\\\"kind\\\":\\\"function\\\",\\\"value\\\":{\\\"function\\\":\\\"c5c11c3246829dca468727e1cdb9dd9876b6c5e70df1fd2750d943d7a2e56ae6\\\",\\\"signature\\\":{\\\"params\\\":[{\\\"name\\\":\\\"input\\\",\\\"ty\\\":\\\"any\\\"},{\\\"name\\\":\\\"extra\\\",\\\"ty\\\":\\\"any\\\"}],\\\"result\\\":\\\"any\\\"},\\\"convention\\\":{\\\"kind\\\":\\\"ts_args_list\\\",\\\"value\\\":{\\\"await_fn\\\":{\\\"kind\\\":\\\"local\\\",\\\"value\\\":\\\"7431216d0b427d5e29a825f3c08debb7fe36669a109f6d39e73be02816c8c4fb\\\"},\\\"same_fn\\\":{\\\"kind\\\":\\\"local\\\",\\\"value\\\":\\\"c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\\\"}}},\\\"asynchronous\\\":false,\\\"rest\\\":false}}\"\ndefinition \"function settle(value: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  print value\\n  return value\\n}\\n\"\ndefinition \"function start(this: Any, args: List(Any)) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  print this\\n  return args\\n}\\n\"\ndefinition \"function same(arg0: Any, arg1: Any) -> Bool\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, sum(min(size(arg0), size(arg1)), nested(arg0), nested(arg1)), deep(result))\\nnative\\n\"\n",
+      "environment": {
+        "args": [
+          {
+            "number": "7"
+          },
+          {
+            "number": "8"
+          }
+        ],
+        "entry": "start"
+      },
+      "expected": {
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "float": "7.0"
+              },
+              {
+                "float": "8.0"
+              }
+            ]
+          }
+        },
+        "prints": [
+          "absent",
+          {
+            "list": [
+              {
+                "float": "7.0"
+              },
+              {
+                "float": "8.0"
+              }
+            ]
+          }
+        ]
+      },
+      "name": "ts_args packs this and every decoded argument"
+    },
+    {
+      "document": "kernel 1\nnumbers float\nexport start \"{\\\"kind\\\":\\\"function\\\",\\\"value\\\":{\\\"function\\\":\\\"96cf2004ab63ecd07183f42ab8728db1ea2bf7c8502d3d70f903a3462948940f\\\",\\\"signature\\\":{\\\"params\\\":[{\\\"name\\\":\\\"input\\\",\\\"ty\\\":\\\"any\\\"}],\\\"result\\\":\\\"any\\\"},\\\"convention\\\":{\\\"kind\\\":\\\"ts_direct\\\",\\\"value\\\":{\\\"await_fn\\\":{\\\"kind\\\":\\\"local\\\",\\\"value\\\":\\\"7431216d0b427d5e29a825f3c08debb7fe36669a109f6d39e73be02816c8c4fb\\\"}}},\\\"asynchronous\\\":false,\\\"rest\\\":false}}\"\ndefinition \"function settle(value: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  print value\\n  return value\\n}\\n\"\ndefinition \"function start(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  print b\\n  return a\\n}\\n\"\n",
+      "environment": {
+        "args": [
+          {
+            "number": "7"
+          }
+        ],
+        "entry": "start"
+      },
+      "expected": {
+        "end": {
+          "finished": {
+            "float": "7.0"
+          }
+        },
+        "prints": [
+          "absent",
+          {
+            "float": "7.0"
+          }
+        ]
+      },
+      "name": "ts_direct pads omitted source parameters and settles once"
+    },
+    {
+      "document": "kernel 1\nnumbers float\nexport start \"{\\\"kind\\\":\\\"function\\\",\\\"value\\\":{\\\"function\\\":\\\"1d7991b7b8f0211dedc87e037feb5f9094f933b353abb2957b307922d8fe7e0e\\\",\\\"signature\\\":{\\\"params\\\":[{\\\"name\\\":\\\"input\\\",\\\"ty\\\":\\\"any\\\"}],\\\"result\\\":\\\"any\\\"},\\\"convention\\\":{\\\"kind\\\":\\\"ts_direct\\\",\\\"value\\\":{\\\"await_fn\\\":{\\\"kind\\\":\\\"local\\\",\\\"value\\\":\\\"7431216d0b427d5e29a825f3c08debb7fe36669a109f6d39e73be02816c8c4fb\\\"}}},\\\"asynchronous\\\":false,\\\"rest\\\":false}}\"\ndefinition \"function start(a: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return absent\\n}\\n\"\ndefinition \"function settle(value: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  print value\\n  return value\\n}\\n\"\n",
+      "environment": {
+        "args": [
+          {
+            "number": "7"
+          }
+        ],
+        "entry": "start"
+      },
+      "expected": {
+        "end": {
+          "finished": "null"
+        },
+        "prints": [
+          "absent"
+        ]
+      },
+      "name": "ts_direct absent result ends with null"
     }
   ]
 }

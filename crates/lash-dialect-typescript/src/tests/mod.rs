@@ -13,6 +13,7 @@ mod array_callbacks;
 mod async_fn;
 mod builtin_values;
 mod controls;
+mod core;
 mod deviations;
 mod guarded_text;
 mod hoisting;
@@ -223,3 +224,20 @@ fn a_host_source_policy_allows_a_larger_typescript_cell() {
 mod linked;
 mod linked_inspection;
 mod linked_reads;
+
+/// K-DOC-005: admitted TS output must also compile on the bytecode core.
+pub(super) fn compile_on_core(document: &lash_kernel_doc::Document) {
+    let link = lash_kernel_value::LinkId::from_bytes([0; 32]);
+    let compile = |entry| {
+        lash_kernel_vm::testing::compile_document(document, machine::registry(), link, entry)
+            .unwrap_or_else(|error| panic!("{error}\n{}", print_document(document)));
+    };
+    if document.main.is_some() {
+        compile(None);
+    }
+    for export in document.exports.values() {
+        if let lash_kernel_doc::Export::Function(export) = export {
+            compile(Some(export.function));
+        }
+    }
+}

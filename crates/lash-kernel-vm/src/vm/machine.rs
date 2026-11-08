@@ -34,6 +34,7 @@ pub struct CoreMachine {
     vm: Vm<SlotHeap>,
     document: Arc<Document>,
     ended: bool,
+    convention: Option<lash_kernel_doc::StartConvention>,
 }
 
 fn linked(problem: impl ToString) -> StartError {
@@ -108,6 +109,14 @@ impl Machine for CoreMachine {
                 return Err(linked("the bytecode core starts no callable yet"));
             }
         };
+        let export = match &start.target {
+            Target::Entry(name) => match document.exports.get(name) {
+                Some(lash_kernel_doc::Export::Function(export)) => Some(export),
+                _ => None,
+            },
+            _ => None,
+        };
+        let convention = export.map(|export| export.convention.clone());
         let registry = program.library.registry().clone();
         let code = crate::bytecode::compile::compile(&document, &registry, program.link, entry)
             .map_err(linked)?;
@@ -135,22 +144,30 @@ impl Machine for CoreMachine {
             declared: &|callable| document.functions.contains_key(&callable.function),
         };
         let mut args = Vec::with_capacity(params.len());
-        for (at, param) in params.iter().enumerate() {
-            let value = match start.args.get(at) {
-                Some(datum) => {
-                    let decoded = decoder
-                        .decode(datum, &param.ty)
-                        .map_err(StartError::Decode)?;
-                    Self::copy_in(&mut vm, &decoded)?
-                }
-                None if param.optional => Value::Absent,
-                None => {
-                    return Err(StartError::MissingArgument {
-                        name: param.name.clone(),
-                    });
-                }
-            };
-            args.push(value);
+        if let Some(decoded) =
+            crate::bytecode::conventions::arguments(&document, export, &start.args)?
+        {
+            for datum in &decoded {
+                args.push(Self::copy_in(&mut vm, datum)?);
+            }
+        } else {
+            for (at, param) in params.iter().enumerate() {
+                let value = match start.args.get(at) {
+                    Some(datum) => {
+                        let decoded = decoder
+                            .decode(datum, &param.ty)
+                            .map_err(StartError::Decode)?;
+                        Self::copy_in(&mut vm, &decoded)?
+                    }
+                    None if param.optional => Value::Absent,
+                    None => {
+                        return Err(StartError::MissingArgument {
+                            name: param.name.clone(),
+                        });
+                    }
+                };
+                args.push(value);
+            }
         }
         let globals: Vec<Name> = vm.program.globals.clone();
         for (at, name) in globals.iter().enumerate() {
@@ -165,6 +182,7 @@ impl Machine for CoreMachine {
             vm,
             document,
             ended: false,
+            convention,
         })
     }
 
@@ -226,7 +244,7 @@ impl Machine for CoreMachine {
                         not_carried: Vec::new(),
                     }))
                 },
-                result,
+                crate::bytecode::conventions::result(self.convention.as_ref(), result),
             ),
             Stop::Finish(result) => {
                 let ender = Some(self.vm.tasks.running);

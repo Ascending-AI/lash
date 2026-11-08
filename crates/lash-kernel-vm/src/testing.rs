@@ -103,3 +103,29 @@ pub fn open(
     )
     .map(|machine| strategy.select(machine))
 }
+
+/// A compiled and validated bytecode program, without a running machine.
+pub use crate::bytecode::program::Program as BytecodeProgram;
+
+/// Compiles every unit reached by this document and validates the bytecode.
+/// No session, heap, host operations or machine start is required.
+///
+/// # Errors
+/// Returns a typed start refusal for an unsupported document or malformed code.
+pub fn compile_document(
+    document: &lash_kernel_doc::Document,
+    registry: &lash_kernel_doc::FunctionRegistry,
+    link: lash_kernel_value::LinkId,
+    entry: Option<lash_kernel_value::FunctionId>,
+) -> Result<BytecodeProgram, StartError> {
+    let code =
+        crate::bytecode::compile::compile(document, registry, link, entry).map_err(|problem| {
+            StartError::Linked {
+                problem: problem.to_string(),
+            }
+        })?;
+    crate::bytecode::validate::validate(&code).map_err(|problem| StartError::Linked {
+        problem: problem.to_string(),
+    })?;
+    Ok(code)
+}
