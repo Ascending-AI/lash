@@ -252,10 +252,14 @@ def main():
     if previous_has_runner:
         sources |= dependency_sources(base)
     changed = triggered(git("diff", "--name-only", base, head).splitlines(), sources)
-    if not changed and not args.always:
-        print("continuation compatibility: no runner dependency or build configuration changed")
-        return
+    # Several contract §9 witnesses live outside the runner's closure
+    # (lash-vm-runtime, lash-vm-protocol). A changed witness alone still
+    # selects the refusal branch and its deployment evidence.
     before, after = witnesses(base), witnesses(head)
+    changed += [f"witness {name}" for name in sorted(FORMAT_NAMES) if before[name] != after[name]]
+    if not changed and not args.always:
+        print("continuation compatibility: no runner dependency, build configuration or format witness changed")
+        return
     mode = "resume" if previous_has_runner and before == after else "refusal"
     inputs = read(args.inputs) if args.inputs.exists() else {}
     out = (args.out or ROOT / ".kiln/continuation-compat" / str(time.time_ns())).resolve()
