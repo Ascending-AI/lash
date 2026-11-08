@@ -35,6 +35,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Case, CaseBounds, ExpectedEnd, HarnessError, HostAnswer, Observations, Shard, Trace};
 
+/// The runner's export and observation protocol with
+/// `scripts/continuation_compat.py`.
+/// version_surface = "coexist"
+/// format_outside_manifest = "conformance runner exchange files read by the compatibility gate; not durable execution state"
+/// version_guard(roots(Manifest, Image, Runs, Refusal))
 const VERSION: u32 = 2;
 /// The sweep's slice (`r57/l7-runner-interface.md`: slice size 1).
 const SLICE: u64 = 1;
