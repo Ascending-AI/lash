@@ -174,10 +174,17 @@ def observations(path, expected, resumed):
         value = run["observation"]
         require(isinstance(value, dict) and set(value) == OBSERVATION_FIELDS,
                 f"{key}: incomplete actual observation")
-        require(all(isinstance(value[f], list) for f in ("prints", "trace", "charge_tape", "steps")) and
-                type(value["charged"]) is int and value["charged"] >= 0 and value["steps"],
+        require(all(isinstance(value[f], list) for f in ("prints", "trace", "charge_tape", "steps")),
                 f"{key}: incomplete event or step observations")
-        require(value["charged"] == 0 or value["charge_tape"], f"{key}: missing paid-event tape")
+        if value["end"] == "refused":
+            # An authored admission refusal is an observation of a machine
+            # that never started: nothing ran, so nothing was metered.
+            require(not resumed and value["charged"] is None and not value["charge_tape"] and
+                    not value["steps"] and not value["trace"], f"{key}: refusal after execution")
+        else:
+            require(type(value["charged"]) is int and value["charged"] >= 0 and value["steps"],
+                    f"{key}: incomplete event or step observations")
+            require(value["charged"] == 0 or value["charge_tape"], f"{key}: missing paid-event tape")
         result[key] = value
     return result
 
