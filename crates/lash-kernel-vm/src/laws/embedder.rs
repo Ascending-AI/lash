@@ -415,12 +415,14 @@ fn shared_library(native_twice: bool, probes: Option<Probes>) -> Library {
 }
 
 /// A bytecode-core machine running `text`'s `main` over the laws' library
-/// (with `pair.twice` native) under `bounds`.
+/// (with `pair.twice` native and the functions `probes` adds) under
+/// `bounds`.
 pub(crate) fn core_machine(
     text: &str,
     bounds: Bounds,
+    probes: Option<Probes>,
 ) -> Result<crate::CoreMachine, crate::StartError> {
-    let library = shared_library(true, None);
+    let library = shared_library(true, probes);
     let text = format!("numbers by_spelling\n{}{text}", library.header);
     let document = Arc::new(document(&text, &library.registry));
     let program = program(

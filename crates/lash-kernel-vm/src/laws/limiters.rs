@@ -612,7 +612,7 @@ fn core_run(
         charge_limit: limit,
         ..ROOMY
     };
-    let mut machine = super::embedder::core_machine(text, bounds).unwrap();
+    let mut machine = super::embedder::core_machine(text, bounds, Some(huge_charges)).unwrap();
     if exact {
         machine.record_charges(crate::ChargeTape::new());
     }
@@ -716,6 +716,81 @@ fn the_prepaid_and_exact_paths_refuse_at_the_same_event_with_the_same_total() {
                 core_run(text, limit, u64::MAX, false, None),
                 whole,
                 "limit {limit}"
+            );
+        }
+    }
+}
+
+/// `law.wide`, whose completion formula saturates on any argument of size
+/// 3 or more.
+fn huge_charges(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    _: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
+    struct Nothing;
+    impl lash_kernel_doc::NativeFunction for Nothing {
+        fn call(
+            &self,
+            _: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            Ok(lash_kernel_doc::Value::Null)
+        }
+    }
+    let definition = lash_kernel_doc::parse_definition(
+        "function law.wide(x: Any) -> Any\nkernel 1\ncharge product(size(x), 9223372036854775807)\nnative\n",
+    )
+    .unwrap();
+    vec![(
+        "law.wide",
+        registry
+            .register(definition, Some(std::sync::Arc::new(Nothing)))
+            .unwrap(),
+    )]
+}
+
+/// Contract §3 and `K-CHG-003` at the top of `u64`. A `metered u64::MAX`
+/// loop test shares its block with one-unit events, so the block's fixed
+/// sum passes `u64::MAX` and the block runs event by event: at every limit
+/// it refuses where the exact path does, and at `u64::MAX` it refuses the
+/// test with only what preceded it charged. `law.wide("abc")`'s formula
+/// saturates to `u64::MAX` (a wrapping one is `2^63 - 3`, which fits), so
+/// it too refuses at every limit with only what preceded it charged.
+#[test]
+fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
+    let refused = |limit: u64| {
+        format!(
+            "Error(Bound(BoundExceeded {{ bound: Charge, limit: {limit}, function: Some(FunctionName(\"main\")), site: Some(Site {{ unit: Main, path: [] }}) }}))"
+        )
+    };
+    let documents = [
+        "main {\n  let n = 0\n  while num.lt(n, 2) metered 18446744073709551615 {\n    set n = num.add(n, 1)\n  }\n  return n\n}",
+        "main {\n  do invoke law.wide(\"abc\")\n  return 4\n}",
+    ];
+    for text in documents {
+        let before = core_run(text, 1_000, u64::MAX, true, None);
+        let pre = before.1.unwrap();
+        assert!(pre < 10, "{before:?}");
+        for limit in (0..=pre + 1).chain([1_000, 1 << 63, u64::MAX - 1, u64::MAX]) {
+            let exact = core_run(text, limit, u64::MAX, true, None);
+            let end = if limit < pre {
+                exact.0.clone()
+            } else {
+                refused(limit)
+            };
+            assert_eq!(
+                exact,
+                (end, Some(pre.min(limit)), Vec::new()),
+                "limit {limit}"
+            );
+            assert_eq!(
+                core_run(text, limit, u64::MAX, false, None),
+                exact,
+                "limit {limit}"
+            );
+            assert_eq!(
+                core_run(text, limit, 1, false, None),
+                exact,
+                "limit {limit}, sliced"
             );
         }
     }
