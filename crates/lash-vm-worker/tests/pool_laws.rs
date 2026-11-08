@@ -1461,6 +1461,47 @@ fn a_run_that_holds_its_worker_past_its_wall_time_ends_with_the_wall_limit() {
     assert!(!lost.is_host_verdict(), "the run's own end: {lost:?}");
 }
 
+/// FIG-7686: a CPU-limit refusal consumes its receipt before reaping. The
+/// scripted worker reports an hour so its final kernel CPU is below that
+/// receipt; the expected total comes only from its reported deltas.
+#[test]
+fn a_worker_reaped_after_a_cpu_limit_has_each_reported_delta_charged_once() {
+    HOST_DIALECTS.set("typescript");
+    let reported_deltas = [0_u64, 3_600_000_000_000];
+    let mut config = config("cpu_receipts");
+    config.entry.args.truncate(1);
+    let mut reported = 0;
+    for delta in reported_deltas {
+        reported += delta;
+        config.entry.args.push(reported.to_string());
+    }
+    let pool = WorkerPool::new(config).expect("pool");
+    let budget = ExecutionBudget::default();
+    let mut worker = pool
+        .checkout(
+            4 * 1024 * 1024 + FRAME_HEADER_BYTES,
+            OwnerEpoch(1),
+            FrameEpoch(1),
+            budget.clone(),
+        )
+        .expect("checkout");
+    let lost = worker
+        .prepare(owner(), EncodedPayload(Vec::new()))
+        .expect_err("CPU limit");
+    assert_eq!(
+        lost,
+        PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
+            limit: WorkerLimit::Cpu { bound_ms: 10_000 },
+        })
+    );
+    assert!(worker.pid().is_none(), "the refused worker was reaped");
+    drop(worker);
+    assert_eq!(
+        budget.cpu(),
+        Some(Duration::from_nanos(reported_deltas.into_iter().sum()))
+    );
+}
+
 /// FIG-6786: the pool's restart window counts failures of its workers, not
 /// a run's own typed limit. Twice a run passes its compute deadline and
 /// loses its worker; with a window one failure fills, the pool still hands

@@ -80,6 +80,10 @@ fn main() {
         pipe.write_all(&bytes).expect("handshake");
         return;
     }
+    if mode == "cpu_receipts" {
+        cpu_receipts(&args);
+        return;
+    }
     let mut started = false;
     let mut hook = |message: &lash_vm_protocol::ParentMessage| {
         use lash_vm_protocol::ParentMessage;
@@ -212,4 +216,84 @@ impl lash_kernel_doc::arena::native::NativeFunction for Same {
         call.counter.spend(1)?;
         Ok(call.args.values()[0])
     }
+}
+
+/// Scripted process-clock receipts make the accounting oracle independent of
+/// the pool and keep final wait4 CPU below the last reported receipt.
+fn cpu_receipts(args: &[String]) {
+    use lash_protocol_types::engine_fault::{ExecutionLease, FrameEpoch, OwnerEpoch};
+    use lash_vm_client::ipc::{read_frame, write_frame};
+    use lash_vm_protocol::*;
+    use std::os::fd::FromRawFd;
+    use std::time::{Duration, Instant};
+
+    let index = args
+        .iter()
+        .position(|arg| arg == "--lash-vm-worker")
+        .expect("entry");
+    let socket = args[index + 1].parse::<i32>().expect("socket");
+    // SAFETY: the fixture owns the one descriptor its launcher transferred.
+    #[expect(unsafe_code, reason = "fixture consumes its inherited IPC descriptor")]
+    let mut pipe = unsafe { std::os::unix::net::UnixStream::from_raw_fd(socket) };
+    let codec = FrameCodec::new(DecodeLimits::standard());
+    let deadline = || Instant::now() + Duration::from_secs(5);
+    let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
+    let ready = codec
+        .encode_worker(&WorkerFrame {
+            header: fence.next_header(),
+            message: WorkerMessage::Ready {
+                protocol_version: WORKER_PROTOCOL_VERSION,
+                crate_version: env!("CARGO_PKG_VERSION").into(),
+            },
+        })
+        .expect("ready");
+    write_frame(&mut pipe, &ready, deadline()).expect("ready");
+    let mut parts = PoolStartParts::default();
+    loop {
+        let bytes = read_frame(&mut pipe, &codec, deadline()).expect("pool start");
+        if parts
+            .push(codec.decode_pool_start(&bytes).expect("pool start"))
+            .expect("parts")
+            .is_some()
+        {
+            break;
+        }
+    }
+    let installed = lash_vm_client::packages::result(Ok(())).expect("installed");
+    write_frame(
+        &mut pipe,
+        &codec.encode_pool_started(&installed).expect("installed"),
+        deadline(),
+    )
+    .expect("installed");
+    let bytes = read_frame(&mut pipe, &codec, deadline()).expect("prepare");
+    let request = codec.decode_parent(&bytes).expect("prepare");
+    assert!(matches!(request.message, ParentMessage::Prepare { .. }));
+    fence = MessageFence::new(
+        request.header.lease,
+        request.header.owner_epoch,
+        request.header.frame_epoch,
+    );
+    for (phase, receipt) in [WorkerPhase::Computing, WorkerPhase::Serializing]
+        .into_iter()
+        .zip(&args[2..4])
+    {
+        let frame = WorkerFrame {
+            header: fence.next_header(),
+            message: WorkerMessage::Progress {
+                phase,
+                cpu_nanos: receipt.parse().expect("CPU receipt"),
+                meters: None,
+                work: None,
+            },
+        };
+        write_frame(
+            &mut pipe,
+            &codec.encode_worker(&frame).expect("progress"),
+            deadline(),
+        )
+        .expect("progress");
+    }
+    // Wait for the parent to kill and reap this worker after its refusal.
+    let _ = read_frame(&mut pipe, &codec, deadline());
 }
