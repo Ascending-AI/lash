@@ -439,3 +439,114 @@ fn helper_seals_agree() {
     }
     assert_eq!(actual, reference);
 }
+
+/// Every effect identity a run asks for, answering each from the laws'
+/// table in the order asked: on the frozen engine and on the bytecode core.
+fn effect_identities(text: &str) -> [Vec<lash_kernel_value::sites::EffectIdentity>; 2] {
+    use super::embedder::{World, answer, core_machine, wait_of};
+    use lash_kernel_value::kernel_internals::effect_parts;
+    let parts = |requests: &[crate::Request]| {
+        requests
+            .iter()
+            .map(|request| {
+                let crate::Request::Effect(effect) = request;
+                effect_parts(&effect.identity).clone()
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut base = Embedder::with(text, Setup::default());
+    let end = base.run_to_end(&[]);
+    assert_eq!(result(end), int(0), "{text}");
+    let mut core = core_machine(text, super::embedder::ROOMY, None).unwrap();
+    let mut world = World::default();
+    let mut asked = Vec::new();
+    loop {
+        match core.run(&mut world, u64::MAX).unwrap() {
+            Step::Ended(end) => {
+                assert_eq!(result(end), int(0), "{text}");
+                break;
+            }
+            Step::Slice => {}
+            Step::Parked(park) => {
+                for request in &park.requests {
+                    asked.push(request.clone());
+                    core.deliver(wait_of(request), answer(request)).unwrap();
+                }
+            }
+        }
+    }
+    [parts(&base.requests), parts(&asked)]
+}
+
+/// `K-EFF-008`, `K-TASK-020`, `K-SITE-004`, literal: an effect is named by
+/// its task, its `perform`'s site, how often that task ran the site before
+/// (counted across every call, here `g`'s through `f`'s) and the loops
+/// around it outermost first across the task's calls: a `while` and the
+/// `for` in its body, then a `for … via` whose walk `work.fill` opens. A
+/// spawned task is named by its spawner, the spawn's site and occurrence;
+/// it counts its own effects from 0 and runs inside no loop of its
+/// spawner's, and a task it spawns names it as parent. Both engines ask
+/// for exactly these.
+#[test]
+fn effects_are_named_by_task_site_occurrence_and_enclosing_loops() {
+    use super::embedder::{function_site, main_site};
+    use lash_kernel_value::sites::{EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity};
+    const G: &str = "definition \"function g(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let v = perform 0(x) as Any return v }\"\n";
+    let looped = format!(
+        "{G}definition \"function f(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {{ let a = call g(x) let b = call g(x) return b }}\"\n\
+         main {{\n  let i = 0\n  while num.lt(i, 2) {{\n    for x in [7, 8] {{\n      let r = call f(x)\n    }}\n    set i = num.add(i, 1)\n  }}\n  for y in 2 via (open work.fill) {{\n    let s = call g(y)\n  }}\n  return 0\n}}"
+    );
+    // A law's function ids are known once its document is parsed.
+    let asked = effect_identities(&looped);
+    let at = |path: Vec<u32>, iteration| LoopIteration {
+        site: lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, path),
+        iteration,
+    };
+    let effect = |task: TaskIdentity, occurrence, loops| EffectIdentity {
+        task,
+        site: function_site("g", [0, 0]),
+        occurrence,
+        loops,
+    };
+    let mut expected = Vec::new();
+    for i in 0..2 {
+        for x in 0..2 {
+            for _call in 0..2 {
+                let occurrence = expected.len() as u64;
+                expected.push(effect(
+                    TaskIdentity::Main,
+                    occurrence,
+                    vec![at(vec![1], i), at(vec![1, 1, 0], x)],
+                ));
+            }
+        }
+    }
+    for y in 0..2 {
+        expected.push(effect(TaskIdentity::Main, 8 + y, vec![at(vec![2], y)]));
+    }
+    assert_eq!(asked, [expected.clone(), expected]);
+
+    let spawned = format!(
+        "{G}definition \"function k(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {{ let h = spawn call g(x) let v = join h return v }}\"\n\
+         main {{\n  let hs = []\n  for x in [1, 2] {{\n    let h = spawn call g(x)\n    set hs[list.len(hs)] = h\n  }}\n  let c = spawn call k(3)\n  set hs[list.len(hs)] = c\n  do join all hs\n  return 0\n}}"
+    );
+    let asked = effect_identities(&spawned);
+    let child = |site, occurrence| {
+        TaskIdentity::Spawned(SpawnIdentity {
+            parent: std::sync::Arc::new(TaskIdentity::Main),
+            site,
+            occurrence,
+        })
+    };
+    let grandchild = TaskIdentity::Spawned(SpawnIdentity {
+        parent: std::sync::Arc::new(child(main_site([2, 0]), 0)),
+        site: function_site("k", [0, 0]),
+        occurrence: 0,
+    });
+    let expected = vec![
+        effect(child(main_site([1, 1, 0, 0]), 0), 0, Vec::new()),
+        effect(child(main_site([1, 1, 0, 0]), 1), 0, Vec::new()),
+        effect(grandchild, 0, Vec::new()),
+    ];
+    assert_eq!(asked, [expected.clone(), expected]);
+}
