@@ -12,3 +12,4 @@ pub(crate) mod lower;
 pub(crate) mod names;
 pub(crate) mod op;
 pub(crate) mod program;
+pub(crate) mod validate;
