@@ -105,7 +105,12 @@ impl NativeFunction for Native {
         }
     }
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        use lash_kernel_doc::arena::native::{InlineNative, InlineOperation};
         lash_kernel_doc::NativeSpecialization {
+            inline: self.text_append.then_some(InlineNative {
+                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                operation: InlineOperation::TextConcat,
+            }),
             immediate: self.prepared,
             text_append: self.text_append,
             ..Default::default()

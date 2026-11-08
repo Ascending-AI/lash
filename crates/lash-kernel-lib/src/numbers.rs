@@ -537,6 +537,7 @@ impl NativeFunction for NumericFunction {
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
         use lash_kernel_doc::SymbolicNative;
         lash_kernel_doc::NativeSpecialization {
+            inline: prepared::inline(self.operation, self.domain),
             immediate: self.prepare(),
             immediate_resources: true,
             symbolic: match (self.operation, self.domain) {

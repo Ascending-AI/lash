@@ -910,6 +910,10 @@ pub trait NativeFunction: Send + Sync {
 /// rather than claims inferred from a library function's name.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NativeSpecialization {
+    /// R8 operation and argument-kind domain, certified by this exact native
+    /// implementation. Resolve it against the registered native version;
+    /// neither a function name nor another version authorizes an inline path.
+    pub inline: Option<InlineNative>,
     pub immediate: Option<PreparedNative>,
     /// Every successful answer from `immediate` has exactly its immutable
     /// output occurrence as its logical resource obligation, with no scratch
@@ -927,6 +931,102 @@ pub struct NativeSpecialization {
     pub text_join: bool,
     /// A semantic projection used by the helper compiler's symbolic proof.
     pub symbolic: Option<SymbolicNative>,
+}
+
+/// A native's version-bound inline semantics (`K-LIB-011`, R8).
+///
+/// Inside the declared domain an implementation must preserve the ordinary
+/// native's answer, raise or Decline, work-counter increments, allocation
+/// admission, charge and call depth. This is not a totality certificate.
+/// Overflow, cold input and allocation still take the ordinary call whenever
+/// the inline implementation cannot preserve those obligations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InlineNative {
+    pub native_version: u32,
+    pub operation: InlineOperation,
+}
+
+impl InlineNative {
+    /// Select only the version whose implementation made the declaration.
+    pub fn for_version(self, native_version: u32) -> Option<InlineOperation> {
+        (self.native_version == native_version).then_some(self.operation)
+    }
+
+    /// A graph-free scalar kernel answer. `None` runs the ordinary call;
+    /// it does not mean the native itself Declines. The caller still admits
+    /// the output and retains the call's charge and depth obligations.
+    #[inline]
+    pub fn scalar_answer(self, native_version: u32, args: &[Value]) -> Option<Value> {
+        let operation = self.for_version(native_version)?;
+        if !operation.accepts(args) {
+            return None;
+        }
+        let InlineOperation::Scalar { operation, .. } = operation else {
+            return None;
+        };
+        match args {
+            [Value::Int(a), Value::Int(b)] => crate::scalar::ints(operation, *a, *b),
+            [Value::Float(a), Value::Float(b)] => crate::scalar::floats(operation, *a, *b),
+            _ => None,
+        }
+    }
+}
+
+/// The operation and its exact argument-kind domain. Unlisted kinds and
+/// arities always use the ordinary call, including mixed numeric pairs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InlineOperation {
+    Scalar {
+        operation: crate::scalar::ScalarOp,
+        domain: ScalarDomain,
+    },
+    IntegerText(IntegerTextDomain),
+    /// Two texts, inline or heap-backed. The result is freshly allocated
+    /// after admission unless it fits an inline text. No mutation is allowed.
+    TextConcat,
+}
+
+impl InlineOperation {
+    /// Kind and arity eligibility only. This does not admit resources or
+    /// authorize an answer when the native would raise or Decline.
+    #[inline]
+    pub fn accepts(self, args: &[Value]) -> bool {
+        match (self, args) {
+            (Self::Scalar { domain, .. }, [Value::Int(_), Value::Int(_)]) => {
+                matches!(domain, ScalarDomain::Words | ScalarDomain::WordsOrFloats)
+            }
+            (Self::Scalar { domain, .. }, [Value::Float(_), Value::Float(_)]) => {
+                matches!(domain, ScalarDomain::Floats | ScalarDomain::WordsOrFloats)
+            }
+            (Self::IntegerText(IntegerTextDomain::Decimal), [Value::Int(_)]) => true,
+            (
+                Self::IntegerText(IntegerTextDomain::RadixArgument),
+                [Value::Int(_), Value::Int(radix)],
+            ) => (2..=36).contains(radix),
+            (Self::TextConcat, [left, right]) => {
+                matches!(left, Value::Text(_) | Value::LongText(_))
+                    && matches!(right, Value::Text(_) | Value::LongText(_))
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Homogeneous immediate pairs. Big integers and mixed pairs run normally.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScalarDomain {
+    Words,
+    Floats,
+    WordsOrFloats,
+}
+
+/// Integer formatting's word-only domains. Longer answers still need the
+/// native's allocation admission; an immediate entry may answer only the
+/// short outputs it certifies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntegerTextDomain {
+    Decimal,
+    RadixArgument,
 }
 
 /// A read that neither allocates nor mutates its resident operands.

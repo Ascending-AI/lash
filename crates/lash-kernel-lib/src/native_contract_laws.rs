@@ -315,6 +315,178 @@ fn text(value: &str) -> Datum {
     Datum::Text(value.into())
 }
 
+/// R8/K-LIB-006: the declared word/binary64 kernel is the registered
+/// native's answer, including NaN, signed zero and word overflow fallback.
+#[test]
+fn known_answers_use_their_kernel_and_reject_disagreement() {
+    let float = |value| Value::Float(lash_kernel_doc::Float::new(value));
+    for (definition, native) in crate::numbers() {
+        let Some(inline) = native.specialization().inline else {
+            continue;
+        };
+        let version = definition.native_version;
+        for args in [
+            [Value::Int(3), Value::Int(4)],
+            [Value::Int(i64::MAX), Value::Int(1)],
+            [Value::Int(i64::MIN), Value::Int(-1)],
+            [float(1.0), float(2.0)],
+            [float(-0.0), float(0.0)],
+            [float(f64::INFINITY), float(f64::NEG_INFINITY)],
+            [float(f64::NAN), float(2.0)],
+        ] {
+            let Some(answer) = inline.scalar_answer(version, &args) else {
+                continue;
+            };
+            let mut bench = heap();
+            let mut counter = lash_kernel_doc::WorkCounter::new(Some(0));
+            let called = bench.call(&*native, &args, u64::MAX, &mut counter);
+            let ordinary = called.answer.unwrap();
+            assert!(answer.same(&ordinary), "{} {args:?}", definition.name);
+            assert_eq!(counter.spent(), 0);
+            assert_eq!(called.usage.objects, 0);
+            assert!(inline.scalar_answer(version + 1, &args).is_none());
+        }
+    }
+    let add = crate::native("int.add").unwrap();
+    let inline = add.specialization().inline.unwrap();
+    assert!(matches!(
+        inline.scalar_answer(1, &[Value::Int(3), Value::Int(4)]),
+        Some(Value::Int(7))
+    ));
+    let args = [Value::Int(i64::MAX), Value::Int(1)];
+    assert!(inline.scalar_answer(1, &args).is_none());
+    let mut bench = heap();
+    let mut counter = lash_kernel_doc::WorkCounter::new(None);
+    let overflow = bench
+        .call(&*add, &args, u64::MAX, &mut counter)
+        .answer
+        .unwrap();
+    assert_eq!(
+        crate::testsupport::datum(&bench, &overflow),
+        Datum::Int(Integer::parse("9223372036854775808").unwrap())
+    );
+    let wrong_kind = [float(1.0), float(2.0)];
+    assert!(inline.scalar_answer(1, &wrong_kind).is_none());
+    assert!(matches!(
+        bench
+            .call(&*add, &wrong_kind, u64::MAX, &mut counter)
+            .answer,
+        Err(NativeError::Refused {
+            kind: "type_error",
+            ..
+        })
+    ));
+}
+
+/// R8: neither a replacement's name nor a different native version carries
+/// another implementation's authorization. A native may still Decline.
+#[test]
+fn inline_selection_preserves_a_replacement_natives_decline() {
+    struct Declines;
+    impl lash_kernel_doc::NativeFunction for Declines {
+        fn call(&self, _: lash_kernel_doc::NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            Err(NativeError::Decline)
+        }
+    }
+    let mut registry = FunctionRegistry::new();
+    let definition = lash_kernel_doc::parse_definition(
+        "function int.add(a: Int, b: Int) -> Int\nkernel 1\ncharge 5\nnative\nbody { return 7 }",
+    )
+    .unwrap();
+    let function = registry
+        .register(definition, Some(std::sync::Arc::new(Declines)))
+        .unwrap();
+    let registered = registry.get(&function).unwrap();
+    let native = registered.native().unwrap();
+    let args = [Value::Int(3), Value::Int(4)];
+    assert!(
+        native
+            .specialization()
+            .inline
+            .and_then(|inline| {
+                inline.scalar_answer(registered.definition().native_version, &args)
+            })
+            .is_none()
+    );
+    let mut bench = heap();
+    let mut counter = lash_kernel_doc::WorkCounter::new(None);
+    assert!(matches!(
+        bench.call(&**native, &args, u64::MAX, &mut counter).answer,
+        Err(NativeError::Decline)
+    ));
+    let declared = crate::native("int.add")
+        .unwrap()
+        .specialization()
+        .inline
+        .unwrap();
+    assert!(declared.for_version(2).is_none());
+}
+
+/// R8/K-BND-003: scalar eligibility never certifies graph-bearing operands
+/// or removes the allocation admission needed by overflow and long text.
+#[test]
+fn prepared_scalar_answers_supply_only_graph_free_contracts() {
+    let native = crate::native("int.add").unwrap();
+    let specialization = native.specialization();
+    let inline = specialization.inline.unwrap();
+    let mut bench = heap();
+    let args = [Value::Int(3), Value::Int(4)];
+    let scalar = inline.scalar_answer(1, &args).unwrap();
+    let contract = bench
+        .run(&args, 0, |args, _| native.resource_contract(args))
+        .unwrap()
+        .0
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        contract,
+        Contract::value(Exit::Returned, Cost::REFERENCE + 1, Origin::Immutable)
+    );
+    assert!(scalar.same(&Value::Int(7)));
+    for graph in [
+        Datum::List(vec![int(3)]),
+        Datum::Tuple(vec![Datum::List(vec![int(3)])]),
+        Datum::Int(Integer::parse("9223372036854775808").unwrap()),
+    ] {
+        let value = decode(&mut bench, graph);
+        assert!(!inline.operation.accepts(&[value, Value::Int(4)]));
+        assert!(inline.scalar_answer(1, &[value, Value::Int(4)]).is_none());
+    }
+    let mut counter = lash_kernel_doc::WorkCounter::new(None);
+    let overflow = [Value::Int(i64::MAX), Value::Int(1)];
+    assert!(inline.scalar_answer(1, &overflow).is_none());
+    assert!(crate::testsupport::exhausted(
+        &bench.call(&*native, &overflow, 0, &mut counter).answer
+    ));
+    let format = crate::native("num.to_text").unwrap();
+    let digits = format.specialization().inline.unwrap();
+    assert!(digits.operation.accepts(&[Value::Int(i64::MAX)]));
+    assert!((format.prepare().unwrap().entry)(&[Value::Int(i64::MAX)]).is_none());
+    assert!(crate::testsupport::exhausted(
+        &bench
+            .call(&*format, &[Value::Int(i64::MAX)], 0, &mut counter)
+            .answer
+    ));
+    let concat = crate::native("text.concat").unwrap();
+    let long = decode(&mut bench, text("longer than a short text"));
+    let args = [
+        long,
+        Value::Text(lash_kernel_doc::arena::ShortText::new("x").unwrap()),
+    ];
+    assert!(
+        concat
+            .specialization()
+            .inline
+            .unwrap()
+            .operation
+            .accepts(&args)
+    );
+    assert!((concat.prepare().unwrap().entry)(&args).is_none());
+    assert!(crate::testsupport::exhausted(
+        &bench.call(&*concat, &args, 0, &mut counter).answer
+    ));
+}
+
 /// Omitted immutable payloads, fresh bodies and record-key payloads must fail
 /// even when physical reservations overestimate them or inputs are chunked.
 #[test]
