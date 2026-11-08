@@ -11,8 +11,10 @@
 
 pub(crate) mod calls;
 pub(crate) mod charge;
+pub(crate) mod datum;
 pub(crate) mod frames;
 pub(crate) mod loops;
+pub(crate) mod machine;
 pub(crate) mod members;
 pub(crate) mod plans;
 
@@ -37,8 +39,8 @@ use frames::{Bill, Context, Frame, Handler};
 /// Why [`Vm::run`] returned.
 #[derive(Debug)]
 pub(crate) enum Stop {
-    /// The task's bottom frame returned this value.
-    Returned(Value),
+    /// The task's bottom frame returned this value, copied out.
+    Returned(Datum),
     /// A raise no handler of the task caught.
     Uncaught(Value),
     /// `finish` ended the run with this copied-out value.
@@ -834,7 +836,12 @@ impl<H: Heap> Vm<H> {
                 Op::Call(site) => self.call(&program, unit, site)?,
                 Op::Return => {
                     let value = self.pop();
-                    if let Some(stop) = self.ret(value)? {
+                    if let Some(stop) = self.ret(value, true)? {
+                        return Ok(stop);
+                    }
+                }
+                Op::Fall => {
+                    if let Some(stop) = self.ret(Value::Null, false)? {
                         return Ok(stop);
                     }
                 }
@@ -897,9 +904,17 @@ impl<H: Heap> Vm<H> {
     /// Returns `value` from the running frame, billing the call's
     /// completion formula. Gives the stop when the task's bottom frame
     /// returned.
-    fn ret(&mut self, value: Value) -> Run<Option<Stop>> {
+    fn ret(&mut self, value: Value, explicit: bool) -> Run<Option<Stop>> {
         self.meter.leave();
         self.exact = true;
+        // A return that leaves the run copies its value out where it
+        // stands, so a raise of the copy is caught by the frame's own
+        // handlers; falling off the end copies nothing.
+        let leaving = match self.cx.frames.len() {
+            1 if explicit => Some(self.copy_out(&value)?),
+            1 => Some(Datum::Null),
+            _ => None,
+        };
         let Some(frame) = self.cx.frames.pop() else {
             return Err(fault("a return with no frame"));
         };
@@ -908,8 +923,8 @@ impl<H: Heap> Vm<H> {
             self.complete(bill.charge, &bill.args, Some(&value))?;
         }
         self.cx.stack.truncate(frame.base as usize);
-        if self.cx.frames.is_empty() {
-            return Ok(Some(Stop::Returned(value)));
+        if let Some(datum) = leaving {
+            return Ok(Some(Stop::Returned(datum)));
         }
         self.push(value);
         Ok(None)

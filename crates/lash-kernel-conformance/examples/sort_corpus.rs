@@ -42,6 +42,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(2).as_deref() == Some("--charges") {
         return charges(std::path::Path::new(&root), registry);
     }
+    if std::env::args().nth(2).as_deref() == Some("--core-census") {
+        return core_census(std::path::Path::new(&root), registry);
+    }
     let path = std::path::PathBuf::from(root)
         .join("crates/lash-kernel-conformance/corpus/val/K-VAL-033.json");
     let original = std::fs::read_to_string(&path)?;
@@ -65,6 +68,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         1,
     );
     std::fs::write(path, updated)?;
+    Ok(())
+}
+
+/// Runs every corpus case on the bytecode core and prints one line per
+/// case: `PASS` or `FAIL`, the shard file, the case and why. A dev census
+/// until the production switch (handoff H1) makes the core the machine.
+fn core_census(
+    root: &std::path::Path,
+    registry: FunctionRegistry,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut runner = lash_kernel_conformance::MachineRunner::<lash_kernel_vm::CoreMachine>::new(
+        Arc::new(registry),
+    );
+    let mut paths = Vec::new();
+    corpus_files(
+        &root.join("crates/lash-kernel-conformance/corpus"),
+        &mut paths,
+    )?;
+    paths.sort();
+    let (mut passed, mut failed) = (0u32, 0u32);
+    for path in paths {
+        let Ok(shard) = serde_json::from_str::<lash_kernel_conformance::Shard>(
+            &std::fs::read_to_string(&path)?,
+        ) else {
+            continue;
+        };
+        let file = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        for case in &shard.cases {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                lash_kernel_conformance::check_case(&mut runner, case)
+            }));
+            let verdict = match outcome {
+                Ok(Ok(_)) => None,
+                Ok(Err(error)) => Some(error.to_string()),
+                Err(_) => Some("panicked".to_owned()),
+            };
+            match verdict {
+                None => {
+                    passed += 1;
+                    println!("PASS\t{file}\t{}", case.name);
+                }
+                Some(why) => {
+                    failed += 1;
+                    let why = why.replace('\n', " ");
+                    println!("FAIL\t{file}\t{}\t{why}", case.name);
+                }
+            }
+        }
+    }
+    println!("TOTAL\tpassed {passed}\tfailed {failed}");
+    Ok(())
+}
+
+fn corpus_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            corpus_files(&path, out)?;
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+        {
+            out.push(path);
+        }
+    }
     Ok(())
 }
 

@@ -40,10 +40,19 @@ pub(crate) fn unsupported<T>(what: impl Into<String>) -> Result<T> {
 }
 
 /// Compiles `document`, whose library functions `registry` holds, as
-/// instance `link`.
-pub fn compile(document: &Document, registry: &FunctionRegistry, link: LinkId) -> Result<Program> {
+/// instance `link`: its `main`, or the declared function `entry`, is the
+/// unit a start runs.
+pub fn compile(
+    document: &Document,
+    registry: &FunctionRegistry,
+    link: LinkId,
+    entry: Option<FunctionId>,
+) -> Result<Program> {
     let mut compiler = Compiler::new(document, registry, link);
-    let main = compiler.main()?;
+    let main = match entry {
+        Some(entry) => compiler.body(entry, false)?,
+        None => compiler.main()?,
+    };
     compiler.finish(main)
 }
 
@@ -202,10 +211,10 @@ impl Fun {
         self.ops.len() as u32
     }
 
-    pub(crate) fn slot(&mut self, name: &Name) -> u16 {
-        if let Some(slot) = self.slots.get(name) {
-            return *slot;
-        }
+    /// Declares `name` in the innermost scope (`K-FORM-003`): a new
+    /// variable in a slot of its own, shadowing any outer one until the
+    /// scope ends.
+    pub(crate) fn declare(&mut self, name: &Name) -> u16 {
         let slot = self.temp();
         self.slots.insert(name.clone(), slot);
         slot
@@ -362,10 +371,6 @@ impl<'a> Compiler<'a> {
         self.constant(&Literal::Text(text.to_owned()))
     }
 
-    pub(crate) fn absent(&mut self) -> u32 {
-        self.constant(&Literal::Absent)
-    }
-
     pub(crate) fn global(&mut self, name: &Name) -> u16 {
         if let Some(at) = self.global_ids.get(name) {
             return *at;
@@ -378,11 +383,11 @@ impl<'a> Compiler<'a> {
 
     // --- Units.
 
-    /// Declares a unit's parameters and the names it binds, and boxes
-    /// those a closure it makes shares.
+    /// Declares a unit's parameters, and marks the names it declares that
+    /// a closure it makes shares: their variables live in cells.
     fn declare(&mut self, f: &mut Fun, params: &[Name], block: &[Stmt]) -> Result<()> {
         for param in params {
-            f.slot(param);
+            f.declare(param);
         }
         let (declared, closures) = {
             let mut closure_free = |closure| self.free_names(closure);
@@ -394,12 +399,9 @@ impl<'a> Compiler<'a> {
         for closure in closures {
             shared.extend(self.free_names(closure)?);
         }
-        for name in &declared {
-            f.slot(name);
-        }
-        f.boxed = f
-            .slots
-            .keys()
+        f.boxed = params
+            .iter()
+            .chain(&declared)
             .filter(|name| shared.contains(*name))
             .cloned()
             .collect();
@@ -486,11 +488,9 @@ impl<'a> Compiler<'a> {
         Ok((captures, capture_names))
     }
 
-    /// Falling off a body's end returns absent.
-    fn fall_off(&mut self, f: &mut Fun) {
-        let absent = self.absent();
-        f.emit(Op::Const(absent));
-        f.emit(Op::Return);
+    /// Falling off a body's end returns null (`K-FORM-015`).
+    fn fall_off(&self, f: &mut Fun) {
+        f.emit(Op::Fall);
     }
 
     /// The unit that runs library or declared function `id`'s body,

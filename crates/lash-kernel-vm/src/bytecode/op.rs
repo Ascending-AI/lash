@@ -89,8 +89,12 @@ pub enum Op {
     /// Call site `n` of the unit: its callee and argument count. The
     /// arguments are on the stack; a value callee is below them.
     Call(u32),
-    /// Returns the top value from the frame.
+    /// Returns the top value from the frame. Leaving the run, the value
+    /// is copied out (`K-EFF-002`).
     Return,
+    /// The body ends without a `return`: the frame returns null, and
+    /// nothing is copied out of the run (`K-FORM-015`).
+    Fall,
     /// Raises the top value (`K-ERR`).
     Raise,
 

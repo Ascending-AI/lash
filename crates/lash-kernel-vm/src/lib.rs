@@ -162,6 +162,7 @@ pub use observe::{ChargeTape, ObservationMode};
 pub use paged::{SealedRoot, validate_foreign_checkpoint};
 pub use save::CellSaveContext;
 pub use session_editor::{SessionEditor, SessionValue};
+pub use vm::machine::CoreMachine;
 pub use {
     lash_kernel_value::observation::ExecutionPath, lash_kernel_value::observation::SiteCounts,
 };

@@ -145,12 +145,6 @@ impl<H: Heap> Vm<H> {
     pub(super) fn proto_open(&mut self, unit: &Unit, n: u32) -> Run<()> {
         let site = &unit.loops[n as usize];
         let opened = self.pop();
-        if !walkable(&opened, true) && site.driver.is_none() {
-            return Err(self.error(
-                "type_error",
-                "the loop's protocol opened a value it has no `next` to step",
-            ));
-        }
         self.set_slot(site, WALKED, opened);
         self.set_slot(site, CURSOR, Self::first(&opened));
         let size = match opened {
@@ -175,9 +169,14 @@ impl<H: Heap> Vm<H> {
         let site = &unit.loops[n as usize];
         let walked = self.slot(site, WALKED);
         if !walkable(&walked, true) {
-            let driver = site
-                .driver
-                .ok_or_else(|| fault("a driven loop has no `next`"))?;
+            // The header has billed its test: a value with no `next` to
+            // step it raises here (`K-ITER-005`).
+            let Some(driver) = site.driver else {
+                return Err(self.error(
+                    "type_error",
+                    "the loop's protocol opened a value it has no `next` to step",
+                ));
+            };
             self.jump(driver);
             return Ok(());
         }

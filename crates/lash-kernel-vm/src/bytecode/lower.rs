@@ -23,14 +23,26 @@ use super::op::Op;
 use super::program::{ActionSite, Callee, LoopSite};
 
 impl Compiler<'_> {
+    /// Lowers `block` in a scope of its own (`K-FORM-003`).
     pub(crate) fn block(&mut self, f: &mut Fun, block: &[Stmt]) -> Result<()> {
-        for (index, stmt) in block.iter().enumerate() {
-            f.path.push(index as u32);
-            let lowered = self.stmt(f, stmt);
-            f.path.pop();
-            lowered?;
-        }
-        Ok(())
+        Self::scoped(f, |f| {
+            for (index, stmt) in block.iter().enumerate() {
+                f.path.push(index as u32);
+                let lowered = self.stmt(f, stmt);
+                f.path.pop();
+                lowered?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Runs `lower` in a new scope: what it declares is visible until it
+    /// returns.
+    fn scoped<T>(f: &mut Fun, lower: impl FnOnce(&mut Fun) -> Result<T>) -> Result<T> {
+        let outer = f.slots.clone();
+        let lowered = lower(f);
+        f.slots = outer;
+        lowered
     }
 
     /// Lowers `block` as child `index` of the node at `f.path`.
@@ -81,15 +93,11 @@ impl Compiler<'_> {
 
     /// A declaration: each execution makes a new variable, so a shared one
     /// gets a fresh cell (closures made by earlier executions keep theirs).
-    fn bind(&mut self, f: &mut Fun, name: &Name) {
-        match f.slots.get(name).copied() {
-            Some(slot) => {
-                f.emit(Op::SetLocal(slot));
-                if f.boxed.contains(name) {
-                    f.emit(Op::Box(slot));
-                }
-            }
-            None => self.write(f, name),
+    fn bind(f: &mut Fun, name: &Name) {
+        let slot = f.declare(name);
+        f.emit(Op::SetLocal(slot));
+        if f.boxed.contains(name) {
+            f.emit(Op::Box(slot));
         }
     }
 
@@ -109,7 +117,7 @@ impl Compiler<'_> {
         match stmt {
             Stmt::Let { name, value } => {
                 self.rhs(f, 0, value)?;
-                self.bind(f, name);
+                Self::bind(f, name);
             }
             Stmt::Assign {
                 place: Place::Variable(name),
@@ -199,10 +207,11 @@ impl Compiler<'_> {
                 else_block,
             } => {
                 self.child(f, 0, iterable)?;
-                match via {
-                    Some(protocol) => self.protocol_for(f, *metered, binding, protocol, body)?,
-                    None => self.plain_for(f, *metered, binding, body)?,
-                }
+                // The binding is declared in the body's scope alone.
+                Self::scoped(f, |f| match via {
+                    Some(protocol) => self.protocol_for(f, *metered, binding, protocol, body),
+                    None => self.plain_for(f, *metered, binding, body),
+                })?;
                 if !else_block.is_empty() {
                     self.child_block(f, 2, else_block)?;
                 }
@@ -337,7 +346,7 @@ impl Compiler<'_> {
         let slot = f.temp();
         f.temp(); // the cursor
         let index = f.loop_sites.len() as u32;
-        let binding_slot = f.slot(binding);
+        let binding_slot = f.declare(binding);
         f.loop_sites.push(LoopSite {
             slot,
             binding: binding_slot,
@@ -397,7 +406,7 @@ impl Compiler<'_> {
         for _ in 0..5 {
             f.temp();
         }
-        let binding_slot = f.slot(binding);
+        let binding_slot = f.declare(binding);
         let index = f.loop_sites.len() as u32;
         f.loop_sites.push(LoopSite {
             slot,
@@ -444,19 +453,24 @@ impl Compiler<'_> {
         });
         self.child_block(f, 1, body)?;
         Self::exit(f, Op::Jump(head));
-        // The driver's step: `next` on what the loop walks.
-        let driver = f.label();
-        if let Some(next) = next {
-            f.emit(Op::Local(slot));
-            let callee = self.callee(f, next)?;
-            self.call(f, callee, 1, site);
-            f.emit(Op::ProtoPull(index));
-        }
-        Self::exit(f, Op::Jump(join));
+        // The driver's step: `next` on what the loop walks. Without a
+        // `next`, what `open` gives must be walkable (`K-ITER-005`).
+        let driver = match next {
+            Some(next) => {
+                let driver = f.label();
+                f.emit(Op::Local(slot));
+                let callee = self.callee(f, next)?;
+                self.call(f, callee, 1, site);
+                f.emit(Op::ProtoPull(index));
+                Self::exit(f, Op::Jump(join));
+                Some(driver)
+            }
+            None => None,
+        };
         let exit = f.label();
         let loop_site = &mut f.loop_sites[index as usize];
         loop_site.exit = exit;
-        loop_site.driver = Some(driver);
+        loop_site.driver = driver;
         loop_site.join = Some(join);
         Ok(())
     }
@@ -492,8 +506,10 @@ impl Compiler<'_> {
                 // The handler starts a block, the raised value on the stack.
                 let handler = f.label();
                 f.patch(enter, handler);
-                self.bind(f, &catch.binding);
-                self.child_block(f, 1, &catch.body)?;
+                Self::scoped(f, |f| {
+                    Self::bind(f, &catch.binding);
+                    self.child_block(f, 1, &catch.body)
+                })?;
                 let end = f.label();
                 f.patch(skip, end);
             }
@@ -817,8 +833,10 @@ impl Compiler<'_> {
             }
             Expr::Let { name, value, body } => {
                 self.child(f, 0, value)?;
-                self.bind(f, name);
-                self.child(f, 1, body)?;
+                Self::scoped(f, |f| {
+                    Self::bind(f, name);
+                    self.child(f, 1, body)
+                })?;
             }
             Expr::Act(act) => {
                 let site = f.site();
