@@ -209,7 +209,9 @@ impl<H: Heap> Vm<H> {
     pub(super) fn proto_checked(&mut self, unit: &Unit, n: u32) -> Run<()> {
         let site = &unit.loops[n as usize];
         let budget = self.pop();
-        if !matches!(budget, Value::Int(count) if count >= 0) {
+        // Any integer, negative or past a word, is the count retained
+        // exactly for the next check (`K-ITER-005`).
+        if !matches!(budget, Value::Int(_) | Value::BigInt(_)) {
             return Err(self.error(
                 "type_error",
                 "a loop protocol's `check` gives a count of the items still allowed",
