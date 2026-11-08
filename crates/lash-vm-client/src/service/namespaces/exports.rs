@@ -2,10 +2,10 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_dialect::{FunctionMember, NamespaceKind, NamespaceMember, TypeMember, ValueType};
-use lash_kernel_value::{Convention, QualifiedName, Signature, Type, Visibility, names::Segment};
+use lash_kernel_value::{Convention, QualifiedName, Signature, Visibility, names::Segment};
 use serde::{Deserialize, Serialize};
 
-use super::{Parameter, TypeTable};
+use super::{Parameter, TypeTable, types::Types};
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -70,7 +70,7 @@ impl Function {
         indices.push(self.result);
     }
 
-    fn expand(self, types: &[Type]) -> FunctionMember {
+    fn expand(self, types: &Types) -> FunctionMember {
         FunctionMember {
             name: self.name,
             convention: self.convention,
@@ -80,11 +80,11 @@ impl Function {
                     .into_iter()
                     .map(|p| lash_kernel_value::Param {
                         name: p.name,
-                        ty: types[p.ty].clone(),
+                        ty: types.get(p.ty),
                         optional: p.optional,
                     })
                     .collect(),
-                result: types[self.result].clone(),
+                result: types.get(self.result),
             },
             asynchronous: self.asynchronous,
             rest: self.rest,
@@ -143,7 +143,7 @@ impl Export {
         indices
     }
 
-    pub(super) fn expand(self, types: &[Type]) -> NamespaceMember {
+    pub(super) fn expand(self, types: &Types) -> NamespaceMember {
         NamespaceMember {
             visibility: self.visibility,
             kind: match self.kind {
@@ -152,7 +152,7 @@ impl Export {
                     representation,
                     members,
                 } => NamespaceKind::Type(ValueType {
-                    representation: types[representation].clone(),
+                    representation: types.get(representation),
                     members: members
                         .into_iter()
                         .map(|(name, member)| {

@@ -104,71 +104,110 @@ impl TypeNode {
         }
     }
 
-    fn build<E: Error>(self, mut resolve: impl FnMut(usize) -> Result<Type, E>) -> Result<Type, E> {
-        Ok(match self {
-            Self::Leaf(ty) => match ty {
-                Type::Any
-                | Type::Json
-                | Type::Null
-                | Type::Absent
-                | Type::Bool
-                | Type::Int
-                | Type::Float
-                | Type::Number
-                | Type::Text
-                | Type::Bytes
-                | Type::Timestamp
-                | Type::Enum(_)
-                | Type::Error
-                | Type::Handle(_) => ty,
-                _ => return Err(E::custom("shared type leaf contains nested types")),
-            },
-            Self::Tuple(items) => {
-                Type::Tuple(items.into_iter().map(resolve).collect::<Result<_, _>>()?)
-            }
-            Self::List(ty) => Type::List(Box::new(resolve(ty)?)),
+    /// The type this node is, its children built by `resolve`.
+    fn build(&self, mut resolve: impl FnMut(usize) -> Type) -> Type {
+        match self {
+            Self::Leaf(ty) => ty.clone(),
+            Self::Tuple(items) => Type::Tuple(items.iter().map(|i| resolve(*i)).collect()),
+            Self::List(ty) => Type::List(Box::new(resolve(*ty))),
             Self::Map { key, value } => Type::Map(Box::new(MapType {
-                key: resolve(key)?,
-                value: resolve(value)?,
+                key: resolve(*key),
+                value: resolve(*value),
             })),
-            Self::Set(ty) => Type::Set(Box::new(resolve(ty)?)),
+            Self::Set(ty) => Type::Set(Box::new(resolve(*ty))),
             Self::Record { fields, rest } => Type::Record(RecordType {
                 fields: fields
-                    .into_iter()
-                    .map(|field| {
-                        Ok(RecordTypeField {
-                            name: field.name,
-                            ty: resolve(field.ty)?,
-                            optional: field.optional,
-                        })
+                    .iter()
+                    .map(|field| RecordTypeField {
+                        name: field.name.clone(),
+                        ty: resolve(field.ty),
+                        optional: field.optional,
                     })
-                    .collect::<Result<_, E>>()?,
+                    .collect(),
                 rest: match rest {
                     Rest::Closed => RecordRest::Closed,
                     Rest::Drop => RecordRest::Drop,
-                    Rest::Keep(ty) => RecordRest::Keep(Box::new(resolve(ty)?)),
+                    Rest::Keep(ty) => RecordRest::Keep(Box::new(resolve(*ty))),
                 },
             }),
             Self::Function { params, result } => Type::Function(Box::new(Signature {
                 params: params
-                    .into_iter()
-                    .map(|param| {
-                        Ok(Param {
-                            name: param.name,
-                            ty: resolve(param.ty)?,
-                            optional: param.optional,
-                        })
+                    .iter()
+                    .map(|param| Param {
+                        name: param.name.clone(),
+                        ty: resolve(param.ty),
+                        optional: param.optional,
                     })
-                    .collect::<Result<_, E>>()?,
-                result: resolve(result)?,
+                    .collect(),
+                result: resolve(*result),
             })),
-            Self::Task(ty) => Type::Task(Box::new(resolve(ty)?)),
-            Self::Union(items) => {
-                Type::Union(items.into_iter().map(resolve).collect::<Result<_, _>>()?)
+            Self::Task(ty) => Type::Task(Box::new(resolve(*ty))),
+            Self::Union(items) => Type::Union(items.iter().map(|i| resolve(*i)).collect()),
+        }
+    }
+
+    fn children(&self) -> Vec<usize> {
+        match self {
+            Self::Leaf(_) => Vec::new(),
+            Self::Tuple(items) | Self::Union(items) => items.clone(),
+            Self::List(ty) | Self::Set(ty) | Self::Task(ty) => vec![*ty],
+            Self::Map { key, value } => vec![*key, *value],
+            Self::Record { fields, rest } => fields
+                .iter()
+                .map(|field| field.ty)
+                .chain(match rest {
+                    Rest::Keep(ty) => Some(*ty),
+                    Rest::Closed | Rest::Drop => None,
+                })
+                .collect(),
+            Self::Function { params, result } => params
+                .iter()
+                .map(|param| param.ty)
+                .chain(std::iter::once(*result))
+                .collect(),
+        }
+    }
+
+    /// The heap bytes the built node allocates itself, its children's
+    /// slots included and their own allocations not: each allocation
+    /// charged its length and [`ALLOCATION`].
+    fn own_bytes(&self) -> u64 {
+        fn slots<T>(count: usize) -> u64 {
+            ALLOCATION + (count * size_of::<T>()) as u64
+        }
+        let text = |len: usize| ALLOCATION + len as u64;
+        match self {
+            Self::Leaf(Type::Enum(values)) => {
+                slots::<String>(values.len()) + values.iter().map(|v| text(v.len())).sum::<u64>()
             }
-        })
+            Self::Leaf(Type::Handle(kind)) => text(kind.len()),
+            Self::Leaf(_) => 0,
+            Self::Tuple(items) | Self::Union(items) => slots::<Type>(items.len()),
+            Self::List(_) | Self::Set(_) | Self::Task(_) => slots::<Type>(1),
+            Self::Map { .. } => slots::<MapType>(1),
+            Self::Record { fields, rest } => {
+                slots::<RecordTypeField>(fields.len())
+                    + fields.iter().map(|f| text(f.name.len())).sum::<u64>()
+                    + match rest {
+                        Rest::Keep(_) => slots::<Type>(1),
+                        Rest::Closed | Rest::Drop => 0,
+                    }
+            }
+            Self::Function { params, .. } => {
+                slots::<Signature>(1)
+                    + slots::<Param>(params.len())
+                    + params
+                        .iter()
+                        .map(|p| text(p.name.as_str().len()))
+                        .sum::<u64>()
+            }
+        }
     }
 }
+
+/// What one heap allocation costs beyond its bytes: the allocator's header
+/// and alignment.
+const ALLOCATION: u64 = 16;
 
 #[derive(Default)]
 pub(super) struct TypeTable<'a> {
@@ -189,53 +228,76 @@ impl<'a> TypeTable<'a> {
     }
 }
 
-fn charge(value: &serde_json::Value) -> u64 {
-    128 + match value {
-        serde_json::Value::String(s) => s.len() as u64,
-        serde_json::Value::Array(v) => v.iter().map(charge).sum(),
-        serde_json::Value::Object(v) => v
-            .iter()
-            .map(|(k, v)| 128 + k.len() as u64 + charge(v))
-            .sum(),
-        _ => 0,
-    }
+/// A decoded type table. Every reference to it is built as its own tree,
+/// which is what the kernel's types are, so each is charged the heap bytes
+/// that tree really allocates; the table itself is never built.
+pub(super) struct Types {
+    nodes: Vec<TypeNode>,
+    /// The heap bytes of each node's built tree.
+    bytes: Vec<u64>,
 }
 
-/// Refuse amplification before cloning any children. Backward-only references
-/// exclude cycles; explicit depth checking bounds recursive Type operations.
-pub(super) fn expand<E: Error>(
-    nodes: Vec<TypeNode>,
-    remaining: &mut u64,
-) -> Result<(Vec<Type>, Vec<u64>), E> {
-    let mut types: Vec<Type> = Vec::with_capacity(nodes.len());
-    let mut charges: Vec<u64> = Vec::with_capacity(nodes.len());
-    let mut depths: Vec<u32> = Vec::with_capacity(nodes.len());
-    let null_charge = charge(&serde_json::to_value(Type::Null).map_err(E::custom)?);
-    for node in nodes {
-        let mut children = 0u64;
-        let mut placeholders = 0;
-        let mut depth = 1;
-        let skeleton = node.clone().build(|index| {
-            let size = charges
-                .get(index)
-                .ok_or_else(|| E::custom("unknown or forward shared signature type"))?;
-            children = children.saturating_add(*size);
-            placeholders += null_charge;
-            depth = depth.max(depths[index] + 1);
-            Ok(Type::Null)
-        })?;
-        if depth > lash_vm_protocol::DecodeLimits::standard().max_depth {
-            return Err(E::custom("expanded signatures exceed type depth bound"));
+impl Types {
+    /// Backward-only references exclude cycles, and the depth bound keeps
+    /// every build and every recursive Type operation on it bounded.
+    pub(super) fn new<E: Error>(nodes: Vec<TypeNode>) -> Result<Self, E> {
+        let mut bytes: Vec<u64> = Vec::with_capacity(nodes.len());
+        let mut depths: Vec<u32> = Vec::with_capacity(nodes.len());
+        for node in &nodes {
+            if let TypeNode::Leaf(ty) = node
+                && !matches!(
+                    ty,
+                    Type::Any
+                        | Type::Json
+                        | Type::Null
+                        | Type::Absent
+                        | Type::Bool
+                        | Type::Int
+                        | Type::Float
+                        | Type::Number
+                        | Type::Text
+                        | Type::Bytes
+                        | Type::Timestamp
+                        | Type::Enum(_)
+                        | Type::Error
+                        | Type::Handle(_)
+                )
+            {
+                return Err(E::custom("shared type leaf contains nested types"));
+            }
+            let mut size = node.own_bytes();
+            let mut depth = 1;
+            for child in node.children() {
+                let child_bytes = bytes
+                    .get(child)
+                    .ok_or_else(|| E::custom("unknown or forward shared signature type"))?;
+                size = size.saturating_add(*child_bytes);
+                depth = depth.max(depths[child] + 1);
+            }
+            if depth > lash_vm_protocol::DecodeLimits::standard().max_depth {
+                return Err(E::custom("decoded signatures exceed type depth bound"));
+            }
+            bytes.push(size);
+            depths.push(depth);
         }
-        let size = charge(&serde_json::to_value(skeleton).map_err(E::custom)?)
-            .saturating_sub(placeholders)
-            .saturating_add(children);
-        *remaining = remaining
-            .checked_sub(size)
-            .ok_or_else(|| E::custom("expanded signatures exceed 64 MiB"))?;
-        types.push(node.build::<E>(|index| Ok(types[index].clone()))?);
-        charges.push(size);
-        depths.push(depth);
+        Ok(Self { nodes, bytes })
     }
-    Ok((types, charges))
+
+    /// Charge the tree `index` is built as, its root slot included, against
+    /// `remaining`, before anything is built.
+    pub(super) fn charge<E: Error>(&self, index: usize, remaining: &mut u64) -> Result<(), E> {
+        let size = self
+            .bytes
+            .get(index)
+            .ok_or_else(|| E::custom("unknown shared signature type"))?;
+        *remaining = remaining
+            .checked_sub(size.saturating_add(size_of::<Type>() as u64))
+            .ok_or_else(|| E::custom("decoded signatures exceed 64 MiB"))?;
+        Ok(())
+    }
+
+    /// The type `index` names, built whole. Only a charged index is built.
+    pub(super) fn get(&self, index: usize) -> Type {
+        self.nodes[index].build(|child| self.get(child))
+    }
 }
