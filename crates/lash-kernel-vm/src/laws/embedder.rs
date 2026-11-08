@@ -414,6 +414,27 @@ fn shared_library(native_twice: bool, probes: Option<Probes>) -> Library {
     })
 }
 
+/// A bytecode-core machine running `text`'s `main` over the laws' library
+/// (with `pair.twice` native) under `bounds`.
+pub(crate) fn core_machine(
+    text: &str,
+    bounds: Bounds,
+) -> Result<crate::CoreMachine, crate::StartError> {
+    let library = shared_library(true, None);
+    let text = format!("numbers by_spelling\n{}{text}", library.header);
+    let document = Arc::new(document(&text, &library.registry));
+    let program = program(
+        document,
+        PreparedLibrary::new(Arc::clone(&library.registry)),
+    );
+    <crate::CoreMachine as Machine>::start(
+        program,
+        bounds,
+        Setup::default().start,
+        Box::new(Source::default()),
+    )
+}
+
 /// The world outside the run: read-bound operations and printed values.
 #[derive(Default)]
 pub(crate) struct World {

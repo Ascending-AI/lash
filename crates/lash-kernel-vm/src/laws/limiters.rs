@@ -593,3 +593,130 @@ fn helper_refusals() {
         assert!(whole.printed.starts_with(&actual.0.printed));
     }
 }
+
+/// How a core run ended, what it was charged and what it printed.
+type CoreTrace = (String, Option<u64>, Vec<lash_kernel_doc::Datum>);
+
+/// Runs `text` on the bytecode core under charge limit `limit` in slices
+/// of `slice`, `limiter` answering at the bound. `exact` records the
+/// charges, which runs every block event by event: the contract's
+/// reference path (cutover contract §3).
+fn core_run(
+    text: &str,
+    limit: u64,
+    slice: u64,
+    exact: bool,
+    limiter: Option<&Scripted>,
+) -> CoreTrace {
+    let bounds = Bounds {
+        charge_limit: limit,
+        ..ROOMY
+    };
+    let mut machine = super::embedder::core_machine(text, bounds).unwrap();
+    if exact {
+        machine.record_charges(crate::ChargeTape::new());
+    }
+    machine.set_options(MachineOptions {
+        charge_limiter: limiter
+            .cloned()
+            .map(|limiter| Box::new(limiter) as Box<dyn ChargeLimiter>),
+        ..MachineOptions::default()
+    });
+    let mut world = super::embedder::World::default();
+    loop {
+        match machine.run(&mut world, slice).unwrap() {
+            Step::Ended(end) => {
+                let end = match end {
+                    End::Finished(finished) => format!("{:?}", finished.result),
+                    other => format!("{other:?}"),
+                };
+                return (end, machine.meters().charged, world.printed);
+            }
+            Step::Slice => {}
+            Step::Parked(_) => panic!("the event-contract documents perform nothing"),
+        }
+    }
+}
+
+/// Documents whose blocks hold every kind of charge site: fixed events,
+/// atomic constructions, completion fees of natives and of a library
+/// call, a raise in mid-block and its catch.
+const EVENT_CONTRACT: [&str; 2] = [
+    r#"definition "function sq(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return num.add(x, x) }"
+main {
+  let s = ""
+  let total = 0
+  let i = 0
+  while num.lt(i, 12) {
+    set s = text.concat(s, "ab")
+    let q = call sq(i)
+    set total = num.add(total, q)
+    let held = [i, total, (i, s)]
+    set i = num.add(i, 1)
+  }
+  print total
+  return s
+}"#,
+    r#"main {
+  let caught = 0
+  let i = 0
+  while num.lt(i, 8) {
+    try {
+      let x = num.add(i, 1)
+      let bad = text.concat(x, "x")
+      set caught = num.add(caught, 100)
+    } catch e {
+      set caught = num.add(caught, 1)
+    }
+    set i = num.add(i, 1)
+  }
+  print caught
+  return caught
+}"#,
+];
+
+/// Contract §3: at every charge limit the run can reach, a prepaid run
+/// refuses at the same event with the same total as the event-by-event
+/// run, whether its fixed costs were reserved, cancelled by a dynamic fee
+/// or a raise, or stopped short by a slice; and a limiter that grows the
+/// limit at the refused event resumes it there, as a run started with the
+/// grown limit runs. A limit at and next to `u64::MAX` reserves without
+/// overflow.
+#[test]
+fn the_prepaid_and_exact_paths_refuse_at_the_same_event_with_the_same_total() {
+    for text in EVENT_CONTRACT {
+        let whole = core_run(text, ROOMY.charge_limit, u64::MAX, true, None);
+        let total = whole.1.expect("charge is metered");
+        assert!(
+            whole.0.starts_with("Int") || whole.0.starts_with("Text"),
+            "{whole:?}"
+        );
+        for limit in 0..=total + 1 {
+            let exact = core_run(text, limit, u64::MAX, true, None);
+            assert_eq!(
+                core_run(text, limit, u64::MAX, false, None),
+                exact,
+                "limit {limit}"
+            );
+            assert_eq!(
+                core_run(text, limit, 7, false, None),
+                exact,
+                "limit {limit}, sliced"
+            );
+            let grow = total / 3 + 1;
+            let started = core_run(text, limit + grow, u64::MAX, true, None);
+            for exact_path in [false, true] {
+                let limiter = Scripted::answering([LimitDecision::Grow(grow)]);
+                let grown = core_run(text, limit, u64::MAX, exact_path, Some(&limiter));
+                assert_eq!(grown, started, "limit {limit} grown, exact {exact_path}");
+            }
+        }
+        for limit in [u64::MAX - 1, u64::MAX] {
+            assert_eq!(
+                core_run(text, limit, u64::MAX, false, None),
+                whole,
+                "limit {limit}"
+            );
+        }
+    }
+}
