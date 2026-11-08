@@ -59,16 +59,96 @@
       "name": "an opened value no cursor walks and no next steps raises type_error",
       "document": "kernel 1\nnumbers by_spelling\nnative @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\ndefinition \"function list.len(xs: List(Any)) -> Int\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge 1\\nnative\\n\"\nmain {\n  try {\n    for x in [7] via (open list.len) {\n      print x\n    }\n  } catch e {\n    print e.kind\n  }\n}\n",
       "expected": {
+        "charged": 21,
+        "end": {
+          "finished": "null"
+        },
         "prints": [
           {
             "text": "type_error"
           }
         ],
+        "trace": []
+      }
+    },
+    {
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function h.open(x: Any) -> Any\\nkernel 1\\ncharge sum(1, size(x), size(result))\\nbody {\\n  return x\\n}\\n\"\ndefinition \"function h.check(source: Any, size: Int, remaining: Int, more: Any) -> Int\\nkernel 1\\ncharge 3\\nbody {\\n  return remaining\\n}\\n\"\nmain {\n  let m = map{\"a\": 1}\n  for k in m via (open h.open, check h.check) {\n    print k\n  }\n}\n",
+      "expected": {
+        "charged": 26,
         "end": {
           "finished": "null"
         },
+        "prints": [
+          {
+            "text": "a"
+          }
+        ],
         "trace": []
-      }
+      },
+      "name": "an uncovered open and check hook each bill their completion formula once per invocation"
+    },
+    {
+      "document": "kernel 1\nnumbers by_spelling\nnative @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\nnative @45e6a20f6cf62deb05f9ccfdb92a02be45e952e3b012a006ab527ee8d19833ac\ndefinition \"function eq(arg0: Any, arg1: Any) -> Bool\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function sub(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\\nnative\\n\"\ndefinition \"function h.drive(x: Any) -> Any\\nkernel 1\\ncharge 5\\nbody {\\n  return {state: [x]}\\n}\\n\"\ndefinition \"function h.next(d: Any) -> Any\\nkernel 1\\ncharge 7\\nuse eq = @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\\nuse sub = @45e6a20f6cf62deb05f9ccfdb92a02be45e952e3b012a006ab527ee8d19833ac\\nbody {\\n  let s = d.state\\n  let n = s[0]\\n  if eq(n, 0) {\\n    return ()\\n  }\\n  set s[0] = sub(n, 1)\\n  return (n,)\\n}\\n\"\ndefinition \"function h.item(source: Any, raw: Any) -> Any\\nkernel 1\\ncharge 11\\nbody {\\n  return (raw, raw)\\n}\\n\"\nmain {\n  for p in 2 via (open h.drive, next h.next, item h.item) {\n    print p\n  }\n}\n",
+      "expected": {
+        "charged": 71,
+        "end": {
+          "finished": "null"
+        },
+        "prints": [
+          {
+            "tuple": [
+              {
+                "int": "2"
+              },
+              {
+                "int": "2"
+              }
+            ]
+          },
+          {
+            "tuple": [
+              {
+                "int": "1"
+              },
+              {
+                "int": "1"
+              }
+            ]
+          }
+        ],
+        "trace": []
+      },
+      "name": "a driver's next and item hooks bill their formulas on every continuation test"
+    },
+    {
+      "document": "kernel 1\nnumbers by_spelling\nnative @6e9ee931768c0f4c5bde848ffbd908ebe1f1d2e029f5199fba47e7bdd7edf255\ndefinition \"function error.new(kind: Text, message: Text, data?: Any) -> Error\\nkernel 1\\nerrors \\\"type_error\\\"\\ncharge sum(1, size(kind), size(message), size(result))\\nnative\\n\"\ndefinition \"function h.boom(x: Any) -> Any\\nkernel 1\\nerrors \\\"boom\\\"\\ncharge sum(1, size(x), size(result))\\nuse error.new = @6e9ee931768c0f4c5bde848ffbd908ebe1f1d2e029f5199fba47e7bdd7edf255\\nbody {\\n  throw error.new(\\\"boom\\\", \\\"hook\\\")\\n}\\n\"\nmain {\n  try {\n    for x in [1, 2] via (open h.boom) {\n      print x\n    }\n  } catch e {\n    print e.kind\n  }\n}\n",
+      "expected": {
+        "charged": 19,
+        "end": {
+          "finished": "null"
+        },
+        "prints": [
+          {
+            "text": "boom"
+          }
+        ],
+        "trace": []
+      },
+      "name": "a hook that raises bills its formula with result size zero and no header test"
+    },
+    {
+      "document": "kernel 1\nnumbers by_spelling\nnative @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a\ndefinition \"function list.copy(xs: List(Any)) -> List(Any)\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge sum(1, size(xs), size(result))\\nnative\\n\"\ndefinition \"function h.walk(xs: List(Any)) -> Int\\nkernel 1\\ncharge sum(1, size(xs))\\nuse list.copy = @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a\\nbody {\\n  let n = 0\\n  for x in xs via (open list.copy) {\\n    set n = x\\n  }\\n  return n\\n}\\n\"\nmain {\n  let xs = [1, 2]\n  let r = invoke h.walk(xs)\n  finish r\n}\n",
+      "expected": {
+        "charged": 16,
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "prints": [],
+        "trace": []
+      },
+      "name": "a hook invoked inside a library body is covered by that body's formula"
     }
   ]
 }
