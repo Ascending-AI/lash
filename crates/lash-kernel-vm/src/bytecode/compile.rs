@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ClosureIdentity;
+use lash_kernel_doc::arena::native::InlineOperation;
 use lash_kernel_doc::linked_site::LinkedSite;
 use lash_kernel_doc::{Document, FunctionDefinition, FunctionRegistry, Literal, Stmt, Value};
 use lash_kernel_value::content_ids::LinkId;
@@ -666,6 +667,15 @@ impl<'a> Compiler<'a> {
             .guard
             .as_ref()
             .map(|guard| self.formula(&guard.limit, definition));
+        let scalar = match native
+            .specialization()
+            .inline
+            .and_then(|inline| inline.for_version(definition.native_version))
+        {
+            // A guarded native's answer stays the call's, under its guard.
+            scalar @ Some(InlineOperation::Scalar { .. }) if guard.is_none() => scalar,
+            _ => None,
+        };
         let at = self.natives.len() as u32;
         self.natives.push(NativeEntry {
             function: id,
@@ -675,6 +685,7 @@ impl<'a> Compiler<'a> {
             charge,
             guard,
             body: None,
+            scalar,
         });
         self.native_ids.insert(id, at);
         // A decline runs the definition's body under the native's cover

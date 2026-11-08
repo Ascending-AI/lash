@@ -144,11 +144,37 @@ pub(crate) struct Vm<H: Heap> {
     /// The total a charge refusal reported, once one has.
     pub refused: Option<u64>,
     /// Each closure function's body unit.
-    closures: HashMap<FunctionId, UnitId>,
+    closures: Digests<UnitId>,
     /// Each function value's trampoline.
-    functions: HashMap<FunctionId, UnitId>,
+    functions: Digests<UnitId>,
     /// What observes the run; an observed run takes the exact path.
     pub watch: Option<Box<watch::Watch>>,
+}
+
+/// A map keyed by function digests.
+type Digests<V> = HashMap<FunctionId, V, std::hash::BuildHasherDefault<DigestHasher>>;
+
+/// Hashes a function identity by its digest's first word: a SHA-256
+/// digest is already uniform, so no further mixing is needed.
+#[derive(Default)]
+struct DigestHasher(u64);
+
+impl std::hash::Hasher for DigestHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        let mut word = [0; 8];
+        let n = bytes.len().min(8);
+        word[..n].copy_from_slice(&bytes[..n]);
+        self.0 ^= u64::from_le_bytes(word);
+    }
+
+    #[inline]
+    fn write_usize(&mut self, _: usize) {}
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
 }
 
 impl<H: Heap> Vm<H> {
@@ -184,7 +210,7 @@ impl<H: Heap> Vm<H> {
                 .map_err(|error| Stop::Fault(error.to_string()))?;
             constants.push(value);
         }
-        let mut closures = HashMap::new();
+        let mut closures = Digests::default();
         for (at, unit) in program.units.iter().enumerate() {
             if let UnitKind::Closure(function) = unit.kind {
                 closures.insert(function, at as UnitId);
@@ -421,7 +447,7 @@ impl<H: Heap> Vm<H> {
         }
         let arena = self.heap.arena();
         let mut failed = None;
-        let units = formula.evaluate(&mut |position, how| {
+        let units = formula.evaluate(|position, how| {
             let value = if position == RESULT {
                 result
             } else {
@@ -430,6 +456,9 @@ impl<H: Heap> Vm<H> {
             let Some(value) = value else {
                 return 0;
             };
+            if let Some(units) = crate::data::immediate_measure(value, how) {
+                return units;
+            }
             let measured = match how {
                 Measure::Size => crate::data::size(arena, value),
                 Measure::DeepSize => crate::data::deep_size(arena, value),
@@ -551,18 +580,15 @@ impl<H: Heap> Vm<H> {
                 self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
             )));
         }
-        let program = Arc::clone(&self.program);
-        let code = &program.units[unit as usize];
+        let code = &self.program.units[unit as usize];
         let base = self.cx.stack.len() - argc;
+        let boxes = !code.boxed.is_empty();
         self.cx.stack.resize(
             base + usize::from(code.locals.max(argc as u16)),
             Value::Absent,
         );
-        for &slot in &code.boxed {
-            let at = base + usize::from(slot);
-            let value = self.cx.stack[at];
-            let cell = self.cell(value)?;
-            self.cx.stack[at] = Value::Handle(cell);
+        if boxes {
+            self.box_locals(unit, base)?;
         }
         self.cx.frames.push(Frame {
             unit,
@@ -571,6 +597,19 @@ impl<H: Heap> Vm<H> {
             closure,
             bill,
         });
+        Ok(())
+    }
+
+    /// Boxes each local of a frame of `unit` at `base` that a closure
+    /// shares into a cell (`K-CLO-001`).
+    fn box_locals(&mut self, unit: UnitId, base: usize) -> Run<()> {
+        let program = Arc::clone(&self.program);
+        for &slot in &program.units[unit as usize].boxed {
+            let at = base + usize::from(slot);
+            let value = self.cx.stack[at];
+            let cell = self.cell(value)?;
+            self.cx.stack[at] = Value::Handle(cell);
+        }
         Ok(())
     }
 

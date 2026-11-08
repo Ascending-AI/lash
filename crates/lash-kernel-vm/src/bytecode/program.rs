@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ClosureIdentity;
-use lash_kernel_doc::arena::native::NativeFunction;
+use lash_kernel_doc::arena::native::{InlineOperation, NativeFunction};
 use lash_kernel_doc::{Integer, JoinMode, Value};
 use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot, Name};
 use lash_kernel_value::sites::Site;
@@ -312,6 +312,10 @@ pub struct NativeEntry {
     pub guard: Option<u32>,
     /// The definition's kernel body, covered, for a Decline (K-LIB-006).
     pub body: Option<UnitId>,
+    /// The scalar operation and domain this native version declares it
+    /// answers inline over immediate pairs (R8, `K-LIB-011`): selected
+    /// from the declaration, never from the native's identity.
+    pub scalar: Option<InlineOperation>,
 }
 
 /// A function a function value names: applying it calls `unit`, a

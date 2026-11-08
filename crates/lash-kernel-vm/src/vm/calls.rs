@@ -13,7 +13,9 @@
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::WorkCounter;
-use lash_kernel_doc::arena::native::{Args, NativeCall, NativeError, NewObject, Nursery};
+use lash_kernel_doc::arena::native::{
+    Args, InlineOperation, NativeCall, NativeError, NewObject, Nursery,
+};
 use lash_kernel_doc::heap::LogicalBytes;
 
 use super::frames::Bill;
@@ -117,6 +119,30 @@ impl<H: Heap> Vm<H> {
         charged: bool,
     ) -> Run<()> {
         let entry: &NativeEntry = &program.natives[native as usize];
+        if let Some(inline) = entry.scalar
+            && let Some(value) = self.scalar(inline, argc, usize::from(entry.params))
+        {
+            // The declared inline answer: the native's own, with no work,
+            // allocation or depth to count (`K-LIB-011`).
+            let from = self.cx.stack.len() - argc;
+            let fee = if charged && !self.paced {
+                let args = &self.cx.stack[from..];
+                let sized = |value: &Value| crate::data::immediate_size(value).unwrap_or(0);
+                let sizes = [sized(&args[0]), sized(&args[1]), sized(&value)];
+                match program.charges[entry.charge as usize].pair(sizes) {
+                    Some(units) => Some(units),
+                    None => Some(self.formula(entry.charge, args, Some(&value))?),
+                }
+            } else {
+                None
+            };
+            self.cx.stack.truncate(from);
+            self.push(value);
+            if let Some(units) = fee {
+                self.fee(units)?;
+            }
+            return Ok(());
+        }
         let params = usize::from(entry.params);
         for _ in argc..params {
             self.push(Value::Absent);
@@ -169,9 +195,11 @@ impl<H: Heap> Vm<H> {
         }
         match answer {
             Ok(value) => {
-                let depth = self.heap.arena().summary_of(&value).depth as usize;
+                // An immediate answer holds no other value.
                 let limit = value_depth();
-                if depth > limit {
+                if crate::data::immediate_size(&value).is_none()
+                    && self.heap.arena().summary_of(&value).depth as usize > limit
+                {
                     return Err(self.error(
                         "too_deep",
                         &format!("a value exceeds the configured {limit}-level value depth"),
@@ -224,6 +252,28 @@ impl<H: Heap> Vm<H> {
             }
             Err(NativeError::Host(error)) => Err(fault(error.to_string())),
             Err(NativeError::Malformed(problem)) => Err(fault(problem)),
+        }
+    }
+
+    /// The inline answer of a native declaring `inline` over its top two
+    /// operands, when they are in its declared domain and the operation
+    /// has an immediate answer.
+    #[inline]
+    fn scalar(&self, inline: InlineOperation, argc: usize, params: usize) -> Option<Value> {
+        let InlineOperation::Scalar { operation, .. } = inline else {
+            return None;
+        };
+        if argc != 2 || params != 2 {
+            return None;
+        }
+        let args = &self.cx.stack[self.cx.stack.len() - 2..];
+        if !inline.accepts(args) {
+            return None;
+        }
+        match *args {
+            [Value::Int(a), Value::Int(b)] => lash_kernel_doc::scalar::ints(operation, a, b),
+            [Value::Float(a), Value::Float(b)] => lash_kernel_doc::scalar::floats(operation, a, b),
+            _ => None,
         }
     }
 
