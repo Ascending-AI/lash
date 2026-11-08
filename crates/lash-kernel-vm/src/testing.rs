@@ -105,7 +105,9 @@ pub fn open(
 }
 
 /// A compiled and validated bytecode program, without a running machine.
-pub use crate::bytecode::program::Program as BytecodeProgram;
+pub struct BytecodeProgram {
+    _code: crate::bytecode::program::Program,
+}
 
 /// Compiles every unit reached by this document and validates the bytecode.
 /// No session, heap, host operations or machine start is required.
@@ -127,5 +129,5 @@ pub fn compile_document(
     crate::bytecode::validate::validate(&code).map_err(|problem| StartError::Linked {
         problem: problem.to_string(),
     })?;
-    Ok(code)
+    Ok(BytecodeProgram { _code: code })
 }

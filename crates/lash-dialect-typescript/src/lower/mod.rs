@@ -506,7 +506,7 @@ fn lower_beside_result(
     // require.
     lowerer.declared_notes.extend(lowerer.local_notes);
     #[cfg(test)]
-    crate::tests::compile_on_core(&document);
+    crate::tests::compile_on_core(&document, environment.library);
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
     let layers = lash_kernel_dialect::site_layers(
         &document,
