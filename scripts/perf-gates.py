@@ -244,6 +244,19 @@ def binary_identity(binary: str, worker: str) -> dict:
     return identity
 
 
+def check_land_protocol(enabled: bool) -> None:
+    # Rebase replaces land on disk, but an older Python process keeps its old
+    # program. This dynamically invoked checker must refuse that stale caller.
+    command = Path(f"/proc/{os.getppid()}/cmdline")
+    if not command.exists():
+        return
+    caller = [os.fsdecode(arg) for arg in command.read_bytes().split(b"\0") if arg]
+    from_land = any(Path(arg).name == "land" and Path(arg).resolve() == ROOT / "scripts/land"
+                    for arg in caller)
+    if from_land and not enabled:
+        raise ValueError("outdated land process predates the blocking perf gate; rerun scripts/land")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("instructions", "startup", "history", "check-sources"))
@@ -254,10 +267,12 @@ def main() -> int:
     parser.add_argument("--sample", type=Path, help="reuse this same-commit instruction sample for history")
     parser.add_argument("--calibrate", action="store_true")
     parser.add_argument("--no-record", action="store_true")
+    parser.add_argument("--land-perf-gate", action="store_true")
     parser.add_argument("--history", type=Path, default=ROOT / ".benchmarks/perf-guard/runtime-duration-history-full.jsonl")
     args = parser.parse_args()
     if args.mode == "check-sources":
         try:
+            check_land_protocol(args.land_perf_gate)
             check_sources(ROOT)
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
             print(f"instructions: REFUSED: {error}")

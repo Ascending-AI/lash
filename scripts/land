@@ -28,11 +28,6 @@ REMOTE = re.compile(
     re.IGNORECASE,
 )
 HOOK = re.compile(r"^.*\.{3,}\s*Failed\s*$|^- hook id: ", re.MULTILINE)
-FMT = re.compile(
-    r"(?:cargo|kiln) fmt[^\n]*Failed|include!d file formatting[^\n]*Failed"
-    r"|- hook id: (?:cargo-fmt|included-file-formatting)\s*$",
-    re.MULTILINE,
-)
 
 
 def run(*args, check=True, quiet=False):
@@ -106,28 +101,25 @@ def rebase():
         raise
 
 
-def push(main):
-    formatted = False
+def push(main, qualified_head):
     outages = 0
     while True:
-        result = run("git", "push", "origin", "HEAD:main", check=False)
+        current = git("rev-parse", "HEAD")
+        if current != qualified_head:
+            raise RuntimeError(f"candidate changed after qualification: {qualified_head} -> {current}; rerun scripts/land")
+        result = run("git", "push", "origin", f"{qualified_head}:main", check=False)
         if result.returncode == 0:
             return True
         output = result.stdout
         if HOOK.search(output):
-            if not formatted and FMT.search(output):
-                formatted = True
-                run("kiln", "fmt")
-                run("git", "add", "-u")
-                run("git", "commit", "--amend", "--no-edit")
-                continue
+            raise RuntimeError("push hook refused candidate; fix and commit, then rerun scripts/land:\n" + tail(output))
         elif RACE.search(output):
             return False
         elif REMOTE.search(output):
             # A dropped connection may have hidden a successful push.
             fetched = run("git", "fetch", "origin", "main", check=False)
             if fetched.returncode == 0:
-                if run("git", "merge-base", "--is-ancestor", "HEAD", "origin/main",
+                if run("git", "merge-base", "--is-ancestor", qualified_head, "origin/main",
                        check=False, quiet=True).returncode == 0:
                     return True
                 if git("rev-parse", "origin/main") != main:
@@ -201,7 +193,7 @@ def main():
                 "migration or old-shape reader is provided.")
         # Allocation validates the complete planned tree, including unchanged
         # guards and the post-cut evidence. Do not project it a second time.
-        run("python3", "scripts/perf-gates.py", "check-sources")
+        run("python3", "scripts/perf-gates.py", "check-sources", "--land-perf-gate")
         run("python3", "scripts/apply_format_witnesses.py", "--check-artifacts")
         run("kiln", "build", "//:schema_checks", "//:workspace_clippy")
         run("python3", "scripts/check_format_registry.py")
@@ -211,14 +203,16 @@ def main():
         run("kiln", "test", "//crates/lash-kernel-releases:lash-kernel-releases__unit_test",
             "--test_arg=--exact",
             "--test_arg=tests::checked_archive_covers_current_release_and_native_implementations")
+        qualified_head = git("rev-parse", "HEAD")
+        run("python3", "scripts/perf_land_gate.py", "--base", main_sha)
         if args.dry_run:
             print("dry-run: push skipped; HEAD " + git("rev-parse", "HEAD"))
             return
         with land_lock():
             run("git", "fetch", "origin", "main")
-            landed = git("rev-parse", "origin/main") == main_sha and push(main_sha)
+            landed = git("rev-parse", "origin/main") == main_sha and push(main_sha, qualified_head)
         if landed:
-            print("landed " + git("rev-parse", "HEAD"))
+            print("landed " + qualified_head)
             return
         if witness_paths:
             # Drop only our own generated commit, with a clean tree, before
