@@ -55,6 +55,43 @@ def require(ok, message):
         raise ValueError(message)
 
 
+def check_instruction_ceiling(side, key, median, ceiling, monty=None, calibrate=False):
+    if not calibrate:
+        require(median <= ceiling, f"{side}/{key}: median {median} exceeds ceiling {ceiling}")
+    if side == "candidate" and key.startswith("python/") and policy.MONTY_BINDING:
+        require(monty is not None and math.isfinite(monty) and monty > 0,
+                f"{side}/{key}: missing qualified Monty secant")
+        require(median <= policy.MONTY_MAX_RATIO * monty,
+                f"{side}/{key}: {median / monty:.6f}x Monty exceeds {policy.MONTY_MAX_RATIO:.2f}x")
+
+
+def check_cold_access(key, row):
+    require(row["elements"] == 200_000, f"{key}: cold workload size differs")
+    require(type(row["path_depth"]) is int and row["path_depth"] >= 0,
+            f"{key}: missing store tree path depth")
+    bound = row["path_depth"] + 1
+    require(type(row["cold_leaf_pages"]) is int and row["cold_leaf_pages"] > max(3, bound),
+            f"{key}: workload is not a cold collection spanning more than the read bound")
+    for field, ceiling in (("reads", 3), ("edit_reads", bound), ("writes", bound)):
+        require(type(row[field]) is int and 0 < row[field] <= ceiling,
+                f"{key}: cold {field} {row[field]} exceeds {ceiling} or is not counted")
+
+
+def check_rows(prior, previous_source, calibrate):
+    replacement = hashlib.sha256(previous_source.encode()).hexdigest() == policy.REVIEWED_REPLACEMENT["previous_sha256"]
+    added = set(policy.REVIEWED_REPLACEMENT["added_rows"]) if replacement else set()
+    require(set(policy.ROWS) == set(prior) | added and not set(prior) & added,
+            "tracked rows changed; reviewed replacement required")
+    for key, old_row in prior.items():
+        row = policy.ROWS[key]
+        require({k: v for k, v in row.items() if k != "ceiling"} ==
+                {k: v for k, v in old_row.items() if k != "ceiling"},
+                f"{key}: workload contract changed; reviewed replacement required")
+        if old_row["ceiling"] is not None:
+            require(row["ceiling"] is not None and row["ceiling"] <= old_row["ceiling"],
+                    f"{key}: ordinary lands cannot raise ceilings")
+
+
 def load_artifact(path):
     value = read(path)
     require(value["configuration"] == policy.CONFIGURATION, "artifact configuration differs from ceilings")
@@ -66,10 +103,13 @@ def load_artifact(path):
     return value
 
 
-def build(commit, out):
+def build(commit, out, label=LABEL):
     commit = git("rev-parse", commit + "^{commit}")
     directory = CACHE / "artifacts" / commit
+    if label != LABEL:
+        directory /= hashlib.sha256(label.encode()).hexdigest()[:16]
     directory.mkdir(parents=True, exist_ok=True)
+    build_args = [label if arg == LABEL else arg for arg in BUILD_ARGS]
     metadata = directory / "artifact.json"
     with (directory / "build.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -91,7 +131,7 @@ def build(commit, out):
             if switched:
                 subprocess.run(["git", "checkout", "--detach", commit], cwd=ROOT, check=True)
             with log.open("w") as output:
-                subprocess.run([*BUILD_ARGS, "--build-report", str(report)], cwd=ROOT,
+                subprocess.run([*build_args, "--build-report", str(report)], cwd=ROOT,
                                stdout=output, stderr=subprocess.STDOUT, check=True)
             require(git("rev-parse", "HEAD") == commit and
                     not git("status", "--porcelain", "--untracked-files=all"),
@@ -99,16 +139,16 @@ def build(commit, out):
             spec = importlib.util.spec_from_file_location("kiln_outputs", ROOT / "tools/buck2/outputs.py")
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            outputs = module.resolve(read(report), LABEL)
+            outputs = module.resolve(read(report), label)
             require(len(outputs) == 1, "optimized build did not produce one executable")
             tmp = directory / f"lash_perf.{os.getpid()}.tmp"
             shutil.copyfile(outputs[0], tmp)
             tmp.chmod(0o755)
             os.replace(tmp, directory / "lash_perf")
-            artifact = dict(commit=commit, tree=git("rev-parse", "HEAD^{tree}"),
+            artifact = dict(label=label, commit=commit, tree=git("rev-parse", "HEAD^{tree}"),
                             binary=str(directory / "lash_perf"), binary_sha256=digest(directory / "lash_perf"),
                             configuration=policy.CONFIGURATION, compiler=compiler,
-                            build_command=BUILD_ARGS, build_seconds=time.monotonic() - start)
+                            build_command=build_args, build_seconds=time.monotonic() - start)
             write(metadata, artifact)
         finally:
             if switched:
@@ -123,18 +163,22 @@ def references(out):
     with (directory / "references.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         qjs = directory / ("quickjs-" + policy.QUICKJS_REVISION) / "qjs"
-        if not qjs.exists():
+        monty = directory / "monty-bin"
+        if not qjs.exists() or not monty.exists():
             with (Path(out) / "references-build.log").open("w") as log:
                 subprocess.run(["bash", "-c", 'ulimit -v 8388608; exec "$@"', "--", sys.executable,
                                 "scripts/build-compare-references.py", "--cache", str(directory),
-                                "--engine", "quickjs"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
+                                "--engine", "quickjs", "--engine", "monty"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
         require(digest(qjs) == policy.QUICKJS_SHA256, "QuickJS executable differs from frozen reference")
+        require(digest(monty) == policy.MONTY_SHA256, "Monty executable differs from frozen reference")
     python = Path(shutil.which("python3")).resolve()
     require(digest(python) == policy.PYTHON_SHA256, "CPython executable differs from frozen reference")
     version = subprocess.check_output([str(python), "--version"], text=True).strip()
     require(version == policy.PYTHON_VERSION, "CPython version differs from frozen reference")
-    return {"python": ("--python", str(python), "cpython", policy.PYTHON_SHA256),
-            "typescript": ("--qjs", str(qjs), "qjs-0", policy.QUICKJS_SHA256)}
+    return {"python": dict(args=["--python", str(python), "--monty", str(monty)],
+                           engines={"cpython": policy.PYTHON_SHA256, "monty": policy.MONTY_SHA256}),
+            "typescript": dict(args=["--qjs", str(qjs)],
+                               engines={"qjs-0": policy.QUICKJS_SHA256})}
 
 
 def cpus():
@@ -168,16 +212,24 @@ def contract(base, calibrate):
                      for node in ast.parse(old.stdout).body
                      if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)}
         for field in ("CONFIGURATION", "COMPILER", "BUILD_FLAGS", "ENGINE_VERSION", "QUICKJS_REVISION", "QUICKJS_SHA256",
-                      "PYTHON_SHA256", "PYTHON_VERSION", "MONTY_VERSION", "MONTY_SHA256", "WORKERS", "CPU_MODEL", "SCOPE", "COST_ORDER"):
+                      "PYTHON_SHA256", "PYTHON_VERSION", "MONTY_VERSION", "MONTY_SHA256", "WORKERS", "CPU_MODEL", "SCOPE"):
             require(namespace[field] == getattr(policy, field), f"{field}: measurement contract changed; reviewed replacement required")
-        prior = namespace["ROWS"]
-        require(set(prior) == set(policy.ROWS), "tracked rows changed; reviewed replacement required")
-        for key, row in policy.ROWS.items():
-            old_row = prior[key]
-            require({k: v for k, v in row.items() if k != "ceiling"} ==
-                    {k: v for k, v in old_row.items() if k != "ceiling"},
-                    f"{key}: workload contract changed; reviewed replacement required")
-            require(row["ceiling"] <= old_row["ceiling"], f"{key}: ordinary lands cannot raise ceilings")
+        replacement = hashlib.sha256(old.stdout.encode()).hexdigest() == policy.REVIEWED_REPLACEMENT["previous_sha256"]
+        if replacement:
+            require([key for key in policy.COST_ORDER if key not in policy.REVIEWED_REPLACEMENT["added_rows"]]
+                    == namespace["COST_ORDER"], "existing cost order changed")
+        else:
+            require(namespace["COST_ORDER"] == policy.COST_ORDER,
+                    "COST_ORDER: measurement contract changed; reviewed replacement required")
+            require(namespace.get("MONTY_BINDING") is True and policy.MONTY_BINDING is True and
+                    namespace.get("MONTY_MAX_RATIO") == policy.MONTY_MAX_RATIO == 2.0,
+                    "binding Monty contract changed; reviewed replacement required")
+            require(namespace.get("BOUNDARY") == policy.BOUNDARY,
+                    "boundary contract changed; reviewed replacement required")
+            if namespace.get("CHECKPOINT_BASE") is not None:
+                require(namespace["CHECKPOINT_BASE"] == policy.CHECKPOINT_BASE,
+                        "checkpoint base changed; reviewed replacement required")
+        check_rows(namespace["ROWS"], old.stdout, calibrate)
     for path in ("tools/buck2/lash_rust.bzl", "tools/buck2/third_party.bzl"):
         flags = re.search(r"_OPTIMIZED_FLAGS = (\[[\s\S]*?\n\])", (ROOT / path).read_text())
         require(flags is not None and ast.literal_eval(flags[1]) == policy.BUILD_FLAGS,
@@ -187,13 +239,81 @@ def contract(base, calibrate):
         if not calibrate:
             require(isinstance(row["ceiling"], (float, int)) and math.isfinite(row["ceiling"]) and row["ceiling"] > 0,
                     f"{key}: no qualified ceiling")
+    require(digest(ROOT / policy.BOUNDARY["source"]) == policy.BOUNDARY["sha256"],
+            "boundary workload checksum differs")
+    require(policy.MONTY_BINDING is True and policy.MONTY_MAX_RATIO == 2.0,
+            "cutover requires a binding 2.00x Monty ceiling")
+
+
+def boundary(base, candidate, out):
+    receipts = []
+    captures = {"base": {"list": [], "map": []}, "candidate": {"list": [], "map": []}}
+    # Each adjacent base/candidate pair uses the same physical core. There is
+    # no concurrent boundary work; alternate order to avoid a fixed time bias.
+    cpu = cpus()[0]
+    for repeat in range(policy.BOUNDARY["samples"]):
+        sides = (("base", base), ("candidate", candidate))
+        for side, artifact in sides if repeat % 2 == 0 else reversed(sides):
+            stem = Path(out) / f"boundary-{side}-{repeat}"
+            with stem.with_suffix(".log").open("w") as log:
+                subprocess.run(["bash", "-c", 'ulimit -v 8388608; exec "$@"', "--",
+                                "taskset", "-c", str(cpu), artifact["binary"], "boundary",
+                                "--case", "kernel-cold", "--operations", "1",
+                                "--out", str(stem.with_suffix(".json")),
+                                "--store-dir", str(stem.with_suffix(".store"))],
+                               cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=600)
+            receipt = read(stem.with_suffix(".json"))
+            receipts.append(str(stem.with_suffix(".json")))
+            evidence = receipt["evidence"]
+            require(receipt["population"] == 1 and evidence["source_sha256"] == policy.BOUNDARY["sha256"] and
+                    evidence["charge"] == "exact" and evidence["memory_meter"] == "on" and
+                    set(evidence["rows"]) == {"list", "map"}, "boundary geometry or work differs")
+            for key, rows in evidence["rows"].items():
+                require(len(rows) == 1, f"{side}/{key}: incomplete boundary population")
+                row = rows[0]
+                require(row["elements"] == 200_000, f"{side}/{key}: wrong boundary population size")
+                require(row["status"] in ("supported", "unsupported"), f"{side}/{key}: missing completion status")
+                if row["status"] == "supported":
+                    require(row["results"] == [100_003, -1], f"{side}/{key}: wrong boundary equal-work result")
+                    for field in ("seal_ns", "bytes_written"):
+                        require(type(row[field]) is int and row[field] > 0,
+                                f"{side}/{key}: missing checkpoint measurement")
+                captures[side][key].append(row)
+    report, errors = {}, []
+    for key in ("list", "map"):
+        old, new = captures["base"][key], captures["candidate"][key]
+        candidate_complete = all(row["status"] == "supported" for row in new)
+        for row in new:
+            try:
+                require(row["status"] == "supported", f"candidate/{key}: {row.get('error', 'incomplete point edit')}")
+                check_cold_access(key, row)
+            except ValueError as error:
+                errors.append(str(error))
+        unsupported = [row for row in old if row["status"] == "unsupported"]
+        ratios = {}
+        if unsupported:
+            require(len(unsupported) == len(old) and all(
+                "cold point edit" in row["error"] and "canonical region reached an unintegrated boundary" in row["error"]
+                for row in unsupported), f"base/{key}: unqualified failure, not FIG-7669")
+            checkpoint = "unsupported at base: " + ", ".join(path for path in receipts if "boundary-base-" in path)
+        else:
+            checkpoint = "base-relative"
+            if candidate_complete:
+                for field in ("seal_ns", "bytes_written"):
+                    ratios[field] = statistics.median([n[field] / b[field] for b, n in zip(old, new, strict=True)])
+                    if ratios[field] > policy.BOUNDARY["max_checkpoint_ratio"]:
+                        errors.append(f"{key}: checkpoint {field} {ratios[field]:.6f}x exceeds base")
+        report[key] = dict(base=old, candidate=new, checkpoint=checkpoint, checkpoint_ratios=ratios)
+    write(Path(out) / "boundary.json", dict(base=base, candidate=candidate, rows=report, failures=errors))
+    require(not errors, "; ".join(errors))
+    return report
 
 
 def capture(artifact, side, key, row, repeat, cpu, refs, out, deadline):
     stem = Path(out) / f"{side}-{key.replace('/', '-')}-{repeat}"
     command = ["bash", "-c", 'ulimit -v 8388608; exec "$@"', "--", artifact["binary"], "compare", "--out", str(stem.with_suffix(".json")), "--instructions",
                "--runs", "1", "--warmups", "1", "--factor", "20", "--dialect", key.split("/")[0],
-               "--workload", key.split("/")[1], "--cpu", str(cpu), *refs[:2]]
+               "--workload", key.split("/")[1], "--cpu", str(cpu), *refs["args"]]
     remaining = deadline - time.monotonic()
     require(remaining > 0, f"{side}/{key}/{repeat}: measurement deadline exceeded")
     start = time.monotonic()
@@ -216,25 +336,35 @@ def capture(artifact, side, key, row, repeat, cpu, refs, out, deadline):
             geometry["observation"] == "off" and geometry["memory_bytes"] == 512 << 20 and
             geometry["charge_limit"] == 10_000_000_000, f"{side}/{key}: measurement geometry differs")
     engines = {r["engine"]: r for r in receipt["rows"]}
-    require(len(receipt["rows"]) == 2 and set(engines) == {"lash", refs[2]}, f"{side}/{key}: missing equal-work reference")
-    lash, reference = engines["lash"], engines[refs[2]]
+    require(len(receipt["rows"]) == 1 + len(refs["engines"]) and set(engines) == {"lash", *refs["engines"]}, f"{side}/{key}: missing equal-work reference")
+    lash = engines["lash"]
     trips = [row["lo"], 20 * row["lo"]]
     operations = [n * row["ops"] for n in trips]
-    for result, identity in ((lash, artifact["binary_sha256"]), (reference, refs[3])):
+    for engine, identity in {"lash": artifact["binary_sha256"], **refs["engines"]}.items():
+        result = engines[engine]
         require(result["dialect"] == key.split("/")[0] and result["workload"] == key.split("/")[1] and
                 result["source_hash"] == row["sha256"] and result["trips"] == trips and
                 result["operations"] == operations and result["engine_identity"] == identity and
-                len(result["samples"]) == 1, f"{side}/{key}: source, work, engine or population differs")
-    pair, oracle = lash["samples"][0], reference["samples"][0]
-    require([s["result"] for s in pair] == [s["result"] for s in oracle], f"{side}/{key}: wrong equal-work result")
+                len(result["samples"]) == 1 and len(result["samples"][0]) == 2,
+                f"{side}/{key}: source, work, engine or population differs")
+    pair = lash["samples"][0]
+    for engine in refs["engines"]:
+        require([s["result"] for s in pair] == [s["result"] for s in engines[engine]["samples"][0]],
+                f"{side}/{key}/{engine}: wrong equal-work result")
     for sample in pair:
         window = sample["instruction_window"]
         require(window["time_enabled"] > 0 and .99 <= window["time_running"] / window["time_enabled"] <= 1 and
                 window["instructions"] == sample["instructions"] and sample["instructions"] > 0,
                 f"{side}/{key}: unqualified instructions:u window")
-    secant = (pair[1]["instructions"] - pair[0]["instructions"]) / (19 * row["lo"] * row["ops"])
-    require(math.isfinite(secant) and secant > 0, f"{side}/{key}: invalid secant")
-    return dict(side=side, row=key, repeat=repeat, cpu=cpu, secant=secant,
+    secants = {}
+    for engine, result in engines.items():
+        low, high = result["samples"][0]
+        require(all(type(s["instructions"]) is int and s["instructions"] > 0 for s in (low, high)),
+                f"{side}/{key}/{engine}: missing instruction count")
+        secant = (high["instructions"] - low["instructions"]) / (19 * row["lo"] * row["ops"])
+        require(math.isfinite(secant) and secant > 0, f"{side}/{key}/{engine}: invalid secant")
+        secants[engine] = secant
+    return dict(side=side, row=key, repeat=repeat, cpu=cpu, secant=secants["lash"], reference_secants={k: v for k, v in secants.items() if k != "lash"},
                 results=[s["result"] for s in pair], wall_seconds=time.monotonic() - start,
                 capture=str(stem.with_suffix(".json")))
 
@@ -261,7 +391,8 @@ def measure(base_path, candidate_path, out, calibrate=False):
                   policy=dict(scope=policy.SCOPE, build_flags=policy.BUILD_FLAGS, rows=policy.ROWS,
                               compiler=policy.COMPILER, engine=policy.ENGINE_VERSION,
                               references=dict(quickjs=policy.QUICKJS_REVISION, python=policy.PYTHON_VERSION,
-                                              monty_recorded_only=policy.MONTY_VERSION)))
+                                              monty=policy.MONTY_VERSION, monty_binding=policy.MONTY_BINDING,
+                                              monty_max_ratio=policy.MONTY_MAX_RATIO)))
     def run(task):
         side, artifact, key, row, repeat = task
         return capture(artifact, side, key, row, repeat, local.cpu, refs[key.split("/")[0]], out, deadline)
@@ -291,16 +422,33 @@ def measure(base_path, candidate_path, out, calibrate=False):
                 errors.append(f"{side}/{key}: repeat noise {noise:.4%} >=1%; calibration required")
             if not all(s["results"] == population[0]["results"] for s in population):
                 errors.append(f"{side}/{key}: nondeterministic equal-work result")
-            if not calibrate and median > row["ceiling"]:
-                errors.append(f"{side}/{key}: median {median:.6f} exceeds ceiling {row['ceiling']:.6f}")
+            reference_medians = {}
+            for engine in population[0]["reference_secants"]:
+                counts = [s["reference_secants"][engine] for s in population]
+                center = statistics.median(counts)
+                reference_medians[engine] = center
+                if (max(counts) - min(counts)) / center >= .01:
+                    errors.append(f"{side}/{key}/{engine}: repeat noise >=1%; calibration required")
+            result["references"] = reference_medians
+            result["ratios"] = {engine: median / count for engine, count in reference_medians.items()}
+            try:
+                check_instruction_ceiling(side, key, median, row["ceiling"],
+                                          reference_medians.get("monty"), calibrate)
+            except ValueError as error:
+                errors.append(str(error))
     report["wall_seconds"] = time.monotonic() - start
     if report["wall_seconds"] > 600:
         errors.append(f"base plus candidate measurement exceeded 600s: {report['wall_seconds']:.2f}s")
-    require(len(samples) == 110 or errors, "incomplete gate population")
+    for key in policy.ROWS:
+        populations = [[s["results"] for s in samples if s["side"] == side and s["row"] == key]
+                       for side in ("base", "candidate")]
+        if populations[0] and populations[1] and populations[0][0] != populations[1][0]:
+            errors.append(f"{key}: base and candidate equal-work results differ")
+    expected = len(policy.ROWS) * 10
+    require(len(samples) == expected or errors, "incomplete gate population")
     write(Path(out) / "receipt.json", report)
     kind = "calibration" if calibrate else "gate"
-    print(f"perf {kind}: {report['wall_seconds']:.2f}s, {len(samples)}/110 pairs, receipt={Path(out) / 'receipt.json'}", flush=True)
-    require(not errors, "; ".join(errors))
+    print(f"perf {kind}: {report['wall_seconds']:.2f}s, {len(samples)}/{expected} pairs, receipt={Path(out) / 'receipt.json'}", flush=True)
     return report
 
 
@@ -323,16 +471,26 @@ def main():
         base = build(args.base, out)
         candidate = build(head, out)
         require(git("rev-parse", "HEAD") == head, "candidate checkout was not restored")
+    require(policy.CHECKPOINT_BASE is not None, "checkpoint base has not been pinned")
+    checkpoint_base = load_artifact(build(policy.CHECKPOINT_BASE, out))
     result = measure(base, candidate, out, args.calibrate)
+    try:
+        result["boundary"] = boundary(checkpoint_base, load_artifact(candidate), out)
+    except (ValueError, OSError, KeyError, subprocess.SubprocessError) as error:
+        result["failures"].append(f"boundary: {error}")
+    result["status"] = "failed" if result["failures"] else ("calibrated" if args.calibrate else "qualified")
+    write(out / "receipt.json", result)
+    require(not result["failures"], "; ".join(result["failures"]))
     if not args.base_artifact:
         current = git("rev-parse", "HEAD")
         require(current == head, f"candidate changed during measurement: {head} -> {current}")
         require(not git("status", "--porcelain", "--untracked-files=all"),
                 "candidate working tree changed during measurement; rerun scripts/land")
-    if not args.calibrate:
-        result["qualified_ceilings"] = {key: min(row["ceiling"], result["rows"][f"candidate/{key}"]["median"] * 1.03)
-                                        for key, row in policy.ROWS.items()}
-        write(out / "receipt.json", result)
+    result["qualified_ceilings"] = {
+        key: (min(row["ceiling"], result["rows"][f"candidate/{key}"]["median"] * 1.03)
+              if row["ceiling"] is not None else result["rows"][f"candidate/{key}"]["median"] * 1.03)
+        for key, row in policy.ROWS.items()}
+    write(out / "receipt.json", result)
 
 
 if __name__ == "__main__":
