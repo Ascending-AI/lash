@@ -238,15 +238,15 @@ struct Case {
 const DOCUMENT_DEPTH: usize = 64;
 
 /// What `ts.json.plain` should say, written independently of it: the value
-/// `build` makes holds only lists, records, null, bools, text and finite
-/// numbers; no record has a `toJSON` or `__lash_brand` field or a key that begins
+/// `build` makes holds only lists, records, null, bools, text, kernel
+/// integers (Numbers) and finite floats; no record has a `toJSON` or `__lash_brand` field or a key that begins
 /// with a digit; no container is nested past the writer's document depth
 /// limit, [`DOCUMENT_DEPTH`]. The number of values is unbounded, counting each
 /// place a shared value is held. A cycle is never plain.
 fn plain(case: &Case) -> bool {
     fn walk(value: &Datum, depth: usize) -> bool {
         let members: Vec<&Datum> = match value {
-            Datum::Null | Datum::Bool(_) | Datum::Text(_) => return true,
+            Datum::Null | Datum::Bool(_) | Datum::Text(_) | Datum::Int(_) => return true,
             Datum::Float(float) => return float.get().is_finite(),
             Datum::List(items) => items.iter().collect(),
             Datum::Record(fields) => {
@@ -307,8 +307,8 @@ fn text(value: &str) -> Datum {
 }
 
 /// Leaves JSON writes plainly, and the traps of its spelling: signed zero,
-/// exponent thresholds, escapes, control characters, line separators and
-/// supplementary characters.
+/// kernel integers past binary64 and i64, exponent thresholds, escapes,
+/// control characters, line separators and supplementary characters.
 fn leaf(bits: &mut Bits) -> Datum {
     const NUMBERS: [f64; 14] = [
         0.0,
@@ -338,10 +338,18 @@ fn leaf(bits: &mut Bits) -> Datum {
         "</script>",
         "0",
     ];
-    match bits.below(5) {
+    match bits.below(6) {
         0 => Datum::Null,
         1 => Datum::Bool(bits.below(2) == 0),
         2 => float(NUMBERS[bits.below(NUMBERS.len() as u64) as usize]),
+        3 => Datum::Int(match bits.below(4) {
+            0 => Integer::from(0i64),
+            1 => Integer::from(-500i64),
+            2 => Integer::from(i64::MAX),
+            _ => {
+                Integer::try_from("18446744073709551615000".to_owned()).expect("a decimal integer")
+            }
+        }),
         _ => text(TEXTS[bits.below(TEXTS.len() as u64) as usize]),
     }
 }
@@ -680,13 +688,18 @@ fn plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path() {
 }
 
 /// A tool's JSON schema `levels` objects deep, each with `breadth` properties:
-/// ordinary data that nests far past eight containers.
+/// ordinary data that nests far past eight containers. Its bounds are kernel
+/// integers, as a host tool's decoded schema carries them; they are Numbers.
 fn schema(levels: u32, breadth: u32) -> Datum {
     let mut fields = vec![
         ("type".to_owned(), text("object")),
         (
             "description".to_owned(),
             text(&format!("level {levels} of the schema")),
+        ),
+        (
+            "maxProperties".to_owned(),
+            Datum::Int(Integer::from(i64::from(breadth) * 1000)),
         ),
     ];
     if levels > 0 {
@@ -708,12 +721,13 @@ fn schema(levels: u32, breadth: u32) -> Datum {
     Datum::Record(fields)
 }
 
-/// Compact JSON length of records, lists and ASCII text without escapes,
+/// Compact JSON length of records, lists, integers and ASCII text without escapes,
 /// counted from the JSON grammar.
 fn json_bytes(value: &Datum) -> u64 {
     let separators = |n: usize| 2 + n.saturating_sub(1) as u64;
     match value {
         Datum::Text(text) => text.len() as u64 + 2,
+        Datum::Int(value) => value.to_string().len() as u64,
         Datum::List(items) => separators(items.len()) + items.iter().map(json_bytes).sum::<u64>(),
         Datum::Record(fields) => {
             separators(fields.len())

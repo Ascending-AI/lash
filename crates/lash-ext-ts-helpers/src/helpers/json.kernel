@@ -177,7 +177,8 @@ body {
 
 # Whether JSON.stringify writes `value` as the console's JSON render does:
 # a list, a record or a scalar whose containers hold only lists, records,
-# null, bools, text and finite numbers. A record with a `toJSON` or a
+# null, bools, text and finite numbers. A kernel integer is a Number, which
+# both paths hand unchanged to json.boundary, so it is plain. A record with a `toJSON` or a
 # `__lash_brand` field, or with a key that begins with a digit (an index key, which
 # JSON writes before the others), is not plain. Nesting past the writer's
 # document depth limit, or a container inside itself, is not plain: the
@@ -189,7 +190,7 @@ metering statements
 body {
   # The native is neutral: forbidden fields, key interval and integer
   # admission are dialect policy. Its result packs work and admission in its low bit.
-  let classified = json.classify(value, ("toJSON", "__lash_brand"), "0", ":", false)
+  let classified = json.classify(value, ("toJSON", "__lash_brand"), "0", ":", true)
   return same(num.rem_trunc(classified, 2), 1)
 }
 
