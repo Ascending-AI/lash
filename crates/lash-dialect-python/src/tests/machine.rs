@@ -2246,3 +2246,127 @@ pub(super) fn stress_observation(
         Box::new(session.source.clone()),
     )
 }
+
+/// FIG-7684 / K-LIB-007 / K-CHG-001/008: the source oracle owns native
+/// JSON allocations and refuses at the first charge past the bound.
+#[test]
+fn json_transform_source_owns_native_results_and_refuses_at_the_charge() {
+    use lash_kernel_vm::testing::ExecutionStrategy;
+
+    // crates/lash-perf/src/compare/workloads/json_transform.py, with its n=1 driver.
+    let source = r#"# Match the TypeScript row: parse, update and compactly encode 128 records.
+import json
+
+
+def benchmark(n):
+    records = []
+    for i in range(128):
+        records.append({"id": i, "name": "tool-record-" + str(i), "value": i, "active": i % 2 == 0})
+    source = json.dumps({"tool": "search", "records": records}, separators=(",", ":"))
+    result = 0
+    for trip in range(n):
+        data = json.loads(source)
+        for record in data["records"]:
+            record["value"] += 1
+        result += len(json.dumps(data, separators=(",", ":")))
+    return result
+
+print(benchmark(1))
+"#;
+    let lowered = lower(source).expect("the JSON compare row lowers");
+    let print_at = lowered
+        .document
+        .main
+        .as_ref()
+        .unwrap()
+        .iter()
+        .position(|stmt| matches!(stmt, lash_kernel_doc::Stmt::Print { .. }))
+        .expect("the driver prints its checksum") as u32;
+    let program = crate::tests::linked::program(
+        Arc::clone(lowered.document.shared()),
+        installed().prepared.clone(),
+    );
+    let observe = |bounds| {
+        let session = Session::default();
+        let mut machine = lash_kernel_vm::testing::start(
+            program.clone(),
+            bounds,
+            lash_kernel_vm::CellStart {
+                owner: pages::OWNER,
+                target: lash_kernel_vm::Target::Main,
+                args: Vec::new(),
+                session: session.root,
+                modes: Default::default(),
+                host: Vec::new(),
+            },
+            ExecutionStrategy::Source,
+            Box::new(session.source.clone()),
+        )
+        .expect("the JSON row starts");
+        let tape = lash_kernel_vm::ChargeTape::new();
+        machine.record_charges(tape.clone());
+        let mut host = Console::default();
+        let Step::Ended(end) = machine
+            .run(&mut host, u64::MAX)
+            .expect("the JSON row runs without a heap fault")
+        else {
+            panic!("the synchronous JSON row must end");
+        };
+        (
+            end,
+            host.lines,
+            machine.meters().charged.unwrap(),
+            tape.steps(),
+        )
+    };
+    // Compact JSON has 128 records, each with 48 fixed bytes and active's
+    // 4/5 bytes. The id/name digits total 2*274, the incremented values 276.
+    // With 127 separators and the 30-byte wrapper: 128*48 + 64*9 + 548
+    // + 276 + 127 + 30 = 7701 UTF-8 bytes.
+    // K-ITER-005 also bills py.for_in.open's declared 4 units. The optimized
+    // compare row reports 35412 but omits that hook; all other charge events
+    // agree. Keep the source oracle's required fee, giving 35416.
+    let total = 35_416;
+    for charge_limit in [BOUNDS.charge_limit, 27_614, 35_411, total - 1] {
+        let (end, lines, charged, charges) = observe(Bounds {
+            charge_limit,
+            ..BOUNDS
+        });
+        if charge_limit == BOUNDS.charge_limit {
+            assert_eq!(lines, ["7701"]);
+            assert!(matches!(end, End::Finished(_)));
+            assert_eq!(charged, total);
+        } else {
+            assert!(lines.is_empty(), "print follows its charge");
+            let End::Error(RunError::Bound(exceeded)) = end else {
+                panic!("expected a charge refusal, got {end:?}");
+            };
+            assert_eq!(exceeded.bound, lash_kernel_vm::Bound::Charge);
+            assert_eq!(exceeded.limit, charge_limit);
+            let attempted = charges
+                .last()
+                .expect("the refusing charge is recorded")
+                .units();
+            if charge_limit >= 35_411 {
+                // K-CHG-002/004: copying out the four UTF-8 digits costs
+                // size(text) = 1 + 4, before the host observes any output.
+                assert_eq!(charged, total);
+                assert_eq!(attempted, 5);
+                assert_eq!(
+                    exceeded.function.as_ref().map(|name| name.as_str()),
+                    Some("main")
+                );
+                assert_eq!(
+                    exceeded.site.as_deref(),
+                    Some(&lash_kernel_value::sites::Site::new(
+                        lash_kernel_value::sites::Unit::Main,
+                        vec![print_at],
+                    ))
+                );
+            } else {
+                assert_eq!(charged, 27_615);
+                assert_eq!(attempted, 1);
+            }
+        }
+    }
+}

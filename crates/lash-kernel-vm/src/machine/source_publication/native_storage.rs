@@ -597,13 +597,13 @@ pub(in crate::machine) fn scratch_events(
 ) -> Result<Vec<lash_kernel_state::kernel_internals::logical::ScratchEvent>, HeapFault> {
     use doc::{NativeResourceEvent as Event, NativeResourceRelease as Release};
     use lash_kernel_state::kernel_internals::logical::{ScratchEvent, Slot};
+    // An iterable's result already names its retained loop-control slot.
+    // Scratch belongs to the invocation, independently of that output role.
     let Owner::Value {
-        task,
-        invocation,
-        slot: Slot::Operand(_),
+        task, invocation, ..
     } = output
     else {
-        return Err(malformed("native output has no operand owner"));
+        return Err(malformed("native output has no invocation owner"));
     };
     if contract.peak_scratch_bytes().is_none() {
         return Err(malformed("native scratch contract is invalid"));

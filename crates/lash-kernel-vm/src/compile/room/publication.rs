@@ -865,10 +865,10 @@ fn check_native(
     }
     // Scratch ordering is part of the declaration, including leases ending
     // before an allocation. Equal peaks do not authorize another schedule.
+    // The source event checks the canonical destination, which may be a
+    // retained loop-control slot. Scratch is scoped to its invocation.
     let logical::Owner::Value {
-        task,
-        invocation,
-        slot: logical::Slot::Operand(_),
+        task, invocation, ..
     } = actual.outputs[0].0
     else {
         return Err(Refused::Facts);
