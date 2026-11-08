@@ -149,6 +149,12 @@ pub(crate) struct Vm<H: Heap> {
     functions: Digests<UnitId>,
     /// What observes the run; an observed run takes the exact path.
     pub watch: Option<Box<watch::Watch>>,
+    /// What a frame of each unit holds (contract §2): admitted when the
+    /// frame is entered, returned when it leaves.
+    frames: Vec<u64>,
+    /// The program or its constants did not fit the memory bound: the
+    /// run refuses before it runs anything.
+    unadmitted: Option<MemoryRefused>,
 }
 
 /// A map keyed by function digests.
@@ -181,15 +187,20 @@ impl<H: Heap> Vm<H> {
     /// An instance of `program` over `heap`, its constants placed and
     /// admitted. `limit` is the charge limit under `Charge::Exact`;
     /// `paced` selects `Charge::Off`.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         document: Arc<Document>,
         program: Arc<Program>,
+        heights: &[u32],
         mut heap: H,
         used: u64,
         limit: u64,
         paced: bool,
         call_depth: u32,
     ) -> Result<Self, Stop> {
+        // The instance holds its own program, then its materialized
+        // constants (contract §2, `K-MACH-001`).
+        let mut unadmitted = heap.admit(crate::heap::meter::program(&program)).err();
         let mut constants = Vec::with_capacity(program.constants.len());
         for constant in &program.constants {
             let object = match constant {
@@ -202,14 +213,24 @@ impl<H: Heap> Vm<H> {
                 Constant::Bytes(bytes) => NewObject::Bytes(bytes.clone()),
                 Constant::Function(callable) => NewObject::Function(*callable),
             };
-            if let Err(refused) = heap.admit(crate::heap::slots::schedule(&object)) {
-                return Err(Stop::bound(memory(refused)));
+            if unadmitted.is_none() {
+                unadmitted = heap.admit(crate::heap::slots::schedule(&object)).err();
+            }
+            if unadmitted.is_some() {
+                constants.push(Value::Absent);
+                continue;
             }
             let value = heap
                 .create(object)
                 .map_err(|error| Stop::Fault(error.to_string()))?;
             constants.push(value);
         }
+        let frames = program
+            .units
+            .iter()
+            .zip(heights)
+            .map(|(unit, height)| crate::heap::meter::frame(unit, *height))
+            .collect();
         let mut closures = Digests::default();
         for (at, unit) in program.units.iter().enumerate() {
             if let UnitKind::Closure(function) = unit.kind {
@@ -241,6 +262,8 @@ impl<H: Heap> Vm<H> {
             closures,
             functions,
             watch: None,
+            frames,
+            unadmitted,
         })
     }
 
@@ -496,7 +519,7 @@ impl<H: Heap> Vm<H> {
     }
 
     fn cell(&mut self, value: Value) -> Run<ArenaHandle> {
-        self.admit(crate::heap::slots::CELL)?;
+        self.admit(crate::heap::meter::CELL)?;
         Ok(self.heap.cell(value))
     }
 
@@ -537,12 +560,31 @@ impl<H: Heap> Vm<H> {
 
     /// The raise of a new error of `kind` and `message` (`K-ERR-002`).
     pub(crate) fn error(&mut self, kind: &str, message: &str) -> Flow {
-        if let Err(flow) = self.admit(crate::heap::slots::ERROR) {
-            return flow;
-        }
-        match self.heap.error(kind, message, Value::Null) {
+        match self.new_error(kind, message, Value::Null) {
             Ok(value) => Flow::Raise(value),
-            Err(error) => fault(error.to_string()),
+            Err(flow) => flow,
+        }
+    }
+
+    /// A new error value of `kind`, `message` and `data`, admitted for
+    /// everything it holds before it is built (`K-ERR-001`). `data` must
+    /// be held by the caller across the admission's collection.
+    pub(crate) fn new_error(&mut self, kind: &str, message: &str, data: Value) -> Run<Value> {
+        let units = self
+            .heap
+            .error_units(kind, message, data)
+            .map_err(|error| fault(error.to_string()))?;
+        self.admit(units)?;
+        self.heap
+            .error(kind, message, data)
+            .map_err(|error| fault(error.to_string()))
+    }
+
+    /// A text value: inline when short, else a long text admitted first.
+    pub(crate) fn text(&mut self, text: &str) -> Run<Value> {
+        match lash_kernel_doc::arena::ShortText::new(text) {
+            Some(short) => Ok(Value::Text(short)),
+            None => self.alloc(NewObject::LongText(text.into())),
         }
     }
 
@@ -580,6 +622,7 @@ impl<H: Heap> Vm<H> {
                 self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
             )));
         }
+        self.admit(self.frames[unit as usize])?;
         let code = &self.program.units[unit as usize];
         let base = self.cx.stack.len() - argc;
         let boxes = !code.boxed.is_empty();
@@ -678,6 +721,7 @@ impl<H: Heap> Vm<H> {
             let Some(frame) = self.cx.frames.pop() else {
                 return Err(Flow::from(Stop::Uncaught(value)));
             };
+            self.heap.release(self.frames[frame.unit as usize]);
             self.drop_handlers();
             if let Some(bill) = &frame.bill {
                 self.complete(bill.charge, &bill.args, None)?;
@@ -708,6 +752,9 @@ impl<H: Heap> Vm<H> {
     /// Runs the tasks until the run stops: it parks, the slice of `slice`
     /// units ends, or the run ends.
     pub(crate) fn run(&mut self, host: &mut dyn Host, slice: u64) -> Stop {
+        if let Some(refused) = self.unadmitted {
+            return Stop::bound(memory(refused));
+        }
         self.meter.slice(slice);
         self.fresh = true;
         let mut next = if self.tasks.installed {
@@ -887,7 +934,7 @@ impl<H: Heap> Vm<H> {
                             crate::bytecode::program::Capture::Capture(k) => self.capture(*k)?,
                         });
                     }
-                    self.admit(crate::heap::slots::closure_units(captures.len()))?;
+                    self.admit(crate::heap::meter::closure(captures.len()))?;
                     let closure = self.heap.closure(Arc::clone(&site.identity), captures);
                     self.push(Value::Closure(closure));
                 }
@@ -1058,6 +1105,7 @@ impl<H: Heap> Vm<H> {
         let Some(frame) = self.cx.frames.pop() else {
             return Err(fault("a return with no frame"));
         };
+        self.heap.release(self.frames[frame.unit as usize]);
         self.drop_handlers();
         if let Some(bill) = &frame.bill {
             self.complete(bill.charge, &bill.args, Some(&value))?;
@@ -1118,10 +1166,10 @@ impl<H: Heap> Vm<H> {
     }
 }
 
-fn memory(refused: MemoryRefused) -> Exceeded {
+pub(crate) fn memory(refused: MemoryRefused) -> Exceeded {
     Exceeded {
         bound: Bound::Memory,
-        limit: refused.held.saturating_add(refused.wanted),
+        limit: refused.bound,
         function: None,
         site: None,
     }

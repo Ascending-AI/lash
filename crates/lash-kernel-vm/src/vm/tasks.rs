@@ -988,14 +988,10 @@ impl<H: Heap> Vm<H> {
                 let errors = results.into_iter().filter_map(Result::err).collect();
                 let errors = self.alloc(NewObject::List(errors))?;
                 self.held.push(errors);
-                let admitted = self.admit(crate::heap::slots::ERROR);
+                let error =
+                    self.new_error("all_failed", "every task of the `join any` failed", errors);
                 self.held.pop();
-                admitted?;
-                let error = self
-                    .heap
-                    .error("all_failed", "every task of the `join any` failed", errors)
-                    .map_err(|error| fault(error.to_string()))?;
-                Some(Err(error))
+                Some(Err(error?))
             }
         })
     }

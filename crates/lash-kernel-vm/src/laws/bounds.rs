@@ -1061,3 +1061,91 @@ main { do call descend(&descend) }"#;
     );
     assert!(limited.document.node(&site).is_some());
 }
+
+/// How a bytecode-core run of `body` under memory bound `memory` ended,
+/// with what it held when it ended.
+fn core_end(body: &str, memory: u64) -> (End, u64) {
+    let bounds = Bounds { memory, ..ROOMY };
+    let mut machine = super::embedder::core_machine(&format!("main {{\n{body}\n}}"), bounds, None)
+        .expect("the law's document starts");
+    let mut world = World::default();
+    loop {
+        match machine.run(&mut world, u64::MAX).expect("the core runs") {
+            Step::Ended(end) => return (end, machine.meters().memory),
+            Step::Slice => {}
+            Step::Parked(_) => panic!("the memory laws perform nothing"),
+        }
+    }
+}
+
+/// The least memory bound a core run of `body` finishes under.
+fn threshold(body: &str) -> u64 {
+    let finishes = |memory| matches!(core_end(body, memory).0, End::Finished(_));
+    assert!(finishes(ROOMY.memory), "{body}");
+    let (mut refused, mut passed) = (0u64, ROOMY.memory);
+    while passed - refused > 1 {
+        let mid = refused + (passed - refused) / 2;
+        if finishes(mid) {
+            passed = mid;
+        } else {
+            refused = mid;
+        }
+    }
+    passed
+}
+
+/// `K-BND-003`, contract §2: the core's memory schedule is a fixed function
+/// of what a run holds. Holding `k` more list members raises the least
+/// bound the run finishes under by exactly 16 bytes a member, and `k` more
+/// bytes of long text by exactly `k`. One byte under that bound the run ends
+/// with the memory bound, at the native that would have exceeded it.
+#[test]
+fn the_core_memory_threshold_moves_by_exactly_the_schedule() {
+    let fill = |n: u64| format!("  let big = work.fill({n})\n  return 0");
+    let repeat = |n: u64| format!("  let big = work.repeat({n})\n  return 0");
+    let base_fill = threshold(&fill(1000));
+    let base_repeat = threshold(&repeat(1000));
+    for k in [1u64, 7, 100] {
+        assert_eq!(threshold(&fill(1000 + k)), base_fill + 16 * k, "fill +{k}");
+        assert_eq!(threshold(&repeat(1000 + k)), base_repeat + k, "repeat +{k}");
+    }
+    for (body, name) in [(fill(1000), "work.fill"), (repeat(1000), "work.repeat")] {
+        let limit = threshold(&body) - 1;
+        let (end, _) = core_end(&body, limit);
+        let End::Error(RunError::Bound(exceeded)) = end else {
+            panic!("{name} under {limit}: {end:?}");
+        };
+        assert_eq!(
+            (exceeded.bound, exceeded.limit, exceeded.function),
+            (
+                Bound::Memory,
+                limit,
+                Some(lash_kernel_value::names::FunctionName::new(name).unwrap())
+            )
+        );
+    }
+}
+
+/// `K-BND-003`, G011/G013: a shared object counts once, by its slot: a list
+/// that holds the same 1,000-member list twice needs no more room than one
+/// that holds it beside an integer; and a rootless cycle stays charged only
+/// until collection, so two hundred of them fit in room for a few.
+#[test]
+fn the_core_counts_a_shared_object_once_and_collects_rootless_cycles() {
+    let twice = threshold("  let a = work.fill(1000)\n  let z = 0\n  let b = [a, a]\n  return 0");
+    let once = threshold("  let a = work.fill(1000)\n  let z = 0\n  let b = [a, z]\n  return 0");
+    assert_eq!(twice, once);
+    // Each cycle holds a 1,000-member list (16,024 bytes) and the pair
+    // that closes it: 200 of them are over 3 MB, in a 64 KiB bound.
+    let (end, _) = core_end(
+        "  let i = 0
+  while num.lt(i, 200) {
+    let c = [work.fill(1000)]
+    set c[1] = c
+    set i = num.add(i, 1)
+  }
+  return i",
+        64 << 10,
+    );
+    assert_eq!(result(end), int(200));
+}

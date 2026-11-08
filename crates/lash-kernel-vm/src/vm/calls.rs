@@ -14,7 +14,7 @@
 use lash_kernel_doc::Value;
 use lash_kernel_doc::WorkCounter;
 use lash_kernel_doc::arena::native::{
-    Args, InlineOperation, NativeCall, NativeError, NewObject, Nursery,
+    Args, InlineOperation, NativeCall, NativeError, NewObject, Nursery, Retry,
 };
 use lash_kernel_doc::heap::LogicalBytes;
 
@@ -153,45 +153,84 @@ impl<H: Heap> Vm<H> {
             Some(guard) => Some(self.formula(guard, &self.cx.stack[from..], None)?),
             None => None,
         };
-        let (answer, built) = {
-            let objects = self.heap.objects();
-            let semantics = self.heap.semantics();
-            let mut nursery = Nursery::new(objects, LogicalBytes(u64::MAX));
-            let mut counter = WorkCounter::new(limit);
-            let answer = entry.native.call(NativeCall {
-                args: Args::new(&self.cx.stack[from..], objects, &semantics),
-                new: &mut nursery,
-                counter: &mut counter,
-            });
-            match &answer {
-                Ok(_) | Err(NativeError::Raised(_)) => (answer, nursery.into_new()),
-                Err(_) => {
-                    nursery.discard();
-                    (answer, Vec::new())
+        // The call builds into a nursery with the room the bound leaves.
+        // What it built is admitted at its peak, the larger of what it
+        // reserved and what its objects hold, before any of it is placed;
+        // its inputs are still held on the stack (contract §2). Short of
+        // room, the run collects and calls the native once more: it is
+        // pure, so the second call does what the first would have.
+        let mut collected = false;
+        let (answer, built, peak) = loop {
+            let attempt = {
+                let objects = self.heap.objects();
+                let semantics = self.heap.semantics();
+                let room = self.heap.bound().saturating_sub(self.heap.held());
+                let mut nursery = Nursery::new(objects, LogicalBytes(room));
+                let mut counter = WorkCounter::new(limit);
+                let answer = entry.native.call(NativeCall {
+                    args: Args::new(&self.cx.stack[from..], objects, &semantics),
+                    new: &mut nursery,
+                    counter: &mut counter,
+                });
+                match &answer {
+                    Ok(_) | Err(NativeError::Raised(_)) => {
+                        let placed: u64 = nursery
+                            .built()
+                            .iter()
+                            .map(|(_, object)| crate::heap::meter::new_object(object))
+                            .fold(0, u64::saturating_add);
+                        let peak = placed.max(nursery.held().0);
+                        if peak <= room {
+                            Some((answer, nursery.into_new(), peak))
+                        } else {
+                            nursery.discard();
+                            None
+                        }
+                    }
+                    Err(NativeError::Retry(Retry::Room { .. })) => {
+                        nursery.discard();
+                        None
+                    }
+                    Err(_) => {
+                        nursery.discard();
+                        Some((answer, Vec::new(), 0))
+                    }
+                }
+            };
+            match attempt {
+                Some(done) => break done,
+                None if !collected => {
+                    collected = true;
+                    self.collect();
+                }
+                None => {
+                    let held = self.heap.held();
+                    // The native that would have exceeded the bound is
+                    // named, as a guard that ends the run is.
+                    return Err(Flow::from(Stop::bound(Exceeded {
+                        function: Some(entry.name.clone()),
+                        ..super::memory(crate::heap::MemoryRefused {
+                            held,
+                            wanted: self.heap.bound().saturating_sub(held).saturating_add(1),
+                            bound: self.heap.bound(),
+                        })
+                    })));
                 }
             }
         };
-        if !built.is_empty() {
-            let units: u64 = built
+        if peak > 0 {
+            // Admitted within the room just measured.
+            let _fits = self.heap.admit(peak);
+            debug_assert!(_fits.is_ok());
+            let placed: u64 = built
                 .iter()
-                .map(|(_, object)| crate::heap::slots::schedule(object))
+                .map(|(_, object)| crate::heap::meter::new_object(object))
                 .fold(0, u64::saturating_add);
             self.heap
                 .install(built)
                 .map_err(|error| self.native(error))?;
-            // Installed, what the call built is reachable only from its
-            // answer until it is published: held across the collection
-            // the admission may make.
-            let answered = match &answer {
-                Ok(value) | Err(NativeError::Raised(value)) => Some(*value),
-                Err(_) => None,
-            };
-            self.held.extend(answered);
-            let admitted = self.admit_after(units);
-            if answered.is_some() {
-                self.held.pop();
-            }
-            admitted?;
+            // The transient part of the peak ends with the call.
+            self.heap.release(peak - placed);
         }
         match answer {
             Ok(value) => {
@@ -290,11 +329,6 @@ impl<H: Heap> Vm<H> {
             self.fee(units)?;
         }
         Ok(())
-    }
-
-    /// Admits what a native built, collecting once before it refuses.
-    fn admit_after(&mut self, units: u64) -> Run<()> {
-        self.admit(units)
     }
 
     /// A function the machine answers itself (`K-LIB-010`).

@@ -29,11 +29,23 @@ fn build<H: Heap>(vm: &mut Vm<H>, datum: &Datum) -> Run<Value> {
             Some(word) => Value::Int(word),
             None => vm.alloc(NewObject::BigInt(value.clone()))?,
         },
-        Datum::Text(text) => vm.heap.arena_mut().text(text),
-        Datum::Bytes(bytes) => vm.heap.arena_mut().bytes(bytes.as_slice()),
-        Datum::Timestamp(value) => vm.heap.arena_mut().timestamp(value.nanoseconds.clone()),
-        Datum::Function(name) => vm.heap.arena_mut().function(*name),
-        Datum::Handle(handle) => vm.heap.arena_mut().host_handle(handle.clone()),
+        Datum::Text(text) => vm.text(text)?,
+        Datum::Bytes(bytes) => vm.alloc(NewObject::Bytes(bytes.as_slice().into()))?,
+        Datum::Timestamp(value) => match value.nanoseconds.word() {
+            Some(word) => Value::Timestamp(word),
+            None => vm.alloc(NewObject::Timestamp(value.nanoseconds.clone()))?,
+        },
+        Datum::Function(name) => vm.alloc(NewObject::Function(*name))?,
+        Datum::Handle(handle) => {
+            let units = crate::heap::meter::OBJECT
+                .saturating_add((handle.kind.len() + handle.id.len()) as u64);
+            vm.admit(units)?;
+            let value = vm.heap.arena_mut().host_handle(handle.clone());
+            if let Some(placed) = value.handle() {
+                vm.heap.settle(placed, units);
+            }
+            value
+        }
         Datum::Tuple(members) => {
             let from = held(vm, members.iter())?;
             let members = vm.held[from..].to_vec();
@@ -65,7 +77,7 @@ fn build<H: Heap>(vm: &mut Vm<H>, datum: &Datum) -> Run<Value> {
         Datum::Record(fields) => {
             let from = vm.held.len();
             for (name, value) in fields {
-                let name = vm.heap.arena_mut().text(name);
+                let name = vm.text(name)?;
                 vm.held.push(name);
                 let value = build(vm, value)?;
                 vm.held.push(value);
@@ -79,12 +91,9 @@ fn build<H: Heap>(vm: &mut Vm<H>, datum: &Datum) -> Run<Value> {
             let from = vm.held.len();
             let data = build(vm, error.data())?;
             vm.held.push(data);
-            let admitted = vm.admit(crate::heap::slots::ERROR);
+            let built = vm.new_error(&error.kind, &error.message, data);
             vm.held.truncate(from);
-            admitted?;
-            vm.heap
-                .error(&error.kind, &error.message, data)
-                .map_err(|error| fault(error.to_string()))?
+            built?
         }
         Datum::Number(_) => return Err(fault("an undecoded number reached the run")),
         Datum::FunctionValue(_) => return Err(fault("a function value never enters a run")),

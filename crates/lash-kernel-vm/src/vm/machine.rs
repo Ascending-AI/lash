@@ -111,12 +111,13 @@ impl Machine for CoreMachine {
         let registry = program.library.registry().clone();
         let code = crate::bytecode::compile::compile(&document, &registry, program.link, entry)
             .map_err(linked)?;
-        crate::bytecode::validate::validate(&code).map_err(linked)?;
+        let heights = crate::bytecode::validate::validate(&code).map_err(linked)?;
         let paced = matches!(bounds.charge, Charge::Off);
         let operations = operations(&program, &code, start.modes)?;
         let mut vm = Vm::new(
             Arc::clone(&document),
             Arc::new(code),
+            &heights,
             SlotHeap::new(bounds.memory),
             0,
             bounds.charge_limit,

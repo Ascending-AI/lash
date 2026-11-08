@@ -3,48 +3,42 @@
 //! tables, admitted by a logical schedule and collected by mark-sweep from
 //! the machine's roots.
 //!
-//! The schedule here is the skeleton's: `fixed + unit × logical length` per
-//! object, independent of capacity and allocation history (contract §2,
-//! R7). L2's `heap/meter.rs` fixes the constants.
+//! Each live slot's schedule is kept beside it, read from its body
+//! ([`super::meter::body`]), so a write that grows an object settles to
+//! exactly what the object then holds (contract §2, R7).
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::arena::Objects;
-use lash_kernel_doc::arena::native::{NativeError, NewObject};
+use lash_kernel_doc::arena::native::{Args, NativeError, NewObject, Nursery};
 use lash_kernel_state::arena::{Arena, ArenaSemantics, Visit};
 
 use super::{Heap, MemoryRefused};
 
-/// Schedule units an object costs before its contents.
-const FIXED: u64 = 32;
-/// Schedule units per value an object holds.
-const PER_VALUE: u64 = 16;
-
-/// Schedule units of a closure over `captures` cells.
-pub(crate) fn closure_units(captures: usize) -> u64 {
-    FIXED.saturating_add(PER_VALUE.saturating_mul(captures as u64))
-}
-
-/// Schedule units of a cell.
-pub(crate) const CELL: u64 = FIXED + PER_VALUE;
-
-/// An error value: its kind, message and data (`K-ERR-001`).
-pub(crate) const ERROR: u64 = FIXED + 3 * PER_VALUE;
+pub(crate) use super::meter::{CELL, closure as closure_units};
 
 /// The schedule units `object` costs once placed.
 pub(crate) fn schedule(object: &NewObject) -> u64 {
-    let values = |n: usize| PER_VALUE.saturating_mul(n as u64);
-    FIXED.saturating_add(match object {
-        NewObject::List(values_) | NewObject::Tuple(values_) | NewObject::Set(values_) => {
-            values(values_.len())
-        }
-        NewObject::Map(pairs) | NewObject::Record(pairs) => values(pairs.len().saturating_mul(2)),
-        NewObject::LongText(text) => text.len() as u64,
-        NewObject::Bytes(bytes) => bytes.len() as u64,
-        NewObject::BigInt(int) | NewObject::Timestamp(int) => int.to_string().len() as u64,
-        NewObject::Function(_) => 0,
-        NewObject::Error { .. } => values(3),
-    })
+    super::meter::new_object(object)
+}
+
+/// Builds the error value of `kind`, `message` and `data` into `nursery`
+/// (`K-ERR-001`): its texts, its data object and itself.
+fn build_error<'call>(
+    nursery: &mut Nursery<'call>,
+    args: Args<'call>,
+    kind: &str,
+    message: &str,
+    data: Value,
+) -> Result<Value, NativeError> {
+    let kind = nursery.text(kind);
+    let message = nursery.text(message);
+    let data = lash_kernel_doc::error_object::native(args, nursery, kind, message, data)?;
+    Ok(nursery.allocate(NewObject::Error {
+        kind,
+        message,
+        data,
+    }))
 }
 
 /// A slot heap bounded by `bound` schedule units.
@@ -74,6 +68,26 @@ impl SlotHeap {
         }
         self.units[index] = units;
     }
+
+    /// Records the new object in slot `handle`, which was admitted for
+    /// `admitted`: the holding settles to what its body holds (a map
+    /// built from pairs that repeat a key holds fewer than it was
+    /// admitted for).
+    fn settle_placed(&mut self, handle: ArenaHandle, admitted: u64) {
+        if self
+            .units
+            .get(handle.index() as usize)
+            .is_some_and(|units| *units != 0)
+        {
+            // A shared object the arena gave again (the empty tuple):
+            // counted once, by its slot.
+            self.held = self.held.saturating_sub(admitted);
+            return;
+        }
+        let now = self.arena.body(handle).map_or(0, super::meter::body);
+        self.held = self.held.saturating_sub(admitted).saturating_add(now);
+        self.place(handle, now);
+    }
 }
 
 impl Heap for SlotHeap {
@@ -97,6 +111,7 @@ impl Heap for SlotHeap {
             _ => Err(MemoryRefused {
                 held: self.held,
                 wanted: units,
+                bound: self.bound,
             }),
         }
     }
@@ -106,11 +121,16 @@ impl Heap for SlotHeap {
         self.held
     }
 
+    #[inline]
+    fn bound(&self) -> u64 {
+        self.bound
+    }
+
     fn create(&mut self, object: NewObject) -> Result<Value, NativeError> {
-        let units = schedule(&object);
+        let admitted = schedule(&object);
         let value = self.arena.create(object)?;
         if let Some(handle) = value.handle() {
-            self.place(handle, units);
+            self.settle_placed(handle, admitted);
         }
         Ok(value)
     }
@@ -121,18 +141,65 @@ impl Heap for SlotHeap {
             .map(|(handle, object)| (*handle, schedule(object)))
             .collect();
         self.arena.install(built)?;
-        for (handle, units) in placed {
-            self.place(handle, units);
+        for (handle, admitted) in placed {
+            self.settle_placed(handle, admitted);
         }
         Ok(())
     }
 
+    fn error_units(&self, kind: &str, message: &str, data: Value) -> Result<u64, NativeError> {
+        let objects = self.arena.objects();
+        let semantics = self.arena.semantics();
+        let mut nursery = Nursery::unaccounted(objects);
+        build_error(
+            &mut nursery,
+            Args::new(&[], objects, &semantics),
+            kind,
+            message,
+            data,
+        )?;
+        let units = nursery
+            .built()
+            .iter()
+            .map(|(_, object)| schedule(object))
+            .fold(0, u64::saturating_add);
+        nursery.discard();
+        Ok(units)
+    }
+
     fn error(&mut self, kind: &str, message: &str, data: Value) -> Result<Value, NativeError> {
-        let value = self.arena.error(kind, message, data)?;
-        if let Some(handle) = value.handle() {
-            self.place(handle, ERROR);
-        }
+        let (value, built) = {
+            let objects = self.arena.objects();
+            let semantics = self.arena.semantics();
+            let mut nursery = Nursery::unaccounted(objects);
+            let value = build_error(
+                &mut nursery,
+                Args::new(&[], objects, &semantics),
+                kind,
+                message,
+                data,
+            )?;
+            (value, nursery.into_new())
+        };
+        self.install(built)?;
         Ok(value)
+    }
+
+    #[inline]
+    fn release(&mut self, units: u64) {
+        self.held = self.held.saturating_sub(units);
+    }
+
+    fn settle(&mut self, handle: ArenaHandle, admitted: u64) {
+        let index = handle.index() as usize;
+        let before = self.units.get(index).copied().unwrap_or(0);
+        let now = self.arena.body(handle).map_or(0, super::meter::body);
+        self.held = self
+            .held
+            .saturating_sub(admitted)
+            .saturating_sub(before)
+            .saturating_add(now);
+        self.place(handle, now);
     }
 
     fn cell(&mut self, value: Value) -> ArenaHandle {
@@ -173,14 +240,15 @@ impl Heap for SlotHeap {
     fn collect(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) {
         self.arena.collect_cycles(roots);
         let objects = self.arena.objects();
-        let mut held = 0u64;
+        let mut freed = 0u64;
         for (index, units) in self.units.iter_mut().enumerate() {
-            if objects.handle_at(index as u32).is_some() {
-                held = held.saturating_add(*units);
-            } else {
+            if *units != 0 && objects.handle_at(index as u32).is_none() {
+                freed = freed.saturating_add(*units);
                 *units = 0;
             }
         }
-        self.held = held;
+        // What the objects did not hold (frames, the program, transients)
+        // is not the collector's to free.
+        self.held = self.held.saturating_sub(freed);
     }
 }

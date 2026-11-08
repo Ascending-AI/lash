@@ -6,6 +6,7 @@
 //! collector is mark-sweep from the machine's roots. Owner after handoff
 //! H0: L2 (module-map §3).
 
+pub(crate) mod meter;
 pub(crate) mod slots;
 
 use lash_kernel_doc::Value;
@@ -19,6 +20,8 @@ pub(crate) struct MemoryRefused {
     /// What the run held, and what it asked for, in schedule units.
     pub held: u64,
     pub wanted: u64,
+    /// The bound it would pass.
+    pub bound: u64,
 }
 
 /// What the dispatcher needs of a heap. Every allocation is admitted
@@ -37,14 +40,29 @@ pub(crate) trait Heap {
     /// What the run holds under the schedule.
     fn held(&self) -> u64;
 
+    /// The memory bound, in schedule units (`Bounds::memory`).
+    fn bound(&self) -> u64;
+
+    /// Returns `units` admitted for a holding that has ended: a transient,
+    /// a frame that left, a raw outcome decoded.
+    fn release(&mut self, units: u64);
+
+    /// Settles object `handle` after a write that was admitted for
+    /// `admitted` more: the holding becomes exactly what its body holds.
+    fn settle(&mut self, handle: ArenaHandle, admitted: u64);
+
     /// Places `object`, already admitted.
     fn create(&mut self, object: NewObject) -> Result<Value, NativeError>;
 
     /// Installs what a native call built, in reservation order.
     fn install(&mut self, built: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError>;
 
+    /// What the error value of `kind`, `message` and `data` holds once
+    /// built: its texts, its data object and itself.
+    fn error_units(&self, kind: &str, message: &str, data: Value) -> Result<u64, NativeError>;
+
     /// An error value of `kind`, `message` and `data` (`K-ERR-001`),
-    /// already admitted.
+    /// already admitted for [`Heap::error_units`].
     fn error(&mut self, kind: &str, message: &str, data: Value) -> Result<Value, NativeError>;
 
     /// A new cell holding `value` (`K-CLO-001`).

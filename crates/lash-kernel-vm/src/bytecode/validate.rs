@@ -35,8 +35,10 @@ impl fmt::Display for Malformed {
 
 type Checked = Result<(), Malformed>;
 
-/// Checks `program`'s structure.
-pub fn validate(program: &Program) -> Checked {
+/// Checks `program`'s structure, giving each unit's operand height: the
+/// most operands its frames hold above their locals, which the memory
+/// schedule admits at frame entry (contract §2).
+pub fn validate(program: &Program) -> Result<Vec<u32>, Malformed> {
     let units = program.units.len();
     let whole = |problem: String| Malformed {
         unit: program.main,
@@ -64,10 +66,11 @@ pub fn validate(program: &Program) -> Checked {
         }
     }
     let captures = captures(program)?;
+    let mut heights = Vec::with_capacity(program.units.len());
     for (id, unit) in program.units.iter().enumerate() {
-        Unit::check(unit, program, id as UnitId, &captures)?;
+        heights.push(Unit::check(unit, program, id as UnitId, &captures)?);
     }
-    Ok(())
+    Ok(heights)
 }
 
 /// Each unit's capture count, from the closures that make it: every
@@ -100,7 +103,12 @@ fn captures(program: &Program) -> Result<Vec<Option<usize>>, Malformed> {
 }
 
 impl Unit {
-    fn check(&self, program: &Program, id: UnitId, captures: &[Option<usize>]) -> Checked {
+    fn check(
+        &self,
+        program: &Program,
+        id: UnitId,
+        captures: &[Option<usize>],
+    ) -> Result<u32, Malformed> {
         let at = |pc: usize, problem: String| Malformed {
             unit: id,
             pc: Some(pc as u32),
@@ -346,9 +354,11 @@ impl Unit {
     }
 
     /// Every op reached from the entry, or from a handler, sees one
-    /// operand depth, and no op pops past the frame's locals.
-    fn check_stack(&self, id: UnitId) -> Checked {
+    /// operand depth, and no op pops past the frame's locals. Gives the
+    /// greatest depth any op reaches.
+    fn check_stack(&self, id: UnitId) -> Result<u32, Malformed> {
         let len = self.ops.len();
+        let mut height = 0u32;
         let mut depth: Vec<Option<u32>> = vec![None; len];
         let mut work = vec![(0usize, 0u32)];
         while let Some((pc, d)) = work.pop() {
@@ -373,6 +383,7 @@ impl Unit {
                 return Err(at(format!("{op:?} pops {pops} of {d} operands")));
             };
             let after = after + pushes;
+            height = height.max(d).max(after);
             let mut go = |to: usize, d: u32| work.push((to, d));
             match op {
                 Op::Return | Op::Fall | Op::Raise | Op::Finish | Op::Fail | Op::Unavailable(_) => {}
@@ -406,7 +417,7 @@ impl Unit {
                 _ => go(pc + 1, after),
             }
         }
-        Ok(())
+        Ok(height)
     }
 
     /// What `op` pops and then pushes (`ProtoGuard` as when it guards).
@@ -564,7 +575,7 @@ mod tests {
     /// refused, at the op that has it.
     #[test]
     fn a_defect_the_dispatcher_would_trust_is_refused() {
-        assert_eq!(validate(&program()), Ok(()));
+        assert!(validate(&program()).is_ok());
         type Corrupt = fn(&mut Unit);
         let defects: [(&str, Option<u32>, Corrupt); 6] = [
             // Falling into block 2 leaves an operand the jump does not.

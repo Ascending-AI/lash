@@ -6,7 +6,8 @@ use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::Body;
 
 use super::{Run, Vm};
-use crate::heap::Heap;
+use crate::heap::{Heap, meter};
+use lash_kernel_doc::arena::ArenaHandle;
 
 /// The list position `index` names, `None` past every position.
 fn position<H: Heap>(vm: &mut Vm<H>, index: &Value) -> Run<Option<u64>> {
@@ -136,10 +137,41 @@ impl<H: Heap> Vm<H> {
         let Value::Record(record) = target else {
             return Err(self.error("type_error", "only a record has fields to assign"));
         };
-        self.heap
-            .arena_mut()
-            .table_write(record, name, value)
-            .map_err(|e| self.native(e))
+        let admitted = self.admit_growth(record, &name, [target, name, value])?;
+        let written = self.heap.arena_mut().table_write(record, name, value);
+        self.heap.settle(record, admitted);
+        written.map_err(|e| self.native(e))
+    }
+
+    /// Admits what writing `key` into table `table` adds, before the write
+    /// (contract §2): a new key's entry, nothing for an overwrite. The
+    /// write's `operands` are held across the admission's collection.
+    fn admit_growth(&mut self, table: ArenaHandle, key: &Value, operands: [Value; 3]) -> Run<u64> {
+        let present = self
+            .heap
+            .arena()
+            .table_get(table, key)
+            .map_err(|e| self.native(e))?
+            .is_some();
+        if present {
+            return Ok(0);
+        }
+        let entry = match self.heap.arena().body(table) {
+            Ok(Body::Set(_)) => meter::VALUE,
+            _ => 2 * meter::VALUE,
+        };
+        self.admit_holding(entry, operands)?;
+        Ok(entry)
+    }
+
+    /// Admits `units`, holding `operands` across the collection it may
+    /// make.
+    fn admit_holding(&mut self, units: u64, operands: [Value; 3]) -> Run<()> {
+        let from = self.held.len();
+        self.held.extend(operands);
+        let admitted = self.admit(units);
+        self.held.truncate(from);
+        admitted
     }
 
     pub(super) fn set_index(&mut self, target: Value, index: Value, value: Value) -> Run<()> {
@@ -152,17 +184,28 @@ impl<H: Heap> Vm<H> {
                         &format!("a list of {length} is assigned at 0 to {length}"),
                     ));
                 };
-                self.heap.arena_mut().list_set(list, at, value)
+                // Assigning at the length appends: one more member.
+                let admitted = if at == length { meter::VALUE } else { 0 };
+                self.admit_holding(admitted, [target, index, value])?;
+                let written = self.heap.arena_mut().list_set(list, at, value);
+                self.heap.settle(list, admitted);
+                written
             }
             Value::Record(record) => {
                 if !is_text(&index) {
                     return Err(self.error("type_error", "a record index must be text"));
                 }
-                self.heap.arena_mut().table_write(record, index, value)
+                let admitted = self.admit_growth(record, &index, [target, index, value])?;
+                let written = self.heap.arena_mut().table_write(record, index, value);
+                self.heap.settle(record, admitted);
+                written
             }
             Value::Map(map) => {
                 self.key(&index)?;
-                self.heap.arena_mut().table_write(map, index, value)
+                let admitted = self.admit_growth(map, &index, [target, index, value])?;
+                let written = self.heap.arena_mut().table_write(map, index, value);
+                self.heap.settle(map, admitted);
+                written
             }
             Value::Set(set) => {
                 self.key(&index)?;
@@ -173,9 +216,14 @@ impl<H: Heap> Vm<H> {
                     ));
                 };
                 if present {
-                    self.heap.arena_mut().table_write(set, index, Value::Absent)
+                    let admitted = self.admit_growth(set, &index, [target, index, value])?;
+                    let written = self.heap.arena_mut().table_write(set, index, Value::Absent);
+                    self.heap.settle(set, admitted);
+                    written
                 } else {
-                    self.heap.arena_mut().table_delete(set, &index)
+                    let written = self.heap.arena_mut().table_delete(set, &index);
+                    self.heap.settle(set, 0);
+                    written
                 }
             }
             _ => {
@@ -192,10 +240,9 @@ impl<H: Heap> Vm<H> {
         let Value::Record(record) = target else {
             return Err(self.error("type_error", "only a record has fields to remove"));
         };
-        self.heap
-            .arena_mut()
-            .table_delete(record, &name)
-            .map_err(|e| self.native(e))
+        let removed = self.heap.arena_mut().table_delete(record, &name);
+        self.heap.settle(record, 0);
+        removed.map_err(|e| self.native(e))
     }
 
     pub(super) fn remove_index(&mut self, target: Value, index: Value) -> Run<()> {
@@ -208,17 +255,23 @@ impl<H: Heap> Vm<H> {
                         &format!("a list of {length} has no element there to remove"),
                     ));
                 };
-                self.heap.arena_mut().list_remove(list, at)
+                let removed = self.heap.arena_mut().list_remove(list, at);
+                self.heap.settle(list, 0);
+                removed
             }
             Value::Record(record) => {
                 if !is_text(&index) {
                     return Err(self.error("type_error", "a record index must be text"));
                 }
-                self.heap.arena_mut().table_delete(record, &index)
+                let removed = self.heap.arena_mut().table_delete(record, &index);
+                self.heap.settle(record, 0);
+                removed
             }
             Value::Map(table) | Value::Set(table) => {
                 self.key(&index)?;
-                self.heap.arena_mut().table_delete(table, &index)
+                let removed = self.heap.arena_mut().table_delete(table, &index);
+                self.heap.settle(table, 0);
+                removed
             }
             _ => {
                 return Err(self.error(
