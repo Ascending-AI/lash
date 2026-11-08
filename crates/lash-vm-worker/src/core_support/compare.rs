@@ -12,7 +12,8 @@ use lash_kernel_doc::{Datum, ErrorDatum};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::perf_witness::Profiling;
 use lash_kernel_vm::{
-    Bounds, CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, Program, Step, Target,
+    Bounds, CellStart, CoreMachine, End, Host, KernelMachine, Machine, PreparedLibrary, Program,
+    Step, Target,
 };
 use {lash_kernel_value::package::Fill, lash_kernel_value::package::Link};
 
@@ -29,12 +30,22 @@ pub struct Measurement {
     pub result: serde_json::Value,
 }
 
+/// The machine a comparison runs. The bytecode core runs beside the base
+/// machine until the cutover; it seals nothing and observes no sites yet.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Engine {
+    #[default]
+    Base,
+    Core,
+}
+
 /// A linked cell whose VM program remains owned by the worker.
 pub struct PreparedCell(
     Program,
     lash_kernel_doc::SourceMap,
     BTreeMap<lash_kernel_value::sites::Site, lash_kernel_dialect::Written>,
     (lash_kernel_vm::Charge, lash_kernel_vm::MemoryMeter),
+    Engine,
 );
 
 fn elapsed(at: std::time::Instant) -> f64 {
@@ -106,6 +117,7 @@ pub struct Kernel {
     library: PreparedLibrary,
     pub setup_ns: f64,
     metering: (lash_kernel_vm::Charge, lash_kernel_vm::MemoryMeter),
+    engine: Engine,
 }
 impl Kernel {
     /// Assemble the same natives and released helpers as Test262.
@@ -132,7 +144,13 @@ impl Kernel {
                 lash_kernel_vm::Charge::Exact,
                 lash_kernel_vm::MemoryMeter::On,
             ),
+            engine: Engine::Base,
         })
+    }
+    /// Select the machine the prepared cells run on.
+    pub fn with_engine(mut self, engine: Engine) -> Self {
+        self.engine = engine;
+        self
     }
     /// Select accounting modes for a diagnostic comparison. Ordinary
     /// comparisons retain exact charges and the conservative memory meter.
@@ -237,7 +255,13 @@ impl Kernel {
         .map_err(failure)?;
         drop(_scope);
         Ok((
-            PreparedCell(program, source_map, lowered.written, self.metering),
+            PreparedCell(
+                program,
+                source_map,
+                lowered.written,
+                self.metering,
+                self.engine,
+            ),
             phases,
         ))
     }
@@ -245,19 +269,36 @@ impl Kernel {
 
 /// Construct and run a fresh machine; checkpoint only the separate diagnostic run.
 /// The interval excludes preparation, machine drop and output validation.
+/// The bytecode core takes no checkpoint and observes nothing.
 ///
 /// # Errors
-/// Refused construction, checkpoint, execution or checksum output.
+/// Refused construction, checkpoint, execution or checksum output; an
+/// observed core run.
 pub fn execute(
     program: &PreparedCell,
     checkpoint: bool,
     observe: bool,
 ) -> Result<(Measurement, BTreeMap<String, f64>)> {
+    if program.4 == Engine::Core {
+        if observe {
+            return Err(failure("the bytecode core observes no sites yet"));
+        }
+        let mut phases = BTreeMap::new();
+        let began = std::time::Instant::now();
+        let mut machine = {
+            let _scope = Scope::new("machine_construction", &mut phases);
+            start::<CoreMachine>(program)?
+        };
+        let mut console = Console::default();
+        finish(&mut machine, &mut console)?;
+        let ns = elapsed(began);
+        return Ok((measured(ns, &console)?, phases));
+    }
     let mut phases = BTreeMap::new();
     let began = std::time::Instant::now();
     let mut machine = {
         let _scope = Scope::new("machine_construction", &mut phases);
-        start(program)?
+        start::<KernelMachine>(program)?
     };
     if observe {
         machine.count_work();
@@ -274,13 +315,7 @@ pub fn execute(
         machine.checkpoint().map_err(failure)?;
     }
     let mut console = Console(Vec::new(), observe);
-    loop {
-        match machine.run(&mut console, u64::MAX).map_err(failure)? {
-            Step::Slice => {}
-            Step::Ended(End::Finished(_)) => break,
-            other => return Err(failure(format!("workload did not finish: {other:?}"))),
-        }
-    }
+    finish(&mut machine, &mut console)?;
     let ns = elapsed(began);
     if observe {
         if machine.work().is_none() || machine.take_counts().is_empty() {
@@ -290,6 +325,20 @@ pub fn execute(
         }
         machine.take_path().map_err(failure)?;
     }
+    Ok((measured(ns, &console)?, phases))
+}
+
+fn finish(machine: &mut impl Machine, console: &mut Console) -> Result<()> {
+    loop {
+        match machine.run(console, u64::MAX).map_err(failure)? {
+            Step::Slice => {}
+            Step::Ended(End::Finished(_)) => return Ok(()),
+            other => return Err(failure(format!("workload did not finish: {other:?}"))),
+        }
+    }
+}
+
+fn measured(ns: f64, console: &Console) -> Result<Measurement> {
     if console.0.len() != 1 {
         return Err(failure("workload must print exactly one result"));
     }
@@ -300,7 +349,7 @@ pub fn execute(
         )));
     };
     let result = serde_json::from_str(text)?;
-    Ok((Measurement { ns, result }, phases))
+    Ok(Measurement { ns, result })
 }
 
 // Scope clocks come from the existing perf-witness monotonic clock. These
@@ -328,8 +377,8 @@ impl Drop for Scope<'_> {
     }
 }
 
-fn start(program: &PreparedCell) -> Result<KernelMachine> {
-    KernelMachine::start(
+fn start<M: Machine>(program: &PreparedCell) -> Result<M> {
+    M::start(
         program.0.clone(),
         Bounds {
             charge_limit: 10_000_000_000,
@@ -361,7 +410,7 @@ pub(super) fn profile(
     source: &str,
     out: &std::path::Path,
 ) -> Result<()> {
-    let mut machine = start(program)?;
+    let mut machine = start::<KernelMachine>(program)?;
     super::cell_profile::capture(
         &mut machine,
         super::cell_profile::Source {
@@ -458,7 +507,7 @@ console.log(JSON.stringify(benchmark(1000)));"#,
         ] {
             let (program, _) = kernel.prepare(source, false).unwrap();
             let run = |publish| {
-                let mut machine = start(&program).unwrap();
+                let mut machine = start::<KernelMachine>(&program).unwrap();
                 if publish {
                     machine.publish_context(lash_kernel_vm::perf_witness::GuestContext::new());
                 }
@@ -495,7 +544,7 @@ console.log(JSON.stringify(benchmark(1000)));"#,
             ),
         ] {
             let (program, _) = kernel.prepare(source, python).unwrap();
-            let machine = start(&program).unwrap();
+            let machine = start::<KernelMachine>(&program).unwrap();
             let symbols = machine.guest_symbols();
             for expected in ["compareKeys", "buildSort"] {
                 assert!(
