@@ -416,8 +416,6 @@ pub enum RunStep {
 pub struct Checkout {
     #[cfg(feature = "testing")]
     admitted_at: Instant,
-    #[cfg(feature = "testing")]
-    measured_cpu_receipt: std::cell::Cell<u64>,
     pool: Arc<Pool>,
     state: CheckoutState,
     budget: ExecutionBudget,
@@ -604,19 +602,16 @@ impl Checkout {
             scope.document = document;
         }
     }
-    fn charge_cpu(&self, cpu_nanos: u64) -> Result<(), PoolError> {
+    fn charge_cpu(&mut self, cpu_nanos: u64) -> Result<(), PoolError> {
+        // Charging records the delta even when it refuses the execution.
+        // Advance the receipt first so reaping cannot charge it again.
+        let delta = cpu_nanos.saturating_sub(std::mem::replace(&mut self.credited_cpu, cpu_nanos));
         #[cfg(feature = "testing")]
         {
             let mut state = lock(&self.pool.state);
-            // Failed accounting can charge again when reaping. Measure each
-            // worker receipt once without changing execution-budget policy.
-            let delta = cpu_nanos.saturating_sub(self.measured_cpu_receipt.replace(cpu_nanos));
             state.measured_cpu_nanos = state.measured_cpu_nanos.saturating_add(delta);
         }
-        let result = self.budget.charge(
-            cpu_nanos.saturating_sub(self.credited_cpu),
-            &self.pool.config,
-        );
+        let result = self.budget.charge(delta, &self.pool.config);
         #[cfg(feature = "testing")]
         if result.is_err() {
             self.pool.report_deadline(
@@ -1051,7 +1046,6 @@ impl Checkout {
                     self.discard_after(&error);
                     return Err(error);
                 }
-                self.credited_cpu = cpu_nanos;
                 if let CheckoutState::Live(mut lease) =
                     std::mem::replace(&mut self.state, CheckoutState::Discarded)
                 {
@@ -1308,7 +1302,6 @@ impl Checkout {
                         self.budget.observe(meters);
                     }
                     self.charge_cpu(cpu_nanos)?;
-                    self.credited_cpu = cpu_nanos;
                     self.state.live_mut()?.worker.cpu_nanos = cpu_nanos;
                     if next == WorkerPhase::Computing {
                         let lease_id = self.lease().0;
@@ -1451,7 +1444,6 @@ impl Checkout {
             }
             let cpu = self.pool.discard(lease.worker, failed, cause);
             let _ = self.charge_cpu(cpu);
-            self.credited_cpu = cpu;
             if !matches!(lease.phase, LeasePhase::Fresh) {
                 self.budget.replacement(true);
             }
@@ -1624,8 +1616,6 @@ pub mod runtime_ops {
                         return Ok(Checkout {
                             #[cfg(feature = "testing")]
                             admitted_at: Instant::now(),
-                            #[cfg(feature = "testing")]
-                            measured_cpu_receipt: std::cell::Cell::new(credited_cpu),
                             pool: self.0.clone(),
                             state: CheckoutState::Live(Box::new(Lease {
                                 worker,
