@@ -479,6 +479,7 @@ impl<H: Heap> Vm<H> {
                 let Phase::Delivered(outcome) = pending.phase else {
                     return Err(fault("a resuming outcome is not delivered"));
                 };
+                self.heap.release(crate::heap::meter::outcome(&outcome));
                 // The raw outcome is decoded here, once: a failure by any
                 // type, a result by the `perform`'s; a result that does not
                 // fit raises its refusal, uncharged.
@@ -1058,7 +1059,10 @@ impl<H: Heap> Vm<H> {
                     turn = pending.then_yield;
                     match pending.phase {
                         Phase::Issued => self.tasks.issued.retain(|issued| *issued != wait),
-                        _ => {
+                        phase => {
+                            if let Phase::Delivered(outcome) = &phase {
+                                self.heap.release(crate::heap::meter::outcome(outcome));
+                            }
                             self.tasks.cancellations.push(WaitCancellation::Withdraw(
                                 lash_kernel_doc::kernel_internals::wait_id(wait),
                             ));

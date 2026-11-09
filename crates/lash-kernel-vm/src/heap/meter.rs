@@ -218,6 +218,19 @@ pub(crate) fn program(program: &Program) -> u64 {
         .saturating_add(CONSTANT.saturating_mul(program.constants.len() as u64))
 }
 
+/// What a delivered outcome holds until its consumption decodes it: a
+/// failure as the error datum it raises.
+pub(crate) fn outcome(outcome: &crate::Outcome) -> u64 {
+    match outcome {
+        crate::Outcome::Completed(datum) => raw(datum),
+        crate::Outcome::Failed(error) => VALUE
+            .saturating_add(values(2))
+            .saturating_add(error.kind.len() as u64)
+            .saturating_add(error.message.len() as u64)
+            .saturating_add(raw(error.raw())),
+    }
+}
+
 /// A raw outcome the host delivered, held until its consumption decodes it:
 /// its deep size, each scalar one value and each text or byte string its
 /// length besides.

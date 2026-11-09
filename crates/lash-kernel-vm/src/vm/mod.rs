@@ -398,6 +398,19 @@ impl<H: Heap> Vm<H> {
         }
     }
 
+    /// Holds `units` of delivered outcomes raw until their consumption
+    /// decodes them (contract §2). A holding past the memory bound, after
+    /// a collection, is held for the next step, as a refused program or
+    /// constant is.
+    pub(crate) fn hold_raw(&mut self, units: u64) {
+        let held = self.admit(units);
+        if let Err(Flow::Stop(stop)) = held
+            && let Stop::Bound(exceeded) = *stop
+        {
+            self.unadmitted.get_or_insert(*exceeded);
+        }
+    }
+
     /// Whether something the run is started with did not fit its memory
     /// bound.
     pub(crate) fn unadmitted(&self) -> bool {

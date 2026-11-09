@@ -1378,3 +1378,69 @@ fn inline_frame_memory_is_admitted_at_entry() {
         assert_eq!(inline, framed + crate::heap::meter::OP * added, "{text}");
     }
 }
+
+/// Contract §2, `K-BND-003`: a delivered outcome is held raw, at its deep
+/// size, until its consumption decodes it, and a run sealed after the
+/// delivery and opened cold holds it again. A text of `k` bytes is one
+/// value and its `k` bytes, `16 + k`, whatever else the run holds.
+#[test]
+fn a_delivered_outcome_is_held_at_its_deep_size_until_it_is_consumed() {
+    use lash_kernel_doc::Datum;
+    use lash_kernel_state::paged::SealBudget;
+
+    use super::embedder::{Source, core_program, wait_of};
+    use crate::{CoreMachine, Outcome};
+
+    let text = "main {\n  let v = perform 0(1) as Any\n  return 0\n}";
+    let source = Source::default();
+    let mut machine = <CoreMachine as Machine>::start(
+        core_program(text, None),
+        ROOMY,
+        Setup::default().start,
+        Box::new(source.clone()),
+    )
+    .unwrap();
+    let Step::Parked(park) = machine.run(&mut World::default(), u64::MAX).unwrap() else {
+        panic!("the run parks at its perform");
+    };
+    let seal = |machine: &mut CoreMachine| {
+        let budget = SealBudget {
+            pages: u64::MAX,
+            bytes: u64::MAX,
+        };
+        crate::kernel_internals::sealed_root(&machine.seal(budget).unwrap().unwrap()).clone()
+    };
+    let opened = |root| {
+        <CoreMachine as Machine>::open(
+            core_program(text, None),
+            ROOMY,
+            &lash_kernel_state::kernel_internals::checkpoint(root),
+            Box::new(source.clone()),
+        )
+        .unwrap()
+        .meters()
+        .memory
+    };
+    let undelivered = seal(&mut machine);
+    for k in [0u64, 1000] {
+        let mut machine = <CoreMachine as Machine>::open(
+            core_program(text, None),
+            ROOMY,
+            &lash_kernel_state::kernel_internals::checkpoint(undelivered.clone()),
+            Box::new(source.clone()),
+        )
+        .unwrap();
+        let before = machine.meters().memory;
+        let outcome = Outcome::Completed(Datum::Text("x".repeat(k as usize)));
+        machine
+            .deliver(wait_of(&park.requests[0]), outcome)
+            .unwrap();
+        assert_eq!(machine.meters().memory - before, 16 + k, "delivered, k {k}");
+        let delivered = seal(&mut machine);
+        assert_eq!(
+            opened(delivered) - opened(undelivered.clone()),
+            16 + k,
+            "opened cold, k {k}"
+        );
+    }
+}

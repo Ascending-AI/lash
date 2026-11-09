@@ -496,7 +496,12 @@ impl Machine for CoreMachine {
             return Err(DeliverError::Ended);
         }
         let n = lash_kernel_doc::kernel_internals::wait_number(wait);
-        self.vm.tasks.deliver(n, outcome)
+        let held = crate::heap::meter::outcome(&outcome);
+        let delivered = self.vm.tasks.deliver(n, outcome)?;
+        if delivered == Delivered::Accepted {
+            self.vm.hold_raw(held);
+        }
+        Ok(delivered)
     }
 
     /// Seals the whole run in one step: the budget is not divided yet.

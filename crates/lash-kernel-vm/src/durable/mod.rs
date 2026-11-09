@@ -615,6 +615,16 @@ pub(crate) fn open(
         .collect::<Result<_, String>>()?;
     scheduler.next_join = record.next_join;
     vm.refused = record.refused;
+    let raw: u64 = vm
+        .tasks
+        .waits
+        .values()
+        .filter_map(|pending| match &pending.phase {
+            WaitState::Delivered(outcome) => Some(crate::heap::meter::outcome(outcome)),
+            _ => None,
+        })
+        .fold(0, u64::saturating_add);
+    vm.hold_raw(raw);
     Ok(())
 }
 
