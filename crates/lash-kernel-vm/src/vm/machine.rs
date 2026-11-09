@@ -327,9 +327,13 @@ impl CoreMachine {
             declared: &|callable| code.callable(callable),
         };
         let mut args = Vec::with_capacity(params.len());
-        if let Some(decoded) =
-            crate::bytecode::conventions::arguments(&document, &code, export, &start.args, vm.value_depth)?
-        {
+        if let Some(decoded) = crate::bytecode::conventions::arguments(
+            &document,
+            &code,
+            export,
+            &start.args,
+            vm.value_depth,
+        )? {
             for datum in &decoded {
                 args.push(Self::copy_in(&mut vm, datum)?);
             }

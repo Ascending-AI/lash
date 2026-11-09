@@ -43,26 +43,6 @@ impl Lib {
         })
     }
 
-    /// Every prepared, metered, typed, scalar, heap and joined-text entry uses
-    /// this exact declaration. Inspecting its source is cold and preserves
-    /// ordinary preparation's body laziness.
-    #[cfg(test)]
-    pub(crate) fn source_room<'e>(&self, exe: &'e Executable) -> Option<&'e super::room::Source> {
-        let code = match self.run {
-            LibRun::Body(code)
-            | LibRun::Native {
-                body: Some(code), ..
-            } => code,
-            _ => return None,
-        };
-        let source = &exe.code(code).source_room;
-        (self.specialization.resource
-            == super::room::CallSource::Body(self.specialization.function)
-            && source.owner
-                == doc::constant_pool::PoolOwner::Function(self.specialization.function))
-        .then_some(source.as_ref())
-    }
-
     pub(crate) fn body_arity(&self, given: usize) -> bool {
         given <= self.arity
             && self.header.signature.params[given..]

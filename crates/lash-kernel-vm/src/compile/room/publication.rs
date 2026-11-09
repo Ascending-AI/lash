@@ -13,8 +13,6 @@ use lash_kernel_state::{
 use std::collections::BTreeSet;
 pub(crate) mod boundary;
 mod control;
-#[cfg(test)]
-pub(crate) mod oracle;
 pub(crate) use control::{ControlExit, ControlRoots, FrameCaller, FrameEntry};
 mod departure;
 pub(crate) use departure::DepartureExit;
@@ -203,21 +201,6 @@ impl Frontier {
     /// Whether an interval starting at `start` needs a handoff first.
     pub(crate) fn departs(&self, start: &Position) -> bool {
         self.proven || &self.position != start
-    }
-    /// Commit a proven acquisition in the defining body. It advances this
-    /// frontier past its recorded coordinate and expires every capability
-    /// bound to the older frontier; the ledger edit itself is the caller's.
-    #[cfg(test)]
-    pub(crate) fn proven(&mut self) -> Result<(), HeapFault> {
-        if self.position.unpaid.is_none() {
-            return Err(fault("proven source event after the defining Leave"));
-        }
-        self.revision = self
-            .revision
-            .checked_add(1)
-            .ok_or_else(|| fault("source frontier overflow"))?;
-        self.proven = true;
-        Ok(())
     }
     /// The runtime supplies canonical current coordinates after exact execution.
     /// No previously accepted suffix can survive this transition.

@@ -189,7 +189,7 @@ fn a_session_diff_reports_rebinds_and_in_place_mutations() {
     );
     let second = cell(
         "main {\n  set xs[0] = 5\n  set n = 7\n  let fresh = 1\n  return 0\n}",
-        start(first.carry.clone(), Vec::new()),
+        start(first.carry, Vec::new()),
         &source,
     );
     let editor =

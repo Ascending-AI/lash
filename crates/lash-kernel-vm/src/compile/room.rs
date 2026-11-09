@@ -964,12 +964,6 @@ impl Source {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn verify_room(&self, room: &SourceRoom) -> Result<(), Refused> {
-        self.verify_identity()?;
-        // A changed projection is never covered by the immutable default's cache.
-        verify::body(self, room)
-    }
     /// The first canonical holding event of an actual source continuation.
     /// This uses the same walker as interval verification and stops before
     /// choosing a branch or evaluating a fact.
@@ -1229,28 +1223,6 @@ impl Source {
         }
         cache.insert(at.clone(), successor.clone());
         Ok(successor)
-    }
-
-    #[cfg(test)]
-    /// A finite source execution, including selected branches and repeated
-    /// source loop tests. Budget exhaustion is an eligibility miss.
-    pub(crate) fn evaluate(
-        &self,
-        execution: &mut impl Execution,
-        budget: usize,
-    ) -> Result<CheckedRoom, Refused> {
-        self.verify()?;
-        evaluate::prefix(self, &self.site, execution, budget)
-    }
-    #[cfg(test)]
-    pub(crate) fn evaluate_prefix(
-        &self,
-        at: &Site,
-        execution: &mut impl Execution,
-        budget: usize,
-    ) -> Result<CheckedRoom, Refused> {
-        self.verify()?;
-        evaluate::prefix(self, at, execution, budget)
     }
 }
 fn point(site: &Site, phase: Phase) -> Point {

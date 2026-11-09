@@ -401,10 +401,3 @@ pub(crate) fn verify_close(
         Err(refused)
     }
 }
-
-#[cfg(test)]
-impl ChargeProgram {
-    pub(crate) fn first(&self) -> &Point {
-        &self.first
-    }
-}

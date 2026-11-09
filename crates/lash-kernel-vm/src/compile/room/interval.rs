@@ -957,63 +957,6 @@ impl Source {
         }
         Ok(interval)
     }
-    #[cfg(test)]
-    pub(crate) fn compile_interval(
-        &self,
-        at: &Site,
-        selected: &[Selection],
-        budget: usize,
-    ) -> Result<Arc<CompiledInterval>, Refused> {
-        self.verify()?;
-        if selected.len() > budget.min(4096) {
-            return Err(Refused::Path);
-        }
-        let key = Key {
-            event: false,
-            call: false,
-            join: None,
-            at: at.clone(),
-            bounds: None,
-            selected: selected.into(),
-        };
-        let mut cache = self.intervals.lock().map_err(|_| Refused::Source)?;
-        if let Some(interval) = cache.get(&key) {
-            return Ok(Arc::clone(interval));
-        }
-        if cache.keys().filter(|key| !key.event).count() >= 128 {
-            return Err(Refused::Path);
-        }
-        let mut trace = Trace {
-            source: self,
-            selected,
-            cursor: 0,
-            events: Vec::new(),
-            stop: false,
-        };
-        let exit = evaluate::walk(self, at, &mut trace, budget)?;
-        if trace.cursor != selected.len() {
-            return Err(Refused::Path);
-        }
-        let mut variables = 0;
-        let mut steps = Vec::with_capacity(trace.events.len());
-        for (event, selected) in trace.events {
-            steps.push(Step::compile(self, event, selected, &mut variables)?);
-        }
-        let interval = Arc::new(CompiledInterval {
-            owner: self.owner,
-            source: self.site.clone(),
-            at: at.clone(),
-            route: selected.into(),
-            steps: steps.into(),
-            variables,
-            exit,
-            whole: at == &self.site,
-            return_loops: None,
-            resume: None,
-        });
-        cache.insert(key, Arc::clone(&interval));
-        Ok(interval)
-    }
 }
 struct Trace<'a> {
     source: &'a Source,
@@ -1084,15 +1027,6 @@ impl CompiledInterval {
         self.steps.iter().map(|step| &step.event)
     }
 
-    /// Bind canonical event facts once, then evaluate indexed polynomials.
-    /// No source node, child vector, or AST traversal is used here.
-    #[cfg(test)]
-    pub(crate) fn evaluate_interval(
-        &self,
-        execution: &mut impl Execution,
-    ) -> Result<CheckedRoom, Refused> {
-        self.evaluate_checked(execution, |_, _, _| Ok(()))
-    }
     pub(super) fn evaluate_checked(
         &self,
         execution: &mut impl Execution,

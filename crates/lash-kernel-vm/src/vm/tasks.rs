@@ -491,7 +491,13 @@ impl<H: Heap> Vm<H> {
                         (true, Datum::Error(Box::new(error)), Type::Any)
                     }
                 };
-                match decode(&self.document, &|c| self.callable(c), self.value_depth, &raw, &ty) {
+                match decode(
+                    &self.document,
+                    &|c| self.callable(c),
+                    self.value_depth,
+                    &raw,
+                    &ty,
+                ) {
                     Ok(datum) if raised => Err(Flow::Raise(self.decoded(&datum)?)),
                     Ok(datum) => {
                         let value = self.decoded(&datum)?;
@@ -801,7 +807,13 @@ impl<H: Heap> Vm<H> {
     /// Decodes `datum` by `ty`, or gives the error its refusal raises
     /// (`K-EFF-005`, `K-EFF-007`).
     pub(crate) fn decode(&self, datum: &Datum, ty: &Type) -> Result<Datum, Datum> {
-        decode(&self.document, &|c| self.callable(c), self.value_depth, datum, ty)
+        decode(
+            &self.document,
+            &|c| self.callable(c),
+            self.value_depth,
+            datum,
+            ty,
+        )
     }
 
     /// `spawn`: the new task runs at once, and the spawner goes on when it

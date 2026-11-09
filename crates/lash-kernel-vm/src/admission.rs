@@ -162,21 +162,6 @@ impl<'a> SourceResources<'a> {
     }
 }
 impl<'a, C> SourceAccepted<'a, C> {
-    #[cfg(test)]
-    pub(crate) fn try_map<D, E>(
-        self,
-        map: impl FnOnce(C) -> Result<D, E>,
-    ) -> Result<SourceAccepted<'a, D>, E> {
-        let request = map(self.accepted.request)?;
-        Ok(SourceAccepted {
-            resources: self.resources,
-            accepted: Accepted {
-                request,
-                end: self.accepted.end,
-            },
-            occurrences: self.occurrences,
-        })
-    }
     pub(crate) fn commit<R, E>(self, commit: impl FnOnce(C) -> Result<R, E>) -> Result<R, E> {
         let result = commit(self.accepted.request)?;
         *self.resources.charged = self.accepted.end;
