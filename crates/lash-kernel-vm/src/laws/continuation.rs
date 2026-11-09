@@ -937,6 +937,72 @@ fn edit_roles(embedder: &mut Embedder, edit: impl FnOnce(&mut Vec<RoleRecord>)) 
         .unwrap();
 }
 
+/// A page source the open must not touch.
+struct Untouched;
+
+impl lash_kernel_state::paged::PageSource for Untouched {
+    fn read(
+        &mut self,
+        _: &[lash_kernel_doc::heap::PageRef],
+    ) -> Result<
+        Vec<Result<lash_kernel_state::paged::PageAnswer, lash_kernel_doc::heap::HeapFault>>,
+        lash_kernel_doc::heap::HeapFault,
+    > {
+        panic!("the open read a page of a root it refuses")
+    }
+    fn seal(
+        &mut self,
+        _: lash_kernel_state::paged::PageBody,
+    ) -> Result<lash_kernel_doc::heap::PageRef, lash_kernel_doc::heap::HeapFault> {
+        panic!("the open wrote a page for a root it refuses")
+    }
+}
+
+/// CONT-FORMAT (contract §9): a root its envelope states under another
+/// parked-state format is refused with that format, before the open reads
+/// or writes a page; the same root stated under the format the build reads
+/// opens.
+#[test]
+fn a_root_stated_under_another_format_is_refused() {
+    use lash_kernel_state::paged::StatedFormat;
+    let surface = "KERNEL_PARKED_STATE_VERSION";
+    let mut embedder = waiting();
+    let (root, _) = embedder.checkpoint();
+    let root = lash_kernel_state::kernel_internals::checkpoint(root);
+    let foreign = StatedFormat {
+        surface,
+        expected: 16,
+        observed: 15,
+    };
+    let opened = crate::KernelMachine::open(
+        embedder.program(true).0,
+        embedder.bounds,
+        &root.clone().stated(foreign),
+        Box::new(Untouched),
+    );
+    assert_eq!(
+        opened.err(),
+        Some(crate::OpenError::Format {
+            surface,
+            expected: 16,
+            observed: 15,
+        })
+    );
+    let current = StatedFormat {
+        observed: 16,
+        ..foreign
+    };
+    assert!(
+        crate::KernelMachine::open(
+            embedder.program(true).0,
+            embedder.bounds,
+            &root.stated(current),
+            Box::new(embedder.source.clone()),
+        )
+        .is_ok()
+    );
+}
+
 /// CONT-GRAMMAR: an action site the statement does not hold.
 #[test]
 fn an_unknown_site_is_refused() {

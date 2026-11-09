@@ -195,9 +195,10 @@ impl Machine for CoreMachine {
     fn open(
         _program: Program,
         _bounds: Bounds,
-        _root: &Checkpoint,
+        root: &Checkpoint,
         _source: Box<dyn PageSource>,
     ) -> Result<Self, OpenError> {
+        crate::paged::admit_format(root)?;
         Err(OpenError::Malformed {
             problem: "the bytecode core opens no checkpoint before the durable heap lands".into(),
         })

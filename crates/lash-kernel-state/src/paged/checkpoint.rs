@@ -9,13 +9,37 @@ use {
 
 /// An authenticated checkpoint opened from its root page. Execution records
 /// remain owned by the kernel; hosts retain and transport the page identity.
+///
+/// A host that has not matched the root's envelope against its own format
+/// states the format the envelope names ([`Checkpoint::stated`]); an open
+/// refuses a root stated under another format before it reads a page
+/// (contract §9).
 #[derive(Clone, Debug)]
-pub struct Checkpoint(pub(crate) CheckpointRoot);
+pub struct Checkpoint(pub(crate) CheckpointRoot, pub(crate) Option<StatedFormat>);
+
+/// The parked-state format a root's envelope names (`observed`) against the
+/// format the opening build reads (`expected`), on the witness `surface`.
+/// The witnesses live with the embedding, outside the kernel, so the host
+/// states both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StatedFormat {
+    pub surface: &'static str,
+    pub expected: u32,
+    pub observed: u32,
+}
 
 impl Checkpoint {
     /// Opens the opaque state and authorizes its references from a page answer.
     pub fn of_answer(page: &PageAnswer) -> Result<Self, HeapFault> {
-        CheckpointRoot::of_answer(page).map(Self)
+        CheckpointRoot::of_answer(page).map(|root| Self(root, None))
+    }
+    /// This checkpoint, its envelope stating `format`.
+    pub fn stated(self, format: StatedFormat) -> Self {
+        Self(self.0, Some(format))
+    }
+    /// The stated format, when it is not the one the opening build reads.
+    pub fn foreign_format(&self) -> Option<StatedFormat> {
+        self.1.filter(|format| format.observed != format.expected)
     }
     /// Whether both checkpoints retain the same authenticated pending-wait set.
     /// This compares the saved set without exposing its storage coordinates.
@@ -72,7 +96,7 @@ impl TokenCodec for Checkpoint {
         self.0.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        CheckpointRoot::decode(input).map(Self)
+        CheckpointRoot::decode(input).map(|root| Self(root, None))
     }
 }
 

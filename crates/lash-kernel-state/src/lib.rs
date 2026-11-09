@@ -24,7 +24,7 @@ pub mod kernel_internals {
     }
 
     pub fn checkpoint(root: crate::paged::CheckpointRoot) -> crate::paged::Checkpoint {
-        crate::paged::checkpoint::Checkpoint(root)
+        crate::paged::checkpoint::Checkpoint(root, None)
     }
     pub fn checkpoint_root(checkpoint: &crate::paged::Checkpoint) -> &crate::paged::CheckpointRoot {
         &checkpoint.0

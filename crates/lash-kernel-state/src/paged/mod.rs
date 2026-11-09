@@ -20,7 +20,7 @@ mod code;
 pub use checkpoint::helper_compatibility_work;
 pub use checkpoint::{
     Checkpoint, CheckpointHeader, HelperCompatibilityError, HelperPins, HelperUpgradeCheckError,
-    check_helper_compatibility, inspect_checkpoint,
+    StatedFormat, check_helper_compatibility, inspect_checkpoint,
 };
 pub use code::{RetainedCode, checkpoint_code, restore_selection};
 pub mod census;

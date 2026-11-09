@@ -184,6 +184,15 @@ pub enum OpenError {
         "the state was parked under kernel version {parked}; the document is written for {supported}"
     )]
     KernelVersion { parked: u32, supported: u32 },
+    /// The root's envelope names a parked-state format this build does not
+    /// read (contract §9): refused before any page is read, never
+    /// reinterpreted.
+    #[error("the state was parked under {surface} {observed}; this build reads {expected}")]
+    Format {
+        surface: &'static str,
+        expected: u32,
+        observed: u32,
+    },
     #[error("the root is not a checkpoint root of this format: {problem}")]
     Malformed { problem: String },
     /// The root's saved memory accounting is inconsistent.
@@ -192,6 +201,19 @@ pub enum OpenError {
     /// A page the open reads faulted.
     #[error(transparent)]
     Heap(HeapFault),
+}
+
+/// Refuses `root` when its envelope states a format this build does not
+/// read; the first check of every open, ahead of any page read.
+pub(crate) fn admit_format(root: &Checkpoint) -> Result<(), OpenError> {
+    match root.foreign_format() {
+        None => Ok(()),
+        Some(format) => Err(OpenError::Format {
+            surface: format.surface,
+            expected: format.expected,
+            observed: format.observed,
+        }),
+    }
 }
 
 /// Why a seal did not produce a root.

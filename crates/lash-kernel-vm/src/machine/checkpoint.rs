@@ -24,6 +24,7 @@ impl Machine for KernelMachine {
         root: &lash_kernel_state::paged::Checkpoint,
         source: Box<dyn PageSource>,
     ) -> Result<Self, OpenError> {
+        crate::paged::admit_format(root)?;
         Self::open_with_layout(
             program,
             bounds,
