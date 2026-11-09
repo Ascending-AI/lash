@@ -5,15 +5,17 @@
 //! Each `kernel_run` step parks its machine and seals a CheckpointRoot in
 //! its activation's spool; the step's outcome publishes that root with its
 //! run fact in one fenced commit. The matrix cuts every `step.outcome`
-//! commit under fail-before, abort, ack-hidden and commit-then-abort,
-//! recovers on the other node, and checks:
+//! commit under fail-before, abort, ack-hidden, zombie and
+//! commit-then-abort, recovers on the other node, and checks:
 //!
 //! - a step whose outcome committed never runs again: every later outcome
 //!   commit of the process lands, none refused as a repeat;
 //! - a step whose outcome did not commit runs again, and the process
 //!   commits exactly the uncut run's outcomes and one terminal;
 //! - nothing staged is left behind: no spool outlives its activation, and
-//!   no stored page is unreachable from a root.
+//!   no stored page is unreachable from a root;
+//! - a zombie that lost the process is fenced: every owner write it
+//!   attempts from its cut on is refused `OwnershipLost`.
 //!
 //! A second process parks inside expressions (`K-EVAL-008`): at a `sleep`
 //! nested in a list (`Waiting`), then in a callee called inside it, its
@@ -447,8 +449,34 @@ impl Scenario for KernelSteps {
                 .iter()
                 .position(|write| write.cut == Some(cut.fault) && write.node == cut.node)
         });
+        // A zombie keeps running after it lost its actors: every owner write
+        // it attempts from its cut on is fenced, so its candidate machine
+        // never publishes.
+        let zombie = cut.filter(|cut| cut.fault == Fault::Zombie);
+        if let Some(cut) = zombie {
+            match trace.iter().position(|write| {
+                write.node == cut.node && write.point == cut.point && write.cut == Some(cut.fault)
+            }) {
+                None => violations.push("the zombie's cut write is not in the trace".to_owned()),
+                Some(from) => {
+                    for write in trace[from..].iter().filter(|write| {
+                        write.node == cut.node && write.kind == lash_durable_test::WriteKind::Actor
+                    }) {
+                        if !matches!(
+                            write.stored,
+                            lash_durable_test::Stored::Refused(
+                                lash_durable::DurableError::OwnershipLost(_)
+                            )
+                        ) {
+                            violations.push(format!("zombie write {write} was {:?}", write.stored));
+                        }
+                    }
+                }
+            }
+        }
         for (at, write) in outcomes.iter().enumerate() {
-            if !write.committed() && Some(at) != cut_at {
+            let fenced = zombie.is_some_and(|cut| write.node == cut.node);
+            if !write.committed() && Some(at) != cut_at && !fenced {
                 violations.push(format!("a step outcome did not land: {write}"));
             }
         }
@@ -515,6 +543,7 @@ async fn a_kernel_steps_outcome_publishes_its_pages_once_across_a_cut() {
             Fault::FailBefore,
             Fault::Abort,
             Fault::AckHidden,
+            Fault::Zombie,
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
