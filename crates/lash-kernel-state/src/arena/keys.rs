@@ -184,8 +184,7 @@ fn certified<'a>(
         | Value::BigTimestamp(handle)
         | Value::Bytes(handle) => facts
             .get(handle.index() as usize)?
-            .head
-            .get()
+            .head()
             .map(super::Head::normal),
         _ => None,
     }
@@ -423,7 +422,7 @@ pub(super) fn tokens(
                 .get(handle.index() as usize)
                 .filter(|_| objects.get(*handle).is_some())
                 .ok_or(NativeError::Malformed("a ref names no object of the run"))?;
-            match referent.entity {
+            match referent.entity() {
                 Some(entity) => {
                     out.sum(10, 1);
                     Identity::Object(entity).encode(out);

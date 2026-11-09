@@ -68,8 +68,8 @@ impl Holding {
             && let Some(holding) = arena
                 .facts(handle)
                 .map_err(arena_fault)?
-                .logical_holding
-                .get()
+                .projected()
+                .and_then(|projected| projected.logical_holding.get())
         {
             return Ok(holding.clone());
         }
@@ -106,6 +106,7 @@ impl Holding {
             let _ = arena
                 .facts(handle)
                 .map_err(arena_fault)?
+                .try_projection()?
                 .logical_holding
                 .set(holding.clone());
         }
@@ -203,9 +204,12 @@ fn stream_native_edges(
                     continue;
                 }
                 let facts = arena.facts(handle).map_err(arena_fault)?;
-                if let Some(cached) = facts.logical_holding.get() {
+                if let Some(cached) = facts
+                    .projected()
+                    .and_then(|projected| projected.logical_holding.get())
+                {
                     cached.each_edge(access, &mut |edge| visit(edge.target, edge.count))?;
-                } else if let Some(page) = facts.page.get() {
+                } else if let Some(page) = facts.page() {
                     stream_value_edges(access, page, &mut |target| visit(target, 1))?;
                 } else {
                     each_member(arena.body(handle).map_err(arena_fault)?, &mut |value| {

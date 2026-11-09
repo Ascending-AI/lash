@@ -57,7 +57,7 @@ pub(crate) fn id_of(arena: &Arena, handle: ArenaHandle) -> Result<ObjectId, Stri
     match arena
         .facts(handle)
         .map_err(|error| error.to_string())?
-        .entity
+        .entity()
     {
         Some(EntityId {
             family: FamilyId::PRIMARY,

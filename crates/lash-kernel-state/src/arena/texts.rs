@@ -105,7 +105,7 @@ impl Arena {
         };
         matches!(&*long.chunks, [Chunk::Resident(_)])
             && facts.count == 0
-            && facts.page.get().is_none()
+            && facts.page().is_none()
             && !facts.cold
     }
 

@@ -125,38 +125,19 @@ pub use crate::paged::run::objects::Head;
 use lash_kernel_doc::heap_values::text_summary;
 use lash_kernel_doc::{Handle, Integer, NativeError, NewObject, Value};
 
-/// What the arena knows of one slot beside its body.
+/// What the arena knows of one slot beside its body. What only projection,
+/// page admission and the ledger read is boxed in [`Projected`], made on its
+/// first write, so the slot table stays small.
 #[derive(Debug, Default)]
 pub struct Facts {
-    /// A mutable object's durable identity: given by the first projection
-    /// that saves it, or the one its page names, and kept from then on.
-    pub entity: Option<EntityId>,
-    /// The process-local ledger key of a mutable object the ledger priced
-    /// before any projection gave it [`Self::entity`]
-    /// ([`FamilyId::PROVISIONAL`](lash_kernel_doc::heap::FamilyId::PROVISIONAL)).
-    pub provisional: Option<EntityId>,
     /// The object changed since it was last projected, or was never
     /// projected: the heap does not hold what the arena does.
     pub dirty: bool,
-    /// The heap holds a head for the object: it was opened from one or
-    /// projected to one. A projection writes such a list's or table's dirty
-    /// cards into it, never the whole object.
-    pub based: bool,
     /// A based list's or table's dirty cards, ascending: card `c` holds
     /// positions, or insertion sequences, `c * CARD ..`.
     pub cards: Vec<u64>,
-    /// An immutable's page form: the descriptor it was admitted from, or
-    /// the one its first projection built. Projection reuses it.
-    pub page: std::cell::OnceCell<PageValue>,
     /// An immutable composite's summary.
     pub summary: Summary,
-    /// Logical occurrence cost of an immutable composite, computed on the
-    /// first normalization. Shared immutable DAGs reuse the calculation, not
-    /// the holding charge. Representation changes preserve this cost.
-    logical_immutable_cost: std::cell::OnceCell<u64>,
-    /// Immutable source occurrence and direct identity edges. This cache owns
-    /// no runtime value and does not retain an arena body for collection.
-    pub(crate) logical_holding: std::cell::OnceCell<crate::paged::logical::Holding>,
     /// Exact unsaturated sum of flat member charge sizes, never persisted.
     flat: Option<sizes::FlatSize>,
     /// A resident map's, set's or record's key index.
@@ -165,10 +146,6 @@ pub struct Facts {
     /// placeholder of its kind. An immutable opened from its head is cold
     /// until its payload is read.
     pub cold: bool,
-    /// An immutable's head (lead ruling A): the one a row opened it with,
-    /// or the one its first seal certified. Fixed once given: the object
-    /// never changes, and every row that names it holds this head.
-    pub head: std::cell::OnceCell<Head>,
     /// A key named the object by its process-local token, before it had a
     /// durable id: giving it one re-keys the tables ([`Arena::assign`]).
     pub(crate) token_keyed: std::cell::Cell<bool>,
@@ -193,13 +170,112 @@ pub struct Facts {
     /// Invalidates ledger size/value facts even when table positions survive.
     content_revision: u64,
     mark: bool,
+    /// The slot's projection facts, absent until one is given.
+    projected: std::cell::OnceCell<Box<[Projected; 1]>>,
+}
+
+/// A slot's facts of projection, pages and the ledger.
+#[derive(Debug, Default)]
+pub struct Projected {
+    /// A mutable object's durable identity: given by the first projection
+    /// that saves it, or the one its page names, and kept from then on.
+    pub entity: Option<EntityId>,
+    /// The process-local ledger key of a mutable object the ledger priced
+    /// before any projection gave it [`Self::entity`]
+    /// ([`FamilyId::PROVISIONAL`](lash_kernel_doc::heap::FamilyId::PROVISIONAL)).
+    pub provisional: Option<EntityId>,
+    /// The heap holds a head for the object: it was opened from one or
+    /// projected to one. A projection writes such a list's or table's dirty
+    /// cards into it, never the whole object.
+    pub based: bool,
+    /// An immutable's page form: the descriptor it was admitted from, or
+    /// the one its first projection built. Projection reuses it.
+    pub page: std::cell::OnceCell<PageValue>,
+    /// Logical occurrence cost of an immutable composite, computed on the
+    /// first normalization. Shared immutable DAGs reuse the calculation, not
+    /// the holding charge. Representation changes preserve this cost.
+    logical_immutable_cost: std::cell::OnceCell<u64>,
+    /// Immutable source occurrence and direct identity edges. This cache owns
+    /// no runtime value and does not retain an arena body for collection.
+    pub(crate) logical_holding: std::cell::OnceCell<crate::paged::logical::Holding>,
+    /// An immutable's head (lead ruling A): the one a row opened it with,
+    /// or the one its first seal certified. Fixed once given: the object
+    /// never changes, and every row that names it holds this head.
+    pub head: std::cell::OnceCell<Head>,
+}
+
+impl Projected {
+    /// An empty box, from fallibly reserved host memory.
+    fn try_boxed() -> Result<Box<[Self; 1]>, lash_kernel_doc::heap::HeapFault> {
+        let mut one = Vec::new();
+        one.try_reserve_exact(1)
+            .map_err(|_| lash_kernel_doc::heap::HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        one.push(Self::default());
+        one.into_boxed_slice().try_into().map_err(|_| {
+            lash_kernel_doc::heap::HeapFault::Malformed("a projection box holds one".into())
+        })
+    }
+    /// These facts, boxed for a slot made with them.
+    fn boxed(self) -> std::cell::OnceCell<Box<[Self; 1]>> {
+        std::cell::OnceCell::from(Box::new([self]))
+    }
 }
 
 impl Facts {
     /// The key the ledger holds the object under, if it has one: its
     /// provisional key until the ledger is rekeyed, then its durable id.
     pub fn ledger_entity(&self) -> Option<EntityId> {
-        self.provisional.or(self.entity)
+        self.projected()
+            .and_then(|projected| projected.provisional.or(projected.entity))
+    }
+    /// The projection facts, if any were given.
+    #[inline]
+    pub fn projected(&self) -> Option<&Projected> {
+        self.projected.get().map(|projected| &projected[0])
+    }
+    /// The projection facts to change, if any were given.
+    #[inline]
+    pub fn projected_mut(&mut self) -> Option<&mut Projected> {
+        self.projected.get_mut().map(|projected| &mut projected[0])
+    }
+    /// The projection facts, made empty on first use.
+    pub fn projection(&self) -> &Projected {
+        &self.projected.get_or_init(Box::default)[0]
+    }
+    /// The projection facts, made empty on first use from fallibly reserved
+    /// host memory.
+    pub fn try_projection(&self) -> Result<&Projected, lash_kernel_doc::heap::HeapFault> {
+        if let Some(projected) = self.projected() {
+            return Ok(projected);
+        }
+        let boxed = Projected::try_boxed()?;
+        Ok(&self.projected.get_or_init(|| boxed)[0])
+    }
+    /// [`Self::try_projection`], to change.
+    pub fn try_projection_mut(
+        &mut self,
+    ) -> Result<&mut Projected, lash_kernel_doc::heap::HeapFault> {
+        self.try_projection()?;
+        self.projected_mut().ok_or_else(|| {
+            lash_kernel_doc::heap::HeapFault::Malformed("a projection box vanished".into())
+        })
+    }
+    pub fn entity(&self) -> Option<EntityId> {
+        self.projected().and_then(|projected| projected.entity)
+    }
+    pub fn provisional(&self) -> Option<EntityId> {
+        self.projected().and_then(|projected| projected.provisional)
+    }
+    pub fn based(&self) -> bool {
+        self.projected().is_some_and(|projected| projected.based)
+    }
+    pub fn page(&self) -> Option<&PageValue> {
+        self.projected().and_then(|projected| projected.page.get())
+    }
+    pub fn head(&self) -> Option<&Head> {
+        self.projected().and_then(|projected| projected.head.get())
     }
 }
 
@@ -510,15 +586,18 @@ impl Arena {
     /// never takes a durable id.
     pub fn ledger_key(&mut self, handle: ArenaHandle) -> Result<EntityId, NativeError> {
         let facts = self.facts(handle)?;
-        if let Some(entity) = facts.provisional.or(facts.entity) {
+        if let Some(entity) = facts.provisional().or(facts.entity()) {
             return Ok(entity);
         }
         if !is_mutable(self.body(handle)?) {
             return Err(malformed("an immutable has no ledger key"));
         }
+        facts.try_projection()?;
         let entity = self.take_provisional()?;
         self.entities.insert(entity, handle);
-        self.facts[handle.index() as usize].provisional = Some(entity);
+        self.facts[handle.index() as usize]
+            .try_projection_mut()?
+            .provisional = Some(entity);
         if self.registering {
             self.keyed.push(handle);
         }
@@ -533,7 +612,9 @@ impl Arena {
         for (provisional, _, handle) in &rekeyed {
             if self.entities.get(provisional) == Some(handle) {
                 self.entities.remove(provisional);
-                self.facts[handle.index() as usize].provisional = None;
+                if let Some(projected) = self.facts[handle.index() as usize].projected_mut() {
+                    projected.provisional = None;
+                }
             }
         }
         rekeyed
@@ -577,7 +658,7 @@ impl Arena {
         if index >= self.facts.len() {
             self.facts.resize_with(index + 1, Facts::default);
         }
-        if let Some(entity) = facts.entity.or(facts.provisional) {
+        if let Some(entity) = facts.entity().or(facts.provisional()) {
             self.entities.insert(entity, handle);
         }
         self.tokens += 1;
@@ -600,7 +681,7 @@ impl Arena {
             ..Facts::default()
         };
         if let Some(page) = page {
-            let _ = facts.page.set(page);
+            let _ = facts.projection().page.set(page);
         }
         if matches!(&body, Body::Tuple(sequence) if sequence.len == 0 && !has_cold(&body)) {
             return self.empty_tuple(facts);
@@ -670,9 +751,13 @@ impl Arena {
         self.insert(
             kind.placeholder(),
             Facts {
-                entity: Some(entity),
                 cold: true,
-                based: true,
+                projected: Projected {
+                    entity: Some(entity),
+                    based: true,
+                    ..Projected::default()
+                }
+                .boxed(),
                 ..Facts::default()
             },
         )
@@ -762,14 +847,14 @@ impl Arena {
         card: Option<u64>,
     ) {
         facts.content_revision = facts.content_revision.saturating_add(1);
-        if facts.based
+        if facts.based()
             && let Some(card) = card
             && let Err(at) = facts.cards.binary_search(&card)
         {
             facts.cards.insert(at, card);
         }
         facts.dirty = true;
-        if facts.entity.is_some() && !facts.listed {
+        if facts.entity().is_some() && !facts.listed {
             facts.listed = true;
             dirty.push(handle);
         }
@@ -1066,9 +1151,9 @@ impl Arena {
     /// laws read.
     pub fn evict(&mut self, handle: ArenaHandle) -> Result<bool, NativeError> {
         let facts = self.facts(handle)?;
-        let paged = match facts.entity {
+        let paged = match facts.entity() {
             Some(_) => !facts.dirty,
-            None => facts.page.get().is_some(),
+            None => facts.page().is_some(),
         };
         if !paged {
             return Ok(false);
@@ -1116,7 +1201,7 @@ impl Arena {
             // A scalar immutable has no chunk to leave: one with an id goes
             // back to its row whole, its head answering for it.
             Body::BigInt(_) | Body::Timestamp(_) | Body::Error(_)
-                if self.facts(handle)?.entity.is_some() =>
+                if self.facts(handle)?.entity().is_some() =>
             {
                 opened(&self.head(handle)?).0
             }
@@ -1132,7 +1217,7 @@ impl Arena {
         );
         self.resident = self.resident.saturating_sub(body_values(&body));
         let facts = self.facts_mut(handle)?;
-        let mutable = facts.entity.is_some();
+        let mutable = facts.entity().is_some();
         facts.cold = mutable;
         facts.flat = None;
         let index = facts.index.take();
@@ -1189,7 +1274,7 @@ impl Arena {
             let facts = &mut self.facts[handle.index() as usize];
             facts.listed = false;
             if facts.dirty
-                && let Some(entity) = facts.entity
+                && let Some(entity) = facts.entity()
             {
                 dirty.push((entity, handle));
             }
@@ -1201,8 +1286,9 @@ impl Arena {
     /// Marks `handle` clean: the heap holds what it does, as its head.
     pub fn clean(&mut self, handle: ArenaHandle) -> Result<(), NativeError> {
         let facts = self.facts_mut(handle)?;
+        facts.try_projection()?;
         facts.dirty = false;
-        facts.based = true;
+        facts.try_projection_mut()?.based = true;
         facts.cards.clear();
         Ok(())
     }
@@ -1210,7 +1296,7 @@ impl Arena {
     /// Keeps `page` as the page form of the immutable `handle`, unless it
     /// has one.
     pub fn keep_page(&self, handle: ArenaHandle, page: PageValue) -> Result<(), NativeError> {
-        let _ = self.facts(handle)?.page.set(page);
+        let _ = self.facts(handle)?.try_projection()?.page.set(page);
         Ok(())
     }
 
@@ -1230,12 +1316,13 @@ impl Arena {
     /// none: the next primary ordinal. It is dirty already, as every object
     /// the run creates is until it is projected.
     pub fn identify(&mut self, handle: ArenaHandle) -> Result<EntityId, NativeError> {
-        if let Some(entity) = self.facts(handle)?.entity {
+        if let Some(entity) = self.facts(handle)?.entity() {
             return Ok(entity);
         }
         if !is_mutable(self.body(handle)?) {
             return Err(malformed("an immutable has no durable identity"));
         }
+        self.facts(handle)?.try_projection()?;
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::record(|work| work.identified += 1);
         let entity = EntityId {
@@ -1248,8 +1335,8 @@ impl Arena {
             .ok_or_else(|| malformed("identity ordinals overflow"))?;
         self.entities.insert(entity, handle);
         let facts = &mut self.facts[handle.index() as usize];
-        facts.entity = Some(entity);
-        if let Some(provisional) = facts.provisional {
+        facts.try_projection_mut()?.entity = Some(entity);
+        if let Some(provisional) = facts.provisional() {
             self.rekeyed.push((provisional, entity, handle));
         }
         let facts = &mut self.facts[handle.index() as usize];
@@ -1266,16 +1353,17 @@ impl Arena {
     /// listed until a projection cleans it, so a projection that fails
     /// after the id is given still writes the object next time.
     pub fn assign(&mut self, handle: ArenaHandle, entity: EntityId) -> Result<(), NativeError> {
-        if self.facts(handle)?.entity.is_some() {
+        if self.facts(handle)?.entity().is_some() {
             return Err(malformed("an object has a durable identity already"));
         }
         if self.entities.contains_key(&entity) {
             return Err(malformed("a durable identity names two objects"));
         }
+        self.facts(handle)?.try_projection()?;
         self.entities.insert(entity, handle);
         let facts = &mut self.facts[handle.index() as usize];
-        facts.entity = Some(entity);
-        if let Some(provisional) = facts.provisional {
+        facts.try_projection_mut()?.entity = Some(entity);
+        if let Some(provisional) = facts.provisional() {
             self.rekeyed.push((provisional, entity, handle));
         }
         let facts = &mut self.facts[handle.index() as usize];
@@ -1296,7 +1384,7 @@ impl Arena {
             .filter(|handle| self.objects.get(**handle).is_some())
             .filter_map(|handle| {
                 let facts = &self.facts[handle.index() as usize];
-                facts.dirty.then_some((facts.entity?, *handle))
+                facts.dirty.then_some((facts.entity()?, *handle))
             })
             .collect();
         dirty.sort_unstable_by_key(|(entity, _)| *entity);
@@ -1330,7 +1418,7 @@ impl Arena {
             .filter(|handle| self.objects.get(**handle).is_some())
             .filter_map(|handle| {
                 let facts = &self.facts[handle.index() as usize];
-                facts.dirty.then_some((facts.entity?, *handle))
+                facts.dirty.then_some((facts.entity()?, *handle))
             })
             .collect();
         dirty.sort_unstable_by_key(|(entity, _)| *entity);
@@ -1365,12 +1453,12 @@ impl Arena {
                 return Err(malformed("a stale handle reached the machine"));
             };
             let facts = &self.facts[handle.index() as usize];
-            if facts.mark || facts.entity.is_some() {
+            if facts.mark || facts.entity().is_some() {
                 continue;
             }
             if is_mutable(body) {
                 self.identify(handle)?;
-            } else if facts.page.get().is_some() {
+            } else if facts.page().is_some() {
                 continue;
             } else {
                 self.facts[handle.index() as usize].mark = true;
@@ -1434,7 +1522,7 @@ impl Arena {
                 facts.zero = false;
                 continue;
             }
-            if facts.mark || (facts.entity.is_some() && facts.dirty) {
+            if facts.mark || (facts.entity().is_some() && facts.dirty) {
                 kept.push(handle);
                 continue;
             }
@@ -1487,10 +1575,10 @@ impl Arena {
         }
         let index = handle.index() as usize;
         let facts = std::mem::take(&mut self.facts[index]);
-        if let Some(entity) = facts.entity {
+        if let Some(entity) = facts.entity() {
             self.entities.remove(&entity);
         }
-        if let Some(entity) = facts.provisional {
+        if let Some(entity) = facts.provisional() {
             self.entities.remove(&entity);
         }
         if let Some(body) = self.objects.get(handle) {
@@ -1527,7 +1615,7 @@ impl Arena {
         self.pending_member_handles(&mut pending);
         for (index, facts) in self.facts.iter().enumerate() {
             if facts.dirty
-                && facts.entity.is_some()
+                && facts.entity().is_some()
                 && let Some(handle) = self.objects.handle_at(index as u32)
             {
                 pending.push(handle);

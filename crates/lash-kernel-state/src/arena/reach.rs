@@ -180,7 +180,7 @@ impl Arena {
             .filter(|handle| {
                 self.objects.get(*handle).is_some_and(|body| {
                     let facts = &self.facts[handle.index() as usize];
-                    facts.dirty && facts.entity.is_some() && has_cold(body)
+                    facts.dirty && facts.entity().is_some() && has_cold(body)
                 })
             })
             .collect()
@@ -195,7 +195,7 @@ impl Arena {
             .filter(|handle| self.objects.get(**handle).is_some())
             .filter_map(|handle| {
                 let facts = &self.facts[handle.index() as usize];
-                facts.dirty.then_some(facts.entity).flatten()
+                facts.dirty.then_some(facts.entity()).flatten()
             })
             .collect();
         entities.sort_unstable();
@@ -240,7 +240,7 @@ impl Arena {
             }
             facts.mark = true;
             reach.marked.push(handle);
-            if facts.entity.is_none() && is_mutable(body) {
+            if facts.entity().is_none() && is_mutable(body) {
                 reach.anonymous_local_bytes = reach
                     .anonymous_local_bytes
                     .checked_add(self.logical_body_bytes(handle)?)
@@ -251,12 +251,12 @@ impl Arena {
             let facts = &self.facts[handle.index() as usize];
             #[cfg(any(test, feature = "perf-witness"))]
             crate::perf_witness::record(|work| work.arena_marks += 1);
-            if let Some(entity) = facts.entity {
+            if let Some(entity) = facts.entity() {
                 out(Reached::Identity(Identity::Object(entity)))?;
                 continue;
             }
             if !is_mutable(body) && (facts.cold || has_cold(body)) {
-                if let Some(page) = facts.page.get() {
+                if let Some(page) = facts.page() {
                     out(Reached::Page(page))?;
                 }
                 continue;
@@ -297,12 +297,15 @@ impl Arena {
             let body = self.objects.get(handle).ok_or_else(stale)?;
             let facts = &self.facts[handle.index() as usize];
             if !is_mutable(body)
-                && let Some(page) = facts.page.get()
+                && let Some(page) = facts.page()
             {
                 return Ok(Cost::local(page));
             }
             if matches!(value, Value::Tuple(_) | Value::Error(_)) {
-                if let Some(cost) = facts.logical_immutable_cost.get() {
+                if let Some(cost) = facts
+                    .projected()
+                    .and_then(|projected| projected.logical_immutable_cost.get())
+                {
                     return Ok(*cost);
                 }
                 let cost = match (value, body) {
@@ -349,7 +352,7 @@ impl Arena {
                         ));
                     }
                 };
-                let _ = facts.logical_immutable_cost.set(cost);
+                let _ = facts.try_projection()?.logical_immutable_cost.set(cost);
                 return Ok(cost);
             }
         }

@@ -100,7 +100,7 @@ impl ProjectionArena for Arena {
         &mut self,
         handle: ArenaHandle,
     ) -> Result<Option<PageValue>, lash_kernel_doc::NativeError> {
-        Ok(self.facts(handle)?.page.get().cloned())
+        Ok(self.facts(handle)?.page().cloned())
     }
     fn projection_keep_page(
         &mut self,
@@ -564,8 +564,8 @@ pub(crate) fn materialize(
     chunk: u32,
 ) -> Result<(), HeapFault> {
     let facts = arena.facts(handle).map_err(arena_fault)?;
-    let Some(entity) = facts.entity else {
-        let page = facts.page.get().cloned();
+    let Some(entity) = facts.entity() else {
+        let page = facts.page().cloned();
         let count = arena.decode_count(handle).map_err(arena_fault)?;
         return match page {
             Some(page) => warm_immutable(arena, heap.pages(), handle, &page, chunk, count),
@@ -880,7 +880,7 @@ fn cards(
         Table(bool, u64, u64, Vec<TableCard>),
     }
     let facts = arena.facts(handle).map_err(arena_fault)?;
-    if !facts.based {
+    if !facts.based() {
         return Ok(None);
     }
     let held = match arena.body(handle).map_err(arena_fault)? {

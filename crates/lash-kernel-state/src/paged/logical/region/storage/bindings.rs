@@ -232,9 +232,12 @@ impl<'s> StateLease<'s> {
                     return Err(invalid("mutable import is not source retained"));
                 }
             } else if matches!(value, Value::Tuple(_) | Value::Error(_)) {
-                if let Some(holding) = facts.logical_holding.get() {
+                if let Some(holding) = facts
+                    .projected()
+                    .and_then(|projected| projected.logical_holding.get())
+                {
                     check(holding)?;
-                } else if let Some(page) = facts.page.get() {
+                } else if let Some(page) = facts.page() {
                     check(&Holding::from_page(self.heap.pages(), page)?)?;
                 } else {
                     crate::arena::each_member(body, &mut |value| pending.push(*value));

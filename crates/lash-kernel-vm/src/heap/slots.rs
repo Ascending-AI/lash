@@ -791,8 +791,7 @@ impl Heap for SlotHeap {
             .arena
             .facts(object)
             .map_err(|error| malformed(error.to_string()))?
-            .head
-            .get()
+            .head()
             .cloned();
         if let Some(head) = head {
             let held = self.arena.detached_head(&body);

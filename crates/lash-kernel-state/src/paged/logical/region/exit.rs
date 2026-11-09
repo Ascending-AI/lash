@@ -46,8 +46,7 @@ impl LeaseProjection<'_> {
             .arena
             .facts(handle)
             .map_err(arena_fault)?
-            .page
-            .get()
+            .page()
             .cloned())
     }
     pub fn ledger_key(&self, handle: ArenaHandle) -> Result<EntityId, HeapFault> {

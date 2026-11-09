@@ -586,7 +586,7 @@ impl KernelMachine {
                 };
                 // Saved environments are immutable templates. Each invocation owns
                 // fresh cells and fresh instances of its frozen data.
-                let entity = self.in_arena(|arena| Ok(arena.facts(closure)?.entity))?;
+                let entity = self.in_arena(|arena| Ok(arena.facts(closure)?.entity()))?;
                 if let Some(entity) = entity {
                     let functions = super::session::open_tree::<
                         lash_kernel_state::paged::FunctionRecord,

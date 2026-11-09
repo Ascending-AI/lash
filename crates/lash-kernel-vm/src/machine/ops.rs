@@ -189,7 +189,7 @@ impl KernelMachine {
             .borrow()
             .facts(table)
             .map_err(Interrupt::from)?
-            .entity
+            .entity()
             .ok_or(lash_kernel_doc::NativeError::Malformed(
                 "a table with cold chunks has no durable id",
             ))

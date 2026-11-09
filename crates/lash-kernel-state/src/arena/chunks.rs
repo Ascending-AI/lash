@@ -189,7 +189,7 @@ impl Arena {
     /// held is held no longer. Gives whether it did.
     pub fn drop_large(&mut self, handle: ArenaHandle) -> Result<bool, NativeError> {
         let facts = self.facts(handle)?;
-        if facts.entity.is_none() || facts.dirty || facts.cold {
+        if facts.entity().is_none() || facts.dirty || facts.cold {
             return Ok(false);
         }
         if !matches!(
@@ -734,9 +734,9 @@ impl Arena {
                 Some(Body::Bytes(bytes)) => bytes.len > PAYLOAD_LEAF_BYTES,
                 _ => false,
             };
-            let paged = match facts.entity {
-                Some(_) => facts.based && !facts.dirty && !facts.cold,
-                None => facts.page.get().is_some_and(|page| {
+            let paged = match facts.entity() {
+                Some(_) => facts.based() && !facts.dirty && !facts.cold,
+                None => facts.page().is_some_and(|page| {
                     matches!(
                         page,
                         lash_kernel_doc::heap::PageValue::Text(lash_kernel_doc::heap::TextRef {
@@ -790,7 +790,7 @@ impl Arena {
         self.unhold_members(&held);
         let facts = self.facts_mut(handle)?;
         facts.flat = None;
-        if facts.entity.is_some() {
+        if facts.entity().is_some() {
             facts.cold = true;
             facts.index = None;
         }

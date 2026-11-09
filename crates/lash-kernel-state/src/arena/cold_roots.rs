@@ -46,7 +46,7 @@ impl Arena {
                 }
                 facts.mark = true;
                 marked.push(handle);
-                let entity = facts.entity;
+                let entity = facts.entity();
                 each_member(body, &mut |value| pending.extend(value.handle()));
                 if let Body::Closure { captures, .. } = body {
                     pending.extend(captures.iter().copied());

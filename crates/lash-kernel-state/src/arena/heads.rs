@@ -31,7 +31,7 @@ impl Arena {
     ) -> Result<ArenaHandle, NativeError> {
         if let Some(handle) = self.entities.get(&entity).copied() {
             let facts = self.facts(handle)?;
-            if let Some(held) = facts.head.get() {
+            if let Some(held) = facts.head() {
                 return if held == head {
                     Ok(handle)
                 } else {
@@ -40,6 +40,7 @@ impl Arena {
             }
             // A proxy a ref named first takes the body its head gives.
             if facts.cold && matches!(self.body(handle)?, Body::Cell(Value::Absent)) {
+                facts.try_projection()?;
                 let (body, summary) = opened(head);
                 let cold = has_cold(&body);
                 *self
@@ -49,7 +50,7 @@ impl Arena {
                 let facts = self.facts_mut(handle)?;
                 facts.cold = cold;
                 facts.summary = summary;
-                let _ = facts.head.set(head.clone());
+                let _ = facts.projection().head.set(head.clone());
                 if !cold {
                     self.colds = self.colds.saturating_sub(1);
                 }
@@ -64,14 +65,15 @@ impl Arena {
             };
         }
         let (body, summary) = opened(head);
-        let facts = Facts {
-            entity: Some(entity),
+        let mut facts = Facts {
             cold: has_cold(&body),
-            based: true,
             summary,
             ..Facts::default()
         };
-        let _ = facts.head.set(head.clone());
+        let projected = facts.try_projection_mut()?;
+        projected.entity = Some(entity);
+        projected.based = true;
+        let _ = projected.head.set(head.clone());
         Ok(self.insert(body, facts))
     }
 
@@ -85,7 +87,7 @@ impl Arena {
     /// needs and has no head of; a malformed fault for a mutable object.
     pub fn head(&self, handle: ArenaHandle) -> Result<Head, NativeError> {
         let facts = self.facts(handle)?;
-        if let Some(head) = facts.head.get() {
+        if let Some(head) = facts.head() {
             return Ok(head.clone());
         }
         let body = self.body(handle)?;
@@ -130,7 +132,7 @@ impl Arena {
     /// Fixes `head` as the immutable `handle`'s, as a seal that wrote a row
     /// naming it does: every later row names it so.
     pub fn certify(&self, handle: ArenaHandle, head: Head) -> Result<(), NativeError> {
-        let _ = self.facts(handle)?.head.set(head);
+        let _ = self.facts(handle)?.try_projection()?.head.set(head);
         Ok(())
     }
 

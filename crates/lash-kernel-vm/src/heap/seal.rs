@@ -177,9 +177,9 @@ impl Walk<'_> {
                 .arena
                 .facts(handle)
                 .map_err(|error| fault(error.to_string()))?;
-            let descend = match facts.entity {
+            let descend = match facts.entity() {
                 _ if facts.cold => {
-                    if facts.entity.is_none() {
+                    if facts.entity().is_none() {
                         return Err(fault("a cold proxy has no id"));
                     }
                     false
@@ -225,7 +225,7 @@ fn id_of(arena: &Arena, handle: ArenaHandle) -> Result<ObjectId, SealError> {
     let facts = arena
         .facts(handle)
         .map_err(|error| fault(error.to_string()))?;
-    match facts.entity {
+    match facts.entity() {
         Some(EntityId {
             family: FamilyId::PRIMARY,
             ordinal,

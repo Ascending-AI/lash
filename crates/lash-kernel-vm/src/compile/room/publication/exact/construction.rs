@@ -596,7 +596,7 @@ fn matches_page(
     use lash_kernel_state::kernel_internals::page_reads;
     if let Some(handle) = value.handle()
         && let Ok(facts) = arena.facts(handle)
-        && let Some(expected) = facts.page.get()
+        && let Some(expected) = facts.page()
         && lash_kernel_value::tokens::encode_body(expected)
             == lash_kernel_value::tokens::encode_body(page)
     {

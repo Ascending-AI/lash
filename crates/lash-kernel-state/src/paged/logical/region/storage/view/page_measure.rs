@@ -40,8 +40,7 @@ impl StateLease<'_> {
                         .ok_or_else(|| invalid("cold value has no handle"))?,
                 )
                 .map_err(local_native)?
-                .page
-                .get()
+                .page()
                 .cloned()
                 .ok_or_else(|| invalid("cold immutable has no page form"))?
         };

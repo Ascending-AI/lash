@@ -896,7 +896,7 @@ impl KernelMachine {
         let fact = if arena
             .facts(handle)
             .map_err(|error| fault(&error.to_string()))?
-            .entity
+            .entity()
             .is_some()
         {
             Some(

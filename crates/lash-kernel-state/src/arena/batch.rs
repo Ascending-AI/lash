@@ -365,9 +365,9 @@ impl<'a> PreparedInstallation<'a> {
             .iter()
             .find(|entry| entry.handle == handle)
         {
-            return Ok(entry.facts.page.get().cloned());
+            return Ok(entry.facts.page().cloned());
         }
-        Ok(self.registration.arena().facts(handle)?.page.get().cloned())
+        Ok(self.registration.arena().facts(handle)?.page().cloned())
     }
 
     /// A new mutable body must already be bound to its prospective journal
@@ -382,7 +382,7 @@ impl<'a> PreparedInstallation<'a> {
         {
             return entry
                 .facts
-                .provisional
+                .provisional()
                 .ok_or_else(|| malformed("a prepared body has no journal key"));
         }
         self.registration.arena().ledger_key(handle)
@@ -503,7 +503,7 @@ impl<'a> PreparedInstallation<'a> {
                 .batch
                 .entries
                 .iter()
-                .any(|entry| entry.handle != handle && entry.facts.provisional == Some(entity))
+                .any(|entry| entry.handle != handle && entry.facts.provisional() == Some(entity))
         {
             return Err(malformed("a batch identity is not fresh and unique"));
         }
@@ -511,7 +511,7 @@ impl<'a> PreparedInstallation<'a> {
             .batch
             .entries
             .iter()
-            .filter(|entry| entry.facts.provisional.is_some())
+            .filter(|entry| entry.facts.provisional().is_some())
             .count()
             + 1;
         let entry = self
@@ -520,11 +520,11 @@ impl<'a> PreparedInstallation<'a> {
             .iter_mut()
             .find(|entry| entry.handle == handle)
             .ok_or_else(|| malformed("an identity target is absent from the batch"))?;
-        if !is_mutable(&entry.body) || entry.facts.provisional.is_some_and(|old| old != entity) {
+        if !is_mutable(&entry.body) || entry.facts.provisional().is_some_and(|old| old != entity) {
             return Err(malformed("a batch identity does not name its mutable body"));
         }
         arena.entities.try_reserve(count).map_err(|_| exhausted())?;
-        entry.facts.provisional = Some(entity);
+        entry.facts.try_projection_mut()?.provisional = Some(entity);
         Ok(())
     }
     pub fn into_parts(self) -> (Registration<'a>, PreparedBatch) {
@@ -1103,8 +1103,7 @@ impl PreparedInstallation<'_> {
                 && arena
                     .facts(handle)
                     .map_err(|error| proof_fault(&error.to_string()))?
-                    .page
-                    .get()
+                    .page()
                     .is_none()
             {
                 each_member(body, &mut |value| pending.push(*value));
@@ -1444,14 +1443,14 @@ impl PreparedBatch {
             && self.entries.iter().all(|entry| {
                 entry
                     .facts
-                    .provisional
+                    .provisional()
                     .is_none_or(|id| id.ordinal < arena.next_provisional().ordinal)
             })
             && arena.entities.capacity() - arena.entities.len()
                 >= self
                     .entries
                     .iter()
-                    .filter(|entry| entry.facts.provisional.is_some())
+                    .filter(|entry| entry.facts.provisional().is_some())
                     .count()
             && self
                 .dependencies

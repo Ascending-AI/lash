@@ -242,14 +242,16 @@ impl Drop for Registration<'_> {
             for at in self.dirty..self.arena.dirty.len() {
                 let handle = self.arena.dirty[at];
                 let facts = &mut self.arena.facts[handle.index() as usize];
-                match facts.entity {
+                match facts.entity() {
                     Some(entity)
                         if entity.family == lash_kernel_doc::heap::FamilyId::PRIMARY
                             && entity.ordinal >= self.next
-                            && !facts.based =>
+                            && !facts.based() =>
                     {
                         self.arena.entities.remove(&entity);
-                        facts.entity = None;
+                        if let Some(projected) = facts.projected_mut() {
+                            projected.entity = None;
+                        }
                         facts.listed = false;
                     }
                     _ => {
@@ -264,10 +266,12 @@ impl Drop for Registration<'_> {
                 let Some(facts) = self.arena.facts.get_mut(handle.index() as usize) else {
                     continue;
                 };
-                if let Some(entity) = facts.provisional
+                if let Some(entity) = facts.provisional()
                     && entity.ordinal >= self.provisional
                 {
-                    facts.provisional = None;
+                    if let Some(projected) = facts.projected_mut() {
+                        projected.provisional = None;
+                    }
                     self.arena.entities.remove(&entity);
                 }
             }
