@@ -5,8 +5,10 @@ use lash_kernel_doc::scalar::{ScalarOp, size_bit, word_size_bit};
 
 use super::{Binary, Domain, Math, Operation, PreparedNative, Unary, Value, plain};
 
-/// Only the row-required kernels. This declaration belongs to the native,
-/// independently of its catalogue name and of any helper that calls it.
+/// The operations with a shared word/binary64 kernel answer inline
+/// ([`kernel_of`]); kind, identity and integer text are the other inline
+/// operations. This declaration belongs to the native, independently of
+/// its catalogue name and of any helper that calls it.
 pub(super) fn inline(
     operation: Operation,
     domain: Domain,
@@ -21,25 +23,14 @@ pub(super) fn inline(
             InlineOperation::IntegerText(IntegerTextDomain::Decimal)
         }
         Operation::IntText => InlineOperation::IntegerText(IntegerTextDomain::RadixArgument),
-        operation => {
-            let operation = match operation {
-                Operation::Binary(Binary::Add) => ScalarOp::Add,
-                Operation::Binary(Binary::Sub) => ScalarOp::Sub,
-                Operation::Binary(Binary::Mul) => ScalarOp::Mul,
-                Operation::Eq => ScalarOp::Eq,
-                Operation::Lt => ScalarOp::Lt,
-                Operation::Le => ScalarOp::Le,
-                Operation::Gt => ScalarOp::Gt,
-                Operation::Ge => ScalarOp::Ge,
-                _ => return None,
-            };
-            let domain = match domain {
+        operation => InlineOperation::Scalar {
+            operation: kernel_of(operation)?,
+            domain: match domain {
                 Domain::Any | Domain::Number => ScalarDomain::WordsOrFloats,
                 Domain::Int => ScalarDomain::Words,
                 Domain::Float => ScalarDomain::Floats,
-            };
-            InlineOperation::Scalar { operation, domain }
-        }
+            },
+        },
     };
     Some(InlineNative {
         native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
@@ -172,8 +163,14 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
 /// The shared kernel of `S`'s operation ([`lash_kernel_doc::scalar`]):
 /// `run`'s own first answer on two floats and on two word integers.
 const fn kernel<S: Scalar>() -> Option<ScalarOp> {
+    kernel_of(S::OPERATION)
+}
+
+/// The shared kernel of `operation`, which its inline answer and its
+/// prepared entry both answer by.
+const fn kernel_of(operation: Operation) -> Option<ScalarOp> {
     use lash_kernel_doc::scalar::ScalarOp as K;
-    match S::OPERATION {
+    match operation {
         Operation::Binary(Binary::Add) => Some(K::Add),
         Operation::Binary(Binary::Sub) => Some(K::Sub),
         Operation::Binary(Binary::Mul) => Some(K::Mul),
