@@ -108,15 +108,12 @@ fn append(unit: &mut Unit, ops: &[Op]) {
     unit.ops[start as usize] = Op::Block(unit.blocks.len() as u32);
     unit.event
         .extend(std::iter::repeat_n(Event::default(), ops.len()));
-    unit.pace.extend(std::iter::repeat_n(0, ops.len()));
     unit.step.extend(std::iter::repeat_n(false, ops.len()));
     unit.through.extend(std::iter::repeat_n(0, ops.len()));
-    unit.pace_through.extend(std::iter::repeat_n(0, ops.len()));
     unit.blocks.push(Block {
         start,
         end: unit.ops.len() as u32,
         charge: Some(0),
-        pace: Some(0),
     });
 }
 

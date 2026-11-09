@@ -9,7 +9,7 @@
 //! Link: a function value names a Link and a function, and calls that
 //! Link's body or nothing. [`lower`](super::lower)
 //! emits each unit's statements; [`Compiler::seal`] cuts its blocks and
-//! derives the charge, pace and step tables.
+//! derives the charge and step tables.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
@@ -106,10 +106,8 @@ pub(crate) enum Scope {
 pub(crate) struct Fun {
     pub ops: Vec<Op>,
     pub event: Vec<Event>,
-    pub pace: Vec<u32>,
     pub step: Vec<bool>,
     pending: Event,
-    pending_pace: u32,
     /// The next op starts a step (a statement's start).
     pub mark: bool,
     /// What an observer sees before the next op: a statement start.
@@ -159,10 +157,8 @@ impl Fun {
         Self {
             ops: Vec::new(),
             event: Vec::new(),
-            pace: Vec::new(),
             step: Vec::new(),
             pending: Event::default(),
-            pending_pace: 0,
             mark: false,
             start: None,
             points: Vec::new(),
@@ -236,21 +232,12 @@ impl Fun {
         }
     }
 
-    /// One unit of pace (`Charge::Off`): a statement, loop test or action
-    /// atom of uncovered code.
-    pub(crate) fn pace(&mut self) {
-        if !self.covered {
-            self.pending_pace += 1;
-        }
-    }
-
     /// Emits `op`, which bills nothing, leaving pending events and the
     /// step mark to the op after it.
     pub(crate) fn quiet(&mut self, op: Op) {
         self.originate();
         self.ops.push(op);
         self.event.push(Event::default());
-        self.pace.push(0);
         self.step.push(false);
     }
 
@@ -261,7 +248,6 @@ impl Fun {
         self.originate();
         self.ops.push(op);
         self.event.push(std::mem::take(&mut self.pending));
-        self.pace.push(std::mem::take(&mut self.pending_pace));
         self.step.push(std::mem::take(&mut self.mark));
         self.ops.len() - 1
     }
@@ -278,7 +264,7 @@ impl Fun {
 
     /// A block starts here; events still pending are billed before it.
     pub(crate) fn leader(&mut self) {
-        if !self.pending.is_none() || self.pending_pace != 0 || self.mark {
+        if !self.pending.is_none() || self.mark {
             self.emit(Op::Nop);
         }
         if !matches!(self.ops.last(), Some(Op::Block(_))) {
@@ -974,7 +960,6 @@ impl<'a> Compiler<'a> {
         let Fun {
             mut ops,
             event,
-            pace,
             mut step,
             locals,
             slots,
@@ -1004,24 +989,18 @@ impl<'a> Compiler<'a> {
             };
         let mut blocks = Vec::new();
         let mut through = vec![0u64; ops.len()];
-        let mut pace_through = vec![0u64; ops.len()];
         let mut pc = 0;
         while pc < ops.len() {
             debug_assert!(matches!(ops[pc], Op::Block(_)), "a block starts every run");
             let start = pc;
             let mut charge = Some(0u64);
-            let mut paced = Some(0u64);
             let mut sum = 0u64;
-            let mut pace_sum = 0u64;
             pc += 1;
             while pc < ops.len() && !matches!(ops[pc], Op::Block(_)) {
                 let cost = event[pc].total();
                 charge = charge.and_then(|total| total.checked_add(cost));
-                paced = paced.and_then(|total| total.checked_add(u64::from(pace[pc])));
                 sum = sum.saturating_add(cost);
-                pace_sum = pace_sum.saturating_add(u64::from(pace[pc]));
                 through[pc] = sum;
-                pace_through[pc] = pace_sum;
                 pc += 1;
             }
             ops[start] = Op::Block(blocks.len() as u32);
@@ -1029,7 +1008,6 @@ impl<'a> Compiler<'a> {
                 start: start as u32,
                 end: pc as u32,
                 charge,
-                pace: paced,
             });
         }
         // A loop's back edge starts a step (`K-MACH-002`).
@@ -1058,10 +1036,8 @@ impl<'a> Compiler<'a> {
             boxed,
             ops,
             event,
-            pace,
             step,
             through,
-            pace_through,
             blocks,
             records,
             closures,

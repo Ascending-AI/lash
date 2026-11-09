@@ -514,7 +514,7 @@ impl<H: Heap> Vm<H> {
     /// charge in whatever code the `perform` stands (`K-CHG-002`).
     fn decoded(&mut self, datum: &Datum) -> Run<Value> {
         let value = super::datum::copy_in(self, datum)?;
-        if !self.paced {
+        if !self.off {
             let size = crate::data::deep_size(self.heap.arena(), &value).map_err(super::read)?;
             self.held.push(value);
             let charged = self.fee(size);

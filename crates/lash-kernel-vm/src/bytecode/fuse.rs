@@ -75,7 +75,7 @@ fn run(unit: &Unit, pc: usize, scalar: &impl Fn(u32, &Unit) -> bool) -> Option<(
     // answer is fused only where the exact path does nothing at it.
     let quiet = |pc: usize| {
         let event = unit.event[pc];
-        event.units == 0 && event.atomic == 0 && unit.pace[pc] == 0 && !unit.step[pc]
+        event.units == 0 && event.atomic == 0 && !unit.step[pc]
     };
     let taking = unit.ops.get(call + 1).copied().filter(|_| quiet(call + 1));
     let (then, end) = match taking {

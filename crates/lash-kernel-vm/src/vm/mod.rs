@@ -6,8 +6,9 @@
 //! and the slice's end; otherwise the block runs event by event, each op
 //! billing its own event at its start. The per-op check is one flag,
 //! `exact`, so a prepaid block's ops pay nothing more than the dispatch.
-//! Under `Charge::Off` the same machinery runs over the pace tables, with
-//! no limit and no dynamic fee.
+//! Under `Charge::Off` the same machinery runs over the same fixed
+//! costs, which only place the slice's end: no limit, no dynamic fee and
+//! no charge readout.
 
 pub(crate) mod calls;
 pub(crate) mod charge;
@@ -186,8 +187,9 @@ pub(crate) struct Vm<H: Heap> {
     /// of issued actions), for the collector.
     pub held: Vec<Value>,
     meter: Meter,
-    /// The run is under `Charge::Off`: the pace tables, no fee.
-    paced: bool,
+    /// The run is under `Charge::Off`: fixed costs place slices; no
+    /// limit, fee or readout.
+    off: bool,
     /// The current block runs event by event.
     exact: bool,
     /// The next op is the first of a run call: its step is not tested.
@@ -238,7 +240,7 @@ impl<H: Heap> Vm<H> {
 
     /// An instance of `program` over `heap`, its constants placed and
     /// admitted. `limit` is the charge limit under `Charge::Exact`;
-    /// `paced` selects `Charge::Off`.
+    /// `off` selects `Charge::Off`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         document: Arc<Document>,
@@ -247,7 +249,7 @@ impl<H: Heap> Vm<H> {
         mut heap: H,
         used: u64,
         limit: u64,
-        paced: bool,
+        off: bool,
         call_depth: u32,
     ) -> Result<Self, Stop> {
         // The instance holds its own program, then its materialized
@@ -316,8 +318,8 @@ impl<H: Heap> Vm<H> {
             tasks: tasks::Tasks::new(),
             document,
             held: Vec::new(),
-            meter: Meter::new(used, if paced { u64::MAX } else { limit }),
-            paced,
+            meter: Meter::new(used, if off { u64::MAX } else { limit }),
+            off,
             exact: true,
             fresh: false,
             call_depth,
@@ -337,7 +339,7 @@ impl<H: Heap> Vm<H> {
         })
     }
 
-    /// What the run has paid (pace units under `Charge::Off`).
+    /// What the run has paid (fixed costs only under `Charge::Off`).
     pub(crate) fn charged(&self) -> u64 {
         self.meter.total(self.through())
     }
@@ -346,8 +348,8 @@ impl<H: Heap> Vm<H> {
         self.meter.limit()
     }
 
-    pub(crate) fn paced(&self) -> bool {
-        self.paced
+    pub(crate) fn off(&self) -> bool {
+        self.off
     }
 
     /// Starts unit `unit` as the running context's bottom frame, its
@@ -414,12 +416,7 @@ impl<H: Heap> Vm<H> {
         };
         let unit = &self.program.units[frame.unit as usize];
         let at = (frame.pc as usize).saturating_sub(1);
-        let table = if self.paced {
-            &unit.pace_through
-        } else {
-            &unit.through
-        };
-        table.get(at).copied().unwrap_or(0)
+        unit.through.get(at).copied().unwrap_or(0)
     }
 
     /// Leaves the running block early at the op last dispatched: its
@@ -488,17 +485,8 @@ impl<H: Heap> Vm<H> {
     /// Bills op `pc`'s fixed event on the exact path.
     #[inline]
     fn bill(&mut self, unit: &Unit, pc: usize) -> Run<()> {
-        if self.paced {
-            let pace = unit.pace[pc];
-            if pace != 0
-                && let Err(refused) = self.meter.units(u64::from(pace))
-            {
-                self.refusal(refused)?;
-            }
-            return Ok(());
-        }
         let event = unit.event[pc];
-        if self.watch.is_some() {
+        if self.watch.is_some() && !self.off {
             return self.bill_watched(event);
         }
         if event.units != 0
@@ -550,7 +538,7 @@ impl<H: Heap> Vm<H> {
     /// path, the running block continuing event by event. Under
     /// `Charge::Off` it bills nothing.
     pub(crate) fn fee(&mut self, units: u64) -> Run<()> {
-        if self.paced {
+        if self.off {
             return Ok(());
         }
         if let Some(watch) = &self.watch {
@@ -586,7 +574,7 @@ impl<H: Heap> Vm<H> {
             return Ok(Completion::default());
         };
         let from = bill.from as usize;
-        let units = if self.paced {
+        let units = if self.off {
             None
         } else {
             Some(self.formula(bill.charge, &self.cx.billed[from..], result)?)
@@ -1131,8 +1119,7 @@ impl<H: Heap> Vm<H> {
                         // own.
                         self.meter.leave();
                         let block = &unit.blocks[block as usize];
-                        let cost = if self.paced { block.pace } else { block.charge };
-                        self.exact = self.watch.is_some() || !self.meter.enter(cost);
+                        self.exact = self.watch.is_some() || !self.meter.enter(block.charge);
                     }
                     Op::Nop => {}
                     Op::Const(n) => self.push(self.constants[n as usize]),

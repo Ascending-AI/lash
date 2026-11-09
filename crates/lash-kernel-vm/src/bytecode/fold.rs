@@ -24,7 +24,7 @@
 //! activation at the region's `Op::Leave` with the value, as the body's
 //! return does: the completion billed there, the frame released.
 //!
-//! The pass folds only ops that bill no event, pace no unit, test no
+//! The pass folds only ops that bill no event, test no
 //! slice and show no point, and native calls that bill no fee, so
 //! skipping them moves, merges or drops no charge, step or observation.
 //! A fold holds no fact past its own run: nothing it reads is written
@@ -224,10 +224,9 @@ fn walk(
     }
 }
 
-/// Whether op `pc` bills, paces, tests and shows nothing.
+/// Whether op `pc` bills, tests and shows nothing.
 fn quiet(unit: &Unit, pc: usize) -> bool {
     unit.event[pc].total() == 0
-        && unit.pace[pc] == 0
         && !unit.step[pc]
         && !unit.points.iter().any(|&(at, _)| at as usize == pc)
 }

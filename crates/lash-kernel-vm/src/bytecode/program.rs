@@ -2,7 +2,7 @@
 //! instance, never cached across instances. It holds code for each unit
 //! (main, every declared function of every Link the run's build loads,
 //! every kernel-code body reached, every closure body and spawn stub), the
-//! constant pool, each block's charge and pace tables (§3) and each unit's
+//! constant pool, each block's charge tables (§3) and each unit's
 //! side tables. Each unit is compiled as the Link it belongs to.
 //!
 //! A `Program` is built by the compiler and checked once by the validator;
@@ -113,8 +113,6 @@ pub struct Unit {
     pub ops: Vec<Op>,
     /// Each op's fixed charge under `Charge::Exact`.
     pub event: Vec<Event>,
-    /// Each op's pace units under `Charge::Off`.
-    pub pace: Vec<u32>,
     /// Whether the slice is tested before the op (`K-MACH-002`): a
     /// statement's start or a loop's back edge.
     pub step: Vec<bool>,
@@ -122,8 +120,6 @@ pub struct Unit {
     /// including it: `rest(o) = cost - through[o]` (contract §3). `None`
     /// past an unrepresentable sum.
     pub through: Vec<u64>,
-    /// The same for pace.
-    pub pace_through: Vec<u64>,
     pub blocks: Vec<Block>,
     pub records: Vec<Arc<[u32]>>,
     pub closures: Vec<ClosureSite>,
@@ -321,8 +317,6 @@ pub struct Block {
     /// The sum of the block's fixed events, `None` when it is not
     /// representable in `u64`: such a block always runs event by event.
     pub charge: Option<u64>,
-    /// The block's pace units.
-    pub pace: Option<u64>,
 }
 
 /// A closure a `MakeClosure` makes.

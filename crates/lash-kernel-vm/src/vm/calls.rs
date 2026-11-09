@@ -69,7 +69,7 @@ impl<H: Heap> Vm<H> {
     /// The bill a call of formula `charge` owes, over its top `argc`
     /// operands.
     pub(super) fn owed(&mut self, charge: Option<u32>, argc: usize) -> Option<Bill> {
-        let charge = charge.filter(|_| !self.paced)?;
+        let charge = charge.filter(|_| !self.off)?;
         Some(self.owe(charge, argc))
     }
 
@@ -146,7 +146,7 @@ impl<H: Heap> Vm<H> {
             self.push(Value::Absent);
         }
         let from = self.cx.stack.len() - params.max(argc);
-        let charged = charged && !self.paced;
+        let charged = charged && !self.off;
         let limit = match entry.guard {
             Some(guard) => match self.formula(guard, &self.cx.stack[from..], None) {
                 Ok(limit) => Some(limit),
@@ -331,7 +331,7 @@ impl<H: Heap> Vm<H> {
             return None;
         }
         let value = self.immediate(inline, args)?;
-        if !charged || self.paced {
+        if !charged || self.off {
             return Some(Ok((value, None)));
         }
         let units = match inline {
@@ -484,7 +484,7 @@ impl<H: Heap> Vm<H> {
                 ));
             }
         };
-        let fee = match charge.filter(|_| !self.paced) {
+        let fee = match charge.filter(|_| !self.off) {
             Some(charge) => Some(self.formula(charge, &self.cx.stack[from..], Some(&value))?),
             None => None,
         };

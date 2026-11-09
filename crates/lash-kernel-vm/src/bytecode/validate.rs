@@ -3,7 +3,7 @@
 //! tables unchecked.
 //!
 //! It checks that every table an op names has the entry, that the blocks
-//! partition each unit and that their charge, pace and suffix tables sum
+//! partition each unit and that their charge and suffix tables sum
 //! as the dispatcher bills them, that control enters blocks only at their
 //! heads, and that the operand stack has one depth at every op and never
 //! underflows. Semantic checks (types, bounds, guards) stay in the
@@ -130,10 +130,8 @@ impl Unit {
         let len = self.ops.len();
         let parallel = [
             ("event", self.event.len()),
-            ("pace", self.pace.len()),
             ("step", self.step.len()),
             ("through", self.through.len()),
-            ("pace_through", self.pace_through.len()),
         ];
         for (table, size) in parallel {
             if size != len {
@@ -449,7 +447,7 @@ impl Unit {
     }
 
     /// The blocks partition the ops, each headed by its own `Block` op,
-    /// which bills nothing and starts no step, and their charge, pace and
+    /// which bills nothing and starts no step, and their charge and
     /// suffix tables sum the ops' events.
     fn check_blocks(&self, id: UnitId) -> Checked {
         let whole = |problem: String| Malformed {
@@ -471,27 +469,19 @@ impl Unit {
             if end > self.ops.len() || self.ops[start] != Op::Block(k as u32) {
                 return Err(at(format!("block {k} is not headed by its own op")));
             }
-            if !self.event[start].is_none()
-                || self.pace[start] != 0
-                || self.through[start] != 0
-                || self.step[start]
-            {
+            if !self.event[start].is_none() || self.through[start] != 0 || self.step[start] {
                 return Err(at(format!("block {k}'s head bills or starts a step")));
             }
             let mut charge = Some(0u64);
-            let mut pace = Some(0u64);
-            let (mut sum, mut pace_sum) = (0u64, 0u64);
+            let mut sum = 0u64;
             for pc in start + 1..end {
                 if matches!(self.ops[pc], Op::Block(_)) {
                     return Err(at(format!("block {k} holds another block's head")));
                 }
                 let cost = self.event[pc].total();
-                let paced = u64::from(self.pace[pc]);
                 charge = charge.and_then(|total| total.checked_add(cost));
-                pace = pace.and_then(|total| total.checked_add(paced));
                 sum = sum.saturating_add(cost);
-                pace_sum = pace_sum.saturating_add(paced);
-                if self.through[pc] != sum || self.pace_through[pc] != pace_sum {
+                if self.through[pc] != sum {
                     return Err(Malformed {
                         unit: id,
                         pc: Some(pc as u32),
@@ -499,7 +489,7 @@ impl Unit {
                     });
                 }
             }
-            if block.charge != charge || block.pace != pace {
+            if block.charge != charge {
                 return Err(at(format!("block {k}'s cost is not its events' sum")));
             }
             next = block.end;
@@ -773,15 +763,11 @@ mod tests {
                 }
             })
             .collect();
-        let pace = (0..ops.len())
-            .map(|pc| u32::from(!heads.contains(&pc)))
-            .collect();
         let through = vec![0, 1, 2, 0, 1, 2, 0, 1, 2];
         let block = |start, end| Block {
             start,
             end,
             charge: Some(2),
-            pace: Some(2),
         };
         Program {
             units: vec![Unit {
@@ -794,8 +780,6 @@ mod tests {
                 step: vec![false; ops.len()],
                 ops,
                 event,
-                pace,
-                pace_through: through.clone(),
                 through,
                 blocks: vec![block(0, 3), block(3, 6), block(6, 9)],
                 records: Vec::new(),

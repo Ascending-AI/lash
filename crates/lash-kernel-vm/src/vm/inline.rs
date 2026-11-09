@@ -75,7 +75,7 @@ impl<H: Heap> Vm<H> {
         self.exact = true;
         // The bill reads the arguments where they stand: no step wrote
         // them.
-        let units = match charge.filter(|_| !self.paced) {
+        let units = match charge.filter(|_| !self.off) {
             Some(charge) => match self.formula(charge, &self.cx.stack[base..], Some(&value)) {
                 Ok(units) => Some(units),
                 Err(flow) => {

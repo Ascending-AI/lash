@@ -124,7 +124,6 @@ impl Compiler<'_> {
         }
         f.mark = true;
         f.units(1);
-        f.pace();
         match stmt {
             Stmt::Let { name, value } => {
                 self.rhs(f, 0, value)?;
@@ -329,7 +328,6 @@ impl Compiler<'_> {
     fn loop_test(&mut self, f: &mut Fun, metered: u64) {
         f.units(1);
         f.metered(metered);
-        f.pace();
     }
 
     fn assign(
@@ -704,7 +702,6 @@ impl Compiler<'_> {
             } else {
                 f.units(1);
             }
-            f.pace();
             match arg {
                 Atom::Variable(name) => self.read(f, name),
                 Atom::Literal(literal) => self.literal(f, literal)?,

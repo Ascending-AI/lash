@@ -83,7 +83,7 @@ impl<H: Heap> Vm<H> {
     /// Every read a copy of `value` out of the run makes: its deep size
     /// and its copy, neither billed nor raised yet.
     pub(crate) fn copied(&self, value: &Value) -> Run<Copied> {
-        let size = if self.paced {
+        let size = if self.off {
             None
         } else {
             Some(crate::data::deep_size(self.heap.arena(), value).map_err(read)?)

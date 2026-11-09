@@ -133,7 +133,7 @@ fn build(
     let heights = crate::bytecode::validate::validate(&code).map_err(linked)?;
     crate::bytecode::fold::fold(&mut code);
     crate::bytecode::fuse::fuse(&mut code);
-    let paced = matches!(bounds.charge, Charge::Off);
+    let off = matches!(bounds.charge, Charge::Off);
     let operations = operations(program, &code, modes)?;
     let mut vm = Vm::new(
         Arc::clone(document),
@@ -142,7 +142,7 @@ fn build(
         heap,
         used,
         bounds.charge_limit,
-        paced,
+        off,
         bounds.call_depth,
     )
     .map_err(|stop| linked(format!("{stop:?}")))?;
@@ -634,10 +634,10 @@ impl Machine for CoreMachine {
             limits: SavedLimits {
                 // The limits the run's limiters grew, not the ones it
                 // started with: the reopened run resumes under them
-                // (FIG-6768). A paced run's meter has no limit to grow.
+                // (FIG-6768). An Off run's meter has no limit to grow.
                 memory: (header.bounds.memory_meter == crate::MemoryMeter::On)
                     .then(|| self.vm.heap.bound()),
-                charge: if self.vm.paced() {
+                charge: if self.vm.off() {
                     header.bounds.charge_limit
                 } else {
                     self.vm.charge_limit()
@@ -681,7 +681,7 @@ impl Machine for CoreMachine {
 
     fn meters(&self) -> Meters {
         Meters {
-            charged: (!self.vm.paced()).then(|| self.vm.charged()),
+            charged: (!self.vm.off()).then(|| self.vm.charged()),
             memory: self.vm.heap.held(),
             live_tasks: self.vm.tasks.live,
         }

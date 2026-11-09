@@ -23,7 +23,7 @@
 //! completion bill and lays the body's locals out where its frame would;
 //! `Op::Leave` completes and releases it as a return does; a raise in the
 //! region completes it first, at the body's position, and unwinds on from
-//! the caller. The region's ops carry the body's events, pace and step
+//! the caller. The region's ops carry the body's events and step
 //! tables op for op, so the charge, its tape and every refusal fall at the
 //! body's own events.
 //!
@@ -228,7 +228,6 @@ fn expand(
     let target = |to: u32| starts[body.blocks.iter().position(|block| block.start == to)?];
     let mut ops = Vec::new();
     let mut event = Vec::new();
-    let mut pace = Vec::new();
     let mut calls = Vec::new();
     let mut blocks = Vec::new();
     for (n, &(k, on)) in region.blocks.iter().enumerate() {
@@ -237,7 +236,6 @@ fn expand(
         let head = first_block + n as u32;
         ops.push(Op::Block(head));
         event.push(Default::default());
-        pace.push(0);
         if on {
             for from in block.start as usize + 1..block.end as usize {
                 let op = match body.ops[from] {
@@ -252,12 +250,10 @@ fn expand(
                 };
                 ops.push(op);
                 event.push(body.event[from]);
-                pace.push(body.pace[from]);
             }
         } else {
             ops.push(Op::Deopt(block.start));
             event.push(Default::default());
-            pace.push(0);
         }
         blocks.push(start);
     }
@@ -268,24 +264,19 @@ fn expand(
     caller.ops[pc] = Op::Inline(index);
     for (n, &start) in blocks.iter().enumerate() {
         let stop = blocks.get(n + 1).copied().unwrap_or(end);
-        let (mut charge, mut paced) = (Some(0u64), Some(0u64));
-        let (mut sum, mut pace_sum) = (0u64, 0u64);
+        let mut charge = Some(0u64);
+        let mut sum = 0u64;
         caller.through.push(0);
-        caller.pace_through.push(0);
         for at in (start + 1..stop).map(|pc| (pc - entry) as usize) {
             let cost = event[at].total();
             charge = charge.and_then(|total| total.checked_add(cost));
-            paced = paced.and_then(|total| total.checked_add(u64::from(pace[at])));
             sum = sum.saturating_add(cost);
-            pace_sum = pace_sum.saturating_add(u64::from(pace[at]));
             caller.through.push(sum);
-            caller.pace_through.push(pace_sum);
         }
         caller.blocks.push(Block {
             start,
             end: stop,
             charge,
-            pace: paced,
         });
     }
     caller.step.extend(std::iter::repeat_n(false, ops.len()));
@@ -294,7 +285,6 @@ fn expand(
     }
     caller.ops.extend(ops);
     caller.event.extend(event);
-    caller.pace.extend(pace);
     caller.calls.extend(calls);
     caller.inlines.push(InlineSite {
         callee,
