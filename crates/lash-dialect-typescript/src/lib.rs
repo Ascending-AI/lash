@@ -133,13 +133,13 @@ pub fn parse(source: &str) -> Result<(), Diagnostic> {
 
 /// Identifier spellings read by the dialect's context-sensitive tokenizer.
 /// Comments and ordinary string contents are excluded; Unicode escapes are
-/// decoded. Import module strings contribute their package root.
+/// decoded. Import module strings contribute their package root. Reserved words
+/// are excluded except `await`, which also names implicit process awaits.
 ///
-/// # Errors
-///
-/// The dialect's syntax or parser-resource refusal, including its hard source
-/// byte and nesting ceilings. Lowering enforces the host's admission policy.
-pub fn source_identifiers(source: &str) -> Result<std::collections::BTreeSet<String>, Diagnostic> {
+/// If the source cannot be read completely, the set contains `"*"` instead:
+/// callers must keep every namespace. This scan never refuses source;
+/// lowering owns syntax diagnostics and the host's admission policy.
+pub fn source_identifiers(source: &str) -> std::collections::BTreeSet<String> {
     adapter::source_identifiers(source)
 }
 
