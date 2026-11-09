@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::arena::native::NewObject;
 use lash_kernel_doc::{Datum, JoinMode, TaskId, Value};
+use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::{FunctionId, ImportSlot, OperationUse};
 use lash_kernel_value::sites::{
     EffectIdentity, LoopIteration, Site, SpawnIdentity, TaskIdentity, TaskLabel, WaitCancellation,
@@ -121,7 +122,8 @@ pub(crate) struct Operation {
 
 /// Each perform's operation, by the owner of the code it stands in and
 /// its import slot; `Err` when it resolves to none.
-pub(crate) type Operations = HashMap<(Option<FunctionId>, ImportSlot), Result<Operation, String>>;
+pub(crate) type Operations =
+    HashMap<(LinkId, Option<FunctionId>, ImportSlot), Result<Operation, String>>;
 
 /// Every task of the run and what waits between them.
 pub(crate) struct Tasks {
@@ -489,7 +491,7 @@ impl<H: Heap> Vm<H> {
                         (true, Datum::Error(Box::new(error)), Type::Any)
                     }
                 };
-                match decode(&self.document, &raw, &ty) {
+                match decode(&self.document, &|c| self.callable(c), &raw, &ty) {
                     Ok(datum) if raised => Err(Flow::Raise(self.decoded(&datum)?)),
                     Ok(datum) => {
                         let value = self.decoded(&datum)?;
@@ -619,7 +621,7 @@ impl<H: Heap> Vm<H> {
                 then_yield,
                 site,
             } => {
-                let operation = match self.tasks.operations.get(&(*owner, *slot)) {
+                let operation = match self.tasks.operations.get(&(unit.link, *owner, *slot)) {
                     Some(Ok(operation)) => operation.clone(),
                     Some(Err(problem)) => return Err(fault(problem.clone())),
                     None => return Err(fault("a perform whose operation was never resolved")),
@@ -799,7 +801,7 @@ impl<H: Heap> Vm<H> {
     /// Decodes `datum` by `ty`, or gives the error its refusal raises
     /// (`K-EFF-005`, `K-EFF-007`).
     pub(crate) fn decode(&self, datum: &Datum, ty: &Type) -> Result<Datum, Datum> {
-        decode(&self.document, datum, ty)
+        decode(&self.document, &|c| self.callable(c), datum, ty)
     }
 
     /// `spawn`: the new task runs at once, and the spawner goes on when it
@@ -856,10 +858,10 @@ impl<H: Heap> Vm<H> {
             Callee::Unit { unit, .. } => Some(unit),
             Callee::Value => match value {
                 Some(Value::Closure(handle)) => found(self.heap.arena().closure(handle))?
-                    .and_then(|(identity, _, _)| self.closures.get(&identity.callable.function))
+                    .and_then(|(identity, _, _)| self.closures.get(&identity.callable))
                     .copied(),
                 Some(Value::Function(handle)) => found(self.heap.arena().callable(handle))?
-                    .and_then(|callable| self.functions.get(&callable.function))
+                    .and_then(|callable| self.functions.get(&callable))
                     .and_then(|trampoline| units[*trampoline as usize].calls.first())
                     .and_then(|call| match call.callee {
                         Callee::Unit { unit, .. } => Some(unit),
@@ -1134,16 +1136,18 @@ fn found<T>(found: Result<T, lash_kernel_doc::NativeError>) -> Run<Option<T>> {
 }
 
 /// Decodes `datum` by `ty` under `document`'s number policy, or gives the
-/// error datum its refusal raises.
+/// error datum its refusal raises. A function value is admitted only when
+/// `callable` holds it: by its Link and function.
 pub(crate) fn decode(
     document: &lash_kernel_doc::Document,
+    callable: &dyn Fn(&lash_kernel_value::CallableId) -> bool,
     datum: &Datum,
     ty: &Type,
 ) -> Result<Datum, Datum> {
     let decoder = lash_kernel_doc::Decoder {
         max_depth: super::value_depth(),
         policy: document.numbers,
-        declared: &|callable| document.functions.contains_key(&callable.function),
+        declared: callable,
     };
     decoder
         .decode(datum, ty)

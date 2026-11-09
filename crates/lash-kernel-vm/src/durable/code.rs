@@ -13,7 +13,6 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use lash_kernel_doc::Document;
 use lash_kernel_value::FunctionId;
 
 use crate::bytecode::op::Op;
@@ -30,7 +29,7 @@ use crate::vm::frames::Context;
 /// The helper an unavailable unit stands for, when a resume point reaches
 /// one.
 pub(crate) fn live(vm: &Vm<SlotHeap>) -> Result<BTreeSet<FunctionId>, FunctionId> {
-    let mut walk = Walk::new(&vm.program, &vm.document);
+    let mut walk = Walk::new(&vm.program);
     let tasks = &vm.tasks;
     for (number, task) in tasks.all.iter().enumerate() {
         let cx: &Context = if tasks.installed && number == tasks.running {
@@ -54,16 +53,12 @@ pub(crate) fn live(vm: &Vm<SlotHeap>) -> Result<BTreeSet<FunctionId>, FunctionId
 /// The build helpers stored code names: `code` holds the function of each
 /// closure or function value the heap sealed, or a helper already
 /// resolved.
-pub(crate) fn held(
-    program: &Program,
-    document: &Document,
-    code: &BTreeSet<FunctionId>,
-) -> BTreeSet<FunctionId> {
+pub(crate) fn held(program: &Program, code: &BTreeSet<FunctionId>) -> BTreeSet<FunctionId> {
     let closures: HashMap<FunctionId, UnitId> = closure_units(program);
     code.iter()
         .filter_map(|function| match closures.get(function) {
             Some(unit) => program.units[*unit as usize].owner,
-            None => (!document.functions.contains_key(function)).then_some(*function),
+            None => (!program.declares(function)).then_some(*function),
         })
         .collect()
 }
@@ -83,17 +78,15 @@ fn closure_units(program: &Program) -> HashMap<FunctionId, UnitId> {
 /// A forward walk over ops, each visited once.
 struct Walk<'p> {
     program: &'p Program,
-    document: &'p Document,
     seen: Vec<Vec<bool>>,
     work: Vec<(UnitId, u32)>,
     pins: BTreeSet<FunctionId>,
 }
 
 impl<'p> Walk<'p> {
-    fn new(program: &'p Program, document: &'p Document) -> Self {
+    fn new(program: &'p Program) -> Self {
         Self {
             program,
-            document,
             seen: program
                 .units
                 .iter()
@@ -110,7 +103,7 @@ impl<'p> Walk<'p> {
 
     /// Pins `function` when the build supplies it.
     fn pin(&mut self, function: FunctionId) {
-        if !self.document.functions.contains_key(&function) {
+        if !self.program.declares(&function) {
             self.pins.insert(function);
         }
     }
@@ -187,7 +180,7 @@ impl<'p> Walk<'p> {
                         if let Some(entry) = program
                             .functions
                             .iter()
-                            .find(|entry| entry.function == callable.function)
+                            .find(|entry| entry.callable == *callable)
                         {
                             self.enter(entry.unit, 0);
                         }

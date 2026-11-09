@@ -12,6 +12,7 @@
 pub(crate) mod calls;
 pub(crate) mod charge;
 pub(crate) mod datum;
+mod digests;
 pub(crate) mod frames;
 pub(crate) mod inline;
 pub(crate) mod loops;
@@ -21,16 +22,16 @@ pub(crate) mod plans;
 pub(crate) mod tasks;
 pub(crate) mod watch;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::arena::native::{NativeError, NewObject, Retry};
 use lash_kernel_doc::{Datum, Document, Measure, Value};
 use lash_kernel_value::data_limits::KernelDataLimits;
-use lash_kernel_value::names::{FunctionId, Name};
+use lash_kernel_value::names::{CallableId, Name};
 use lash_kernel_value::sites::Site;
 
+use self::digests::Digests;
 use crate::bytecode::charge_tables::RESULT;
 use crate::bytecode::op::Op;
 use crate::bytecode::program::{Callee, Constant, Operand, Program, Then, Unit, UnitId, UnitKind};
@@ -214,9 +215,10 @@ pub(crate) struct Vm<H: Heap> {
     pub limiter: Option<Box<dyn ChargeLimiter>>,
     /// The total a charge refusal reported, once one has.
     pub refused: Option<u64>,
-    /// Each closure function's body unit.
+    /// Each closure function's body unit, by its Link and function.
     closures: Digests<UnitId>,
-    /// Each function value's trampoline.
+    /// Each function value's trampoline, by its Link and function: every
+    /// function each loaded Link declares.
     functions: Digests<UnitId>,
     /// What observes the run; an observed run takes the exact path.
     pub watch: Option<Box<watch::Watch>>,
@@ -241,33 +243,13 @@ pub(crate) struct Vm<H: Heap> {
     pub(crate) chill: Option<fn(&mut H, &[Value])>,
 }
 
-/// A map keyed by function digests.
-type Digests<V> = HashMap<FunctionId, V, std::hash::BuildHasherDefault<DigestHasher>>;
-
-/// Hashes a function identity by its digest's first word: a SHA-256
-/// digest is already uniform, so no further mixing is needed.
-#[derive(Default)]
-struct DigestHasher(u64);
-
-impl std::hash::Hasher for DigestHasher {
-    #[inline]
-    fn write(&mut self, bytes: &[u8]) {
-        let mut word = [0; 8];
-        let n = bytes.len().min(8);
-        word[..n].copy_from_slice(&bytes[..n]);
-        self.0 ^= u64::from_le_bytes(word);
-    }
-
-    #[inline]
-    fn write_usize(&mut self, _: usize) {}
-
-    #[inline]
-    fn finish(&self) -> u64 {
-        self.0
-    }
-}
-
 impl<H: Heap> Vm<H> {
+    /// Whether a function value naming `callable` can enter the run: the
+    /// Link it names is loaded and declares it.
+    pub(crate) fn callable(&self, callable: &CallableId) -> bool {
+        self.program.callable(callable)
+    }
+
     /// An instance of `program` over `heap`, its constants placed and
     /// admitted. `limit` is the charge limit under `Charge::Exact`;
     /// `paced` selects `Charge::Off`.
@@ -324,13 +306,17 @@ impl<H: Heap> Vm<H> {
         let mut closures = Digests::default();
         for (at, unit) in program.units.iter().enumerate() {
             if let UnitKind::Closure(function) = unit.kind {
-                closures.insert(function, at as UnitId);
+                let callable = CallableId {
+                    link: unit.link,
+                    function,
+                };
+                closures.insert(callable, at as UnitId);
             }
         }
         let functions = program
             .functions
             .iter()
-            .map(|entry| (entry.function, entry.unit))
+            .map(|entry| (entry.callable, entry.unit))
             .collect();
         let globals = vec![Value::Absent; program.globals.len()];
         Ok(Self {

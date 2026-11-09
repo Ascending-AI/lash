@@ -36,13 +36,14 @@ pub(crate) fn admit(
     let units: HashMap<(UnitKind, &Site), &Unit> = program
         .units
         .iter()
+        .filter(|unit| unit.link == program.link)
         .map(|unit| ((save_kind(&unit.kind), &unit.site), unit))
         .collect();
     let tasks = &record.tasks;
     tasks_in_order(program, &units, tasks)?;
     running(record)?;
     queue(record)?;
-    waits(&units, operations, record)?;
+    waits(program.link, &units, operations, record)?;
     joins(record)?;
     for (number, task) in tasks.iter().enumerate() {
         frames(number as u32, task)?;
@@ -168,6 +169,7 @@ fn queue(record: &RunRecord) -> Result<(), Inadmissible> {
 /// delivered with its raw outcome while the task is ready to resume with
 /// it. No wait performs a read.
 fn waits(
+    link: lash_kernel_value::LinkId,
     units: &HashMap<(UnitKind, &Site), &Unit>,
     operations: &Operations,
     record: &RunRecord,
@@ -228,7 +230,7 @@ fn waits(
         {
             return Err(Inadmissible::WaitPoint { wait: number });
         }
-        if matches!(operations.get(&(*owner, *slot)), Some(Ok(operation)) if operation.read) {
+        if matches!(operations.get(&(link, *owner, *slot)), Some(Ok(operation)) if operation.read) {
             return Err(Inadmissible::ReadBoundWait { wait: number });
         }
     }

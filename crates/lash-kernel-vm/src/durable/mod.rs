@@ -122,9 +122,7 @@ pub(crate) fn seal(
         .into_iter()
         .collect();
     let heap = vm.heap.seal(&values.0)?;
-    let held_code = code::held(&program, &vm.document, &vm.heap.code)
-        .into_iter()
-        .collect();
+    let held_code = code::held(&program, &vm.heap.code).into_iter().collect();
     Ok(RunRecord {
         heap,
         entry,
@@ -167,9 +165,16 @@ fn number(at: usize) -> Result<u32, SealError> {
 }
 
 /// Each action and call site's occurrence counter, by its index.
+///
+/// Only the root Link's: a saved site names no Link, so another Link's
+/// counter is refused where it is saved, never read as the root's.
 fn occurrence_sites(program: &Program) -> HashMap<u32, Site> {
     let mut sites = HashMap::new();
-    for unit in &program.units {
+    for unit in program
+        .units
+        .iter()
+        .filter(|unit| unit.link == program.link)
+    {
         for call in &unit.calls {
             sites.insert(call.mark.occurrence, call.site.clone());
         }
@@ -225,7 +230,7 @@ fn save_task(
     for (occurrence, count) in &task.occurrences {
         let site = occurrences
             .get(occurrence)
-            .ok_or_else(|| fault("an occurrence counter names no site"))?;
+            .ok_or_else(|| fault("an occurrence counter names no root Link site"))?;
         counts.push(RunOccurrence {
             site: site.clone(),
             count: *count,
@@ -277,6 +282,14 @@ fn save_frame(
     values: &mut Values,
 ) -> Result<RunFrame, SealError> {
     let unit = &program.units[frame.unit as usize];
+    // A saved unit names no Link: another Link's frame cannot be saved
+    // until it does, and is never reopened as the root's.
+    if unit.link != program.link {
+        return Err(fault(format!(
+            "unit {} of another Link stands in the run",
+            unit.name
+        )));
+    }
     let base = frame.base as usize;
     let size = end
         .checked_sub(base)
@@ -512,6 +525,7 @@ pub(crate) fn open(
         .units
         .iter()
         .enumerate()
+        .filter(|(_, unit)| unit.link == program.link)
         .map(|(at, unit)| ((save_kind(&unit.kind), &unit.site), at as UnitId))
         .collect();
     let occurrences: HashMap<Site, u32> = occurrence_sites(&program)

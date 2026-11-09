@@ -124,6 +124,7 @@ pub fn compile_document(
         document,
         registry,
         link,
+        &[],
         entry.map(|export| export.function),
         entry.map(|export| &export.convention),
         None,

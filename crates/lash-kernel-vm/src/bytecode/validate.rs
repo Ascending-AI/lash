@@ -50,7 +50,10 @@ pub fn validate(program: &Program) -> Result<Vec<u32>, Malformed> {
     }
     for entry in &program.functions {
         if entry.unit as usize >= units {
-            return Err(whole(format!("function {} names no unit", entry.function)));
+            return Err(whole(format!(
+                "function {:?} names no unit",
+                entry.callable
+            )));
         }
     }
     for native in &program.natives {
@@ -783,6 +786,7 @@ mod tests {
         Program {
             units: vec![Unit {
                 kind: UnitKind::Main,
+                link: lash_kernel_value::LinkId::from_bytes([1; 32]),
                 covered: false,
                 params: 0,
                 locals: 0,
@@ -815,7 +819,9 @@ mod tests {
             constants: vec![Constant::Immediate(Value::Bool(true))],
             natives: Vec::new(),
             charges: Vec::new(),
+            link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             functions: Vec::new(),
+            declared: Default::default(),
             globals: Vec::new(),
             main: 0,
         }

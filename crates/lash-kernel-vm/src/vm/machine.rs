@@ -108,10 +108,22 @@ fn build(
     };
     let convention = export.map(|export| export.convention.clone());
     let registry = program.library.registry().clone();
+    // Every Link the build loads: a function value of one calls that
+    // Link's own body.
+    let others: Vec<(lash_kernel_value::LinkId, &Document)> = program
+        .instances
+        .iter()
+        .filter(|(link, _)| **link != program.link)
+        .filter_map(|(link, instance)| {
+            let document = program.documents.get(&instance.document)?;
+            Some((*link, &**document))
+        })
+        .collect();
     let mut code = crate::bytecode::conventions::compile_selected(
         document,
         &registry,
         program.link,
+        &others,
         export.map(|export| export.function),
         convention.as_ref(),
         available,
@@ -286,14 +298,15 @@ impl Machine for CoreMachine {
         let mut header = Header::of(&program, bounds, start.owner);
         header.host = start.host.iter().map(|(name, _)| name.clone()).collect();
         header.entry = entry;
+        let code = Arc::clone(&vm.program);
         let decoder = Decoder {
             max_depth: value_depth(),
             policy: document.numbers,
-            declared: &|callable| document.functions.contains_key(&callable.function),
+            declared: &|callable| code.callable(callable),
         };
         let mut args = Vec::with_capacity(params.len());
         if let Some(decoded) =
-            crate::bytecode::conventions::arguments(&document, export, &start.args)?
+            crate::bytecode::conventions::arguments(&document, &code, export, &start.args)?
         {
             for datum in &decoded {
                 args.push(Self::copy_in(&mut vm, datum)?);
@@ -708,17 +721,23 @@ fn operations(
             reads.insert(use_);
         }
     }
-    let link = program.link;
-    let instance = program.instances.get(&link);
-    let document = &program.document;
     let mut operations = HashMap::new();
     for unit in &code.units {
+        // A perform is filled in the Link whose code it is.
+        let link = unit.link;
         for action in &unit.actions {
             let ActionSite::Perform { owner, slot, .. } = action else {
                 continue;
             };
-            operations.entry((*owner, *slot)).or_insert_with(|| {
-                let instance = instance.ok_or("the program's Link is not loaded")?;
+            operations.entry((link, *owner, *slot)).or_insert_with(|| {
+                let instance = program
+                    .instances
+                    .get(&link)
+                    .ok_or("the perform's Link is not loaded")?;
+                let document = program
+                    .documents
+                    .get(&instance.document)
+                    .ok_or("the perform's document is not loaded")?;
                 let key = match owner {
                     Some(function) if !document.functions.contains_key(function) => {
                         let registered = program

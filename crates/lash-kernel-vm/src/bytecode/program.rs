@@ -1,8 +1,9 @@
 //! A compiled document (cutover contract §1): one [`Program`] per machine
 //! instance, never cached across instances. It holds code for each unit
-//! (main, every declared function, every kernel-code body reached, every
-//! closure body and spawn stub), the constant pool, each block's charge
-//! and pace tables (§3) and each unit's side tables.
+//! (main, every declared function of every Link the run's build loads,
+//! every kernel-code body reached, every closure body and spawn stub), the
+//! constant pool, each block's charge and pace tables (§3) and each unit's
+//! side tables. Each unit is compiled as the Link it belongs to.
 //!
 //! A `Program` is built by the compiler and checked once by the validator;
 //! nothing at run time re-checks its structure.
@@ -12,6 +13,7 @@ use std::sync::Arc;
 use lash_kernel_doc::arena::ClosureIdentity;
 use lash_kernel_doc::arena::native::{InlineOperation, NativeFunction};
 use lash_kernel_doc::{Integer, JoinMode, Value};
+use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot, Name};
 use lash_kernel_value::sites::Site;
 use lash_kernel_value::types::Type;
@@ -29,8 +31,15 @@ pub struct Program {
     pub natives: Vec<NativeEntry>,
     /// Completion formulas and guard limits, by index.
     pub charges: Vec<Charge>,
-    /// The functions a function value may name, by index.
+    /// The run's root Link: the one main and the entry belong to.
+    pub link: LinkId,
+    /// What a function value calls, by Link and function: each the root
+    /// Link's code names, and every function another loaded Link declares.
     pub functions: Vec<FunctionEntry>,
+    /// Every function each loaded Link declares: what a function value
+    /// entering the run may name. A value naming any other is refused
+    /// where it enters.
+    pub declared: std::collections::BTreeSet<CallableId>,
     /// The host bindings main's free names read (`CellStart::host`).
     pub globals: Vec<Name>,
     /// The unit a `Main` start runs.
@@ -89,6 +98,9 @@ impl Event {
 /// One unit's code and tables.
 pub struct Unit {
     pub kind: UnitKind,
+    /// The Link whose code this is: its function values, closures and
+    /// operation fills are that Link's.
+    pub link: LinkId,
     /// The unit runs inside a covered library extent (`K-CHG-007`): its
     /// event table holds only what charges there, and it creates no step.
     pub covered: bool,
@@ -469,10 +481,26 @@ pub struct NativeEntry {
     pub scalar: Option<InlineOperation>,
 }
 
+impl Program {
+    /// Whether a function value naming `callable` can enter a run of the
+    /// program: its Link is loaded and declares it.
+    pub fn callable(&self, callable: &CallableId) -> bool {
+        self.declared.contains(callable)
+    }
+
+    /// Whether some loaded Link declares `function`: otherwise it is a
+    /// library function, which a build image supplies.
+    pub fn declares(&self, function: &FunctionId) -> bool {
+        self.declared
+            .iter()
+            .any(|callable| callable.function == *function)
+    }
+}
+
 /// A function a function value names: applying it calls `unit`, a
 /// trampoline that makes the ordinary charged call.
 #[derive(Clone, Debug)]
 pub struct FunctionEntry {
-    pub function: FunctionId,
+    pub callable: CallableId,
     pub unit: UnitId,
 }

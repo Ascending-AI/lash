@@ -21,6 +21,7 @@ pub(crate) fn compile_selected(
     document: &Document,
     registry: &lash_kernel_doc::FunctionRegistry,
     link: lash_kernel_value::LinkId,
+    others: &[(lash_kernel_value::LinkId, &Document)],
     entry: Option<FunctionId>,
     convention: Option<&StartConvention>,
     available: Option<&lash_kernel_doc::BuildHelpers>,
@@ -35,7 +36,7 @@ pub(crate) fn compile_selected(
             !matches!(export, Export::Function(export) if export.function == entry && &export.convention != convention)
         });
     }
-    super::compile::compile(&selected, registry, link, entry, available)
+    super::compile::compile(&selected, registry, link, others, entry, available)
 }
 
 /// Selects an entry's unit, retaining the existing path for other conventions.
@@ -123,6 +124,7 @@ fn append(unit: &mut Unit, ops: &[Op]) {
 /// Other conventions retain the machine's existing decoding path.
 pub(crate) fn arguments(
     document: &Document,
+    code: &super::program::Program,
     export: Option<&lash_kernel_doc::FunctionExport>,
     raw: &[Datum],
 ) -> std::result::Result<Option<Vec<Datum>>, StartError> {
@@ -135,7 +137,7 @@ pub(crate) fn arguments(
     let decoder = Decoder {
         max_depth: crate::vm::value_depth(),
         policy: document.numbers,
-        declared: &|callable| document.functions.contains_key(&callable.function),
+        declared: &|callable| code.callable(callable),
     };
     let mut args = Vec::new();
     for (at, param) in export.signature.params.iter().enumerate() {

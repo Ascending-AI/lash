@@ -4,7 +4,10 @@
 //! Units are compiled on first reach: main, then every function a call
 //! names, every closure body where its expression stands, every function
 //! value's trampoline and every spawn's stub. A unit index is reserved
-//! before its body compiles, so recursion resolves. [`lower`](super::lower)
+//! before its body compiles, so recursion resolves. Then every function
+//! each other loaded Link declares gets its trampoline, compiled as that
+//! Link: a function value names a Link and a function, and calls that
+//! Link's body or nothing. [`lower`](super::lower)
 //! emits each unit's statements; [`Compiler::seal`] cuts its blocks and
 //! derives the charge, pace and step tables.
 
@@ -45,7 +48,8 @@ pub(crate) fn unsupported<T>(what: impl Into<String>) -> Result<T> {
 
 /// Compiles `document`, whose library functions `registry` holds, as
 /// instance `link`: its `main`, or the declared function `entry`, is the
-/// unit a start runs.
+/// unit a start runs. `others` are the other Links the run's build loads,
+/// each with its own document.
 ///
 /// An open under another build image passes that image as `available`: a
 /// build helper it lacks compiles to a unit that refuses when it runs
@@ -54,6 +58,7 @@ pub fn compile(
     document: &Document,
     registry: &FunctionRegistry,
     link: LinkId,
+    others: &[(LinkId, &Document)],
     entry: Option<FunctionId>,
     available: Option<&BuildHelpers>,
 ) -> Result<Program> {
@@ -63,6 +68,13 @@ pub fn compile(
         Some(entry) => super::conventions::entry(&mut compiler, entry)?,
         None => compiler.main()?,
     };
+    compiler.declare_all(false);
+    for (other, document) in others {
+        if *other != link {
+            compiler.enter_link(*other, document);
+            compiler.declare_all(true);
+        }
+    }
     compiler.finish(main)
 }
 
@@ -314,31 +326,45 @@ impl Fun {
     }
 }
 
+/// What the compiler has made for one Link: a function id, a function
+/// literal or a helper's perform means that Link's own, so each Link's
+/// code is compiled, and found again, apart.
+#[derive(Default)]
+struct LinkCode {
+    immediates: HashMap<Literal, u32>,
+    native_ids: HashMap<FunctionId, u32>,
+    charge_ids: HashMap<FunctionId, u32>,
+    bodies: HashMap<(FunctionId, bool), UnitId>,
+    stubs: HashMap<(Option<FunctionId>, u8), UnitId>,
+    free: HashMap<FunctionId, BTreeSet<Name>>,
+    /// The unit each unavailable helper compiled to.
+    missing: HashMap<FunctionId, UnitId>,
+}
+
 /// The compiler's program-wide state.
 pub(crate) struct Compiler<'a> {
+    /// The document of the Link being compiled.
     pub document: &'a Document,
     pub registry: &'a FunctionRegistry,
+    /// The Link being compiled.
     pub link: LinkId,
+    /// The run's root Link: main's and the entry's.
+    root: LinkId,
+    scope: LinkCode,
     pub units: Vec<Option<Unit>>,
     pub constants: Vec<Constant>,
-    immediates: HashMap<Literal, u32>,
     pub natives: Vec<NativeEntry>,
-    native_ids: HashMap<FunctionId, u32>,
     pub charges: Vec<Charge>,
-    charge_ids: HashMap<FunctionId, u32>,
-    pub functions: BTreeMap<FunctionId, UnitId>,
+    pub functions: BTreeMap<CallableId, UnitId>,
+    /// The functions each compiled Link declares.
+    declares: BTreeSet<CallableId>,
     pub globals: Vec<Name>,
     global_ids: HashMap<Name, u16>,
-    bodies: HashMap<(FunctionId, bool), UnitId>,
-    pub stubs: HashMap<(Option<FunctionId>, u8), UnitId>,
-    free: HashMap<FunctionId, BTreeSet<Name>>,
     /// Each action site's occurrence counter index (`K-EFF-008`).
-    occurrences: HashMap<Site, u32>,
+    occurrences: HashMap<(LinkId, Site), u32>,
     /// The build image an open compiles under, when it is not the one the
     /// run sealed under: the helpers it lacks are unavailable.
     available: Option<&'a BuildHelpers>,
-    /// The unit each unavailable helper compiled to.
-    missing: HashMap<FunctionId, UnitId>,
 }
 
 impl<'a> Compiler<'a> {
@@ -347,22 +373,50 @@ impl<'a> Compiler<'a> {
             document,
             registry,
             link,
+            root: link,
+            scope: LinkCode::default(),
             units: Vec::new(),
             constants: Vec::new(),
-            immediates: HashMap::new(),
             natives: Vec::new(),
-            native_ids: HashMap::new(),
             charges: Vec::new(),
-            charge_ids: HashMap::new(),
             functions: BTreeMap::new(),
+            declares: BTreeSet::new(),
             globals: Vec::new(),
             global_ids: HashMap::new(),
-            bodies: HashMap::new(),
-            stubs: HashMap::new(),
-            free: HashMap::new(),
             occurrences: HashMap::new(),
             available: None,
-            missing: HashMap::new(),
+        }
+    }
+
+    /// Compiles Link `link`, whose document is `document`, from here on.
+    fn enter_link(&mut self, link: LinkId, document: &'a Document) {
+        self.document = document;
+        self.link = link;
+        self.scope = LinkCode::default();
+    }
+
+    /// Records the functions the Link being compiled declares and, when
+    /// `compile`, gives each its trampoline. One the core cannot compile
+    /// is a unit that refuses when it runs (contract §7), as is every
+    /// unit its attempt reserved.
+    fn declare_all(&mut self, compile: bool) {
+        let document = self.document;
+        for id in document.functions.keys() {
+            self.declares.insert(CallableId {
+                link: self.link,
+                function: *id,
+            });
+            if !compile {
+                continue;
+            }
+            let from = self.units.len();
+            if let Err(error) = self.trampoline(*id) {
+                for at in from..self.units.len() {
+                    if self.units[at].is_none() {
+                        self.units[at] = Some(self.unavailable(&error.0));
+                    }
+                }
+            }
         }
     }
 
@@ -400,8 +454,10 @@ impl<'a> Compiler<'a> {
             functions: self
                 .functions
                 .into_iter()
-                .map(|(function, unit)| FunctionEntry { function, unit })
+                .map(|(callable, unit)| FunctionEntry { callable, unit })
                 .collect(),
+            declared: self.declares,
+            link: self.root,
             globals: self.globals,
             main,
         })
@@ -428,7 +484,7 @@ impl<'a> Compiler<'a> {
     // --- Constants.
 
     pub(crate) fn constant(&mut self, literal: &Literal) -> u32 {
-        if let Some(at) = self.immediates.get(literal) {
+        if let Some(at) = self.scope.immediates.get(literal) {
             return *at;
         }
         let constant = match literal {
@@ -452,7 +508,7 @@ impl<'a> Compiler<'a> {
         };
         let at = self.constants.len() as u32;
         self.constants.push(constant);
-        self.immediates.insert(literal.clone(), at);
+        self.scope.immediates.insert(literal.clone(), at);
         at
     }
 
@@ -501,11 +557,11 @@ impl<'a> Compiler<'a> {
     /// The names a function body reads or writes and does not bind,
     /// through the closures it makes.
     pub(crate) fn free_names(&mut self, id: FunctionId) -> Result<BTreeSet<Name>> {
-        if let Some(free) = self.free.get(&id) {
+        if let Some(free) = self.scope.free.get(&id) {
             return Ok(free.clone());
         }
         // A closure that names itself recurses no further.
-        self.free.insert(id, BTreeSet::new());
+        self.scope.free.insert(id, BTreeSet::new());
         let definition = self.def(&id)?;
         let Some(body) = definition.body() else {
             return unsupported(format!("closure {id} has no body"));
@@ -522,7 +578,7 @@ impl<'a> Compiler<'a> {
             found.block(&body.block)?;
             found.free
         };
-        self.free.insert(id, free.clone());
+        self.scope.free.insert(id, free.clone());
         Ok(free)
     }
 
@@ -540,6 +596,13 @@ impl<'a> Compiler<'a> {
         let Some(body) = definition.body() else {
             return unsupported(format!("function {id} has no kernel body"));
         };
+        // A free name is a host binding of the root Link's main: another
+        // Link's function must not read the root's.
+        if outer.is_none() && self.link != self.root && !self.free_names(id)?.is_empty() {
+            return unsupported(format!(
+                "function {id} of another Link reads names its own Link binds"
+            ));
+        }
         let owner = match outer {
             Some(outer) => outer.owner,
             None if self.document.functions.contains_key(&id) => None,
@@ -586,11 +649,11 @@ impl<'a> Compiler<'a> {
     /// The unit that runs library or declared function `id`'s body,
     /// `covered` or not.
     pub(crate) fn body(&mut self, id: FunctionId, covered: bool) -> Result<UnitId> {
-        if let Some(unit) = self.bodies.get(&(id, covered)) {
+        if let Some(unit) = self.scope.bodies.get(&(id, covered)) {
             return Ok(*unit);
         }
         let at = self.reserve();
-        self.bodies.insert((id, covered), at);
+        self.scope.bodies.insert((id, covered), at);
         let kind = if self.document.functions.contains_key(&id) {
             UnitKind::Declared(id)
         } else {
@@ -599,7 +662,7 @@ impl<'a> Compiler<'a> {
         match self.function(id, None, at, covered, kind) {
             Ok(_) => Ok(at),
             Err(error) => {
-                self.bodies.remove(&(id, covered));
+                self.scope.bodies.remove(&(id, covered));
                 // The reserved index keeps a unit that says why it cannot run.
                 self.units[at as usize] = Some(self.unavailable(&error.0));
                 Err(error)
@@ -615,14 +678,14 @@ impl<'a> Compiler<'a> {
         if self.document.functions.contains_key(&id) || available.contains(&id) {
             return None;
         }
-        if let Some(unit) = self.missing.get(&id) {
+        if let Some(unit) = self.scope.missing.get(&id) {
             return Some(*unit);
         }
         let at = self.reserve();
         let mut unit = self.unavailable(&format!("build helper {id} is unavailable"));
         unit.owner = Some(id);
         self.units[at as usize] = Some(unit);
-        self.missing.insert(id, at);
+        self.scope.missing.insert(id, at);
         Some(at)
     }
 
@@ -642,12 +705,12 @@ impl<'a> Compiler<'a> {
         id: FunctionId,
         definition: &FunctionDefinition,
     ) -> Option<u32> {
-        if let Some(at) = self.charge_ids.get(&id) {
+        if let Some(at) = self.scope.charge_ids.get(&id) {
             return Some(*at);
         }
         let formula = charge_tables::completion(definition, false)?;
         let at = self.formula(formula, definition);
-        self.charge_ids.insert(id, at);
+        self.scope.charge_ids.insert(id, at);
         Some(at)
     }
 
@@ -725,7 +788,7 @@ impl<'a> Compiler<'a> {
         definition: &FunctionDefinition,
         native: Arc<dyn lash_kernel_doc::NativeFunction>,
     ) -> Result<u32> {
-        if let Some(at) = self.native_ids.get(&id) {
+        if let Some(at) = self.scope.native_ids.get(&id) {
             return Ok(*at);
         }
         let Some(charge) = self.charge(id, definition) else {
@@ -763,7 +826,7 @@ impl<'a> Compiler<'a> {
             body: None,
             scalar,
         });
-        self.native_ids.insert(id, at);
+        self.scope.native_ids.insert(id, at);
         // A decline runs the definition's body under the native's cover
         // (`K-LIB-006`). A body the core cannot compile leaves the decline
         // to refuse.
@@ -778,16 +841,20 @@ impl<'a> Compiler<'a> {
     /// The trampoline a function value naming `id` applies: it makes the
     /// ordinary call, so applying the value charges what calling `id` does.
     pub(crate) fn trampoline(&mut self, id: FunctionId) -> Result<()> {
-        if self.functions.contains_key(&id) {
+        let callable = CallableId {
+            link: self.link,
+            function: id,
+        };
+        if self.functions.contains_key(&callable) {
             return Ok(());
         }
         if let Some(unit) = self.missing(id) {
-            self.functions.insert(id, unit);
+            self.functions.insert(callable, unit);
             return Ok(());
         }
         let definition = self.def(&id)?;
         let at = self.reserve();
-        self.functions.insert(id, at);
+        self.functions.insert(callable, at);
         let argc = definition.signature.params.len();
         let mut f = Fun::new(SiteUnit::Library(id), false, false, None);
         f.locals = argc as u16;
@@ -824,7 +891,10 @@ impl<'a> Compiler<'a> {
     /// Where `f` stands at the call or action at `site`.
     pub(crate) fn mark(&mut self, f: &Fun, site: &Site) -> Arc<Mark> {
         let next = self.occurrences.len() as u32;
-        let occurrence = *self.occurrences.entry(site.clone()).or_insert(next);
+        let occurrence = *self
+            .occurrences
+            .entry((self.link, site.clone()))
+            .or_insert(next);
         Arc::new(Mark {
             statement: f.statement.clone(),
             loops: f.enclosing.iter().cloned().collect(),
@@ -836,11 +906,11 @@ impl<'a> Compiler<'a> {
     /// callee first), and it makes the call. A task is no part of its
     /// spawner's call, so a covered spawner's cover does not reach it.
     pub(crate) fn stub(&mut self, f: &Fun, callee: Option<FunctionId>, argc: u8) -> Result<UnitId> {
-        if let Some(unit) = self.stubs.get(&(callee, argc)) {
+        if let Some(unit) = self.scope.stubs.get(&(callee, argc)) {
             return Ok(*unit);
         }
         let at = self.reserve();
-        self.stubs.insert((callee, argc), at);
+        self.scope.stubs.insert((callee, argc), at);
         let values = u16::from(argc) + u16::from(callee.is_none());
         let site_unit = f.site.clone();
         let mut g = Fun::new(site_unit, false, false, f.owner);
@@ -981,6 +1051,7 @@ impl<'a> Compiler<'a> {
         boxed.sort_unstable();
         Unit {
             kind,
+            link: self.link,
             covered,
             params,
             locals: locals.max(params),

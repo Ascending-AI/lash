@@ -445,7 +445,7 @@ fn library_declaring(native_twice: bool, probes: Option<Probes>, inline: bool) -
 /// `probes` and `inline`: its natives hold no state, and a deployment
 /// shares one registry across its runs too. A cold reopen still builds
 /// its own.
-fn shared_library(native_twice: bool, probes: Option<Probes>, inline: bool) -> Library {
+pub(crate) fn shared_library(native_twice: bool, probes: Option<Probes>, inline: bool) -> Library {
     let key = (native_twice, probes.map(|probes| probes as usize), inline);
     LAW_LIBRARIES.with_borrow_mut(|held| {
         held.entry(key)
@@ -1001,6 +1001,21 @@ fn operation_name(slot: lash_kernel_value::OperationSlot) -> &'static str {
 }
 /// Prepare a final Document and its Operation Uses as one linked instance.
 pub(crate) fn program(document: Arc<Document>, library: PreparedLibrary) -> Program {
+    let link = link(&document);
+    Program::prepare(
+        link.identity(),
+        BTreeMap::from([(document.identity(), document)]),
+        &BTreeMap::from([(link.identity(), link)]),
+        PageId([8; 32]),
+        library,
+        lash_kernel_doc::Selection::Fresh,
+    )
+    .unwrap()
+}
+
+/// `document` as a Link whose every import is an operation filled under
+/// contract 1.
+pub(crate) fn link(document: &Document) -> lash_kernel_value::package::Link {
     use {
         lash_kernel_value::ContractId, lash_kernel_value::ImportKind,
         lash_kernel_value::OperationRequirement, lash_kernel_value::package::Fill,
@@ -1022,20 +1037,11 @@ pub(crate) fn program(document: Arc<Document>, library: PreparedLibrary) -> Prog
             )
         })
         .collect();
-    let link = Link {
+    Link {
         helper_fills: Default::default(),
         document: document.identity(),
         fills,
-    };
-    Program::prepare(
-        link.identity(),
-        BTreeMap::from([(document.identity(), document)]),
-        &BTreeMap::from([(link.identity(), link)]),
-        PageId([8; 32]),
-        library,
-        lash_kernel_doc::Selection::Fresh,
-    )
-    .unwrap()
+    }
 }
 
 /// Build law Documents from final definition and main forms. Library definitions

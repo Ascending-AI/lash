@@ -81,13 +81,13 @@ impl<H: Heap> Vm<H> {
         let callee = self.cx.stack[at];
         let (unit, closure) = match callee {
             Value::Closure(handle) => {
-                let function = {
+                let callable = {
                     let (identity, _, _) = self.heap.arena().closure(handle).map_err(read)?;
-                    identity.callable.function
+                    identity.callable
                 };
                 let unit = *self
                     .closures
-                    .get(&function)
+                    .get(&callable)
                     .ok_or_else(|| fault("a closure of a body the program lacks"))?;
                 (unit, Some(handle))
             }
@@ -95,7 +95,7 @@ impl<H: Heap> Vm<H> {
                 let callable = self.heap.arena().callable(handle).map_err(read)?;
                 let unit = *self
                     .functions
-                    .get(&callable.function)
+                    .get(&callable)
                     .ok_or_else(|| fault("a function value the program cannot call"))?;
                 (unit, None)
             }
