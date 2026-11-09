@@ -313,13 +313,13 @@ fn a_crash_before_a_grown_limit_is_saved_asks_again() {
         },
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let (root, certificate) = embedder.checkpoint();
+    let root = embedder.checkpoint();
     assert_eq!(root.limits.charge, total / 2);
     let pending = embedder.pending.clone();
     let mut attempts = Vec::new();
     for _ in 0..2 {
         let limiter = Scripted::answering([LimitDecision::Grow(GROW)]);
-        embedder.open_at(&root, certificate, crate::Layout::default(), true);
+        embedder.open_at(&root, crate::Layout::default(), true);
         limited(&mut embedder, Which::Charge, Some(&limiter));
         embedder.pending = pending.clone();
         embedder.world.printed.clear();

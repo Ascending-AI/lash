@@ -75,9 +75,9 @@ fn observe(
         match embedder.run() {
             Step::Ended(end) => break end,
             Step::Slice if cold && !source => {
-                let (root, certificate) = embedder.checkpoint();
+                let root = embedder.checkpoint();
                 let (program, library) = embedder.program(true);
-                embedder.machine = crate::KernelMachine::open_with_census(
+                embedder.machine = crate::KernelMachine::open_in(
                     program,
                     embedder.bounds,
                     &root,
@@ -85,12 +85,6 @@ fn observe(
                         source: embedder.source.clone(),
                         reads: Rc::clone(&reads),
                     }),
-                    Box::new(
-                        lash_kernel_state::kernel_internals::census_impl::Census::restore(
-                            certificate,
-                        )
-                        .unwrap(),
-                    ),
                     layout,
                 )
                 .unwrap();

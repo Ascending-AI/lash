@@ -213,6 +213,8 @@ pub(crate) struct Vm<H: Heap> {
     fresh: bool,
     pub call_depth: u32,
     pub limiter: Option<Box<dyn ChargeLimiter>>,
+    /// What decides where an allocation passes the memory bound.
+    pub memory_limiter: Option<Box<dyn crate::interface::MemoryLimiter>>,
     /// The total a charge refusal reported, once one has.
     pub refused: Option<u64>,
     /// Each closure function's body unit, by its Link and function.
@@ -336,6 +338,7 @@ impl<H: Heap> Vm<H> {
             fresh: false,
             call_depth,
             limiter: None,
+            memory_limiter: None,
             refused: None,
             closures,
             functions,
@@ -688,9 +691,23 @@ impl<H: Heap> Vm<H> {
     #[inline(never)]
     fn admit_collected(&mut self, units: u64) -> Run<()> {
         self.collect();
-        self.heap
-            .admit(units)
-            .map_err(|refused| Flow::from(Stop::bound(memory(refused))))
+        loop {
+            let Err(refused) = self.heap.admit(units) else {
+                return Ok(());
+            };
+            // The host decides once a collection leaves the bound passed
+            // (FIG-6768), and is asked again while what it grew still
+            // leaves it passed.
+            let used = refused.held.saturating_add(refused.wanted);
+            let decision = match self.memory_limiter.as_mut() {
+                Some(limiter) => limiter.limit_reached(used, refused.bound),
+                None => LimitDecision::Refuse,
+            };
+            match decision {
+                LimitDecision::Grow(more) if more > 0 => self.heap.grow(more),
+                _ => return Err(Flow::from(Stop::bound(memory(refused)))),
+            }
+        }
     }
 
     /// Places `object`, admitted first.

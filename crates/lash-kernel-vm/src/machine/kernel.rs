@@ -24,6 +24,11 @@ pub struct KernelMachine {
     /// run: a run with it set refuses (see [`retired`]).
     #[cfg(test)]
     pub(crate) boundary: Option<Box<dyn FnMut(u64) -> super::Boundary>>,
+    /// What the laws' observation probes have turned on.
+    #[cfg(test)]
+    observing: bool,
+    #[cfg(test)]
+    path: bool,
 }
 
 impl std::fmt::Debug for KernelMachine {
@@ -42,6 +47,10 @@ impl KernelMachine {
             core,
             #[cfg(test)]
             boundary: None,
+            #[cfg(test)]
+            observing: false,
+            #[cfg(test)]
+            path: false,
         }
     }
 
@@ -107,6 +116,11 @@ impl Machine for KernelMachine {
     }
 
     fn set_options(&mut self, options: MachineOptions) {
+        #[cfg(test)]
+        {
+            self.observing = !options.observation.is_off();
+            self.path = options.trace_path;
+        }
         self.core.set_options(options);
     }
 
@@ -189,12 +203,12 @@ impl KernelMachine {
         Self::start(program, bounds, start, source)
     }
 
-    pub(crate) fn open_with_census(
+    /// Opens `root` in `layout`, which the core ignores: it has one.
+    pub(crate) fn open_in(
         program: Program,
         bounds: Bounds,
         root: &lash_kernel_state::paged::CheckpointRoot,
         source: Box<dyn PageSource>,
-        _census: Box<dyn lash_kernel_state::paged::AllocationCensus>,
         _layout: crate::compile::Layout,
     ) -> Result<Self, OpenError> {
         let checkpoint = lash_kernel_state::kernel_internals::checkpoint(root.clone());
@@ -207,16 +221,12 @@ impl KernelMachine {
     pub(crate) fn force_generic_regions(&mut self) {}
 
     pub(crate) fn set_observe(&mut self, observe: crate::ObservationMode) {
-        self.set_options(MachineOptions {
-            observation: observe,
-            ..MachineOptions::default()
-        });
+        self.observing = !observe.is_off();
+        self.core.watch(self.observing, self.path);
     }
     pub(crate) fn trace_path(&mut self) {
-        self.set_options(MachineOptions {
-            trace_path: true,
-            ..MachineOptions::default()
-        });
+        self.path = true;
+        self.core.watch(self.observing, self.path);
     }
     pub(crate) fn take_ran(&mut self) -> SiteCounts {
         self.take_counts()
@@ -252,9 +262,6 @@ impl KernelMachine {
         lash_kernel_doc::heap::HeapFault,
     > {
         retired("logical_balance")
-    }
-    pub(crate) fn accounting(&self) -> lash_kernel_state::paged::AccountingCertificate {
-        retired("accounting")
     }
     pub(crate) fn cold_reads(&self) -> u64 {
         retired("cold_reads")

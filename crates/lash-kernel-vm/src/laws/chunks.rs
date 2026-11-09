@@ -97,20 +97,17 @@ fn point_write(build: &str, length: u64) -> (u64, u64, u64) {
         },
     );
     park(&mut embedder);
-    let (root, certificate) = embedder.checkpoint();
+    let root = embedder.checkpoint();
     let counting = Counting {
         inner: embedder.source.clone(),
         ..Counting::default()
     };
     let (program, library) = embedder.program(true);
-    embedder.machine = crate::KernelMachine::open_with_census(
+    embedder.machine = crate::KernelMachine::open_in(
         program,
         ROOMY,
         &root,
         Box::new(counting.clone()),
-        Box::new(
-            lash_kernel_state::kernel_internals::census_impl::Census::restore(certificate).unwrap(),
-        ),
         Layout::default(),
     )
     .unwrap();

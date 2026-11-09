@@ -579,6 +579,10 @@ impl Heap for SlotHeap {
         self.bound
     }
 
+    fn grow(&mut self, units: u64) {
+        self.bound = self.bound.saturating_add(units);
+    }
+
     fn create(&mut self, object: NewObject) -> Result<Value, NativeError> {
         let admitted = schedule(&object);
         let value = self.arena.create(object)?;

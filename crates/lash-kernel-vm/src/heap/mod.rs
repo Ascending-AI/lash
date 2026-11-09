@@ -46,6 +46,9 @@ pub(crate) trait Heap {
     /// The memory bound, in schedule units (`Bounds::memory`).
     fn bound(&self) -> u64;
 
+    /// Raises the memory bound by `units`, as a memory limiter grew it.
+    fn grow(&mut self, units: u64);
+
     /// Returns `units` admitted for a holding that has ended: a transient,
     /// a frame that left, a raw outcome decoded.
     fn release(&mut self, units: u64);

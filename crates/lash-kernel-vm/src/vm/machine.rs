@@ -204,6 +204,14 @@ impl CoreMachine {
     }
 
     /// How many waits the run holds issued.
+    /// Observes the run's counts, its path, both or neither from here,
+    /// keeping its limiters and its charge tape.
+    pub(crate) fn watch(&mut self, observing: bool, path: bool) {
+        let tape = self.vm.watch.take().and_then(|watch| watch.tape);
+        self.vm.watch =
+            Watch::new(&self.document, &self.vm.program, observing, path, tape).map(Box::new);
+    }
+
     #[cfg(test)]
     pub(crate) fn wait_count(&self) -> u64 {
         self.vm.tasks.waits.len() as u64
@@ -467,15 +475,8 @@ impl Machine for CoreMachine {
 
     fn set_options(&mut self, options: MachineOptions) {
         self.vm.limiter = options.charge_limiter;
-        let tape = self.vm.watch.take().and_then(|watch| watch.tape);
-        self.vm.watch = Watch::new(
-            &self.document,
-            &self.vm.program,
-            !options.observation.is_off(),
-            options.trace_path,
-            tape,
-        )
-        .map(Box::new);
+        self.vm.memory_limiter = options.memory_limiter;
+        self.watch(!options.observation.is_off(), options.trace_path);
     }
 
     fn take_counts(&mut self) -> SiteCounts {
@@ -602,11 +603,16 @@ impl Machine for CoreMachine {
         let header = &self.header;
         let root = CheckpointRoot {
             limits: SavedLimits {
+                // The limits the run's limiters grew, not the ones it
+                // started with: the reopened run resumes under them
+                // (FIG-6768). A paced run's meter has no limit to grow.
                 memory: (header.bounds.memory_meter == crate::MemoryMeter::On)
-                    .then_some(header.bounds.memory),
-                // The limit a charge limiter grew, not the one the run
-                // started with: the reopened run resumes under it (FIG-6768).
-                charge: self.vm.charge_limit(),
+                    .then(|| self.vm.heap.bound()),
+                charge: if self.vm.paced() {
+                    header.bounds.charge_limit
+                } else {
+                    self.vm.charge_limit()
+                },
             },
             kernel: header.kernel,
             document: header.document,

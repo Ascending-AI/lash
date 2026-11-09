@@ -777,26 +777,23 @@ impl Embedder {
     /// in `layout` against a program compiled afresh, in which `pair.twice`
     /// runs natively or not. The root it opened.
     pub(crate) fn reopen(&mut self, layout: Layout, native_twice: bool) -> CheckpointRoot {
-        let (root, certificate) = self.checkpoint();
-        self.open_at(&root, certificate, layout, native_twice);
+        let root = self.checkpoint();
+        self.open_at(&root, layout, native_twice);
         root
     }
 
     /// [`Self::reopen`], or why the seal or the open refused: a bound a
     /// law runs under can refuse at either.
     pub(crate) fn try_reopen(&mut self, layout: Layout, native_twice: bool) -> Result<(), String> {
-        let (root, certificate) = self
+        let root = self
             .try_checkpoint()
             .map_err(|error| format!("{error:?}"))?;
         let (program, library) = self.program(native_twice);
-        let census = lash_kernel_state::kernel_internals::census_impl::Census::restore(certificate)
-            .map_err(|error| format!("{error:?}"))?;
-        self.machine = crate::KernelMachine::open_with_census(
+        self.machine = crate::KernelMachine::open_in(
             program,
             self.bounds,
             &root,
             Box::new(self.source.clone()),
-            Box::new(census),
             layout,
         )
         .map_err(|error| format!("{error:?}"))?;
@@ -805,15 +802,13 @@ impl Embedder {
     }
 
     /// Seals the run whole, as a node commits it, leaving it running: the
-    /// root and the accounting another node opens it with.
-    pub(crate) fn checkpoint(&mut self) -> (CheckpointRoot, AccountingCertificate) {
+    /// root another node opens it from.
+    pub(crate) fn checkpoint(&mut self) -> CheckpointRoot {
         self.try_checkpoint().unwrap()
     }
 
     /// [`Self::checkpoint`], or why the machine refused to seal.
-    pub(crate) fn try_checkpoint(
-        &mut self,
-    ) -> Result<(CheckpointRoot, AccountingCertificate), crate::SealError> {
+    pub(crate) fn try_checkpoint(&mut self) -> Result<CheckpointRoot, crate::SealError> {
         let sealed = self
             .machine
             .seal(SealBudget {
@@ -821,32 +816,21 @@ impl Embedder {
                 bytes: u64::MAX,
             })?
             .unwrap();
-        let certificate = self.machine.accounting();
         let root: CheckpointRoot = lash_kernel_value::tokens::decode_body(
             &lash_kernel_value::tokens::encode_body(&sealed.root),
         )
         .unwrap();
-        Ok((root, certificate))
+        Ok(root)
     }
 
     /// Opens `root`, a checkpoint of this run, cold in another machine.
-    pub(crate) fn open_at(
-        &mut self,
-        root: &CheckpointRoot,
-        certificate: AccountingCertificate,
-        layout: Layout,
-        native_twice: bool,
-    ) {
+    pub(crate) fn open_at(&mut self, root: &CheckpointRoot, layout: Layout, native_twice: bool) {
         let (program, library) = self.program(native_twice);
-        self.machine = crate::KernelMachine::open_with_census(
+        self.machine = crate::KernelMachine::open_in(
             program,
             self.bounds,
             root,
             Box::new(self.source.clone()),
-            Box::new(
-                lash_kernel_state::kernel_internals::census_impl::Census::restore(certificate)
-                    .unwrap(),
-            ),
             layout,
         )
         .unwrap();

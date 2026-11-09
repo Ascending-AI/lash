@@ -967,7 +967,7 @@ impl lash_kernel_state::paged::PageSource for Untouched {
 fn a_root_stated_under_another_format_is_refused() {
     use lash_kernel_state::paged::{FormatValue, StatedFormat};
     let mut embedder = waiting();
-    let (root, _) = embedder.checkpoint();
+    let root = embedder.checkpoint();
     let root = lash_kernel_state::kernel_internals::checkpoint(root);
     let cases = [
         (

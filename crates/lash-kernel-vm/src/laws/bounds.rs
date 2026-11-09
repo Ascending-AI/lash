@@ -536,7 +536,7 @@ fn charge_off_survives_a_resume_on_a_fresh_worker() {
         },
     );
     assert!(matches!(run.run(), Step::Parked(_)));
-    let (root, _) = run.checkpoint();
+    let root = run.checkpoint();
     assert_eq!(root.meters.charge(), crate::Charge::Off);
     // New preparation, another layout and deliberately opposite worker defaults.
     let (program, _) = run.program(false);
@@ -582,9 +582,9 @@ fn memory_off_removes_accounting_and_survives_a_cold_resume() {
         },
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let (root, certificate) = embedder.checkpoint();
+    let root = embedder.checkpoint();
     assert_eq!(root.limits.memory, None);
-    embedder.open_at(&root, certificate, crate::Layout::default(), true);
+    embedder.open_at(&root, crate::Layout::default(), true);
     embedder.deliver("park");
     crate::perf_witness::enable_work();
     let end = embedder.run_to_end(&[]);

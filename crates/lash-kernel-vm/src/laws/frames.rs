@@ -627,8 +627,8 @@ fn a_seal_inside_an_expression_callee_is_exact() {
             active.machine.semantic_checkpoint(),
             reference.machine.semantic_checkpoint()
         );
-        let (root, certificate) = active.checkpoint();
-        let (expected, _) = reference.checkpoint();
+        let root = active.checkpoint();
+        let expected = reference.checkpoint();
         // Compare the canonical frame/task/ready roots themselves, not
         // merely the values read back from them.
         assert_eq!(root.tasks, expected.tasks);
@@ -636,7 +636,7 @@ fn a_seal_inside_an_expression_callee_is_exact() {
         assert_eq!(root.waits, expected.waits);
 
         checkpoints += 1;
-        active.open_at(&root, certificate, Layout(1 + checkpoints * 2), true);
+        active.open_at(&root, Layout(1 + checkpoints * 2), true);
         active.machine.record_charges(tape.clone());
         assert_eq!(
             active.machine.semantic_checkpoint(),
@@ -667,9 +667,9 @@ fn a_seal_inside_an_expression_callee_is_exact() {
     let mut end = loop {
         let step = embedder.run();
         if !matches!(step, Step::Ended(_)) {
-            let (root, certificate) = embedder.checkpoint();
+            let root = embedder.checkpoint();
             sealed += 1;
-            embedder.open_at(&root, certificate, layouts.next().unwrap(), true);
+            embedder.open_at(&root, layouts.next().unwrap(), true);
         }
         match step {
             Step::Ended(end) => break end,
@@ -759,8 +759,8 @@ fn a_cold_branch_keeps_its_locally_shared_cell_when_the_loop_reenters() {
             match active.run() {
                 Step::Ended(end) => break end,
                 Step::Slice => {
-                    let (root, certificate) = active.checkpoint();
-                    active.open_at(&root, certificate, Layout(0), true);
+                    let root = active.checkpoint();
+                    active.open_at(&root, Layout(0), true);
                 }
                 Step::Parked(_) => panic!("this cell-sharing fixture has no effects"),
             }

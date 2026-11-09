@@ -68,7 +68,7 @@ fn parked(layout: Layout) -> Checkpoint {
         },
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let (root, _) = embedder.checkpoint();
+    let root = embedder.checkpoint();
     checkpoint(&root, Box::new(embedder.source.clone())).unwrap()
 }
 
@@ -164,7 +164,7 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
         embedder
     };
     let mut whole = start(Layout(0));
-    let (root, _) = whole.checkpoint();
+    let root = whole.checkpoint();
     let expected = checkpoint(&root, Box::new(whole.source.clone())).unwrap();
     let expected_charge = whole.machine.meters().charged;
     let expected_work = whole.machine.work();
@@ -198,8 +198,7 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
     let saved = checkpoint(&root, Box::new(budgeted.source.clone())).unwrap();
     assert_eq!(saved.ids(), expected.ids());
     assert_eq!(saved, expected);
-    let certificate = budgeted.machine.accounting();
-    budgeted.open_at(&root, certificate, Layout(2), true);
+    budgeted.open_at(&root, Layout(2), true);
     assert_eq!(budgeted.machine.semantic_checkpoint(), saved);
     assert!(
         budgeted.machine.work().is_none(),
@@ -265,8 +264,7 @@ fn control_seals_agree() {
                     };
                     let root = crate::kernel_internals::sealed_root(&sealed).clone();
                     let seen = checkpoint(&root, Box::new(embedder.source.clone())).unwrap();
-                    let certificate = embedder.machine.accounting();
-                    embedder.open_at(&root, certificate, layout, true);
+                    embedder.open_at(&root, layout, true);
                     assert_eq!(embedder.machine.semantic_checkpoint(), seen);
                     saved.push(seen);
                     embedder.machine.record_charges(tape.clone());
@@ -342,8 +340,7 @@ fn scheduler_seals_agree() {
                         };
                         let root = crate::kernel_internals::sealed_root(&sealed).clone();
                         let seen = checkpoint(&root, Box::new(embedder.source.clone())).unwrap();
-                        let certificate = embedder.machine.accounting();
-                        embedder.open_at(&root, certificate, layout, true);
+                        embedder.open_at(&root, layout, true);
                         assert_eq!(embedder.machine.semantic_checkpoint(), seen);
                         saved.push(seen);
 
@@ -414,8 +411,7 @@ fn helper_seals_agree() {
                         }
                     };
                     let seen = checkpoint(&root, Box::new(embedder.source.clone())).unwrap();
-                    let certificate = embedder.machine.accounting();
-                    embedder.open_at(&root, certificate, layout, true);
+                    embedder.open_at(&root, layout, true);
                     assert_eq!(embedder.machine.semantic_checkpoint(), seen);
                     saved.push(seen);
                     embedder.machine.record_charges(tape.clone());

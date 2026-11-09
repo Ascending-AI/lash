@@ -185,30 +185,42 @@ impl<H: Heap> Vm<H> {
                             .fold(0, u64::saturating_add);
                         let peak = placed.max(nursery.held().0);
                         if peak <= room {
-                            Some((answer, nursery.into_new(), peak))
+                            Ok((answer, nursery.into_new(), peak))
                         } else {
                             nursery.discard();
-                            None
+                            Err(peak)
                         }
                     }
-                    Err(NativeError::Retry(Retry::Room { .. })) => {
+                    Err(NativeError::Retry(Retry::Room { wanted })) => {
+                        let wanted = wanted.0;
                         nursery.discard();
-                        None
+                        Err(wanted)
                     }
                     Err(_) => {
                         nursery.discard();
-                        Some((answer, Vec::new(), 0))
+                        Ok((answer, Vec::new(), 0))
                     }
                 }
             };
             match attempt {
-                Some(done) => break done,
-                None if !collected => {
+                Ok(done) => break done,
+                Err(_) if !collected => {
                     collected = true;
                     self.collect();
                 }
-                None => {
+                Err(wanted) => {
                     let held = self.heap.held();
+                    // The host decides once a collection leaves too little
+                    // room (FIG-6768): what it grows, the call runs in.
+                    let used = held.saturating_add(wanted);
+                    let bound = self.heap.bound();
+                    if let Some(limiter) = self.memory_limiter.as_mut()
+                        && let crate::LimitDecision::Grow(more) = limiter.limit_reached(used, bound)
+                        && more > 0
+                    {
+                        self.heap.grow(more);
+                        continue;
+                    }
                     // The native that would have exceeded the bound is
                     // named, as a guard that ends the run is.
                     return Err(Flow::from(Stop::bound(Exceeded {

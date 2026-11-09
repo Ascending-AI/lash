@@ -206,12 +206,11 @@ fn an_exhausted_seal_budget_preserves_both_continuations() {
     let old_heap =
         PagedHeap::open_header(prior.heap, Box::new(embedder.source.clone()), EditEpoch(2))
             .unwrap();
-    let mut old = crate::KernelMachine::open_with_census(
+    let mut old = crate::KernelMachine::open_in(
         program,
         Setup::default().bounds,
         &prior,
         Box::new(embedder.source.clone()),
-        Box::new(Census::restore(old_heap.certificate()).unwrap()),
         crate::compile::Layout::default(),
     )
     .unwrap();
@@ -698,13 +697,13 @@ main {
 }"#,
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let (root, certificate) = embedder.checkpoint();
+    let root = embedder.checkpoint();
     assert_eq!(root.meters.next_join, 1);
     assert_eq!(root.joins.len(), 1);
-    embedder.open_at(&root, certificate, Layout::default(), true);
+    embedder.open_at(&root, Layout::default(), true);
     embedder.deliver("gate");
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let (root, _) = embedder.checkpoint();
+    let root = embedder.checkpoint();
     assert_eq!(root.meters.next_join, 2);
     assert_eq!(root.joins.len(), 2, "both live join identities survive");
     assert_eq!(
@@ -723,7 +722,7 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     use lash_kernel_state::paged::{ObjectInit, SemanticHeap};
     let mut run = Embedder::new("main { let a = [1] let b = a do perform 0(1) as Any return b }");
     assert!(matches!(run.run(), crate::Step::Parked(_)));
-    let (root, _) = run.checkpoint();
+    let root = run.checkpoint();
     let snapshot = |root: &CheckpointRoot| {
         lash_kernel_state::semantic::checkpoint(root, Box::new(run.source.clone())).unwrap()
     };
