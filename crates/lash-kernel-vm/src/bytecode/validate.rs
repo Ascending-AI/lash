@@ -592,7 +592,7 @@ impl Unit {
             };
             let pc = pc as u32;
             let mut wanted: Vec<(Phase, u32, u32)> = Vec::new();
-            if self.step[pc as usize] {
+            if self.slices(pc as usize) {
                 let phase = match op {
                     Op::Jump(to) if *to < pc => Phase::Back,
                     _ => Phase::Statement,

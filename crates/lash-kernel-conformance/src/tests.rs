@@ -12,6 +12,7 @@ mod contract_cases;
 mod accumulators;
 mod captions;
 mod charge;
+mod cold_probes;
 mod probes;
 mod protocol;
 

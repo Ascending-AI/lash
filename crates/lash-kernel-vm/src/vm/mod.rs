@@ -1164,7 +1164,7 @@ impl<H: Heap> Vm<H> {
                     // A refusal, a limiter and a slice read the frame at
                     // the op.
                     sync!(pc);
-                    if !retrying && self.exact_step(id, unit, pc, op, fresh)? {
+                    if !retrying && self.exact_step(id, unit, pc, fresh)? {
                         return Ok(Stop::Slice);
                     }
                     // A fused run is a prepaid path's: here its first op
@@ -1366,9 +1366,8 @@ impl<H: Heap> Vm<H> {
     /// falling off its body. A `return` statement's step runs on into its
     /// caller's continuation; dispatching it is no step.
     #[inline]
-    fn exact_step(&mut self, id: UnitId, unit: &Unit, pc: usize, op: Op, fresh: bool) -> Run<bool> {
-        let tested = unit.step[pc] || (matches!(op, Op::Fall) && !unit.covered);
-        if tested && !fresh && self.meter.spent() {
+    fn exact_step(&mut self, id: UnitId, unit: &Unit, pc: usize, fresh: bool) -> Run<bool> {
+        if unit.slices(pc) && !fresh && self.meter.spent() {
             return Ok(true);
         }
         self.bill(unit, pc)?;

@@ -152,6 +152,13 @@ pub struct Unit {
 }
 
 impl Unit {
+    /// Whether the slice is tested before the op at `pc` (`K-MACH-002`):
+    /// at a step's start, and where a stepped frame's last statement ends
+    /// by falling off its body. The resume table saves a point at each.
+    pub fn slices(&self, pc: usize) -> bool {
+        self.step[pc] || (matches!(self.ops[pc], Op::Fall) && !self.covered)
+    }
+
     /// The op compiled at `pc`, before inlining or fusion replaced it.
     pub fn original(&self, pc: usize) -> Option<Op> {
         match *self.ops.get(pc)? {

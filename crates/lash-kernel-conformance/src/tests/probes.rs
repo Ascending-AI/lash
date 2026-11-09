@@ -109,7 +109,7 @@ const PROBE_FILES: &[(&str, &str)] = &[
 
 /// Links `text` with the Python and ECMAScript services filling its helper
 /// operations, and a conformance contract for its own imports.
-fn linked(library: &PreparedLibrary, text: &str) -> Result<Program, String> {
+pub(super) fn linked(library: &PreparedLibrary, text: &str) -> Result<Program, String> {
     let document =
         Arc::new(lash_kernel_doc::parse_document(text).map_err(|error| format!("{error:?}"))?);
     let services = || {

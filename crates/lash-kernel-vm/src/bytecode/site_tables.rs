@@ -283,7 +283,7 @@ pub(crate) fn build(unit: &Unit) -> SiteTable {
             continue;
         };
         let next = pc as u32 + 1;
-        if unit.step[pc] {
+        if unit.slices(pc) {
             let phase = match op {
                 Op::Jump(to) if (*to as usize) < pc => Phase::Back,
                 _ => Phase::Statement,
