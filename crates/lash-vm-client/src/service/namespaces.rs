@@ -14,7 +14,7 @@ mod types;
 use types::{TypeNode, TypeTable};
 
 impl Request {
-    pub(super) fn restrict_namespaces(&mut self) -> Result<(), lash_kernel_dialect::Diagnostic> {
+    pub(super) fn restrict_namespaces(&mut self) {
         let (source, namespaces, typescript) = match self {
             Self::Lower {
                 dialect,
@@ -40,9 +40,11 @@ impl Request {
                 namespaces,
                 matches!(language, lash_kernel_doc::SourceLanguage::TypeScript),
             ),
-            _ => return Ok(()),
+            _ => return,
         };
-        let identifiers = source::identifiers(source, typescript)?;
+        let Some(identifiers) = source::identifiers(source, typescript) else {
+            return;
+        };
         // An ordinary TypeScript await also awaits durable process handles.
         // Its implicit processes.await call need not appear in the source.
         let process_await = typescript && identifiers.contains("await");
@@ -66,7 +68,6 @@ impl Request {
         if let Ok(selected) = Namespaces::new(packages, deferred, &|_| false) {
             *namespaces = selected;
         }
-        Ok(())
     }
 }
 
@@ -244,7 +245,7 @@ mod tests {
             bindings: Default::default(),
             functions: Default::default(),
         };
-        request.restrict_namespaces()?;
+        request.restrict_namespaces();
         let bytes = rmp_serde::to_vec_named(&request)?;
         let request = rmp_serde::from_slice::<Request>(&bytes)?;
         let Request::Lower {
@@ -259,6 +260,23 @@ mod tests {
             vec![catalogue]
         );
         assert_eq!(selected.deferred(), &[deferred].into());
+        // A failed read cannot prove any namespace unused. The worker owns
+        // the syntax error, including names after the point the parser stops.
+        let mut malformed = Request::ImportWorkflow {
+            language: lash_kernel_doc::SourceLanguage::TypeScript,
+            source: "catalogue.read(); export const broken = ; deferred.call();".into(),
+            namespaces: namespaces.clone(),
+            limits: None,
+        };
+        malformed.restrict_namespaces();
+        let Request::ImportWorkflow {
+            namespaces: retained,
+            ..
+        } = malformed
+        else {
+            unreachable!()
+        };
+        assert_eq!(retained, namespaces);
         for (language, source, referenced) in [
             (
                 lash_kernel_doc::SourceLanguage::TypeScript,
@@ -352,7 +370,7 @@ mod tests {
                 namespaces: namespaces.clone(),
                 limits: None,
             };
-            escaped.restrict_namespaces()?;
+            escaped.restrict_namespaces();
             let Request::ImportWorkflow {
                 namespaces: selected,
                 ..
@@ -375,7 +393,7 @@ mod tests {
         }
         let processes = PackagePath::parse("processes")?;
         assert_eq!(
-            lash_dialect_typescript::source_identifiers("await.read()")?,
+            lash_dialect_typescript::source_identifiers("await.read()"),
             ["await".to_owned(), "read".to_owned()].into(),
             "Script-goal spelling repairs must not leak placeholder identifiers"
         );
@@ -391,7 +409,7 @@ mod tests {
                 bindings: Default::default(),
                 functions: Default::default(),
             };
-            request.restrict_namespaces()?;
+            request.restrict_namespaces();
             let Request::Lower { namespaces, .. } = request else {
                 unreachable!()
             };

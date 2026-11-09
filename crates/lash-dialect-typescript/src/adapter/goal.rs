@@ -198,11 +198,15 @@ fn parse_goal(
                     StringInput::new(word, BytePos(0), BytePos(word.len() as u32)),
                     None,
                 );
-                lexer.next()?;
-                Some(match lexer.take_token_value() {
-                    Some(swc_ecma_parser::unstable::TokenValue::Word(name)) => name.to_string(),
-                    _ => word.to_owned(),
-                })
+                let name = match (lexer.next(), lexer.take_token_value()) {
+                    (Some(_), Some(swc_ecma_parser::unstable::TokenValue::Word(name))) => {
+                        name.to_string()
+                    }
+                    (Some(_), None) if !word.contains('\\') => word.to_owned(),
+                    // An unknown spelling cannot prove any namespace unused.
+                    _ => "*".to_owned(),
+                };
+                (!super::is_strict_reserved_word(&name)).then_some(name)
             })
             .collect();
         (body, errors, identifiers)
