@@ -145,3 +145,77 @@ fn a_native_that_reads_every_chunk_cold_runs_as_it_runs_warm() {
         }
     }
 }
+
+mod mixed_cycle {
+    use lash_kernel_doc::Value;
+    use lash_kernel_doc::arena::native::NewObject;
+    use lash_kernel_state::paged::run::directory::Directory;
+    use lash_kernel_state::paged::run::ids::HighWater;
+
+    use crate::heap::Heap;
+    use crate::heap::slots::SlotHeap;
+    use crate::laws::embedder::Source;
+
+    fn make(heap: &mut SlotHeap, object: NewObject) -> Value {
+        heap.admit(crate::heap::slots::schedule(&object))
+            .expect("room");
+        heap.create(object).expect("an object")
+    }
+
+    /// Contract §6 (B4), dropped last root of a mixed cycle: `a` and `b`
+    /// name each other; `b` is paged out, `a` is resident and changed
+    /// since the seal, and holds a large list. Once the last root is
+    /// dropped, before another seal, a collection frees `a` and its list,
+    /// so an allocation that fits only then is admitted. The cold object
+    /// `b` names `a`, but nothing reaches `b`: its edges are a candidate
+    /// set, not a root set.
+    #[test]
+    fn dropped_last_root_of_a_mixed_cycle_frees_its_resident_half() {
+        let pages = Source::default();
+        let mut heap = SlotHeap::durable(
+            u64::MAX,
+            crate::heap::open::Durable {
+                directory: Directory::new(Box::new(pages)),
+                high_water: HighWater(0),
+            },
+        );
+        let a = make(&mut heap, NewObject::List(vec![Value::Int(1)]));
+        let b = make(&mut heap, NewObject::List(vec![a]));
+        let (a_handle, b_handle) = (a.handle().expect("a"), b.handle().expect("b"));
+        heap.arena_mut().list_set(a_handle, 0, b).expect("a ↔ b");
+        heap.page_out(&[a]).expect("a page-out");
+        heap.load(a_handle, 0, &mut |visit| visit(&a))
+            .expect("a reload");
+        assert!(
+            heap.arena().facts(b_handle).expect("b").cold,
+            "b is paged out"
+        );
+        assert!(
+            !heap.arena().facts(a_handle).expect("a").cold,
+            "a is resident"
+        );
+
+        // `a` changes after the seal: it now holds a list of 4,096 ints.
+        let list = make(
+            &mut heap,
+            NewObject::List((0..4096).map(Value::Int).collect()),
+        );
+        heap.arena_mut()
+            .list_set(a_handle, 1, list)
+            .expect("an append");
+        heap.settle(a_handle, 0);
+
+        // The last root is dropped. The bound leaves room for half the
+        // list: what is wanted fits only once `a` and its list are freed.
+        let wanted = crate::heap::slots::schedule(&NewObject::List(vec![Value::Int(0); 2048]));
+        heap.rebound(heap.held() + wanted / 2);
+        assert!(
+            heap.admit(wanted).is_err(),
+            "it does not fit before a collection"
+        );
+        heap.collect(&mut |_| {});
+        heap.admit(wanted)
+            .expect("the collection freed the cycle's resident half");
+        assert!(heap.arena().facts(a_handle).is_err(), "a is freed");
+    }
+}

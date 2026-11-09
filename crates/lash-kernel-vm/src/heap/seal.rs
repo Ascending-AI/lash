@@ -29,7 +29,7 @@ use lash_kernel_state::paged::run::root::HeapRoot;
 use super::open::entity;
 use crate::paged::SealError;
 
-fn fault(problem: impl Into<String>) -> SealError {
+pub(super) fn fault(problem: impl Into<String>) -> SealError {
     SealError::Fault {
         problem: problem.into(),
     }
@@ -37,7 +37,10 @@ fn fault(problem: impl Into<String>) -> SealError {
 
 /// Writes every object `roots` reach that changed since the last seal into
 /// `directory`, minting ids from `high_water`, prunes what they no longer
-/// reach and seals it.
+/// reach and seals it. A large list or table is written by its changed
+/// chunks ([`super::large`]); gives, besides the root, the large objects
+/// whose chunks moved, for the caller to put back on their rows once the
+/// seal stands.
 ///
 /// # Errors
 ///
@@ -49,7 +52,8 @@ pub(crate) fn seal(
     roots: &[Value],
     directory: &mut Directory,
     high_water: &mut HighWater,
-) -> Result<HeapRoot, SealError> {
+    large: &mut super::large::Large,
+) -> Result<(HeapRoot, Vec<ArenaHandle>), SealError> {
     let mut walk = Walk {
         arena,
         high_water,
@@ -67,16 +71,24 @@ pub(crate) fn seal(
     }
     let Walk { arena, written, .. } = walk;
 
+    let mut moved = Vec::new();
     for &handle in &written {
         let id = id_of(arena, handle)?;
-        let mut members = Vec::new();
-        lash_kernel_state::arena::each_member(
-            arena
-                .body(handle)
-                .map_err(|error| fault(error.to_string()))?,
-            &mut |value| members.push(*value),
-        );
-        let row = Row::of(record(arena, handle)?, heads(arena, &members)?);
+        let body = arena
+            .body(handle)
+            .map_err(|error| fault(error.to_string()))?;
+        let row = if super::large::is_large(body) {
+            let (row, relayout) = large.write(arena, handle, id, directory.access())?;
+            if relayout {
+                moved.push(handle);
+            }
+            row
+        } else {
+            large.forget(id);
+            let mut members = Vec::new();
+            lash_kernel_state::arena::each_member(body, &mut |value| members.push(*value));
+            Row::of(record(arena, handle)?, heads(arena, &members)?)
+        };
         directory.put(id, row).map_err(SealError::Heap)?;
     }
     let heads = heads(arena, roots)?;
@@ -95,19 +107,22 @@ pub(crate) fn seal(
             .map_err(|error| fault(error.to_string()))?;
     }
     let _ = arena.take_dirty();
-    Ok(HeapRoot {
-        high_water: *high_water,
-        directory,
-        roots,
-        heads,
-    })
+    Ok((
+        HeapRoot {
+            high_water: *high_water,
+            directory,
+            roots,
+            heads,
+        },
+        moved,
+    ))
 }
 
 /// The heads of the immutables `values` name, once each by id. Each is
 /// fixed as its object's at its first row, so every row and root naming
 /// the object names it by the same head, and a seal that fails and is
 /// retried writes the same one.
-fn heads(arena: &Arena, values: &[Value]) -> Result<Heads, SealError> {
+pub(super) fn heads(arena: &Arena, values: &[Value]) -> Result<Heads, SealError> {
     let mut heads = std::collections::BTreeMap::new();
     for value in values {
         let immutable = matches!(
@@ -220,7 +235,7 @@ fn id_of(arena: &Arena, handle: ArenaHandle) -> Result<ObjectId, SealError> {
     }
 }
 
-fn run_value(arena: &Arena, value: &Value) -> Result<RunValue, SealError> {
+pub(super) fn run_value(arena: &Arena, value: &Value) -> Result<RunValue, SealError> {
     let object =
         |kind: ObjectKind, handle: &ArenaHandle| Ok(RunValue::Object(kind, id_of(arena, *handle)?));
     match value {

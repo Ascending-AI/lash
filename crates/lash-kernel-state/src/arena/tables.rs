@@ -18,7 +18,17 @@
 //! it can be: its index is the layout, its entries take sequences from
 //! zero, and an entry's sequence is its position. Any other table, and one
 //! that leaves its layout, has an index of its own.
+//!
+//! A large table the bytecode core opens is chunked by key placement
+//! instead (`lash_kernel_state::paged::run::chunked`): its index is keyed,
+//! each chunk holding the entries whose keys the heap places there, in
+//! sequence order, and a new entry joins an overflow chunk the heap
+//! re-places at its next seal. A key the index does not know is answered
+//! by the one chunk its placement names: the lookup keeps the key
+//! ([`super::Arena::take_lookup`]) and answers [`Retry::Cold`] for
+//! [`LOOKUP`].
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
@@ -63,7 +73,18 @@ struct Own {
     seqs: Vec<Vec<u64>>,
     /// The sequence the next new entry takes.
     next: u64,
+    /// Keyed by placement: each resident entry's sequence, to its chunk;
+    /// `None` for a table chunked by sequence or one chunk.
+    placed: Option<HashMap<u64, u32>>,
+    /// The chunk new entries of a keyed table join until its next seal.
+    overflow: Option<u32>,
+    /// The key a keyed table's last lookup did not know.
+    lookup: RefCell<Option<Key>>,
 }
+
+/// The chunk a keyed table's [`Retry::Cold`] names for a key its index
+/// does not know: the heap loads the chunk the key's placement names.
+pub const LOOKUP: u32 = u32::MAX;
 
 /// Where an entry sits: its chunk and its position in it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -166,10 +187,19 @@ impl Own {
     /// The chunk that holds sequence `seq`.
     #[inline]
     fn chunk_of(&self, seq: u64) -> usize {
+        if let Some(placed) = &self.placed {
+            return placed.get(&seq).map_or(usize::MAX, |chunk| *chunk as usize);
+        }
         match self.width {
             0 => 0,
             width => (seq / width) as usize,
         }
+    }
+
+    /// Whether the table is chunked: by sequence, or keyed by placement.
+    #[inline]
+    fn chunked(&self) -> bool {
+        self.width != 0 || self.placed.is_some()
     }
 
     /// The resident entries' sequences of chunk `chunk`, ascending.
@@ -185,7 +215,7 @@ impl Own {
     /// `0..next`, which it keeps in no vector.
     #[inline]
     fn is_dense(&self) -> bool {
-        self.seqs.is_empty() && self.width == 0
+        self.seqs.is_empty() && !self.chunked()
     }
 
     /// The index of a one-chunk table whose `len` entries take sequences
@@ -197,6 +227,9 @@ impl Own {
             width: 0,
             seqs: Vec::new(),
             next: len,
+            placed: None,
+            overflow: None,
+            lookup: RefCell::new(None),
         }
     }
 
@@ -222,6 +255,9 @@ impl Own {
     /// The sequences chunk `chunk` spans: everything while the table is one
     /// chunk.
     fn span(&self, chunk: usize) -> std::ops::Range<u64> {
+        if self.placed.is_some() {
+            return 0..self.next;
+        }
         match self.width {
             0 => 0..u64::MAX,
             width => chunk as u64 * width..(chunk as u64 + 1) * width,
@@ -284,18 +320,31 @@ impl Own {
             .seqs
             .get_mut(chunk)
             .ok_or(NativeError::Malformed("a decoded table chunk is no chunk"))?;
+        if let Some(placed) = &mut self.placed {
+            for seq in &seqs {
+                if placed.insert(*seq, chunk as u32).is_some() {
+                    return Err(NativeError::Malformed(
+                        "two chunks of a table hold one sequence",
+                    ));
+                }
+            }
+        }
         *held = seqs;
         Ok(())
     }
 
     /// The table's chunks were joined into one: its index knows every key.
     fn join(&mut self) {
-        let all: Vec<u64> = std::mem::take(&mut self.seqs)
+        let mut all: Vec<u64> = std::mem::take(&mut self.seqs)
             .into_iter()
             .flatten()
             .collect();
+        if self.placed.take().is_some() {
+            all.sort_unstable();
+        }
         self.seqs = vec![all];
         self.width = 0;
+        self.overflow = None;
         self.absent.clear();
     }
 }
@@ -318,7 +367,61 @@ impl Index {
             width,
             seqs: vec![Vec::new(); chunks],
             next,
+            placed: None,
+            overflow: None,
+            lookup: RefCell::new(None),
         })))
+    }
+
+    /// The index of a large table the bytecode core opened from its page
+    /// form: `chunks` cold chunks keyed by placement, below `next`.
+    pub(super) fn keyed(chunks: usize, next: u64) -> Self {
+        Self(Repr::Own(Box::new(Own {
+            keys: HashMap::new(),
+            absent: HashSet::new(),
+            width: 0,
+            seqs: vec![Vec::new(); chunks],
+            next,
+            placed: Some(HashMap::new()),
+            overflow: None,
+            lookup: RefCell::new(None),
+        })))
+    }
+
+    /// Whether the table is keyed by placement.
+    pub fn is_keyed(&self) -> bool {
+        matches!(&self.0, Repr::Own(own) if own.placed.is_some())
+    }
+
+    /// The chunk new entries of a keyed table joined since its last seal.
+    pub fn overflow(&self) -> Option<u32> {
+        match &self.0 {
+            Repr::Own(own) => own.overflow,
+            Repr::Shared(_) => None,
+        }
+    }
+
+    /// The key a keyed table's last lookup did not know, taken.
+    pub(super) fn take_lookup(&self) -> Option<Key> {
+        match &self.0 {
+            Repr::Own(own) => own.lookup.borrow_mut().take(),
+            Repr::Shared(_) => None,
+        }
+    }
+
+    /// The chunk the entry of sequence `seq`, the index's next, joins: an
+    /// overflow chunk after the `count` a keyed table holds, made once.
+    fn append_chunk(&mut self, seq: u64, count: usize) -> usize {
+        match &mut self.0 {
+            Repr::Own(own) if own.placed.is_some() => {
+                let chunk = *own.overflow.get_or_insert(count as u32);
+                if let Some(placed) = &mut own.placed {
+                    placed.insert(seq, chunk);
+                }
+                chunk as usize
+            }
+            _ => self.chunk_of(seq),
+        }
     }
 
     /// The table's own index, for an edit a layout does not make: a table
@@ -639,6 +742,14 @@ pub(crate) fn find(
     }
     let cold = table.chunks.first_cold();
     match own.known(key, cold.is_some()) {
+        Known::Unknown if own.placed.is_some() => {
+            *own.lookup.borrow_mut() = Some(key.clone());
+            Err(Retry::Cold {
+                object,
+                chunk: LOOKUP,
+            }
+            .into())
+        }
         Known::Seq(seq) => {
             let chunk = own.chunk_of(seq);
             resident(object, table, chunk)?;
@@ -902,7 +1013,7 @@ impl super::Arena {
         let flat = self.facts(handle)?.flat;
         let (table, index) = self.table_parts(handle)?;
         let seq = index.next();
-        let chunk = index.chunk_of(seq);
+        let chunk = index.append_chunk(seq, table.chunks.count());
         let joined = match &index.0 {
             Repr::Shared(layout) => layout.next(&resident),
             Repr::Own(_) => None,
@@ -926,7 +1037,7 @@ impl super::Arena {
                 .ok_or(NativeError::Malformed("a table's sequence overflows"))?;
             own.push(chunk, seq)?;
             own.next = next;
-            if own.width != 0 {
+            if own.chunked() {
                 own.absent.remove(&resident);
             }
             own.keys.insert(resident, seq);
@@ -973,7 +1084,10 @@ impl super::Arena {
             .ok_or(NativeError::Malformed("a table's index names no chunk"))?
             .remove(place.at);
         own.keys.remove(key);
-        if own.width != 0 {
+        if let Some(placed) = &mut own.placed {
+            placed.remove(&seq);
+        }
+        if own.chunked() {
             own.absent.insert(key.clone());
         }
         table.len -= 1;
@@ -1142,6 +1256,11 @@ impl super::Arena {
         after: Option<u64>,
     ) -> Result<Option<(u64, Value)>, NativeError> {
         let (table, index) = self.table_view(handle)?;
+        if index.is_keyed() {
+            // Insertion order spans every chunk of a keyed table: it is
+            // read whole.
+            pairs(handle, table)?;
+        }
         let start = after.map_or(0, |after| after.saturating_add(1));
         let mut chunk = index.chunk_of(start);
         while let Some(values) = resident(handle, table, chunk)? {
@@ -1158,6 +1277,11 @@ impl super::Arena {
     /// How many entries sit at or before cursor `last` (`K-ITER-002`).
     pub fn table_passed(&self, handle: ArenaHandle, last: Option<u64>) -> Result<u64, NativeError> {
         let (table, index) = self.table_view(handle)?;
+        if index.is_keyed() {
+            // Insertion order spans every chunk of a keyed table: it is
+            // read whole.
+            pairs(handle, table)?;
+        }
         let Some(last) = last else {
             return Ok(0);
         };

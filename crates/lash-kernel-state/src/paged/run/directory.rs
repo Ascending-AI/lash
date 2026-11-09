@@ -69,6 +69,23 @@ impl Cell for Row {
     fn cost(&self) -> u64 {
         0
     }
+    fn children(&self, out: &mut Vec<PageRef>) {
+        if let Record::Chunked(chunked) = &self.record {
+            out.extend(chunked.parts.iter().map(|part| part.page));
+            out.extend(chunked.edges.iter().map(|part| part.page));
+        }
+    }
+    fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
+        if let Record::Chunked(chunked) = &mut self.record {
+            for part in &mut chunked.parts {
+                super::super::tree::grant(&mut part.page, children)?;
+            }
+            for part in &mut chunked.edges {
+                super::super::tree::grant(&mut part.page, children)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A sealed directory's root: its tree page and row count.
@@ -192,7 +209,7 @@ impl Directory {
                 continue;
             };
             reached.insert(id);
-            for edge in row.edges {
+            for edge in self.edges(&row)? {
                 if !reached.contains(&edge) {
                     if self.get(edge)?.is_none() {
                         return Err(HeapFault::Malformed(format!(
@@ -205,6 +222,19 @@ impl Directory {
             }
         }
         Ok(reached)
+    }
+
+    /// The ids `row` references: its edges, or a large object's edge
+    /// pages read. Reads no chunk.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults.
+    pub fn edges(&self, row: &Row) -> Result<Vec<ObjectId>, HeapFault> {
+        match &row.record {
+            Record::Chunked(chunked) => super::chunked::edge_ids(&self.access, &chunked.edges),
+            _ => Ok(row.edges.clone()),
+        }
     }
 
     /// Drops every row `roots` do not reach through the rows' edges, from

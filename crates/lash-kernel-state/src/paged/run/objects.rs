@@ -13,6 +13,7 @@ use lash_kernel_value::names::CallableId;
 use lash_kernel_value::sites::Site;
 use lash_kernel_value::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 
+use super::chunked::Chunked;
 use super::ids::ObjectId;
 use crate::arena::Summary;
 
@@ -270,12 +271,19 @@ pub enum Record {
     Bytes(Arc<[u8]>),
     Function(CallableId),
     Handle(Handle),
+    /// A large list or table: its index, its chunks on their own pages
+    /// ([`super::chunked`]).
+    Chunked(Box<Chunked>),
 }
 
 impl Record {
     /// Every id the record references, once each, ascending: its exact
     /// edge set.
     pub fn edges(&self) -> Vec<ObjectId> {
+        if let Self::Chunked(_) = self {
+            // Its edges are in its edge pages.
+            return Vec::new();
+        }
         let mut edges: Vec<ObjectId> = self.values().into_iter().filter_map(RunValue::id).collect();
         if let Self::Closure { captures, .. } = self {
             edges.extend(captures.iter().copied());
@@ -310,7 +318,8 @@ impl Record {
             | Self::LongText(_)
             | Self::Bytes(_)
             | Self::Function(_)
-            | Self::Handle(_) => {}
+            | Self::Handle(_)
+            | Self::Chunked(_) => {}
         }
         values
     }
@@ -405,6 +414,10 @@ impl TokenCodec for Record {
                 out.sum(13, 1);
                 handle.encode(out);
             }
+            Self::Chunked(chunked) => {
+                out.sum(14, 1);
+                chunked.encode(out);
+            }
         }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -473,6 +486,10 @@ impl TokenCodec for Record {
             13 => {
                 expect(1)?;
                 Self::Handle(Handle::decode(input)?)
+            }
+            14 => {
+                expect(1)?;
+                Self::Chunked(Box::new(Chunked::decode(input)?))
             }
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })

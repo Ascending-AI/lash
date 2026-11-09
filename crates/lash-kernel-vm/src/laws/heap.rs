@@ -20,7 +20,17 @@ use lash_kernel_state::paged::run::root::HeapRoot;
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 
 use super::embedder::Source;
-use crate::heap::seal::seal;
+
+/// Seals what `roots` reach, with no large object opened before.
+fn seal(
+    arena: &mut Arena,
+    roots: &[Value],
+    directory: &mut Directory,
+    high_water: &mut HighWater,
+) -> Result<HeapRoot, SealError> {
+    let mut large = crate::heap::large::Large::default();
+    crate::heap::seal::seal(arena, roots, directory, high_water, &mut large).map(|(root, _)| root)
+}
 use crate::heap::slots::SlotHeap;
 use crate::heap::{Heap, LoadError};
 use crate::paged::SealError;

@@ -126,14 +126,7 @@ pub(crate) fn referents<'a>(
     record: &Record,
     heads: &'a Heads,
 ) -> Result<Vec<(ObjectId, Opening<'a>)>, String> {
-    let mut referents = Vec::new();
-    for value in record.values() {
-        match value {
-            RunValue::Object(kind, id) => referents.push((*id, opening(*kind, *id, heads)?)),
-            RunValue::Ref(id) => referents.push((*id, Opening::Proxy(ProxyKind::Unknown))),
-            _ => {}
-        }
-    }
+    let mut referents = values_referents(record.values(), heads)?;
     if let Record::Closure { captures, .. } = record {
         referents.extend(
             captures
@@ -143,6 +136,23 @@ pub(crate) fn referents<'a>(
     }
     let mut seen = std::collections::HashSet::new();
     referents.retain(|(id, _)| seen.insert(*id));
+    Ok(referents)
+}
+
+/// Every object `values` reference, in member order, with how it opens;
+/// an object named twice is named twice.
+pub(crate) fn values_referents<'a, 'v>(
+    values: impl IntoIterator<Item = &'v RunValue>,
+    heads: &'a Heads,
+) -> Result<Vec<(ObjectId, Opening<'a>)>, String> {
+    let mut referents = Vec::new();
+    for value in values {
+        match value {
+            RunValue::Object(kind, id) => referents.push((*id, opening(*kind, *id, heads)?)),
+            RunValue::Ref(id) => referents.push((*id, Opening::Proxy(ProxyKind::Unknown))),
+            _ => {}
+        }
+    }
     Ok(referents)
 }
 
@@ -252,5 +262,6 @@ pub(crate) fn body(arena: &mut Arena, record: &Record, heads: &Heads) -> Result<
         }),
         Record::Function(callable) => Body::Function(Box::new(*callable)),
         Record::Handle(host) => Body::Handle(host.clone()),
+        Record::Chunked(_) => return Err("a chunked row opens by its index, not whole".into()),
     })
 }

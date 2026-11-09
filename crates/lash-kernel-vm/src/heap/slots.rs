@@ -13,6 +13,11 @@ use lash_kernel_doc::arena::Objects;
 use lash_kernel_doc::arena::native::{Args, NativeError, NewObject, Nursery};
 use lash_kernel_state::arena::{Arena, ArenaSemantics, Visit};
 
+use lash_kernel_state::arena::{LOOKUP, ProxyKind};
+use lash_kernel_state::paged::run::chunked::{Chunked, Members, Placement, placement};
+use lash_kernel_state::paged::run::ids::ObjectId;
+use lash_kernel_state::paged::run::objects::{ObjectKind, Record};
+
 use super::open;
 use super::{Heap, LoadError, MemoryRefused};
 
@@ -47,6 +52,11 @@ pub(crate) struct SlotHeap {
     arena: Arena,
     /// The run's directory, once the heap has one to load from.
     durable: Option<super::open::Durable>,
+    /// The large lists and tables the heap opened or wrote by chunk.
+    large: super::large::Large,
+    /// The edge summary of each cold object the collector traced past,
+    /// from its row in the current directory, until the next seal.
+    summaries: std::collections::HashMap<ObjectId, Vec<lash_kernel_doc::heap::EntityId>>,
     /// Each slot's schedule units, by slot index, while its object lives.
     units: Vec<u64>,
     held: u64,
@@ -58,6 +68,8 @@ impl SlotHeap {
         Self {
             arena: Arena::new(),
             durable: None,
+            large: super::large::Large::default(),
+            summaries: std::collections::HashMap::new(),
             units: Vec::new(),
             held: 0,
             bound,
@@ -134,12 +146,37 @@ impl SlotHeap {
             .ok_or(crate::paged::SealError::Fault {
                 problem: "the heap has no directory".into(),
             })?;
-        super::seal::seal(
+        let (root, moved) = super::seal::seal(
             &mut self.arena,
             roots,
             &mut durable.directory,
             &mut durable.high_water,
-        )
+            &mut self.large,
+        )?;
+        self.summaries.clear();
+        // A large object whose chunks moved goes back to its row: the
+        // arena's chunks are always the row's.
+        for handle in moved {
+            if self
+                .arena
+                .drop_large(handle)
+                .map_err(|error| crate::paged::SealError::Fault {
+                    problem: error.to_string(),
+                })?
+            {
+                self.resettle(handle);
+            }
+        }
+        Ok(root)
+    }
+
+    /// Slot `handle`'s body changed in place: it holds what its body does.
+    fn resettle(&mut self, handle: ArenaHandle) {
+        let index = handle.index() as usize;
+        let before = self.units.get(index).copied().unwrap_or(0);
+        let now = self.arena.body(handle).map_or(0, super::meter::body);
+        self.held = self.held.saturating_sub(before).saturating_add(now);
+        self.place(handle, now);
     }
 
     /// Seals what `roots` reach, then puts every clean list, map, set and
@@ -171,23 +208,32 @@ impl SlotHeap {
                     | Body::LongText(_)
                     | Body::Bytes(_))
             );
+            let fault = |error: NativeError| crate::paged::SealError::Fault {
+                problem: error.to_string(),
+            };
             let evicted = paged
-                && self
-                    .arena
-                    .evict(handle)
-                    .map_err(|error| crate::paged::SealError::Fault {
-                        problem: error.to_string(),
-                    })?;
+                && (self.arena.drop_large(handle).map_err(fault)?
+                    || self.arena.evict(handle).map_err(fault)?);
             if evicted {
-                let now = self.arena.body(handle).map_or(0, super::meter::body);
-                self.held = self
-                    .held
-                    .saturating_sub(self.units[index])
-                    .saturating_add(now);
-                self.units[index] = now;
+                self.resettle(handle);
             }
         }
         Ok(root)
+    }
+
+    /// Bounds the heap by `bound` from now on.
+    #[cfg(test)]
+    pub(crate) fn rebound(&mut self, bound: u64) {
+        self.bound = bound;
+    }
+
+    /// Forgets every page the heap's directory holds decoded, so the next
+    /// read of each comes from the store: a cold access.
+    #[cfg(test)]
+    pub(crate) fn forget_pages(&self) {
+        if let Some(durable) = &self.durable {
+            durable.directory.access().clear();
+        }
     }
 
     /// What loading `row` adds: its body and an opened referent for each
@@ -220,6 +266,260 @@ impl SlotHeap {
         let now = self.arena.body(handle).map_or(0, super::meter::body);
         self.held = self.held.saturating_sub(admitted).saturating_add(now);
         self.place(handle, now);
+    }
+}
+
+impl SlotHeap {
+    /// Opens the cold proxy `object` (the large object `id`) from its row
+    /// alone: every chunk cold, nothing of its members read.
+    fn open_large(
+        &mut self,
+        object: ArenaHandle,
+        id: ObjectId,
+        chunked: &Chunked,
+        roots: &mut dyn FnMut(&mut Visit<'_>),
+    ) -> Result<(), LoadError> {
+        use lash_kernel_doc::heap::HeapFault;
+        let malformed = |reason: String| LoadError::Store(HeapFault::Malformed(reason));
+        let placeholder = self
+            .units
+            .get(object.index() as usize)
+            .copied()
+            .unwrap_or(0);
+        let wanted = super::meter::record(&Record::Chunked(Box::new(chunked.clone())))
+            .saturating_sub(placeholder);
+        if self.admit(wanted).is_err() {
+            self.collect(roots);
+            self.admit(wanted).map_err(LoadError::Memory)?;
+        }
+        let chunks = usize::try_from(chunked.chunks())
+            .map_err(|_| malformed("a large object's chunk count is past memory".into()))?;
+        let opened = match chunked.kind {
+            ObjectKind::List => self.arena.open_list(object, chunked.len),
+            kind => {
+                let proxy = match kind {
+                    ObjectKind::Map => ProxyKind::Map,
+                    ObjectKind::Set => ProxyKind::Set,
+                    _ => ProxyKind::Record,
+                };
+                self.arena
+                    .open_keyed_table(object, proxy, chunked.len, chunked.next, chunks)
+            }
+        };
+        opened.map_err(|error| malformed(error.to_string()))?;
+        if self
+            .arena
+            .chunk_count(object)
+            .map_err(|error| malformed(error.to_string()))?
+            != chunks
+        {
+            return Err(malformed(format!(
+                "large list {} has {chunks} chunks for {} values",
+                id.0, chunked.len
+            )));
+        }
+        self.large.opened(id, chunked.clone());
+        self.held = self.held.saturating_sub(wanted.saturating_add(placeholder));
+        let now = self.arena.body(object).map_or(0, super::meter::body);
+        self.held = self.held.saturating_add(now);
+        self.place(object, now);
+        Ok(())
+    }
+
+    /// Loads what the resident `object` waits for: chunk `chunk`, the
+    /// chunk the key of its last lookup is placed in ([`LOOKUP`]), or, once
+    /// every chunk is resident, the join of its chunks.
+    fn load_chunk(
+        &mut self,
+        object: ArenaHandle,
+        chunk: u32,
+        roots: &mut dyn FnMut(&mut Visit<'_>),
+    ) -> Result<(), LoadError> {
+        use lash_kernel_doc::heap::HeapFault;
+        let malformed = |reason: String| LoadError::Store(HeapFault::Malformed(reason));
+        let Some(id) = open::id_of(&self.arena, object)
+            .ok()
+            .filter(|id| self.large.row(*id).is_some())
+        else {
+            return Ok(());
+        };
+        let cold = |heap: &Self, chunk: u32| -> Result<bool, LoadError> {
+            Ok(heap
+                .arena
+                .cold_chunks(object, chunk, 1)
+                .map_err(|error| malformed(error.to_string()))?
+                .first()
+                .is_some_and(|(at, _)| *at == chunk))
+        };
+        if chunk == LOOKUP {
+            let (key, normal) = self
+                .arena
+                .take_lookup(object)
+                .map_err(|error| malformed(error.to_string()))?
+                .ok_or_else(|| malformed("a lookup with no key".into()))?;
+            let at = placement(&normal);
+            let durable = self
+                .durable
+                .as_ref()
+                .ok_or_else(|| malformed("a large object in a heap with no directory".into()))?;
+            let target = self
+                .large
+                .chunk_of_key(durable.directory.access(), id, &at)
+                .map_err(LoadError::Store)?;
+            let found =
+                cold(self, target)? && self.read_chunk(object, id, target, roots)?.contains(&at);
+            if !found {
+                self.arena
+                    .resolved(object, key, None)
+                    .map_err(|error| malformed(error.to_string()))?;
+            }
+            return Ok(());
+        }
+        if cold(self, chunk)? {
+            self.read_chunk(object, id, chunk, roots)?;
+            return Ok(());
+        }
+        let first = self
+            .arena
+            .cold_chunks(object, 0, 1)
+            .map_err(|error| malformed(error.to_string()))?
+            .first()
+            .map(|(at, _)| *at);
+        match first {
+            Some(first) => {
+                self.read_chunk(object, id, first, roots)?;
+            }
+            None => {
+                if !self
+                    .arena
+                    .join_chunks(object)
+                    .map_err(|error| malformed(error.to_string()))?
+                {
+                    return Err(malformed(format!(
+                        "large object {} asks for resident chunk {chunk}",
+                        id.0
+                    )));
+                }
+                self.resettle(object);
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads chunk `chunk` of the large object `id` into `object`: its
+    /// members decoded, each referent opened. Gives the placements of a
+    /// table chunk's keys.
+    fn read_chunk(
+        &mut self,
+        object: ArenaHandle,
+        id: ObjectId,
+        chunk: u32,
+        roots: &mut dyn FnMut(&mut Visit<'_>),
+    ) -> Result<Vec<Placement>, LoadError> {
+        use lash_kernel_doc::heap::HeapFault;
+        let malformed = |reason: String| LoadError::Store(HeapFault::Malformed(reason));
+        let durable = self
+            .durable
+            .as_ref()
+            .ok_or_else(|| malformed("a large object in a heap with no directory".into()))?;
+        let page = self
+            .large
+            .read(durable.directory.access(), id, chunk)
+            .map_err(LoadError::Store)?;
+        let corrupt = |reason: String| {
+            LoadError::Store(self.durable.as_ref().map_or_else(
+                || HeapFault::Malformed(reason.clone()),
+                |durable| durable.corrupt(reason.clone()),
+            ))
+        };
+        let referents =
+            open::values_referents(page.members.values(), &page.heads).map_err(corrupt)?;
+        let wanted = |heap: &Self| {
+            let mut seen = std::collections::HashSet::new();
+            let fresh: u64 = referents
+                .iter()
+                .filter(|(id, _)| {
+                    seen.insert(*id) && heap.arena.entity_handle(open::entity(*id)).is_none()
+                })
+                .map(|(_, opening)| super::meter::body(&opening.placeholder()))
+                .sum();
+            let per = match &page.members {
+                Members::List(values) => values.len() as u64,
+                Members::Table(entries) => entries.len() as u64,
+            };
+            super::meter::values(per)
+                .saturating_sub(super::meter::COLD_CHUNK)
+                .saturating_add(fresh)
+        };
+        let units = wanted(self);
+        if self.admit(units).is_err() {
+            self.collect(roots);
+            self.admit(wanted(self)).map_err(LoadError::Memory)?;
+        }
+        let fresh: Vec<_> = referents
+            .iter()
+            .filter(|(id, _)| self.arena.entity_handle(open::entity(*id)).is_none())
+            .map(|(id, opening)| (*id, super::meter::body(&opening.placeholder())))
+            .collect();
+        let mut placements = Vec::new();
+        let decoded = match &page.members {
+            Members::List(members) => {
+                let values = members
+                    .iter()
+                    .map(|member| open::value(&mut self.arena, member, &page.heads))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(malformed)?;
+                self.arena.decoded_list(object, chunk, values)
+            }
+            Members::Table(entries) => {
+                let mut decoded = Vec::with_capacity(entries.len());
+                for entry in entries {
+                    let key =
+                        open::value(&mut self.arena, &entry.key, &page.heads).map_err(malformed)?;
+                    let value = open::value(&mut self.arena, &entry.value, &page.heads)
+                        .map_err(malformed)?;
+                    let normal = self
+                        .arena
+                        .semantics()
+                        .normal_key(&key)
+                        .map_err(|error| malformed(error.to_string()))?
+                        .ok_or_else(|| malformed("a table key has no normal form".into()))?;
+                    if placement(&normal) != entry.placement {
+                        return Err(malformed(format!(
+                            "large table {} holds a key out of its placement",
+                            id.0
+                        )));
+                    }
+                    placements.push(entry.placement);
+                    decoded.push((entry.seq, key, value, normal));
+                }
+                self.arena.decoded_table(object, chunk, decoded)
+            }
+        };
+        decoded.map_err(|error| malformed(error.to_string()))?;
+        let mut placed = std::collections::HashSet::new();
+        for (id, units) in fresh {
+            if placed.insert(id)
+                && let Some(handle) = self.arena.entity_handle(open::entity(id))
+            {
+                self.place(handle, units);
+            }
+        }
+        // Admitted as its schedule; it holds what its body does.
+        let index = object.index() as usize;
+        let before = self.units.get(index).copied().unwrap_or(0);
+        let now = self.arena.body(object).map_or(0, super::meter::body);
+        let fresh_units = units.saturating_sub(
+            super::meter::values(page.members.len() as u64)
+                .saturating_sub(super::meter::COLD_CHUNK),
+        );
+        self.held = self
+            .held
+            .saturating_sub(units.saturating_sub(fresh_units))
+            .saturating_sub(before)
+            .saturating_add(now);
+        self.place(object, now);
+        Ok(placements)
     }
 }
 
@@ -371,7 +671,36 @@ impl Heap for SlotHeap {
     }
 
     fn collect(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) {
-        self.arena.collect_cycles(roots);
+        let collected = match &self.durable {
+            Some(durable) => {
+                let summaries = &mut self.summaries;
+                self.arena.collect_reachable(roots, &mut |entity| {
+                    let id = ObjectId(entity.ordinal);
+                    if let Some(edges) = summaries.get(&id) {
+                        return Ok(edges.clone());
+                    }
+                    let edges: Vec<_> = match durable.directory.get(id)? {
+                        Some(row) => durable
+                            .directory
+                            .edges(&row)?
+                            .into_iter()
+                            .map(open::entity)
+                            .collect(),
+                        None => Vec::new(),
+                    };
+                    summaries.insert(id, edges.clone());
+                    Ok(edges)
+                })
+            }
+            None => Err(lash_kernel_doc::heap::HeapFault::Malformed(
+                "no directory".into(),
+            )),
+        };
+        if collected.is_err() {
+            // No edge summary to trace a cold object by: what it may name
+            // stays, as the conservative collection keeps it.
+            self.arena.collect_cycles(roots);
+        }
         let objects = self.arena.objects();
         let mut freed = 0u64;
         for (index, units) in self.units.iter_mut().enumerate() {
@@ -399,18 +728,15 @@ impl Heap for SlotHeap {
             .map_err(|error| malformed(error.to_string()))?
             .cold
         {
-            return Ok(());
+            return self.load_chunk(object, chunk, roots);
         }
-        let row = {
+        let (id, row) = {
             let Some(durable) = self.durable.as_ref() else {
                 return Err(malformed(
                     "a cold object in a heap with no directory".into(),
                 ));
             };
             let corrupt = |reason: String| LoadError::Store(durable.corrupt(reason));
-            if chunk != 0 {
-                return Err(corrupt(format!("a whole row has no chunk {chunk}")));
-            }
             let id = open::id_of(&self.arena, object).map_err(malformed)?;
             let row = durable
                 .directory
@@ -418,8 +744,11 @@ impl Heap for SlotHeap {
                 .map_err(LoadError::Store)?
                 .ok_or_else(|| corrupt(format!("object {} has no row", id.0)))?;
             open::referents(&row.record, &row.heads).map_err(corrupt)?;
-            row
+            (id, row)
         };
+        if let Record::Chunked(chunked) = &row.record {
+            return self.open_large(object, id, chunked, roots);
+        }
 
         // Admission of the growth: the body replaces the proxy's
         // placeholder. Then one collection from the roots, and once more.

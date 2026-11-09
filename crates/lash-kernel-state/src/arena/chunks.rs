@@ -14,6 +14,7 @@ use lash_kernel_doc::arena::{ArenaHandle, Body, Bytes, Chunk, Chunks, LongText, 
 use lash_kernel_doc::heap::{NormalKey, PAYLOAD_LEAF_BYTES, PageRef};
 use lash_kernel_doc::{NativeError, Value};
 
+pub use super::tables::LOOKUP;
 use super::tables::{self, Index};
 use super::{Arena, Key, NO_PAGE, ProxyKind, body_values, first_cold, malformed};
 
@@ -115,6 +116,127 @@ impl Arena {
         facts.cold = false;
         facts.index = Some(Index::chunked(width, count, next));
         Ok(())
+    }
+
+    /// Opens a proxy's row as a large table of `kind` (a map, a set or a
+    /// record) with `len` entries below sequence `next`, in `chunks` cold
+    /// chunks keyed by placement (the bytecode core's page form).
+    pub fn open_keyed_table(
+        &mut self,
+        handle: ArenaHandle,
+        kind: ProxyKind,
+        len: u64,
+        next: u64,
+        chunks: usize,
+    ) -> Result<(), NativeError> {
+        let table = Table {
+            len,
+            chunks: Chunks::Split((0..chunks).map(|_| cold(0)).collect()),
+        };
+        let body = match kind {
+            ProxyKind::Map => Body::Map(table),
+            ProxyKind::Set => Body::Set(table),
+            ProxyKind::Record => Body::Record(table),
+            _ => return Err(malformed("a table proxy of another kind")),
+        };
+        let before = self.needs_decode(handle)?;
+        let (held, facts) = self.parts_mut(handle)?;
+        *held = body;
+        facts.cold = false;
+        facts.index = Some(Index::keyed(chunks, next));
+        self.recount(handle, before)
+    }
+
+    /// The key the keyed table `handle`'s last lookup did not know, taken,
+    /// with its normal form: the key whose placement names the chunk the
+    /// heap loads for [`tables::LOOKUP`].
+    pub fn take_lookup(
+        &self,
+        handle: ArenaHandle,
+    ) -> Result<Option<(Key, NormalKey)>, NativeError> {
+        let Some(key) = self
+            .facts(handle)?
+            .index
+            .as_ref()
+            .and_then(Index::take_lookup)
+        else {
+            return Ok(None);
+        };
+        let value = match &key {
+            Key::Normal(normal) => {
+                let normal = (**normal).clone();
+                return Ok(Some((key, normal)));
+            }
+            Key::Int(word) => Value::Int(*word),
+            Key::Text(low, high) => {
+                let word = (u128::from(*high) << 64 | u128::from(*low)).to_le_bytes();
+                let text = std::str::from_utf8(&word[1..=usize::from(word[0])])
+                    .ok()
+                    .and_then(lash_kernel_doc::arena::ShortText::new)
+                    .ok_or_else(|| malformed("a text key is not a short text"))?;
+                Value::Text(text)
+            }
+        };
+        let normal = self
+            .semantics()
+            .normal_key(&value)?
+            .ok_or_else(|| malformed("a looked-up key has no normal form"))?;
+        Ok(Some((key, normal)))
+    }
+
+    /// Puts the clean list or table `handle`, which has an id, back on its
+    /// row as a proxy of its kind, whatever chunks it holds: what its body
+    /// held is held no longer. Gives whether it did.
+    pub fn drop_large(&mut self, handle: ArenaHandle) -> Result<bool, NativeError> {
+        let facts = self.facts(handle)?;
+        if facts.entity.is_none() || facts.dirty || facts.cold {
+            return Ok(false);
+        }
+        if !matches!(
+            self.body(handle)?,
+            Body::List(_) | Body::Map(_) | Body::Set(_) | Body::Record(_)
+        ) {
+            return Ok(false);
+        }
+        self.drop_to_pages(handle)?;
+        Ok(true)
+    }
+
+    /// The sequence the next new entry of the table `handle` takes.
+    pub fn next_sequence(&self, handle: ArenaHandle) -> Result<u64, NativeError> {
+        Ok(self
+            .facts(handle)?
+            .index
+            .as_ref()
+            .ok_or_else(|| malformed("a table has no index"))?
+            .next())
+    }
+
+    /// Whether the table `handle` is chunked by key placement, and the
+    /// chunk its new entries joined since it was opened.
+    pub fn keyed_overflow(&self, handle: ArenaHandle) -> Result<Option<Option<u32>>, NativeError> {
+        Ok(self
+            .facts(handle)?
+            .index
+            .as_ref()
+            .filter(|index| index.is_keyed())
+            .map(Index::overflow))
+    }
+
+    /// The entries' sequences of chunk `chunk` of the table `handle`.
+    pub fn chunk_sequences(
+        &self,
+        handle: ArenaHandle,
+        chunk: usize,
+    ) -> Result<Vec<u64>, NativeError> {
+        Ok(self
+            .facts(handle)?
+            .index
+            .as_ref()
+            .ok_or_else(|| malformed("a table has no index"))?
+            .sequences(chunk)
+            .iter()
+            .collect())
     }
 
     /// Up to `count` cold chunks of the list or table `handle`, from chunk
@@ -255,6 +377,39 @@ impl Arena {
                 if !sequence.chunks.join() {
                     return Ok(false);
                 }
+            }
+            Body::Map(table) | Body::Set(table) | Body::Record(table)
+                if facts.index.as_ref().is_some_and(Index::is_keyed) =>
+            {
+                let index = facts
+                    .index
+                    .as_mut()
+                    .ok_or_else(|| malformed("a table has no index"))?;
+                let Chunks::Split(chunks) = &mut table.chunks else {
+                    return Ok(false);
+                };
+                if chunks
+                    .iter()
+                    .any(|chunk| matches!(chunk, Chunk::Cold { .. }))
+                {
+                    return Ok(false);
+                }
+                let mut entries = Vec::with_capacity(table.len as usize);
+                for (at, chunk) in std::mem::take(chunks).into_iter().enumerate() {
+                    if let Chunk::Resident(pairs) = chunk {
+                        let seqs = index.sequences(at);
+                        for (slot, pair) in pairs.as_chunks::<2>().0.iter().enumerate() {
+                            let seq = seqs
+                                .get(slot)
+                                .ok_or_else(|| malformed("a table's index names no entry"))?;
+                            entries.push((seq, *pair));
+                        }
+                    }
+                }
+                entries.sort_unstable_by_key(|(seq, _)| *seq);
+                table.chunks =
+                    Chunks::whole(entries.into_iter().flat_map(|(_, pair)| pair).collect());
+                index.join();
             }
             Body::Map(table) | Body::Set(table) | Body::Record(table) => {
                 if !table.chunks.join() {

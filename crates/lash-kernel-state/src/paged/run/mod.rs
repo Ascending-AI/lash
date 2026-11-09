@@ -8,6 +8,7 @@
 //! references, so reachability over the directory reads rows only, never
 //! a large object's member pages.
 
+pub mod chunked;
 pub mod directory;
 pub mod ids;
 pub mod objects;

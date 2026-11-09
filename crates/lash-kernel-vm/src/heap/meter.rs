@@ -25,6 +25,11 @@
 //! | raw outcome, until decoded | its deep size ([`raw`]) |
 //! | the instance's program | [`OP`] per op, [`CONSTANT`] per constant |
 //! | resident directory or tree node | [`NODE`] |
+//! | a large list's or table's cold chunk | [`COLD_CHUNK`] |
+//!
+//! A large list or table opened by its chunks holds what its resident
+//! chunks hold, its members at the rates above, and [`COLD_CHUNK`] for
+//! each chunk still on its page.
 //!
 //! [`OBJECT`] includes one mark-stack word ([`MARK`]), so a collection
 //! needs no memory the run was not admitted for.
@@ -78,6 +83,10 @@ pub(crate) const CONSTANT: u64 = VALUE;
 /// One resident directory or tree node.
 pub(crate) const NODE: u64 = 256;
 
+/// One chunk of a large list or table that is still on its page: its
+/// place in the object's chunk vector.
+pub(crate) const COLD_CHUNK: u64 = VALUE;
+
 /// The physical-overhead factor: `physical ≤ PHYSICAL_A × logical +
 /// PHYSICAL_B` (contract §2).
 pub(crate) const PHYSICAL_A: u64 = 32;
@@ -86,7 +95,7 @@ pub(crate) const PHYSICAL_A: u64 = 32;
 pub(crate) const PHYSICAL_B: u64 = 1 << 17;
 
 #[inline]
-fn values(n: u64) -> u64 {
+pub(crate) fn values(n: u64) -> u64 {
     VALUE.saturating_mul(n)
 }
 
@@ -116,9 +125,9 @@ pub(crate) fn body(body: &Body) -> u64 {
         Body::LongText(text) => resident(&text.chunks),
         Body::Bytes(bytes) => resident(&bytes.chunks),
         Body::Tuple(sequence) => values(sequence.chunks.resident_len()),
-        Body::List(sequence) => values(sequence.len),
-        Body::Set(table) => values(table.len),
-        Body::Map(table) | Body::Record(table) => values(table.len.saturating_mul(2)),
+        Body::List(sequence) => split(&sequence.chunks, 1),
+        Body::Set(table) => split(&table.chunks, 2),
+        Body::Map(table) | Body::Record(table) => split(&table.chunks, 1),
         Body::Error(ErrorBody { .. }) => values(3),
         Body::Function(_) => CALLABLE,
         Body::Handle(handle) => (handle.kind.len() + handle.id.len()) as u64,
@@ -146,8 +155,23 @@ pub(crate) fn record(record: &Record) -> u64 {
         Record::Handle(handle) => (handle.kind.len() + handle.id.len()) as u64,
         Record::Closure { captures, .. } => values(captures.len() as u64),
         Record::Cell(_) => VALUE,
+        Record::Chunked(chunked) => COLD_CHUNK.saturating_mul(chunked.chunks()),
     };
     OBJECT.saturating_add(length)
+}
+
+/// What a list's or table's `chunks` hold: each resident value, `per` of
+/// them to a member (a set's entry holds its key and an absent value), and
+/// each cold chunk.
+fn split(chunks: &lash_kernel_doc::arena::Chunks, per: u64) -> u64 {
+    let cold = match chunks {
+        lash_kernel_doc::arena::Chunks::Split(chunks) => chunks
+            .iter()
+            .filter(|chunk| matches!(chunk, Chunk::Cold { .. }))
+            .count() as u64,
+        _ => 0,
+    };
+    values(chunks.resident_len() / per).saturating_add(COLD_CHUNK.saturating_mul(cold))
 }
 
 /// What `object` holds once placed. A map or record built from pairs that

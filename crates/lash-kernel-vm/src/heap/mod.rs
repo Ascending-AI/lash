@@ -6,6 +6,7 @@
 //! collector is mark-sweep from the machine's roots. Owner after handoff
 //! H0: L2 (module-map §3).
 
+pub(crate) mod large;
 pub(crate) mod meter;
 pub(crate) mod open;
 pub(crate) mod seal;

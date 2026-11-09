@@ -75,6 +75,7 @@ pub use batch::{PreparedBatch, PreparedGraphProof, PreparedInstallation, Prepare
 
 mod bench;
 mod chunks;
+mod cold_roots;
 mod heads;
 mod keys;
 mod layouts;
@@ -99,7 +100,7 @@ pub(crate) use region_port::{ArenaAuthority, RegionBuild, RegionRegistration};
 
 pub use crate::paged::stored::CARD;
 pub use bench::{Bench, Called, Usage};
-pub use chunks::{ColdChunk, PayloadPart};
+pub use chunks::{ColdChunk, LOOKUP, PayloadPart};
 pub use heads::opened;
 pub use keys::{ArenaSemantics, Key, text_key};
 pub use list_write::{
@@ -1548,6 +1549,11 @@ impl Arena {
                 pending.extend(captures.iter().copied());
             }
         }
+        self.sweep_unmarked();
+    }
+
+    /// Frees every object a mark did not reach, and clears the marks.
+    fn sweep_unmarked(&mut self) {
         let mut survivors = Vec::new();
         for index in 0..self.facts.len() {
             if std::mem::take(&mut self.facts[index].mark) {
