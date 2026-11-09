@@ -636,6 +636,7 @@ struct Drive<'a> {
     cold: bool,
     /// Cancellation is latched from the start.
     cancel: bool,
+    memory: u64,
 }
 
 impl Default for Drive<'_> {
@@ -649,6 +650,7 @@ impl Default for Drive<'_> {
             charge: ROOMY.charge,
             cold: false,
             cancel: false,
+            memory: ROOMY.memory,
         }
     }
 }
@@ -672,9 +674,24 @@ fn drive(text: &str, how: Drive<'_>) -> Observed {
     let bounds = Bounds {
         charge: how.charge,
         charge_limit: how.limit,
+        memory: how.memory,
         ..ROOMY
     };
-    let mut machine = super::embedder::core_machine(text, bounds, Some(huge_charges)).unwrap();
+    let mut machine = match super::embedder::core_machine(text, bounds, Some(huge_charges)) {
+        Ok(machine) => machine,
+        Err(refused) => {
+            return Observed {
+                end: format!("{refused:?}"),
+                charged: None,
+                printed: Vec::new(),
+                tape: None,
+                slices: 0,
+                requests: Vec::new(),
+                asked: Vec::new(),
+                natives: 0,
+            };
+        }
+    };
     let tape = how.exact.then(|| {
         let tape = crate::ChargeTape::new();
         machine.record_charges(tape.clone());
@@ -1019,4 +1036,68 @@ fn a_run_paged_out_at_every_statement_shows_its_host_what_a_resident_run_does() 
             });
         }
     }
+}
+
+/// Astra cold path, item 10: a cold load the memory bound refuses, after
+/// the collection that frees the run's garbage, refuses at the load's own
+/// event with exactly the charge before it, on the exact and the prepaid
+/// path: the block's reservation is cancelled once.
+///
+/// `xs` and `ys` fit one at a time, each beside the other's proxy, but
+/// loading `xs` back beside `ys`'s proxy does not fit, at some bound. A
+/// bound refuses that load where the same run reading `ys` instead, which
+/// fits wherever `let ys` did, finishes.
+/// By `K-CHG-002` the run has charged, up to and including the index
+/// node that loads `xs`:
+/// `let xs` 1 + 9 nodes + 8 members = 18; `let ys` 1 + 3 + 2 = 6;
+/// `let junk` 1 + 4 + 3 = 8; `set junk` 1 + 1 = 2; then `let n`'s
+/// statement 1, `xs` 1, `0` 1 and the index 1: 38.
+#[test]
+fn a_cold_load_refused_for_memory_refuses_at_its_event_with_the_charge_before_it() {
+    const BODY: &str = r#"main {
+  let xs = [1, 2, 3, 4, 5, 6, 7, 8]
+  let ys = [1, 2]
+  let junk = [1, 2, 3]
+  set junk = 0
+  let n = READ
+  return [n, ys]
+}"#;
+    let (text, unread) = (BODY.replace("READ", "xs[0]"), BODY.replace("READ", "ys[0]"));
+    let mut refused = 0;
+    for memory in 0..=4096 {
+        let how = Drive {
+            memory,
+            cold: true,
+            ..Drive::default()
+        };
+        if !drive(&unread, how).end.starts_with("List") {
+            continue;
+        }
+        let exact = drive(&text, Drive { exact: true, ..how });
+        let prepaid = drive(&text, how);
+        if exact.end.starts_with("List") {
+            assert_eq!(
+                prepaid,
+                Observed {
+                    tape: None,
+                    ..exact
+                },
+                "memory {memory}"
+            );
+            continue;
+        }
+        assert!(
+            exact.end.contains("bound: Memory"),
+            "memory {memory}: {exact:?}"
+        );
+        assert_eq!(exact.charged, Some(38), "exact, memory {memory}: {exact:?}");
+        assert_eq!(prepaid.end, exact.end, "prepaid, memory {memory}");
+        assert_eq!(
+            prepaid.charged,
+            Some(38),
+            "prepaid, memory {memory}: {prepaid:?}"
+        );
+        refused += 1;
+    }
+    assert!(refused > 0, "no bound refuses the load");
 }
