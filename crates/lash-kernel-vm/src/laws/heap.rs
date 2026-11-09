@@ -341,3 +341,49 @@ fn a_store_fault_is_not_a_memory_refusal() {
     ));
     assert!(cold(&heap, root));
 }
+
+/// Paging a heap out and loading it back holds exactly what it held: each
+/// body replaces its proxy, and a shared object comes back once.
+#[test]
+fn paging_out_and_loading_back_holds_what_the_bodies_hold() {
+    let mut heap = SlotHeap::durable(
+        u64::MAX,
+        crate::heap::open::Durable {
+            directory: Pages::default().directory(None),
+            high_water: HighWater(0),
+        },
+    );
+    let create = |heap: &mut SlotHeap, object: NewObject| {
+        heap.admit(crate::heap::slots::schedule(&object))
+            .expect("room");
+        heap.create(object).expect("an object")
+    };
+    let shared = create(
+        &mut heap,
+        NewObject::List(vec![Value::Int(1), Value::Int(2)]),
+    );
+    let root = create(
+        &mut heap,
+        NewObject::List(vec![shared, Value::Int(3), shared]),
+    );
+    let resident = heap.held();
+    assert_eq!(resident, (24 + 2 * 16) + (24 + 3 * 16));
+
+    heap.page_out(&[root]).expect("a page-out");
+    assert!(cold(&heap, root) && cold(&heap, shared));
+    assert_eq!(heap.held(), 2 * 24, "two proxies");
+
+    load(&mut heap, root, &[root]).expect("a load");
+    load(&mut heap, shared, &[root]).expect("a load");
+    let [first, three, second] = members(&heap, root)[..] else {
+        panic!("three members");
+    };
+    assert!(matches!(three, Value::Int(3)));
+    assert_eq!(first.handle(), shared.handle());
+    assert_eq!(second.handle(), shared.handle());
+    assert!(matches!(
+        members(&heap, shared)[..],
+        [Value::Int(1), Value::Int(2)]
+    ));
+    assert_eq!(heap.held(), resident);
+}

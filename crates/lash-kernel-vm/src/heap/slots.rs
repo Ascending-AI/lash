@@ -142,6 +142,44 @@ impl SlotHeap {
         )
     }
 
+    /// Seals what `roots` reach, then puts every clean list, map, set and
+    /// record back on its pages as a cold proxy, so the next read of it
+    /// loads its row: the force-cold laws' statement boundary. Closures,
+    /// cells and immutables stay resident.
+    #[cfg(test)]
+    pub(crate) fn page_out(
+        &mut self,
+        roots: &[Value],
+    ) -> Result<lash_kernel_state::paged::run::root::HeapRoot, crate::paged::SealError> {
+        use lash_kernel_doc::arena::Body;
+        let root = self.seal(roots)?;
+        for index in 0..self.units.len() {
+            let Some(handle) = self.arena.objects().handle_at(index as u32) else {
+                continue;
+            };
+            let mutable = matches!(
+                self.arena.body(handle),
+                Ok(Body::List(_) | Body::Map(_) | Body::Set(_) | Body::Record(_))
+            );
+            let evicted = mutable
+                && self
+                    .arena
+                    .evict(handle)
+                    .map_err(|error| crate::paged::SealError::Fault {
+                        problem: error.to_string(),
+                    })?;
+            if evicted {
+                let now = self.arena.body(handle).map_or(0, super::meter::body);
+                self.held = self
+                    .held
+                    .saturating_sub(self.units[index])
+                    .saturating_add(now);
+                self.units[index] = now;
+            }
+        }
+        Ok(root)
+    }
+
     /// What loading `record` adds: its body and a proxy for each referent
     /// the arena does not hold.
     fn load_units(&self, record: &lash_kernel_state::paged::run::objects::Record) -> u64 {
