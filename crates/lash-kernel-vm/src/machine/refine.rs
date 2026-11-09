@@ -193,7 +193,8 @@ impl KernelMachine {
     }
 }
 
-#[cfg(test)]
+// The frozen engine's laws: unreachable since the flip; L6 deletes them (FIG-7688).
+#[cfg(any())]
 mod laws {
     use super::*;
     use crate::compile::{Form, Stmt, Stream};

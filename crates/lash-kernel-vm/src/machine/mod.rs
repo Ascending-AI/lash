@@ -1,4 +1,9 @@
-//! The kernel machine: one run of one document as a set of tasks.
+//! The kernel machine ([`kernel::KernelMachine`]) runs the bytecode core
+//! ([`crate::vm`]) over its slot heap ([`crate::heap`]) and seals and opens
+//! through [`crate::durable`]. The rest of this module is the frozen engine
+//! the core replaced: no path reaches it, and L6 deletes it (FIG-7688).
+//!
+//! The frozen engine: one run of one document as a set of tasks.
 //!
 //! Each task is a stack of frames, and each frame a stack of the blocks,
 //! loops and `try` statements it is inside. A frame stands between
@@ -8,6 +13,9 @@
 //! roles of its continuation (`K-EVAL-008`), so a task's whole state is
 //! that stack and the variables: no value lives in a register past its
 //! step.
+
+// The frozen engine is unreachable until L6 deletes it.
+#![allow(dead_code)]
 
 mod actions;
 mod callable_capture;
@@ -19,6 +27,7 @@ mod export_abi;
 mod foreign;
 mod frames;
 mod issued;
+pub(crate) mod kernel;
 mod limits;
 mod logical_held;
 mod loops;
@@ -29,7 +38,8 @@ mod ops;
 mod oracle;
 mod oracle_actions;
 mod origin;
-#[cfg(test)]
+// The frozen engine's laws: unreachable since the flip; L6 deletes them (FIG-7688).
+#[cfg(any())]
 mod park_laws;
 pub(crate) mod project;
 mod public_value;

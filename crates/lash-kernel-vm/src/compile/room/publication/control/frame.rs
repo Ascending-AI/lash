@@ -490,7 +490,8 @@ fn root_value(value: &PV) -> Option<RootValue<'_>> {
     })
 }
 
-#[cfg(test)]
+// The frozen engine's laws: unreachable since the flip; L6 deletes them (FIG-7688).
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::laws::embedder::Embedder;

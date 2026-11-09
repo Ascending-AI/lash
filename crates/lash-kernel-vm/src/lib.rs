@@ -160,7 +160,7 @@ mod laws;
 pub(crate) use compile::Layout;
 pub use compile::{PreparedLibrary, body_census};
 pub use functions::{MachineFunctions, implement_machine_functions, register_machine_functions};
-pub use machine::KernelMachine;
+pub use machine::kernel::KernelMachine;
 pub use observe::{ChargeTape, ObservationMode};
 pub use paged::{SealedRoot, validate_foreign_checkpoint};
 pub use save::CellSaveContext;

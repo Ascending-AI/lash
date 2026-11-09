@@ -203,6 +203,12 @@ impl CoreMachine {
         }
     }
 
+    /// How many waits the run holds issued.
+    #[cfg(test)]
+    pub(crate) fn wait_count(&self) -> u64 {
+        self.vm.tasks.waits.len() as u64
+    }
+
     /// Pages every object the heap can out at each statement boundary:
     /// the laws' forced-cold runs.
     #[cfg(test)]
@@ -598,7 +604,9 @@ impl Machine for CoreMachine {
             limits: SavedLimits {
                 memory: (header.bounds.memory_meter == crate::MemoryMeter::On)
                     .then_some(header.bounds.memory),
-                charge: header.bounds.charge_limit,
+                // The limit a charge limiter grew, not the one the run
+                // started with: the reopened run resumes under it (FIG-6768).
+                charge: self.vm.charge_limit(),
             },
             kernel: header.kernel,
             document: header.document,

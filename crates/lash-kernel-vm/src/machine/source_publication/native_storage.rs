@@ -647,7 +647,8 @@ pub(in crate::machine) fn scratch_events(
     Ok(events)
 }
 
-#[cfg(test)]
+// The frozen engine's laws: unreachable since the flip; L6 deletes them (FIG-7688).
+#[cfg(any())]
 mod scalar_validation_tests {
     use super::*;
     use crate::laws::embedder::{Embedder, Setup};

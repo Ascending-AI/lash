@@ -1,12 +1,14 @@
 //! Differential execution controls for embedding laws. All strategies keep
 //! the same semantic result, effects and exact charge; interpreted execution
 //! exercises the stored helper bodies instead of their native shortcuts.
-use crate::{Bounds, CellStart, KernelMachine, OpenError, PreparedLibrary, Program, StartError};
+use crate::{
+    Bounds, CellStart, KernelMachine, Machine as _, OpenError, PreparedLibrary, Program, StartError,
+};
 use lash_kernel_state::paged::{Checkpoint, PageSource};
 
-pub mod region_isa;
-
 /// The execution paths an embedder can compare without naming VM layout.
+/// Every strategy runs the one bytecode core: a start or open takes no
+/// strategy, and [`library`] alone reprepares helpers under its layout.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ExecutionStrategy {
     #[default]
@@ -26,41 +28,35 @@ impl ExecutionStrategy {
             Self::Interpreted => 3,
         })
     }
-
-    fn select(self, mut machine: KernelMachine) -> KernelMachine {
-        match self {
-            Self::Source => machine.force_source_execution(),
-            Self::GenericRegions => machine.force_generic_regions(),
-            Self::Optimized | Self::Interpreted => {}
-        }
-        machine
-    }
 }
 
 /// The source ledger's entity bytes, root/control bytes and entity count.
-/// Physical residency and saved capacity floors do not participate.
+/// The bytecode core keeps no source ledger, so this always refuses.
 ///
 /// # Errors
-/// The source ledger could not read its authenticated balance.
+/// Always: [`HeapFault::Malformed`] naming the missing ledger.
 pub fn owner_balance(
     machine: &KernelMachine,
 ) -> Result<[u64; 3], lash_kernel_doc::heap::HeapFault> {
-    let balance = machine.logical_balance()?;
-    Ok([
-        balance.entity_local_bytes,
-        balance.root_and_control_bytes,
-        balance.entities,
-    ])
+    let _ = machine;
+    Err(lash_kernel_doc::heap::HeapFault::Malformed(
+        "the bytecode core keeps no source ledger".into(),
+    ))
 }
 
 /// Seals and reads the canonical cold equality domain at a legal boundary.
+/// The bytecode core seals site-keyed run records, which this reader does
+/// not read, so this always refuses.
 ///
 /// # Errors
-/// The seal or semantic reader could not read the complete checkpoint.
+/// Always: [`crate::SealError::Fault`] naming the format.
 pub fn semantic_checkpoint(
     machine: &mut KernelMachine,
 ) -> Result<lash_kernel_state::semantic::Checkpoint, crate::SealError> {
-    machine.try_semantic_checkpoint()
+    let _ = machine;
+    Err(crate::SealError::Fault {
+        problem: "the bytecode core's checkpoints are run records".into(),
+    })
 }
 
 /// Prepares the same installed definitions under the selected strategy.
@@ -79,8 +75,8 @@ pub fn start(
     strategy: ExecutionStrategy,
     source: Box<dyn PageSource>,
 ) -> Result<KernelMachine, StartError> {
-    KernelMachine::start_with_layout(program, bounds, start, strategy.layout(), source)
-        .map(|machine| strategy.select(machine))
+    let _ = strategy;
+    KernelMachine::start(program, bounds, start, source)
 }
 
 /// Reopens an opaque parked run under the selected strategy.
@@ -94,14 +90,8 @@ pub fn open(
     source: Box<dyn PageSource>,
     strategy: ExecutionStrategy,
 ) -> Result<KernelMachine, OpenError> {
-    KernelMachine::open_with_layout(
-        program,
-        bounds,
-        lash_kernel_state::kernel_internals::checkpoint_root(checkpoint),
-        source,
-        strategy.layout(),
-    )
-    .map(|machine| strategy.select(machine))
+    let _ = strategy;
+    KernelMachine::open(program, bounds, checkpoint, source)
 }
 
 /// A compiled and validated bytecode program, without a running machine.

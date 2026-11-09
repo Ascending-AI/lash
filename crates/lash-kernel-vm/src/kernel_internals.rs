@@ -6,7 +6,9 @@ use lash_kernel_state::paged::{CheckpointRoot, PageSource};
 use std::sync::Arc;
 
 pub use crate::compile::Layout;
-use crate::{CellStart, KernelMachine, OpenError, PreparedLibrary, Program, StartError};
+use crate::{
+    CellStart, KernelMachine, Machine as _, OpenError, PreparedLibrary, Program, StartError,
+};
 
 /// Prepares `registry` under `layout`; library bodies compile on first use.
 pub fn prepare_with_layout(registry: Arc<FunctionRegistry>, layout: Layout) -> PreparedLibrary {
@@ -24,7 +26,8 @@ pub fn in_charge(library: &PreparedLibrary, charge: crate::Charge) -> PreparedLi
     library.in_charge(charge)
 }
 
-/// Starts a run whose program executes in `layout`.
+/// Starts a run. The bytecode core compiles one program whatever the
+/// library's `layout`; the parameter stays for its callers.
 ///
 /// # Errors
 ///
@@ -36,10 +39,12 @@ pub fn start_with_layout(
     layout: Layout,
     source: Box<dyn PageSource>,
 ) -> Result<KernelMachine, StartError> {
-    KernelMachine::start_with_layout(program, bounds, start, layout, source)
+    let _ = layout;
+    KernelMachine::start(program, bounds, start, source)
 }
 
-/// Opens a root whose program executes in `layout`.
+/// Opens a root. The bytecode core compiles one program whatever the
+/// library's `layout`; the parameter stays for its callers.
 ///
 /// # Errors
 ///
@@ -51,7 +56,9 @@ pub fn open_with_layout(
     source: Box<dyn PageSource>,
     layout: Layout,
 ) -> Result<KernelMachine, OpenError> {
-    KernelMachine::open_with_layout(program, bounds, root, source, layout)
+    let _ = layout;
+    let checkpoint = lash_kernel_state::kernel_internals::checkpoint(root.clone());
+    KernelMachine::open(program, bounds, &checkpoint, source)
 }
 
 /// The executable's own check of its statement structure.
@@ -63,12 +70,6 @@ pub trait StepStructure {
     ///
     /// The first malformed range.
     fn verify_stream(&self) -> Result<usize, lash_kernel_exec::KirError>;
-}
-
-impl StepStructure for KernelMachine {
-    fn verify_stream(&self) -> Result<usize, lash_kernel_exec::KirError> {
-        KernelMachine::verify_stream(self)
-    }
 }
 
 /// Checks the ops of every statement of `library`'s bodies; gives how many
@@ -88,12 +89,15 @@ pub fn sealed_root(sealed: &crate::SealedRoot) -> &CheckpointRoot {
     &sealed.root
 }
 
-/// Task identity resolution for the kernel's persisted-state laws.
+/// A task's identity, as the frozen engine's paged task records named it.
+/// The bytecode core keeps run records instead, so every reference refuses.
 pub fn task_identity(
-    machine: &KernelMachine,
-    identity: lash_kernel_state::paged::TaskIdentityRef,
+    _machine: &KernelMachine,
+    _identity: lash_kernel_state::paged::TaskIdentityRef,
 ) -> Result<lash_kernel_value::sites::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
-    machine.task_identity(identity)
+    Err(lash_kernel_doc::heap::HeapFault::Malformed(
+        "the bytecode core keeps no paged task identities".to_owned(),
+    ))
 }
 
 /// The prepared scalar completion formula, for the owning library's

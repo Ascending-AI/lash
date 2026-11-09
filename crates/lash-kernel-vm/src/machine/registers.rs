@@ -680,7 +680,8 @@ impl From<Vec<Value>> for Registers {
     }
 }
 
-#[cfg(test)]
+// The frozen engine's laws: unreachable since the flip; L6 deletes them (FIG-7688).
+#[cfg(any())]
 mod laws {
     use crate::laws::embedder::{Embedder, Setup};
     use crate::{Layout, Machine};

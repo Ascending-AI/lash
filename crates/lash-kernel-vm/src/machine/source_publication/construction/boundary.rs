@@ -176,10 +176,11 @@ pub(in crate::machine) use super::super::{
 
 #[cfg(test)]
 mod certificates;
-#[cfg(test)]
+// The frozen engine's laws: unreachable since the flip; L6 deletes them (FIG-7688).
+#[cfg(any())]
 mod laws;
 
-#[cfg(test)]
+#[cfg(any())]
 impl crate::machine::KernelMachine {
     pub(crate) fn check_prepared_constructor_graphs(&self) {
         laws::prepared_graphs(self);

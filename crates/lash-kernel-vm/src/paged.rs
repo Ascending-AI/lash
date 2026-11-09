@@ -386,6 +386,7 @@ pub fn validate_foreign_checkpoint(
     source: Box<dyn PageSource>,
 ) -> Result<(), OpenError> {
     use crate::Machine as _;
-    let mut machine = crate::KernelMachine::open(program, bounds, checkpoint, source)?;
-    machine.validate_foreign_frames().map_err(OpenError::Heap)
+    // The core's open checks the admission relation and the live resume
+    // closure before it returns (contract §5, §7).
+    crate::KernelMachine::open(program, bounds, checkpoint, source).map(drop)
 }

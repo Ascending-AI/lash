@@ -115,21 +115,6 @@ pub trait Profiling {
     fn guest_symbols(&self) -> GuestSymbols;
 }
 
-impl Profiling for crate::KernelMachine {
-    fn count_work(&mut self) {
-        crate::KernelMachine::count_work(self);
-    }
-    fn work(&self) -> Option<WorkReport> {
-        crate::KernelMachine::work(self)
-    }
-    fn publish_context(&mut self, context: std::sync::Arc<GuestContext>) {
-        crate::KernelMachine::publish_context(self, context);
-    }
-    fn guest_symbols(&self) -> GuestSymbols {
-        crate::KernelMachine::guest_symbols(self)
-    }
-}
-
 /// The site of the statement the first ready task of the sealed `root`
 /// runs next, read through `source`: where a profiler places a run that
 /// parked. None when no task is ready.
