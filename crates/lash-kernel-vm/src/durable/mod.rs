@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use lash_kernel_doc::{JoinMode, Value};
+use lash_kernel_doc::{Datum, JoinMode, Value};
 use lash_kernel_state::paged::run::continuation::{
     JoinKind, PointPhase, RunBill, RunFrame, RunHandler, RunJoin, RunJoiner, RunOccurrence,
     RunRecord, RunRequest, RunResume, RunSlot, RunTask, RunTaskState, RunUnit, RunWait,
@@ -30,9 +30,7 @@ use crate::interface::EffectRequest;
 use crate::paged::SealError;
 use crate::vm::Vm;
 use crate::vm::frames::{Bill, Context, Frame, Handler};
-use crate::vm::tasks::{
-    Committed, Joiner, ListJoin, Pending, Phase as WaitState, Resume, State, Task, Wait,
-};
+use crate::vm::tasks::{Joiner, ListJoin, Pending, Phase as WaitState, Resume, State, Task, Wait};
 
 /// The phases a frame can stand in, in the order a saved point is looked
 /// for: a frame under another stands at its call.
@@ -357,11 +355,12 @@ fn save_wait(number: u64, pending: &Pending) -> Result<RunWait, SealError> {
         phase: match &pending.phase {
             WaitState::Issued => WaitPhase::Issued,
             WaitState::Admitted => WaitPhase::Admitted,
-            WaitState::Committed(Committed::Completed(datum)) => {
+            WaitState::Delivered(crate::Outcome::Completed(datum)) => {
                 WaitPhase::Completed(datum.clone())
             }
-            WaitState::Committed(Committed::Failed(datum)) => WaitPhase::Failed(datum.clone()),
-            WaitState::Committed(Committed::Rejected(datum)) => WaitPhase::Rejected(datum.clone()),
+            WaitState::Delivered(crate::Outcome::Failed(error)) => {
+                WaitPhase::Failed(Datum::Error(Box::new(error.clone())))
+            }
         },
         result: pending.result.clone(),
         then_yield: pending.then_yield,
@@ -566,7 +565,7 @@ pub(crate) fn open(
     scheduler.waits = record
         .waits
         .iter()
-        .map(|wait| Ok((wait.number, open_wait(wait, task_number(wait.task)?))))
+        .map(|wait| Ok((wait.number, open_wait(wait, task_number(wait.task)?)?)))
         .collect::<Result<_, String>>()?;
     scheduler.withdrawn = record.withdrawn.iter().copied().collect();
     scheduler.next_wait = record.next_wait;
@@ -700,17 +699,21 @@ fn open_handler(program: &Program, cx: &Context, saved: &RunHandler) -> Result<H
     })
 }
 
-fn open_wait(saved: &RunWait, task: usize) -> Pending {
-    Pending {
+fn open_wait(saved: &RunWait, task: usize) -> Result<Pending, String> {
+    Ok(Pending {
         task,
         phase: match &saved.phase {
             WaitPhase::Issued => WaitState::Issued,
             WaitPhase::Admitted => WaitState::Admitted,
             WaitPhase::Completed(datum) => {
-                WaitState::Committed(Committed::Completed(datum.clone()))
+                WaitState::Delivered(crate::Outcome::Completed(datum.clone()))
             }
-            WaitPhase::Failed(datum) => WaitState::Committed(Committed::Failed(datum.clone())),
-            WaitPhase::Rejected(datum) => WaitState::Committed(Committed::Rejected(datum.clone())),
+            WaitPhase::Failed(Datum::Error(error)) => {
+                WaitState::Delivered(crate::Outcome::Failed((**error).clone()))
+            }
+            WaitPhase::Failed(_) => {
+                return Err(format!("wait {} failed with no error", saved.number));
+            }
         },
         result: saved.result.clone(),
         then_yield: saved.then_yield,
@@ -722,5 +725,5 @@ fn open_wait(saved: &RunWait, task: usize) -> Pending {
             result: request.result.clone(),
             origin: request.origin.clone(),
         }),
-    }
+    })
 }

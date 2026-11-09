@@ -18,10 +18,9 @@ use lash_kernel_state::paged::{
 use lash_kernel_value::names::{FunctionName, Name};
 use lash_kernel_value::package::OperationMode;
 use lash_kernel_value::tokens::encode_body;
-use lash_kernel_value::types::Type;
 use lash_kernel_value::{HelperOperationId, OperationSlot};
 
-use super::tasks::{Committed, Operation, Operations};
+use super::tasks::{Operation, Operations};
 use crate::bytecode::program::ActionSite;
 
 use super::watch::Watch;
@@ -456,21 +455,8 @@ impl Machine for CoreMachine {
         if self.ended {
             return Err(DeliverError::Ended);
         }
-        let document = &self.document;
         let n = lash_kernel_doc::kernel_internals::wait_number(wait);
-        self.vm.tasks.deliver(n, |result| match outcome {
-            Outcome::Completed(datum) => match super::tasks::decode(document, &datum, result) {
-                Ok(decoded) => Committed::Completed(decoded),
-                Err(refusal) => Committed::Rejected(refusal),
-            },
-            Outcome::Failed(error) => {
-                let datum = Datum::Error(Box::new(error));
-                match super::tasks::decode(document, &datum, &Type::Any) {
-                    Ok(decoded) => Committed::Failed(decoded),
-                    Err(refusal) => Committed::Rejected(refusal),
-                }
-            }
-        })
+        self.vm.tasks.deliver(n, outcome)
     }
 
     /// Seals the whole run in one step: the budget is not divided yet.

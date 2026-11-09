@@ -3,7 +3,10 @@
 //! - PAUSE-ANY: a core run sealed at every slice and every park and opened
 //!   cold, each time in a machine built from a program compiled afresh,
 //!   leaves what the run that never paused leaves: its end, prints,
-//!   requests and charge.
+//!   requests and charge. A park is sealed either before its requests
+//!   are delivered or after (the post-deliver window); a delivered
+//!   outcome survives the reopen, and delivering it again is refused
+//!   (contract §5).
 
 use lash_kernel_doc::Datum;
 use lash_kernel_state::paged::SealBudget;
@@ -20,10 +23,20 @@ struct Left {
     charged: Option<u64>,
 }
 
-/// Runs `text` on the core in slices of `slice`; when `pause`, seals it at
-/// every slice and park and goes on in a machine opened cold from the
-/// root. How many times it paused, and what it left.
-fn run(text: &str, slice: u64, pause: bool) -> (usize, Left) {
+/// Where a run pauses.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Pause {
+    Never,
+    /// At every slice, and at every park before it is delivered.
+    BeforeDelivery,
+    /// At every slice, and at every park once it is delivered.
+    AfterDelivery,
+}
+
+/// Runs `text` on the core in slices of `slice`, sealing it where `pause`
+/// says and going on in a machine opened cold from the root. How many
+/// times it paused, and what it left.
+fn run(text: &str, slice: u64, pause: Pause) -> (usize, Left) {
     let source = Source::default();
     let mut machine = <crate::CoreMachine as Machine>::start(
         core_program(text, None),
@@ -61,18 +74,30 @@ fn run(text: &str, slice: u64, pause: bool) -> (usize, Left) {
             Step::Ended(End::Finished(finished)) => break format!("{:?}", finished.result),
             Step::Ended(other) => break format!("{other:?}"),
             Step::Slice => {
-                if pause {
+                if pause != Pause::Never {
                     reopen(&mut machine);
                 }
             }
             Step::Parked(park) => {
-                if pause {
+                if pause == Pause::BeforeDelivery {
                     reopen(&mut machine);
                 }
                 for request in &park.requests {
                     let crate::Request::Effect(effect) = request;
                     requests.push(effect.args.clone());
                     machine.deliver(wait_of(request), answer(request)).unwrap();
+                }
+                if pause == Pause::AfterDelivery && !park.requests.is_empty() {
+                    reopen(&mut machine);
+                    for request in &park.requests {
+                        assert!(
+                            matches!(
+                                machine.deliver(wait_of(request), answer(request)),
+                                Err(crate::DeliverError::AlreadyDelivered { .. })
+                            ),
+                            "{text}\na second delivery across a reopen is refused"
+                        );
+                    }
                 }
             }
         }
@@ -111,10 +136,15 @@ fn cases() -> Vec<String> {
 #[test]
 fn a_core_run_sealed_and_opened_cold_at_every_pause_leaves_what_an_unpaused_run_leaves() {
     for text in cases() {
-        let (_, whole) = run(&text, u64::MAX, false);
+        let (_, whole) = run(&text, u64::MAX, Pause::Never);
         for slice in [u64::MAX, 1, 2, 5] {
-            let (paused, left) = run(&text, slice, true);
-            assert_eq!(left, whole, "{text}\nslice {slice}, {paused} pauses");
+            for pause in [Pause::BeforeDelivery, Pause::AfterDelivery] {
+                let (paused, left) = run(&text, slice, pause);
+                assert_eq!(
+                    left, whole,
+                    "{text}\nslice {slice}, {pause:?}, {paused} pauses"
+                );
+            }
         }
     }
 }

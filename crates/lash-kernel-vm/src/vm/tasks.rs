@@ -106,15 +106,9 @@ pub(crate) enum Phase {
     Issued,
     /// Handed over at a park.
     Admitted,
-    Committed(Committed),
-}
-
-/// A delivered outcome, decoded by the `perform`'s type.
-pub(crate) enum Committed {
-    Completed(Datum),
-    Failed(Datum),
-    /// The result did not fit the type: the refusal is raised, uncharged.
-    Rejected(Datum),
+    /// Delivered: the host's outcome as it gave it, held raw until the
+    /// task consumes it, which decodes it once (contract §5).
+    Delivered(crate::Outcome),
 }
 
 /// How a perform's operation resolved at the start.
@@ -288,7 +282,7 @@ impl Tasks {
     pub(crate) fn deliver(
         &mut self,
         wait: u64,
-        outcome: impl FnOnce(&Type) -> Committed,
+        outcome: crate::Outcome,
     ) -> Result<crate::Delivered, crate::DeliverError> {
         let id = lash_kernel_doc::kernel_internals::wait_id(wait);
         let Some(pending) = self.waits.get_mut(&wait) else {
@@ -302,10 +296,10 @@ impl Tasks {
         };
         match pending.phase {
             Phase::Issued => return Err(crate::DeliverError::UnknownWait { wait: id }),
-            Phase::Committed(_) => return Err(crate::DeliverError::AlreadyDelivered { wait: id }),
+            Phase::Delivered(_) => return Err(crate::DeliverError::AlreadyDelivered { wait: id }),
             Phase::Admitted => {}
         }
-        pending.phase = Phase::Committed(outcome(&pending.result));
+        pending.phase = Phase::Delivered(outcome);
         let (task, turn) = (pending.task, pending.then_yield);
         self.wake(task, Resume::Outcome(wait), turn);
         Ok(crate::Delivered::Accepted)
@@ -482,19 +476,26 @@ impl<H: Heap> Vm<H> {
                 let Some(pending) = self.tasks.waits.remove(&wait) else {
                     return Err(fault("a resuming outcome has no wait"));
                 };
-                let Phase::Committed(committed) = pending.phase else {
-                    return Err(fault("a resuming outcome is not committed"));
+                let Phase::Delivered(outcome) = pending.phase else {
+                    return Err(fault("a resuming outcome is not delivered"));
                 };
-                match committed {
-                    Committed::Completed(datum) => {
+                // The raw outcome is decoded here, once: a failure by any
+                // type, a result by the `perform`'s; a result that does not
+                // fit raises its refusal, uncharged.
+                let (raised, raw, ty) = match outcome {
+                    crate::Outcome::Completed(datum) => (false, datum, pending.result),
+                    crate::Outcome::Failed(error) => {
+                        (true, Datum::Error(Box::new(error)), Type::Any)
+                    }
+                };
+                match decode(&self.document, &raw, &ty) {
+                    Ok(datum) if raised => Err(Flow::Raise(self.decoded(&datum)?)),
+                    Ok(datum) => {
                         let value = self.decoded(&datum)?;
                         self.push(value);
                         Ok(())
                     }
-                    Committed::Failed(datum) => Err(Flow::Raise(self.decoded(&datum)?)),
-                    Committed::Rejected(datum) => {
-                        Err(Flow::Raise(super::datum::copy_in(self, &datum)?))
-                    }
+                    Err(refusal) => Err(Flow::Raise(super::datum::copy_in(self, &refusal)?)),
                 }
             }
         }
@@ -1089,7 +1090,7 @@ impl<H: Heap> Vm<H> {
             return Ok(());
         };
         match pending.phase {
-            Phase::Committed(_) => return Ok(()),
+            Phase::Delivered(_) => return Ok(()),
             Phase::Issued => {
                 // No embedder has it: the local request is refused.
                 let turn = pending.then_yield;

@@ -429,11 +429,10 @@ pub enum WaitPhase {
     Issued,
     /// Handed over at a park.
     Admitted,
-    /// Delivered, decoded by the `perform`'s type.
+    /// Delivered as the host gave it, decoded when the task consumes it.
     Completed(Datum),
+    /// Delivered as failed: the host's error, as a [`Datum::Error`].
     Failed(Datum),
-    /// The result did not fit the type: the refusal is raised, uncharged.
-    Rejected(Datum),
 }
 
 impl TokenCodec for WaitPhase {
@@ -443,7 +442,6 @@ impl TokenCodec for WaitPhase {
             Self::Admitted => out.sum(1, 0),
             Self::Completed(datum) => one(out, 2, datum),
             Self::Failed(datum) => one(out, 3, datum),
-            Self::Rejected(datum) => one(out, 4, datum),
         }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -452,7 +450,6 @@ impl TokenCodec for WaitPhase {
             (1, 0) => Self::Admitted,
             (2, 1) => Self::Completed(Datum::decode(input)?),
             (3, 1) => Self::Failed(Datum::decode(input)?),
-            (4, 1) => Self::Rejected(Datum::decode(input)?),
             (variant, _) => return Err(TokenError::UnsupportedVariant { variant }),
         })
     }
