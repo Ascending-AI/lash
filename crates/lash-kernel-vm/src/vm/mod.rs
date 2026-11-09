@@ -561,14 +561,19 @@ impl<H: Heap> Vm<H> {
         Ok(())
     }
 
-    /// Bills a dynamic fee (a completion formula, a copy-out): the running
-    /// block continues event by event. Under `Charge::Off` it bills nothing.
+    /// Bills a dynamic fee (a completion formula, a copy-out): on top of
+    /// a prepaid block where the block still fits, otherwise on the exact
+    /// path, the running block continuing event by event. Under
+    /// `Charge::Off` it bills nothing.
     pub(crate) fn fee(&mut self, units: u64) -> Run<()> {
         if self.paced {
             return Ok(());
         }
         if let Some(watch) = &self.watch {
             watch.charge(Weight::Atomic(units));
+        }
+        if self.meter.prepay(units) {
+            return Ok(());
         }
         let through = self.through();
         self.exact = true;
@@ -1154,12 +1159,6 @@ impl<H: Heap> Vm<H> {
                 if !retrying && unit.step[pc] {
                     self.chill();
                 }
-                if let Op::Block(_) = op {
-                    // The block before ended: what it reserved is spent,
-                    // and the charge is exact at the boundary.
-                    self.meter.leave();
-                    self.exact = true;
-                }
                 if self.exact {
                     // A refusal, a limiter and a slice read the frame at
                     // the op.
@@ -1178,6 +1177,11 @@ impl<H: Heap> Vm<H> {
                 pc += 1;
                 match op {
                     Op::Block(block) => {
+                        // The block before ended: what it reserved is
+                        // spent. A head bills nothing and starts no step
+                        // (validated), so it needs no exact step of its
+                        // own.
+                        self.meter.leave();
                         let block = &unit.blocks[block as usize];
                         let cost = if self.paced { block.pace } else { block.charge };
                         self.exact = self.watch.is_some() || !self.meter.enter(cost);

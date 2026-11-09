@@ -446,7 +446,8 @@ impl Unit {
     }
 
     /// The blocks partition the ops, each headed by its own `Block` op,
-    /// and their charge, pace and suffix tables sum the ops' events.
+    /// which bills nothing and starts no step, and their charge, pace and
+    /// suffix tables sum the ops' events.
     fn check_blocks(&self, id: UnitId) -> Checked {
         let whole = |problem: String| Malformed {
             unit: id,
@@ -467,8 +468,12 @@ impl Unit {
             if end > self.ops.len() || self.ops[start] != Op::Block(k as u32) {
                 return Err(at(format!("block {k} is not headed by its own op")));
             }
-            if !self.event[start].is_none() || self.pace[start] != 0 || self.through[start] != 0 {
-                return Err(at(format!("block {k}'s head bills")));
+            if !self.event[start].is_none()
+                || self.pace[start] != 0
+                || self.through[start] != 0
+                || self.step[start]
+            {
+                return Err(at(format!("block {k}'s head bills or starts a step")));
             }
             let mut charge = Some(0u64);
             let mut pace = Some(0u64);

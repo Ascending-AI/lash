@@ -171,6 +171,21 @@ pub(crate) fn immediate_size(value: &Value) -> Option<u64> {
     Some(extent + 1)
 }
 
+/// Whether a value the arena holds nothing of, of size 1 or 2 as
+/// [`immediate_size`] measures it, is of size 2; `None` for any other.
+#[inline(always)]
+pub(crate) fn size_two(value: &Value) -> Option<bool> {
+    match value {
+        Value::Int(word) => Some(*word != 0),
+        Value::Text(short) => match short.as_bytes().len() {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        },
+        value => size_one(value).then_some(false),
+    }
+}
+
 /// `measure` of a value the arena holds nothing of, as [`size`],
 /// [`deep_size`], [`nested_size`] and [`magnitude`] measure it: such a
 /// value holds no other, so its deep size is its size and its nested size

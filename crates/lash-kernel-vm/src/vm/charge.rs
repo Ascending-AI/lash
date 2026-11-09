@@ -11,10 +11,13 @@
 //! a prepaid block holds no step at which the slice could end: the slice
 //! is tested at step ops on the exact path alone.
 //!
-//! Leaving a prepaid block early (a raise, a refusal, `finish`, a bound
-//! error, a limiter consultation, a dynamic fee, a cancellation) cancels
-//! the reservation exactly once: the reservation is an `Option`, taken
-//! when cancelled.
+//! A dynamic fee in a prepaid block is billed on top of its reservation
+//! while the whole stays within the limit and ends before the slice: no
+//! event left in the block can then be refused or end the slice, so the
+//! block stays prepaid. Leaving a prepaid block early (a raise, a refusal,
+//! `finish`, a bound error, a limiter consultation, a dynamic fee that
+//! does not fit, a cancellation) cancels the reservation exactly once: the
+//! reservation is an `Option`, taken when cancelled.
 
 /// A charge refusal: the event would pass the limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,6 +160,24 @@ impl Meter {
         match rest {
             Rest::Units(units) => self.units(units),
             Rest::Atomic(units) => self.atomic(units),
+        }
+    }
+
+    /// Bills a dynamic fee of `units` on top of a prepaid block's
+    /// reservation, when the block and the fee fit the limit and end
+    /// before the slice: then every prefix of the block's rest is within
+    /// both, as on the exact path. Gives whether it was billed.
+    #[inline]
+    pub(crate) fn prepay(&mut self, units: u64) -> bool {
+        if self.reserved.is_none() {
+            return false;
+        }
+        match self.used.checked_add(units) {
+            Some(used) if used <= self.limit && used < self.slice_end => {
+                self.used = used;
+                true
+            }
+            _ => false,
         }
     }
 

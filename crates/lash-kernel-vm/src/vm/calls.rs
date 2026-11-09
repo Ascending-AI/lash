@@ -328,14 +328,10 @@ impl<H: Heap> Vm<H> {
             | InlineOperation::Length(_)
             | InlineOperation::Membership(_)
             | InlineOperation::IntegerText(_) => self.formula(entry.charge, args, Some(&value)),
-            _ => {
-                let sized = |value: &Value| crate::data::immediate_size(value).unwrap_or(0);
-                let sizes = [sized(&args[0]), sized(&args[1]), sized(&value)];
-                match program.charges[entry.charge as usize].pair(sizes) {
-                    Some(units) => Ok(units),
-                    None => self.formula(entry.charge, args, Some(&value)),
-                }
-            }
+            _ => match program.charges[entry.charge as usize].pair([&args[0], &args[1], &value]) {
+                Some(units) => Ok(units),
+                None => self.formula(entry.charge, args, Some(&value)),
+            },
         };
         Some(units.map(|units| (value, Some(units))))
     }

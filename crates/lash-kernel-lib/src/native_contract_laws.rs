@@ -520,6 +520,7 @@ fn call_wrapper_leaf_natives_answer_without_allocating() {
                     | "map.contains"
                     | "num.to_text"
                     | "int.to_text"
+                    | "num.add"
             )
         }) {
             let definition = (**registered.definition()).clone();
@@ -532,7 +533,7 @@ fn call_wrapper_leaf_natives_answer_without_allocating() {
             registry.register(definition, Some(native)).unwrap();
         }
         let document = std::sync::Arc::new(crate::testsupport::document(
-            "kernel 1\nnumbers by_spelling\nmain { let xs = [] let pair = (7, 8) let kw = map{\"x\": 7} return (kind(xs), same(\"py.function\", \"py.function\"), same(-0.0, 0.0), same(xs, xs), list.len(xs), tuple.len(pair), map.len(kw), bool.not(false), map.contains(kw, \"x\"), num.to_text(-1234), int.to_text(255, 16)) }",
+            "kernel 1\nnumbers by_spelling\nmain { let xs = [] let pair = (7, 8) let kw = map{\"x\": 7} return (kind(xs), same(\"py.function\", \"py.function\"), same(-0.0, 0.0), same(xs, xs), list.len(xs), tuple.len(pair), map.len(kw), bool.not(false), map.contains(kw, \"x\"), num.to_text(-1234), int.to_text(255, 16), num.add(-3, 1), same(\"a\", \"b\")) }",
             &registry,
         ));
         let program = crate::testsupport::program(

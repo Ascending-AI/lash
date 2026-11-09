@@ -5,7 +5,7 @@
 //! billing reads the call's arguments and result without names. A formula
 //! that is a constant is folded once.
 
-use lash_kernel_doc::{Formula, FunctionDefinition, Measure, Operand};
+use lash_kernel_doc::{Formula, FunctionDefinition, Measure, Operand, Value};
 use lash_kernel_value::names::Name;
 
 /// An operand position: an argument index, or the result.
@@ -202,17 +202,15 @@ impl Charge {
     }
 
     /// The formula over two arguments and a result that hold nothing,
-    /// of sizes `sizes`, when each is 1 or 2 and the formula reads nothing
+    /// `values`, when each is of size 1 or 2 and the formula reads nothing
     /// else.
-    #[inline]
-    pub fn pair(&self, sizes: [u64; 3]) -> Option<u64> {
+    #[inline(always)]
+    pub fn pair(&self, values: [&Value; 3]) -> Option<u64> {
         let table = self.pairs.as_ref()?;
         let mut index = 0;
-        for (bit, size) in sizes.into_iter().enumerate() {
-            match size {
-                1 => {}
-                2 => index |= 1 << bit,
-                _ => return None,
+        for (bit, value) in values.into_iter().enumerate() {
+            if crate::data::size_two(value)? {
+                index |= 1 << bit;
             }
         }
         Some(table[index])
