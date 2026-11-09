@@ -757,7 +757,9 @@ fn drive(text: &str, how: Drive<'_>) -> Observed {
 /// `law.at`, whose guard path folds to one list read: past the end of its
 /// list the fold declines and its region raises. `law.get`'s folds to a
 /// membership answer and one map read: on a key the map lacks its guard
-/// does not hold and the region returns 0.
+/// does not hold and the region returns 0. `law.str` folds both ways
+/// of its numeric guard: an integer's digits below 1000, a constant
+/// from 1000.
 const EVENT_CONTRACT: [&str; 3] = [
     r#"definition "function sq(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return num.add(x, x) }"
 main {
@@ -809,6 +811,9 @@ main {
     set total = num.add(total, list.len(d))
     set total = num.add(total, invoke law.at([5, 6, 7], i))
     set total = num.add(total, invoke law.get(map{1: 20, 2: 30}, i))
+    let up = invoke law.str(num.add(i, 998))
+    let down = invoke law.str(num.add(i, -2))
+    print (up, down)
     try {
       set total = num.add(total, invoke law.at([5], i))
     } catch e {
@@ -939,7 +944,10 @@ thread_local! {
 /// `law.at`, reading a list below 3 and billing its result's size; and
 /// `law.first`, reading its first argument's first member and billing
 /// its second's deep size; `law.holds`, `map.contains` declaring its
-/// inline answer; and `law.get`, reading a map under a key it holds.
+/// inline answer; `law.get`, reading a map under a key it holds;
+/// `law.digits`, `num.to_text` declaring its inline answer; and
+/// `law.str`, spelling an integer below 1000 and billing its result's
+/// size.
 fn huge_charges(
     registry: &mut lash_kernel_doc::FunctionRegistry,
     ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
@@ -986,6 +994,40 @@ fn huge_charges(
             Ok(lash_kernel_doc::Value::Bool(
                 call.args.lookup(table, key)?.is_some(),
             ))
+        }
+    }
+    /// `num.to_text` over words whose digits a short text holds, spelled
+    /// by the standard formatter, declaring its inline answer as the
+    /// library's does.
+    struct Digits;
+    impl lash_kernel_doc::NativeFunction for Digits {
+        fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+            use lash_kernel_doc::arena::native::{
+                InlineNative, InlineOperation, IntegerTextDomain,
+            };
+            lash_kernel_doc::NativeSpecialization {
+                inline: Some(InlineNative {
+                    native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                    operation: InlineOperation::IntegerText(IntegerTextDomain::Decimal),
+                }),
+                ..Default::default()
+            }
+        }
+
+        fn call(
+            &self,
+            call: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            let [lash_kernel_doc::Value::Int(word)] = call.args.values() else {
+                return Err(lash_kernel_doc::NativeError::Malformed(
+                    "law.digits takes a word",
+                ));
+            };
+            lash_kernel_doc::arena::ShortText::new(&word.to_string())
+                .map(lash_kernel_doc::Value::Text)
+                .ok_or(lash_kernel_doc::NativeError::Malformed(
+                    "law.digits spells short words",
+                ))
         }
     }
     let mut registered: Vec<(&'static str, lash_kernel_value::FunctionId)> = Vec::new();
@@ -1041,6 +1083,16 @@ fn huge_charges(
             true,
         ),
         (
+            "law.digits",
+            "function law.digits(x: Any) -> Text\nkernel 1\ncharge size(result)\nnative\n",
+            true,
+        ),
+        (
+            "law.str",
+            "function law.str(x: Any) -> Any\nkernel 1\ncharge sum(8, deep(x), size(result))\n{uses}body { if num.lt(x, 1000) { return law.digits(x) } return \"big\" }",
+            false,
+        ),
+        (
             "law.get",
             "function law.get(m: Any, k: Any) -> Any\nkernel 1\ncharge sum(6, deep(k), size(result))\n{uses}body { if law.holds(m, k) { return m[k] } return 0 }",
             false,
@@ -1058,6 +1110,8 @@ fn huge_charges(
         let native =
             native.then(|| match name {
                 "law.holds" => std::sync::Arc::new(Holds)
+                    as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,
+                "law.digits" => std::sync::Arc::new(Digits)
                     as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,
                 _ => std::sync::Arc::new(Nothing)
                     as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,

@@ -433,6 +433,19 @@ fn call_wrapper_leaf_natives_answer_without_allocating() {
         ("map.contains", &[map, short("x")], Value::Bool(true)),
         ("map.contains", &[map, short("y")], Value::Bool(false)),
         ("map.contains", &[map, Value::Int(7)], Value::Bool(false)),
+        ("num.to_text", &[Value::Int(-1234)], short("-1234")),
+        ("num.to_text", &[Value::Int(0)], short("0")),
+        (
+            "int.to_text",
+            &[Value::Int(255), Value::Int(16)],
+            short("ff"),
+        ),
+        (
+            "int.to_text",
+            &[Value::Int(-5), Value::Int(2)],
+            short("-101"),
+        ),
+        ("int.to_text", &[Value::Int(35), Value::Int(36)], short("z")),
     ];
     for &(name, values, expected) in cases {
         let native = crate::native(name).unwrap();
@@ -498,7 +511,15 @@ fn call_wrapper_leaf_natives_answer_without_allocating() {
         for (_, registered) in catalog.iter().filter(|(_, registered)| {
             matches!(
                 registered.name(),
-                "kind" | "same" | "bool.not" | "list.len" | "tuple.len" | "map.len"
+                "kind"
+                    | "same"
+                    | "bool.not"
+                    | "list.len"
+                    | "tuple.len"
+                    | "map.len"
+                    | "map.contains"
+                    | "num.to_text"
+                    | "int.to_text"
             )
         }) {
             let definition = (**registered.definition()).clone();
@@ -511,7 +532,7 @@ fn call_wrapper_leaf_natives_answer_without_allocating() {
             registry.register(definition, Some(native)).unwrap();
         }
         let document = std::sync::Arc::new(crate::testsupport::document(
-            "kernel 1\nnumbers by_spelling\nmain { let xs = [] let pair = (7, 8) let kw = map{\"x\": 7} return (kind(xs), same(\"py.function\", \"py.function\"), same(-0.0, 0.0), same(xs, xs), list.len(xs), tuple.len(pair), map.len(kw), bool.not(false)) }",
+            "kernel 1\nnumbers by_spelling\nmain { let xs = [] let pair = (7, 8) let kw = map{\"x\": 7} return (kind(xs), same(\"py.function\", \"py.function\"), same(-0.0, 0.0), same(xs, xs), list.len(xs), tuple.len(pair), map.len(kw), bool.not(false), map.contains(kw, \"x\"), num.to_text(-1234), int.to_text(255, 16)) }",
             &registry,
         ));
         let program = crate::testsupport::program(
@@ -704,6 +725,7 @@ fn prepared_scalar_answers_supply_only_graph_free_contracts() {
     let digits = format.specialization().inline.unwrap();
     assert!(digits.operation.accepts(&[Value::Int(i64::MAX)]));
     assert!((format.prepare().unwrap().entry)(&[Value::Int(i64::MAX)]).is_none());
+    assert!(digits.scalar_answer(1, &[Value::Int(i64::MAX)]).is_none());
     assert!(crate::testsupport::exhausted(
         &bench
             .call(&*format, &[Value::Int(i64::MAX)], 0, &mut counter)

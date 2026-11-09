@@ -285,7 +285,7 @@ fn number<S: Output>(
         }
     }
     match value {
-        Value::Int(number) => match crate::numbers::short_digits(*number, 10) {
+        Value::Int(number) => match lash_kernel_doc::arena::ShortText::digits(*number, 10) {
             Some(digits) => out.push(digits.as_str()),
             None => out.push(&number.to_string()),
         },

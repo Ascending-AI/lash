@@ -41,17 +41,31 @@ impl<H: Heap> Vm<H> {
     }
 
     /// Enters inline site `n` of `unit` as [`Vm::inline`] does, and runs
-    /// the region's fold `fold`. A fold that holds completes the
-    /// activation where the region's `Op::Leave` would, giving `None`:
+    /// the region's folds `folds`, its guard paths, until one holds: at
+    /// most one does, for no two paths take the same branch both ways. A
+    /// fold that holds completes the activation where its `Op::Leave`
+    /// would, giving `None`:
     /// the frame stands there while its completion is billed, so a cold
     /// read or a refusal finds the region laid out at its leave with the
     /// value on the stack, as the leave's own dispatch would. Otherwise
     /// the activation is laid out and the region runs: gives where its
     /// locals start.
-    pub(super) fn inline_folded(&mut self, unit: &Unit, n: u32, fold: &Fold) -> Run<Option<usize>> {
+    pub(super) fn inline_folded(
+        &mut self,
+        unit: &Unit,
+        n: u32,
+        folds: &[Fold],
+    ) -> Run<Option<usize>> {
         let (charge, argc) = self.activate(unit, n)?;
         let base = self.cx.stack.len() - argc;
-        let Some(value) = self.folded(fold, base) else {
+        let mut held = None;
+        for fold in folds {
+            if let Some(value) = self.folded(fold, base) {
+                held = Some((fold, value));
+                break;
+            }
+        }
+        let Some((fold, value)) = held else {
             return Ok(Some(self.lay_out(unit, n, charge, argc)));
         };
         if let Some(frame) = self.cx.frames.last_mut() {
@@ -127,6 +141,7 @@ impl<H: Heap> Vm<H> {
     /// not hold or a step declines, so that the region runs. A region
     /// calls only natives with no body, so an answer holds no unit of
     /// depth.
+    #[inline(always)]
     fn folded(&self, fold: &Fold, base: usize) -> Option<Value> {
         let mut made = [Value::Absent; FOLD_STEPS];
         let mut count = 0;

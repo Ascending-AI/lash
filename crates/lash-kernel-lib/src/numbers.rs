@@ -760,7 +760,7 @@ fn plain(
         Operation::ToText => match a {
             // Digits a short text holds are written nowhere; longer ones
             // are reserved before they are written.
-            Value::Int(word) => match short_digits(*word, 10) {
+            Value::Int(word) => match ShortText::digits(*word, 10) {
                 Some(digits) => Value::Text(digits),
                 None => return Ok(None),
             },
@@ -782,7 +782,7 @@ fn plain(
             let Value::Int(word) = a else {
                 return Ok(None);
             };
-            match short_digits(*word, radix(&args[1])?) {
+            match ShortText::digits(*word, radix(&args[1])?) {
                 Some(digits) => Value::Text(digits),
                 None => return Ok(None),
             }
@@ -855,41 +855,6 @@ const _: () = {
 /// A kind's name, as `kind` answers it, from the immutable kind table.
 fn kind_name(kind: ValueKind) -> Value {
     crate::short(KIND_NAMES[kind as usize].1)
-}
-
-/// A word's digits in `radix`, lower-case and signed as
-/// [`integer_text`] spells them, when they fit a short text: one held in
-/// the value, which takes no room.
-pub(crate) fn short_digits(word: i64, radix: u32) -> Option<ShortText> {
-    // Decimal, the radix nearly every call spells, divides by a constant.
-    if radix == 10 {
-        spell(word, 10)
-    } else {
-        spell(word, radix)
-    }
-}
-
-/// [`short_digits`]'s one spelling, `radix` in `2..=36`.
-#[inline(always)]
-fn spell(word: i64, radix: u32) -> Option<ShortText> {
-    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    let radix = u64::from(radix);
-    let mut bytes = [0u8; ShortText::MAX];
-    let mut at = bytes.len();
-    let mut rest = word.unsigned_abs();
-    loop {
-        at = at.checked_sub(1)?;
-        bytes[at] = *DIGITS.get(usize::try_from(rest % radix).ok()?)?;
-        rest /= radix;
-        if rest == 0 {
-            break;
-        }
-    }
-    if word < 0 {
-        at = at.checked_sub(1)?;
-        bytes[at] = b'-';
-    }
-    ShortText::ascii(&bytes[at..])
 }
 
 /// An integer's digits in `radix`, a text that can be eight times the

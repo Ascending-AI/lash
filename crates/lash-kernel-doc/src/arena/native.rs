@@ -1076,6 +1076,15 @@ impl InlineOperation {
             (Self::Kind, [value]) => KIND_TEXTS[value.kind() as usize].map(Value::Text),
             (Self::Same, [left, right]) => shallow_same(left, right).map(Value::Bool),
             (Self::Not, [Value::Bool(value)]) => Some(Value::Bool(!value)),
+            (Self::IntegerText(IntegerTextDomain::Decimal), [Value::Int(word)]) => {
+                ShortText::digits(*word, 10).map(Value::Text)
+            }
+            (
+                Self::IntegerText(IntegerTextDomain::RadixArgument),
+                [Value::Int(word), Value::Int(radix)],
+            ) if self.accepts(args) => {
+                ShortText::digits(*word, u32::try_from(*radix).ok()?).map(Value::Text)
+            }
             (Self::Scalar { operation, .. }, [Value::Int(a), Value::Int(b)])
                 if self.accepts(args) =>
             {

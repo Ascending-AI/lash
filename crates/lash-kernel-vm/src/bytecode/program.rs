@@ -186,18 +186,22 @@ pub struct InlineSite {
     pub at: u32,
     pub entry: u32,
     pub end: u32,
-    /// The guard path's fold, in the unit's folds (`fold`), if it has one.
-    pub fold: Option<u32>,
+    /// Its guard paths' folds (`fold`): where they start in the unit's
+    /// folds and where they end, an empty span when no path folds.
+    pub folds: (u32, u32),
 }
 
 /// The most steps, and values made, of one fold.
 pub const FOLD_STEPS: usize = 8;
 
+/// The most guard paths of one region that fold.
+pub const FOLD_PATHS: usize = 4;
+
 /// An inline region's guard path from its entry to one `Op::Leave`, as
 /// one guarded op (`fold`): its guards and the value it returns, read
 /// with no effect. Where a guard does not hold or a read declines, the
-/// region runs from its entry; otherwise the region's `Op::Leave` at
-/// `leave` returns the value.
+/// path does not hold; otherwise the region's `Op::Leave` at `leave`
+/// returns the value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fold {
     pub steps: [Step; FOLD_STEPS],

@@ -14,7 +14,7 @@
 use lash_kernel_doc::Value;
 use lash_kernel_doc::WorkCounter;
 use lash_kernel_doc::arena::native::{
-    Args, InlineOperation, NativeCall, NativeError, NewObject, Nursery, Retry,
+    Args, InlineOperation, IntegerTextDomain, NativeCall, NativeError, NewObject, Nursery, Retry,
 };
 use lash_kernel_doc::heap::LogicalBytes;
 
@@ -326,7 +326,8 @@ impl<H: Heap> Vm<H> {
             InlineOperation::Kind
             | InlineOperation::Not
             | InlineOperation::Length(_)
-            | InlineOperation::Membership(_) => self.formula(entry.charge, args, Some(&value)),
+            | InlineOperation::Membership(_)
+            | InlineOperation::IntegerText(_) => self.formula(entry.charge, args, Some(&value)),
             _ => {
                 let sized = |value: &Value| crate::data::immediate_size(value).unwrap_or(0);
                 let sizes = [sized(&args[0]), sized(&args[1]), sized(&value)];
@@ -359,7 +360,16 @@ impl<H: Heap> Vm<H> {
                     _ => None,
                 }
             }
-            InlineOperation::Kind | InlineOperation::Not if args.len() == 1 => inline.answer(args),
+            InlineOperation::Kind
+            | InlineOperation::Not
+            | InlineOperation::IntegerText(IntegerTextDomain::Decimal)
+                if args.len() == 1 =>
+            {
+                inline.answer(args)
+            }
+            InlineOperation::IntegerText(IntegerTextDomain::RadixArgument) if args.len() == 2 => {
+                inline.answer(args)
+            }
             InlineOperation::Length(_) if args.len() == 1 => self.read_answer(inline, args),
             InlineOperation::Membership(_) if args.len() == 2 => self.read_answer(inline, args),
             InlineOperation::Same if args.len() == 2 => inline.answer(args),

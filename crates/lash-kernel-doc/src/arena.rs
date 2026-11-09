@@ -100,6 +100,41 @@ impl ShortText {
         })
     }
 
+    /// A word's digits in `radix`, `2..=36`, lower-case with a leading
+    /// `-` when negative, when they fit inline: the one spelling of an
+    /// integer as text, which the native and its inline answer share.
+    pub fn digits(word: i64, radix: u32) -> Option<Self> {
+        // Decimal, the radix nearly every call spells, divides by a
+        // constant.
+        if radix == 10 {
+            Self::spell(word, 10)
+        } else {
+            Self::spell(word, radix)
+        }
+    }
+
+    #[inline(always)]
+    fn spell(word: i64, radix: u32) -> Option<Self> {
+        const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+        let radix = u64::from(radix);
+        let mut bytes = [0u8; Self::MAX];
+        let mut at = bytes.len();
+        let mut rest = word.unsigned_abs();
+        loop {
+            at = at.checked_sub(1)?;
+            bytes[at] = *DIGITS.get(usize::try_from(rest % radix).ok()?)?;
+            rest /= radix;
+            if rest == 0 {
+                break;
+            }
+        }
+        if word < 0 {
+            at = at.checked_sub(1)?;
+            bytes[at] = b'-';
+        }
+        Self::ascii(&bytes[at..])
+    }
+
     /// ASCII bytes inline, when they are ASCII and short enough.
     #[inline]
     pub fn ascii(text: &[u8]) -> Option<Self> {

@@ -1,12 +1,12 @@
-//! Folding: an inline region's guard path as one guarded op (cutover
-//! contract §1, §3).
+//! Folding: an inline region's guard paths, each as one guarded op
+//! (cutover contract §1, §3).
 //!
 //! A region still dispatches each op of its body: a list read's two
 //! bound tests, its length and its index are a dozen dispatches around
 //! one element read. The pass follows each region from its entry along
-//! the branches of one path to an `Op::Leave`, carrying what each op
-//! pushes as a fact about where its value comes from, and records the
-//! path as a fold: the native answers (R8) it computes, the branches it
+//! both ways of each branch to its `Op::Leave`s, carrying what each op
+//! pushes as a fact about where its value comes from, and records each
+//! path that gets there, up to four, as a fold: the native answers (R8) it computes, the branches it
 //! takes as guards, its index reads and the value it returns. An answer
 //! step holds the operation the native's version declares, resolved
 //! once here. A path reads a local only where it was written on the path
@@ -14,9 +14,10 @@
 //! the body's locals.
 //!
 //! `Op::Inline` makes the activation as before, its depth checked and
-//! its frame admitted, and then runs the fold. Every step reads and none
-//! commits: an answer is a pure native answer, an index read finds an
-//! element or declines. Where a guard does not hold or a step declines,
+//! its frame admitted, and then runs its folds in turn until one holds.
+//! Every step reads and none commits: an answer is a pure native answer,
+//! an index read finds an element or declines. Two paths part at a
+//! branch, one guarding each way, so at most one holds. Where none does,
 //! the activation is laid out, its completion owed, and the region runs
 //! from its entry over the same state, so the body's own ops raise, read
 //! cold or deoptimize as they would. A fold that holds completes the
@@ -33,21 +34,20 @@
 //!
 //! It runs after validation, on validated code, before fusion.
 
-use lash_kernel_doc::arena::native::InlineOperation;
+use lash_kernel_doc::arena::native::{InlineOperation, IntegerTextDomain};
 
 use super::op::Op;
-use super::program::{Callee, FOLD_STEPS, Fold, Program, Slot, Step, Unit};
+use super::program::{Callee, FOLD_PATHS, FOLD_STEPS, Fold, Program, Slot, Step, Unit};
 
 /// Folds the guard path of every inline region of `program`.
 pub(crate) fn fold(program: &mut Program) {
     for at in 0..program.units.len() {
         for n in 0..program.units[at].inlines.len() {
-            let Some(fold) = derive(program, &program.units[at], n as u32) else {
-                continue;
-            };
+            let folds = derive(program, &program.units[at], n as u32);
             let unit = &mut program.units[at];
-            unit.inlines[n].fold = Some(unit.folds.len() as u32);
-            unit.folds.push(fold);
+            let start = unit.folds.len() as u32;
+            unit.folds.extend(folds);
+            unit.inlines[n].folds = (start, unit.folds.len() as u32);
         }
     }
 }
@@ -82,9 +82,9 @@ impl Path {
     }
 }
 
-/// The fold of inline site `n` of `unit`, `None` when no path of its
-/// region folds.
-fn derive(program: &Program, unit: &Unit, n: u32) -> Option<Fold> {
+/// The folds of inline site `n` of `unit`: its region's paths that fold,
+/// at most [`FOLD_PATHS`] of them.
+fn derive(program: &Program, unit: &Unit, n: u32) -> Vec<Fold> {
     let site = unit.inlines[n as usize];
     let argc = unit.calls[site.call as usize].argc;
     let path = Path {
@@ -93,19 +93,50 @@ fn derive(program: &Program, unit: &Unit, n: u32) -> Option<Fold> {
         steps: Vec::new(),
         made: 0,
     };
-    follow(program, unit, n, argc, site.entry as usize, path)
+    let mut folds = Vec::new();
+    follow(
+        program,
+        unit,
+        n,
+        argc,
+        site.entry as usize,
+        path,
+        &mut folds,
+    );
+    folds
 }
 
-/// The fold of the first path from `pc` that reaches the region's
-/// `Op::Leave`, the branch's fall-through tried before its jump. The
-/// call passed `argc` arguments, the body's first locals.
+/// Adds to `folds` the folds of the paths from `pc` that reach the
+/// region's `Op::Leave`, each branch's fall-through before its jump,
+/// until [`FOLD_PATHS`] fold. The call passed `argc` arguments, the
+/// body's first locals.
 fn follow(
+    program: &Program,
+    unit: &Unit,
+    n: u32,
+    argc: u8,
+    pc: usize,
+    path: Path,
+    folds: &mut Vec<Fold>,
+) {
+    if folds.len() < FOLD_PATHS
+        && let Some(fold) = walk(program, unit, n, argc, pc, path, folds)
+    {
+        folds.push(fold);
+    }
+}
+
+/// The fold of the path from `pc` up to its first branch or its
+/// `Op::Leave`: at a branch, both ways are followed into `folds`, and
+/// the walk gives none.
+fn walk(
     program: &Program,
     unit: &Unit,
     n: u32,
     argc: u8,
     mut pc: usize,
     mut path: Path,
+    folds: &mut Vec<Fold>,
 ) -> Option<Fold> {
     let site = unit.inlines[n as usize];
     loop {
@@ -136,14 +167,13 @@ fn follow(
             }
             Op::JumpIfFalse(to) => {
                 let mut taken = path.clone();
-                path.guard(true)?;
-                if let Some(fold) = follow(program, unit, n, argc, pc + 1, path) {
-                    return Some(fold);
+                if path.guard(true).is_some() {
+                    follow(program, unit, n, argc, pc + 1, path, folds);
                 }
-                taken.guard(false)?;
-                path = taken;
-                pc = to as usize;
-                continue;
+                if taken.guard(false).is_some() {
+                    follow(program, unit, n, argc, to as usize, taken, folds);
+                }
+                return None;
             }
             Op::Index => {
                 let index = path.stack.pop()?;
@@ -212,7 +242,11 @@ fn answers(program: &Program, native: u32, argc: usize) -> Option<InlineOperatio
         InlineOperation::Scalar { .. } | InlineOperation::Same | InlineOperation::Membership(_) => {
             2
         }
-        InlineOperation::Kind | InlineOperation::Not | InlineOperation::Length(_) => 1,
+        InlineOperation::IntegerText(IntegerTextDomain::RadixArgument) => 2,
+        InlineOperation::Kind
+        | InlineOperation::Not
+        | InlineOperation::Length(_)
+        | InlineOperation::IntegerText(IntegerTextDomain::Decimal) => 1,
         _ => return None,
     };
     (arity == argc).then_some(operation)

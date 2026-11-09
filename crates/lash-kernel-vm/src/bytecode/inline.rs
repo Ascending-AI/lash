@@ -302,7 +302,7 @@ fn expand(
         at: pc as u32,
         entry,
         end,
-        fold: None,
+        folds: (0, 0),
     });
     Some(())
 }

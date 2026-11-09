@@ -1259,11 +1259,12 @@ impl<H: Heap> Vm<H> {
                         // A fold that holds completes the activation at
                         // the region's leave, and the caller runs on after
                         // the call; otherwise the region runs.
-                        let entered = match site.fold {
-                            Some(fold) => {
-                                self.inline_folded(unit, n, &unit.folds[fold as usize])?
-                            }
-                            None => Some(self.inline(unit, n)?),
+                        let (start, end) = site.folds;
+                        let entered = if start < end {
+                            let folds = &unit.folds[start as usize..end as usize];
+                            self.inline_folded(unit, n, folds)?
+                        } else {
+                            Some(self.inline(unit, n)?)
                         };
                         if let Some(at) = entered {
                             base = at;
