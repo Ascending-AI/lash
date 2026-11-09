@@ -656,15 +656,15 @@ impl Default for Drive<'_> {
 }
 
 /// What a core run showed its host: its end, charge, output, recorded
-/// charges, slices, the requests it handed out, the questions its
-/// limiter was asked and how often its natives ran.
+/// charges, the charge at each slice's return, the requests it handed
+/// out, the questions its limiter was asked and how often its natives ran.
 #[derive(Debug, PartialEq)]
 struct Observed {
     end: String,
     charged: Option<u64>,
     printed: Vec<lash_kernel_doc::Datum>,
     tape: Option<Vec<lash_kernel_exec::Weight>>,
-    slices: usize,
+    slices: Vec<Option<u64>>,
     requests: Vec<Vec<lash_kernel_doc::Datum>>,
     asked: Vec<(u64, u64)>,
     natives: u64,
@@ -685,7 +685,7 @@ fn drive(text: &str, how: Drive<'_>) -> Observed {
                 charged: None,
                 printed: Vec::new(),
                 tape: None,
-                slices: 0,
+                slices: Vec::new(),
                 requests: Vec::new(),
                 asked: Vec::new(),
                 natives: 0,
@@ -714,13 +714,13 @@ fn drive(text: &str, how: Drive<'_>) -> Observed {
         cancel: how.cancel,
         ..super::embedder::World::default()
     };
-    let (mut slices, mut requests) = (0, Vec::new());
+    let (mut slices, mut requests) = (Vec::new(), Vec::new());
     NATIVE_CALLS.set(0);
     let end = loop {
         match machine.run(&mut world, how.slice).unwrap() {
             Step::Ended(End::Finished(finished)) => break format!("{:?}", finished.result),
             Step::Ended(other) => break format!("{other:?}"),
-            Step::Slice => slices += 1,
+            Step::Slice => slices.push(machine.meters().charged),
             Step::Parked(park) => {
                 for request in &park.requests {
                     let crate::Request::Effect(effect) = request;
@@ -846,7 +846,9 @@ fn inlined(text: &str, how: Drive<'_>) -> Observed {
 /// Contract §3: at every charge limit the run can reach, a prepaid run
 /// refuses at the same event with the same total as the event-by-event
 /// run, whether its fixed costs were reserved, cancelled by a dynamic fee
-/// or a raise, or stopped short by a slice; and a limiter that grows the
+/// or a raise, or stopped short by a slice; a slice of any size, a fee
+/// on top of a reservation included, returns at the charge the
+/// event-by-event run's slice does; and a limiter that grows the
 /// limit at the refused event resumes it there, as a run started with the
 /// grown limit runs. A limit at and next to `u64::MAX` reserves without
 /// overflow. Where covered bodies run inline, every limit refuses at the
@@ -863,6 +865,20 @@ fn the_prepaid_and_exact_paths_refuse_at_the_same_event_with_the_same_total() {
             whole.0.starts_with("Int") || whole.0.starts_with("Text"),
             "{whole:?}"
         );
+        for slice in 1..=total {
+            let sliced = |exact| {
+                let seen = drive(
+                    text,
+                    Drive {
+                        slice,
+                        exact,
+                        ..Drive::default()
+                    },
+                );
+                (seen.end, seen.charged, seen.printed, seen.slices)
+            };
+            assert_eq!(sliced(false), sliced(true), "slice {slice}");
+        }
         for limit in 0..=total + 1 {
             let exact = core_run(text, limit, u64::MAX, true, None);
             assert_eq!(
