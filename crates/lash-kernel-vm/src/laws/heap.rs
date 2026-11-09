@@ -29,7 +29,15 @@ fn seal(
     high_water: &mut HighWater,
 ) -> Result<HeapRoot, SealError> {
     let mut large = crate::heap::large::Large::default();
-    crate::heap::seal::seal(arena, roots, directory, high_water, &mut large).map(|(root, _)| root)
+    crate::heap::seal::seal(
+        arena,
+        roots,
+        directory,
+        high_water,
+        &mut large,
+        &mut Default::default(),
+    )
+    .map(|(root, _)| root)
 }
 use crate::heap::slots::SlotHeap;
 use crate::heap::{Heap, LoadError};

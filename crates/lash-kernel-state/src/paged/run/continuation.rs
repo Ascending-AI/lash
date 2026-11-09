@@ -16,7 +16,7 @@
 
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::{HeapFault, PageRef};
-use lash_kernel_value::names::{Name, OperationUse};
+use lash_kernel_value::names::{FunctionId, Name, OperationUse};
 use lash_kernel_value::sites::{EffectIdentity, Site, TaskIdentity, WaitCancellation};
 use lash_kernel_value::tokens::{
     TokenCodec, TokenError, TokenReader, TokenWriter, decode_body, encode_body,
@@ -100,6 +100,16 @@ record! {
         /// List joins, by number.
         pub joins: Vec<RunJoin>,
         pub next_join: u64,
+        /// The live resume closure's build helpers (contract §7): those
+        /// the code reachable from each frame's resume point and each
+        /// handler runs, calls or names, frames' own bodies included.
+        /// A helper only completed calls ran is not among them.
+        pub pins: Vec<FunctionId>,
+        /// The build helpers whose closures or function values the heap
+        /// has held: what any stored code value may still call. Kept
+        /// across seals, never shrunk, since a cold page's values are not
+        /// read to seal.
+        pub held_code: Vec<FunctionId>,
     }
 }
 

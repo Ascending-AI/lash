@@ -23,6 +23,7 @@ pub(crate) fn compile_selected(
     link: lash_kernel_value::LinkId,
     entry: Option<FunctionId>,
     convention: Option<&StartConvention>,
+    available: Option<&lash_kernel_doc::BuildHelpers>,
 ) -> Result<super::program::Program> {
     let mut selected = std::borrow::Cow::Borrowed(document);
     if let (Some(entry), Some(convention)) = (entry, convention)
@@ -34,7 +35,7 @@ pub(crate) fn compile_selected(
             !matches!(export, Export::Function(export) if export.function == entry && &export.convention != convention)
         });
     }
-    super::compile::compile(&selected, registry, link, entry)
+    super::compile::compile(&selected, registry, link, entry, available)
 }
 
 /// Selects an entry's unit, retaining the existing path for other conventions.

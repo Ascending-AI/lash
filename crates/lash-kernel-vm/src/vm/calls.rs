@@ -60,7 +60,9 @@ impl<H: Heap> Vm<H> {
             }
             Callee::Value => self.call_value(argc),
             Callee::Native { native, charged } => self.call_native(program, native, argc, charged),
-            Callee::Machine { function, charge } => self.call_machine(function, charge, argc),
+            Callee::Machine {
+                function, charge, ..
+            } => self.call_machine(function, charge, argc),
         }
     }
 

@@ -14,7 +14,9 @@ use std::sync::Arc;
 use lash_kernel_doc::arena::ClosureIdentity;
 use lash_kernel_doc::arena::native::InlineOperation;
 use lash_kernel_doc::linked_site::LinkedSite;
-use lash_kernel_doc::{Document, FunctionDefinition, FunctionRegistry, Literal, Stmt, Value};
+use lash_kernel_doc::{
+    BuildHelpers, Document, FunctionDefinition, FunctionRegistry, Literal, Stmt, Value,
+};
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::{CallableId, FunctionId, Name};
 use lash_kernel_value::sites::{Site, Unit as SiteUnit};
@@ -44,13 +46,19 @@ pub(crate) fn unsupported<T>(what: impl Into<String>) -> Result<T> {
 /// Compiles `document`, whose library functions `registry` holds, as
 /// instance `link`: its `main`, or the declared function `entry`, is the
 /// unit a start runs.
+///
+/// An open under another build image passes that image as `available`: a
+/// build helper it lacks compiles to a unit that refuses when it runs
+/// (contract §7), and open proves no resume point reaches one.
 pub fn compile(
     document: &Document,
     registry: &FunctionRegistry,
     link: LinkId,
     entry: Option<FunctionId>,
+    available: Option<&BuildHelpers>,
 ) -> Result<Program> {
     let mut compiler = Compiler::new(document, registry, link);
+    compiler.available = available;
     let main = match entry {
         Some(entry) => super::conventions::entry(&mut compiler, entry)?,
         None => compiler.main()?,
@@ -326,6 +334,11 @@ pub(crate) struct Compiler<'a> {
     free: HashMap<FunctionId, BTreeSet<Name>>,
     /// Each action site's occurrence counter index (`K-EFF-008`).
     occurrences: HashMap<Site, u32>,
+    /// The build image an open compiles under, when it is not the one the
+    /// run sealed under: the helpers it lacks are unavailable.
+    available: Option<&'a BuildHelpers>,
+    /// The unit each unavailable helper compiled to.
+    missing: HashMap<FunctionId, UnitId>,
 }
 
 impl<'a> Compiler<'a> {
@@ -348,6 +361,8 @@ impl<'a> Compiler<'a> {
             stubs: HashMap::new(),
             free: HashMap::new(),
             occurrences: HashMap::new(),
+            available: None,
+            missing: HashMap::new(),
         }
     }
 
@@ -592,6 +607,25 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// The unit build helper `id` compiles to when the opening build image
+    /// lacks it: an `Unavailable` op owned by `id` (contract §7). `None`
+    /// for a function the document declares or the image holds.
+    fn missing(&mut self, id: FunctionId) -> Option<UnitId> {
+        let available = self.available?;
+        if self.document.functions.contains_key(&id) || available.contains(&id) {
+            return None;
+        }
+        if let Some(unit) = self.missing.get(&id) {
+            return Some(*unit);
+        }
+        let at = self.reserve();
+        let mut unit = self.unavailable(&format!("build helper {id} is unavailable"));
+        unit.owner = Some(id);
+        self.units[at as usize] = Some(unit);
+        self.missing.insert(id, at);
+        Some(at)
+    }
+
     /// A unit that refuses when it runs: a body the core cannot compile,
     /// reached only from a path that does not run it (contract §7).
     fn unavailable(&mut self, why: &str) -> Unit {
@@ -634,6 +668,9 @@ impl<'a> Compiler<'a> {
 
     /// What a call of library or declared function `id` from `f` calls.
     pub(crate) fn callee(&mut self, f: &Fun, id: FunctionId) -> Result<Callee> {
+        if let Some(unit) = self.missing(id) {
+            return Ok(Callee::Unit { unit, charge: None });
+        }
         let definition = self.def(&id)?;
         let covered = f.covered;
         if let Some(function) = machine_function(definition) {
@@ -642,7 +679,11 @@ impl<'a> Compiler<'a> {
             } else {
                 self.charge(id, definition)
             };
-            return Ok(Callee::Machine { function, charge });
+            return Ok(Callee::Machine {
+                function,
+                id,
+                charge,
+            });
         }
         let Some(_) = definition.charge() else {
             // A statement-metered body charges its own nodes wherever it
@@ -736,6 +777,10 @@ impl<'a> Compiler<'a> {
     /// ordinary call, so applying the value charges what calling `id` does.
     pub(crate) fn trampoline(&mut self, id: FunctionId) -> Result<()> {
         if self.functions.contains_key(&id) {
+            return Ok(());
+        }
+        if let Some(unit) = self.missing(id) {
+            self.functions.insert(id, unit);
             return Ok(());
         }
         let definition = self.def(&id)?;
@@ -873,6 +918,7 @@ impl<'a> Compiler<'a> {
             mut points,
             origin,
             declared,
+            owner,
             ..
         } = f;
         // Points are recorded in lowering order; an `if`'s test and a
@@ -952,6 +998,7 @@ impl<'a> Compiler<'a> {
             action_marks,
             authored,
             name,
+            owner,
             site: Site::new(site, Vec::new()),
             points,
             fused: Vec::new(),
@@ -966,6 +1013,9 @@ impl<'a> Compiler<'a> {
     /// A function call's machine identity, for `brand.built` answered
     /// where it is written.
     pub(crate) fn brand_built(&mut self, f: &Fun, id: FunctionId) -> Result<Option<u32>> {
+        if self.missing(id).is_some() {
+            return Ok(None);
+        }
         let definition = self.def(&id)?;
         if machine_function(definition) != Some(MachineFunction::BrandBuilt) {
             return Ok(None);

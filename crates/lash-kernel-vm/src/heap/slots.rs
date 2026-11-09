@@ -61,6 +61,10 @@ pub(crate) struct SlotHeap {
     units: Vec<u64>,
     held: u64,
     bound: u64,
+    /// Every function a closure or function value the heap sealed names,
+    /// since the run started: code a stored value may still call
+    /// (contract §7).
+    pub(crate) code: std::collections::BTreeSet<lash_kernel_value::FunctionId>,
 }
 
 impl SlotHeap {
@@ -73,6 +77,7 @@ impl SlotHeap {
             units: Vec::new(),
             held: 0,
             bound,
+            code: std::collections::BTreeSet::new(),
         }
     }
 
@@ -152,6 +157,7 @@ impl SlotHeap {
             &mut durable.directory,
             &mut durable.high_water,
             &mut self.large,
+            &mut self.code,
         )?;
         self.summaries.clear();
         // A large object whose chunks moved goes back to its row: the

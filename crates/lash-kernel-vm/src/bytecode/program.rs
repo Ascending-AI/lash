@@ -125,6 +125,10 @@ pub struct Unit {
     pub authored: bool,
     /// The function's name, for bound errors.
     pub name: Arc<str>,
+    /// The library function whose body this unit is, or whose body made
+    /// it: what a frame of it pins when its build image changes (contract
+    /// §7). `None` in the document's own code.
+    pub owner: Option<FunctionId>,
     /// The unit's site root.
     pub site: Site,
     /// What an observer sees at an op, by op index, in op order: the
@@ -329,6 +333,8 @@ pub enum Callee {
     /// A function the machine answers itself; `charge` as for a unit.
     Machine {
         function: crate::functions::MachineFunction,
+        /// The definition the call names.
+        id: FunctionId,
         charge: Option<u32>,
     },
 }

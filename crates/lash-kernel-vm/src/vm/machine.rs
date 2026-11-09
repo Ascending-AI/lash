@@ -82,6 +82,7 @@ fn build(
     modes: crate::interface::EffectModes,
     heap: SlotHeap,
     used: u64,
+    available: Option<&lash_kernel_doc::BuildHelpers>,
 ) -> Result<(Vm<SlotHeap>, Option<lash_kernel_doc::StartConvention>), StartError> {
     let document = &program.document;
     let export = match entry {
@@ -103,6 +104,7 @@ fn build(
         program.link,
         export.map(|export| export.function),
         convention.as_ref(),
+        available,
     )
     .map_err(linked)?;
     crate::bytecode::inline::inline(&mut code);
@@ -127,6 +129,14 @@ fn build(
     vm.tasks.requests_limit = bounds.requests_per_park;
     vm.tasks.join_limit = bounds.join_members;
     Ok((vm, convention))
+}
+
+/// A build helper the run's live code reaches and the opening image lacks.
+fn unavailable_helper(function: lash_kernel_value::FunctionId) -> OpenError {
+    OpenError::HelperUnavailable {
+        reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+        function,
+    }
 }
 
 fn malformed(problem: impl ToString) -> OpenError {
@@ -228,7 +238,8 @@ impl Machine for CoreMachine {
                 high_water: lash_kernel_state::paged::run::ids::HighWater(0),
             },
         );
-        let (mut vm, convention) = build(&program, bounds, entry.as_ref(), start.modes, heap, 0)?;
+        let (mut vm, convention) =
+            build(&program, bounds, entry.as_ref(), start.modes, heap, 0, None)?;
         let mut header = Header::of(&program, bounds, start.owner);
         header.host = start.host.iter().map(|(name, _)| name.clone()).collect();
         header.entry = entry;
@@ -323,13 +334,37 @@ impl Machine for CoreMachine {
                 "the document's execution closure differs from the checkpoint's",
             ));
         }
-        if root.helper_library != header.helper_library {
-            return Err(malformed("the checkpoint ran another helper library"));
-        }
         if !matches!(root.status, RootStatus::Parked) {
             return Err(malformed("an ended root cannot execute"));
         }
         let (record, directory) = continuation::open(source, root.heap).map_err(OpenError::Heap)?;
+        // Under another build image, the run opens only if the image holds
+        // every helper its live resume closure pins (contract §7).
+        let changed = (root.helper_library != header.helper_library).then(|| program.helpers());
+        if let Some(helpers) = changed {
+            // A frame standing in a helper's body names it by its site.
+            let framed = record
+                .tasks
+                .iter()
+                .flat_map(|task| &task.frames)
+                .filter_map(|frame| match frame.unit.site.unit {
+                    lash_kernel_value::sites::Unit::Library(function) => Some(function),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let unavailable = record
+                .pins
+                .iter()
+                .chain(&record.held_code)
+                .chain(&framed)
+                .find(|function| {
+                    !helpers.contains(function)
+                        && !program.document.functions.contains_key(function)
+                });
+            if let Some(function) = unavailable {
+                return Err(unavailable_helper(*function));
+            }
+        }
         if matches!(root.target, CellTargetKind::Main) != record.entry.is_none() {
             return Err(malformed("the root's target and its run's entry disagree"));
         }
@@ -349,10 +384,14 @@ impl Machine for CoreMachine {
             modes,
             heap,
             record.charged,
+            changed.map(|helpers| helpers.as_ref()),
         )
         .map_err(|error| malformed(format!("the document does not compile again: {error:?}")))?;
         crate::durable::admit(&vm.program, &vm.tasks.operations, &record)?;
         crate::durable::open(&mut vm, &record, &values).map_err(malformed)?;
+        if changed.is_some() {
+            crate::durable::live(&vm).map_err(unavailable_helper)?;
+        }
         Ok(Self {
             vm,
             document: Arc::clone(&program.document),

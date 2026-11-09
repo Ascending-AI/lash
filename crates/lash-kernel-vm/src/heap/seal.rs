@@ -13,7 +13,7 @@
 //! The arena marks nothing clean until the directory has sealed, so a seal
 //! that fails leaves every changed object dirty for the next one.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use lash_kernel_doc::Value;
@@ -25,6 +25,7 @@ use lash_kernel_state::paged::run::directory::Row;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
 use lash_kernel_state::paged::run::objects::{ClosureCode, Heads, ObjectKind, Record, RunValue};
 use lash_kernel_state::paged::run::root::HeapRoot;
+use lash_kernel_value::FunctionId;
 
 use super::open::entity;
 use crate::paged::SealError;
@@ -53,6 +54,7 @@ pub(crate) fn seal(
     directory: &mut Directory,
     high_water: &mut HighWater,
     large: &mut super::large::Large,
+    code: &mut BTreeSet<FunctionId>,
 ) -> Result<(HeapRoot, Vec<ArenaHandle>), SealError> {
     let mut walk = Walk {
         arena,
@@ -87,7 +89,17 @@ pub(crate) fn seal(
             large.forget(id);
             let mut members = Vec::new();
             lash_kernel_state::arena::each_member(body, &mut |value| members.push(*value));
-            Row::of(record(arena, handle)?, heads(arena, &members)?)
+            let record = record(arena, handle)?;
+            match &record {
+                Record::Closure { code: closure, .. } => {
+                    code.insert(closure.callable.function);
+                }
+                Record::Function(callable) => {
+                    code.insert(callable.function);
+                }
+                _ => {}
+            }
+            Row::of(record, heads(arena, &members)?)
         };
         directory.put(id, row).map_err(SealError::Heap)?;
     }

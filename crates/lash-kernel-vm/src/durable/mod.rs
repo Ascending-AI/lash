@@ -10,6 +10,7 @@
 //! build's table and refuses a point the table does not hold.
 
 mod admit;
+mod code;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -34,6 +35,7 @@ use crate::vm::Vm;
 use crate::vm::frames::{Bill, Context, Frame, Handler};
 use crate::vm::tasks::{Joiner, ListJoin, Pending, Phase as WaitState, Resume, State, Task, Wait};
 pub(crate) use admit::admit;
+pub(crate) use code::live;
 
 /// The phases a frame can stand in, in the order a saved point is looked
 /// for: a frame under another stands at its call.
@@ -110,7 +112,18 @@ pub(crate) fn seal(
     let issued = tasks.issued.clone();
     let cancellations = tasks.cancellations.clone();
     let (charged, refused) = (vm.charged(), vm.refused);
+    let pins = code::live(vm)
+        .map_err(|helper| {
+            fault(format!(
+                "a resume point reaches unavailable helper {helper}"
+            ))
+        })?
+        .into_iter()
+        .collect();
     let heap = vm.heap.seal(&values.0)?;
+    let held_code = code::held(&program, &vm.document, &vm.heap.code)
+        .into_iter()
+        .collect();
     Ok(RunRecord {
         heap,
         entry,
@@ -131,6 +144,8 @@ pub(crate) fn seal(
         cancellations,
         joins,
         next_join,
+        pins,
+        held_code,
     })
 }
 
@@ -471,6 +486,7 @@ pub(crate) fn open(
     if record.globals.len() != vm.globals.len() {
         return Err("the run holds another number of host bindings".into());
     }
+    vm.heap.code = record.held_code.iter().copied().collect();
     for (slot, at) in vm.globals.iter_mut().zip(&record.globals) {
         *slot = value(*at)?;
     }

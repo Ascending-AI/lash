@@ -797,6 +797,7 @@ mod tests {
                 action_marks: Vec::new(),
                 authored: true,
                 name: Arc::from("main"),
+                owner: None,
                 site: Site::new(SiteUnit::Main, Vec::new()),
                 points: Vec::new(),
                 fused: Vec::new(),

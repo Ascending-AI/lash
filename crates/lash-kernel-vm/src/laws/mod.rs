@@ -23,6 +23,7 @@ mod operations;
 mod operators;
 mod paged;
 mod pause;
+mod pinning;
 mod preparation;
 mod resident;
 mod scheduler;

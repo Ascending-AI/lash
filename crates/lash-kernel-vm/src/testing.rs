@@ -126,6 +126,7 @@ pub fn compile_document(
         link,
         entry.map(|export| export.function),
         entry.map(|export| &export.convention),
+        None,
     )
     .map_err(|problem| StartError::Linked {
         problem: problem.to_string(),
