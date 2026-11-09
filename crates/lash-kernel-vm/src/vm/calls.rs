@@ -291,9 +291,13 @@ impl<H: Heap> Vm<H> {
     }
 
     /// The inline answer of native `native` over `args`, and the fee the
-    /// call bills when `charged`: the native's own answer, with no work,
-    /// allocation or depth to count (R8, `K-LIB-011`). `None` where the
-    /// native declares no inline answer over them.
+    /// call bills when `charged`: the native's own answer, with no work or
+    /// allocation to count (R8, `K-LIB-011`). `None` where the native
+    /// declares no inline answer over them. An operation, a native with a
+    /// body beside it, is one unit of call depth whichever implementation
+    /// answers: at the bound it is refused here, before any is offered the
+    /// call (`K-BND-002`, `K-LIB-012`), and a Decline into its body enters
+    /// that same unit.
     #[inline(always)]
     pub(super) fn answer(
         &self,
@@ -303,6 +307,11 @@ impl<H: Heap> Vm<H> {
         args: &[Value],
     ) -> Option<Run<(Value, Option<u64>)>> {
         let entry = &program.natives[native as usize];
+        if entry.body.is_some() && self.cx.frames.len() >= self.call_depth as usize {
+            return Some(Err(Flow::from(Stop::bound(
+                self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
+            ))));
+        }
         let inline = entry.scalar?;
         if args.len() != usize::from(entry.params) {
             return None;

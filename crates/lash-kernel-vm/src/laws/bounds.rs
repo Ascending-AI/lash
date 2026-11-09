@@ -1332,6 +1332,30 @@ main { let r = call descend(&descend, 0) return r }"#;
         }
     }
     assert!(refused >= 6, "the depth bound refused {refused} runs");
+    // An operation is one unit of depth whichever implementation answers
+    // (K-BND-002): `main`'s frame fills a bound of 1, so `pair.twice` is
+    // refused there before its native answers, and runs under 2.
+    const OPERATION: &str = "main { let r = invoke pair.twice(1) return r }";
+    for (call_depth, refuses) in [(1, true), (2, false)] {
+        let bounds = Bounds {
+            call_depth,
+            ..ROOMY
+        };
+        for ran in [
+            core_in(OPERATION, bounds, None),
+            crate::bytecode::inline::disabled(|| core_in(OPERATION, bounds, None)),
+        ] {
+            match ran.0 {
+                End::Error(RunError::Bound(exceeded)) if refuses => {
+                    assert_eq!(exceeded.bound, Bound::CallDepth);
+                }
+                end => {
+                    assert!(!refuses, "call depth {call_depth}: {end:?}");
+                    assert_eq!(result(end), int(2));
+                }
+            }
+        }
+    }
 }
 
 /// Contract §2, astra inlining item 2: a body run inline admits its
