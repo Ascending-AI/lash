@@ -214,9 +214,10 @@ pub enum Slot {
 /// One step of a fold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
-    /// A native call's inline answer (R8), making a value.
+    /// A native call's inline answer (R8), making a value: the operation
+    /// the native's version declares, its arguments the first `argc`.
     Answer {
-        native: u32,
+        operation: InlineOperation,
         args: [Slot; 2],
         argc: u8,
     },

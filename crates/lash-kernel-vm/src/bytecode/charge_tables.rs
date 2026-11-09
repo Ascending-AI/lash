@@ -20,9 +20,63 @@ pub struct Charge {
     /// hold nothing and measure 1 or 2 (a word, a float, a bool), indexed
     /// by [`Charge::pair`]: `None` when it reads anything else.
     pairs: Option<[u64; 8]>,
+    /// The formula as a constant plus the sizes of at most three operands,
+    /// when it is a sum of constants and sizes, shallow or deep.
+    linear: Option<Linear>,
     /// Whether the formula measures an argument: a call keeps its
     /// arguments for the bill only then.
     reads_args: bool,
+}
+
+/// A formula that adds a constant to the sizes, shallow or deep, of the
+/// operands at `positions[..len]` (`Charge::linear`). Over values the
+/// arena holds nothing of, a deep size is the size, so it is the
+/// formula's sum without its tree.
+#[derive(Clone, Copy, Debug)]
+pub struct Linear {
+    pub constant: u64,
+    pub positions: [u8; 3],
+    pub len: u8,
+}
+
+impl Linear {
+    /// The formula's value where `size` gives each operand position's
+    /// size, `Some(0)` for a position with no operand: `None` where it
+    /// gives none, a value the arena holds something of.
+    #[inline]
+    pub fn units(self, mut size: impl FnMut(u8) -> Option<u64>) -> Option<u64> {
+        let mut units = self.constant;
+        for &position in &self.positions[..usize::from(self.len)] {
+            units = units.saturating_add(size(position)?);
+        }
+        Some(units)
+    }
+
+    fn of(term: &Term) -> Option<Self> {
+        fn add(term: &Term, linear: &mut Linear) -> Option<()> {
+            match term {
+                Term::Constant(units) => linear.constant = linear.constant.saturating_add(*units),
+                Term::Measure(position, Measure::Size | Measure::DeepSize) => {
+                    *linear.positions.get_mut(usize::from(linear.len))? = *position;
+                    linear.len += 1;
+                }
+                Term::Sum(terms) => {
+                    for term in terms {
+                        add(term, linear)?;
+                    }
+                }
+                _ => return None,
+            }
+            Some(())
+        }
+        let mut linear = Self {
+            constant: 0,
+            positions: [0; 3],
+            len: 0,
+        };
+        add(term, &mut linear)?;
+        Some(linear)
+    }
 }
 
 /// A formula with each operand resolved to its position once, so billing
@@ -141,6 +195,7 @@ impl Charge {
         Self {
             reads_args: constant.is_none() && term.reads_args(),
             constant,
+            linear: Linear::of(&term),
             term,
             pairs,
         }
@@ -167,6 +222,12 @@ impl Charge {
     #[inline]
     pub fn reads_args(&self) -> bool {
         self.reads_args
+    }
+
+    /// The formula as a constant plus operand sizes, when it is one.
+    #[inline]
+    pub fn linear(&self) -> Option<Linear> {
+        self.linear
     }
 
     /// The formula's value when it reads no operand.
@@ -210,4 +271,80 @@ pub(crate) fn completion(definition: &FunctionDefinition, covered: bool) -> Opti
         return None;
     }
     definition.charge()
+}
+
+#[cfg(test)]
+mod tests {
+    use lash_kernel_doc::{Measure, Value, parse_definition};
+
+    use super::{Charge, RESULT};
+    use crate::data::immediate_measure;
+
+    /// `K-CHG-003`, `K-CHG-005`: a formula's linear form bills what its
+    /// tree bills over every value the arena holds nothing of, each
+    /// operand's deep size its size, an absent operand 0, and saturating
+    /// at the top.
+    #[test]
+    fn a_linear_formula_bills_what_its_tree_bills_over_immediate_values() {
+        let values = [
+            Value::Null,
+            Value::Bool(true),
+            Value::Int(0),
+            Value::Int(-7),
+            Value::Int(i64::MAX),
+            Value::Text(lash_kernel_doc::arena::ShortText::new("").unwrap()),
+            Value::Text(lash_kernel_doc::arena::ShortText::new("fourteen bytes").unwrap()),
+        ];
+        let mut linear = 0;
+        for formula in [
+            "sum(6, deep(b))",
+            "sum(8, deep(a), size(result))",
+            "sum(2, size(result))",
+            "sum(1, sum(size(a), 2), deep(b), size(result))",
+            "sum(18446744073709551615, size(a))",
+            "sum(size(a), size(b), size(result), 1)",
+            "sum(size(a), size(b), size(a), size(result))",
+            "sum(4, nested(a))",
+            "product(2, size(a))",
+        ] {
+            let definition = parse_definition(&format!(
+                "function law.f(a: Any, b: Any) -> Any\nkernel 1\ncharge {formula}\nnative\n"
+            ))
+            .unwrap();
+            let params = definition.signature.params.iter();
+            let charge = Charge::new(
+                definition.charge().unwrap(),
+                params.map(|param| param.name.clone()).collect(),
+            );
+            let Some(form) = charge.linear() else {
+                continue;
+            };
+            linear += 1;
+            for a in values {
+                for b in values {
+                    for result in values {
+                        let at = |position: u8| match position {
+                            RESULT => Some(result),
+                            0 => Some(a),
+                            1 => Some(b),
+                            _ => None,
+                        };
+                        let tree = charge.evaluate(|position, how| {
+                            at(position).map_or(0, |value| immediate_measure(&value, how).unwrap())
+                        });
+                        let sized = form.units(|position| {
+                            Some(at(position).map_or(0, |value| {
+                                immediate_measure(&value, Measure::Size).unwrap()
+                            }))
+                        });
+                        assert_eq!(sized, Some(tree), "{formula} over {a:?}, {b:?}, {result:?}");
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            linear, 6,
+            "the sums of sizes have a linear form, the rest none"
+        );
+    }
 }

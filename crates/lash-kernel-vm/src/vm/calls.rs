@@ -316,7 +316,32 @@ impl<H: Heap> Vm<H> {
         if args.len() != usize::from(entry.params) {
             return None;
         }
-        let value = match inline {
+        let value = self.immediate(inline, args)?;
+        if !charged || self.paced {
+            return Some(Ok((value, None)));
+        }
+        let units = match inline {
+            InlineOperation::Kind | InlineOperation::Not | InlineOperation::Length(_) => {
+                self.formula(entry.charge, args, Some(&value))
+            }
+            _ => {
+                let sized = |value: &Value| crate::data::immediate_size(value).unwrap_or(0);
+                let sizes = [sized(&args[0]), sized(&args[1]), sized(&value)];
+                match program.charges[entry.charge as usize].pair(sizes) {
+                    Some(units) => Ok(units),
+                    None => self.formula(entry.charge, args, Some(&value)),
+                }
+            }
+        };
+        Some(units.map(|units| (value, Some(units))))
+    }
+
+    /// What inline operation `inline` answers over `args`, with no effect:
+    /// `None` outside the domain the core answers it in, where the
+    /// native's ordinary call runs.
+    #[inline(always)]
+    pub(super) fn immediate(&self, inline: InlineOperation, args: &[Value]) -> Option<Value> {
+        match inline {
             InlineOperation::Scalar { operation, .. } if args.len() == 2 => {
                 if !inline.accepts(args) {
                     return None;
@@ -341,24 +366,7 @@ impl<H: Heap> Vm<H> {
             }
             InlineOperation::Same if args.len() == 2 => inline.answer(args),
             _ => None,
-        }?;
-        if !charged || self.paced {
-            return Some(Ok((value, None)));
         }
-        let units = match inline {
-            InlineOperation::Kind | InlineOperation::Not | InlineOperation::Length(_) => {
-                self.formula(entry.charge, args, Some(&value))
-            }
-            _ => {
-                let sized = |value: &Value| crate::data::immediate_size(value).unwrap_or(0);
-                let sizes = [sized(&args[0]), sized(&args[1]), sized(&value)];
-                match program.charges[entry.charge as usize].pair(sizes) {
-                    Some(units) => Ok(units),
-                    None => self.formula(entry.charge, args, Some(&value)),
-                }
-            }
-        };
-        Some(units.map(|units| (value, Some(units))))
     }
 
     /// Completes a native call that answered or raised: bills formula

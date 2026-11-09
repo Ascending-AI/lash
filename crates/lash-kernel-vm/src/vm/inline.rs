@@ -5,14 +5,15 @@
 //! call's entry makes, all but the frame; `Op::Leave` completes it as a
 //! return does; `Op::Deopt` pushes the body's frame where the guard path
 //! ends; a raise completes it at the body's position before unwinding on.
-//! A region's fold (`bytecode::fold`) runs once its activation is made.
+//! A region's fold (`bytecode::fold`) runs once its activation is made,
+//! and one that holds completes it as the region's `Op::Leave` would.
 
 use lash_kernel_doc::Value;
 
 use super::frames::{Activation, Frame};
 use super::{Flow, Restart, Run, Stop, Vm, fault};
 use crate::Bound;
-use crate::bytecode::program::{Callee, FOLD_STEPS, Fold, Program, Slot, Step, Unit};
+use crate::bytecode::program::{Callee, FOLD_STEPS, Fold, Slot, Step, Unit};
 use crate::heap::Heap;
 
 #[cfg(test)]
@@ -35,13 +36,61 @@ impl<H: Heap> Vm<H> {
     /// admitted and its locals laid out, all but the frame. Gives where
     /// its locals start.
     pub(super) fn inline(&mut self, unit: &Unit, n: u32) -> Run<usize> {
+        let (charge, argc) = self.activate(unit, n)?;
+        Ok(self.lay_out(unit, n, charge, argc))
+    }
+
+    /// Enters inline site `n` of `unit` as [`Vm::inline`] does, and runs
+    /// the region's fold `fold`. A fold that holds completes the
+    /// activation where the region's `Op::Leave` would, giving `None`:
+    /// the frame stands there while its completion is billed, so a cold
+    /// read or a refusal finds the region laid out at its leave with the
+    /// value on the stack, as the leave's own dispatch would. Otherwise
+    /// the activation is laid out and the region runs: gives where its
+    /// locals start.
+    pub(super) fn inline_folded(&mut self, unit: &Unit, n: u32, fold: &Fold) -> Run<Option<usize>> {
+        let (charge, argc) = self.activate(unit, n)?;
+        let base = self.cx.stack.len() - argc;
+        let Some(value) = self.folded(fold, base) else {
+            return Ok(Some(self.lay_out(unit, n, charge, argc)));
+        };
+        if let Some(frame) = self.cx.frames.last_mut() {
+            frame.pc = fold.leave + 1;
+        }
+        self.meter.leave();
+        self.exact = true;
+        // The bill reads the arguments where they stand: no step wrote
+        // them.
+        let units = match charge.filter(|_| !self.paced) {
+            Some(charge) => match self.formula(charge, &self.cx.stack[base..], Some(&value)) {
+                Ok(units) => Some(units),
+                Err(flow) => {
+                    self.lay_out(unit, n, Some(charge), argc);
+                    self.push(value);
+                    return Err(flow);
+                }
+            },
+            None => None,
+        };
+        let callee = unit.inlines[n as usize].callee;
+        self.heap.release(self.frames[callee as usize]);
+        self.cx.stack.truncate(base);
+        self.push(value);
+        if let Some(units) = units {
+            self.fee(units)?;
+        }
+        Ok(None)
+    }
+
+    /// The activation of inline site `n` of `unit` as a call's entry
+    /// makes it: its depth checked at the call and its frame admitted.
+    /// Gives the call's completion formula and argument count.
+    fn activate(&mut self, unit: &Unit, n: u32) -> Run<(Option<u32>, usize)> {
         let site = unit.inlines[n as usize];
         let call = &unit.calls[site.call as usize];
         let Callee::Unit { charge, .. } = call.callee else {
             return Err(fault("an inline site of no body call"));
         };
-        let argc = usize::from(call.argc);
-        let bill = self.owed(charge, argc);
         self.meter.leave();
         self.exact = true;
         if self.cx.frames.len() >= self.call_depth as usize {
@@ -50,6 +99,15 @@ impl<H: Heap> Vm<H> {
             )));
         }
         self.admit(self.frames[site.callee as usize])?;
+        Ok((charge, usize::from(call.argc)))
+    }
+
+    /// Lays out the activated inline site `n` of `unit` over its `argc`
+    /// arguments: its completion owed and its locals placed where its
+    /// frame's would be. Gives where they start.
+    fn lay_out(&mut self, unit: &Unit, n: u32, charge: Option<u32>, argc: usize) -> usize {
+        let site = unit.inlines[n as usize];
+        let bill = self.owed(charge, argc);
         let locals = self.program.units[site.callee as usize].locals;
         let base = self.cx.stack.len() - argc;
         self.cx
@@ -61,13 +119,15 @@ impl<H: Heap> Vm<H> {
             base: base as u32,
             bill,
         });
-        Ok(base)
+        base
     }
 
-    /// What fold `fold` of the region whose activation's locals start at
-    /// `base` returns: each step read with no effect, `None` where a guard
-    /// does not hold or a step declines, so that the region runs.
-    pub(super) fn folded(&self, program: &Program, fold: &Fold, base: usize) -> Option<Value> {
+    /// What fold `fold` of the region whose arguments start at `base`
+    /// returns: each step read with no effect, `None` where a guard does
+    /// not hold or a step declines, so that the region runs. A region
+    /// calls only natives with no body, so an answer holds no unit of
+    /// depth.
+    fn folded(&self, fold: &Fold, base: usize) -> Option<Value> {
         let mut made = [Value::Absent; FOLD_STEPS];
         let mut count = 0;
         let read = |made: &[Value; FOLD_STEPS], slot: Slot| match slot {
@@ -77,12 +137,13 @@ impl<H: Heap> Vm<H> {
         };
         for &step in &fold.steps[..usize::from(fold.len)] {
             let value = match step {
-                Step::Answer { native, args, argc } => {
+                Step::Answer {
+                    operation,
+                    args,
+                    argc,
+                } => {
                     let args = [read(&made, args[0]), read(&made, args[1])];
-                    match self.answer(program, native, false, &args[..usize::from(argc)])? {
-                        Ok((value, None)) => value,
-                        _ => return None,
-                    }
+                    self.immediate(operation, &args[..usize::from(argc)])?
                 }
                 Step::Guard { value, holds } => {
                     if !matches!(read(&made, value), Value::Bool(found) if found == holds) {

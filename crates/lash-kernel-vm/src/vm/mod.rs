@@ -613,6 +613,20 @@ impl<H: Heap> Vm<H> {
         if let Some(units) = formula.constant() {
             return Ok(units);
         }
+        // A sum of sizes over values the arena holds nothing of is billed
+        // without its tree, the same amount.
+        if let Some(linear) = formula.linear()
+            && let Some(units) = linear.units(|position| {
+                let value = if position == RESULT {
+                    result
+                } else {
+                    args.get(usize::from(position))
+                };
+                value.map_or(Some(0), crate::data::immediate_size)
+            })
+        {
+            return Ok(units);
+        }
         let arena = self.heap.arena();
         let mut failed = None;
         let units = formula.evaluate(|position, how| {
@@ -1228,17 +1242,19 @@ impl<H: Heap> Vm<H> {
                     }
                     Op::Inline(n) => {
                         sync!(pc);
-                        base = self.inline(unit, n)?;
                         let site = &unit.inlines[n as usize];
-                        pc = site.entry as usize;
-                        // A fold that holds returns its value at the
-                        // region's leave; otherwise the region runs.
-                        if let Some(fold) = site.fold {
-                            let fold = &unit.folds[fold as usize];
-                            if let Some(value) = self.folded(&program, fold, base) {
-                                self.push(value);
-                                pc = fold.leave as usize;
+                        // A fold that holds completes the activation at
+                        // the region's leave, and the caller runs on after
+                        // the call; otherwise the region runs.
+                        let entered = match site.fold {
+                            Some(fold) => {
+                                self.inline_folded(unit, n, &unit.folds[fold as usize])?
                             }
+                            None => Some(self.inline(unit, n)?),
+                        };
+                        if let Some(at) = entered {
+                            base = at;
+                            pc = site.entry as usize;
                         }
                     }
                     Op::Leave(n) => {

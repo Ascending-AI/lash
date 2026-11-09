@@ -933,7 +933,9 @@ thread_local! {
 /// `law.raises` it calls, whose own native calls are covered; `law.pick`,
 /// whose guard returns at once or calls `law.raises`; `law.oops`, which
 /// raises unless its argument is text, billing its deep size; and
-/// `law.at`, reading a list below 3 and billing its result's size.
+/// `law.at`, reading a list below 3 and billing its result's size; and
+/// `law.first`, reading its first argument's first member and billing
+/// its second's deep size.
 fn huge_charges(
     registry: &mut lash_kernel_doc::FunctionRegistry,
     ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
@@ -988,6 +990,11 @@ fn huge_charges(
         (
             "law.at",
             "function law.at(xs: Any, i: Any) -> Any\nkernel 1\ncharge sum(2, size(result))\n{uses}body { if num.lt(i, 3) { return xs[i] } return i }",
+            false,
+        ),
+        (
+            "law.first",
+            "function law.first(xs: Any, ys: Any) -> Any\nkernel 1\ncharge sum(2, deep(ys))\n{uses}body { return xs[0] }",
             false,
         ),
     ] {
@@ -1062,7 +1069,9 @@ fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
 /// and a two-argument `perform` copying both out. `law.deep` and
 /// `law.oops` run inline: a cold index inside the region, a cold return
 /// fee and a cold fee of a raise leaving it. `law.at`'s fold reads a cold
-/// element, declines, and its region reads it again.
+/// element, declines, and its region reads it again. `law.first`'s fold
+/// holds over the list its statement loaded, and its completion reads the
+/// cold map: the completion runs again at the region's leave.
 const COLD_CONTRACT: &str = r#"import 3 operation host.pair(a: Any, b: Any) -> Any
 main {
   let xs = [1, 2, 3]
@@ -1074,6 +1083,7 @@ main {
     let d = invoke law.deep(m)
     set total = num.add(total, num.add(xs[1], list.len(m["b"])))
     set total = num.add(total, invoke law.at(xs, 1))
+    set total = num.add(xs[0], invoke law.first(xs, m))
     for x in m["b"] { set total = num.add(total, x) }
     try {
       let bad = invoke law.fails(m)

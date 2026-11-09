@@ -1361,14 +1361,20 @@ main { let r = call descend(&descend, 0) return r }"#;
 /// Contract §2, astra inlining item 2: a body run inline admits its
 /// frame's memory at its entry and releases it when it leaves, as its
 /// frame would. `law.pack` builds its list while its frame is admitted,
-/// three times, so the least bound the run finishes under is the framed
-/// run's, plus the schedule's program size for exactly the ops the
+/// three times, and `law.step`'s fold completes its activation sixty
+/// times, so the least bound each run finishes under is the framed run's,
+/// plus the schedule's program size for exactly the ops the
 /// expansion added (K-MACH-001).
 #[test]
 fn inline_frame_memory_is_admitted_at_entry() {
     const TEXT: &str = "main {\n  let xs = work.fill(100)\n  let p = 0\n  let i = 0\n  while num.lt(i, 3) {\n    set p = invoke law.pack(xs)\n    set i = num.add(i, 1)\n  }\n  return 0\n}";
-    let (_, added) = inline_in(TEXT, ROOMY);
-    let inline = threshold_in(TEXT, Some(inline_probes));
-    let framed = crate::bytecode::inline::disabled(|| threshold_in(TEXT, Some(inline_probes)));
-    assert_eq!(inline, framed + crate::heap::meter::OP * added);
+    // `law.step`'s fold holds at each call, and completes the activation
+    // there: it releases what its entry admitted, sixty times.
+    const FOLDED: &str = "main {\n  let xs = work.fill(100)\n  let i = 0\n  while num.lt(i, 60) {\n    set i = invoke law.step(i)\n  }\n  return xs\n}";
+    for text in [TEXT, FOLDED] {
+        let (_, added) = inline_in(text, ROOMY);
+        let inline = threshold_in(text, Some(inline_probes));
+        let framed = crate::bytecode::inline::disabled(|| threshold_in(text, Some(inline_probes)));
+        assert_eq!(inline, framed + crate::heap::meter::OP * added, "{text}");
+    }
 }

@@ -7,16 +7,21 @@
 //! the branches of one path to an `Op::Leave`, carrying what each op
 //! pushes as a fact about where its value comes from, and records the
 //! path as a fold: the native answers (R8) it computes, the branches it
-//! takes as guards, its index reads and the value it returns.
+//! takes as guards, its index reads and the value it returns. An answer
+//! step holds the operation the native's version declares, resolved
+//! once here. A path reads a local only where it was written on the path
+//! or the call passed it as an argument, so the fold needs no layout of
+//! the body's locals.
 //!
-//! `Op::Inline` makes the activation as before, its depth checked, its
-//! frame admitted and its completion owed, and then runs the fold. Every
-//! step reads and none commits: an answer is a pure native answer, an
-//! index read finds an element or declines. Where a guard does not hold
-//! or a step declines, the region runs from its entry over the same state,
-//! so the body's own ops raise, read cold or deoptimize as they would. A
-//! fold that holds goes to the region's `Op::Leave` with the value, which
-//! completes the activation as the body's return does.
+//! `Op::Inline` makes the activation as before, its depth checked and
+//! its frame admitted, and then runs the fold. Every step reads and none
+//! commits: an answer is a pure native answer, an index read finds an
+//! element or declines. Where a guard does not hold or a step declines,
+//! the activation is laid out, its completion owed, and the region runs
+//! from its entry over the same state, so the body's own ops raise, read
+//! cold or deoptimize as they would. A fold that holds completes the
+//! activation at the region's `Op::Leave` with the value, as the body's
+//! return does: the completion billed there, the frame released.
 //!
 //! The pass folds only ops that bill no event, pace no unit, test no
 //! slice and show no point, and native calls that bill no fee, so
@@ -81,18 +86,27 @@ impl Path {
 /// region folds.
 fn derive(program: &Program, unit: &Unit, n: u32) -> Option<Fold> {
     let site = unit.inlines[n as usize];
+    let argc = unit.calls[site.call as usize].argc;
     let path = Path {
         stack: Vec::new(),
         set: Vec::new(),
         steps: Vec::new(),
         made: 0,
     };
-    follow(program, unit, n, site.entry as usize, path)
+    follow(program, unit, n, argc, site.entry as usize, path)
 }
 
 /// The fold of the first path from `pc` that reaches the region's
-/// `Op::Leave`, the branch's fall-through tried before its jump.
-fn follow(program: &Program, unit: &Unit, n: u32, mut pc: usize, mut path: Path) -> Option<Fold> {
+/// `Op::Leave`, the branch's fall-through tried before its jump. The
+/// call passed `argc` arguments, the body's first locals.
+fn follow(
+    program: &Program,
+    unit: &Unit,
+    n: u32,
+    argc: u8,
+    mut pc: usize,
+    mut path: Path,
+) -> Option<Fold> {
     let site = unit.inlines[n as usize];
     loop {
         if !(site.entry as usize..site.end as usize).contains(&pc) || !quiet(unit, pc) {
@@ -102,12 +116,11 @@ fn follow(program: &Program, unit: &Unit, n: u32, mut pc: usize, mut path: Path)
             Op::Block(_) | Op::Nop => {}
             Op::Const(k) => path.stack.push(Slot::Const(k)),
             Op::Local(local) => {
-                let slot = path
-                    .set
-                    .iter()
-                    .rev()
-                    .find(|(set, _)| *set == local)
-                    .map_or(Slot::Local(local), |&(_, slot)| slot);
+                let slot = match path.set.iter().rev().find(|(set, _)| *set == local) {
+                    Some(&(_, slot)) => slot,
+                    None if local < u16::from(argc) => Slot::Local(local),
+                    None => return None,
+                };
                 path.stack.push(slot);
             }
             Op::SetLocal(local) => {
@@ -124,7 +137,7 @@ fn follow(program: &Program, unit: &Unit, n: u32, mut pc: usize, mut path: Path)
             Op::JumpIfFalse(to) => {
                 let mut taken = path.clone();
                 path.guard(true)?;
-                if let Some(fold) = follow(program, unit, n, pc + 1, path) {
+                if let Some(fold) = follow(program, unit, n, argc, pc + 1, path) {
                     return Some(fold);
                 }
                 taken.guard(false)?;
@@ -147,16 +160,13 @@ fn follow(program: &Program, unit: &Unit, n: u32, mut pc: usize, mut path: Path)
                 else {
                     return None;
                 };
-                let argc = usize::from(call.argc);
-                if !answers(program, native, argc) {
-                    return None;
-                }
+                let operation = answers(program, native, usize::from(call.argc))?;
                 let mut args = [Slot::Const(0); 2];
-                for at in (0..argc).rev() {
+                for at in (0..usize::from(call.argc)).rev() {
                     args[at] = path.stack.pop()?;
                 }
                 let made = path.make(Step::Answer {
-                    native,
+                    operation,
                     args,
                     argc: call.argc,
                 })?;
@@ -192,16 +202,16 @@ fn quiet(unit: &Unit, pc: usize) -> bool {
         && !unit.points.iter().any(|&(at, _)| at as usize == pc)
 }
 
-/// Whether native `native` gives an inline answer over `argc` arguments
-/// (`Vm::answer`).
-fn answers(program: &Program, native: u32, argc: usize) -> bool {
+/// The inline answer (`Vm::immediate`) native `native` gives over `argc`
+/// arguments: the operation its version declares, where the core
+/// answers it.
+fn answers(program: &Program, native: u32, argc: usize) -> Option<InlineOperation> {
     let entry = &program.natives[native as usize];
-    usize::from(entry.params) == argc
-        && match entry.scalar {
-            Some(InlineOperation::Scalar { .. } | InlineOperation::Same) => argc == 2,
-            Some(InlineOperation::Kind | InlineOperation::Not | InlineOperation::Length(_)) => {
-                argc == 1
-            }
-            _ => false,
-        }
+    let operation = entry.scalar.filter(|_| usize::from(entry.params) == argc)?;
+    let arity = match operation {
+        InlineOperation::Scalar { .. } | InlineOperation::Same => 2,
+        InlineOperation::Kind | InlineOperation::Not | InlineOperation::Length(_) => 1,
+        _ => return None,
+    };
+    (arity == argc).then_some(operation)
 }
