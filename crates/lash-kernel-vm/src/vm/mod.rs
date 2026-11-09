@@ -12,7 +12,6 @@
 pub(crate) mod calls;
 pub(crate) mod charge;
 pub(crate) mod datum;
-pub(crate) use datum::Copied;
 mod digests;
 pub(crate) mod frames;
 pub(crate) mod inline;

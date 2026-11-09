@@ -125,8 +125,8 @@ record!(PagedSession {
     functions: KeyedRoot,
     certificate: DataOnlyCertificate
 });
-// The paged form is its record; the run form a one-field sum, which no
-// record's token begins with.
+// The paged engine's session was its record; the run form a one-field
+// sum, which no record's token begins with. A record is refused typed.
 impl TokenCodec for SessionRoot {
     fn encode(&self, out: &mut TokenWriter) {
         match &self.0 {
@@ -139,7 +139,9 @@ impl TokenCodec for SessionRoot {
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         if input.peek_tag()? != Tag::Sum {
-            return PagedSession::decode(input).map(|session| Self(SessionForm::Paged(session)));
+            return Err(TokenError::Retired(
+                lash_kernel_value::tokens::RetiredState::Session,
+            ));
         }
         match input.sum()? {
             (0, 1) => Ok(Self(SessionForm::Run(PageRef::decode(input)?))),

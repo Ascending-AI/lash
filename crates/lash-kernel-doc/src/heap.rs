@@ -525,6 +525,13 @@ pub enum HeapFault {
     /// The heap's own state or an admitted certificate is inconsistent.
     #[error("the heap is malformed: {0}")]
     Malformed(String),
+    /// Page `page` holds state a retired engine format wrote: refused
+    /// typed, read no further and never rewritten.
+    #[error("page {page:?}: {state} was written in a retired format, which this build never reads")]
+    Retired {
+        page: PageId,
+        state: lash_kernel_value::tokens::RetiredState,
+    },
 }
 
 /// The host resources a heap draws on beside guest memory.

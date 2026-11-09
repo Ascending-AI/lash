@@ -2,10 +2,10 @@
 //! page roots: the descriptor a session publishes never grows with what
 //! the session holds (FIG-6418).
 use lash_kernel_doc::heap::{HeapFault, PageRef};
-use lash_kernel_value::tokens::TokenCodec;
 use lash_kernel_value::tokens::TokenReader;
 use lash_kernel_value::tokens::TokenWriter;
 use lash_kernel_value::tokens::encode_body;
+use lash_kernel_value::tokens::{TokenCodec, TokenError};
 use std::collections::BTreeSet;
 
 use lash_kernel_doc::NumberPolicy;
@@ -81,9 +81,15 @@ pub(super) fn read(
         });
     }
     let mut input = TokenReader::new(&answer.tokens);
-    let mut descriptor = SessionDescriptor::decode(&mut input).map_err(|e| HeapFault::Corrupt {
-        page: page.id,
-        reason: e.to_string(),
+    let mut descriptor = SessionDescriptor::decode(&mut input).map_err(|e| match e {
+        TokenError::Retired(state) => HeapFault::Retired {
+            page: page.id,
+            state,
+        },
+        e => HeapFault::Corrupt {
+            page: page.id,
+            reason: e.to_string(),
+        },
     })?;
     input.finish().map_err(|e| HeapFault::Corrupt {
         page: page.id,

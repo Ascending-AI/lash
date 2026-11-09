@@ -849,6 +849,19 @@ fn waiting() -> Embedder {
     })
 }
 
+/// A run of [`NESTED_AWAIT`] at its first park.
+fn parked() -> Embedder {
+    let mut embedder = Embedder::with(NESTED_AWAIT, setup(0));
+    for _ in 0..200 {
+        match embedder.run() {
+            Step::Parked(_) => return embedder,
+            Step::Slice => {}
+            Step::Ended(end) => panic!("the run ended unparked: {end:?}"),
+        }
+    }
+    panic!("the run never parked")
+}
+
 /// `main` standing at the nested `call a()`, its callee's frame above.
 fn called() -> Embedder {
     let phase = Embedder::with(NESTED_AWAIT, setup(0))
@@ -966,7 +979,7 @@ impl lash_kernel_state::paged::PageSource for Untouched {
 #[test]
 fn a_root_stated_under_another_format_is_refused() {
     use lash_kernel_state::paged::{FormatValue, StatedFormat};
-    let mut embedder = waiting();
+    let mut embedder = parked();
     let root = embedder.checkpoint();
     let root = lash_kernel_state::kernel_internals::checkpoint(root);
     let cases = [
@@ -1018,6 +1031,48 @@ fn a_root_stated_under_another_format_is_refused() {
             "{surface}"
         );
     }
+}
+
+/// CONT-RETIRED (contract §9): state the paged engine wrote is refused
+/// typed, as retired, before any of it is interpreted: its parked run,
+/// whose root names the paged heap's header, and its carried
+/// session, whose root is the paged engine's record.
+#[test]
+fn the_paged_engines_state_is_refused_as_retired() {
+    use lash_kernel_doc::heap::HeapFault;
+    use lash_kernel_state::kernel_internals::PagedHeap;
+    use lash_kernel_state::paged::{
+        CarryRoots, EditEpoch, HeapLifecycle as _, KeyedRoot, SemanticHeap as _, SessionRoot,
+    };
+    use lash_kernel_value::tokens::{RetiredState, TokenError, decode_body, encode_body};
+    let mut embedder = parked();
+    let mut heap = PagedHeap::fresh(Box::new(embedder.source.clone()), EditEpoch(1));
+    let session = heap
+        .carry(CarryRoots {
+            bindings: KeyedRoot::Empty,
+            functions: KeyedRoot::Empty,
+        })
+        .unwrap();
+    assert_eq!(
+        decode_body::<SessionRoot>(&encode_body(&session)).err(),
+        Some(TokenError::Retired(RetiredState::Session))
+    );
+    let header = session.pages()[0];
+    let mut root = embedder.checkpoint();
+    root.heap = header;
+    let opened = crate::KernelMachine::open(
+        embedder.program(true).0,
+        embedder.bounds,
+        &lash_kernel_state::kernel_internals::checkpoint(root),
+        Box::new(embedder.source.clone()),
+    );
+    assert_eq!(
+        opened.err(),
+        Some(crate::OpenError::Heap(HeapFault::Retired {
+            page: header.id,
+            state: RetiredState::ParkedRun,
+        }))
+    );
 }
 
 /// CONT-GRAMMAR: an action site the statement does not hold.

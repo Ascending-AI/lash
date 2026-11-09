@@ -556,6 +556,14 @@ pub(super) fn read_segmented(
         reason,
     };
     let answer = access.read(page)?;
+    if kind == PageKind::RUN_ROOT && answer.kind == PageKind::KEYED_LEAF {
+        // The paged engine parked its run under its heap's header, a keyed
+        // leaf; no run of the core is rooted at one.
+        return Err(HeapFault::Retired {
+            page: page.id,
+            state: lash_kernel_value::tokens::RetiredState::ParkedRun,
+        });
+    }
     if answer.kind != kind {
         return Err(corrupt(format!("not a page of kind {}", kind.0)));
     }
