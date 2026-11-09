@@ -627,6 +627,22 @@ pub enum Body {
     /// A variable a closure shares (`K-CLO-001`), or a `for` iteration's
     /// fresh one (`K-CLO-002`): not a value kind, only a holder of one.
     Cell(Value),
+    /// A big integer, a big timestamp or an error whose payload the machine
+    /// has not read: only its head's summaries. Every read of its payload
+    /// answers [`Retry::Cold`](native::Retry::Cold); no reader that matches
+    /// the resident kind finds it. A tuple's, a long text's and bytes'
+    /// unread payloads are cold chunks of their own bodies instead.
+    Cold(ColdImmutable),
+}
+
+/// What a cold [`Body::Cold`] immutable is, and the summaries its head
+/// certifies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColdImmutable {
+    BigInt(crate::heap::IntSummary),
+    Timestamp(crate::heap::IntSummary),
+    /// Its depth and edge summaries are the arena's, as for a resident one.
+    Error,
 }
 
 // A tiny list's, tuple's or table's inline values fit beside the widest

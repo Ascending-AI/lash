@@ -14,40 +14,54 @@ use lash_kernel_value::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter
 use super::super::tree::{Access, Cell, SealWork, Tree};
 use super::super::{PageSource, SealBudget};
 use super::ids::ObjectId;
-use super::objects::Record;
+use super::objects::{Heads, Record};
 
-/// One written object: its record and the ids it references.
+/// One written object: its record, the heads of the immutables it names
+/// and the ids it references.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
     pub record: Record,
+    /// Exactly the heads of the immutables [`Self::record`] names.
+    pub heads: Heads,
     /// Ascending, once each: exactly [`Record::edges`].
     pub edges: Vec<ObjectId>,
 }
 
 impl Row {
-    /// The row of `record`, its edges derived.
-    pub fn of(record: Record) -> Self {
+    /// The row of `record` with `heads`, its edges derived.
+    pub fn of(record: Record, heads: Heads) -> Self {
         let edges = record.edges();
-        Self { record, edges }
+        Self {
+            record,
+            heads,
+            edges,
+        }
     }
 }
 
 impl TokenCodec for Row {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
+        out.seq(3);
         self.record.encode(out);
+        self.heads.encode(out);
         self.edges.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
+        input.expect_struct(3)?;
         let record = Record::decode(input)?;
+        let heads = Heads::decode(input)?;
+        heads.check(record.values()).map_err(TokenError::Invalid)?;
         let edges = Vec::<ObjectId>::decode(input)?;
         if edges != record.edges() {
             return Err(TokenError::Invalid(
                 "a directory row's edges are not its record's".into(),
             ));
         }
-        Ok(Self { record, edges })
+        Ok(Self {
+            record,
+            heads,
+            edges,
+        })
     }
 }
 
@@ -139,14 +153,13 @@ impl Directory {
         self.tree.get(&id.key(), &self.access)
     }
 
-    /// Writes `record` as the row of `id`.
+    /// Writes `row` as the row of `id`.
     ///
     /// # Errors
     ///
     /// The page port's faults.
-    pub fn put(&mut self, id: ObjectId, record: Record) -> Result<(), HeapFault> {
-        self.tree
-            .write(id.key().to_vec(), Row::of(record), &self.access)
+    pub fn put(&mut self, id: ObjectId, row: Row) -> Result<(), HeapFault> {
+        self.tree.write(id.key().to_vec(), row, &self.access)
     }
 
     /// Removes the row of `id`.

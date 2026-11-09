@@ -21,8 +21,9 @@ use lash_kernel_doc::arena::{ArenaHandle, Body, Chunks, ErrorBody};
 use lash_kernel_doc::heap::{EntityId, FamilyId};
 use lash_kernel_state::arena::Arena;
 use lash_kernel_state::paged::run::directory::Directory;
+use lash_kernel_state::paged::run::directory::Row;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
-use lash_kernel_state::paged::run::objects::{ClosureCode, ObjectKind, Record, RunValue};
+use lash_kernel_state::paged::run::objects::{ClosureCode, Heads, ObjectKind, Record, RunValue};
 use lash_kernel_state::paged::run::root::HeapRoot;
 
 use super::open::entity;
@@ -68,10 +69,17 @@ pub(crate) fn seal(
 
     for &handle in &written {
         let id = id_of(arena, handle)?;
-        directory
-            .put(id, record(arena, handle)?)
-            .map_err(SealError::Heap)?;
+        let mut members = Vec::new();
+        lash_kernel_state::arena::each_member(
+            arena
+                .body(handle)
+                .map_err(|error| fault(error.to_string()))?,
+            &mut |value| members.push(*value),
+        );
+        let row = Row::of(record(arena, handle)?, heads(arena, &members)?);
+        directory.put(id, row).map_err(SealError::Heap)?;
     }
+    let heads = heads(arena, roots)?;
     let roots = roots
         .iter()
         .map(|value| run_value(arena, value))
@@ -91,7 +99,44 @@ pub(crate) fn seal(
         high_water: *high_water,
         directory,
         roots,
+        heads,
     })
+}
+
+/// The heads of the immutables `values` name, once each by id. Each is
+/// fixed as its object's at its first row, so every row and root naming
+/// the object names it by the same head, and a seal that fails and is
+/// retried writes the same one.
+fn heads(arena: &Arena, values: &[Value]) -> Result<Heads, SealError> {
+    let mut heads = std::collections::BTreeMap::new();
+    for value in values {
+        let immutable = matches!(
+            value,
+            Value::Function(_)
+                | Value::BigInt(_)
+                | Value::LongText(_)
+                | Value::Bytes(_)
+                | Value::BigTimestamp(_)
+                | Value::Tuple(_)
+                | Value::Error(_)
+                | Value::Handle(_)
+        );
+        let Some(handle) = value.handle().filter(|_| immutable) else {
+            continue;
+        };
+        let id = id_of(arena, handle)?;
+        if heads.contains_key(&id) {
+            continue;
+        }
+        let head = arena
+            .head(handle)
+            .map_err(|error| fault(error.to_string()))?;
+        arena
+            .certify(handle, head.clone())
+            .map_err(|error| fault(error.to_string()))?;
+        heads.insert(id, head);
+    }
+    Ok(Heads(heads.into_iter().collect()))
 }
 
 struct Walk<'a> {
@@ -302,5 +347,6 @@ fn record(arena: &Arena, handle: ArenaHandle) -> Result<Record, SealError> {
         }
         Body::Function(callable) => Record::Function(**callable),
         Body::Handle(host) => Record::Handle(host.clone()),
+        Body::Cold(_) => return Err(fault("a cold immutable reached the seal")),
     })
 }

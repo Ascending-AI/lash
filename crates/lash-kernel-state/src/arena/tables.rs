@@ -525,6 +525,42 @@ pub(super) fn index_of(
     )))))
 }
 
+/// `index` with its resident entries keyed afresh: what a table that keys a
+/// ref by its referent's token holds once the referent has a durable id
+/// (`K-KEY-004`). Entries keep their sequences; a cold chunk's entries were
+/// keyed from pages, by ids, and stay as they are.
+pub(super) fn rekeyed(
+    objects: &Objects,
+    facts: &[Facts],
+    layouts: &Layouts,
+    object: ArenaHandle,
+    table: &Table,
+    index: Index,
+) -> Result<Index, NativeError> {
+    let mut own = match index.0 {
+        Repr::Shared(_) => return index_of(objects, facts, layouts, object, table),
+        Repr::Own(own) => own,
+    };
+    let mut resident = HashSet::new();
+    let mut fresh = Vec::new();
+    for chunk in 0..table.chunks.count() {
+        let Some(values) = table.chunks.resident(chunk) else {
+            continue;
+        };
+        let seqs = own.sequences(chunk);
+        for (at, [key, _]) in values.as_chunks::<2>().0.iter().enumerate() {
+            let seq = seqs
+                .get(at)
+                .ok_or(NativeError::Malformed("a table entry has no sequence"))?;
+            resident.insert(seq);
+            fresh.push((key_of(objects, facts, key)?.ok_or_else(invalid_key)?, seq));
+        }
+    }
+    own.keys.retain(|_, seq| !resident.contains(seq));
+    own.keys.extend(fresh);
+    Ok(Index(Repr::Own(own)))
+}
+
 #[inline]
 fn table_of(body: &Body) -> Result<&Table, NativeError> {
     match body {

@@ -215,6 +215,10 @@ fn flat_member_size(objects: &(impl super::Bodies + ?Sized), value: &Value) -> O
         Value::Text(text) => text.as_bytes().len() as u64,
         Value::BigInt(handle) => match objects.get(*handle)? {
             Body::BigInt(integer) => integer.bits().div_ceil(64),
+            // A cold integer's head certifies its magnitude.
+            Body::Cold(lash_kernel_doc::arena::ColdImmutable::BigInt(summary)) => {
+                summary.bits.div_ceil(64)
+            }
             _ => return None,
         },
         Value::LongText(handle) => match objects.get(*handle)? {

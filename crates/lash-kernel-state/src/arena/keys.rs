@@ -146,6 +146,9 @@ fn other_key_of(
     facts: &(impl super::FactTable + ?Sized),
     value: &Value,
 ) -> Result<Option<Key>, NativeError> {
+    if let Some(normal) = certified(facts, value) {
+        return Ok(normal.map(|normal| Key::Normal(Box::new(normal.clone()))));
+    }
     match value {
         Value::Float(float) => {
             if let Some(word) = word_of(float.get()) {
@@ -164,6 +167,64 @@ fn other_key_of(
         _ => {}
     }
     Ok(normal_key(objects, facts, value)?.map(|normal| Key::Normal(Box::new(normal))))
+}
+
+/// The normal form the head of the immutable `value` certifies, when the
+/// object has a head: `Some(None)` for one that is no legal key. A head
+/// answers for its object without its body, so a cold key is indexed
+/// without a read.
+fn certified<'a>(
+    facts: &'a (impl super::FactTable + ?Sized),
+    value: &Value,
+) -> Option<Option<&'a NormalKey>> {
+    match value {
+        Value::Tuple(handle)
+        | Value::LongText(handle)
+        | Value::BigInt(handle)
+        | Value::BigTimestamp(handle)
+        | Value::Bytes(handle) => facts
+            .get(handle.index() as usize)?
+            .head
+            .get()
+            .map(super::Head::normal),
+        _ => None,
+    }
+}
+
+/// The tokens a tuple's member contributes to the tuple's normal form: an
+/// immutable object's own normal form, its tokens when they are held whole
+/// and its digest otherwise, so a tuple's normal form needs no member's
+/// body once the member has a head (`D-KEY`).
+fn nested(
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
+    member: &Value,
+    out: &mut TokenWriter,
+) -> Result<bool, NativeError> {
+    match member {
+        Value::Tuple(_)
+        | Value::LongText(_)
+        | Value::BigInt(_)
+        | Value::BigTimestamp(_)
+        | Value::Bytes(_) => match normal_key(objects, facts, member)? {
+            None => Ok(false),
+            Some(NormalKey::Inline(tokens)) => {
+                out.raw(&tokens);
+                Ok(true)
+            }
+            Some(NormalKey::Digest(digest)) => {
+                out.sum(11, 1);
+                out.bytes(&digest);
+                Ok(true)
+            }
+        },
+        _ => tokens(objects, facts, member, out),
+    }
+}
+
+/// The retry a read of the cold object `object`'s payload answers.
+fn cold(object: ArenaHandle) -> NativeError {
+    Retry::Cold { object, chunk: 0 }.into()
 }
 
 fn body(
@@ -252,6 +313,7 @@ pub(crate) fn integer(
         Value::Int(word) => Some(Integer::from(*word)),
         Value::BigInt(handle) => match body(objects, *handle)? {
             Body::BigInt(int) => Some(int.clone()),
+            Body::Cold(_) => return Err(cold(*handle)),
             _ => {
                 return Err(NativeError::Malformed(
                     "an integer handle names another body",
@@ -271,6 +333,7 @@ pub(crate) fn nanoseconds(
         Value::Timestamp(word) => Some(Integer::from(*word)),
         Value::BigTimestamp(handle) => match body(objects, *handle)? {
             Body::Timestamp(int) => Some(int.clone()),
+            Body::Cold(_) => return Err(cold(*handle)),
             _ => {
                 return Err(NativeError::Malformed(
                     "a timestamp handle names another body",
@@ -287,16 +350,14 @@ pub(crate) fn normal_key(
     facts: &(impl super::FactTable + ?Sized),
     value: &Value,
 ) -> Result<Option<NormalKey>, NativeError> {
+    if let Some(normal) = certified(facts, value) {
+        return Ok(normal.cloned());
+    }
     let mut out = TokenWriter::new();
     if !tokens(objects, facts, value, &mut out)? {
         return Ok(None);
     }
-    let bytes = out.into_bytes();
-    Ok(Some(if bytes.len() <= NormalKey::INLINE_MAX {
-        NormalKey::Inline(bytes)
-    } else {
-        NormalKey::Digest(key_digest(&bytes))
-    }))
+    Ok(Some(finish(out)))
 }
 
 /// The normal form of a text key: what a record field name is keyed by.
@@ -324,11 +385,9 @@ pub(super) fn tokens(
             out.sum(1, 1);
             flag.encode(out);
         }
-        Value::Int(_) | Value::BigInt(_) => {
+        Value::Int(word) => {
             out.sum(2, 1);
-            integer(objects, value)?
-                .ok_or(NativeError::Malformed("an integer was expected"))?
-                .encode(out);
+            Integer::from(*word).encode(out);
         }
         Value::Float(float) => match integral_float(float.get()) {
             Some(int) => {
@@ -340,19 +399,14 @@ pub(super) fn tokens(
                 float.encode(out);
             }
         },
-        Value::Text(_) | Value::LongText(_) => {
+        Value::Text(short) => {
             out.sum(4, 1);
-            out.text(text(objects, value)?);
+            out.text(short.as_str());
         }
-        Value::Bytes(handle) => {
-            out.sum(5, 1);
-            out.bytes(bytes(objects, *handle)?);
-        }
-        Value::Timestamp(_) | Value::BigTimestamp(_) => {
+        Value::Timestamp(word) => {
             out.sum(6, 1);
             Timestamp {
-                nanoseconds: nanoseconds(objects, value)?
-                    .ok_or(NativeError::Malformed("a timestamp was expected"))?,
+                nanoseconds: Integer::from(*word),
             }
             .encode(out);
         }
@@ -360,38 +414,134 @@ pub(super) fn tokens(
             out.sum(7, 1);
             Identity::Task(*task).encode(out);
         }
-        // A ref is keyed by its referent's process-local token, whether or
-        // not a projection has given it a durable id: an arena key never
-        // reaches a page, and a ref keeps its referent resident.
+        // A ref is keyed by its referent's durable id, which a sealed key
+        // names it by on its pages and after a reopen. Until the referent
+        // has one it is keyed by its process-local token, and giving it an
+        // id re-keys the tables that key it so ([`super::Arena::assign`]).
         Value::ObjectRef(handle) => {
-            let token = facts
+            let referent = facts
                 .get(handle.index() as usize)
                 .filter(|_| objects.get(*handle).is_some())
-                .map(|facts| facts.token)
                 .ok_or(NativeError::Malformed("a ref names no object of the run"))?;
-            out.sum(10, 1);
-            out.unsigned(token);
-        }
-        Value::Function(handle) => {
-            out.sum(8, 1);
-            match body(objects, *handle)? {
-                Body::Function(callable) => callable.encode(out),
-                _ => return Err(NativeError::Malformed("function body")),
-            }
-        }
-        Value::Tuple(handle) => {
-            let members = sequence(objects, *handle)?;
-            out.sum(9, 1);
-            out.seq(members.len() as u64);
-            for member in members {
-                if !tokens(objects, facts, member, out)? {
-                    return Ok(false);
+            match referent.entity {
+                Some(entity) => {
+                    out.sum(10, 1);
+                    Identity::Object(entity).encode(out);
+                }
+                None => {
+                    referent.token_keyed.set(true);
+                    out.sum(12, 1);
+                    out.unsigned(referent.token);
                 }
             }
+        }
+        Value::BigInt(handle)
+        | Value::LongText(handle)
+        | Value::Bytes(handle)
+        | Value::BigTimestamp(handle)
+        | Value::Function(handle)
+        | Value::Tuple(handle) => {
+            return body_tokens(objects, facts, Some(*handle), body(objects, *handle)?, out);
         }
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+/// The tokens of the immutable `body`, held by `object` when the arena
+/// holds it: what [`tokens`] writes for a value naming it. A detached body
+/// (one a load decoded and has not installed) is whole.
+fn body_tokens(
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
+    object: Option<ArenaHandle>,
+    body: &Body,
+    out: &mut TokenWriter,
+) -> Result<bool, NativeError> {
+    let unread = |chunk: u32| match object {
+        Some(object) => NativeError::from(Retry::Cold { object, chunk }),
+        None => NativeError::Malformed("a detached body holds a cold chunk"),
+    };
+    fn held<T>(chunks: &[Chunk<T>]) -> Result<Option<&T>, u32> {
+        match chunks {
+            [] => Ok(None),
+            [Chunk::Resident(whole)] => Ok(Some(whole)),
+            chunks => Err(super::first_cold(chunks).unwrap_or(0)),
+        }
+    }
+    match body {
+        Body::BigInt(int) => {
+            out.sum(2, 1);
+            int.encode(out);
+        }
+        Body::LongText(text) if text.moved() => {
+            return Err(NativeError::Malformed(
+                "a text whose storage moved was read",
+            ));
+        }
+        Body::LongText(text) => {
+            out.sum(4, 1);
+            out.text(held(&text.chunks).map_err(unread)?.map_or("", |text| text));
+        }
+        Body::Bytes(bytes) => {
+            out.sum(5, 1);
+            out.bytes(
+                held(&bytes.chunks)
+                    .map_err(unread)?
+                    .map_or(&[], |bytes| bytes),
+            );
+        }
+        Body::Timestamp(nanoseconds) => {
+            out.sum(6, 1);
+            Timestamp {
+                nanoseconds: nanoseconds.clone(),
+            }
+            .encode(out);
+        }
+        Body::Function(callable) => {
+            out.sum(8, 1);
+            callable.encode(out);
+        }
+        Body::Tuple(sequence) => {
+            let members = match object {
+                Some(object) => super::ops::values(object, &sequence.chunks)?,
+                None => sequence.chunks.values().ok_or_else(|| unread(0))?,
+            };
+            out.sum(9, 1);
+            out.seq(members.len() as u64);
+            for member in members {
+                if !nested(objects, facts, member, out)? {
+                    return Ok(false);
+                }
+            }
+        }
+        Body::Cold(_) => return Err(unread(0)),
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// The normal form of the immutable `body`, which a load decoded and has
+/// not installed: what [`normal_key`] would give once it is.
+pub(crate) fn detached_normal(
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
+    body: &Body,
+) -> Result<Option<NormalKey>, NativeError> {
+    let mut out = TokenWriter::new();
+    if !body_tokens(objects, facts, None, body, &mut out)? {
+        return Ok(None);
+    }
+    Ok(Some(finish(out)))
+}
+
+fn finish(out: TokenWriter) -> NormalKey {
+    let bytes = out.into_bytes();
+    if bytes.len() <= NormalKey::INLINE_MAX {
+        NormalKey::Inline(bytes)
+    } else {
+        NormalKey::Digest(key_digest(&bytes))
+    }
 }
 
 enum Step<'a> {
@@ -453,8 +603,10 @@ pub(crate) fn equal(
             (V::Float(a), V::Float(b)) => a.get() == b.get(),
             (V::Int(_) | V::BigInt(_), V::Float(f)) | (V::Float(f), V::Int(_) | V::BigInt(_)) => {
                 let int = if matches!(a, V::Float(_)) { &b } else { &a };
-                integral_float(f.get())
-                    .is_some_and(|f| integer(objects, int).ok().flatten() == Some(f))
+                match integral_float(f.get()) {
+                    Some(f) => integer(objects, int)? == Some(f),
+                    None => false,
+                }
             }
             (V::Text(_) | V::LongText(_), V::Text(_) | V::LongText(_)) => {
                 text(objects, &a)? == text(objects, &b)?
@@ -492,6 +644,8 @@ pub(crate) fn equal(
                         pending.push(Step::Pair(left.data, right.data));
                         true
                     }
+                    (Body::Cold(_), _) => return Err(cold(*left)),
+                    (_, Body::Cold(_)) => return Err(cold(*right)),
                     _ => return Err(NativeError::Malformed("an error names another body")),
                 }
             }

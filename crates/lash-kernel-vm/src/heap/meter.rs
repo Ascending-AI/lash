@@ -46,7 +46,7 @@
 //! the facts row; a slimmer row lowers `A`.
 
 use lash_kernel_doc::arena::native::NewObject;
-use lash_kernel_doc::arena::{Body, ErrorBody};
+use lash_kernel_doc::arena::{Body, Chunk, ErrorBody};
 use lash_kernel_doc::{Datum, Integer};
 use lash_kernel_state::paged::run::objects::Record;
 
@@ -95,14 +95,28 @@ fn integer(int: &Integer) -> u64 {
     int.bits().div_ceil(8)
 }
 
-/// What a resident `body` holds.
+/// What a resident `body` holds. An immutable opened from its head holds
+/// its head and what of its payload is resident: its true length is known
+/// and not charged until it is read (contract §2).
 pub(crate) fn body(body: &Body) -> u64 {
+    fn resident<T: AsRef<[U]>, U>(chunks: &[Chunk<T>]) -> u64 {
+        chunks
+            .iter()
+            .map(|chunk| match chunk {
+                Chunk::Resident(part) => part.as_ref().len() as u64,
+                Chunk::Cold { .. } => 0,
+            })
+            .sum()
+    }
     let length = match body {
         Body::Free => return 0,
+        Body::Cold(_) => 0,
         Body::BigInt(int) | Body::Timestamp(int) => integer(int),
-        Body::LongText(text) => text.summary.utf8_bytes,
-        Body::Bytes(bytes) => bytes.len,
-        Body::Tuple(sequence) | Body::List(sequence) => values(sequence.len),
+        Body::LongText(text) if text.moved() => text.summary.utf8_bytes,
+        Body::LongText(text) => resident(&text.chunks),
+        Body::Bytes(bytes) => resident(&bytes.chunks),
+        Body::Tuple(sequence) => values(sequence.chunks.resident_len()),
+        Body::List(sequence) => values(sequence.len),
         Body::Set(table) => values(table.len),
         Body::Map(table) | Body::Record(table) => values(table.len.saturating_mul(2)),
         Body::Error(ErrorBody { .. }) => values(3),

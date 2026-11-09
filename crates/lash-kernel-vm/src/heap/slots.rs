@@ -101,7 +101,7 @@ impl SlotHeap {
         );
         let mut values = Vec::with_capacity(root.roots.len());
         for value in &root.roots {
-            let value = open::value(&mut heap.arena, value).map_err(|reason| {
+            let value = open::value(&mut heap.arena, value, &root.heads).map_err(|reason| {
                 LoadError::Store(lash_kernel_doc::heap::HeapFault::Malformed(reason))
             })?;
             if let Some(handle) = value.handle()
@@ -143,9 +143,10 @@ impl SlotHeap {
     }
 
     /// Seals what `roots` reach, then puts every clean list, map, set and
-    /// record back on its pages as a cold proxy, so the next read of it
-    /// loads its row: the force-cold laws' statement boundary. Closures,
-    /// cells and immutables stay resident.
+    /// record, and every immutable with a row, back on its pages as a cold
+    /// proxy, so the next read of it loads its row: the force-cold laws'
+    /// statement boundary. Closures, cells, functions and host handles
+    /// stay resident.
     #[cfg(test)]
     pub(crate) fn page_out(
         &mut self,
@@ -157,11 +158,20 @@ impl SlotHeap {
             let Some(handle) = self.arena.objects().handle_at(index as u32) else {
                 continue;
             };
-            let mutable = matches!(
+            let paged = matches!(
                 self.arena.body(handle),
-                Ok(Body::List(_) | Body::Map(_) | Body::Set(_) | Body::Record(_))
+                Ok(Body::List(_)
+                    | Body::Map(_)
+                    | Body::Set(_)
+                    | Body::Record(_)
+                    | Body::Tuple(_)
+                    | Body::Error(_)
+                    | Body::BigInt(_)
+                    | Body::Timestamp(_)
+                    | Body::LongText(_)
+                    | Body::Bytes(_))
             );
-            let evicted = mutable
+            let evicted = paged
                 && self
                     .arena
                     .evict(handle)
@@ -180,13 +190,13 @@ impl SlotHeap {
         Ok(root)
     }
 
-    /// What loading `record` adds: its body and a proxy for each referent
+    /// What loading `row` adds: its body and an opened referent for each
     /// the arena does not hold.
-    fn load_units(&self, record: &lash_kernel_state::paged::run::objects::Record) -> u64 {
-        let mut units = super::meter::record(record);
-        for (id, kind) in open::referents(record).unwrap_or_default() {
+    fn load_units(&self, row: &lash_kernel_state::paged::run::directory::Row) -> u64 {
+        let mut units = super::meter::record(&row.record);
+        for (id, opening) in open::referents(&row.record, &row.heads).unwrap_or_default() {
             if self.arena.entity_handle(open::entity(id)).is_none() {
-                units = units.saturating_add(super::meter::body(&kind.placeholder()));
+                units = units.saturating_add(super::meter::body(&opening.placeholder()));
             }
         }
         units
@@ -391,7 +401,7 @@ impl Heap for SlotHeap {
         {
             return Ok(());
         }
-        let record = {
+        let row = {
             let Some(durable) = self.durable.as_ref() else {
                 return Err(malformed(
                     "a cold object in a heap with no directory".into(),
@@ -402,14 +412,13 @@ impl Heap for SlotHeap {
                 return Err(corrupt(format!("a whole row has no chunk {chunk}")));
             }
             let id = open::id_of(&self.arena, object).map_err(malformed)?;
-            let record = durable
+            let row = durable
                 .directory
                 .get(id)
                 .map_err(LoadError::Store)?
-                .ok_or_else(|| corrupt(format!("object {} has no row", id.0)))?
-                .record;
-            open::referents(&record).map_err(corrupt)?;
-            record
+                .ok_or_else(|| corrupt(format!("object {} has no row", id.0)))?;
+            open::referents(&row.record, &row.heads).map_err(corrupt)?;
+            row
         };
 
         // Admission of the growth: the body replaces the proxy's
@@ -419,22 +428,43 @@ impl Heap for SlotHeap {
             .get(object.index() as usize)
             .copied()
             .unwrap_or(0);
-        let wanted = self.load_units(&record).saturating_sub(placeholder);
+        let wanted = self.load_units(&row).saturating_sub(placeholder);
         if self.admit(wanted).is_err() {
             self.collect(roots);
-            let wanted = self.load_units(&record).saturating_sub(placeholder);
+            let wanted = self.load_units(&row).saturating_sub(placeholder);
             self.admit(wanted).map_err(LoadError::Memory)?;
         }
 
-        let fresh: Vec<_> = open::referents(&record)
+        let fresh: Vec<_> = open::referents(&row.record, &row.heads)
             .unwrap_or_default()
             .into_iter()
             .filter(|(id, _)| self.arena.entity_handle(open::entity(*id)).is_none())
+            .map(|(id, opening)| (id, super::meter::body(&opening.placeholder())))
             .collect();
-        let body = open::body(&mut self.arena, &record).map_err(malformed)?;
-        for (id, kind) in fresh {
+        let body = open::body(&mut self.arena, &row.record, &row.heads).map_err(malformed)?;
+        for (id, units) in fresh {
             if let Some(handle) = self.arena.entity_handle(open::entity(id)) {
-                self.place(handle, super::meter::body(&kind.placeholder()));
+                self.place(handle, units);
+            }
+        }
+        // An immutable's row must be the object every referrer's head
+        // certifies, before the run sees a word of it.
+        let head = self
+            .arena
+            .facts(object)
+            .map_err(|error| malformed(error.to_string()))?
+            .head
+            .get()
+            .cloned();
+        if let Some(head) = head {
+            let held = self.arena.detached_head(&body);
+            if held.as_ref().ok() != Some(&head) {
+                let reason =
+                    format!("a row disagrees with the head its referrers name it by: {held:?}");
+                return Err(LoadError::Store(self.durable.as_ref().map_or_else(
+                    || HeapFault::Malformed(reason.clone()),
+                    |durable| durable.corrupt(reason.clone()),
+                )));
             }
         }
         self.arena
@@ -445,7 +475,7 @@ impl Heap for SlotHeap {
         let now = self.arena.body(object).map_or(0, super::meter::body);
         self.held = self
             .held
-            .saturating_sub(super::meter::record(&record))
+            .saturating_sub(super::meter::record(&row.record))
             .saturating_add(now);
         self.place(object, now);
         Ok(())

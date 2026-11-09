@@ -66,7 +66,10 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     file(path = "crates/lash-kernel-state/src/paged/run/ids.rs", cover("impl TokenCodec for ObjectId", "impl TokenCodec for HighWater")),
 ///     file(
 ///         path = "crates/lash-kernel-state/src/paged/run/objects.rs",
-///         cover("impl TokenCodec for ObjectKind", "impl TokenCodec for RunValue", "impl TokenCodec for Record"),
+///         cover(
+///             "impl TokenCodec for ObjectKind", "impl TokenCodec for RunValue", "impl TokenCodec for Record",
+///             "impl TokenCodec for Head", "impl TokenCodec for Heads",
+///         ),
 ///     ),
 ///     file(
 ///         path = "crates/lash-kernel-state/src/paged/run/directory.rs",

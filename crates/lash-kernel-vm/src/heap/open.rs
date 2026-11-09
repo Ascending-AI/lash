@@ -4,21 +4,24 @@
 //! A load decodes exactly one row: the object's own record. Every object
 //! the record references becomes a proxy, a cold placeholder of its kind
 //! the arena answers [`lash_kernel_doc::Retry::Cold`] for, or the resident
-//! object already holding its id. One load therefore reads one directory
-//! path, whatever the record's referents hold.
+//! object already holding its id. An immutable referent opens from the
+//! head the row holds for it, so its length, summaries and key answer
+//! without its row. One load therefore reads one directory path, whatever
+//! the record's referents hold.
 
 use std::sync::Arc;
 
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::{
-    ArenaHandle, Body, Chunks, ClosureIdentity, Sequence, ShortText, Table,
+    ArenaHandle, Body, Bytes, Chunk, Chunks, ClosureIdentity, ErrorBody, LongText, Sequence,
+    ShortText, Table,
 };
 use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, PageId};
 use lash_kernel_state::arena::{Arena, ProxyKind};
 use lash_kernel_state::paged::run::directory::Directory;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
-use lash_kernel_state::paged::run::objects::{ObjectKind, Record, RunValue};
+use lash_kernel_state::paged::run::objects::{Head, Heads, ObjectKind, Record, RunValue};
 
 /// The run's durable heap: the directory its objects are written to and
 /// read from, and the ids its lineage has minted.
@@ -65,16 +68,37 @@ pub(crate) fn id_of(arena: &Arena, handle: ArenaHandle) -> Result<ObjectId, Stri
     }
 }
 
-/// The proxy kind of a referent of `kind`. An immutable referent waits on
-/// its head in the referrer's record (lead ruling A, pending review).
-fn proxy_kind(kind: ObjectKind) -> Result<ProxyKind, String> {
+/// How a referent opens: a mutable one as a proxy of its kind, an
+/// immutable one from its head.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Opening<'a> {
+    Proxy(ProxyKind),
+    Head(&'a Head),
+}
+
+impl Opening<'_> {
+    /// What the referent holds once opened, before a load of its row.
+    pub(crate) fn placeholder(self) -> Body {
+        match self {
+            Opening::Proxy(kind) => kind.placeholder(),
+            Opening::Head(head) => lash_kernel_state::arena::opened(head).0,
+        }
+    }
+}
+
+/// How the referent `id` of `kind` opens, the row holding `heads`.
+fn opening(kind: ObjectKind, id: ObjectId, heads: &Heads) -> Result<Opening<'_>, String> {
     Ok(match kind {
-        ObjectKind::List => ProxyKind::List,
-        ObjectKind::Map => ProxyKind::Map,
-        ObjectKind::Set => ProxyKind::Set,
-        ObjectKind::Record => ProxyKind::Record,
-        ObjectKind::Closure => ProxyKind::Closure,
-        _ => return Err(format!("an immutable {kind:?} referent has no head")),
+        ObjectKind::List => Opening::Proxy(ProxyKind::List),
+        ObjectKind::Map => Opening::Proxy(ProxyKind::Map),
+        ObjectKind::Set => Opening::Proxy(ProxyKind::Set),
+        ObjectKind::Record => Opening::Proxy(ProxyKind::Record),
+        ObjectKind::Closure => Opening::Proxy(ProxyKind::Closure),
+        _ => Opening::Head(
+            heads
+                .get(id)
+                .ok_or_else(|| format!("immutable {} has no head", id.0))?,
+        ),
     })
 }
 
@@ -96,47 +120,26 @@ fn value_of(kind: ObjectKind, handle: ArenaHandle) -> Value {
     }
 }
 
-/// Every object `record` references, once each in member order, with the
-/// kind of proxy it opens as.
-pub(crate) fn referents(record: &Record) -> Result<Vec<(ObjectId, ProxyKind)>, String> {
+/// Every object `record` references, once each in member order, with how
+/// it opens.
+pub(crate) fn referents<'a>(
+    record: &Record,
+    heads: &'a Heads,
+) -> Result<Vec<(ObjectId, Opening<'a>)>, String> {
     let mut referents = Vec::new();
-    let mut value = |value: &RunValue| -> Result<(), String> {
+    for value in record.values() {
         match value {
-            RunValue::Object(kind, id) => referents.push((*id, proxy_kind(*kind)?)),
-            RunValue::Ref(id) => referents.push((*id, ProxyKind::Unknown)),
+            RunValue::Object(kind, id) => referents.push((*id, opening(*kind, *id, heads)?)),
+            RunValue::Ref(id) => referents.push((*id, Opening::Proxy(ProxyKind::Unknown))),
             _ => {}
         }
-        Ok(())
-    };
-    match record {
-        Record::List(members) | Record::Tuple(members) | Record::Set(members) => {
-            members.iter().try_for_each(&mut value)?;
-        }
-        Record::Map(pairs) | Record::Record(pairs) => {
-            for (key, member) in pairs {
-                value(key)?;
-                value(member)?;
-            }
-        }
-        Record::Cell(member) => value(member)?,
-        Record::Error {
-            kind,
-            message,
-            data,
-        } => {
-            value(kind)?;
-            value(message)?;
-            value(data)?;
-        }
-        Record::Closure { captures, .. } => {
-            referents.extend(captures.iter().map(|cell| (*cell, ProxyKind::Cell)));
-        }
-        Record::BigInt(_)
-        | Record::Timestamp(_)
-        | Record::LongText(_)
-        | Record::Bytes(_)
-        | Record::Function(_)
-        | Record::Handle(_) => {}
+    }
+    if let Record::Closure { captures, .. } = record {
+        referents.extend(
+            captures
+                .iter()
+                .map(|cell| (*cell, Opening::Proxy(ProxyKind::Cell))),
+        );
     }
     let mut seen = std::collections::HashSet::new();
     referents.retain(|(id, _)| seen.insert(*id));
@@ -144,8 +147,8 @@ pub(crate) fn referents(record: &Record) -> Result<Vec<(ObjectId, ProxyKind)>, S
 }
 
 /// The value `value` names: an immediate, or the object holding its id,
-/// opened as a proxy when the arena has none.
-pub(crate) fn value(arena: &mut Arena, value: &RunValue) -> Result<Value, String> {
+/// opened as a proxy, or from its head in `heads`, when the arena has none.
+pub(crate) fn value(arena: &mut Arena, value: &RunValue, heads: &Heads) -> Result<Value, String> {
     Ok(match value {
         RunValue::Null => Value::Null,
         RunValue::Absent => Value::Absent,
@@ -158,20 +161,39 @@ pub(crate) fn value(arena: &mut Arena, value: &RunValue) -> Result<Value, String
         RunValue::Timestamp(nanoseconds) => Value::Timestamp(*nanoseconds),
         RunValue::Task(task) => Value::Task(TaskId(*task)),
         RunValue::TaskRef(task) => Value::TaskRef(TaskId(*task)),
-        RunValue::Object(kind, id) => value_of(*kind, arena.proxy(entity(*id), proxy_kind(*kind)?)),
+        RunValue::Object(kind, id) => {
+            let handle = match opening(*kind, *id, heads)? {
+                Opening::Proxy(proxy) => arena.proxy(entity(*id), proxy),
+                Opening::Head(head) => arena
+                    .open_immutable(entity(*id), head)
+                    .map_err(|error| error.to_string())?,
+            };
+            value_of(*kind, handle)
+        }
         RunValue::Ref(id) => Value::ObjectRef(arena.proxy(entity(*id), ProxyKind::Unknown)),
     })
 }
 
-/// The resident body `record` decodes to, its referents by proxy.
-pub(crate) fn body(arena: &mut Arena, record: &Record) -> Result<Body, String> {
+/// The resident body `record` decodes to, its referents opened by
+/// [`value`].
+pub(crate) fn body(arena: &mut Arena, record: &Record, heads: &Heads) -> Result<Body, String> {
     let mut values = |members: &[RunValue]| -> Result<Vec<Value>, String> {
-        members.iter().map(|member| value(arena, member)).collect()
+        members
+            .iter()
+            .map(|member| value(arena, member, heads))
+            .collect()
     };
     Ok(match record {
         Record::List(members) => {
             let members = values(members)?;
             Body::List(Sequence {
+                len: members.len() as u64,
+                chunks: Chunks::whole(members),
+            })
+        }
+        Record::Tuple(members) => {
+            let members = values(members)?;
+            Body::Tuple(Sequence {
                 len: members.len() as u64,
                 chunks: Chunks::whole(members),
             })
@@ -186,8 +208,8 @@ pub(crate) fn body(arena: &mut Arena, record: &Record) -> Result<Body, String> {
         Record::Map(pairs) | Record::Record(pairs) => {
             let mut flat = Vec::with_capacity(pairs.len() * 2);
             for (key, member) in pairs {
-                flat.push(value(arena, key)?);
-                flat.push(value(arena, member)?);
+                flat.push(value(arena, key, heads)?);
+                flat.push(value(arena, member, heads)?);
             }
             let table = Table::whole(flat);
             if matches!(record, Record::Map(_)) {
@@ -208,16 +230,27 @@ pub(crate) fn body(arena: &mut Arena, record: &Record) -> Result<Body, String> {
                 .collect(),
             code: None,
         },
-        Record::Cell(member) => Body::Cell(value(arena, member)?),
-        Record::Tuple(_)
-        | Record::Error { .. }
-        | Record::BigInt(_)
-        | Record::Timestamp(_)
-        | Record::LongText(_)
-        | Record::Bytes(_)
-        | Record::Function(_)
-        | Record::Handle(_) => {
-            return Err("an immutable object loads with its head".into());
-        }
+        Record::Cell(member) => Body::Cell(value(arena, member, heads)?),
+        Record::Error {
+            kind,
+            message,
+            data,
+        } => Body::Error(ErrorBody {
+            kind: value(arena, kind, heads)?,
+            message: value(arena, message, heads)?,
+            data: value(arena, data, heads)?,
+        }),
+        Record::BigInt(int) => Body::BigInt(int.clone()),
+        Record::Timestamp(nanoseconds) => Body::Timestamp(nanoseconds.clone()),
+        Record::LongText(text) => Body::LongText(LongText {
+            summary: lash_kernel_doc::heap_values::text_summary(text),
+            chunks: Box::new([Chunk::Resident(text.to_string())]),
+        }),
+        Record::Bytes(bytes) => Body::Bytes(Bytes {
+            len: bytes.len() as u64,
+            chunks: Box::new([Chunk::Resident(Box::from(&**bytes))]),
+        }),
+        Record::Function(callable) => Body::Function(Box::new(*callable)),
+        Record::Handle(host) => Body::Handle(host.clone()),
     })
 }

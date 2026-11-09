@@ -260,6 +260,11 @@ impl<'call> Args<'call> {
             Value::Int(word) => Ok(Some(Cow::Owned(Integer::from(*word)))),
             Value::BigInt(object) => match self.body(*object)? {
                 Body::BigInt(int) => Ok(Some(Cow::Borrowed(int))),
+                Body::Cold(_) => Err(Retry::Cold {
+                    object: *object,
+                    chunk: 0,
+                }
+                .into()),
                 _ => Err(NativeError::Malformed(
                     "an integer handle names another body",
                 )),
@@ -274,6 +279,11 @@ impl<'call> Args<'call> {
             Value::Timestamp(word) => Ok(Some(Cow::Owned(Integer::from(*word)))),
             Value::BigTimestamp(object) => match self.body(*object)? {
                 Body::Timestamp(int) => Ok(Some(Cow::Borrowed(int))),
+                Body::Cold(_) => Err(Retry::Cold {
+                    object: *object,
+                    chunk: 0,
+                }
+                .into()),
                 _ => Err(NativeError::Malformed(
                     "a timestamp handle names another body",
                 )),
@@ -301,6 +311,7 @@ impl<'call> Args<'call> {
         };
         match self.body(object)? {
             Body::Error(error) => Ok(Some(error)),
+            Body::Cold(_) => Err(Retry::Cold { object, chunk: 0 }.into()),
             _ => Err(NativeError::Malformed("an error handle names another body")),
         }
     }

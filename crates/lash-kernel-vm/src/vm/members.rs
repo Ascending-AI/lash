@@ -98,6 +98,15 @@ impl<H: Heap> Vm<H> {
             Value::Error(error) => {
                 let parts = match self.heap.arena().body(error) {
                     Ok(Body::Error(parts)) => *parts,
+                    Ok(Body::Cold(_)) => {
+                        return Err(self.native(
+                            lash_kernel_doc::Retry::Cold {
+                                object: error,
+                                chunk: 0,
+                            }
+                            .into(),
+                        ));
+                    }
                     Ok(_) => return Err(super::fault("an error handle names another body")),
                     Err(e) => return Err(self.native(e)),
                 };

@@ -75,6 +75,7 @@ pub use batch::{PreparedBatch, PreparedGraphProof, PreparedInstallation, Prepare
 
 mod bench;
 mod chunks;
+mod heads;
 mod keys;
 mod layouts;
 mod table_write;
@@ -99,6 +100,7 @@ pub(crate) use region_port::{ArenaAuthority, RegionBuild, RegionRegistration};
 pub use crate::paged::stored::CARD;
 pub use bench::{Bench, Called, Usage};
 pub use chunks::{ColdChunk, PayloadPart};
+pub use heads::opened;
 pub use keys::{ArenaSemantics, Key, text_key};
 pub use list_write::{
     PreparedCellWrite, PreparedListRemove, PreparedListWrite, PreparedMemberBody,
@@ -113,9 +115,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use lash_kernel_doc::arena::{
-    ArenaHandle, Body, Bytes, Chunk, Chunks, ErrorBody, LongText, Objects, Sequence, ShortText,
+    ArenaHandle, Body, Bytes, Chunk, Chunks, ColdImmutable, ErrorBody, LongText, Objects, Sequence,
+    ShortText,
 };
 use lash_kernel_doc::heap::{EntityId, PageValue, TextSummary};
+
+pub use crate::paged::run::objects::Head;
 use lash_kernel_doc::heap_values::text_summary;
 use lash_kernel_doc::{Handle, Integer, NativeError, NewObject, Value};
 
@@ -156,8 +161,16 @@ pub struct Facts {
     /// A resident map's, set's or record's key index.
     pub index: Option<Index>,
     /// A proxy whose head the machine has not opened: its body is a cold
-    /// placeholder of its kind.
+    /// placeholder of its kind. An immutable opened from its head is cold
+    /// until its payload is read.
     pub cold: bool,
+    /// An immutable's head (lead ruling A): the one a row opened it with,
+    /// or the one its first seal certified. Fixed once given: the object
+    /// never changes, and every row that names it holds this head.
+    pub head: std::cell::OnceCell<Head>,
+    /// A key named the object by its process-local token, before it had a
+    /// durable id: giving it one re-keys the tables ([`Arena::assign`]).
+    pub(crate) token_keyed: std::cell::Cell<bool>,
     /// The machine decoded the object this many times since the last
     /// statement boundary: each decode reads twice as many chunks as the
     /// one before.
@@ -1099,6 +1112,13 @@ impl Arena {
                 len: bytes.len,
                 chunks: Box::new([cold(bytes.len)]),
             }),
+            // A scalar immutable has no chunk to leave: one with an id goes
+            // back to its row whole, its head answering for it.
+            Body::BigInt(_) | Body::Timestamp(_) | Body::Error(_)
+                if self.facts(handle)?.entity.is_some() =>
+            {
+                opened(&self.head(handle)?).0
+            }
             _ => return Ok(None),
         };
         self.resident = self.resident.saturating_add(body_values(&body));
@@ -1235,6 +1255,7 @@ impl Arena {
         facts.dirty = true;
         facts.listed = true;
         self.dirty.push(handle);
+        self.rekey_after(handle)?;
         Ok(entity)
     }
 
@@ -1262,7 +1283,7 @@ impl Arena {
             facts.listed = true;
             self.dirty.push(handle);
         }
-        Ok(())
+        self.rekey_after(handle)
     }
 
     /// The dirty list, left in place: every listed object with an id that
@@ -1600,6 +1621,7 @@ fn has_cold(body: &Body) -> bool {
         }
         Body::LongText(text) => cold(&text.chunks),
         Body::Bytes(bytes) => cold(&bytes.chunks),
+        Body::Cold(_) => true,
         _ => false,
     }
 }
@@ -1655,6 +1677,7 @@ pub fn each_member(body: &Body, visit: &mut impl FnMut(&Value)) {
         Body::Cell(value) => visit(value),
         Body::Closure { .. }
         | Body::Free
+        | Body::Cold(_)
         | Body::BigInt(_)
         | Body::LongText(_)
         | Body::Bytes(_)
