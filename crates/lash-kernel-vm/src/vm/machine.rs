@@ -68,9 +68,15 @@ impl CoreMachine {
     }
 
     /// Builds `datum` into the run's heap, every mutable object fresh.
+    /// An input past the memory bound is held for the first step, as a
+    /// refused program or constant is (`K-BND-001`).
     fn copy_in(vm: &mut Vm<SlotHeap>, datum: &Datum) -> Result<Value, StartError> {
+        if vm.unadmitted() {
+            return Ok(Value::Absent);
+        }
         let built = super::datum::copy_in(vm, datum);
-        built.map_err(|flow| linked(format!("{flow:?}")))
+        vm.admitted(built, Value::Absent)
+            .map_err(|flow| linked(format!("{flow:?}")))
     }
 
     fn ended(&mut self, end: End) -> Result<Step, MachineError> {

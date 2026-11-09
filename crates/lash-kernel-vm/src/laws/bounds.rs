@@ -1126,6 +1126,26 @@ fn the_core_memory_threshold_moves_by_exactly_the_schedule() {
     }
 }
 
+/// `K-BND-001`: a run whose program, constants or first frame do not fit
+/// its memory bound starts, and its first step ends with the memory bound.
+/// One refusal has one shape on both sides of the bound at which the
+/// program and its constants fit but the first frame does not.
+#[test]
+fn a_run_that_does_not_fit_its_memory_bound_starts_and_refuses_at_its_first_step() {
+    let body = "  let xs = [\"held\", \"text\"]\n  return xs";
+    for memory in 0..threshold(body) {
+        let (end, _) = core_end(body, memory);
+        let End::Error(RunError::Bound(exceeded)) = end else {
+            panic!("under {memory}: {end:?}");
+        };
+        assert_eq!(
+            (exceeded.bound, exceeded.limit),
+            (Bound::Memory, memory),
+            "under {memory}"
+        );
+    }
+}
+
 /// G012, contract §2: a native's inputs stay held while it builds, so its
 /// construction is admitted at the held inputs plus its peak, and at
 /// exactly that. Each byte of a concatenated input is held twice at the

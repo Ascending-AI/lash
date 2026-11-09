@@ -214,9 +214,11 @@ pub(crate) struct Vm<H: Heap> {
     /// What a frame of each unit holds (contract §2): admitted when the
     /// frame is entered, returned when it leaves.
     frames: Vec<u64>,
-    /// The program or its constants did not fit the memory bound: the
-    /// run refuses before it runs anything.
-    unadmitted: Option<MemoryRefused>,
+    /// What the run is started with (its program, constants, inputs and
+    /// first frame) did not fit the memory bound: the run starts, and its
+    /// first step ends with the memory bound before it runs anything
+    /// (`K-BND-001`).
+    unadmitted: Option<Exceeded>,
     /// The committed phase a cold read interrupted, resumed once its chunk
     /// is loaded; none when the interrupted op runs again.
     restart: Option<Restart>,
@@ -273,7 +275,10 @@ impl<H: Heap> Vm<H> {
     ) -> Result<Self, Stop> {
         // The instance holds its own program, then its materialized
         // constants (contract §2, `K-MACH-001`).
-        let mut unadmitted = heap.admit(crate::heap::meter::program(&program)).err();
+        let mut unadmitted = heap
+            .admit(crate::heap::meter::program(&program))
+            .err()
+            .map(memory);
         let mut constants = Vec::with_capacity(program.constants.len());
         for constant in &program.constants {
             let object = match constant {
@@ -287,7 +292,10 @@ impl<H: Heap> Vm<H> {
                 Constant::Function(callable) => NewObject::Function(*callable),
             };
             if unadmitted.is_none() {
-                unadmitted = heap.admit(crate::heap::slots::schedule(&object)).err();
+                unadmitted = heap
+                    .admit(crate::heap::slots::schedule(&object))
+                    .err()
+                    .map(memory);
             }
             if unadmitted.is_some() {
                 constants.push(Value::Absent);
@@ -365,8 +373,34 @@ impl<H: Heap> Vm<H> {
         args: &[Value],
         closure: Option<ArenaHandle>,
     ) -> Run<()> {
+        if self.unadmitted.is_some() {
+            return Ok(());
+        }
         self.cx.stack.extend_from_slice(args);
-        self.enter(unit, args.len(), closure, None)
+        let entered = self.enter(unit, args.len(), closure, None);
+        self.admitted(entered, ())
+    }
+
+    /// What starting the run built, or `refused` once something it is
+    /// started with did not fit the memory bound: the refusal is held for
+    /// the first step, as a refused program or constant is.
+    pub(crate) fn admitted<T>(&mut self, built: Run<T>, refused: T) -> Run<T> {
+        match built {
+            Err(Flow::Stop(stop)) => match *stop {
+                Stop::Bound(exceeded) if exceeded.bound == Bound::Memory => {
+                    self.unadmitted.get_or_insert(*exceeded);
+                    Ok(refused)
+                }
+                stop => Err(Flow::from(stop)),
+            },
+            built => built,
+        }
+    }
+
+    /// Whether something the run is started with did not fit its memory
+    /// bound.
+    pub(crate) fn unadmitted(&self) -> bool {
+        self.unadmitted.is_some()
     }
 
     // --- The meter.
@@ -993,8 +1027,8 @@ impl<H: Heap> Vm<H> {
     /// Runs the tasks until the run stops: it parks, the slice of `slice`
     /// units ends, or the run ends.
     pub(crate) fn run(&mut self, host: &mut dyn Host, slice: u64) -> Stop {
-        if let Some(refused) = self.unadmitted {
-            return Stop::bound(memory(refused));
+        if let Some(refused) = &self.unadmitted {
+            return Stop::bound(refused.clone());
         }
         self.meter.slice(slice);
         self.fresh = true;
