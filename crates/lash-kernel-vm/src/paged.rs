@@ -190,8 +190,8 @@ pub enum OpenError {
     #[error("the state was parked under {surface} {observed}; this build reads {expected}")]
     Format {
         surface: &'static str,
-        expected: u32,
-        observed: u32,
+        expected: lash_kernel_state::paged::FormatValue,
+        observed: lash_kernel_state::paged::FormatValue,
     },
     #[error("the root is not a checkpoint root of this format: {problem}")]
     Malformed { problem: String },
@@ -210,8 +210,8 @@ pub(crate) fn admit_format(root: &Checkpoint) -> Result<(), OpenError> {
         None => Ok(()),
         Some(format) => Err(OpenError::Format {
             surface: format.surface,
-            expected: format.expected,
-            observed: format.observed,
+            expected: format.expected.clone(),
+            observed: format.observed.clone(),
         }),
     }
 }

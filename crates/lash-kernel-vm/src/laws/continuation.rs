@@ -961,46 +961,63 @@ impl lash_kernel_state::paged::PageSource for Untouched {
 /// CONT-FORMAT (contract §9): a root its envelope states under another
 /// parked-state format is refused with that format, before the open reads
 /// or writes a page; the same root stated under the format the build reads
-/// opens.
+/// opens. A witness is a version number or a domain string (the page digest
+/// domain changes every page's identity), and either refuses alike.
 #[test]
 fn a_root_stated_under_another_format_is_refused() {
-    use lash_kernel_state::paged::StatedFormat;
-    let surface = "KERNEL_PARKED_STATE_VERSION";
+    use lash_kernel_state::paged::{FormatValue, StatedFormat};
     let mut embedder = waiting();
     let (root, _) = embedder.checkpoint();
     let root = lash_kernel_state::kernel_internals::checkpoint(root);
-    let foreign = StatedFormat {
-        surface,
-        expected: 16,
-        observed: 15,
-    };
-    let opened = crate::KernelMachine::open(
-        embedder.program(true).0,
-        embedder.bounds,
-        &root.clone().stated(foreign),
-        Box::new(Untouched),
-    );
-    assert_eq!(
-        opened.err(),
-        Some(crate::OpenError::Format {
+    let cases = [
+        (
+            "KERNEL_PARKED_STATE_VERSION",
+            FormatValue::Number(16),
+            FormatValue::Number(15),
+        ),
+        (
+            "PAGE_DIGEST_DOMAIN",
+            FormatValue::Text("lash-blob/v3".into()),
+            FormatValue::Text("lash-blob/v2".into()),
+        ),
+    ];
+    for (surface, expected, observed) in cases {
+        let foreign = StatedFormat {
             surface,
-            expected: 16,
-            observed: 15,
-        })
-    );
-    let current = StatedFormat {
-        observed: 16,
-        ..foreign
-    };
-    assert!(
-        crate::KernelMachine::open(
+            expected: expected.clone(),
+            observed: observed.clone(),
+        };
+        let opened = crate::KernelMachine::open(
             embedder.program(true).0,
             embedder.bounds,
-            &root.stated(current),
-            Box::new(embedder.source.clone()),
-        )
-        .is_ok()
-    );
+            &root.clone().stated(foreign),
+            Box::new(Untouched),
+        );
+        assert_eq!(
+            opened.err(),
+            Some(crate::OpenError::Format {
+                surface,
+                expected: expected.clone(),
+                observed,
+            }),
+            "{surface}"
+        );
+        let current = StatedFormat {
+            surface,
+            expected: expected.clone(),
+            observed: expected,
+        };
+        assert!(
+            crate::KernelMachine::open(
+                embedder.program(true).0,
+                embedder.bounds,
+                &root.clone().stated(current),
+                Box::new(embedder.source.clone()),
+            )
+            .is_ok(),
+            "{surface}"
+        );
+    }
 }
 
 /// CONT-GRAMMAR: an action site the statement does not hold.

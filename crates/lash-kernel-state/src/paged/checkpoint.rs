@@ -21,11 +21,29 @@ pub struct Checkpoint(pub(crate) CheckpointRoot, pub(crate) Option<StatedFormat>
 /// format the opening build reads (`expected`), on the witness `surface`.
 /// The witnesses live with the embedding, outside the kernel, so the host
 /// states both.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StatedFormat {
     pub surface: &'static str,
-    pub expected: u32,
-    pub observed: u32,
+    pub expected: FormatValue,
+    pub observed: FormatValue,
+}
+
+/// A format witness's value: a version number, or a domain string such as
+/// a page digest domain, which changes every page's identity.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(untagged)]
+pub enum FormatValue {
+    Number(u32),
+    Text(std::sync::Arc<str>),
+}
+
+impl std::fmt::Display for FormatValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Number(number) => write!(f, "{number}"),
+            Self::Text(text) => write!(f, "{text:?}"),
+        }
+    }
 }
 
 impl Checkpoint {
@@ -38,8 +56,10 @@ impl Checkpoint {
         Self(self.0, Some(format))
     }
     /// The stated format, when it is not the one the opening build reads.
-    pub fn foreign_format(&self) -> Option<StatedFormat> {
-        self.1.filter(|format| format.observed != format.expected)
+    pub fn foreign_format(&self) -> Option<&StatedFormat> {
+        self.1
+            .as_ref()
+            .filter(|format| format.observed != format.expected)
     }
     /// Whether both checkpoints retain the same authenticated pending-wait set.
     /// This compares the saved set without exposing its storage coordinates.

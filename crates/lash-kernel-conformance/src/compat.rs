@@ -26,7 +26,7 @@ use std::sync::Arc;
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{
-    Checkpoint, PageAnswer, PageBody, PageKind, PageSource, StatedFormat,
+    Checkpoint, FormatValue, PageAnswer, PageBody, PageKind, PageSource, StatedFormat,
 };
 use lash_kernel_value::sites::WaitId;
 use lash_kernel_vm::{
@@ -113,11 +113,11 @@ pub fn cli(args: &[String]) -> Result<(), HarnessError> {
             // builds' values, as a store states its envelope's. A checkpoint
             // holds one stated format, so the first mismatch is the one stated:
             // the open refuses on it, as it would on the first of a list.
-            let first = stated.first().copied().ok_or_else(usage)?;
+            let first = stated.first().cloned().ok_or_else(usage)?;
             let format = stated
                 .iter()
-                .copied()
                 .find(|format| format.expected != format.observed)
+                .cloned()
                 .unwrap_or(first);
             refuse(&library, &corpus, &imports, &out, format)
         }
@@ -145,8 +145,8 @@ fn stated_format(value: &str) -> Option<StatedFormat> {
         surface: ADMISSION_SURFACES
             .into_iter()
             .find(|surface| *surface == name)?,
-        expected: expected.parse().ok()?,
-        observed: observed.parse().ok()?,
+        expected: FormatValue::Number(expected.parse().ok()?),
+        observed: FormatValue::Number(observed.parse().ok()?),
     })
 }
 
@@ -1004,13 +1004,13 @@ struct FormatRefusal {
     error: &'static str,
     kind: &'static str,
     surface: String,
-    expected: u64,
-    observed: u64,
+    expected: FormatValue,
+    observed: FormatValue,
 }
 
 /// The typed format refusal `error` carries; any other open error is not one.
 fn format_refusal(error: &lash_kernel_vm::OpenError) -> Option<FormatRefusal> {
-    match *error {
+    match error {
         lash_kernel_vm::OpenError::Format {
             surface,
             expected,
@@ -1018,9 +1018,9 @@ fn format_refusal(error: &lash_kernel_vm::OpenError) -> Option<FormatRefusal> {
         } => Some(FormatRefusal {
             error: "OpenError",
             kind: "format",
-            surface: surface.to_owned(),
-            expected: u64::from(expected),
-            observed: u64::from(observed),
+            surface: (*surface).to_owned(),
+            expected: expected.clone(),
+            observed: observed.clone(),
         }),
         _ => None,
     }
@@ -1037,7 +1037,7 @@ fn refuse(
     let mut failures = Vec::new();
     for (case, pause, path) in exported(corpus, imports)? {
         let image: Image = read_json(&path)?;
-        let (_, pages, opened) = open(library, case, &image, Some(stated))?;
+        let (_, pages, opened) = open(library, case, &image, Some(stated.clone()))?;
         let mutations = pages.1.get();
         let record = Refusal {
             case: image.case.clone(),
