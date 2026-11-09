@@ -133,6 +133,11 @@ pub struct Unit {
     pub points: Vec<(u32, Point)>,
     /// The fused runs `Op::Fused` names (`fuse`).
     pub fused: Vec<Fused>,
+    /// The expression each op lowers, by its path under `site`. Ops added
+    /// after sealing have none, and stand for the unit's root.
+    pub origin: Vec<super::site_tables::Path>,
+    /// Every point a frame of the unit can be saved at (contract §5).
+    pub sites: super::site_tables::SiteTable,
 }
 
 impl Unit {

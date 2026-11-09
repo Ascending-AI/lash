@@ -292,7 +292,9 @@ impl Unit {
                 return Err(at(pc, format!("{op:?} does not end its block")));
             }
         }
-        self.check_stack(id)
+        let (height, depth) = self.check_stack(id)?;
+        self.check_sites(id, &depth)?;
+        Ok(height)
     }
 
     /// The blocks partition the ops, each headed by its own `Block` op,
@@ -357,8 +359,8 @@ impl Unit {
 
     /// Every op reached from the entry, or from a handler, sees one
     /// operand depth, and no op pops past the frame's locals. Gives the
-    /// greatest depth any op reaches.
-    fn check_stack(&self, id: UnitId) -> Result<u32, Malformed> {
+    /// greatest depth any op reaches, and each op's depth.
+    fn check_stack(&self, id: UnitId) -> Result<(u32, Vec<Option<u32>>), Malformed> {
         let len = self.ops.len();
         let mut height = 0u32;
         let mut depth: Vec<Option<u32>> = vec![None; len];
@@ -419,11 +421,74 @@ impl Unit {
                 _ => go(pc + 1, after),
             }
         }
-        Ok(height)
+        Ok((height, depth))
+    }
+
+    /// The resume table names a point at every call and action and at
+    /// every step, and each point's stack is the depth its pc runs at
+    /// (contract §5): a call's under its operands, an action's after it
+    /// with its value pushed, and its roles within it.
+    fn check_sites(&self, id: UnitId, depth: &[Option<u32>]) -> Checked {
+        use super::site_tables::Phase;
+        let refuse = |pc: u32, problem: String| {
+            Err(Malformed {
+                unit: id,
+                pc: Some(pc),
+                problem,
+            })
+        };
+        for (pc, op) in self.ops.iter().enumerate() {
+            let Some(d) = depth[pc] else {
+                continue;
+            };
+            let pc = pc as u32;
+            let mut wanted: Vec<(Phase, u32, u32)> = Vec::new();
+            if self.step[pc as usize] {
+                let phase = match op {
+                    Op::Jump(to) if *to < pc => Phase::Back,
+                    _ => Phase::Statement,
+                };
+                wanted.push((phase, pc, d));
+            }
+            let (pops, pushes) = self.effect(*op);
+            match op {
+                Op::Call(_) => wanted.push((Phase::Call, pc + 1, d - pops)),
+                Op::Action(n) => {
+                    let kind = super::site_tables::ActionKind::of(&self.actions[*n as usize]);
+                    wanted.push((Phase::Ready, pc, d));
+                    if kind.waits() {
+                        let kept = kind.kept_after_issue().len() as u32;
+                        wanted.push((Phase::Issued, pc + 1, d - pops + kept));
+                    }
+                    wanted.push((Phase::Went, pc + 1, d - pops + pushes));
+                }
+                _ => {}
+            }
+            for (phase, at, height) in wanted {
+                let Some(entry) = self.sites.at(at, phase) else {
+                    return refuse(pc, format!("no resume point for {phase:?} at {at}"));
+                };
+                if entry.resume.stack.len() != height as usize
+                    || usize::from(entry.held) > entry.resume.stack.len()
+                {
+                    return refuse(
+                        pc,
+                        format!(
+                            "the {phase:?} point holds {} values at depth {height}",
+                            entry.resume.stack.len()
+                        ),
+                    );
+                }
+                if self.sites.resume(&entry.site, phase, entry.copy) != Some(entry) {
+                    return refuse(pc, format!("the {phase:?} point is not found by its site"));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// What `op` pops and then pushes (`ProtoGuard` as when it guards).
-    fn effect(&self, op: Op) -> (u32, u32) {
+    pub(super) fn effect(&self, op: Op) -> (u32, u32) {
         match op {
             Op::Block(_)
             | Op::Nop
@@ -565,6 +630,8 @@ mod tests {
                 site: Site::new(SiteUnit::Main, Vec::new()),
                 points: Vec::new(),
                 fused: Vec::new(),
+                origin: Vec::new(),
+                sites: Default::default(),
             }],
             constants: vec![Constant::Immediate(Value::Bool(true))],
             natives: Vec::new(),

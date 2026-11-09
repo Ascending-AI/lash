@@ -26,6 +26,7 @@ use super::program::{
     ActionSite, Block, CallSite, Callee, Capture, ClosureSite, Constant, Event, FunctionEntry,
     LoopMark, LoopSite, Mark, NativeEntry, Point, Program, Unit, UnitId, UnitKind,
 };
+use super::site_tables::Path;
 use crate::functions::{MachineFunction, machine_function};
 
 /// A document the core does not compile. Admission has checked the
@@ -121,6 +122,8 @@ pub(crate) struct Fun {
     pub enclosing: Vec<LoopMark>,
     pub site: SiteUnit,
     pub path: Vec<u32>,
+    /// The expression each op lowers, by path (`site_tables`).
+    pub origin: Vec<Path>,
 }
 
 impl Fun {
@@ -160,6 +163,7 @@ impl Fun {
             enclosing: Vec::new(),
             site,
             path: Vec::new(),
+            origin: Vec::new(),
         }
     }
 
@@ -219,6 +223,7 @@ impl Fun {
     /// Emits `op`, which bills nothing, leaving pending events and the
     /// step mark to the op after it.
     pub(crate) fn quiet(&mut self, op: Op) {
+        self.originate();
         self.ops.push(op);
         self.event.push(Event::default());
         self.pace.push(0);
@@ -229,11 +234,22 @@ impl Fun {
         if let Some(point) = self.start.take() {
             self.points.push((self.here(), point));
         }
+        self.originate();
         self.ops.push(op);
         self.event.push(std::mem::take(&mut self.pending));
         self.pace.push(std::mem::take(&mut self.pending_pace));
         self.step.push(std::mem::take(&mut self.mark));
         self.ops.len() - 1
+    }
+
+    /// Records the path of the op about to be emitted, sharing the last
+    /// op's where it is the same.
+    fn originate(&mut self) {
+        let path = match self.origin.last() {
+            Some(last) if **last == *self.path => Arc::clone(last),
+            _ => Path::from(self.path.as_slice()),
+        };
+        self.origin.push(path);
     }
 
     /// A block starts here; events still pending are billed before it.
@@ -349,6 +365,11 @@ impl<'a> Compiler<'a> {
                 Some(unit) => units.push(unit),
                 None => return unsupported(format!("unit {at} was reserved and never compiled")),
             }
+        }
+        // A unit's tables are built from its final code: a convention may
+        // add to a unit after it was sealed.
+        for unit in &mut units {
+            unit.sites = super::site_tables::build(unit);
         }
         Ok(Program {
             units,
@@ -844,6 +865,7 @@ impl<'a> Compiler<'a> {
             action_marks,
             site,
             mut points,
+            origin,
             ..
         } = f;
         // Points are recorded in lowering order; an `if`'s test and a
@@ -926,6 +948,8 @@ impl<'a> Compiler<'a> {
             site: Site::new(site, Vec::new()),
             points,
             fused: Vec::new(),
+            origin,
+            sites: Default::default(),
         }
     }
 
