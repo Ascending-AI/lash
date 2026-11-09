@@ -289,7 +289,7 @@ fn writer_version(args: Args<'_>, op: &str, legacy: bool) -> Result<Contract, Na
                 Policy {
                     target: Some(target),
                     context: &context,
-                    path: &path,
+                    path: Path::Root(&path),
                     limit: args.limits().document_depth(),
                     json_number: false,
                     legacy_markers: legacy,
@@ -305,7 +305,7 @@ fn writer_version(args: Args<'_>, op: &str, legacy: bool) -> Result<Contract, Na
                 Policy {
                     target: None,
                     context: "json.dumps",
-                    path: "$",
+                    path: Path::Root("$"),
                     limit: args.limits().document_depth(),
                     json_number: false,
                     legacy_markers: legacy,

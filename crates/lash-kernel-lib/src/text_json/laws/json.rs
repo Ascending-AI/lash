@@ -1,7 +1,8 @@
 //! JSON and number formatting natives (FIG-6144's laws, ported onto heap
 //! values).
 use lash_kernel_doc::{
-    Datum, FunctionRegistry, Handle, Measure, NumberPolicy, NumberToken, Operand, Value,
+    Datum, FunctionRegistry, Handle, Measure, NativeError, NumberPolicy, NumberToken, Operand,
+    Retry, Value,
 };
 
 use {
@@ -863,4 +864,62 @@ fn k_ljson_009_configured_encoding_preserves_lexical_policy_and_room() {
     let map = lab.value(Datum::Map(vec![(t("reserved"), i(1))]));
     let result = lab.call("json.encode", &[map, layout, ascii]).unwrap();
     assert_eq!(lab.datum(&result), t(r#"{"reserved": 1}"#));
+}
+
+/// K-BND-003: encoding asks for each piece it writes, in writing order, at
+/// twice the piece's length, and holds a text longer than 256 bytes whole
+/// when it reads it. Under any room the call stops at the first ask that
+/// does not fit, wanting exactly what was held before it plus that ask,
+/// however the writer gathers its asks; past the last piece the error that
+/// ends the walk is raised with its path.
+#[test]
+fn k_bnd_003_an_encode_stops_at_the_first_piece_its_room_refuses() {
+    let mut lab = Lab::new();
+    let lengths: Vec<usize> = (0..150)
+        .map(|index| if index % 9 == 4 { 300 } else { 150 })
+        .collect();
+    let mut items: Vec<Datum> = lengths.iter().map(|n| t(&"x".repeat(*n))).collect();
+    items.push(f(f64::NAN));
+    let value = lab.value(Datum::Record(vec![("a b".into(), list(items))]));
+    // The held total after each ask: `{"a b":[` first, then each item.
+    let mut asked = Vec::new();
+    let mut held = 0;
+    let mut ask = |bytes: usize| {
+        held += bytes as u64;
+        asked.push(held);
+    };
+    for piece in ["{", "\"", "a b", "\"", ":", "["] {
+        ask(2 * piece.len());
+    }
+    for (index, length) in lengths.iter().enumerate() {
+        if index > 0 {
+            ask(2);
+        }
+        if *length > 256 {
+            ask(*length);
+        }
+        ask(2);
+        ask(2 * length);
+        ask(2);
+    }
+    ask(2);
+    let last = held;
+    for room in asked.iter().flat_map(|held| [held - 1, *held]) {
+        lab.room(Some(room));
+        match lab.call("json.stringify", &[value]) {
+            Err(NativeError::Retry(Retry::Room { wanted })) => {
+                let refused = asked.iter().find(|held| **held > room).copied();
+                assert_eq!(Some(wanted.0), refused, "room {room}");
+            }
+            Err(NativeError::Refused { kind, message }) => {
+                assert!(room >= last, "room {room} raised past a refused piece");
+                assert_eq!(kind, "json_number");
+                assert_eq!(
+                    message,
+                    r#"json $["a b"][150]: JSON refuses NaN and infinity"#
+                );
+            }
+            other => panic!("room {room}: {other:?}"),
+        }
+    }
 }

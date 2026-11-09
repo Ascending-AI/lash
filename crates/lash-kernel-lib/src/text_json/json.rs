@@ -50,7 +50,7 @@ pub(super) fn retained_native(
 }
 mod encoder;
 pub use encoder::{JsonModel, JsonTarget, encode_datum};
-use encoder::{Live, Numeric, Policy, encode as encode_value};
+use encoder::{Live, Numeric, Path, Policy, encode as encode_value};
 
 /// Whether `error` is a stated-type mismatch a union tries past, rather
 /// than a cause that ends the call.
@@ -634,7 +634,7 @@ fn write(
         Policy {
             target: None,
             context: "json",
-            path: "$",
+            path: Path::Root("$"),
             limit: args.limits().document_depth().min(64),
             json_number: false,
             legacy_markers: false,
@@ -657,10 +657,7 @@ pub fn stringify_json<'call>(
     new: &mut Nursery<'call>,
 ) -> Result<String, NativeError> {
     let mut out = Out {
-        output: TextOutput {
-            text: String::new(),
-            new,
-        },
+        output: TextOutput::new(new),
         args: Some(args),
         layout: None,
         verbatim_kinds: 0,
@@ -668,8 +665,8 @@ pub fn stringify_json<'call>(
         encoding: None,
         indentation: None,
     };
-    write(value, false, &mut out)?;
-    Ok(out.output.text)
+    let answer = write(value, false, &mut out);
+    Ok(out.output.finish(answer)?.1)
 }
 
 pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
@@ -895,10 +892,7 @@ fn render(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     };
     let layout = DecimalLayout::read(arg(args.values(), 3)?, &args)?;
     let mut out = Out {
-        output: TextOutput {
-            text: String::new(),
-            new: call.new,
-        },
+        output: TextOutput::new(call.new),
         args: Some(&args),
         layout: Some(layout),
         verbatim_kinds,
@@ -906,8 +900,8 @@ fn render(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         encoding: None,
         indentation: None,
     };
-    write(arg(args.values(), 0)?, true, &mut out)?;
-    let text = out.output.text;
+    let answer = arg(args.values(), 0).and_then(|value| write(value, true, &mut out));
+    let ((), text) = out.output.finish(answer)?;
     Ok(call.new.text(&text))
 }
 
@@ -1192,10 +1186,7 @@ fn encoding(args: &Args<'_>, out: &mut Out<'_, '_, impl Output>) -> Result<(), N
 fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let args = call.args;
     let mut out = Out {
-        output: TextOutput {
-            text: String::new(),
-            new: call.new,
-        },
+        output: TextOutput::new(call.new),
         args: Some(&args),
         layout: None,
         verbatim_kinds: 0,
@@ -1203,23 +1194,24 @@ fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         encoding: None,
         indentation: None,
     };
-    encoding(&args, &mut out)?;
-    encode_value(
-        &Live(args),
-        *arg(args.values(), 0)?,
-        0,
-        true,
-        &mut out,
-        Policy {
-            target: None,
-            context: "json.dumps",
-            path: "$",
-            limit: args.limits().document_depth(),
-            json_number: false,
-            legacy_markers: false,
-        },
-    )?;
-    let text = out.output.text;
+    let answer = encoding(&args, &mut out).and_then(|()| {
+        encode_value(
+            &Live(args),
+            *arg(args.values(), 0)?,
+            0,
+            true,
+            &mut out,
+            Policy {
+                target: None,
+                context: "json.dumps",
+                path: Path::Root("$"),
+                limit: args.limits().document_depth(),
+                json_number: false,
+                legacy_markers: false,
+            },
+        )
+    });
+    let (_, text) = out.output.finish(answer)?;
     Ok(call.new.text(&text))
 }
 
@@ -1249,10 +1241,7 @@ fn boundary_version<const LEGACY: bool>(call: NativeCall<'_, '_>) -> Result<Valu
     let (target, context, path) = boundary_policy(&args)?;
     let gap = text_held(&args, call.new, arg(args.values(), 4)?)?.into_owned();
     let mut out = Out {
-        output: TextOutput {
-            text: String::new(),
-            new: call.new,
-        },
+        output: TextOutput::new(call.new),
         args: Some(&args),
         layout: Some(DecimalLayout {
             fixed_from: -5,
@@ -1268,22 +1257,24 @@ fn boundary_version<const LEGACY: bool>(call: NativeCall<'_, '_>) -> Result<Valu
     if !gap.is_empty() {
         out.indentation = Some(gap);
     }
-    let written = encode_value(
-        &Live(args),
-        *arg(args.values(), 0)?,
-        0,
-        true,
-        &mut out,
-        Policy {
-            target: Some(target),
-            context: &context,
-            path: &path,
-            limit: args.limits().document_depth(),
-            json_number: false,
-            legacy_markers: LEGACY,
-        },
-    )?;
-    let text = out.output.text;
+    let answer = arg(args.values(), 0).and_then(|value| {
+        encode_value(
+            &Live(args),
+            *value,
+            0,
+            true,
+            &mut out,
+            Policy {
+                target: Some(target),
+                context: &context,
+                path: Path::Root(&path),
+                limit: args.limits().document_depth(),
+                json_number: false,
+                legacy_markers: LEGACY,
+            },
+        )
+    });
+    let (written, text) = out.output.finish(answer)?;
     Ok(if written {
         call.new.text(&text)
     } else {

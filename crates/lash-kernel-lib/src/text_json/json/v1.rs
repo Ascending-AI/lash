@@ -157,10 +157,7 @@ fn written(
 ) -> Result<Value, NativeError> {
     let args = call.args;
     let mut out = Out {
-        output: TextOutput {
-            text: String::new(),
-            new: call.new,
-        },
+        output: TextOutput::new(call.new),
         args: Some(&args),
         layout,
         verbatim_kinds,
@@ -168,15 +165,9 @@ fn written(
         encoding,
         indentation: None,
     };
-    write(
-        &args,
-        arg(args.values(), 0)?,
-        &mut Vec::new(),
-        0,
-        raw_numbers,
-        &mut out,
-    )?;
-    let text = out.output.text;
+    let answer = arg(args.values(), 0)
+        .and_then(|value| write(&args, value, &mut Vec::new(), 0, raw_numbers, &mut out));
+    let ((), text) = out.output.finish(answer)?;
     Ok(call.new.text(&text))
 }
 

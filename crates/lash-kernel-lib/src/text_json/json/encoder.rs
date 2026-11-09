@@ -241,39 +241,81 @@ impl<'a> Source for Data<'a> {
     }
 }
 
-fn at(error: NativeError, context: &str, path: &str) -> NativeError {
+/// Where a value sits in the document: a root the caller names, then an
+/// index or a member per level. It is spelled only when an error names it.
+#[derive(Clone, Copy)]
+pub(super) enum Path<'a> {
+    Root(&'a str),
+    Index(&'a Path<'a>, usize),
+    Member(&'a Path<'a>, &'a str),
+}
+impl Path<'_> {
+    /// `$[0].name`, or `$["a key"]` for a member that is not an identifier.
+    fn spell(&self, into: &mut String) -> Result<(), NativeError> {
+        match self {
+            Path::Root(root) => into.push_str(root),
+            Path::Index(parent, index) => {
+                parent.spell(into)?;
+                into.push('[');
+                into.push_str(&index.to_string());
+                into.push(']');
+            }
+            Path::Member(parent, key) => {
+                parent.spell(into)?;
+                let identifier = !key.is_empty()
+                    && key.chars().enumerate().all(|(index, c)| {
+                        c == '_'
+                            || c == '$'
+                            || c.is_ascii_alphabetic()
+                            || (index > 0 && c.is_ascii_digit())
+                    });
+                if identifier {
+                    into.push('.');
+                    into.push_str(key);
+                } else {
+                    // Keys use the same escaping routine as values.
+                    let mut out = Out {
+                        output: StringOutput(std::mem::take(into)),
+                        args: None,
+                        layout: None,
+                        verbatim_kinds: 0,
+                        verbatim_field: None,
+                        encoding: None,
+                        indentation: None,
+                    };
+                    out.output.0.push('[');
+                    out.quote(key)?;
+                    out.output.0.push(']');
+                    *into = out.output.0;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn at(error: NativeError, context: &str, path: Path<'_>) -> NativeError {
     match error {
-        NativeError::Refused { kind, message } => NativeError::Refused {
-            kind,
-            message: format!("{context} {path}: {message}"),
-        },
+        NativeError::Refused { kind, message } => {
+            let mut spelled = String::new();
+            if let Err(error) = path.spell(&mut spelled) {
+                return error;
+            }
+            NativeError::Refused {
+                kind,
+                message: format!("{context} {spelled}: {message}"),
+            }
+        }
         other => other,
     }
 }
-fn error(kind: &'static str, context: &str, path: &str, message: impl AsRef<str>) -> NativeError {
+fn error(
+    kind: &'static str,
+    context: &str,
+    path: Path<'_>,
+    message: impl AsRef<str>,
+) -> NativeError {
     at(raise(kind, message.as_ref()), context, path)
-}
-fn member_path(parent: &str, key: &str) -> Result<String, NativeError> {
-    let identifier = !key.is_empty()
-        && key.chars().enumerate().all(|(index, c)| {
-            c == '_' || c == '$' || c.is_ascii_alphabetic() || (index > 0 && c.is_ascii_digit())
-        });
-    if identifier {
-        Ok(format!("{parent}.{key}"))
-    } else {
-        // Keys use the same escaping routine as values.
-        let mut out = Out {
-            output: StringOutput(String::new()),
-            args: None,
-            layout: None,
-            verbatim_kinds: 0,
-            verbatim_field: None,
-            encoding: None,
-            indentation: None,
-        };
-        out.quote(key)?;
-        Ok(format!("{parent}[{}]", out.output.0))
-    }
 }
 fn text<A: Source>(
     source: &A,
@@ -410,7 +452,7 @@ struct Encoder<'a, 'out, 'args, 'call, A: Source, S: Output> {
 pub(super) struct Policy<'a> {
     pub target: Option<JsonTarget>,
     pub context: &'a str,
-    pub path: &'a str,
+    pub path: Path<'a>,
     pub limit: usize,
     /// Spell finite floats as [`Float::json_number`] does: the host's one
     /// number spelling, for copied-out data ([`encode_datum`]). Guest JSON
@@ -451,7 +493,7 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
         view: View<A::Value>,
         depth: usize,
         raw_numbers: bool,
-        path: &str,
+        path: Path<'_>,
     ) -> Result<bool, NativeError> {
         let source = self.source;
         let target = self.target;
@@ -568,7 +610,7 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                         self.out.separator(true)?;
                     }
                     self.out.newline(depth + 1)?;
-                    let child = format!("{path}[{index}]");
+                    let child = Path::Index(&path, index);
                     let view = source
                         .view(&item, &mut self.out.output)
                         .and_then(|view| {
@@ -579,15 +621,15 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                                 &Policy {
                                     target,
                                     context,
-                                    path: &child,
+                                    path: child,
                                     limit,
                                     json_number: self.json_number,
                                     legacy_markers: self.legacy_markers,
                                 },
                             )
                         })
-                        .map_err(|e| at(e, context, &child))?;
-                    if !self.walk(item, view, depth + 1, raw, &child)? {
+                        .map_err(|e| at(e, context, child))?;
+                    if !self.walk(item, view, depth + 1, raw, child)? {
                         self.out.push("null")?;
                     }
                 }
@@ -649,7 +691,7 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                     if branded && matches!(key.as_str(), "__lash_brand" | "__lash_built") {
                         continue;
                     }
-                    let child = member_path(path, &key)?;
+                    let child = Path::Member(&path, &key);
                     let view = source
                         .view(&item, &mut self.out.output)
                         .and_then(|view| {
@@ -660,14 +702,14 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                                 &Policy {
                                     target,
                                     context,
-                                    path: &child,
+                                    path: child,
                                     limit,
                                     json_number: self.json_number,
                                     legacy_markers: self.legacy_markers,
                                 },
                             )
                         })
-                        .map_err(|e| at(e, context, &child))?;
+                        .map_err(|e| at(e, context, child))?;
                     if omitted(&view, target) {
                         continue;
                     }
@@ -677,7 +719,7 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                         return Err(error(
                             "not_data",
                             context,
-                            &child,
+                            child,
                             "record has an excluded field",
                         ));
                     }
@@ -685,17 +727,17 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                         self.out.separator(true)?;
                     }
                     self.out.newline(depth + 1)?;
-                    let key = if target == Some(JsonTarget::Host) {
-                        lash_kernel_doc::escape_function_key(&key).into_owned()
+                    if target == Some(JsonTarget::Host) {
+                        self.out
+                            .quote(&lash_kernel_doc::escape_function_key(&key))?;
                     } else {
-                        key
-                    };
-                    self.out.quote(&key)?;
+                        self.out.quote(&key)?;
+                    }
                     self.out.separator(false)?;
                     if self.out.indentation.is_some() && self.out.encoding.is_none() {
                         self.out.push(" ")?;
                     }
-                    self.walk(item, view, depth + 1, raw, &child)?;
+                    self.walk(item, view, depth + 1, raw, child)?;
                     written += 1;
                 }
                 if written > 0 {
@@ -757,7 +799,7 @@ pub fn encode_datum(
         Policy {
             target: Some(target),
             context,
-            path: "$",
+            path: Path::Root("$"),
             limit,
             json_number: true,
             legacy_markers: false,
@@ -769,7 +811,7 @@ pub fn encode_datum(
         Err(error(
             "not_data",
             context,
-            "$",
+            Path::Root("$"),
             "undefined has no root JSON representation",
         ))
     }
