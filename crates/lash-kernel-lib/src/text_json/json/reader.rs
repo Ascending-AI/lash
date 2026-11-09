@@ -4,6 +4,9 @@ use lash_kernel_doc::{NativeError, NumberToken, Nursery, Retry};
 use std::borrow::Cow;
 
 struct Parser<'text, R> {
+    /// The text, and its bytes: every slice the parser takes ends at an
+    /// ASCII delimiter, so it is the text's own UTF-8.
+    text: &'text str,
     input: &'text [u8],
     cursor: usize,
     reserve: R,
@@ -41,6 +44,9 @@ impl<'text, R: FnMut(u64, u64) -> Result<(), NativeError>> Parser<'text, R> {
             Err(error) => Err(error),
         }
     }
+    fn slice(&self, range: std::ops::Range<usize>) -> Result<&'text str, NativeError> {
+        self.text.get(range).ok_or_else(syntax)
+    }
     fn whitespace(&mut self) -> Result<(), NativeError> {
         while self
             .byte()?
@@ -65,23 +71,31 @@ impl<'text, R: FnMut(u64, u64) -> Result<(), NativeError>> Parser<'text, R> {
             return Err(syntax());
         }
         let start = self.cursor - 1;
+        // A string without escapes or control bytes is the text between its
+        // quotes. Any other string is unescaped whole once its end is found.
+        let rest = &self.input[self.cursor..];
+        match rest
+            .iter()
+            .position(|&byte| matches!(byte, b'"' | b'\\' | 0..0x20))
+        {
+            Some(end) if rest[end] == b'"' => {
+                let body = self.cursor..self.cursor + end;
+                self.cursor += end + 1;
+                return self.slice(body).map(Cow::Borrowed);
+            }
+            Some(end) => self.cursor += end,
+            None => return Err(syntax()),
+        }
         let mut escaped = false;
-        let mut plain = true;
         while let Some(byte) = self.byte()? {
             self.cursor += 1;
             if byte == b'"' && !escaped {
-                if plain {
-                    let text = std::str::from_utf8(&self.input[start + 1..self.cursor - 1])
-                        .map_err(|_| syntax())?;
-                    return Ok(Cow::Borrowed(text));
-                }
                 #[cfg(test)]
                 let _unescape = crate::native_contract_laws::scratch((self.cursor - start) as u64);
                 return serde_json::from_slice::<String>(&self.input[start..self.cursor])
                     .map(Cow::Owned)
                     .map_err(|_| syntax());
             }
-            plain &= byte >= 0x20 && byte != b'\\';
             escaped = byte == b'\\' && !escaped;
         }
         Err(syntax())
@@ -168,8 +182,7 @@ impl<'text, R: FnMut(u64, u64) -> Result<(), NativeError>> Parser<'text, R> {
                     }
                     self.cursor += 1;
                 }
-                let token =
-                    std::str::from_utf8(&self.input[start..self.cursor]).map_err(|_| syntax())?;
+                let token = self.slice(start..self.cursor)?;
                 if !NumberToken::is_valid(token) {
                     return Err(syntax());
                 }
@@ -215,6 +228,7 @@ pub(super) fn read_with(
     reserve: impl FnMut(u64, u64) -> Result<(), NativeError>,
 ) -> Result<Json<'_>, NativeError> {
     let mut parser = Parser {
+        text,
         input: text.as_bytes(),
         cursor: 0,
         reserve,

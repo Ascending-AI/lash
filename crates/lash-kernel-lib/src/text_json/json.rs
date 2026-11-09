@@ -799,21 +799,19 @@ fn decode_with_numbers(
             let mut _completed = Vec::new();
             #[cfg(test)]
             let mut _prefix = crate::native_contract_laws::scratch(0);
-            let values = items
-                .iter()
-                .map(|item| {
-                    let answer = decode_with_numbers(item, numbers, policy, maps, ieee, new);
-                    #[cfg(test)]
-                    if let Ok(value) = &answer {
-                        _completed.push(*value);
-                        _prefix.resize(crate::native_contract_laws::decoded_values_bytes(
-                            new,
-                            &_completed,
-                        ));
-                    }
-                    answer
-                })
-                .collect::<Result<_, _>>()?;
+            let mut values = Vec::with_capacity(items.len());
+            for item in items {
+                let value = decode_with_numbers(item, numbers, policy, maps, ieee, new)?;
+                #[cfg(test)]
+                {
+                    _completed.push(value);
+                    _prefix.resize(crate::native_contract_laws::decoded_values_bytes(
+                        new,
+                        &_completed,
+                    ));
+                }
+                values.push(value);
+            }
             Ok(new.allocate(NewObject::List(values)))
         }
         Json::Object(fields) => {
@@ -821,30 +819,28 @@ fn decode_with_numbers(
             let mut _completed = Vec::new();
             #[cfg(test)]
             let mut _prefix = crate::native_contract_laws::scratch(0);
-            let values = fields
-                .iter()
-                .map(|(key, item)| {
-                    let key = new.text(key);
-                    #[cfg(test)]
-                    {
-                        _completed.push(key);
-                        _prefix.resize(crate::native_contract_laws::decoded_values_bytes(
-                            new,
-                            &_completed,
-                        ));
-                    }
-                    let answer = decode_with_numbers(item, numbers, policy, maps, ieee, new);
-                    #[cfg(test)]
-                    if let Ok(value) = &answer {
-                        _completed.push(*value);
-                        _prefix.resize(crate::native_contract_laws::decoded_values_bytes(
-                            new,
-                            &_completed,
-                        ));
-                    }
-                    Ok::<(Value, Value), NativeError>((key, answer?))
-                })
-                .collect::<Result<_, NativeError>>()?;
+            let mut values = Vec::with_capacity(fields.len());
+            for (key, item) in fields {
+                let key = new.text(key);
+                #[cfg(test)]
+                {
+                    _completed.push(key);
+                    _prefix.resize(crate::native_contract_laws::decoded_values_bytes(
+                        new,
+                        &_completed,
+                    ));
+                }
+                let value = decode_with_numbers(item, numbers, policy, maps, ieee, new)?;
+                #[cfg(test)]
+                {
+                    _completed.push(value);
+                    _prefix.resize(crate::native_contract_laws::decoded_values_bytes(
+                        new,
+                        &_completed,
+                    ));
+                }
+                values.push((key, value));
+            }
             Ok(new.allocate(if maps {
                 NewObject::Map(values)
             } else {

@@ -1,5 +1,6 @@
 //! One JSON traversal over borrowed live values or copied-out data.
 use super::*;
+use std::borrow::Cow;
 
 /// The only difference between TS host transport and TS JSON text is functions:
 /// host transport writes the existing canonical `$lash_function` tag, while text
@@ -37,7 +38,9 @@ pub(super) enum Numeric {
     Token(NumberToken),
 }
 
-pub(super) enum View<V> {
+/// A value as the encoder walks it. Object keys borrow from the source
+/// for `'k` when it holds them whole.
+pub(super) enum View<'k, V> {
     Null,
     Bool(bool),
     Number(Numeric),
@@ -45,18 +48,18 @@ pub(super) enum View<V> {
     Absent,
     Sequence(Vec<V>, &'static str),
     Mapping(Vec<(V, V)>),
-    Object(Vec<(String, V)>, &'static str),
+    Object(Vec<(Cow<'k, str>, V)>, &'static str),
     Function,
     Unsupported(&'static str),
 }
 
-pub(super) trait Source {
+pub(super) trait Source<'k> {
     type Value: Clone;
     type Identity: PartialEq;
     #[cfg(test)]
     fn scratch(
         &self,
-        _: &View<Self::Value>,
+        _: &View<'k, Self::Value>,
     ) -> Result<crate::native_contract_laws::ScratchLease, NativeError> {
         Ok(crate::native_contract_laws::scratch(0))
     }
@@ -70,15 +73,19 @@ pub(super) trait Source {
         &self,
         value: &Self::Value,
         output: &mut impl Output,
-    ) -> Result<View<Self::Value>, NativeError>;
+    ) -> Result<View<'k, Self::Value>, NativeError>;
     fn identity(&self, value: &Self::Value) -> Option<Self::Identity>;
 }
 
 pub(super) struct Live<'call>(pub Args<'call>);
-impl Source for Live<'_> {
+impl<'call> Source<'call> for Live<'call> {
     type Value = Value;
     type Identity = ArenaHandle;
-    fn view(&self, value: &Value, output: &mut impl Output) -> Result<View<Value>, NativeError> {
+    fn view(
+        &self,
+        value: &Value,
+        output: &mut impl Output,
+    ) -> Result<View<'call, Value>, NativeError> {
         Ok(match value {
             Value::Null => View::Null,
             Value::Bool(value) => View::Bool(*value),
@@ -132,7 +139,7 @@ impl Source for Live<'_> {
                             .text(&pair[0])?
                             .ok_or_else(|| raise("json_key", "JSON map keys must be text"))?;
                         output.read_whole(key.len())?;
-                        fields.push((key.whole()?.into_owned(), pair[1]));
+                        fields.push((key.whole()?, pair[1]));
                     }
                 }
                 View::Object(
@@ -157,7 +164,7 @@ impl Source for Live<'_> {
     #[cfg(test)]
     fn scratch(
         &self,
-        view: &View<Value>,
+        view: &View<'call, Value>,
     ) -> Result<crate::native_contract_laws::ScratchLease, NativeError> {
         let (values, names) = match view {
             View::Sequence(values, _) => (values.clone(), 0),
@@ -184,7 +191,7 @@ impl Source for Live<'_> {
 }
 
 struct Data<'a>(JsonModel, std::marker::PhantomData<&'a Datum>);
-impl<'a> Source for Data<'a> {
+impl<'a> Source<'a> for Data<'a> {
     type Value = &'a Datum;
     fn javascript(&self) -> bool {
         self.0 == JsonModel::JavaScript
@@ -201,7 +208,11 @@ impl<'a> Source for Data<'a> {
             NativeError::Malformed("canonical function JSON is not UTF-8")
         })?))
     }
-    fn view(&self, value: &&'a Datum, _: &mut impl Output) -> Result<View<&'a Datum>, NativeError> {
+    fn view(
+        &self,
+        value: &&'a Datum,
+        _: &mut impl Output,
+    ) -> Result<View<'a, &'a Datum>, NativeError> {
         Ok(match value {
             Datum::Null => View::Null,
             Datum::Absent => View::Absent,
@@ -221,7 +232,7 @@ impl<'a> Source for Data<'a> {
             Datum::Record(fields) => View::Object(
                 fields
                     .iter()
-                    .map(|(key, value)| (key.clone(), value))
+                    .map(|(key, value)| (Cow::Borrowed(key.as_str()), value))
                     .collect(),
                 "record",
             ),
@@ -317,7 +328,7 @@ fn error(
 ) -> NativeError {
     at(raise(kind, message.as_ref()), context, path)
 }
-fn text<A: Source>(
+fn text<'k, A: Source<'k>>(
     source: &A,
     value: &A::Value,
     output: &mut impl Output,
@@ -327,17 +338,17 @@ fn text<A: Source>(
         _ => None,
     })
 }
-fn omitted<V>(view: &View<V>, target: Option<JsonTarget>) -> bool {
+fn omitted<V>(view: &View<'_, V>, target: Option<JsonTarget>) -> bool {
     target.is_some() && matches!(view, View::Absent)
         || target == Some(JsonTarget::Text) && matches!(view, View::Function)
 }
 
-fn normalize<A: Source>(
+fn normalize<'k, A: Source<'k>>(
     source: &A,
-    mut view: View<A::Value>,
+    mut view: View<'k, A::Value>,
     out: &mut Out<'_, '_, impl Output>,
     policy: &Policy<'_>,
-) -> Result<View<A::Value>, NativeError> {
+) -> Result<View<'k, A::Value>, NativeError> {
     if let View::Mapping(fields) = view {
         let mut named = Vec::with_capacity(fields.len());
         for (key, value) in fields {
@@ -377,7 +388,7 @@ fn normalize<A: Source>(
                     ));
                 }
             };
-            named.push((name, value));
+            named.push((Cow::Owned(name), value));
         }
         view = View::Object(named, "map");
     }
@@ -438,7 +449,7 @@ fn normalize<A: Source>(
 }
 
 /// All structure, omission, ordering, cycle checks and JSON paths are decided here.
-struct Encoder<'a, 'out, 'args, 'call, A: Source, S: Output> {
+struct Encoder<'a, 'out, 'args, 'call, 'k, A: Source<'k>, S: Output> {
     source: &'a A,
     out: &'out mut Out<'args, 'call, S>,
     target: Option<JsonTarget>,
@@ -461,7 +472,7 @@ pub(super) struct Policy<'a> {
     pub legacy_markers: bool,
 }
 
-pub(super) fn encode<A: Source>(
+pub(super) fn encode<'k, A: Source<'k>>(
     source: &A,
     value: A::Value,
     depth: usize,
@@ -486,11 +497,11 @@ pub(super) fn encode<A: Source>(
     .walk(value, view, depth, raw_numbers, policy.path)
 }
 
-impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
+impl<'k, A: Source<'k>, S: Output> Encoder<'_, '_, '_, '_, 'k, A, S> {
     fn walk(
         &mut self,
         value: A::Value,
-        view: View<A::Value>,
+        view: View<'k, A::Value>,
         depth: usize,
         raw_numbers: bool,
         path: Path<'_>,
@@ -688,7 +699,7 @@ impl<A: Source, S: Output> Encoder<'_, '_, '_, '_, A, S> {
                 self.out.push("{")?;
                 let mut written = 0;
                 for (key, item) in fields {
-                    if branded && matches!(key.as_str(), "__lash_brand" | "__lash_built") {
+                    if branded && matches!(key.as_ref(), "__lash_brand" | "__lash_built") {
                         continue;
                     }
                     let child = Path::Member(&path, &key);
