@@ -29,6 +29,7 @@ mod pause;
 mod pinning;
 mod preparation;
 mod resident;
+mod rewrite;
 mod scheduler;
 mod session;
 mod stream;

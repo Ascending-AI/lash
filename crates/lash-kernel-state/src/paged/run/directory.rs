@@ -121,7 +121,7 @@ pub struct Directory {
     tree: Tree<Row>,
 }
 
-fn whole() -> SealWork {
+pub(super) fn whole() -> SealWork {
     SealWork::new(SealBudget {
         pages: u64::MAX,
         bytes: u64::MAX,

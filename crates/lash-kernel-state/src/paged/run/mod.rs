@@ -13,5 +13,6 @@ pub mod continuation;
 pub mod directory;
 pub mod ids;
 pub mod objects;
+pub mod rewrite;
 pub mod root;
 pub mod session;
