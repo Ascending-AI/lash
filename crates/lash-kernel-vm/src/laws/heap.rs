@@ -1,5 +1,6 @@
-//! The durable heap's seal (cutover contract §6): which rows a seal
-//! writes, under which ids, and what a failed seal leaves for the next.
+//! The durable heap (cutover contract §6): which rows a seal writes, under
+//! which ids, and what a failed seal leaves for the next; what a load
+//! decodes, admits and refuses.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -12,10 +13,13 @@ use lash_kernel_state::arena::Arena;
 use lash_kernel_state::paged::run::directory::{Directory, DirectoryRoot};
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
 use lash_kernel_state::paged::run::objects::{ObjectKind, Record, RunValue};
+use lash_kernel_state::paged::run::root::HeapRoot;
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 
 use super::embedder::Source;
 use crate::heap::seal::seal;
+use crate::heap::slots::SlotHeap;
+use crate::heap::{Heap, LoadError};
 use crate::paged::SealError;
 
 /// Content-addressed pages that refuse writes while `refuse` is set.
@@ -197,4 +201,143 @@ fn a_failed_seal_leaves_its_changes_for_the_next() {
     );
     assert_eq!(row(&reopened, 1), Record::List(vec![RunValue::Int(2)]));
     assert_eq!(row(&reopened, 2), Record::List(vec![RunValue::Int(3)]));
+}
+
+/// A list of `members`, sealed as the one root of a fresh store, and that
+/// store's pages.
+fn sealed(build: impl FnOnce(&mut Arena) -> Value) -> (Pages, HeapRoot) {
+    let mut arena = Arena::new();
+    let root = build(&mut arena);
+    let pages = Pages::default();
+    let mut directory = pages.directory(None);
+    let heap = seal(&mut arena, &[root], &mut directory, &mut HighWater(0)).expect("a seal");
+    (pages, heap)
+}
+
+fn opened(pages: &Pages, root: &HeapRoot, bound: u64) -> (SlotHeap, Value) {
+    let (heap, roots) =
+        SlotHeap::open(bound, root, pages.directory(Some(root.directory))).expect("an open");
+    (heap, roots[0])
+}
+
+fn cold(heap: &SlotHeap, value: Value) -> bool {
+    heap.arena()
+        .facts(value.handle().expect("an object"))
+        .expect("a live object")
+        .cold
+}
+
+fn members(heap: &SlotHeap, value: Value) -> Vec<Value> {
+    heap.arena()
+        .semantics()
+        .sequence(value.handle().expect("a list"))
+        .expect("a resident list")
+        .to_vec()
+}
+
+fn load(heap: &mut SlotHeap, value: Value, roots: &[Value]) -> Result<(), LoadError> {
+    heap.load(value.handle().expect("an object"), 0, &mut |visit| {
+        roots.iter().for_each(&mut *visit)
+    })
+}
+
+/// A load decodes its object's row only: what the row references opens as
+/// proxies, and an object two rows reference opens once.
+#[test]
+fn a_load_decodes_one_row_and_its_referents_stay_cold() {
+    let (pages, root) = sealed(|arena| {
+        let shared = list(arena, vec![Value::Int(1), Value::Int(2)]);
+        let other = list(arena, vec![shared]);
+        list(arena, vec![shared, Value::Int(5), other])
+    });
+    let (mut heap, root) = opened(&pages, &root, u64::MAX);
+    assert!(cold(&heap, root));
+
+    load(&mut heap, root, &[root]).expect("a load");
+    let [shared, five, other] = members(&heap, root)[..] else {
+        panic!("three members");
+    };
+    assert!(matches!(five, Value::Int(5)));
+    assert!(
+        cold(&heap, shared) && cold(&heap, other),
+        "referents stay proxies"
+    );
+
+    load(&mut heap, other, &[root]).expect("a load");
+    let [again] = members(&heap, other)[..] else {
+        panic!("one member");
+    };
+    assert_eq!(again.handle(), shared.handle(), "one object, one handle");
+    assert!(cold(&heap, shared));
+
+    load(&mut heap, shared, &[root]).expect("a load");
+    assert!(matches!(
+        members(&heap, shared)[..],
+        [Value::Int(1), Value::Int(2)]
+    ));
+}
+
+/// Two members, each a one-member list: what the heap holds once the root
+/// is loaded is its body (an object of two values) and a proxy object per
+/// member; the root's own proxy is replaced.
+const ROOT_LOADED: u64 = 24 + 2 * 16 + 2 * 24;
+
+fn pair() -> (Pages, HeapRoot) {
+    sealed(|arena| {
+        let first = list(arena, vec![Value::Int(1)]);
+        let second = list(arena, vec![Value::Int(2)]);
+        list(arena, vec![first, second])
+    })
+}
+
+/// A load the bound refuses collects what its roots do not reach, and asks
+/// again.
+#[test]
+fn a_load_collects_and_asks_again_before_it_refuses() {
+    let (pages, root) = pair();
+    let (mut heap, root) = opened(&pages, &root, ROOT_LOADED);
+    let garbage = NewObject::List(vec![Value::Int(0)]);
+    heap.admit(crate::heap::slots::schedule(&garbage))
+        .expect("room for garbage");
+    heap.create(garbage).expect("garbage");
+
+    load(&mut heap, root, &[root]).expect("a load after a collection");
+    assert!(!cold(&heap, root));
+    assert_eq!(heap.held(), ROOT_LOADED);
+}
+
+/// A load the bound refuses after a collection is the guest's memory
+/// refusal, and leaves the heap as it was: no body, no proxies, no units.
+#[test]
+fn a_refused_load_changes_nothing() {
+    let (pages, root) = pair();
+    let (mut heap, root) = opened(&pages, &root, ROOT_LOADED - 1);
+    let held = heap.held();
+    assert!(matches!(
+        load(&mut heap, root, &[root]),
+        Err(LoadError::Memory(_))
+    ));
+    assert!(cold(&heap, root));
+    assert_eq!(heap.held(), held);
+    for id in [1, 2] {
+        assert!(
+            heap.arena()
+                .entity_handle(crate::heap::open::entity(ObjectId(id)))
+                .is_none()
+        );
+    }
+}
+
+/// A row the store cannot give is an infrastructure failure, not a memory
+/// refusal, and the object stays cold.
+#[test]
+fn a_store_fault_is_not_a_memory_refusal() {
+    let (pages, root) = pair();
+    let (mut heap, root) = opened(&pages, &root, u64::MAX);
+    pages.pages.borrow_mut().clear();
+    assert!(matches!(
+        load(&mut heap, root, &[root]),
+        Err(LoadError::Store(HeapFault::Missing { .. }))
+    ));
+    assert!(cold(&heap, root));
 }

@@ -25,18 +25,12 @@ use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
 use lash_kernel_state::paged::run::objects::{ClosureCode, ObjectKind, Record, RunValue};
 use lash_kernel_state::paged::run::root::HeapRoot;
 
+use super::open::entity;
 use crate::paged::SealError;
 
 fn fault(problem: impl Into<String>) -> SealError {
     SealError::Fault {
         problem: problem.into(),
-    }
-}
-
-fn entity(id: ObjectId) -> EntityId {
-    EntityId {
-        family: FamilyId::PRIMARY,
-        ordinal: id.0,
     }
 }
 

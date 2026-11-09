@@ -1193,6 +1193,14 @@ impl Arena {
         Ok(())
     }
 
+    /// The live object holding durable id `entity`, resident or a proxy.
+    pub fn entity_handle(&self, entity: EntityId) -> Option<ArenaHandle> {
+        self.entities
+            .get(&entity)
+            .copied()
+            .filter(|handle| self.objects.get(*handle).is_some())
+    }
+
     pub(crate) fn logical_handle(&self, entity: EntityId) -> Option<ArenaHandle> {
         self.entities.get(&entity).copied()
     }

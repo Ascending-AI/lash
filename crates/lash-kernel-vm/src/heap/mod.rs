@@ -7,6 +7,7 @@
 //! H0: L2 (module-map §3).
 
 pub(crate) mod meter;
+pub(crate) mod open;
 pub(crate) mod seal;
 pub(crate) mod slots;
 
@@ -89,4 +90,31 @@ pub(crate) trait Heap {
 
     /// Frees every object `roots` does not reach.
     fn collect(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>));
+
+    /// Decodes chunk `chunk` of the cold object `object` from the run's
+    /// directory, its referents becoming proxies, so the operation that
+    /// answered [`lash_kernel_doc::Retry::Cold`] can run again. Admission
+    /// collects from `roots` and asks once more before it refuses. Called
+    /// with no view of the arena live.
+    ///
+    /// # Errors
+    ///
+    /// [`LoadError::Memory`] when the bound does not admit what the object
+    /// holds after a collection; [`LoadError::Store`] when its row cannot
+    /// be read: an infrastructure failure, never retried.
+    fn load(
+        &mut self,
+        object: ArenaHandle,
+        chunk: u32,
+        roots: &mut dyn FnMut(&mut Visit<'_>),
+    ) -> Result<(), LoadError>;
+}
+
+/// Why a cold object could not be loaded.
+#[derive(Clone, Debug)]
+pub(crate) enum LoadError {
+    /// The memory bound, after one collection: the guest's memory refusal.
+    Memory(MemoryRefused),
+    /// The store, a page's integrity or the lease: `MachineError::Host`.
+    Store(lash_kernel_doc::heap::HeapFault),
 }

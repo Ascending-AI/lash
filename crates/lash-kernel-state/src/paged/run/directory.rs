@@ -115,6 +115,12 @@ impl Directory {
         }
     }
 
+    /// The directory's sealed root page, when it has one and no row has
+    /// changed since: the page a missing row is reported against.
+    pub fn page(&self) -> Option<PageRef> {
+        self.tree.page()
+    }
+
     /// How many rows the directory holds.
     pub fn len(&self) -> u64 {
         self.tree.len()

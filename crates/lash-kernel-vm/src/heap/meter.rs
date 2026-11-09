@@ -48,6 +48,7 @@
 use lash_kernel_doc::arena::native::NewObject;
 use lash_kernel_doc::arena::{Body, ErrorBody};
 use lash_kernel_doc::{Datum, Integer};
+use lash_kernel_state::paged::run::objects::Record;
 
 use crate::bytecode::program::{Program, Unit};
 
@@ -109,6 +110,28 @@ pub(crate) fn body(body: &Body) -> u64 {
         Body::Handle(handle) => (handle.kind.len() + handle.id.len()) as u64,
         Body::Closure { captures, .. } => values(captures.len() as u64),
         Body::Cell(_) => VALUE,
+    };
+    OBJECT.saturating_add(length)
+}
+
+/// What the object `record` describes holds once decoded: exactly what
+/// [`body`] gives for the body it decodes to.
+pub(crate) fn record(record: &Record) -> u64 {
+    let length = match record {
+        Record::BigInt(int) | Record::Timestamp(int) => integer(int),
+        Record::LongText(text) => text.len() as u64,
+        Record::Bytes(bytes) => bytes.len() as u64,
+        Record::List(members) | Record::Tuple(members) | Record::Set(members) => {
+            values(members.len() as u64)
+        }
+        Record::Map(pairs) | Record::Record(pairs) => {
+            values((pairs.len() as u64).saturating_mul(2))
+        }
+        Record::Error { .. } => values(3),
+        Record::Function(_) => CALLABLE,
+        Record::Handle(handle) => (handle.kind.len() + handle.id.len()) as u64,
+        Record::Closure { captures, .. } => values(captures.len() as u64),
+        Record::Cell(_) => VALUE,
     };
     OBJECT.saturating_add(length)
 }
