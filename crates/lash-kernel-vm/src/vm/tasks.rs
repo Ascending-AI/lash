@@ -85,23 +85,23 @@ pub(crate) enum Joiner {
     List(u64),
 }
 
-struct ListJoin {
-    joiner: usize,
-    mode: JoinMode,
-    members: Vec<usize>,
+pub(crate) struct ListJoin {
+    pub(crate) joiner: usize,
+    pub(crate) mode: JoinMode,
+    pub(crate) members: Vec<usize>,
 }
 
 /// A waited `perform`'s wait.
-struct Pending {
-    task: usize,
-    phase: Phase,
-    result: Type,
-    then_yield: bool,
+pub(crate) struct Pending {
+    pub(crate) task: usize,
+    pub(crate) phase: Phase,
+    pub(crate) result: Type,
+    pub(crate) then_yield: bool,
     /// What the next park hands over, until it does.
-    request: Option<EffectRequest>,
+    pub(crate) request: Option<EffectRequest>,
 }
 
-enum Phase {
+pub(crate) enum Phase {
     /// Requested since the last park: no embedder has it.
     Issued,
     /// Handed over at a park.
@@ -136,15 +136,15 @@ pub(crate) struct Tasks {
     pub running: usize,
     /// Whether a task is installed in the machine's context.
     pub installed: bool,
-    ready: VecDeque<usize>,
-    waits: BTreeMap<u64, Pending>,
-    withdrawn: HashSet<u64>,
-    next_wait: u64,
+    pub(crate) ready: VecDeque<usize>,
+    pub(crate) waits: BTreeMap<u64, Pending>,
+    pub(crate) withdrawn: HashSet<u64>,
+    pub(crate) next_wait: u64,
     /// The waits requested since the last park, in request order.
-    issued: Vec<u64>,
-    cancellations: Vec<WaitCancellation>,
-    joins: BTreeMap<u64, ListJoin>,
-    next_join: u64,
+    pub(crate) issued: Vec<u64>,
+    pub(crate) cancellations: Vec<WaitCancellation>,
+    pub(crate) joins: BTreeMap<u64, ListJoin>,
+    pub(crate) next_join: u64,
     /// The tasks that have not ended, `main` included.
     pub live: u32,
     pub live_limit: u32,
@@ -313,7 +313,7 @@ impl Tasks {
 }
 
 impl Task {
-    fn new(identity: Arc<TaskIdentity>, spawn_origin: Option<Site>) -> Self {
+    pub(crate) fn new(identity: Arc<TaskIdentity>, spawn_origin: Option<Site>) -> Self {
         Self {
             identity,
             cx: Context::default(),

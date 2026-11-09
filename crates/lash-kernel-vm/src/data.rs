@@ -458,6 +458,12 @@ fn copy(
         ),
         Value::Handle(handle) => match arena.body(*handle)? {
             Body::Handle(handle) => Datum::Handle(handle.clone()),
+            Body::Cold(_) => {
+                return Err(CopyError::Cold {
+                    object: *handle,
+                    chunk: 0,
+                });
+            }
             _ => return Err(NativeError::Malformed("a handle names another body").into()),
         },
         Value::Error(error) => match arena.body(*error)? {
@@ -466,6 +472,12 @@ fn copy(
                 text_of(arena, &error.message)?,
                 copy(arena, limit, &error.data, budget, path)?,
             ))),
+            Body::Cold(_) => {
+                return Err(CopyError::Cold {
+                    object: *error,
+                    chunk: 0,
+                });
+            }
             _ => return Err(NativeError::Malformed("an error names another body").into()),
         },
         Value::Tuple(tuple) => Datum::Tuple(

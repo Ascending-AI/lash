@@ -113,6 +113,11 @@ impl PageKind {
     pub const FROZEN_ROOT: Self = Self(1007);
     /// A session root: carried heap, bindings and functions (S8).
     pub const SESSION_ROOT: Self = Self(1008);
+    /// A bytecode-core run's root: its directory and the segments of its
+    /// encoded state ([`run::continuation`](super::run::continuation)).
+    pub const RUN_ROOT: Self = Self(1009);
+    /// One segment of a bytecode-core run's encoded state.
+    pub const RUN_SEGMENT: Self = Self(1010);
     /// The first number past the semantic kinds a format may add.
     pub const END: u32 = 2000;
 }

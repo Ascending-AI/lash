@@ -462,18 +462,22 @@ pub(crate) fn core_machine(
     bounds: Bounds,
     probes: Option<Probes>,
 ) -> Result<crate::CoreMachine, crate::StartError> {
-    let library = shared_library(true, probes, true);
-    let text = format!("numbers by_spelling\n{}{text}", library.header);
-    let document = Arc::new(document(&text, &library.registry));
-    let program = program(
-        document,
-        PreparedLibrary::new(Arc::clone(&library.registry)),
-    );
     <crate::CoreMachine as Machine>::start(
-        program,
+        core_program(text, probes),
         bounds,
         Setup::default().start,
         Box::new(Source::default()),
+    )
+}
+
+/// The program [`core_machine`] runs, compiled afresh each call.
+pub(crate) fn core_program(text: &str, probes: Option<Probes>) -> Program {
+    let library = shared_library(true, probes, true);
+    let text = format!("numbers by_spelling\n{}{text}", library.header);
+    let document = Arc::new(document(&text, &library.registry));
+    program(
+        document,
+        PreparedLibrary::new(Arc::clone(&library.registry)),
     )
 }
 

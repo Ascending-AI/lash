@@ -140,8 +140,13 @@ impl Directory {
     /// The directory `root` names, read through `source`; nothing is read
     /// until a row is.
     pub fn open(root: DirectoryRoot, source: Box<dyn PageSource>) -> Self {
+        Self::over(root, Access::new(source))
+    }
+
+    /// The directory `root` names, read through `access`.
+    pub fn over(root: DirectoryRoot, access: Access<'static>) -> Self {
         Self {
-            access: Access::new(source),
+            access,
             tree: Tree::open(root.page, root.rows, LogicalBytes(0), false),
         }
     }

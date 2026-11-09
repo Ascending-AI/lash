@@ -132,6 +132,9 @@ mod compile;
 mod costs;
 mod crossing;
 mod data;
+/// Seal and open of the bytecode core (FIG-7692).
+#[allow(dead_code)]
+mod durable;
 mod functions;
 /// The bytecode core's heap (FIG-7688 cutover).
 #[allow(dead_code)]

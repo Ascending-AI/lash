@@ -214,19 +214,19 @@ pub(crate) struct Vm<H: Heap> {
     pub watch: Option<Box<watch::Watch>>,
     /// What a frame of each unit holds (contract §2): admitted when the
     /// frame is entered, returned when it leaves.
-    frames: Vec<u64>,
+    pub(crate) frames: Vec<u64>,
     /// What the run is started with (its program, constants, inputs and
     /// first frame) did not fit the memory bound: the run starts, and its
     /// first step ends with the memory bound before it runs anything
     /// (`K-BND-001`).
-    unadmitted: Option<Exceeded>,
+    pub(crate) unadmitted: Option<Exceeded>,
     /// The committed phase a cold read interrupted, resumed once its chunk
     /// is loaded; none when the interrupted op runs again.
-    restart: Option<Restart>,
+    pub(crate) restart: Option<Restart>,
     /// A cold load has just ended: the running frame's op before its `pc`
     /// runs again, its fixed event already billed, its slice test, step
     /// and points already passed.
-    retrying: bool,
+    pub(crate) retrying: bool,
     /// The laws' forced-cold runs: pages every object out at each
     /// statement boundary, the machine's values rooted.
     #[cfg(test)]

@@ -2,16 +2,22 @@
 //! each start compiles its own [`Program`](crate::bytecode::program::Program)
 //! and runs it on a slot heap.
 //!
-//! Sealing and opening wait on the durable heap (handoff to L2): until it
-//! lands, `seal` and `open` refuse as faults.
+//! A seal writes the run's state as a site-keyed run record
+//! ([`crate::durable`]) under the checkpoint root; an open recompiles the
+//! document as its start did and restores the record into the new build.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, Decoder, Document, Value};
-use lash_kernel_state::paged::{Checkpoint, PageSource, SealBudget};
+use lash_kernel_state::paged::run::continuation;
+use lash_kernel_state::paged::{
+    CellTargetKind, Checkpoint, CheckpointRoot, KeyedRoot, PageKind, PageSource, RootStatus,
+    SavedLimits, SavedMeters, SealBudget, SequenceRoot,
+};
 use lash_kernel_value::names::{FunctionName, Name};
 use lash_kernel_value::package::OperationMode;
+use lash_kernel_value::tokens::encode_body;
 use lash_kernel_value::types::Type;
 use lash_kernel_value::{HelperOperationId, OperationSlot};
 
@@ -35,6 +41,98 @@ pub struct CoreMachine {
     document: Arc<Document>,
     ended: bool,
     convention: Option<lash_kernel_doc::StartConvention>,
+    header: Header,
+}
+
+/// What every root the run seals names besides its state: fixed at start.
+struct Header {
+    bounds: Bounds,
+    kernel: u32,
+    document: lash_kernel_value::names::DocumentId,
+    link: lash_kernel_value::content_ids::LinkId,
+    closure: lash_kernel_doc::heap::PageId,
+    helper_library: lash_kernel_value::HelperLibraryId,
+    owner: lash_kernel_doc::heap::PageId,
+    host: Vec<Name>,
+    /// The export the run started on; `main` when none.
+    entry: Option<Name>,
+}
+
+impl Header {
+    fn of(program: &Program, bounds: Bounds, owner: lash_kernel_doc::heap::PageId) -> Self {
+        Self {
+            bounds,
+            kernel: program.document.kernel(),
+            document: program.library.document_identity(&program.document),
+            link: program.link,
+            closure: program.closure,
+            helper_library: program.helpers().identity(),
+            owner,
+            host: Vec::new(),
+            entry: None,
+        }
+    }
+}
+
+/// The run of `program` on `entry` (`main` when none) compiled as a start
+/// compiles it, over `heap`, having charged `used`.
+fn build(
+    program: &Program,
+    bounds: Bounds,
+    entry: Option<&Name>,
+    modes: crate::interface::EffectModes,
+    heap: SlotHeap,
+    used: u64,
+) -> Result<(Vm<SlotHeap>, Option<lash_kernel_doc::StartConvention>), StartError> {
+    let document = &program.document;
+    let export = match entry {
+        None => None,
+        Some(name) => match document.exports.get(name) {
+            Some(lash_kernel_doc::Export::Function(export)) => Some(export),
+            _ => {
+                return Err(StartError::UnknownEntry {
+                    entry: name.clone(),
+                });
+            }
+        },
+    };
+    let convention = export.map(|export| export.convention.clone());
+    let registry = program.library.registry().clone();
+    let mut code = crate::bytecode::conventions::compile_selected(
+        document,
+        &registry,
+        program.link,
+        export.map(|export| export.function),
+        convention.as_ref(),
+    )
+    .map_err(linked)?;
+    crate::bytecode::inline::inline(&mut code);
+    let heights = crate::bytecode::validate::validate(&code).map_err(linked)?;
+    crate::bytecode::fuse::fuse(&mut code);
+    let paced = matches!(bounds.charge, Charge::Off);
+    let operations = operations(program, &code, modes)?;
+    let mut vm = Vm::new(
+        Arc::clone(document),
+        Arc::new(code),
+        &heights,
+        heap,
+        used,
+        bounds.charge_limit,
+        paced,
+        bounds.call_depth,
+    )
+    .map_err(|stop| linked(format!("{stop:?}")))?;
+    vm.tasks.operations = operations;
+    vm.tasks.live_limit = bounds.live_tasks;
+    vm.tasks.requests_limit = bounds.requests_per_park;
+    vm.tasks.join_limit = bounds.join_members;
+    Ok((vm, convention))
+}
+
+fn malformed(problem: impl ToString) -> OpenError {
+    OpenError::Malformed {
+        problem: problem.to_string(),
+    }
 }
 
 fn linked(problem: impl ToString) -> StartError {
@@ -109,66 +207,31 @@ impl Machine for CoreMachine {
             });
         }
         let document = program.document.clone();
-        let (entry, params) = match &start.target {
-            Target::Main => (None, Vec::new()),
-            Target::Entry(name) => match document.exports.get(name) {
-                Some(lash_kernel_doc::Export::Function(export)) => {
-                    (Some(export.function), export.signature.params.clone())
-                }
-                _ => {
-                    return Err(StartError::UnknownEntry {
-                        entry: name.clone(),
-                    });
-                }
-            },
+        let entry = match &start.target {
+            Target::Main => None,
+            Target::Entry(name) => Some(name.clone()),
             Target::Callable(_) => {
                 return Err(linked("the bytecode core starts no callable yet"));
             }
         };
-        let export = match &start.target {
-            Target::Entry(name) => match document.exports.get(name) {
+        let export = entry
+            .as_ref()
+            .and_then(|name| match document.exports.get(name) {
                 Some(lash_kernel_doc::Export::Function(export)) => Some(export),
                 _ => None,
+            });
+        let params = export.map_or_else(Vec::new, |export| export.signature.params.clone());
+        let heap = SlotHeap::durable(
+            bounds.memory,
+            crate::heap::open::Durable {
+                directory: lash_kernel_state::paged::run::directory::Directory::new(source),
+                high_water: lash_kernel_state::paged::run::ids::HighWater(0),
             },
-            _ => None,
-        };
-        let convention = export.map(|export| export.convention.clone());
-        let registry = program.library.registry().clone();
-        let mut code = crate::bytecode::conventions::compile_selected(
-            &document,
-            &registry,
-            program.link,
-            entry,
-            convention.as_ref(),
-        )
-        .map_err(linked)?;
-        crate::bytecode::inline::inline(&mut code);
-        let heights = crate::bytecode::validate::validate(&code).map_err(linked)?;
-        crate::bytecode::fuse::fuse(&mut code);
-        let paced = matches!(bounds.charge, Charge::Off);
-        let operations = operations(&program, &code, start.modes)?;
-        let mut vm = Vm::new(
-            Arc::clone(&document),
-            Arc::new(code),
-            &heights,
-            // The run writes its objects to its own source.
-            SlotHeap::durable(
-                bounds.memory,
-                crate::heap::open::Durable {
-                    directory: lash_kernel_state::paged::run::directory::Directory::new(source),
-                    high_water: lash_kernel_state::paged::run::ids::HighWater(0),
-                },
-            ),
-            0,
-            bounds.charge_limit,
-            paced,
-            bounds.call_depth,
-        )
-        .map_err(|stop| linked(format!("{stop:?}")))?;
-        vm.tasks.operations = operations;
-        vm.tasks.live_limit = bounds.live_tasks;
-        vm.tasks.requests_limit = bounds.requests_per_park;
-        vm.tasks.join_limit = bounds.join_members;
+        );
+        let (mut vm, convention) = build(&program, bounds, entry.as_ref(), start.modes, heap, 0)?;
+        let mut header = Header::of(&program, bounds, start.owner);
+        header.host = start.host.iter().map(|(name, _)| name.clone()).collect();
+        header.entry = entry;
         let decoder = Decoder {
             max_depth: value_depth(),
             policy: document.numbers,
@@ -214,18 +277,87 @@ impl Machine for CoreMachine {
             document,
             ended: false,
             convention,
+            header,
         })
     }
 
     fn open(
-        _program: Program,
-        _bounds: Bounds,
-        root: &Checkpoint,
-        _source: Box<dyn PageSource>,
+        program: Program,
+        bounds: Bounds,
+        checkpoint: &Checkpoint,
+        source: Box<dyn PageSource>,
     ) -> Result<Self, OpenError> {
-        crate::paged::admit_format(root)?;
-        Err(OpenError::Malformed {
-            problem: "the bytecode core opens no checkpoint before the durable heap lands".into(),
+        crate::paged::admit_format(checkpoint)?;
+        let root = lash_kernel_state::kernel_internals::checkpoint_root(checkpoint);
+        // The run keeps the limits and charge policy it was sealed with.
+        let bounds = Bounds {
+            memory_meter: match root.limits.memory {
+                Some(_) => crate::MemoryMeter::On,
+                None => crate::MemoryMeter::Off,
+            },
+            memory: root.limits.memory.unwrap_or(bounds.memory),
+            charge: root.meters.charge(),
+            charge_limit: root.limits.charge,
+            ..bounds
+        };
+        let mut header = Header::of(&program, bounds, root.owner);
+        if root.document != header.document {
+            return Err(OpenError::DocumentMismatch {
+                parked: root.document,
+                given: header.document,
+            });
+        }
+        if root.kernel != header.kernel {
+            return Err(OpenError::KernelVersion {
+                parked: root.kernel,
+                supported: header.kernel,
+            });
+        }
+        if root.link != header.link {
+            return Err(malformed(
+                "the checkpoint's Link differs from the program's",
+            ));
+        }
+        if root.closure != header.closure {
+            return Err(malformed(
+                "the document's execution closure differs from the checkpoint's",
+            ));
+        }
+        if root.helper_library != header.helper_library {
+            return Err(malformed("the checkpoint ran another helper library"));
+        }
+        if !matches!(root.status, RootStatus::Parked) {
+            return Err(malformed("an ended root cannot execute"));
+        }
+        let (record, directory) = continuation::open(source, root.heap).map_err(OpenError::Heap)?;
+        if matches!(root.target, CellTargetKind::Main) != record.entry.is_none() {
+            return Err(malformed("the root's target and its run's entry disagree"));
+        }
+        header.host = root.host.clone();
+        header.entry = record.entry.clone();
+        let (heap, values) = SlotHeap::open(bounds.memory, &record.heap, directory)
+            .map_err(|error| malformed(format!("the run's heap does not open: {error:?}")))?;
+        let modes = record
+            .reads
+            .iter()
+            .map(|use_| (*use_, OperationMode::Read))
+            .collect();
+        let (mut vm, convention) = build(
+            &program,
+            bounds,
+            record.entry.as_ref(),
+            modes,
+            heap,
+            record.charged,
+        )
+        .map_err(|error| malformed(format!("the document does not compile again: {error:?}")))?;
+        crate::durable::open(&mut vm, &record, &values).map_err(malformed)?;
+        Ok(Self {
+            vm,
+            document: Arc::clone(&program.document),
+            ended: false,
+            convention,
+            header,
         })
     }
 
@@ -340,13 +472,73 @@ impl Machine for CoreMachine {
         })
     }
 
+    /// Seals the whole run in one step: the budget is not divided yet.
     fn seal(&mut self, _budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
         if self.ended {
             return Err(SealError::Ended);
         }
-        Err(SealError::Fault {
-            problem: "the bytecode core seals nothing before the durable heap lands".into(),
-        })
+        let mut reads: Vec<_> = self
+            .vm
+            .tasks
+            .operations
+            .values()
+            .filter_map(|operation| operation.as_ref().ok())
+            .filter(|operation| operation.read)
+            .map(|operation| operation.use_)
+            .collect();
+        reads.sort();
+        reads.dedup();
+        let record = crate::durable::seal(&mut self.vm, self.header.entry.clone(), reads)?;
+        let access = self.vm.heap.access().ok_or_else(|| SealError::Fault {
+            problem: "the heap has no directory".into(),
+        })?;
+        let heap = continuation::write(access, &record).map_err(SealError::Heap)?;
+        let header = &self.header;
+        let root = CheckpointRoot {
+            limits: SavedLimits {
+                memory: (header.bounds.memory_meter == crate::MemoryMeter::On)
+                    .then_some(header.bounds.memory),
+                charge: header.bounds.charge_limit,
+            },
+            kernel: header.kernel,
+            document: header.document,
+            link: header.link,
+            closure: header.closure,
+            helper_library: header.helper_library,
+            owner: header.owner,
+            target: match header.entry {
+                None => CellTargetKind::Main,
+                Some(_) => CellTargetKind::Entry,
+            },
+            functions: KeyedRoot::Empty,
+            status: RootStatus::Parked,
+            heap,
+            tasks: KeyedRoot::Empty,
+            ready: SequenceRoot::Empty,
+            waits: KeyedRoot::Empty,
+            joins: KeyedRoot::Empty,
+            withdrawn: KeyedRoot::Empty,
+            unreported: SequenceRoot::Empty,
+            reads: KeyedRoot::Empty,
+            session: KeyedRoot::Empty,
+            host: header.host.clone(),
+            meters: SavedMeters {
+                charged: (header.bounds.charge == Charge::Exact).then_some(record.charged),
+                waits_issued: record.next_wait,
+                next_join: record.next_join,
+                live_tasks: record.live,
+            },
+        };
+        let tokens = encode_body(&root);
+        if tokens.len() > 4096 {
+            return Err(SealError::Fault {
+                problem: "checkpoint header exceeds the root bound".into(),
+            });
+        }
+        let page = access
+            .seal(PageKind::CHECKPOINT_ROOT, tokens, vec![heap])
+            .map_err(SealError::Heap)?;
+        Ok(Some(SealedRoot { page, root }))
     }
 
     fn meters(&self) -> Meters {

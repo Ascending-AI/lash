@@ -21,6 +21,7 @@ mod observe;
 mod operations;
 mod operators;
 mod paged;
+mod pause;
 mod preparation;
 mod resident;
 mod scheduler;

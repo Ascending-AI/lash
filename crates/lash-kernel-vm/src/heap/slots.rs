@@ -221,6 +221,15 @@ impl SlotHeap {
         Ok(root)
     }
 
+    /// The page port the heap seals through, when it has a directory.
+    pub(crate) fn access(
+        &self,
+    ) -> Option<&lash_kernel_state::kernel_internals::tree::Access<'static>> {
+        self.durable
+            .as_ref()
+            .map(|durable| durable.directory.access())
+    }
+
     /// Bounds the heap by `bound` from now on.
     #[cfg(test)]
     pub(crate) fn rebound(&mut self, bound: u64) {
