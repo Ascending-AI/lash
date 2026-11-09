@@ -1230,6 +1230,50 @@ impl Arena {
         Ok(entity)
     }
 
+    /// Gives `handle`, which has no durable id, the id `entity` its caller
+    /// minted: any object, mutable or immutable, since the run heap names
+    /// every object. Like [`Self::identify`], it leaves the object dirty and
+    /// listed until a projection cleans it, so a projection that fails
+    /// after the id is given still writes the object next time.
+    pub fn assign(&mut self, handle: ArenaHandle, entity: EntityId) -> Result<(), NativeError> {
+        if self.facts(handle)?.entity.is_some() {
+            return Err(malformed("an object has a durable identity already"));
+        }
+        if self.entities.contains_key(&entity) {
+            return Err(malformed("a durable identity names two objects"));
+        }
+        self.entities.insert(entity, handle);
+        let facts = &mut self.facts[handle.index() as usize];
+        facts.entity = Some(entity);
+        if let Some(provisional) = facts.provisional {
+            self.rekeyed.push((provisional, entity, handle));
+        }
+        let facts = &mut self.facts[handle.index() as usize];
+        facts.dirty = true;
+        if !facts.listed {
+            facts.listed = true;
+            self.dirty.push(handle);
+        }
+        Ok(())
+    }
+
+    /// The dirty list, left in place: every listed object with an id that
+    /// is still dirty, in id order.
+    pub fn dirty(&self) -> Vec<(EntityId, ArenaHandle)> {
+        let mut dirty: Vec<(EntityId, ArenaHandle)> = self
+            .dirty
+            .iter()
+            .filter(|handle| self.objects.get(**handle).is_some())
+            .filter_map(|handle| {
+                let facts = &self.facts[handle.index() as usize];
+                facts.dirty.then_some((facts.entity?, *handle))
+            })
+            .collect();
+        dirty.sort_unstable_by_key(|(entity, _)| *entity);
+        dirty.dedup_by_key(|(entity, _)| *entity);
+        dirty
+    }
+
     /// The canonical walk from `roots`, in order (seam C): depth first and
     /// pre-order, it gives each mutable object without an id the next
     /// ordinal when it first reaches it, descending only into those and

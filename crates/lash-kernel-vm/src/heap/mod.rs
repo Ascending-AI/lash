@@ -7,6 +7,7 @@
 //! H0: L2 (module-map §3).
 
 pub(crate) mod meter;
+pub(crate) mod seal;
 pub(crate) mod slots;
 
 use lash_kernel_doc::Value;

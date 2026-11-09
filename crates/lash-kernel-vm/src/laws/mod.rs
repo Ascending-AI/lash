@@ -11,6 +11,7 @@ mod crossing;
 pub(crate) mod embedder;
 mod forms;
 mod frames;
+mod heap;
 mod identity;
 mod layout;
 mod limiters;
