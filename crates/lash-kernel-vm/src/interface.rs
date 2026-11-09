@@ -901,7 +901,8 @@ pub enum StartError {
 }
 
 pub use crate::paged::{
-    CellSave, CellStart, Finished, Machine, MachineError, OpenError, SaveCell, SavedCell, SealError,
+    CellSave, CellStart, Finished, Inadmissible, Machine, MachineError, OpenError, SaveCell,
+    SavedCell, SealError,
 };
 
 /// A slot resolved under its owning Link. Code/type lookup never calls the host.

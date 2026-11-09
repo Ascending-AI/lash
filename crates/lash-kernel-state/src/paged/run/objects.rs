@@ -33,10 +33,13 @@ pub enum ObjectKind {
     Bytes,
     Function,
     Handle,
+    /// A closure's shared variable, held in a frame slot while its
+    /// declaring frame runs (`K-CLO-001`).
+    Cell,
 }
 
 impl ObjectKind {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 14] = [
         Self::List,
         Self::Map,
         Self::Set,
@@ -50,6 +53,7 @@ impl ObjectKind {
         Self::Bytes,
         Self::Function,
         Self::Handle,
+        Self::Cell,
     ];
 
     fn tag(self) -> u64 {
@@ -60,7 +64,7 @@ impl ObjectKind {
     pub fn mutable(self) -> bool {
         matches!(
             self,
-            Self::List | Self::Map | Self::Set | Self::Record | Self::Closure
+            Self::List | Self::Map | Self::Set | Self::Record | Self::Closure | Self::Cell
         )
     }
 }

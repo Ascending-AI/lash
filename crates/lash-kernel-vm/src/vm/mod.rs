@@ -1368,11 +1368,14 @@ impl<H: Heap> Vm<H> {
                 self.push(value);
             }
             Op::CellSet(n) => {
+                // The value leaves the stack once the write commits: a cold
+                // cell runs the op again with its operand still in place.
                 let cell = self.cell_at(n)?;
-                let value = self.pop();
+                let [value] = self.operands::<1>();
                 self.heap
                     .cell_set(cell, value)
                     .map_err(|error| self.native(error))?;
+                self.pop();
             }
             Op::Box(n) => {
                 let at = self.base() + usize::from(n);
@@ -1389,11 +1392,14 @@ impl<H: Heap> Vm<H> {
                 self.push(value);
             }
             Op::CaptureSet(n) => {
+                // The value leaves the stack once the write commits: a cold
+                // cell runs the op again with its operand still in place.
                 let cell = self.capture(n)?;
-                let value = self.pop();
+                let [value] = self.operands::<1>();
                 self.heap
                     .cell_set(cell, value)
                     .map_err(|error| self.native(error))?;
+                self.pop();
             }
             Op::MakeTuple(n) => self.make_tuple(n as usize)?,
             // A built value's members stay on the stack, rooted, until it

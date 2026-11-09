@@ -9,6 +9,8 @@
 //! it at (`K-SITE-001`); opening maps that point back through the opening
 //! build's table and refuses a point the table does not hold.
 
+mod admit;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -31,6 +33,7 @@ use crate::paged::SealError;
 use crate::vm::Vm;
 use crate::vm::frames::{Bill, Context, Frame, Handler};
 use crate::vm::tasks::{Joiner, ListJoin, Pending, Phase as WaitState, Resume, State, Task, Wait};
+pub(crate) use admit::admit;
 
 /// The phases a frame can stand in, in the order a saved point is looked
 /// for: a frame under another stands at its call.

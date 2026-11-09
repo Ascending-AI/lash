@@ -94,6 +94,7 @@ fn opening(kind: ObjectKind, id: ObjectId, heads: &Heads) -> Result<Opening<'_>,
         ObjectKind::Set => Opening::Proxy(ProxyKind::Set),
         ObjectKind::Record => Opening::Proxy(ProxyKind::Record),
         ObjectKind::Closure => Opening::Proxy(ProxyKind::Closure),
+        ObjectKind::Cell => Opening::Proxy(ProxyKind::Cell),
         _ => Opening::Head(
             heads
                 .get(id)
@@ -116,7 +117,7 @@ fn value_of(kind: ObjectKind, handle: ArenaHandle) -> Value {
         ObjectKind::LongText => Value::LongText(handle),
         ObjectKind::Bytes => Value::Bytes(handle),
         ObjectKind::Function => Value::Function(handle),
-        ObjectKind::Handle => Value::Handle(handle),
+        ObjectKind::Handle | ObjectKind::Cell => Value::Handle(handle),
     }
 }
 

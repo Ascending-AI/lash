@@ -2,6 +2,7 @@
 //! `docs/kernel/semantics.md`, in kernel text, through the embedder of
 //! [`embedder`].
 
+mod admission;
 mod await_phase;
 mod bounds;
 mod chunks;

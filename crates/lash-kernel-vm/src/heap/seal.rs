@@ -139,6 +139,9 @@ pub(super) fn heads(arena: &Arena, values: &[Value]) -> Result<Heads, SealError>
         let Some(handle) = value.handle().filter(|_| immutable) else {
             continue;
         };
+        if is_cell(arena, *value) {
+            continue;
+        }
         let id = id_of(arena, handle)?;
         if heads.contains_key(&id) {
             continue;
@@ -152,6 +155,13 @@ pub(super) fn heads(arena: &Arena, values: &[Value]) -> Result<Heads, SealError>
         heads.insert(id, head);
     }
     Ok(Heads(heads.into_iter().collect()))
+}
+
+/// Whether `value` names a cell: a frame slot holds a variable a closure
+/// shares as the cell itself (`K-CLO-001`), by the handle variant a host
+/// handle also uses.
+fn is_cell(arena: &Arena, value: Value) -> bool {
+    matches!(value, Value::Handle(handle) if matches!(arena.body(handle), Ok(Body::Cell(_))))
 }
 
 struct Walk<'a> {
@@ -255,6 +265,7 @@ pub(super) fn run_value(arena: &Arena, value: &Value) -> Result<RunValue, SealEr
         Value::BigTimestamp(handle) => object(ObjectKind::Timestamp, handle),
         Value::Tuple(handle) => object(ObjectKind::Tuple, handle),
         Value::Error(handle) => object(ObjectKind::Error, handle),
+        Value::Handle(handle) if is_cell(arena, *value) => object(ObjectKind::Cell, handle),
         Value::Handle(handle) => object(ObjectKind::Handle, handle),
         Value::List(handle) => object(ObjectKind::List, handle),
         Value::Map(handle) => object(ObjectKind::Map, handle),

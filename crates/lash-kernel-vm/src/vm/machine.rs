@@ -351,6 +351,7 @@ impl Machine for CoreMachine {
             record.charged,
         )
         .map_err(|error| malformed(format!("the document does not compile again: {error:?}")))?;
+        crate::durable::admit(&vm.program, &vm.tasks.operations, &record)?;
         crate::durable::open(&mut vm, &record, &values).map_err(malformed)?;
         Ok(Self {
             vm,

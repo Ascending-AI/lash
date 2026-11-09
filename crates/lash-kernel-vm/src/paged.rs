@@ -198,9 +198,92 @@ pub enum OpenError {
     /// The root's saved memory accounting is inconsistent.
     #[error("the accounting certificate is malformed: {problem}")]
     Accounting { problem: String },
+    /// The sealed run stands outside the admission relation (contract §5).
+    #[error("the parked run is not a state the machine reaches: {0}")]
+    Inadmissible(#[from] Inadmissible),
     /// A page the open reads faulted.
     #[error(transparent)]
     Heap(HeapFault),
+}
+
+/// A sealed run outside the admission relation (contract §5): each names
+/// the one rule the run breaks. Open checks the whole relation before it
+/// restores anything.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum Inadmissible {
+    /// A wait performs an operation the run binds as a read (`K-EFF-012`).
+    #[error("wait {wait} performs an operation the run binds as a read")]
+    ReadBoundWait { wait: u64 },
+    /// One wait number is held twice: an outcome delivered twice.
+    #[error("wait {wait} is held twice")]
+    DuplicateWait { wait: u64 },
+    /// A wait numbered at or past the next one, or one withdrawn.
+    #[error("wait {wait} was never handed out, or was withdrawn")]
+    WaitNumber { wait: u64 },
+    /// A wait no task waits on or resumes with: an orphan, a second wait
+    /// of one task, or a consumed receipt held as outstanding.
+    #[error("no task waits on or resumes with wait {wait}")]
+    OrphanWait { wait: u64 },
+    /// A task waits on or resumes with a wait the run does not hold in
+    /// the phase its state needs: requested or handed over while it
+    /// waits, delivered while it resumes.
+    #[error("task {task} needs wait {wait}, which the run does not hold in that phase")]
+    MissingWait { task: u32, wait: u64 },
+    /// A wait's task does not stand issued at the `perform` it names.
+    #[error("wait {wait}'s task does not stand issued at its perform")]
+    WaitPoint { wait: u64 },
+    /// A wait requested since the last park is not listed as issued, or
+    /// one listed is not requested.
+    #[error("wait {wait} is listed as issued without its request, or the reverse")]
+    Issued { wait: u64 },
+    /// A delivered failure that holds no error.
+    #[error("delivered wait {wait} failed with no error")]
+    Outcome { wait: u64 },
+    /// The ready queue holds a task twice.
+    #[error("task {task} is in the ready queue twice")]
+    ReadyDuplicate { task: u32 },
+    /// A queued task that is not ready, or a ready task not queued.
+    #[error("task {task} is queued and not ready, or ready and not queued")]
+    Queue { task: u32 },
+    /// A frame under another stands somewhere other than its call.
+    #[error("frame {frame} of task {task} is suspended but not at a call")]
+    SuspendedCall { task: u32, frame: u32 },
+    /// A frame's bill reaches outside its task's billed values, or below
+    /// the bill of a frame it called.
+    #[error("frame {frame} of task {task} owes a bill outside its task's billed values")]
+    Bill { task: u32, frame: u32 },
+    /// A closure body's frame runs no closure, or another frame runs one.
+    #[error(
+        "frame {frame} of task {task} lacks the closure its unit runs, or names one it does not"
+    )]
+    Captures { task: u32, frame: u32 },
+    /// A task's outermost frame is not the unit it starts in: the run's
+    /// start unit for the first task, a spawn stub for the others.
+    #[error("task {task}'s outermost frame is not where it starts")]
+    Root { task: u32 },
+    /// A spawned task before its parent, or `main` other than first.
+    #[error("task {task} stands before its parent in spawn order")]
+    SpawnOrder { task: u32 },
+    /// A task's count at a site is at or below an identity it minted there.
+    #[error("task {task}'s count at an action is below an identity it minted")]
+    Counter { task: u32 },
+    /// A task's join or joiners name a task or list join that does not
+    /// name it back, or an ended task.
+    #[error("task {task}'s joins do not agree with the tasks they name")]
+    Join { task: u32 },
+    /// A list join whose joiner or members disagree with it.
+    #[error("list join {join} does not agree with its joiner and members")]
+    ListJoin { join: u64 },
+    /// An ended task that still holds frames.
+    #[error("task {task} has ended but holds frames")]
+    Ended { task: u32 },
+    /// The installed task is not the one running, or another runs.
+    #[error("task {task} runs but is not the installed task")]
+    Running { task: u32 },
+    /// The live count disagrees with the tasks that have not ended.
+    #[error("the run counts {saved} live tasks; {counted} have not ended")]
+    Live { saved: u32, counted: u32 },
 }
 
 /// Refuses `root` when its envelope states a format this build does not

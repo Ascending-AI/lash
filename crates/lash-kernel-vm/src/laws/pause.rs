@@ -53,7 +53,7 @@ fn run(text: &str, slice: u64, pause: Pause) -> (usize, Left) {
                 pages: u64::MAX,
                 bytes: u64::MAX,
             })
-            .unwrap()
+            .unwrap_or_else(|error| panic!("{text}\nseal at pause {paused}: {error:?}"))
             .unwrap();
         // What a node commits is the root's encoding.
         let root = lash_kernel_value::tokens::decode_body(&lash_kernel_value::tokens::encode_body(
@@ -113,7 +113,8 @@ fn run(text: &str, slice: u64, pause: Pause) -> (usize, Left) {
 
 /// Runs whose frames stand at every kind of point: statements and loop
 /// back edges, calls under a callee, a `try` handler, an action ready and
-/// issued, a spawned task and a join, and a cancelled task's cleanup.
+/// issued, a spawned task and a join, a cancelled task's cleanup, and a
+/// variable a closure shares, held in its frame as the cell itself.
 fn cases() -> Vec<String> {
     let g = "definition \"function g(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let v = perform 0(x) as Any return (x, v) }\"\n";
     let sq = "definition \"function sq(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { return num.add(x, x) }\"\n";
@@ -127,6 +128,7 @@ fn cases() -> Vec<String> {
         ),
         super::scheduler::document(false),
         super::scheduler::document(true),
+        "main {\n  let k = 5\n  let f = fn(x) { let v = perform 0(x) as Any return (v, k) }\n  let a = apply f(1)\n  set k = 6\n  let b = apply f(2)\n  print (a, b)\n  return (a, b)\n}".into(),
     ]
 }
 
