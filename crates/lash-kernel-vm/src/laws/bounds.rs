@@ -1126,6 +1126,72 @@ fn the_core_memory_threshold_moves_by_exactly_the_schedule() {
     }
 }
 
+/// G012, contract §2: a native's inputs stay held while it builds, so its
+/// construction is admitted at the held inputs plus its peak, and at
+/// exactly that. Each byte of a concatenated input is held twice at the
+/// peak, in the still-live input and in the text built from it, so the
+/// least finishing bound moves by two bytes a byte where the final balance
+/// alone would move it by one. One byte under, the concatenation is
+/// refused and the holding stays as it stood before the call: the bound
+/// exceeds it by exactly the text's object part (a 16-byte slot header and
+/// an 8-byte mark word) and its 1,999 bytes. The two lengths stay distinct
+/// constants throughout, so the program's constant pool holds the same.
+#[test]
+fn the_core_admits_a_native_at_its_live_inputs_plus_its_peak() {
+    let concat = |a: u64, b: u64| {
+        format!("  let c = text.concat(work.repeat({a}), work.repeat({b}))\n  return 0")
+    };
+    let base = threshold(&concat(1000, 999));
+    for k in [1u64, 7, 100] {
+        assert_eq!(threshold(&concat(1000 + k, 999)), base + 2 * k, "+{k}");
+    }
+    let (end, held) = core_end(&concat(1000, 999), base - 1);
+    let End::Error(RunError::Bound(exceeded)) = end else {
+        panic!("under {}: {end:?}", base - 1);
+    };
+    assert_eq!(
+        (exceeded.bound, exceeded.function),
+        (
+            Bound::Memory,
+            Some(lash_kernel_value::names::FunctionName::new("text.concat").unwrap())
+        )
+    );
+    assert_eq!(held + 16 + 8 + 1999, base);
+}
+
+/// G011, contract §2, K-CLO-001/002: a captured cell edge is one value in
+/// its closure. A closure over one cell holds a 24-byte object part (a
+/// 16-byte slot header and an 8-byte mark word) and the 16-byte edge; a
+/// cell holds the same object part and its 16-byte value. Each further
+/// closure kept in a list of `n` members therefore raises the least
+/// finishing bound by its member (16) and its closure (40) when every
+/// closure shares one cell, and by a fresh cell (40) besides when each
+/// iteration binds its own. The program is the same for every `n`.
+#[test]
+fn the_core_prices_a_captured_cell_edge_as_one_value() {
+    let kept = |n: u64, fresh: bool| {
+        let (outer, inner) = if fresh {
+            ("", "    let x = i\n")
+        } else {
+            ("  let x = 0\n", "")
+        };
+        format!(
+            "  let fs = work.fill({n})\n{outer}  let i = 0\n  while num.lt(i, {n}) {{\n{inner}    \
+             set fs[i] = fn() {{ return x }}\n    set i = num.add(i, 1)\n  }}\n  return 0"
+        )
+    };
+    for (fresh, each) in [(false, 16 + 40), (true, 16 + 40 + 40)] {
+        let base = threshold(&kept(100, fresh));
+        for k in [1u64, 10] {
+            assert_eq!(
+                threshold(&kept(100 + k, fresh)),
+                base + each * k,
+                "fresh {fresh} +{k}"
+            );
+        }
+    }
+}
+
 /// `K-BND-003`, G011/G013: a shared object counts once, by its slot: a list
 /// that holds the same 1,000-member list twice needs no more room than one
 /// that holds it beside an integer; and a rootless cycle stays charged only
