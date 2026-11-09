@@ -34,6 +34,19 @@ pub(crate) struct Bill {
     pub from: u32,
 }
 
+/// A covered body's activation while its inline region runs in the top
+/// frame (`bytecode::inline`): the body's frame in all but the frame. Its
+/// locals start at `base`, its call owes `bill`, and its unit's frame is
+/// admitted until it leaves.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Activation {
+    /// The top frame's inline site whose region runs.
+    pub site: u32,
+    pub callee: UnitId,
+    pub base: u32,
+    pub bill: Option<Bill>,
+}
+
 /// An installed handler: a raise in frame `frame` or a frame above it
 /// truncates the stack to `height`, pushes the raised value and continues
 /// at `pc`.
@@ -52,6 +65,10 @@ pub(crate) struct Context {
     pub handlers: Vec<Handler>,
     /// The arguments of the frames' bills, each bill's from its `from`.
     pub billed: Vec<Value>,
+    /// The activation of the inline region the top frame runs, if any. A
+    /// region reaches no action, step or frame call, so a context never
+    /// parks or switches with one.
+    pub inline: Option<Activation>,
 }
 
 impl Context {

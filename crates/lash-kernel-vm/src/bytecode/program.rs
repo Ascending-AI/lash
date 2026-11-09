@@ -133,6 +133,9 @@ pub struct Unit {
     pub points: Vec<(u32, Point)>,
     /// The fused runs `Op::Fused` names (`fuse`).
     pub fused: Vec<Fused>,
+    /// The library bodies expanded in place of their calls (`inline`),
+    /// each a region of ops past the unit's own.
+    pub inlines: Vec<InlineSite>,
     /// The expression each op lowers, by its path under `site`. Ops added
     /// after sealing have none, and stand for the unit's root.
     pub origin: Vec<super::site_tables::Path>,
@@ -143,13 +146,40 @@ pub struct Unit {
 }
 
 impl Unit {
-    /// The op compiled at `pc`, before fusion replaced it.
+    /// The op compiled at `pc`, before inlining or fusion replaced it.
     pub fn original(&self, pc: usize) -> Option<Op> {
         match *self.ops.get(pc)? {
             Op::Fused(n) => Some(self.fused[n as usize].first),
+            Op::Inline(n) => Some(Op::Call(self.inlines[n as usize].call)),
             op => Some(op),
         }
     }
+
+    /// The inline region `pc` lies in, if any.
+    pub fn region(&self, pc: usize) -> Option<&InlineSite> {
+        self.inlines
+            .iter()
+            .find(|site| (site.entry as usize..site.end as usize).contains(&pc))
+    }
+}
+
+/// A covered library body's call expanded in place (`inline`): the call's
+/// op became `Op::Inline`, and ops `entry..end` of the unit are the body's
+/// guard path, run over the body's own locals laid out where its frame
+/// would hold them. The body's logical activation stays: its depth check,
+/// frame admission and completion bill are the call's, and any block off
+/// the guard path materializes the body's frame there (`Op::Deopt`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InlineSite {
+    /// The body's unit, whose frame the region stands for.
+    pub callee: UnitId,
+    /// The original call site, kept in the unit's calls: its callee, mark
+    /// and resume point are the expansion's.
+    pub call: u32,
+    /// The `Op::Inline` op.
+    pub at: u32,
+    pub entry: u32,
+    pub end: u32,
 }
 
 /// A run of one prepaid block's ops that dispatches at once (`fuse`): up

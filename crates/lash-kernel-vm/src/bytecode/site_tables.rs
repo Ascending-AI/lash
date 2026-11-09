@@ -528,6 +528,7 @@ fn stacks(unit: &Unit, origin: &impl Fn(usize) -> Path) -> Option<Vec<Option<Vec
         let mut go = |to: usize, stack: Vec<Path>| work.push((to, stack));
         match op {
             Op::Return | Op::Fall | Op::Raise | Op::Finish | Op::Fail | Op::Unavailable(_) => {}
+            Op::Leave(_) | Op::Deopt(_) => {}
             Op::Jump(to) => go(to as usize, after),
             Op::JumpIfFalse(to) | Op::WhileFalse(to) => {
                 go(to as usize, after.clone());

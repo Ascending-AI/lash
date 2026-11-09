@@ -66,11 +66,16 @@ pub fn validate(program: &Program) -> Result<Vec<u32>, Malformed> {
         }
     }
     let captures = captures(program)?;
-    let mut heights = Vec::with_capacity(program.units.len());
+    let mut checked = Vec::with_capacity(program.units.len());
     for (id, unit) in program.units.iter().enumerate() {
-        heights.push(Unit::check(unit, program, id as UnitId, &captures)?);
+        checked.push(Unit::check(unit, program, id as UnitId, &captures)?);
     }
-    Ok(heights)
+    for (id, unit) in program.units.iter().enumerate() {
+        for n in 0..unit.inlines.len() {
+            unit.check_region(program, id as UnitId, n, &checked)?;
+        }
+    }
+    Ok(checked.into_iter().map(|(height, _)| height).collect())
 }
 
 /// Each unit's capture count, from the closures that make it: every
@@ -108,7 +113,7 @@ impl Unit {
         program: &Program,
         id: UnitId,
         captures: &[Option<usize>],
-    ) -> Result<u32, Malformed> {
+    ) -> Result<(u32, Vec<Option<u32>>), Malformed> {
         let at = |pc: usize, problem: String| Malformed {
             unit: id,
             pc: Some(pc as u32),
@@ -150,6 +155,7 @@ impl Unit {
             return Err(whole("covered code makes a step".into()));
         }
         self.check_blocks(id)?;
+        self.check_inlines(program, id)?;
         let local = |n: u16| n < self.locals;
         let marked = |mark: &Mark| mark.loops.iter().all(|lp| local(lp.started));
         for site in &self.calls {
@@ -212,6 +218,13 @@ impl Unit {
             return Err(whole("a record field is not a text constant".into()));
         }
         let head = |to: u32| matches!(self.ops.get(to as usize), Some(Op::Block(_)));
+        // Control stays in the unit's own ops or in one region.
+        let region = |pc: u32| {
+            self.inlines
+                .iter()
+                .position(|site| (site.entry..site.end).contains(&pc))
+        };
+        let within = |from: usize, to: u32| head(to) && region(from as u32) == region(to);
         for site in &self.loops {
             let ends = [Some(site.exit), site.driver, site.join];
             if !local(site.binding) || !local(site.slot.saturating_add(1)) {
@@ -236,6 +249,11 @@ impl Unit {
             return Err(whole("the points are not in op order".into()));
         }
         for (pc, op) in self.ops.iter().enumerate() {
+            // A region's ops address its body's locals.
+            let local = |n: u16| match region(pc as u32) {
+                Some(k) => n < program.units[self.inlines[k].callee as usize].locals,
+                None => local(n),
+            };
             let fits = match *op {
                 Op::Block(_) | Op::Nop | Op::Pop | Op::Index | Op::SetIndex => true,
                 Op::SetIndexPlaceFirst | Op::RemoveIndex | Op::Return | Op::Fall => true,
@@ -249,7 +267,7 @@ impl Unit {
                 Op::CaptureGet(n) | Op::CaptureSet(n) => usize::from(n) < own,
                 Op::Global(n) | Op::SetGlobal(n) => usize::from(n) < program.globals.len(),
                 Op::Jump(to) | Op::JumpIfFalse(to) | Op::WhileFalse(to) | Op::TryEnter(to) => {
-                    head(to)
+                    within(pc, to)
                 }
                 Op::MakeRecord(n) => (n as usize) < self.records.len(),
                 Op::MakeClosure(n) => (n as usize) < self.closures.len(),
@@ -271,6 +289,13 @@ impl Unit {
                 Op::Action(n) => (n as usize) < self.actions.len(),
                 // Fusion writes fused runs after validation.
                 Op::Fused(_) => false,
+                Op::Inline(n) => self
+                    .inlines
+                    .get(n as usize)
+                    .is_some_and(|site| site.at == pc as u32),
+                Op::Leave(n) => region(pc as u32) == Some(n as usize),
+                // Checked against the body with the region.
+                Op::Deopt(_) => region(pc as u32).is_some(),
             };
             if !fits {
                 return Err(at(pc, format!("{op:?} names a missing entry")));
@@ -294,7 +319,130 @@ impl Unit {
         }
         let (height, depth) = self.check_stack(id)?;
         self.check_sites(id, &depth)?;
-        Ok(height)
+        Ok((height, depth))
+    }
+
+    /// Each inline site names its call of its body and a region of its
+    /// own past the unit's ops, which no step or point stands in.
+    fn check_inlines(&self, program: &Program, id: UnitId) -> Checked {
+        let whole = |problem: String| Malformed {
+            unit: id,
+            pc: None,
+            problem,
+        };
+        let own = self
+            .inlines
+            .first()
+            .map_or(self.ops.len(), |site| site.entry as usize);
+        let mut next = own as u32;
+        for (n, site) in self.inlines.iter().enumerate() {
+            let calls = self.calls.get(site.call as usize).map(|call| call.callee);
+            let named = matches!(
+                calls,
+                Some(Callee::Unit { unit, .. }) if unit == site.callee
+            ) && (site.callee as usize) < program.units.len()
+                && site.callee != id;
+            if !named
+                || (site.at as usize) >= own
+                || self.ops[site.at as usize] != Op::Inline(n as u32)
+            {
+                return Err(whole(format!("inline site {n} names no call of its body")));
+            }
+            if site.entry != next || site.end <= site.entry || site.end as usize > self.ops.len() {
+                return Err(whole(format!("inline site {n}'s region does not follow")));
+            }
+            let (entry, end) = (site.entry as usize, site.end as usize);
+            if self.step[entry..end].iter().any(|&step| step)
+                || self
+                    .points
+                    .iter()
+                    .any(|(pc, _)| (entry..end).contains(&(*pc as usize)))
+            {
+                return Err(whole(format!("inline site {n}'s region steps or is seen")));
+            }
+            next = site.end;
+        }
+        if next as usize != self.ops.len() {
+            return Err(whole("ops follow the last inline region".into()));
+        }
+        Ok(())
+    }
+
+    /// Region `n` runs from its entry over its body's locals: every op it
+    /// reaches sees one operand depth, it leaves only by `Op::Leave`, a
+    /// raise or a `Op::Deopt` whose depth is the body's at that op, and
+    /// it holds no more operands than the body's frame admits.
+    fn check_region(
+        &self,
+        program: &Program,
+        id: UnitId,
+        n: usize,
+        checked: &[(u32, Vec<Option<u32>>)],
+    ) -> Checked {
+        let site = self.inlines[n];
+        let body = &program.units[site.callee as usize];
+        let (admitted, ref body_depth) = checked[site.callee as usize];
+        let (entry, end) = (site.entry as usize, site.end as usize);
+        let mut depth: Vec<Option<u32>> = vec![None; end - entry];
+        let mut work = vec![(entry, 0u32)];
+        while let Some((pc, d)) = work.pop() {
+            let at = |problem: String| Malformed {
+                unit: id,
+                pc: Some(pc as u32),
+                problem,
+            };
+            if !(entry..end).contains(&pc) {
+                return Err(at(format!("control leaves inline region {n}")));
+            }
+            match depth[pc - entry] {
+                Some(known) if known == d => continue,
+                Some(known) => {
+                    return Err(at(format!("reached at depth {known} and at depth {d}")));
+                }
+                None => depth[pc - entry] = Some(d),
+            }
+            let op = self.ops[pc];
+            let (pops, pushes) = self.effect(op);
+            let Some(after) = d.checked_sub(pops) else {
+                return Err(at(format!("{op:?} pops {pops} of {d} operands")));
+            };
+            let after = after + pushes;
+            if d.max(after) > admitted {
+                return Err(at(format!(
+                    "region {n} holds {} operands where its body admits {admitted}",
+                    d.max(after)
+                )));
+            }
+            match op {
+                Op::Leave(_) | Op::Raise => {}
+                Op::Deopt(to) => {
+                    let head = matches!(body.ops.get(to as usize), Some(Op::Block(_)));
+                    if !head || body_depth[to as usize] != Some(d) {
+                        return Err(at(format!(
+                            "region {n} leaves to its body's op {to} at depth {d}"
+                        )));
+                    }
+                }
+                Op::Jump(to) => work.push((to as usize, after)),
+                Op::JumpIfFalse(to) => {
+                    work.push((to as usize, after));
+                    work.push((pc + 1, after));
+                }
+                Op::Call(_)
+                | Op::Nop
+                | Op::Block(_)
+                | Op::Const(_)
+                | Op::Local(_)
+                | Op::SetLocal(_)
+                | Op::Pop
+                | Op::Index
+                | Op::Field(_)
+                | Op::MakeTuple(_)
+                | Op::MakeList(_) => work.push((pc + 1, after)),
+                _ => return Err(at(format!("{op:?} runs in inline region {n}"))),
+            }
+        }
+        Ok(())
     }
 
     /// The blocks partition the ops, each headed by its own `Block` op,
@@ -391,6 +539,7 @@ impl Unit {
             let mut go = |to: usize, d: u32| work.push((to, d));
             match op {
                 Op::Return | Op::Fall | Op::Raise | Op::Finish | Op::Fail | Op::Unavailable(_) => {}
+                Op::Leave(_) | Op::Deopt(_) => {}
                 Op::Jump(to) => go(to as usize, after),
                 Op::JumpIfFalse(to) | Op::WhileFalse(to) => {
                     go(to as usize, after);
@@ -452,7 +601,7 @@ impl Unit {
             }
             let (pops, pushes) = self.effect(*op);
             match op {
-                Op::Call(_) => wanted.push((Phase::Call, pc + 1, d - pops)),
+                Op::Call(_) | Op::Inline(_) => wanted.push((Phase::Call, pc + 1, d - pops)),
                 Op::Action(n) => {
                     let kind = super::site_tables::ActionKind::of(&self.actions[*n as usize]);
                     wanted.push((Phase::Ready, pc, d));
@@ -521,6 +670,7 @@ impl Unit {
             | Op::Pass(_)
             | Op::Fall
             | Op::Unavailable(_)
+            | Op::Deopt(_)
             | Op::Fused(_) => (0, 0),
             Op::Const(_)
             | Op::Local(_)
@@ -544,7 +694,8 @@ impl Unit {
             | Op::ProtoOpen(_)
             | Op::ProtoChecked(_)
             | Op::ProtoPull(_)
-            | Op::RemoveField(_) => (1, 0),
+            | Op::RemoveField(_)
+            | Op::Leave(_) => (1, 0),
             Op::MakeTuple(n) | Op::MakeList(n) | Op::MakeSet(n) => (n, 1),
             Op::MakeMap(n) => (n.saturating_mul(2), 1),
             Op::MakeRecord(n) => (self.records[n as usize].len() as u32, 1),
@@ -557,6 +708,7 @@ impl Unit {
                 let callee = u32::from(matches!(site.callee, Callee::Value));
                 (u32::from(site.argc) + callee, 1)
             }
+            Op::Inline(n) => self.effect(Op::Call(self.inlines[n as usize].call)),
             Op::ProtoGuard(_) => (0, 4),
             Op::Action(n) => {
                 let pops = match &self.actions[n as usize] {
@@ -648,6 +800,7 @@ mod tests {
                 site: Site::new(SiteUnit::Main, Vec::new()),
                 points: Vec::new(),
                 fused: Vec::new(),
+                inlines: Vec::new(),
                 origin: Vec::new(),
                 declared: Vec::new(),
                 sites: Default::default(),

@@ -1065,13 +1065,30 @@ main { do call descend(&descend) }"#;
 /// How a bytecode-core run of `body` under memory bound `memory` ended,
 /// with what it held when it ended.
 fn core_end(body: &str, memory: u64) -> (End, u64) {
-    let bounds = Bounds { memory, ..ROOMY };
-    let mut machine = super::embedder::core_machine(&format!("main {{\n{body}\n}}"), bounds, None)
-        .expect("the law's document starts");
+    let (end, memory, _) = core_in(
+        &format!("main {{\n{body}\n}}"),
+        Bounds { memory, ..ROOMY },
+        None,
+    );
+    (end, memory)
+}
+
+/// How a bytecode-core run of document `text` with `probes` under
+/// `bounds` ended, with what it held and had charged when it ended.
+fn core_in(
+    text: &str,
+    bounds: Bounds,
+    probes: Option<super::embedder::Probes>,
+) -> (End, u64, Option<u64>) {
+    let mut machine =
+        super::embedder::core_machine(text, bounds, probes).expect("the law's document starts");
     let mut world = World::default();
     loop {
         match machine.run(&mut world, u64::MAX).expect("the core runs") {
-            Step::Ended(end) => return (end, machine.meters().memory),
+            Step::Ended(end) => {
+                let meters = machine.meters();
+                return (end, meters.memory, meters.charged);
+            }
             Step::Slice => {}
             Step::Parked(_) => panic!("the memory laws perform nothing"),
         }
@@ -1080,8 +1097,19 @@ fn core_end(body: &str, memory: u64) -> (End, u64) {
 
 /// The least memory bound a core run of `body` finishes under.
 fn threshold(body: &str) -> u64 {
-    let finishes = |memory| matches!(core_end(body, memory).0, End::Finished(_));
-    assert!(finishes(ROOMY.memory), "{body}");
+    threshold_in(&format!("main {{\n{body}\n}}"), None)
+}
+
+/// The least memory bound a core run of document `text` with `probes`
+/// finishes under.
+fn threshold_in(text: &str, probes: Option<super::embedder::Probes>) -> u64 {
+    let finishes = |memory| {
+        matches!(
+            core_in(text, Bounds { memory, ..ROOMY }, probes).0,
+            End::Finished(_)
+        )
+    };
+    assert!(finishes(ROOMY.memory), "{text}");
     let (mut refused, mut passed) = (0u64, ROOMY.memory);
     while passed - refused > 1 {
         let mid = refused + (passed - refused) / 2;
@@ -1234,4 +1262,89 @@ fn the_core_counts_a_shared_object_once_and_collects_rootless_cycles() {
         64 << 10,
     );
     assert_eq!(result(end), int(200));
+}
+
+/// `law.step`, a covered body adding one to its argument, and `law.pack`,
+/// one returning its argument twice in a new list: bodies the inline pass
+/// expands into their callers.
+fn inline_probes(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
+    let uses = format!("use num.add = @{}\n", ids["num.add"]);
+    [
+        (
+            "law.step",
+            "function law.step(n: Any) -> Any\nkernel 1\ncharge 1\n{uses}body { return num.add(n, 1) }",
+        ),
+        (
+            "law.pack",
+            "function law.pack(x: Any) -> Any\nkernel 1\ncharge sum(2, size(x))\nbody { return [x, x] }",
+        ),
+    ]
+    .into_iter()
+    .map(|(name, source)| {
+        let definition =
+            lash_kernel_doc::parse_definition(&source.replace("{uses}", &uses)).unwrap();
+        (name, registry.register(definition, None).unwrap())
+    })
+    .collect()
+}
+
+/// A core run of `text` with [`inline_probes`], asserting that the inline
+/// pass expanded a body of it: how it ended, what it held and charged,
+/// and how many ops the expansion added to its program.
+fn inline_in(text: &str, bounds: Bounds) -> ((End, u64, Option<u64>), u64) {
+    let before = crate::bytecode::inline::added();
+    let ran = core_in(text, bounds, Some(inline_probes));
+    let added = crate::bytecode::inline::added() - before;
+    assert!(added > 0, "no body of the law's document was expanded");
+    (ran, added)
+}
+
+/// Contract §2, astra inlining item 2: a body run inline checks the call
+/// depth where its frame would have been entered, after its arguments and
+/// with its caller's attribution. Each `descend` frame calls `law.step`
+/// first, so at every bound reached it is `law.step`'s entry that passes
+/// it: the run refuses where, and with what charged, the run entering the
+/// body's frame does, and not at the next `descend`.
+#[test]
+fn inline_depth_refuses_at_original_entry() {
+    const TEXT: &str = r#"definition "function descend(self: Any, n: Any) -> Any\nkernel 1\nmetering statements\nbody { let m = invoke law.step(n) if num.lt(m, 6) { let r = apply self(self, m) return r } return m }"
+main { let r = call descend(&descend, 0) return r }"#;
+    let mut refused = 0;
+    for call_depth in 1..=9 {
+        let bounds = Bounds {
+            call_depth,
+            ..ROOMY
+        };
+        let (inline, _) = inline_in(TEXT, bounds);
+        let framed =
+            crate::bytecode::inline::disabled(|| core_in(TEXT, bounds, Some(inline_probes)));
+        assert_eq!(
+            (format!("{:?}", inline.0), inline.2),
+            (format!("{:?}", framed.0), framed.2),
+            "call depth {call_depth}"
+        );
+        if let End::Error(RunError::Bound(exceeded)) = &inline.0 {
+            assert_eq!(exceeded.bound, Bound::CallDepth, "call depth {call_depth}");
+            refused += 1;
+        }
+    }
+    assert!(refused >= 6, "the depth bound refused {refused} runs");
+}
+
+/// Contract §2, astra inlining item 2: a body run inline admits its
+/// frame's memory at its entry and releases it when it leaves, as its
+/// frame would. `law.pack` builds its list while its frame is admitted,
+/// three times, so the least bound the run finishes under is the framed
+/// run's, plus the schedule's program size for exactly the ops the
+/// expansion added (K-MACH-001).
+#[test]
+fn inline_frame_memory_is_admitted_at_entry() {
+    const TEXT: &str = "main {\n  let xs = work.fill(100)\n  let p = 0\n  let i = 0\n  while num.lt(i, 3) {\n    set p = invoke law.pack(xs)\n    set i = num.add(i, 1)\n  }\n  return 0\n}";
+    let (_, added) = inline_in(TEXT, ROOMY);
+    let inline = threshold_in(TEXT, Some(inline_probes));
+    let framed = crate::bytecode::inline::disabled(|| threshold_in(TEXT, Some(inline_probes)));
+    assert_eq!(inline, framed + crate::heap::meter::OP * added);
 }

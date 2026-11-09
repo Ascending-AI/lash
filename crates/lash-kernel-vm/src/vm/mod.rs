@@ -13,6 +13,7 @@ pub(crate) mod calls;
 pub(crate) mod charge;
 pub(crate) mod datum;
 pub(crate) mod frames;
+mod inline;
 pub(crate) mod loops;
 pub(crate) mod machine;
 pub(crate) mod members;
@@ -471,13 +472,14 @@ impl<H: Heap> Vm<H> {
         }
     }
 
-    /// A bound passed in the running frame.
+    /// A bound passed in the running frame, or in the body whose inline
+    /// region it runs.
     fn exceeded(&self, bound: Bound, limit: u64) -> Exceeded {
-        let unit = self
-            .cx
-            .frames
-            .last()
-            .map(|frame| &self.program.units[frame.unit as usize]);
+        let unit = match self.cx.inline {
+            Some(activation) => Some(activation.callee),
+            None => self.cx.frames.last().map(|frame| frame.unit),
+        }
+        .map(|unit| &self.program.units[unit as usize]);
         Exceeded {
             bound,
             limit,
@@ -925,9 +927,14 @@ impl<H: Heap> Vm<H> {
         Ok(())
     }
 
+    /// Where the running locals start: the top frame's, or those of the
+    /// body whose inline region it runs.
     #[inline]
     fn base(&self) -> usize {
-        self.cx.frames.last().map_or(0, |frame| frame.base as usize)
+        match self.cx.inline {
+            Some(activation) => activation.base as usize,
+            None => self.cx.frames.last().map_or(0, |frame| frame.base as usize),
+        }
     }
 
     #[inline]
@@ -970,6 +977,9 @@ impl<H: Heap> Vm<H> {
     /// the frames already left gone.
     fn raise(&mut self, value: Value) -> Run<()> {
         self.cancel();
+        if let Some(activation) = self.cx.inline {
+            self.unwind_inline(activation, value)?;
+        }
         loop {
             let Some(top) = self.cx.frames.len().checked_sub(1) else {
                 return Err(Flow::from(Stop::Uncaught(value)));
@@ -1082,7 +1092,12 @@ impl<H: Heap> Vm<H> {
                 return Err(fault("a context with no frame ran"));
             };
             let top = self.cx.frames.len() - 1;
-            let (id, mut pc, base) = (frame.unit, frame.pc as usize, frame.base as usize);
+            let (id, mut pc) = (frame.unit, frame.pc as usize);
+            // An inline region runs over its body's locals.
+            let mut base = match self.cx.inline {
+                Some(activation) => activation.base as usize,
+                None => frame.base as usize,
+            };
             if retrying {
                 pc -= 1;
             }
@@ -1203,6 +1218,28 @@ impl<H: Heap> Vm<H> {
                         }
                         sync!(pc);
                         self.call(&program, unit, site)?;
+                        // A native that answered leaves the frame running.
+                        if matches!(call.callee, Callee::Native { .. })
+                            && self.cx.frames.len() == top + 1
+                        {
+                            continue;
+                        }
+                        continue 'frames;
+                    }
+                    Op::Inline(n) => {
+                        sync!(pc);
+                        base = self.inline(unit, n)?;
+                        pc = unit.inlines[n as usize].entry as usize;
+                    }
+                    Op::Leave(n) => {
+                        sync!(pc);
+                        self.leave()?;
+                        base = self.cx.frames[top].base as usize;
+                        pc = unit.inlines[n as usize].at as usize + 1;
+                    }
+                    Op::Deopt(to) => {
+                        sync!(pc);
+                        self.deopt(unit, to)?;
                         continue 'frames;
                     }
                     Op::Fused(n) => {
@@ -1528,6 +1565,9 @@ impl<H: Heap> Vm<H> {
             | Op::WhileFalse(_)
             | Op::LoopStart(_)
             | Op::Pass(_)
+            | Op::Inline(_)
+            | Op::Leave(_)
+            | Op::Deopt(_)
             | Op::Fused(_) => return Err(fault("a dispatched op ran out of line")),
         }
         Ok(None)

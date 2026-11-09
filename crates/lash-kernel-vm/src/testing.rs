@@ -120,7 +120,7 @@ pub fn compile_document(
     link: lash_kernel_value::LinkId,
     entry: Option<&lash_kernel_doc::FunctionExport>,
 ) -> Result<BytecodeProgram, StartError> {
-    let code = crate::bytecode::conventions::compile_selected(
+    let mut code = crate::bytecode::conventions::compile_selected(
         document,
         registry,
         link,
@@ -130,6 +130,7 @@ pub fn compile_document(
     .map_err(|problem| StartError::Linked {
         problem: problem.to_string(),
     })?;
+    crate::bytecode::inline::inline(&mut code);
     crate::bytecode::validate::validate(&code).map_err(|problem| StartError::Linked {
         problem: problem.to_string(),
     })?;

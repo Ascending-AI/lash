@@ -146,6 +146,18 @@ pub enum Op {
     /// once; on the exact path, the run's first op alone. Only the fusion
     /// pass writes it, after validation.
     Fused(u32),
+
+    // --- Inline regions (`inline`).
+    /// Inline site `n` of the unit: the call its site names, its body run
+    /// in the unit's region for it. Only the inline pass writes it.
+    Inline(u32),
+    /// The region of inline site `n` returns the top value: the body's
+    /// activation completes, and the unit continues after the call.
+    Leave(u32),
+    /// The region leaves its guard path at the body's op `pc`: the body's
+    /// frame is materialized there, standing over the region's locals and
+    /// operands.
+    Deopt(u32),
 }
 
 const _: () = assert!(std::mem::size_of::<Op>() == 8);

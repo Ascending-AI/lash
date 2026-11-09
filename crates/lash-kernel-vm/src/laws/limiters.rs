@@ -749,8 +749,12 @@ fn drive(text: &str, how: Drive<'_>) -> Observed {
 
 /// Documents whose blocks hold every kind of charge site: fixed events,
 /// atomic constructions, completion fees of natives and of a library
-/// call, a raise in mid-block and its catch.
-const EVENT_CONTRACT: [&str; 2] = [
+/// call, a raise in mid-block and its catch. The third calls covered
+/// bodies the inline pass expands: `law.deep` returning with a fee that
+/// reads its argument deeply and its result, `law.pick` on its guard path
+/// and, below 2, off it into a call of `law.raises` whose raise escapes
+/// both, and `law.oops` returning or raising from inside its region.
+const EVENT_CONTRACT: [&str; 3] = [
     r#"definition "function sq(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return num.add(x, x) }"
 main {
   let s = ""
@@ -782,7 +786,46 @@ main {
   print caught
   return caught
 }"#,
+    r#"main {
+  let total = 0
+  let i = 0
+  while num.lt(i, 4) {
+    let d = invoke law.deep(map{"a": [i, i]})
+    try {
+      set total = num.add(total, invoke law.pick(i))
+    } catch e {
+      set total = num.add(total, 10)
+    }
+    try {
+      let bad = invoke law.oops(i)
+    } catch e {
+      set total = num.add(total, 100)
+    }
+    let s = invoke law.oops("ab")
+    set total = num.add(total, list.len(d))
+    set i = num.add(i, 1)
+  }
+  print total
+  return total
+}"#,
 ];
+
+/// `drive` with every covered body called through its frame: the inline
+/// pass's reference (`bytecode::inline`).
+fn reference(text: &str, how: Drive<'_>) -> Observed {
+    crate::bytecode::inline::disabled(|| drive(text, how))
+}
+
+/// `drive`, asserting that the inline pass expanded a body of `text`.
+fn inlined(text: &str, how: Drive<'_>) -> Observed {
+    let before = crate::bytecode::inline::added();
+    let seen = drive(text, how);
+    assert!(
+        crate::bytecode::inline::added() > before,
+        "no body of the law's document was expanded"
+    );
+    seen
+}
 
 /// Contract §3: at every charge limit the run can reach, a prepaid run
 /// refuses at the same event with the same total as the event-by-event
@@ -790,9 +833,12 @@ main {
 /// or a raise, or stopped short by a slice; and a limiter that grows the
 /// limit at the refused event resumes it there, as a run started with the
 /// grown limit runs. A limit at and next to `u64::MAX` reserves without
-/// overflow.
+/// overflow. Where covered bodies run inline, every limit refuses at the
+/// same event, with the same tape, function and site, as the run calling
+/// them through their frames, and a growing limiter is asked the same.
 #[test]
 fn the_prepaid_and_exact_paths_refuse_at_the_same_event_with_the_same_total() {
+    let inline = EVENT_CONTRACT[2];
     for text in EVENT_CONTRACT {
         let whole = core_run(text, ROOMY.charge_limit, u64::MAX, true, None);
         let total = whole.1.expect("charge is metered");
@@ -819,6 +865,41 @@ fn the_prepaid_and_exact_paths_refuse_at_the_same_event_with_the_same_total() {
                 let grown = core_run(text, limit, u64::MAX, exact_path, Some(&limiter));
                 assert_eq!(grown, started, "limit {limit} grown, exact {exact_path}");
             }
+            if text == inline {
+                for how in [
+                    Drive {
+                        limit,
+                        exact: true,
+                        ..Drive::default()
+                    },
+                    Drive {
+                        limit,
+                        slice: 7,
+                        ..Drive::default()
+                    },
+                    Drive {
+                        limit,
+                        grow: Some(grow),
+                        ..Drive::default()
+                    },
+                    Drive {
+                        limit,
+                        exact: true,
+                        charge: crate::Charge::Off,
+                        slice: 3,
+                        ..Drive::default()
+                    },
+                ] {
+                    assert_eq!(
+                        inlined(text, how),
+                        reference(text, how),
+                        "inline, limit {limit}, exact {}, slice {}, {:?}",
+                        how.exact,
+                        how.slice,
+                        how.charge
+                    );
+                }
+            }
         }
         for limit in [u64::MAX - 1, u64::MAX] {
             assert_eq!(
@@ -839,7 +920,9 @@ thread_local! {
 /// 3 or more; `law.sized`, a native whose fee reads its argument deeply;
 /// and two kernel-bodied library functions billing at completion,
 /// `law.deep` returning and `law.fails` raising out of the covered
-/// `law.raises` it calls, whose own native calls are covered.
+/// `law.raises` it calls, whose own native calls are covered; `law.pick`,
+/// whose guard returns at once or calls `law.raises`; and `law.oops`,
+/// which raises unless its argument is text, billing its deep size.
 fn huge_charges(
     registry: &mut lash_kernel_doc::FunctionRegistry,
     ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
@@ -881,10 +964,20 @@ fn huge_charges(
             "function law.fails(xs: Any) -> Any\nkernel 1\ncharge sum(5, deep(xs), size(result))\n{uses}body { let n = list.len(xs) let bad = invoke law.raises(xs) return bad }",
             false,
         ),
+        (
+            "law.pick",
+            "function law.pick(x: Any) -> Any\nkernel 1\ncharge sum(2, size(x), size(result))\n{uses}body { if num.lt(x, 2) { let r = invoke law.raises(x) return r } return num.add(x, 1) }",
+            false,
+        ),
+        (
+            "law.oops",
+            "function law.oops(x: Any) -> Any\nkernel 1\ncharge sum(4, deep(x))\n{uses}body { let t = text.concat(x, \"!\") return t }",
+            false,
+        ),
     ] {
         let mut uses = format!(
-            "use list.len = @{}\nuse text.concat = @{}\n",
-            ids["list.len"], ids["text.concat"]
+            "use list.len = @{}\nuse text.concat = @{}\nuse num.add = @{}\nuse num.lt = @{}\n",
+            ids["list.len"], ids["text.concat"], ids["num.add"], ids["num.lt"]
         );
         for (name, id) in &registered {
             uses.push_str(&format!("use {name} = @{id}\n"));
@@ -950,7 +1043,9 @@ fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
 /// A run over mutable lists and maps that a cold run faults on again and
 /// again: index and loop reads, a native fee and two library completions
 /// reading cold sizes, a raise unwinding through an uncovered completion,
-/// and a two-argument `perform` copying both out.
+/// and a two-argument `perform` copying both out. `law.deep` and
+/// `law.oops` run inline: a cold index inside the region, a cold return
+/// fee and a cold fee of a raise leaving it.
 const COLD_CONTRACT: &str = r#"import 3 operation host.pair(a: Any, b: Any) -> Any
 main {
   let xs = [1, 2, 3]
@@ -967,6 +1062,11 @@ main {
     } catch e {
       set total = num.add(total, list.len(d))
     }
+    try {
+      let bad = invoke law.oops(m)
+    } catch e {
+      set total = num.add(total, 1)
+    }
     set i = num.add(i, 1)
   }
   let echoed = perform 3(xs, m) as Any
@@ -980,15 +1080,24 @@ main {
 /// limit, in slices, when a limiter grows a refused dynamic fee and with
 /// cancellation latched across every load. Each fault loads and re-runs
 /// only what was not committed: no event, fee, slice test or step twice.
+/// Its covered bodies run inline, and both runs show what the run calling
+/// them through their frames does.
 #[test]
 fn a_run_paged_out_at_every_statement_shows_its_host_what_a_resident_run_does() {
     let both = |how: Drive<'_>| {
-        let resident = drive(COLD_CONTRACT, how);
+        let resident = inlined(COLD_CONTRACT, how);
         let cold = drive(COLD_CONTRACT, Drive { cold: true, ..how });
         assert_eq!(
             cold, resident,
             "cold, exact {}, {:?}",
             how.exact, how.charge
+        );
+        assert_eq!(
+            reference(COLD_CONTRACT, Drive { cold: true, ..how }),
+            resident,
+            "framed, exact {}, {:?}",
+            how.exact,
+            how.charge
         );
         resident
     };

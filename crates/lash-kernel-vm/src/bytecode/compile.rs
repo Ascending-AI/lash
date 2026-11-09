@@ -955,6 +955,7 @@ impl<'a> Compiler<'a> {
             site: Site::new(site, Vec::new()),
             points,
             fused: Vec::new(),
+            inlines: Vec::new(),
             origin,
             declared,
             sites: Default::default(),

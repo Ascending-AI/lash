@@ -423,6 +423,11 @@ impl<H: Heap> Vm<H> {
 
     /// The running task leaves the machine in `state`.
     fn suspend(&mut self, state: State) {
+        // An inline region reaches no action, step or slice point.
+        debug_assert!(
+            self.cx.inline.is_none(),
+            "a task suspends inside an inline region"
+        );
         let cx = std::mem::take(&mut self.cx);
         let task = self.running();
         task.cx = cx;

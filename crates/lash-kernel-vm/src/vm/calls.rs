@@ -66,7 +66,7 @@ impl<H: Heap> Vm<H> {
 
     /// The bill a call of formula `charge` owes, over its top `argc`
     /// operands.
-    fn owed(&mut self, charge: Option<u32>, argc: usize) -> Option<Bill> {
+    pub(super) fn owed(&mut self, charge: Option<u32>, argc: usize) -> Option<Bill> {
         let charge = charge.filter(|_| !self.paced)?;
         Some(self.owe(charge, argc))
     }

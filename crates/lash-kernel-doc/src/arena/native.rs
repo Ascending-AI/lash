@@ -1009,6 +1009,18 @@ pub enum InlineOperation {
     TextConcat,
 }
 
+/// Each kind's name as an inline text, in [`crate::ValueKind::NAMES`]
+/// order.
+const KIND_TEXTS: [Option<ShortText>; crate::ValueKind::NAMES.len()] = {
+    let mut texts = [None; crate::ValueKind::NAMES.len()];
+    let mut at = 0;
+    while at < texts.len() {
+        texts[at] = ShortText::new(crate::ValueKind::NAMES[at].1);
+        at += 1;
+    }
+    texts
+};
+
 impl InlineOperation {
     /// Kind and arity eligibility only. This does not admit resources or
     /// authorize an answer when the native would raise or Decline.
@@ -1050,9 +1062,7 @@ impl InlineOperation {
     #[inline]
     pub fn answer(self, args: &[Value]) -> Option<Value> {
         match (self, args) {
-            (Self::Kind, [value]) => {
-                ShortText::new(crate::ValueKind::NAMES[value.kind() as usize].1).map(Value::Text)
-            }
+            (Self::Kind, [value]) => KIND_TEXTS[value.kind() as usize].map(Value::Text),
             (Self::Same, [left, right]) => shallow_same(left, right).map(Value::Bool),
             (Self::Not, [Value::Bool(value)]) => Some(Value::Bool(!value)),
             (Self::Scalar { operation, .. }, [Value::Int(a), Value::Int(b)])
