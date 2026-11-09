@@ -130,7 +130,8 @@ pub(crate) fn seal(
         charged,
         refused,
         globals,
-        session: vm.session.clone(),
+        session: vm.session.names.clone(),
+        functions: vm.session.saved.clone(),
         held,
         running,
         installed,
@@ -506,9 +507,19 @@ pub(crate) fn open(
     {
         return Err("the run's session names are not ascending past the program's".into());
     }
-    vm.globals
-        .resize(program.globals.len() + record.session.len(), Value::Absent);
-    vm.session.clone_from(&record.session);
+    if record
+        .functions
+        .windows(2)
+        .any(|pair| pair[0].name >= pair[1].name)
+    {
+        return Err("the run's saved functions are not ascending by name".into());
+    }
+    vm.globals.resize(
+        program.globals.len() + record.session.len() + record.functions.len(),
+        Value::Absent,
+    );
+    vm.session.names.clone_from(&record.session);
+    vm.session.saved.clone_from(&record.functions);
     if record.globals.len() != vm.globals.len() {
         return Err("the run holds another number of host bindings".into());
     }

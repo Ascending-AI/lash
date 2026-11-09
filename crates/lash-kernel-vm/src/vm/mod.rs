@@ -29,7 +29,7 @@ use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::arena::native::{NativeError, NewObject, Retry};
 use lash_kernel_doc::{Datum, Document, Measure, Value};
 use lash_kernel_value::data_limits::KernelDataLimits;
-use lash_kernel_value::names::{CallableId, Name};
+use lash_kernel_value::names::CallableId;
 use lash_kernel_value::sites::Site;
 
 use self::digests::Digests;
@@ -167,13 +167,11 @@ pub(crate) struct Vm<H: Heap> {
     pub heap: H,
     /// The program's constants, materialized in this instance's heap.
     constants: Vec<Value>,
-    /// The host bindings main's free names read and write, then the
-    /// carried session's bindings it names nowhere, by
-    /// [`Self::session`].
+    /// The host bindings main's free names use, then the session's bindings it
+    /// names nowhere, then its saved functions' objects ([`Self::session`]).
     pub globals: Vec<Value>,
-    /// The names of the globals past the program's: the carried session's
-    /// bindings `main` names nowhere, ascending (`K-SES-001`).
-    pub(crate) session: Vec<Name>,
+    /// What the globals past the program's are (`K-SES-001`, `K-SES-004`).
+    pub(crate) session: crate::durable::session::Carried,
     /// `main`'s locals as its bottom frame left them: what its top-level
     /// bindings hand on (`K-SES-001`).
     pub(crate) top: Option<Vec<Value>>,
@@ -312,7 +310,7 @@ impl<H: Heap> Vm<H> {
             heap,
             constants,
             globals,
-            session: Vec::new(),
+            session: Default::default(),
             top: None,
             cx: Context::default(),
             tasks: tasks::Tasks::new(),

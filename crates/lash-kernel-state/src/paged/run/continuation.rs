@@ -75,11 +75,15 @@ record! {
         /// The total a charge refusal reported, once one has.
         pub refused: Option<u64>,
         /// Each host binding's value, then each session binding's of
-        /// [`Self::session`].
+        /// [`Self::session`], then each saved function's of
+        /// [`Self::functions`].
         pub globals: Vec<u32>,
         /// The carried session's bindings `main` names nowhere, ascending:
         /// the globals past the program's.
         pub session: Vec<Name>,
+        /// The carried session's saved functions, ascending by name: the
+        /// globals past the session's.
+        pub functions: Vec<super::session::RunFunction>,
         /// Values the scheduler holds outside any task.
         pub held: Vec<u32>,
         /// The task whose context the machine holds.

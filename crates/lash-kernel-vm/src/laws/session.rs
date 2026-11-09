@@ -10,15 +10,23 @@
 //!   holds it, a large list's last chunk included.
 //! - A binding the cell never names rides through a seal at a park and a
 //!   cold reopen.
+//! - `K-SES-004`: a saved function rides on, and a binding that holds it
+//!   carries, the function by the same identity.
 
 use lash_kernel_doc::Datum;
+use lash_kernel_doc::arena::native::NewObject;
 use lash_kernel_state::kernel_internals::tree::Access;
-use lash_kernel_state::paged::run::session;
+use lash_kernel_state::paged::run::directory::Directory;
+use lash_kernel_state::paged::run::ids::HighWater;
+use lash_kernel_state::paged::run::objects::{Record, RunValue};
+use lash_kernel_state::paged::run::session::{self, RunFunction, RunSession};
 use lash_kernel_state::paged::{SealBudget, SessionRoot};
 use lash_kernel_value::names::Name;
 
 use super::embedder::{ROOMY, Setup, Source, World, answer, core_program, int, wait_of};
 use crate::durable::session::NOT_CARRIED;
+use crate::heap::Heap;
+use crate::heap::slots::SlotHeap;
 use crate::{CellStart, CoreMachine, End, Finished, Machine, Step};
 
 fn start(session: Option<SessionRoot>, host: Vec<(Name, Datum)>) -> CellStart {
@@ -209,4 +217,58 @@ fn a_session_diff_reports_rebinds_and_in_place_mutations() {
             ("ys".to_owned(), (true, true)),
         ]
     );
+}
+
+/// `K-SES-004`, `K-SES-003`: a session's saved function rides a cell
+/// that never names it, and a binding holding it is no binding that
+/// reaches a function: it carries, holding the saved function's object.
+#[test]
+fn a_binding_holding_a_saved_function_carries_it_by_identity() {
+    let source = Source::default();
+    let mut heap = SlotHeap::durable(
+        u64::MAX,
+        crate::heap::open::Durable {
+            directory: Directory::new(Box::new(source.clone())),
+            high_water: HighWater(0),
+        },
+    );
+    let mut make = |object: NewObject| {
+        heap.admit(crate::heap::slots::schedule(&object))
+            .expect("room");
+        heap.create(object).expect("an object")
+    };
+    let function = make(NewObject::Function(lash_kernel_value::CallableId {
+        link: lash_kernel_value::LinkId::from_bytes([4; 32]),
+        function: lash_kernel_value::FunctionId::from_bytes([5; 32]),
+    }));
+    let held = make(NewObject::List(vec![function]));
+    let saved = RunFunction {
+        name: Name::new("f"),
+        description: b"f()".to_vec(),
+    };
+    let root = heap.seal(&[held, function]).expect("a seal");
+    let page = session::write(
+        &Access::new(Box::new(source.clone())),
+        &RunSession {
+            heap: root,
+            names: vec![Name::new("fs")],
+            functions: vec![saved.clone()],
+        },
+    )
+    .unwrap();
+    let end = cell(
+        "main {\n  let n = 1\n  return 0\n}",
+        start(Some(SessionRoot::run(page)), Vec::new()),
+        &source,
+    );
+    assert!(end.not_carried.is_empty(), "{:?}", end.not_carried);
+    assert_eq!(carried(&end, &source), names(&["fs", "n"]));
+    let page = end.carry.as_ref().and_then(SessionRoot::run_page).unwrap();
+    let (carried, directory) = session::open(Box::new(source.clone()), page).unwrap();
+    assert_eq!(carried.functions, vec![saved]);
+    let list = carried.binding(0).and_then(RunValue::id).unwrap();
+    let Record::List(members) = directory.get(list).unwrap().unwrap().record else {
+        panic!("`fs` holds a list");
+    };
+    assert_eq!(members.first(), carried.function(0));
 }

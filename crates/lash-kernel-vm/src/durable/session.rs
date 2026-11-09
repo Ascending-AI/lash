@@ -8,10 +8,14 @@
 //! are globals past the program's, so the collector, a seal and a reopen
 //! keep them as they keep any global.
 //!
+//! A saved function's object is a global past the session's bindings, so
+//! it stays rooted, and is handed on as it came.
+//!
 //! At the end, the session's bindings are the globals, then `main`'s
 //! top-level variables, minus the host's. Their heap is sealed with them
-//! as its roots; a binding whose value reaches a closure, a function or a
-//! task is dropped and named, and the heap sealed again without it.
+//! and the saved functions' objects as its roots; a binding whose value
+//! reaches a closure, a function or a task other than a saved function's
+//! is dropped and named, and the heap sealed again without it.
 //!
 //! [`run::session`]: lash_kernel_state::paged::run::session
 
@@ -33,22 +37,34 @@ use crate::paged::SealError;
 use crate::vm::Vm;
 use crate::vm::tasks::MAIN;
 
+/// The globals past the program's: the carried session's bindings `main`
+/// names nowhere, ascending, then its saved functions, in that order.
+#[derive(Debug, Default)]
+pub(crate) struct Carried {
+    pub(crate) names: Vec<Name>,
+    pub(crate) saved: Vec<session::RunFunction>,
+}
+
 /// Why a binding that reaches a closure, a function or a task is not
 /// carried, when no dialect says more (`K-SES-003`).
 pub(crate) const NOT_CARRIED: &str = "it holds a function or a task, which ends with its cell";
 
-/// Binds `session`'s bindings, valued `values`, in `vm`: a name the
-/// program reads to its global, every other one past them.
+/// Binds `session`'s bindings, valued `values` (the heap's roots), in
+/// `vm`: a name the program reads to its global, every other one past
+/// them, then the saved functions' objects past those.
 pub(crate) fn bind(vm: &mut Vm<SlotHeap>, session: &RunSession, values: Vec<Value>) {
-    for (name, value) in session.names.iter().zip(values) {
+    let (bindings, functions) = values.split_at(session.names.len().min(values.len()));
+    for (name, value) in session.names.iter().zip(bindings) {
         match vm.program.globals.iter().position(|global| global == name) {
-            Some(at) => vm.globals[at] = value,
+            Some(at) => vm.globals[at] = *value,
             None => {
-                vm.globals.push(value);
-                vm.session.push(name.clone());
+                vm.globals.push(*value);
+                vm.session.names.push(name.clone());
             }
         }
     }
+    vm.globals.extend_from_slice(functions);
+    vm.session.saved.clone_from(&session.functions);
 }
 
 /// Hands on `vm`'s session at the end of its cell, `host` the host's
@@ -64,20 +80,38 @@ pub(crate) fn carry(
 ) -> Result<(SessionRoot, Vec<(Name, String)>), MachineError> {
     let mut bindings = BTreeMap::new();
     let program = std::sync::Arc::clone(&vm.program);
-    for (name, value) in program.globals.iter().chain(&vm.session).zip(&vm.globals) {
+    let named = program.globals.len() + vm.session.names.len();
+    let functions = vm
+        .globals
+        .get(named..)
+        .filter(|saved| saved.len() == vm.session.saved.len())
+        .ok_or_else(|| fault("the run holds another number of saved functions"))?
+        .to_vec();
+    for (name, value) in program
+        .globals
+        .iter()
+        .chain(&vm.session.names)
+        .zip(&vm.globals)
+    {
         bindings.insert(name.clone(), *value);
     }
     for (name, value) in top_level(vm)? {
         bindings.insert(name, value);
     }
     bindings.retain(|name, value| !matches!(value, Value::Absent) && !host.contains(name));
-    let (names, values): (Vec<Name>, Vec<Value>) = bindings.into_iter().unzip();
+    let (names, mut values): (Vec<Name>, Vec<Value>) = bindings.into_iter().unzip();
+    let bound = values.len();
+    values.extend_from_slice(&functions);
     let mut heap = vm.heap.seal(&values).map_err(sealing)?;
     let directory = vm
         .heap
         .directory()
         .ok_or_else(|| fault("the heap has no directory"))?;
-    let reaching = Reach::new(directory).classify(&heap.roots)?;
+    let saved = heap.roots[bound..]
+        .iter()
+        .filter_map(RunValue::id)
+        .collect();
+    let reaching = Reach::new(directory, saved).classify(&heap.roots[..bound])?;
     let mut not_carried = Vec::new();
     let mut kept = (Vec::new(), Vec::new());
     for ((name, value), reaches) in names.into_iter().zip(values).zip(reaching) {
@@ -89,6 +123,7 @@ pub(crate) fn carry(
         }
     }
     if !not_carried.is_empty() {
+        kept.1.extend_from_slice(&functions);
         heap = vm.heap.seal(&kept.1).map_err(sealing)?;
     }
     let directory = vm
@@ -100,6 +135,7 @@ pub(crate) fn carry(
         &RunSession {
             heap,
             names: kept.0,
+            functions: vm.session.saved.clone(),
         },
     )
     .map_err(MachineError::Heap)?;
@@ -160,20 +196,21 @@ fn top_level(vm: &mut Vm<SlotHeap>) -> Result<Vec<(Name, Value)>, MachineError> 
     Ok(bound)
 }
 
-/// Which sealed values reach a closure, a function or a task, through the
-/// directory's rows: a leaf object is never read, a large one's chunks
-/// are.
+/// Which sealed values reach a closure, a function or a task other than a
+/// saved function's, through the directory's rows: a leaf object is never
+/// read, a large one's chunks are.
 struct Reach<'a> {
     directory: &'a Directory,
-    /// Objects that reach none.
+    /// Objects that reach none: the saved functions', and every object
+    /// found to.
     clean: BTreeSet<ObjectId>,
 }
 
 impl<'a> Reach<'a> {
-    fn new(directory: &'a Directory) -> Self {
+    fn new(directory: &'a Directory, saved: BTreeSet<ObjectId>) -> Self {
         Self {
             directory,
-            clean: BTreeSet::new(),
+            clean: saved,
         }
     }
 
@@ -225,7 +262,9 @@ impl<'a> Reach<'a> {
     fn direct(&self, value: &RunValue, work: &mut Vec<ObjectId>) -> bool {
         match value {
             RunValue::Task(_) | RunValue::TaskRef(_) => true,
-            RunValue::Object(ObjectKind::Closure | ObjectKind::Function, _) => true,
+            RunValue::Object(ObjectKind::Closure | ObjectKind::Function, id) => {
+                !self.clean.contains(id)
+            }
             RunValue::Object(
                 ObjectKind::LongText
                 | ObjectKind::Bytes
