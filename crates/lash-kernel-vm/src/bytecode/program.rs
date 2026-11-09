@@ -131,6 +131,57 @@ pub struct Unit {
     /// document's statement starts, empty-block entries, `while` tests and
     /// action issues. Read only while the run is observed.
     pub points: Vec<(u32, Point)>,
+    /// The fused runs `Op::Fused` names (`fuse`).
+    pub fused: Vec<Fused>,
+}
+
+impl Unit {
+    /// The op compiled at `pc`, before fusion replaced it.
+    pub fn original(&self, pc: usize) -> Option<Op> {
+        match *self.ops.get(pc)? {
+            Op::Fused(n) => Some(self.fused[n as usize].first),
+            op => Some(op),
+        }
+    }
+}
+
+/// A run of one prepaid block's ops that dispatches at once (`fuse`): up
+/// to two operand pushes, the scalar native call they feed, and what
+/// takes its answer. Its ops after the first stay in place, so a frame
+/// that stands inside the run continues op by op.
+#[derive(Clone, Copy, Debug)]
+pub struct Fused {
+    /// The run's first op, which the exact path dispatches alone.
+    pub first: Op,
+    /// The operands the run pushes before the call, first `pushes` used.
+    pub operands: [Operand; 2],
+    pub pushes: u8,
+    /// The call's site and op index.
+    pub site: u32,
+    pub call: u32,
+    /// What takes the call's answer.
+    pub then: Then,
+}
+
+/// An operand a fused run pushes.
+#[derive(Clone, Copy, Debug)]
+pub enum Operand {
+    Local(u16),
+    Const(u32),
+}
+
+/// The op after a fused call that takes its answer.
+#[derive(Clone, Copy, Debug)]
+pub enum Then {
+    /// None: the answer stays on the stack.
+    Push,
+    SetLocal(u16),
+    Pop,
+    /// `JumpIfFalse(to)`, or `WhileFalse(to)` when `looping`.
+    Branch {
+        to: u32,
+        looping: bool,
+    },
 }
 
 /// What an observed run records before an op runs (`observe/`).

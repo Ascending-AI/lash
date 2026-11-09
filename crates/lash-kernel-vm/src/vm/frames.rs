@@ -25,11 +25,13 @@ pub(crate) struct Frame {
     pub bill: Option<Bill>,
 }
 
-/// A completion formula owed by a frame, with the arguments it measures.
-#[derive(Clone, Debug)]
+/// A completion formula owed by a frame. The arguments it measures are
+/// [`Context::billed`] from `from` up: frames leave in the order they
+/// came, so a frame's bill is the top of that stack when it leaves.
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Bill {
     pub charge: u32,
-    pub args: Box<[Value]>,
+    pub from: u32,
 }
 
 /// An installed handler: a raise in frame `frame` or a frame above it
@@ -48,18 +50,18 @@ pub(crate) struct Context {
     pub stack: Vec<Value>,
     pub frames: Vec<Frame>,
     pub handlers: Vec<Handler>,
+    /// The arguments of the frames' bills, each bill's from its `from`.
+    pub billed: Vec<Value>,
 }
 
 impl Context {
     /// Every value the context holds, for the collector.
     pub(crate) fn roots(&self, visit: &mut dyn FnMut(&Value)) {
         self.stack.iter().for_each(&mut *visit);
+        self.billed.iter().for_each(&mut *visit);
         for frame in &self.frames {
             if let Some(closure) = frame.closure {
                 visit(&Value::Closure(closure));
-            }
-            if let Some(bill) = &frame.bill {
-                bill.args.iter().for_each(&mut *visit);
             }
         }
     }

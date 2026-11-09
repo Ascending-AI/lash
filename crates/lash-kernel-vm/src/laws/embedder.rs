@@ -45,6 +45,9 @@ fn type_error(message: &'static str) -> NativeError {
 /// answer.
 macro_rules! prepared {
     ($native:ident, $immediate_resources:expr, |$args:ident| $body:expr) => {
+        prepared!($native, $immediate_resources, |_| None, |$args| $body);
+    };
+    ($native:ident, $immediate_resources:expr, $inline:expr, |$args:ident| $body:expr) => {
         impl $native {
             fn answer($args: &[Value]) -> Result<Value, NativeError> {
                 $body
@@ -75,6 +78,7 @@ macro_rules! prepared {
             }
             fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
                 lash_kernel_doc::NativeSpecialization {
+                    inline: ($inline)(self),
                     immediate: self.prepare(),
                     immediate_resources: $immediate_resources,
                     ..Default::default()
@@ -84,20 +88,48 @@ macro_rules! prepared {
     };
 }
 
-struct Add;
-prepared!(Add, true, |args| match args {
-    [Value::Int(a), Value::Int(b)] => a
-        .checked_add(*b)
-        .map(Value::Int)
-        .ok_or_else(|| type_error("num.add passes a word")),
-    _ => Err(type_error("num.add takes two integers")),
-});
+/// The R8 inline answer over word pairs a law native declares when `inline`,
+/// as the catalogue's `num.*` natives do: its own answer, so that the
+/// core's inline and fused paths run under the laws.
+fn words(
+    inline: bool,
+    operation: lash_kernel_doc::scalar::ScalarOp,
+) -> Option<lash_kernel_doc::arena::native::InlineNative> {
+    inline.then_some(lash_kernel_doc::arena::native::InlineNative {
+        native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+        operation: lash_kernel_doc::arena::native::InlineOperation::Scalar {
+            operation,
+            domain: lash_kernel_doc::arena::native::ScalarDomain::Words,
+        },
+    })
+}
 
-struct Less;
-prepared!(Less, true, |args| match args {
-    [Value::Int(a), Value::Int(b)] => Ok(Value::Bool(a < b)),
-    _ => Err(type_error("num.lt takes two integers")),
-});
+/// Declares its inline answer when it holds `true`.
+struct Add(bool);
+prepared!(
+    Add,
+    true,
+    |add: &Add| words(add.0, lash_kernel_doc::scalar::ScalarOp::Add),
+    |args| match args {
+        [Value::Int(a), Value::Int(b)] => a
+            .checked_add(*b)
+            .map(Value::Int)
+            .ok_or_else(|| type_error("num.add passes a word")),
+        _ => Err(type_error("num.add takes two integers")),
+    }
+);
+
+/// Declares its inline answer when it holds `true`.
+struct Less(bool);
+prepared!(
+    Less,
+    true,
+    |less: &Less| words(less.0, lash_kernel_doc::scalar::ScalarOp::Lt),
+    |args| match args {
+        [Value::Int(a), Value::Int(b)] => Ok(Value::Bool(a < b)),
+        _ => Err(type_error("num.lt takes two integers")),
+    }
+);
 
 struct Concat;
 impl NativeFunction for Concat {
@@ -307,6 +339,13 @@ pub(crate) type Probes = fn(
 
 /// [`library`] with the functions `probes` adds.
 pub(crate) fn library_with(native_twice: bool, probes: Option<Probes>) -> Library {
+    library_declaring(native_twice, probes, false)
+}
+
+/// [`library_with`], whose `num.add` and `num.lt` declare their inline
+/// answers when `inline`. The bytecode core's laws run with them; the
+/// frozen engine's region admission refuses them.
+fn library_declaring(native_twice: bool, probes: Option<Probes>, inline: bool) -> Library {
     let mut registry = FunctionRegistry::new();
     let mut ids = BTreeMap::new();
     let machine = register_machine_functions(&mut registry).unwrap();
@@ -321,12 +360,12 @@ pub(crate) fn library_with(native_twice: bool, probes: Option<Probes>) -> Librar
         (
             "num.add",
             "(a: Any, b: Any) -> Any\nkernel 1\ncharge 1",
-            Arc::new(Add),
+            Arc::new(Add(inline)),
         ),
         (
             "num.lt",
             "(a: Any, b: Any) -> Bool\nkernel 1\ncharge 1",
-            Arc::new(Less),
+            Arc::new(Less(inline)),
         ),
         (
             "text.concat",
@@ -402,14 +441,15 @@ pub(crate) fn library_with(native_twice: bool, probes: Option<Probes>) -> Librar
     }
 }
 
-/// [`library_with`], built once per thread for each `native_twice` and
-/// `probes`: its natives hold no state, and a deployment shares one
-/// registry across its runs too. A cold reopen still builds its own.
-fn shared_library(native_twice: bool, probes: Option<Probes>) -> Library {
-    let key = (native_twice, probes.map(|probes| probes as usize));
+/// [`library_declaring`], built once per thread for each `native_twice`,
+/// `probes` and `inline`: its natives hold no state, and a deployment
+/// shares one registry across its runs too. A cold reopen still builds
+/// its own.
+fn shared_library(native_twice: bool, probes: Option<Probes>, inline: bool) -> Library {
+    let key = (native_twice, probes.map(|probes| probes as usize), inline);
     LAW_LIBRARIES.with_borrow_mut(|held| {
         held.entry(key)
-            .or_insert_with(|| library_with(native_twice, probes))
+            .or_insert_with(|| library_declaring(native_twice, probes, inline))
             .clone()
     })
 }
@@ -422,7 +462,7 @@ pub(crate) fn core_machine(
     bounds: Bounds,
     probes: Option<Probes>,
 ) -> Result<crate::CoreMachine, crate::StartError> {
-    let library = shared_library(true, probes);
+    let library = shared_library(true, probes, true);
     let text = format!("numbers by_spelling\n{}{text}", library.header);
     let document = Arc::new(document(&text, &library.registry));
     let program = program(
@@ -601,7 +641,7 @@ impl Embedder {
                 ids: BTreeMap::new(),
                 header: format!("kernel {}\n", kernel.number()),
             },
-            None => shared_library(setup.native_twice, setup.probes),
+            None => shared_library(setup.native_twice, setup.probes, false),
         };
         let text = format!("numbers {}\n{}{text}", setup.numbers, library.header);
         let mut document = document(&text, &library.registry);
@@ -1101,11 +1141,15 @@ fn parse_law_document(text: &str, registry: &FunctionRegistry) -> Document {
     }
     document
 }
+/// A law library's `native_twice`, probes and whether `num.add` and
+/// `num.lt` declare their inline answers.
+type LibraryKey = (bool, Option<usize>, bool);
+
 thread_local! {
     static LAW_FUNCTIONS: RefCell<BTreeMap<String, FunctionId>> = const { RefCell::new(BTreeMap::new()) };
     /// The documents parsed last, the most recent last.
     static LAW_DOCUMENTS: RefCell<Vec<(DocumentKey, Arc<Document>)>> = const { RefCell::new(Vec::new()) };
-    static LAW_LIBRARIES: RefCell<BTreeMap<(bool, Option<usize>), Library>> = const { RefCell::new(BTreeMap::new()) };
+    static LAW_LIBRARIES: RefCell<BTreeMap<LibraryKey, Library>> = const { RefCell::new(BTreeMap::new()) };
 }
 pub(crate) fn function_unit(name: &str) -> Unit {
     LAW_FUNCTIONS.with_borrow(|held| Unit::Library(held[name]))

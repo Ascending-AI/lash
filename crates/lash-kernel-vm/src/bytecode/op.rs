@@ -140,6 +140,12 @@ pub enum Op {
     /// A completed-only helper that open could not compile (contract §7).
     /// The validator proves no resume point reaches it.
     Unavailable(u32),
+
+    // --- Fusion (`fuse`).
+    /// Fused run `n` of the unit: on the prepaid path, the run's ops at
+    /// once; on the exact path, the run's first op alone. Only the fusion
+    /// pass writes it, after validation.
+    Fused(u32),
 }
 
 const _: () = assert!(std::mem::size_of::<Op>() == 8);

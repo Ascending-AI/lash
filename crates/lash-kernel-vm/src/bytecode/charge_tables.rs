@@ -20,6 +20,9 @@ pub struct Charge {
     /// hold nothing and measure 1 or 2 (a word, a float, a bool), indexed
     /// by [`Charge::pair`]: `None` when it reads anything else.
     pairs: Option<[u64; 8]>,
+    /// Whether the formula measures an argument: a call keeps its
+    /// arguments for the bill only then.
+    reads_args: bool,
 }
 
 /// A formula with each operand resolved to its position once, so billing
@@ -56,6 +59,18 @@ impl Term {
             Formula::Max(terms) => Self::Max(all(terms)),
             Formula::Min(terms) => Self::Min(all(terms)),
             Formula::CeilLog2(term) => Self::CeilLog2(Box::new(Self::new(term, params))),
+        }
+    }
+
+    /// Whether the term measures an argument.
+    fn reads_args(&self) -> bool {
+        match self {
+            Self::Constant(_) => false,
+            Self::Measure(position, _) => *position != RESULT,
+            Self::Sum(terms) | Self::Product(terms) | Self::Max(terms) | Self::Min(terms) => {
+                terms.iter().any(Self::reads_args)
+            }
+            Self::CeilLog2(term) => term.reads_args(),
         }
     }
 
@@ -122,8 +137,10 @@ impl Charge {
                 })
             })
         });
+        let constant = constant(formula);
         Self {
-            constant: constant(formula),
+            reads_args: constant.is_none() && term.reads_args(),
+            constant,
             term,
             pairs,
         }
@@ -144,6 +161,12 @@ impl Charge {
             }
         }
         Some(table[index])
+    }
+
+    /// Whether the formula measures an argument.
+    #[inline]
+    pub fn reads_args(&self) -> bool {
+        self.reads_args
     }
 
     /// The formula's value when it reads no operand.

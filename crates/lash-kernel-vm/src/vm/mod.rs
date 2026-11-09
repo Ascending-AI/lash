@@ -32,7 +32,7 @@ use lash_kernel_value::sites::Site;
 
 use crate::bytecode::charge_tables::RESULT;
 use crate::bytecode::op::Op;
-use crate::bytecode::program::{Constant, Program, Unit, UnitId, UnitKind};
+use crate::bytecode::program::{Callee, Constant, Operand, Program, Then, Unit, UnitId, UnitKind};
 use crate::heap::{Heap, MemoryRefused};
 use crate::{Bound, ChargeLimiter, Host, LimitDecision};
 use charge::{Meter, Refused, Rest};
@@ -452,14 +452,31 @@ impl<H: Heap> Vm<H> {
         Ok(())
     }
 
-    /// Bills a completion formula (`K-CHG-003`): over the call's arguments
-    /// and its result, of size 0 when the call raised.
-    fn complete(&mut self, charge: u32, args: &[Value], result: Option<&Value>) -> Run<()> {
-        if self.paced {
-            return Ok(());
+    /// The bill of a call of formula `charge` over the top `argc`
+    /// operands, which it keeps when the formula measures them.
+    pub(super) fn owe(&mut self, charge: u32, argc: usize) -> Bill {
+        let from = self.cx.billed.len() as u32;
+        if self.program.charges[charge as usize].reads_args() {
+            let at = self.cx.stack.len() - argc;
+            self.cx.billed.extend_from_slice(&self.cx.stack[at..]);
         }
-        let units = self.formula(charge, args, result)?;
-        self.fee(units)
+        Bill { charge, from }
+    }
+
+    /// Bills a leaving frame's `bill` over its call's arguments and its
+    /// result, of size 0 when the call raised, and drops the arguments.
+    fn settle(&mut self, bill: Bill, result: Option<&Value>) -> Run<()> {
+        let from = bill.from as usize;
+        let units = if self.paced {
+            None
+        } else {
+            Some(self.formula(bill.charge, &self.cx.billed[from..], result))
+        };
+        self.cx.billed.truncate(from);
+        match units {
+            Some(units) => self.fee(units?),
+            None => Ok(()),
+        }
     }
 
     /// Evaluates formula `charge` over `args` and `result`.
@@ -731,8 +748,8 @@ impl<H: Heap> Vm<H> {
             };
             self.heap.release(self.frames[frame.unit as usize]);
             self.drop_handlers();
-            if let Some(bill) = &frame.bill {
-                self.complete(bill.charge, &bill.args, None)?;
+            if let Some(bill) = frame.bill {
+                self.settle(bill, None)?;
             }
             self.cx.stack.truncate(frame.base as usize);
             if self.cx.frames.is_empty() {
@@ -790,280 +807,456 @@ impl<H: Heap> Vm<H> {
         }
     }
 
+    /// Runs the running context's frames. The running frame's unit, ops,
+    /// base and `pc` are held in locals while the ops that keep the frame
+    /// run here: the stack and local ops, jumps, inline scalar calls and
+    /// fused runs. Every other op runs out of line in [`Self::operate`],
+    /// with `pc` written back to the frame first and the frame read again
+    /// after. The loop is kept small so that its state stays in registers.
     fn dispatch(&mut self, host: &mut dyn Host) -> Run<Stop> {
         let program = Arc::clone(&self.program);
-        loop {
+        // The run's first op ends no step: the slice was just started.
+        let mut fresh = std::mem::take(&mut self.fresh);
+        'frames: loop {
             let Some(frame) = self.cx.frames.last() else {
                 return Err(fault("a context with no frame ran"));
             };
-            let (id, pc, base) = (frame.unit, frame.pc as usize, frame.base as usize);
+            let top = self.cx.frames.len() - 1;
+            let (id, mut pc, base) = (frame.unit, frame.pc as usize, frame.base as usize);
             let unit = &program.units[id as usize];
-            let op = unit.ops[pc];
-            let fresh = std::mem::take(&mut self.fresh);
-            if let Op::Block(_) = op {
-                // The block before ended: what it reserved is spent, and
-                // the charge is exact at the boundary.
-                self.meter.leave();
-                self.exact = true;
+            let ops = &unit.ops[..];
+            // Writes the local `pc` back to the running frame.
+            macro_rules! sync {
+                ($pc:expr) => {
+                    self.cx.frames[top].pc = $pc as u32
+                };
             }
-            if self.exact {
-                // The slice is tested after each step of any frame
-                // (`K-MACH-002`): at the next step's start, and where a
-                // stepped frame's last statement ends by falling off its
-                // body. A `return` statement's step runs on into its
-                // caller's continuation; dispatching it is no step.
-                let tested = unit.step[pc] || (matches!(op, Op::Fall) && !unit.covered);
-                if tested && !fresh && self.meter.spent() {
-                    return Ok(Stop::Slice);
-                }
-                self.bill(unit, pc)?;
-                if self.watch.is_some() && !unit.points.is_empty() {
-                    self.see(id, unit, pc);
-                }
+            // Returns `$e`'s error with the frame at the local `pc`.
+            macro_rules! check {
+                ($e:expr) => {
+                    match $e {
+                        Ok(value) => value,
+                        Err(error) => {
+                            sync!(pc);
+                            return Err(error);
+                        }
+                    }
+                };
             }
-            if let Some(frame) = self.cx.frames.last_mut() {
-                frame.pc += 1;
-            }
-            match op {
-                Op::Block(block) => {
-                    let block = &unit.blocks[block as usize];
-                    let cost = if self.paced { block.pace } else { block.charge };
-                    self.exact = self.watch.is_some() || !self.meter.enter(cost);
-                }
-                Op::Nop => {}
-                Op::Const(n) => self.push(self.constants[n as usize]),
-                Op::Local(n) => self.push(self.cx.stack[base + usize::from(n)]),
-                Op::SetLocal(n) => {
-                    let value = self.pop();
-                    self.cx.stack[base + usize::from(n)] = value;
-                }
-                Op::CellGet(n) => {
-                    let cell = self.cell_at(n)?;
-                    let value = self
-                        .heap
-                        .cell_get(cell)
-                        .map_err(|error| self.native(error))?;
-                    self.push(value);
-                }
-                Op::CellSet(n) => {
-                    let cell = self.cell_at(n)?;
-                    let value = self.pop();
-                    self.heap
-                        .cell_set(cell, value)
-                        .map_err(|error| self.native(error))?;
-                }
-                Op::Box(n) => {
-                    let at = base + usize::from(n);
-                    let value = self.cx.stack[at];
-                    let cell = self.cell(value)?;
-                    self.cx.stack[at] = Value::Handle(cell);
-                }
-                Op::CaptureGet(n) => {
-                    let cell = self.capture(n)?;
-                    let value = self
-                        .heap
-                        .cell_get(cell)
-                        .map_err(|error| self.native(error))?;
-                    self.push(value);
-                }
-                Op::CaptureSet(n) => {
-                    let cell = self.capture(n)?;
-                    let value = self.pop();
-                    self.heap
-                        .cell_set(cell, value)
-                        .map_err(|error| self.native(error))?;
-                }
-                Op::Global(n) => self.push(self.globals[usize::from(n)]),
-                Op::SetGlobal(n) => {
-                    let value = self.pop();
-                    self.globals[usize::from(n)] = value;
-                }
-                Op::Pop => {
-                    self.pop();
-                }
-                Op::Jump(to) => self.jump(to),
-                Op::JumpIfFalse(to) => match self.pop() {
-                    Value::Bool(true) => {}
-                    Value::Bool(false) => self.jump(to),
-                    _ => return Err(self.error("type_error", "an `if` condition must be a bool")),
-                },
-                Op::WhileFalse(to) => match self.pop() {
-                    Value::Bool(true) => {}
-                    Value::Bool(false) => self.jump(to),
-                    _ => return Err(self.error("type_error", "a `while` condition must be a bool")),
-                },
-                Op::MakeTuple(n) => self.make_tuple(n as usize)?,
-                Op::MakeList(n) => {
-                    let values = self.take(n as usize);
-                    let value = self.alloc(NewObject::List(values))?;
-                    self.push(value);
-                }
-                Op::MakeSet(n) => {
-                    let values = self.take(n as usize);
-                    for value in &values {
-                        self.key(value)?;
-                    }
-                    let value = self.alloc(NewObject::Set(values))?;
-                    self.push(value);
-                }
-                Op::MakeMap(n) => {
-                    let flat = self.take(2 * n as usize);
-                    let pairs: Vec<(Value, Value)> = flat
-                        .as_chunks::<2>()
-                        .0
-                        .iter()
-                        .map(|&[key, value]| (key, value))
-                        .collect();
-                    for (key, _) in &pairs {
-                        self.key(key)?;
-                    }
-                    let value = self.alloc(NewObject::Map(pairs))?;
-                    self.push(value);
-                }
-                Op::MakeRecord(shape) => {
-                    let shape = Arc::clone(&unit.records[shape as usize]);
-                    let values = self.take(shape.len());
-                    let pairs = shape
-                        .iter()
-                        .map(|field| self.constants[*field as usize])
-                        .zip(values)
-                        .collect();
-                    let value = self.alloc(NewObject::Record(pairs))?;
-                    self.push(value);
-                }
-                Op::MakeClosure(n) => {
-                    let site = &unit.closures[n as usize];
-                    let mut captures = Vec::with_capacity(site.captures.len());
-                    for capture in &site.captures {
-                        captures.push(match capture {
-                            crate::bytecode::program::Capture::Local(slot) => {
-                                self.cell_at(*slot)?
-                            }
-                            crate::bytecode::program::Capture::Capture(k) => self.capture(*k)?,
-                        });
-                    }
-                    self.admit(crate::heap::meter::closure(captures.len()))?;
-                    let closure = self.heap.closure(Arc::clone(&site.identity), captures);
-                    self.push(Value::Closure(closure));
-                }
-                Op::Index => {
-                    let index = self.pop();
-                    let target = self.pop();
-                    let value = self.index(target, index)?;
-                    self.push(value);
-                }
-                Op::Field(field) => {
-                    let target = self.pop();
-                    let name = self.constants[field as usize];
-                    let value = self.field(target, name)?;
-                    self.push(value);
-                }
-                Op::SetIndex => {
-                    let index = self.pop();
-                    let target = self.pop();
-                    let value = self.pop();
-                    self.set_index(target, index, value)?;
-                }
-                Op::SetIndexPlaceFirst => {
-                    let value = self.pop();
-                    let index = self.pop();
-                    let target = self.pop();
-                    self.set_index(target, index, value)?;
-                }
-                Op::SetField(field) => {
-                    let target = self.pop();
-                    let value = self.pop();
-                    self.set_field(target, self.constants[field as usize], value)?;
-                }
-                Op::SetFieldPlaceFirst(field) => {
-                    let value = self.pop();
-                    let target = self.pop();
-                    self.set_field(target, self.constants[field as usize], value)?;
-                }
-                Op::RemoveIndex => {
-                    let index = self.pop();
-                    let target = self.pop();
-                    self.remove_index(target, index)?;
-                }
-                Op::RemoveField(field) => {
-                    let target = self.pop();
-                    self.remove_field(target, self.constants[field as usize])?;
-                }
-                Op::Call(site) => self.call(&program, unit, site)?,
-                Op::Return => {
-                    let value = self.pop();
-                    if let Some(stop) = self.ret(host, value, true)? {
-                        return Ok(stop);
-                    }
-                }
-                Op::Fall => {
-                    if let Some(stop) = self.ret(host, Value::Null, false)? {
-                        return Ok(stop);
-                    }
-                }
-                Op::Raise => {
-                    let value = self.pop();
-                    return Err(Flow::Raise(value));
-                }
-                Op::TryEnter(to) => {
-                    let frame = (self.cx.frames.len() - 1) as u32;
-                    let height = self.cx.stack.len() as u32;
-                    self.cx.handlers.push(Handler {
-                        frame,
-                        pc: to,
-                        height,
-                    });
-                }
-                Op::TryExit => {
-                    self.cx.handlers.pop();
-                }
-                Op::ForOpen(n) => self.for_open(unit, n)?,
-                Op::ForNext(n) => self.for_next(unit, n)?,
-                Op::ProtoOpen(n) => self.proto_open(unit, n)?,
-                Op::ProtoStep(n) => self.proto_step(unit, n)?,
-                Op::ProtoGuard(n) => self.proto_guard(unit, n)?,
-                Op::ProtoChecked(n) => self.proto_checked(unit, n)?,
-                Op::ProtoPull(n) => self.proto_pull(unit, n)?,
-                Op::ProtoMore(n) => self.proto_more(unit, n)?,
-                Op::Action(n) => {
+            loop {
+                let mut op = ops[pc];
+                if let Op::Block(_) = op {
+                    // The block before ended: what it reserved is spent,
+                    // and the charge is exact at the boundary.
                     self.meter.leave();
                     self.exact = true;
-                    if let Some(stop) = self.act(host, unit, n)? {
-                        return Ok(stop);
+                }
+                if self.exact {
+                    // A refusal, a limiter and a slice read the frame at
+                    // the op.
+                    sync!(pc);
+                    if self.exact_step(id, unit, pc, op, fresh)? {
+                        return Ok(Stop::Slice);
+                    }
+                    // A fused run is a prepaid path's: here its first op
+                    // runs alone.
+                    if let Op::Fused(n) = op {
+                        op = unit.fused[n as usize].first;
                     }
                 }
-                Op::LoopStart(n) => self.cx.stack[base + usize::from(n)] = Value::Int(0),
-                Op::Pass(n) => {
-                    let at = base + usize::from(n);
-                    if let Value::Int(count) = self.cx.stack[at] {
-                        self.cx.stack[at] = Value::Int(count.saturating_add(1));
+                fresh = false;
+                pc += 1;
+                match op {
+                    Op::Block(block) => {
+                        let block = &unit.blocks[block as usize];
+                        let cost = if self.paced { block.pace } else { block.charge };
+                        self.exact = self.watch.is_some() || !self.meter.enter(cost);
                     }
-                }
-                Op::Print => {
-                    let value = self.pop();
-                    let datum = self.copy_out(&value)?;
-                    host.print(&datum);
-                }
-                Op::Finish => {
-                    let value = self.pop();
-                    let datum = self.copy_out(&value)?;
-                    return Ok(Stop::Finish(datum));
-                }
-                Op::Fail => {
-                    let value = self.pop();
-                    let datum = self.copy_out(&value)?;
-                    return Ok(Stop::Fail(datum));
-                }
-                Op::Unavailable(reason) => {
-                    let reason = match &program.constants[reason as usize] {
-                        Constant::Text(text) => text.to_string(),
-                        Constant::Immediate(Value::Text(text)) => text.as_str().to_owned(),
-                        _ => String::from("a body the core cannot run"),
-                    };
-                    return Err(fault(reason));
+                    Op::Nop => {}
+                    Op::Const(n) => self.push(self.constants[n as usize]),
+                    Op::Local(n) => self.push(self.cx.stack[base + usize::from(n)]),
+                    Op::SetLocal(n) => {
+                        let value = self.pop();
+                        self.cx.stack[base + usize::from(n)] = value;
+                    }
+                    Op::Global(n) => self.push(self.globals[usize::from(n)]),
+                    Op::SetGlobal(n) => {
+                        let value = self.pop();
+                        self.globals[usize::from(n)] = value;
+                    }
+                    Op::Pop => {
+                        self.pop();
+                    }
+                    Op::Jump(to) => pc = to as usize,
+                    Op::JumpIfFalse(to) => match self.pop() {
+                        Value::Bool(true) => {}
+                        Value::Bool(false) => pc = to as usize,
+                        _ => {
+                            sync!(pc);
+                            return Err(
+                                self.error("type_error", "an `if` condition must be a bool")
+                            );
+                        }
+                    },
+                    Op::WhileFalse(to) => match self.pop() {
+                        Value::Bool(true) => {}
+                        Value::Bool(false) => pc = to as usize,
+                        _ => {
+                            sync!(pc);
+                            return Err(
+                                self.error("type_error", "a `while` condition must be a bool")
+                            );
+                        }
+                    },
+                    Op::LoopStart(n) => self.cx.stack[base + usize::from(n)] = Value::Int(0),
+                    Op::Pass(n) => {
+                        let at = base + usize::from(n);
+                        if let Value::Int(count) = self.cx.stack[at] {
+                            self.cx.stack[at] = Value::Int(count.saturating_add(1));
+                        }
+                    }
+                    Op::Call(site) => {
+                        let call = &unit.calls[site as usize];
+                        if let Callee::Native { native, charged } = call.callee
+                            && call.argc == 2
+                        {
+                            let len = self.cx.stack.len();
+                            let args = [self.cx.stack[len - 2], self.cx.stack[len - 1]];
+                            if let Some(answer) = self.answer(&program, native, charged, &args) {
+                                let (value, fee) = check!(answer);
+                                self.cx.stack.truncate(len - 2);
+                                self.push(value);
+                                if let Some(units) = fee {
+                                    sync!(pc);
+                                    self.fee(units)?;
+                                }
+                                continue;
+                            }
+                        }
+                        sync!(pc);
+                        self.call(&program, unit, site)?;
+                        continue 'frames;
+                    }
+                    Op::Fused(n) => {
+                        let fused = unit.fused[n as usize];
+                        let Callee::Native { native, charged } =
+                            unit.calls[fused.site as usize].callee
+                        else {
+                            sync!(pc);
+                            return Err(fault("a fused call of no native"));
+                        };
+                        let operand = |vm: &Self, operand: Operand| match operand {
+                            Operand::Local(n) => vm.cx.stack[base + usize::from(n)],
+                            Operand::Const(n) => vm.constants[n as usize],
+                        };
+                        let len = self.cx.stack.len();
+                        let [first, second] = fused.operands;
+                        let args = match fused.pushes {
+                            2 => [operand(self, first), operand(self, second)],
+                            1 => [self.cx.stack[len - 1], operand(self, first)],
+                            _ => [self.cx.stack[len - 2], self.cx.stack[len - 1]],
+                        };
+                        pc = fused.call as usize + 1;
+                        let Some(answer) = self.answer(&program, native, charged, &args) else {
+                            // No inline answer: the pushes, then the call.
+                            for &pushed in &fused.operands[..usize::from(fused.pushes)] {
+                                self.push(operand(self, pushed));
+                            }
+                            sync!(pc);
+                            self.call(&program, unit, fused.site)?;
+                            continue 'frames;
+                        };
+                        let (value, fee) = check!(answer);
+                        self.cx.stack.truncate(len + usize::from(fused.pushes) - 2);
+                        self.push(value);
+                        if let Some(units) = fee {
+                            sync!(pc);
+                            self.fee(units)?;
+                        }
+                        match fused.then {
+                            Then::Push => {}
+                            Then::SetLocal(n) => {
+                                pc += 1;
+                                let value = self.pop();
+                                self.cx.stack[base + usize::from(n)] = value;
+                            }
+                            Then::Pop => {
+                                pc += 1;
+                                self.pop();
+                            }
+                            Then::Branch { to, looping } => {
+                                pc += 1;
+                                match self.pop() {
+                                    Value::Bool(true) => {}
+                                    Value::Bool(false) => pc = to as usize,
+                                    _ => {
+                                        sync!(pc);
+                                        let message = if looping {
+                                            "a `while` condition must be a bool"
+                                        } else {
+                                            "an `if` condition must be a bool"
+                                        };
+                                        return Err(self.error("type_error", message));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        sync!(pc);
+                        match self.operate(host, &program, unit, op)? {
+                            Some(stop) => return Ok(stop),
+                            None => continue 'frames,
+                        }
+                    }
                 }
             }
         }
+    }
+
+    /// An op's start on the exact path: whether the slice ends before it,
+    /// and otherwise its fixed event billed and its points seen. The slice
+    /// is tested after each step of any frame (`K-MACH-002`): at the next
+    /// step's start, and where a stepped frame's last statement ends by
+    /// falling off its body. A `return` statement's step runs on into its
+    /// caller's continuation; dispatching it is no step.
+    #[inline]
+    fn exact_step(&mut self, id: UnitId, unit: &Unit, pc: usize, op: Op, fresh: bool) -> Run<bool> {
+        let tested = unit.step[pc] || (matches!(op, Op::Fall) && !unit.covered);
+        if tested && !fresh && self.meter.spent() {
+            return Ok(true);
+        }
+        self.bill(unit, pc)?;
+        if self.watch.is_some() && !unit.points.is_empty() {
+            self.see(id, unit, pc);
+        }
+        Ok(false)
+    }
+
+    /// Runs an op [`Self::dispatch`] does not, the running frame's `pc`
+    /// past it. The frame may change. Gives the stop when the run stops.
+    #[inline(never)]
+    fn operate(
+        &mut self,
+        host: &mut dyn Host,
+        program: &Program,
+        unit: &Unit,
+        op: Op,
+    ) -> Run<Option<Stop>> {
+        match op {
+            Op::CellGet(n) => {
+                let cell = self.cell_at(n)?;
+                let value = self
+                    .heap
+                    .cell_get(cell)
+                    .map_err(|error| self.native(error))?;
+                self.push(value);
+            }
+            Op::CellSet(n) => {
+                let cell = self.cell_at(n)?;
+                let value = self.pop();
+                self.heap
+                    .cell_set(cell, value)
+                    .map_err(|error| self.native(error))?;
+            }
+            Op::Box(n) => {
+                let at = self.base() + usize::from(n);
+                let value = self.cx.stack[at];
+                let cell = self.cell(value)?;
+                self.cx.stack[at] = Value::Handle(cell);
+            }
+            Op::CaptureGet(n) => {
+                let cell = self.capture(n)?;
+                let value = self
+                    .heap
+                    .cell_get(cell)
+                    .map_err(|error| self.native(error))?;
+                self.push(value);
+            }
+            Op::CaptureSet(n) => {
+                let cell = self.capture(n)?;
+                let value = self.pop();
+                self.heap
+                    .cell_set(cell, value)
+                    .map_err(|error| self.native(error))?;
+            }
+            Op::MakeTuple(n) => self.make_tuple(n as usize)?,
+            Op::MakeList(n) => {
+                let values = self.take(n as usize);
+                let value = self.alloc(NewObject::List(values))?;
+                self.push(value);
+            }
+            Op::MakeSet(n) => {
+                let values = self.take(n as usize);
+                for value in &values {
+                    self.key(value)?;
+                }
+                let value = self.alloc(NewObject::Set(values))?;
+                self.push(value);
+            }
+            Op::MakeMap(n) => {
+                let flat = self.take(2 * n as usize);
+                let pairs: Vec<(Value, Value)> = flat
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|&[key, value]| (key, value))
+                    .collect();
+                for (key, _) in &pairs {
+                    self.key(key)?;
+                }
+                let value = self.alloc(NewObject::Map(pairs))?;
+                self.push(value);
+            }
+            Op::MakeRecord(shape) => {
+                let shape = Arc::clone(&unit.records[shape as usize]);
+                let values = self.take(shape.len());
+                let pairs = shape
+                    .iter()
+                    .map(|field| self.constants[*field as usize])
+                    .zip(values)
+                    .collect();
+                let value = self.alloc(NewObject::Record(pairs))?;
+                self.push(value);
+            }
+            Op::MakeClosure(n) => {
+                let site = &unit.closures[n as usize];
+                let mut captures = Vec::with_capacity(site.captures.len());
+                for capture in &site.captures {
+                    captures.push(match capture {
+                        crate::bytecode::program::Capture::Local(slot) => self.cell_at(*slot)?,
+                        crate::bytecode::program::Capture::Capture(k) => self.capture(*k)?,
+                    });
+                }
+                self.admit(crate::heap::meter::closure(captures.len()))?;
+                let closure = self.heap.closure(Arc::clone(&site.identity), captures);
+                self.push(Value::Closure(closure));
+            }
+            Op::Index => {
+                let index = self.pop();
+                let target = self.pop();
+                let value = self.index(target, index)?;
+                self.push(value);
+            }
+            Op::Field(field) => {
+                let target = self.pop();
+                let name = self.constants[field as usize];
+                let value = self.field(target, name)?;
+                self.push(value);
+            }
+            Op::SetIndex => {
+                let index = self.pop();
+                let target = self.pop();
+                let value = self.pop();
+                self.set_index(target, index, value)?;
+            }
+            Op::SetIndexPlaceFirst => {
+                let value = self.pop();
+                let index = self.pop();
+                let target = self.pop();
+                self.set_index(target, index, value)?;
+            }
+            Op::SetField(field) => {
+                let target = self.pop();
+                let value = self.pop();
+                self.set_field(target, self.constants[field as usize], value)?;
+            }
+            Op::SetFieldPlaceFirst(field) => {
+                let value = self.pop();
+                let target = self.pop();
+                self.set_field(target, self.constants[field as usize], value)?;
+            }
+            Op::RemoveIndex => {
+                let index = self.pop();
+                let target = self.pop();
+                self.remove_index(target, index)?;
+            }
+            Op::RemoveField(field) => {
+                let target = self.pop();
+                self.remove_field(target, self.constants[field as usize])?;
+            }
+            Op::Call(site) => self.call(program, unit, site)?,
+            Op::Return => {
+                let value = self.pop();
+                if let Some(stop) = self.ret(host, value, true)? {
+                    return Ok(Some(stop));
+                }
+            }
+            Op::Fall => {
+                if let Some(stop) = self.ret(host, Value::Null, false)? {
+                    return Ok(Some(stop));
+                }
+            }
+            Op::Raise => {
+                let value = self.pop();
+                return Err(Flow::Raise(value));
+            }
+            Op::TryEnter(to) => {
+                let frame = (self.cx.frames.len() - 1) as u32;
+                let height = self.cx.stack.len() as u32;
+                self.cx.handlers.push(Handler {
+                    frame,
+                    pc: to,
+                    height,
+                });
+            }
+            Op::TryExit => {
+                self.cx.handlers.pop();
+            }
+            Op::ForOpen(n) => self.for_open(unit, n)?,
+            Op::ForNext(n) => self.for_next(unit, n)?,
+            Op::ProtoOpen(n) => self.proto_open(unit, n)?,
+            Op::ProtoStep(n) => self.proto_step(unit, n)?,
+            Op::ProtoGuard(n) => self.proto_guard(unit, n)?,
+            Op::ProtoChecked(n) => self.proto_checked(unit, n)?,
+            Op::ProtoPull(n) => self.proto_pull(unit, n)?,
+            Op::ProtoMore(n) => self.proto_more(unit, n)?,
+            Op::Action(n) => {
+                self.meter.leave();
+                self.exact = true;
+                if let Some(stop) = self.act(host, unit, n)? {
+                    return Ok(Some(stop));
+                }
+            }
+            Op::Print => {
+                let value = self.pop();
+                let datum = self.copy_out(&value)?;
+                host.print(&datum);
+            }
+            Op::Finish => {
+                let value = self.pop();
+                let datum = self.copy_out(&value)?;
+                return Ok(Some(Stop::Finish(datum)));
+            }
+            Op::Fail => {
+                let value = self.pop();
+                let datum = self.copy_out(&value)?;
+                return Ok(Some(Stop::Fail(datum)));
+            }
+            Op::Unavailable(reason) => {
+                let reason = match &program.constants[reason as usize] {
+                    Constant::Text(text) => text.to_string(),
+                    Constant::Immediate(Value::Text(text)) => text.as_str().to_owned(),
+                    _ => String::from("a body the core cannot run"),
+                };
+                return Err(fault(reason));
+            }
+            Op::Block(_)
+            | Op::Nop
+            | Op::Const(_)
+            | Op::Local(_)
+            | Op::SetLocal(_)
+            | Op::Global(_)
+            | Op::SetGlobal(_)
+            | Op::Pop
+            | Op::Jump(_)
+            | Op::JumpIfFalse(_)
+            | Op::WhileFalse(_)
+            | Op::LoopStart(_)
+            | Op::Pass(_)
+            | Op::Fused(_) => return Err(fault("a dispatched op ran out of line")),
+        }
+        Ok(None)
     }
 
     /// What op `pc` of unit `id`'s points see, before it runs.
@@ -1115,8 +1308,8 @@ impl<H: Heap> Vm<H> {
         };
         self.heap.release(self.frames[frame.unit as usize]);
         self.drop_handlers();
-        if let Some(bill) = &frame.bill {
-            self.complete(bill.charge, &bill.args, Some(&value))?;
+        if let Some(bill) = frame.bill {
+            self.settle(bill, Some(&value))?;
         }
         self.cx.stack.truncate(frame.base as usize);
         if let Some(datum) = leaving {

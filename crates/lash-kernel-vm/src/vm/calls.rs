@@ -48,13 +48,9 @@ impl<H: Heap> Vm<H> {
 
     /// The bill a call of formula `charge` owes, over its top `argc`
     /// operands.
-    fn owed(&self, charge: Option<u32>, argc: usize) -> Option<Bill> {
+    fn owed(&mut self, charge: Option<u32>, argc: usize) -> Option<Bill> {
         let charge = charge.filter(|_| !self.paced)?;
-        let from = self.cx.stack.len() - argc;
-        Some(Bill {
-            charge,
-            args: self.cx.stack[from..].into(),
-        })
+        Some(self.owe(charge, argc))
     }
 
     /// Calls the closure or function value below the top `argc` operands
@@ -118,38 +114,17 @@ impl<H: Heap> Vm<H> {
         argc: usize,
         charged: bool,
     ) -> Run<()> {
-        let entry: &NativeEntry = &program.natives[native as usize];
-        if let Some(inline) = entry.scalar
-            && let Some(value) = self.scalar(inline, argc, usize::from(entry.params))
-        {
-            // The declared inline answer: the native's own, with no work,
-            // allocation or depth to count (`K-LIB-011`).
-            let from = self.cx.stack.len() - argc;
-            let fee = if charged && !self.paced {
-                let args = &self.cx.stack[from..];
-                match inline {
-                    InlineOperation::Kind | InlineOperation::Not | InlineOperation::Length(_) => {
-                        Some(self.formula(entry.charge, args, Some(&value))?)
-                    }
-                    _ => {
-                        let sized = |value: &Value| crate::data::immediate_size(value).unwrap_or(0);
-                        let sizes = [sized(&args[0]), sized(&args[1]), sized(&value)];
-                        match program.charges[entry.charge as usize].pair(sizes) {
-                            Some(units) => Some(units),
-                            None => Some(self.formula(entry.charge, args, Some(&value))?),
-                        }
-                    }
-                }
-            } else {
-                None
-            };
-            self.cx.stack.truncate(from);
+        let len = self.cx.stack.len();
+        if let Some(answer) = self.answer(program, native, charged, &self.cx.stack[len - argc..]) {
+            let (value, fee) = answer?;
+            self.cx.stack.truncate(len - argc);
             self.push(value);
             if let Some(units) = fee {
                 self.fee(units)?;
             }
             return Ok(());
         }
+        let entry: &NativeEntry = &program.natives[native as usize];
         let params = usize::from(entry.params);
         for _ in argc..params {
             self.push(Value::Absent);
@@ -283,14 +258,11 @@ impl<H: Heap> Vm<H> {
                 let Some(body) = entry.body else {
                     return Err(fault("a native with no kernel body declined"));
                 };
-                let bill = charged.then(|| Bill {
-                    charge: entry.charge,
-                    args: self.cx.stack[from..].into(),
-                });
+                let argc = self.cx.stack.len() - from;
+                let bill = charged.then(|| self.owe(entry.charge, argc));
                 // The body is a frame: the caller's block is left at the
                 // call, and the caller continues event by event.
                 self.cancel();
-                let argc = self.cx.stack.len() - from;
                 self.enter(body, argc, None, bill)
             }
             Err(NativeError::Retry(_)) => {
@@ -301,43 +273,66 @@ impl<H: Heap> Vm<H> {
         }
     }
 
-    /// The inline answer of a native declaring `inline` over its top two
-    /// operands, when they are in its declared domain and the operation
-    /// has an immediate answer.
-    #[inline]
-    fn scalar(&self, inline: InlineOperation, argc: usize, params: usize) -> Option<Value> {
-        match inline {
-            InlineOperation::Kind | InlineOperation::Not if argc == 1 && params == 1 => {
-                return inline.answer(&self.cx.stack[self.cx.stack.len() - argc..]);
+    /// The inline answer of native `native` over `args`, and the fee the
+    /// call bills when `charged`: the native's own answer, with no work,
+    /// allocation or depth to count (R8, `K-LIB-011`). `None` where the
+    /// native declares no inline answer over them.
+    #[inline(always)]
+    pub(super) fn answer(
+        &self,
+        program: &Program,
+        native: u32,
+        charged: bool,
+        args: &[Value],
+    ) -> Option<Run<(Value, Option<u64>)>> {
+        let entry = &program.natives[native as usize];
+        let inline = entry.scalar?;
+        if args.len() != usize::from(entry.params) {
+            return None;
+        }
+        let value = match inline {
+            InlineOperation::Scalar { operation, .. } if args.len() == 2 => {
+                if !inline.accepts(args) {
+                    return None;
+                }
+                match *args {
+                    [Value::Int(a), Value::Int(b)] => {
+                        lash_kernel_doc::scalar::ints(operation, a, b)
+                    }
+                    [Value::Float(a), Value::Float(b)] => {
+                        lash_kernel_doc::scalar::floats(operation, a, b)
+                    }
+                    _ => None,
+                }
             }
-            InlineOperation::Length(_) if argc == 1 && params == 1 => {
-                let args = &self.cx.stack[self.cx.stack.len() - argc..];
+            InlineOperation::Kind | InlineOperation::Not if args.len() == 1 => inline.answer(args),
+            InlineOperation::Length(_) if args.len() == 1 => {
                 let semantics = self.heap.semantics();
-                return inline
+                inline
                     .answer_read(Args::new(args, self.heap.objects(), &semantics))
                     .ok()
-                    .flatten();
+                    .flatten()
             }
-            InlineOperation::Same if argc == 2 && params == 2 => {
-                return inline.answer(&self.cx.stack[self.cx.stack.len() - argc..]);
-            }
-            _ => {}
-        }
-        let InlineOperation::Scalar { operation, .. } = inline else {
-            return None;
-        };
-        if argc != 2 || params != 2 {
-            return None;
-        }
-        let args = &self.cx.stack[self.cx.stack.len() - 2..];
-        if !inline.accepts(args) {
-            return None;
-        }
-        match *args {
-            [Value::Int(a), Value::Int(b)] => lash_kernel_doc::scalar::ints(operation, a, b),
-            [Value::Float(a), Value::Float(b)] => lash_kernel_doc::scalar::floats(operation, a, b),
+            InlineOperation::Same if args.len() == 2 => inline.answer(args),
             _ => None,
+        }?;
+        if !charged || self.paced {
+            return Some(Ok((value, None)));
         }
+        let units = match inline {
+            InlineOperation::Kind | InlineOperation::Not | InlineOperation::Length(_) => {
+                self.formula(entry.charge, args, Some(&value))
+            }
+            _ => {
+                let sized = |value: &Value| crate::data::immediate_size(value).unwrap_or(0);
+                let sizes = [sized(&args[0]), sized(&args[1]), sized(&value)];
+                match program.charges[entry.charge as usize].pair(sizes) {
+                    Some(units) => Ok(units),
+                    None => self.formula(entry.charge, args, Some(&value)),
+                }
+            }
+        };
+        Some(units.map(|units| (value, Some(units))))
     }
 
     /// Bills a raising call's formula with a result of size 0, and drops

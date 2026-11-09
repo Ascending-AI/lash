@@ -269,6 +269,8 @@ impl Unit {
                         .is_some_and(|site| local(site.slot.saturating_add(5)))
                 }
                 Op::Action(n) => (n as usize) < self.actions.len(),
+                // Fusion writes fused runs after validation.
+                Op::Fused(_) => false,
             };
             if !fits {
                 return Err(at(pc, format!("{op:?} names a missing entry")));
@@ -435,7 +437,8 @@ impl Unit {
             | Op::LoopStart(_)
             | Op::Pass(_)
             | Op::Fall
-            | Op::Unavailable(_) => (0, 0),
+            | Op::Unavailable(_)
+            | Op::Fused(_) => (0, 0),
             Op::Const(_)
             | Op::Local(_)
             | Op::CellGet(_)
@@ -561,6 +564,7 @@ mod tests {
                 name: Arc::from("main"),
                 site: Site::new(SiteUnit::Main, Vec::new()),
                 points: Vec::new(),
+                fused: Vec::new(),
             }],
             constants: vec![Constant::Immediate(Value::Bool(true))],
             natives: Vec::new(),

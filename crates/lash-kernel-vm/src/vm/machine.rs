@@ -118,7 +118,7 @@ impl Machine for CoreMachine {
         };
         let convention = export.map(|export| export.convention.clone());
         let registry = program.library.registry().clone();
-        let code = crate::bytecode::conventions::compile_selected(
+        let mut code = crate::bytecode::conventions::compile_selected(
             &document,
             &registry,
             program.link,
@@ -127,6 +127,7 @@ impl Machine for CoreMachine {
         )
         .map_err(linked)?;
         let heights = crate::bytecode::validate::validate(&code).map_err(linked)?;
+        crate::bytecode::fuse::fuse(&mut code);
         let paced = matches!(bounds.charge, Charge::Off);
         let operations = operations(&program, &code, start.modes)?;
         let mut vm = Vm::new(

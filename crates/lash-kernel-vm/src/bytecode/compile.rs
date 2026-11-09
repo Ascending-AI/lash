@@ -925,6 +925,7 @@ impl<'a> Compiler<'a> {
             name,
             site: Site::new(site, Vec::new()),
             points,
+            fused: Vec::new(),
         }
     }
 

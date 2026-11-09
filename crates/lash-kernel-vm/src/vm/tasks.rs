@@ -346,9 +346,9 @@ impl<H: Heap> Vm<H> {
     fn standing<'p>(&'p self, cx: &Context, at: usize) -> Option<&'p Mark> {
         let frame = cx.frames.get(at)?;
         let unit = &self.program.units[frame.unit as usize];
-        match unit.ops.get((frame.pc as usize).checked_sub(1)?)? {
-            Op::Call(call) => Some(&unit.calls[*call as usize].mark),
-            Op::Action(action) => Some(&unit.action_marks[*action as usize]),
+        match unit.original((frame.pc as usize).checked_sub(1)?)? {
+            Op::Call(call) => Some(&unit.calls[call as usize].mark),
+            Op::Action(action) => Some(&unit.action_marks[action as usize]),
             _ => None,
         }
     }
