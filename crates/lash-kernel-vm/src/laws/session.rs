@@ -174,3 +174,39 @@ fn an_untouched_binding_survives_a_seal_and_a_cold_reopen() {
     );
     assert_eq!(third.result, Datum::List(vec![int(2), int(4)]));
 }
+
+/// A host's diff of two sessions never leaves out a binding that differs:
+/// a rebind, a new binding, and an object mutated in place under every
+/// binding that shares it; a binding whose value and rows are as they
+/// were is not reported.
+#[test]
+fn a_session_diff_reports_rebinds_and_in_place_mutations() {
+    let source = Source::default();
+    let first = cell(
+        "main {\n  let xs = [1]\n  let ys = xs\n  let n = 3\n  let m = [4]\n  return 0\n}",
+        start(None, Vec::new()),
+        &source,
+    );
+    let second = cell(
+        "main {\n  set xs[0] = 5\n  set n = 7\n  let fresh = 1\n  return 0\n}",
+        start(first.carry.clone(), Vec::new()),
+        &source,
+    );
+    let editor =
+        crate::SessionEditor::open(second.carry.as_ref(), Box::new(source.clone())).unwrap();
+    let changed: Vec<(String, (bool, bool))> = editor
+        .changed(first.carry.as_ref(), second.carry.as_ref().unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|(name, held)| (name.as_str().to_owned(), held))
+        .collect();
+    assert_eq!(
+        changed,
+        vec![
+            ("fresh".to_owned(), (false, true)),
+            ("n".to_owned(), (true, true)),
+            ("xs".to_owned(), (true, true)),
+            ("ys".to_owned(), (true, true)),
+        ]
+    );
+}

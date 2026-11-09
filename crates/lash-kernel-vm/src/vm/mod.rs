@@ -12,6 +12,7 @@
 pub(crate) mod calls;
 pub(crate) mod charge;
 pub(crate) mod datum;
+pub(crate) use datum::Copied;
 mod digests;
 pub(crate) mod frames;
 pub(crate) mod inline;
@@ -144,20 +145,6 @@ pub(crate) enum Restart {
 pub(crate) struct Completion {
     from: Option<usize>,
     units: Option<u64>,
-}
-
-/// A copy out of the run, read whole before any of it bills: its deep
-/// size (none under `Charge::Off`) and the copy, or the raise it makes.
-pub(crate) struct Copied {
-    size: Option<u64>,
-    datum: Result<Datum, crate::data::Raised>,
-}
-
-impl Copied {
-    /// Whether the copy raises once billed.
-    pub(crate) fn raises(&self) -> bool {
-        self.datum.is_err()
-    }
 }
 
 impl Restart {
@@ -868,61 +855,6 @@ impl<H: Heap> Vm<H> {
             Some(short) => Ok(Value::Text(short)),
             None => self.alloc(NewObject::LongText(text.into())),
         }
-    }
-
-    /// Copies `value` out of the run, billing its deep size first
-    /// (`K-EFF-002`, `K-CHG-005`).
-    pub(crate) fn copy_out(&mut self, value: &Value) -> Run<Datum> {
-        let copied = self.copied(value)?;
-        self.bill_copy(copied)
-    }
-
-    /// Every read a copy of `value` out of the run makes: its deep size
-    /// and its copy, neither billed nor raised yet.
-    pub(crate) fn copied(&self, value: &Value) -> Run<Copied> {
-        let size = if self.paced {
-            None
-        } else {
-            Some(crate::data::deep_size(self.heap.arena(), value).map_err(read)?)
-        };
-        let datum = match crate::data::copy_out(self.heap.arena(), self.value_depth, value) {
-            Ok(datum) => Ok(datum),
-            Err(crate::data::CopyError::Raised(raised)) => Err(raised),
-            Err(crate::data::CopyError::Cold { object, chunk }) => {
-                return Err(Flow::Cold { object, chunk });
-            }
-            Err(crate::data::CopyError::Heap(error)) => return Err(fault(error.to_string())),
-        };
-        Ok(Copied { size, datum })
-    }
-
-    /// Bills a copy's deep size, then gives the copy or raises its error.
-    pub(crate) fn bill_copy(&mut self, copied: Copied) -> Run<Datum> {
-        if let Some(size) = copied.size {
-            self.fee(size)?;
-        }
-        copied
-            .datum
-            .map_err(|raised| self.error(raised.kind, &raised.message))
-    }
-
-    /// Copies `value`, which no frame holds, out of a run that has
-    /// stopped, loading each chunk it reaches cold.
-    pub(crate) fn copy_stopped(&mut self, value: Value) -> Result<Datum, String> {
-        self.held.push(value);
-        let copied = loop {
-            match crate::data::copy_out(self.heap.arena(), self.value_depth, &value) {
-                Err(crate::data::CopyError::Cold { object, chunk }) => {
-                    if let Err(stop) = self.reload(object, chunk) {
-                        break Err(format!("{stop:?}"));
-                    }
-                }
-                Ok(datum) => break Ok(datum),
-                Err(error) => break Err(format!("{error:?}")),
-            }
-        };
-        self.held.pop();
-        copied
     }
 
     // --- Frames.

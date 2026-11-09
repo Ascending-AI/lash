@@ -1,11 +1,11 @@
 //! Bounded host reads: a prompt never copies an unbounded heap value.
 
-use lash_kernel_state::paged::SemanticHeap;
-use std::ops::ControlFlow;
+use lash_kernel_doc::arena::Body;
+use lash_kernel_doc::heap::HeapFault;
+use lash_kernel_doc::{NativeError, Retry, Value};
+use lash_kernel_state::arena::Arena;
 
-use lash_kernel_doc::heap::{Element, EntityId, IntRef, PageReader, PageValue};
-
-use super::{HeapFault, SessionEditor, SessionValue, metadata_key};
+use super::{CopyError, SessionEditor, SessionValue};
 
 impl SessionEditor {
     /// Reads at most `budget` bytes of value payload and node allowance.
@@ -20,20 +20,28 @@ impl SessionEditor {
         name: &lash_kernel_value::names::Name,
         budget: usize,
     ) -> Result<Option<SessionValue>, HeapFault> {
-        let Some(record) = self.bindings.get(&metadata_key(name), self.heap.pages())? else {
+        let Some(value) = self.bindings.get(name).copied() else {
             return Ok(None);
         };
-        let value = match record.value {
-            super::BoundRecord::Value(value) => value,
-            super::BoundRecord::Shared(id) => self.heap.variable_get(id)?,
-            super::BoundRecord::Captured(_) => {
-                return Err(HeapFault::Malformed(
-                    "borrowed frame capture in a session binding".into(),
-                ));
-            }
+        let depth = self.depth.min(64);
+        let read = self.warm(value, |arena| {
+            let (kind, extent) = extent(arena, &value)?;
+            let fits = fits(
+                arena,
+                &value,
+                &mut (budget as u64),
+                &mut Vec::new(),
+                0,
+                depth,
+            )?;
+            Ok((kind, extent, fits))
+        });
+        let (kind, extent, fits) = match read {
+            Ok(read) => read,
+            Err(CopyError::Heap(fault)) => return Err(fault),
+            Err(other) => return Err(HeapFault::Malformed(format!("{other:?}"))),
         };
-        let (kind, extent) = extent(&self.heap, &value)?;
-        if fits(&self.heap, &value, &mut (budget as u64), &mut Vec::new(), 0)? {
+        if fits {
             self.get(name)
         } else {
             Ok(Some(SessionValue::Unpreviewed { kind, extent }))
@@ -41,17 +49,32 @@ impl SessionEditor {
     }
 }
 
-fn extent(heap: &impl PageReader, value: &PageValue) -> Result<(&'static str, u64), HeapFault> {
+fn extent(arena: &Arena, value: &Value) -> Result<(&'static str, u64), NativeError> {
+    let semantics = arena.semantics();
     Ok(match value {
-        PageValue::Text(text) => ("text", text.summary.utf8_bytes),
-        PageValue::Bytes(bytes) => ("bytes", bytes.len),
-        PageValue::Int(IntRef::Paged { summary, .. }) => ("integer", summary.bits),
-        PageValue::Tuple(tuple) => ("tuple", tuple.summary.len),
-        PageValue::List(id) => ("list", heap.len(*id)?),
-        PageValue::Map(id) => ("map", heap.len(*id)?),
-        PageValue::Set(id) => ("set", heap.len(*id)?),
-        PageValue::Record(id) => ("record", heap.len(*id)?),
-        PageValue::Error(_) => ("error", 1),
+        Value::Text(_) | Value::LongText(_) => ("text", semantics.text(value)?.len() as u64),
+        Value::Bytes(handle) => ("bytes", semantics.bytes(*handle)?.len() as u64),
+        Value::BigInt(_) => (
+            "integer",
+            semantics
+                .integer(value)?
+                .map_or(0, |integer| integer.bits()),
+        ),
+        Value::Tuple(handle)
+        | Value::List(handle)
+        | Value::Map(handle)
+        | Value::Set(handle)
+        | Value::Record(handle) => {
+            let kind = match value {
+                Value::Tuple(_) => "tuple",
+                Value::List(_) => "list",
+                Value::Map(_) => "map",
+                Value::Set(_) => "set",
+                _ => "record",
+            };
+            (kind, arena.len(*handle)?)
+        }
+        Value::Error(_) => ("error", 1),
         _ => ("value", 1),
     })
 }
@@ -66,77 +89,135 @@ fn take(remaining: &mut u64, bytes: u64) -> bool {
     }
 }
 
+/// `handle`'s body, resident.
+fn resident(
+    arena: &Arena,
+    handle: lash_kernel_doc::arena::ArenaHandle,
+) -> Result<&Body, NativeError> {
+    match arena.body(handle)? {
+        Body::Cold(_) => Err(Retry::Cold {
+            object: handle,
+            chunk: 0,
+        }
+        .into()),
+        body => Ok(body),
+    }
+}
+
 fn fits(
-    heap: &impl PageReader,
-    value: &PageValue,
+    arena: &Arena,
+    value: &Value,
     remaining: &mut u64,
-    path: &mut Vec<EntityId>,
+    path: &mut Vec<lash_kernel_doc::arena::ArenaHandle>,
     depth: usize,
-) -> Result<bool, HeapFault> {
+    limit: usize,
+) -> Result<bool, NativeError> {
     // Every copied node needs space even when its serialized value is tiny.
     // Depth stops here too, before an adversarial immutable tuple chain can
     // recurse past the host stack. The full reader still classifies cycles
     // and non-data values as opaque when they fit this inspection.
-    if depth >= heap.value_depth_limit().min(64) || !take(remaining, 64) {
+    if depth >= limit || !take(remaining, 64) {
         return Ok(false);
     }
+    let semantics = arena.semantics();
     Ok(match value {
-        PageValue::Text(text) => take(remaining, text.summary.utf8_bytes),
-        PageValue::Bytes(bytes) => take(remaining, bytes.len),
-        PageValue::Int(IntRef::Paged { summary, .. }) => take(remaining, summary.bits.div_ceil(8)),
-        PageValue::Int(IntRef::Inline(integer)) => take(remaining, integer.bits().div_ceil(8)),
-        PageValue::Timestamp(timestamp) => {
-            take(remaining, timestamp.nanoseconds.bits().div_ceil(8))
-        }
-        PageValue::Handle(handle) => take(remaining, (handle.kind.len() + handle.id.len()) as u64),
-        PageValue::Error(error) => {
-            take(remaining, error.kind.summary.utf8_bytes)
-                && take(remaining, error.message.summary.utf8_bytes)
-                && fits(heap, &heap.error_data(error)?, remaining, path, depth + 1)?
-        }
-        PageValue::Tuple(tuple) => {
-            if tuple.summary.len > *remaining / 64 {
+        Value::Text(_) | Value::LongText(_) => take(remaining, semantics.text(value)?.len() as u64),
+        Value::Bytes(handle) => take(remaining, semantics.bytes(*handle)?.len() as u64),
+        Value::Int(_) | Value::BigInt(_) => take(
+            remaining,
+            semantics
+                .integer(value)?
+                .map_or(0, |integer| integer.bits().div_ceil(8)),
+        ),
+        Value::Timestamp(_) | Value::BigTimestamp(_) => take(
+            remaining,
+            semantics
+                .nanoseconds(value)?
+                .map_or(0, |nanoseconds| nanoseconds.bits().div_ceil(8)),
+        ),
+        Value::Handle(handle) => match resident(arena, *handle)? {
+            Body::Handle(handle) => take(remaining, (handle.kind.len() + handle.id.len()) as u64),
+            _ => true,
+        },
+        Value::Error(error) => match resident(arena, *error)? {
+            Body::Error(error) => {
+                take(remaining, semantics.text(&error.kind)?.len() as u64)
+                    && take(remaining, semantics.text(&error.message)?.len() as u64)
+                    && fits(arena, &error.data, remaining, path, depth + 1, limit)?
+            }
+            _ => true,
+        },
+        Value::Tuple(handle) => {
+            if arena.len(*handle)? > *remaining / 64 {
                 return Ok(false);
             }
-            let mut fits_all = Ok(true);
-            heap.tuple_visit(tuple, &mut |member| {
-                fits_all = fits(heap, member, remaining, path, depth + 1);
-                if matches!(fits_all, Ok(true)) {
-                    ControlFlow::Continue(())
-                } else {
-                    ControlFlow::Break(())
+            for member in arena.sequence(*handle)? {
+                if !fits(arena, member, remaining, path, depth + 1, limit)? {
+                    return Ok(false);
                 }
-            })?;
-            fits_all?
+            }
+            true
         }
-        PageValue::List(id) | PageValue::Map(id) | PageValue::Set(id) | PageValue::Record(id) => {
-            if path.contains(id) {
+        Value::List(handle) | Value::Map(handle) | Value::Set(handle) | Value::Record(handle) => {
+            if path.contains(handle) {
                 return Ok(true);
             }
-            if heap.len(*id)? > *remaining / 64 {
+            if arena.len(*handle)? > *remaining / 64 {
                 return Ok(false);
             }
-            path.push(*id);
-            let mut fits_all = Ok(true);
-            heap.visit(*id, &mut |member| {
-                fits_all = (|| match member {
-                    Element::Item(value) => fits(heap, value, remaining, path, depth + 1),
-                    Element::Entry { key, value } => {
-                        Ok(fits(heap, key, remaining, path, depth + 1)?
-                            && fits(heap, value, remaining, path, depth + 1)?)
-                    }
-                    Element::Field { name, value } => Ok(take(remaining, name.summary.utf8_bytes)
-                        && fits(heap, value, remaining, path, depth + 1)?),
-                })();
-                if matches!(fits_all, Ok(true)) {
-                    ControlFlow::Continue(())
-                } else {
-                    ControlFlow::Break(())
+            path.push(*handle);
+            let all = match value {
+                Value::List(_) => members(
+                    arena,
+                    arena.sequence(*handle)?,
+                    remaining,
+                    path,
+                    depth,
+                    limit,
+                ),
+                Value::Set(_) => {
+                    let members_of: Vec<Value> =
+                        arena.entries(*handle)?.iter().step_by(2).copied().collect();
+                    members(arena, &members_of, remaining, path, depth, limit)
                 }
-            })?;
+                Value::Map(_) => members(
+                    arena,
+                    arena.entries(*handle)?,
+                    remaining,
+                    path,
+                    depth,
+                    limit,
+                ),
+                _ => (|| {
+                    for pair in arena.entries(*handle)?.as_chunks::<2>().0 {
+                        if !(take(remaining, semantics.text(&pair[0])?.len() as u64)
+                            && fits(arena, &pair[1], remaining, path, depth + 1, limit)?)
+                        {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                })(),
+            }?;
             path.pop();
-            fits_all?
+            all
         }
         _ => true,
     })
+}
+
+fn members(
+    arena: &Arena,
+    values: &[Value],
+    remaining: &mut u64,
+    path: &mut Vec<lash_kernel_doc::arena::ArenaHandle>,
+    depth: usize,
+    limit: usize,
+) -> Result<bool, NativeError> {
+    for value in values {
+        if !fits(arena, value, remaining, path, depth + 1, limit)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
