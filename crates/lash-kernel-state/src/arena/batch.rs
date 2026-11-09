@@ -215,6 +215,10 @@ impl PreparedValueProof {
     }
 }
 
+/// Batch members by arena slot index. Slots are reused, so the keys are
+/// sparse; the crate's fast hasher replaces SipHash for these u32 keys.
+type Slots<V> = HashMap<u32, V, foldhash::fast::RandomState>;
+
 pub(super) struct Entry {
     pub(super) handle: ArenaHandle,
     body: Body,
@@ -223,7 +227,7 @@ pub(super) struct Entry {
 struct View<'a> {
     arena: &'a Arena,
     entries: &'a [Entry],
-    indices: &'a HashMap<u32, usize>,
+    indices: &'a Slots<usize>,
 }
 impl Bodies for View<'_> {
     fn get(&self, handle: ArenaHandle) -> Option<&Body> {
@@ -267,7 +271,7 @@ pub struct PreparedBatch {
 /// An exclusive preparation guard. Splitting it transfers the registration to
 /// the canonical journal and the storage recipe to its infallible closure.
 pub struct PreparedInstallation<'a> {
-    holdings: HashMap<u32, Holding>,
+    holdings: Slots<Holding>,
     observed: Vec<ArenaHandle>,
     pub(super) registration: Registration<'a>,
     pub(super) batch: PreparedBatch,
@@ -621,7 +625,7 @@ impl Arena {
         let tokens = registration.arena().tokens;
         let mut entries = Vec::new();
         reserve(&mut entries, len)?;
-        let mut indices = HashMap::default();
+        let mut indices = Slots::default();
         indices.try_reserve(len).map_err(|_| exhausted())?;
         let mut allocations = 0u64;
         for at in 0..len {
@@ -780,7 +784,7 @@ impl Arena {
             empty_tuple: None,
         };
         Ok(PreparedInstallation {
-            holdings: HashMap::default(),
+            holdings: Slots::default(),
             observed: Vec::new(),
             registration,
             batch,
