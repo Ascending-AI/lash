@@ -977,8 +977,8 @@ fn a_root_stated_under_another_format_is_refused() {
         ),
         (
             "PAGE_DIGEST_DOMAIN",
-            FormatValue::Text("lash-blob/v3".into()),
-            FormatValue::Text("lash-blob/v2".into()),
+            FormatValue::Text("successor-domain".into()),
+            FormatValue::Text("predecessor-domain".into()),
         ),
     ];
     for (surface, expected, observed) in cases {
