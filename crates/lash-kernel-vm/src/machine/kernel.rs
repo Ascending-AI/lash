@@ -54,14 +54,12 @@ impl KernelMachine {
         }
     }
 
-    /// Starts a run under `limits`, the host's narrowing of the native
-    /// recursive safety ceilings.
+    /// [`Machine::start`] under the deployment's data `limits` instead of
+    /// the standard ones; a reopened run decodes under the standard ones.
     ///
     /// # Errors
     ///
-    /// [`Machine::start`]'s; [`StartError::Linked`] when `limits` differ
-    /// from [`KernelDataLimits::standard`], the only ceilings the core's
-    /// natives and copies are built against.
+    /// [`Machine::start`]'s.
     pub fn start_with_data_limits(
         program: Program,
         bounds: Bounds,
@@ -69,12 +67,7 @@ impl KernelMachine {
         limits: KernelDataLimits,
         source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
-        if limits != KernelDataLimits::standard() {
-            return Err(StartError::Linked {
-                problem: "the kernel runs only under the standard data limits".into(),
-            });
-        }
-        Self::start(program, bounds, start, source)
+        CoreMachine::start_with_data_limits(program, bounds, start, limits, source).map(Self::of)
     }
 
     /// Records every charge the run makes from here on in `tape`, in order

@@ -11,7 +11,7 @@ use lash_kernel_doc::{
     FunctionRegistry, NativeCall, NativeError, NativeFunction, NewObject, Value, parse_definition,
 };
 
-use lash_kernel_state::paged::{AllocationCensus as _, PageAnswer, PageBody, PageSource};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_value::names::FunctionId;
 use std::sync::Arc;
 

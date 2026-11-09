@@ -203,9 +203,6 @@ fn an_exhausted_seal_budget_preserves_both_continuations() {
     );
     assert_eq!(encode_body(&prior), bytes);
     let (program, _) = embedder.program(true);
-    let old_heap =
-        PagedHeap::open_header(prior.heap, Box::new(embedder.source.clone()), EditEpoch(2))
-            .unwrap();
     let mut old = crate::KernelMachine::open_in(
         program,
         Setup::default().bounds,

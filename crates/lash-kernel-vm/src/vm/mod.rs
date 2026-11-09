@@ -170,11 +170,6 @@ impl Restart {
     }
 }
 
-/// The run's limits on values (`K-VAL-034`).
-pub(crate) fn value_depth() -> usize {
-    KernelDataLimits::standard().value_depth()
-}
-
 /// The machine state of one instance over a heap `H`: the program, the
 /// heap, the meter and the running task's context. The scheduler keeps the
 /// other tasks' contexts in [`Vm::tasks`] and swaps them in.
@@ -212,6 +207,9 @@ pub(crate) struct Vm<H: Heap> {
     /// The next op is the first of a run call: its step is not tested.
     fresh: bool,
     pub call_depth: u32,
+    /// The deepest value the run builds or decodes (`K-VAL-034`): the
+    /// deployment's data limit at a start, the standard one at an open.
+    pub value_depth: usize,
     pub limiter: Option<Box<dyn ChargeLimiter>>,
     /// What decides where an allocation passes the memory bound.
     pub memory_limiter: Option<Box<dyn crate::interface::MemoryLimiter>>,
@@ -337,6 +335,7 @@ impl<H: Heap> Vm<H> {
             exact: true,
             fresh: false,
             call_depth,
+            value_depth: KernelDataLimits::standard().value_depth(),
             limiter: None,
             memory_limiter: None,
             refused: None,
@@ -886,7 +885,7 @@ impl<H: Heap> Vm<H> {
         } else {
             Some(crate::data::deep_size(self.heap.arena(), value).map_err(read)?)
         };
-        let datum = match crate::data::copy_out(self.heap.arena(), value_depth(), value) {
+        let datum = match crate::data::copy_out(self.heap.arena(), self.value_depth, value) {
             Ok(datum) => Ok(datum),
             Err(crate::data::CopyError::Raised(raised)) => Err(raised),
             Err(crate::data::CopyError::Cold { object, chunk }) => {
@@ -912,7 +911,7 @@ impl<H: Heap> Vm<H> {
     pub(crate) fn copy_stopped(&mut self, value: Value) -> Result<Datum, String> {
         self.held.push(value);
         let copied = loop {
-            match crate::data::copy_out(self.heap.arena(), value_depth(), &value) {
+            match crate::data::copy_out(self.heap.arena(), self.value_depth, &value) {
                 Err(crate::data::CopyError::Cold { object, chunk }) => {
                     if let Err(stop) = self.reload(object, chunk) {
                         break Err(format!("{stop:?}"));
@@ -1783,7 +1782,7 @@ impl<H: Heap> Vm<H> {
             .max()
             .unwrap_or(0)
             .saturating_add(1);
-        let limit = value_depth();
+        let limit = self.value_depth;
         if depth as usize > limit {
             return Err(self.error(
                 "too_deep",

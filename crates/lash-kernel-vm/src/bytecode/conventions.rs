@@ -127,6 +127,7 @@ pub(crate) fn arguments(
     code: &super::program::Program,
     export: Option<&lash_kernel_doc::FunctionExport>,
     raw: &[Datum],
+    max_depth: usize,
 ) -> std::result::Result<Option<Vec<Datum>>, StartError> {
     let Some(export) = export else {
         return Ok(None);
@@ -135,7 +136,7 @@ pub(crate) fn arguments(
         return Ok(None);
     }
     let decoder = Decoder {
-        max_depth: crate::vm::value_depth(),
+        max_depth,
         policy: document.numbers,
         declared: &|callable| code.callable(callable),
     };

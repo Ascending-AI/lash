@@ -25,7 +25,7 @@ use super::tasks::{Operation, Operations};
 use crate::bytecode::program::ActionSite;
 
 use super::watch::Watch;
-use super::{Stop, Vm, value_depth};
+use super::{Stop, Vm};
 use crate::heap::Heap;
 use crate::heap::slots::SlotHeap;
 use crate::interface::{
@@ -256,11 +256,18 @@ impl CoreMachine {
     }
 }
 
-impl Machine for CoreMachine {
-    fn start(
+impl CoreMachine {
+    /// [`Machine::start`] under the deployment's data `limits` instead of
+    /// the standard ones; a reopened run decodes under the standard ones.
+    ///
+    /// # Errors
+    ///
+    /// [`Machine::start`]'s.
+    pub fn start_with_data_limits(
         program: Program,
         bounds: Bounds,
         start: CellStart,
+        limits: lash_kernel_value::data_limits::KernelDataLimits,
         source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
         let document = program.document.clone();
@@ -306,6 +313,7 @@ impl Machine for CoreMachine {
         };
         let (mut vm, convention) =
             build(&program, bounds, entry.as_ref(), start.modes, heap, 0, None)?;
+        vm.value_depth = limits.value_depth();
         if let Some((session, values)) = session {
             crate::durable::session::bind(&mut vm, &session, values);
         }
@@ -314,13 +322,13 @@ impl Machine for CoreMachine {
         header.entry = entry;
         let code = Arc::clone(&vm.program);
         let decoder = Decoder {
-            max_depth: value_depth(),
+            max_depth: vm.value_depth,
             policy: document.numbers,
             declared: &|callable| code.callable(callable),
         };
         let mut args = Vec::with_capacity(params.len());
         if let Some(decoded) =
-            crate::bytecode::conventions::arguments(&document, &code, export, &start.args)?
+            crate::bytecode::conventions::arguments(&document, &code, export, &start.args, vm.value_depth)?
         {
             for datum in &decoded {
                 args.push(Self::copy_in(&mut vm, datum)?);
@@ -361,6 +369,23 @@ impl Machine for CoreMachine {
             convention,
             header,
         })
+    }
+}
+
+impl Machine for CoreMachine {
+    fn start(
+        program: Program,
+        bounds: Bounds,
+        start: CellStart,
+        source: Box<dyn PageSource>,
+    ) -> Result<Self, StartError> {
+        Self::start_with_data_limits(
+            program,
+            bounds,
+            start,
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
+            source,
+        )
     }
 
     fn open(

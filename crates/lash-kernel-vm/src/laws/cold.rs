@@ -5,7 +5,7 @@ use lash_kernel_doc::{
     Datum,
     heap::{HeapFault, PageRef},
 };
-use lash_kernel_state::paged::{AllocationCensus, PageAnswer, PageBody, PageSource};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use std::{cell::Cell, rc::Rc};
 
 use super::embedder::{Embedder, Setup};

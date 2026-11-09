@@ -19,7 +19,7 @@ use lash_kernel_doc::arena::native::{
 use lash_kernel_doc::heap::LogicalBytes;
 
 use super::frames::Bill;
-use super::{Exceeded, Flow, Restart, Run, Stop, Vm, fault, read, value_depth};
+use super::{Exceeded, Flow, Restart, Run, Stop, Vm, fault, read};
 use crate::Bound;
 use crate::bytecode::program::{Callee, NativeEntry, Program, Unit};
 use crate::functions::MachineFunction;
@@ -254,7 +254,7 @@ impl<H: Heap> Vm<H> {
         match answer {
             Ok(value) => {
                 // An immediate answer holds no other value.
-                let limit = value_depth();
+                let limit = self.value_depth;
                 if crate::data::immediate_size(&value).is_none()
                     && self.heap.arena().summary_of(&value).depth as usize > limit
                 {
