@@ -430,6 +430,9 @@ fn call_wrapper_leaf_natives_answer_without_allocating() {
         ("list.len", &[list], Value::Int(0)),
         ("tuple.len", &[pair], Value::Int(2)),
         ("map.len", &[map], Value::Int(1)),
+        ("map.contains", &[map, short("x")], Value::Bool(true)),
+        ("map.contains", &[map, short("y")], Value::Bool(false)),
+        ("map.contains", &[map, Value::Int(7)], Value::Bool(false)),
     ];
     for &(name, values, expected) in cases {
         let native = crate::native(name).unwrap();

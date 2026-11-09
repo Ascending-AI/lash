@@ -209,7 +209,9 @@ fn answers(program: &Program, native: u32, argc: usize) -> Option<InlineOperatio
     let entry = &program.natives[native as usize];
     let operation = entry.scalar.filter(|_| usize::from(entry.params) == argc)?;
     let arity = match operation {
-        InlineOperation::Scalar { .. } | InlineOperation::Same => 2,
+        InlineOperation::Scalar { .. } | InlineOperation::Same | InlineOperation::Membership(_) => {
+            2
+        }
         InlineOperation::Kind | InlineOperation::Not | InlineOperation::Length(_) => 1,
         _ => return None,
     };

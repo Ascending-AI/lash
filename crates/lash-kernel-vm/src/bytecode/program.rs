@@ -227,8 +227,8 @@ pub enum Step {
     },
     /// A branch the path takes: the value must be `Bool(holds)`.
     Guard { value: Slot, holds: bool },
-    /// An index read of a list or tuple at an integer that finds an
-    /// element, making it.
+    /// An index read that finds a value, making it: a list or tuple at
+    /// an integer, or a map at a key it holds.
     Index { target: Slot, index: Slot },
 }
 

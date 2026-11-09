@@ -783,13 +783,16 @@ impl NativeFunction for Native {
             Kind::Record => Collection::Record,
         };
         lash_kernel_doc::NativeSpecialization {
-            inline: matches!(
-                (self.kind, self.op),
-                (Kind::List | Kind::Tuple | Kind::Map, Op::Len)
-            )
-            .then_some(InlineNative {
+            inline: match (self.kind, self.op) {
+                (Kind::List | Kind::Tuple | Kind::Map, Op::Len) => {
+                    Some(InlineOperation::Length(collection))
+                }
+                (Kind::Map, Op::Contains) => Some(InlineOperation::Membership(Table::Map)),
+                _ => None,
+            }
+            .map(|operation| InlineNative {
                 native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
-                operation: InlineOperation::Length(collection),
+                operation,
             }),
             immediate: self.prepare(),
             resident: match (self.kind, self.op) {

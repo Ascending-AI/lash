@@ -157,6 +157,7 @@ impl<H: Heap> Vm<H> {
                         (Value::List(object) | Value::Tuple(object), Value::Int(at)) => {
                             arena.item(object, u64::try_from(at).ok()?).ok()??
                         }
+                        (Value::Map(object), key) => arena.table_get(object, &key).ok()??,
                         _ => return None,
                     }
                 }

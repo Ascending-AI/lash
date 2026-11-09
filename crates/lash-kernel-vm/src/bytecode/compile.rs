@@ -746,7 +746,8 @@ impl<'a> Compiler<'a> {
                 | InlineOperation::Kind
                 | InlineOperation::Same
                 | InlineOperation::Not
-                | InlineOperation::Length(_),
+                | InlineOperation::Length(_)
+                | InlineOperation::Membership(_),
             ) if guard.is_none() => scalar,
             _ => None,
         };

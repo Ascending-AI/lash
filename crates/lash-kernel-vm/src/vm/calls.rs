@@ -323,9 +323,10 @@ impl<H: Heap> Vm<H> {
             return Some(Ok((value, None)));
         }
         let units = match inline {
-            InlineOperation::Kind | InlineOperation::Not | InlineOperation::Length(_) => {
-                self.formula(entry.charge, args, Some(&value))
-            }
+            InlineOperation::Kind
+            | InlineOperation::Not
+            | InlineOperation::Length(_)
+            | InlineOperation::Membership(_) => self.formula(entry.charge, args, Some(&value)),
             _ => {
                 let sized = |value: &Value| crate::data::immediate_size(value).unwrap_or(0);
                 let sizes = [sized(&args[0]), sized(&args[1]), sized(&value)];
@@ -359,16 +360,21 @@ impl<H: Heap> Vm<H> {
                 }
             }
             InlineOperation::Kind | InlineOperation::Not if args.len() == 1 => inline.answer(args),
-            InlineOperation::Length(_) if args.len() == 1 => {
-                let semantics = self.heap.semantics();
-                inline
-                    .answer_read(Args::new(args, self.heap.objects(), &semantics))
-                    .ok()
-                    .flatten()
-            }
+            InlineOperation::Length(_) if args.len() == 1 => self.read_answer(inline, args),
+            InlineOperation::Membership(_) if args.len() == 2 => self.read_answer(inline, args),
             InlineOperation::Same if args.len() == 2 => inline.answer(args),
             _ => None,
         }
+    }
+
+    /// An answer `inline` reads through the native views: `None` where a
+    /// read is cold or malformed, so that the native's call runs.
+    fn read_answer(&self, inline: InlineOperation, args: &[Value]) -> Option<Value> {
+        let semantics = self.heap.semantics();
+        inline
+            .answer_read(Args::new(args, self.heap.objects(), &semantics))
+            .ok()
+            .flatten()
     }
 
     /// Completes a native call that answered or raised: bills formula

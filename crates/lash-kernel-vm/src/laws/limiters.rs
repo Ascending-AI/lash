@@ -755,7 +755,9 @@ fn drive(text: &str, how: Drive<'_>) -> Observed {
 /// and, below 2, off it into a call of `law.raises` whose raise escapes
 /// both, `law.oops` returning or raising from inside its region, and
 /// `law.at`, whose guard path folds to one list read: past the end of its
-/// list the fold declines and its region raises.
+/// list the fold declines and its region raises. `law.get`'s folds to a
+/// membership answer and one map read: on a key the map lacks its guard
+/// does not hold and the region returns 0.
 const EVENT_CONTRACT: [&str; 3] = [
     r#"definition "function sq(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return num.add(x, x) }"
 main {
@@ -806,6 +808,7 @@ main {
     let s = invoke law.oops("ab")
     set total = num.add(total, list.len(d))
     set total = num.add(total, invoke law.at([5, 6, 7], i))
+    set total = num.add(total, invoke law.get(map{1: 20, 2: 30}, i))
     try {
       set total = num.add(total, invoke law.at([5], i))
     } catch e {
@@ -935,7 +938,8 @@ thread_local! {
 /// raises unless its argument is text, billing its deep size; and
 /// `law.at`, reading a list below 3 and billing its result's size; and
 /// `law.first`, reading its first argument's first member and billing
-/// its second's deep size.
+/// its second's deep size; `law.holds`, `map.contains` declaring its
+/// inline answer; and `law.get`, reading a map under a key it holds.
 fn huge_charges(
     registry: &mut lash_kernel_doc::FunctionRegistry,
     ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
@@ -948,6 +952,40 @@ fn huge_charges(
         ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
             NATIVE_CALLS.set(NATIVE_CALLS.get() + 1);
             Ok(lash_kernel_doc::Value::Null)
+        }
+    }
+    /// `map.contains` over the native views, declaring its inline
+    /// membership answer as the library's does.
+    struct Holds;
+    impl lash_kernel_doc::NativeFunction for Holds {
+        fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+            use lash_kernel_doc::arena::native::{InlineNative, InlineOperation};
+            lash_kernel_doc::NativeSpecialization {
+                inline: Some(InlineNative {
+                    native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                    operation: InlineOperation::Membership(lash_kernel_doc::plan::Table::Map),
+                }),
+                ..Default::default()
+            }
+        }
+
+        fn call(
+            &self,
+            call: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            let [target, key] = call.args.values() else {
+                return Err(lash_kernel_doc::NativeError::Malformed(
+                    "law.holds takes two",
+                ));
+            };
+            let Some(table) = call.args.table(target)? else {
+                return Err(lash_kernel_doc::NativeError::Malformed(
+                    "law.holds takes a map",
+                ));
+            };
+            Ok(lash_kernel_doc::Value::Bool(
+                call.args.lookup(table, key)?.is_some(),
+            ))
         }
     }
     let mut registered: Vec<(&'static str, lash_kernel_value::FunctionId)> = Vec::new();
@@ -997,6 +1035,16 @@ fn huge_charges(
             "function law.first(xs: Any, ys: Any) -> Any\nkernel 1\ncharge sum(2, deep(ys))\n{uses}body { return xs[0] }",
             false,
         ),
+        (
+            "law.holds",
+            "function law.holds(m: Any, k: Any) -> Bool\nkernel 1\ncharge 1\nnative\n",
+            true,
+        ),
+        (
+            "law.get",
+            "function law.get(m: Any, k: Any) -> Any\nkernel 1\ncharge sum(6, deep(k), size(result))\n{uses}body { if law.holds(m, k) { return m[k] } return 0 }",
+            false,
+        ),
     ] {
         let mut uses = format!(
             "use list.len = @{}\nuse text.concat = @{}\nuse num.add = @{}\nuse num.lt = @{}\n",
@@ -1007,9 +1055,13 @@ fn huge_charges(
         }
         let source = source.replace("{uses}", &uses);
         let definition = lash_kernel_doc::parse_definition(&source).unwrap();
-        let native = native.then(|| {
-            std::sync::Arc::new(Nothing) as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>
-        });
+        let native =
+            native.then(|| match name {
+                "law.holds" => std::sync::Arc::new(Holds)
+                    as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,
+                _ => std::sync::Arc::new(Nothing)
+                    as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,
+            });
         registered.push((name, registry.register(definition, native).unwrap()));
     }
     registered
@@ -1071,7 +1123,8 @@ fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
 /// fee and a cold fee of a raise leaving it. `law.at`'s fold reads a cold
 /// element, declines, and its region reads it again. `law.first`'s fold
 /// holds over the list its statement loaded, and its completion reads the
-/// cold map: the completion runs again at the region's leave.
+/// cold map: the completion runs again at the region's leave. `law.get`'s
+/// fold reads the cold map, declines, and its region reads it again.
 const COLD_CONTRACT: &str = r#"import 3 operation host.pair(a: Any, b: Any) -> Any
 main {
   let xs = [1, 2, 3]
@@ -1084,6 +1137,7 @@ main {
     set total = num.add(total, num.add(xs[1], list.len(m["b"])))
     set total = num.add(total, invoke law.at(xs, 1))
     set total = num.add(xs[0], invoke law.first(xs, m))
+    set total = num.add(total, list.len(invoke law.get(m, "b")))
     for x in m["b"] { set total = num.add(total, x) }
     try {
       let bad = invoke law.fails(m)

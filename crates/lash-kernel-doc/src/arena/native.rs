@@ -999,6 +999,10 @@ pub enum InlineOperation {
     /// One collection of the declared kind, read through the native views.
     /// Cold reads and lengths that cannot be answered inline run normally.
     Length(crate::plan::Collection),
+    /// One table of the declared kind and an inline key, read through the
+    /// native views: whether the table holds the key. Other keys, record
+    /// fields and cold reads run normally.
+    Membership(crate::plan::Table),
     Scalar {
         operation: crate::scalar::ScalarOp,
         domain: ScalarDomain,
@@ -1038,6 +1042,13 @@ impl InlineOperation {
                     | (crate::plan::Collection::Set, Value::Set(_))
                     | (crate::plan::Collection::Record, Value::Record(_))
             ),
+            (Self::Membership(table), [target, key]) => {
+                matches!(
+                    (table, target),
+                    (crate::plan::Table::Map, Value::Map(_))
+                        | (crate::plan::Table::Set, Value::Set(_))
+                ) && inline_key(key)
+            }
             (Self::Scalar { domain, .. }, [Value::Int(_), Value::Int(_)]) => {
                 matches!(domain, ScalarDomain::Words | ScalarDomain::WordsOrFloats)
             }
@@ -1101,8 +1112,33 @@ impl InlineOperation {
                 .and_then(|length| i64::try_from(length).ok())
                 .map(Value::Int));
         }
+        if let Self::Membership(_) = self {
+            let [target, key] = args.values() else {
+                return Ok(None);
+            };
+            return match args.table(target)? {
+                Some(table) => Ok(Some(Value::Bool(args.lookup(table, key)?.is_some()))),
+                None => Ok(None),
+            };
+        }
         Ok(self.answer(args.values()))
     }
+}
+
+/// A key legal by its kind alone, with no normal form to build: the keys
+/// a table's membership answers inline.
+fn inline_key(key: &Value) -> bool {
+    matches!(
+        key,
+        Value::Null
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::Text(_)
+            | Value::Timestamp(_)
+            | Value::Function(_)
+            | Value::TaskRef(_)
+    )
 }
 
 fn shallow_same(left: &Value, right: &Value) -> Option<bool> {
