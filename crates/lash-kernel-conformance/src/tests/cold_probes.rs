@@ -66,13 +66,6 @@ struct Left {
 }
 
 /// The harness's default bounds.
-fn roomy() -> Bounds {
-    Bounds {
-        charge_limit: u64::MAX,
-        ..crate::case::CaseBounds::default().into()
-    }
-}
-
 fn library() -> PreparedLibrary {
     let release = lash_kernel_releases::helper_release().expect("helper release");
     PreparedLibrary::with_helpers(
@@ -81,12 +74,11 @@ fn library() -> PreparedLibrary {
     )
 }
 
-/// Runs `text` on the core under `memory`, in slices of `slice`; when
+/// Runs `text` on the core under `bounds`, in slices of `slice`; when
 /// `cold`, it seals at every slice return and goes on in a machine opened
 /// cold from the root, its program linked again.
-fn run(library: &PreparedLibrary, text: &str, memory: u64, slice: u64, cold: bool) -> Left {
+fn run(library: &PreparedLibrary, text: &str, bounds: Bounds, slice: u64, cold: bool) -> Left {
     let program = || -> Program { super::probes::linked(library, text).expect("the probe links") };
-    let bounds = Bounds { memory, ..roomy() };
     let source = Source::default();
     let start = CellStart {
         target: Target::Main,
@@ -140,11 +132,12 @@ fn every_r56_cold_probe_holds_opened_cold_at_every_slice() {
         let shard: Shard = serde_json::from_str(text).expect(file);
         for case in &shard.cases {
             let (prints, null) = literal(&case.expected);
-            let whole = run(&library, &case.document, roomy().memory, u64::MAX, false);
+            let bounds: Bounds = case.environment.bounds.into();
+            let whole = run(&library, &case.document, bounds, u64::MAX, false);
             let left = run(
                 &library,
                 &case.document,
-                roomy().memory,
+                bounds,
                 case.environment.slice,
                 true,
             );
@@ -161,16 +154,16 @@ fn every_r56_cold_probe_holds_opened_cold_at_every_slice() {
 }
 
 /// The least memory bound an unpaused core run of `text` finishes under.
-fn threshold(library: &PreparedLibrary, text: &str) -> u64 {
+fn threshold(library: &PreparedLibrary, text: &str, bounds: Bounds) -> u64 {
     let finishes = |memory| {
         matches!(
-            run(library, text, memory, u64::MAX, false).end,
+            run(library, text, Bounds { memory, ..bounds }, u64::MAX, false).end,
             End::Finished(_)
         )
     };
-    let (mut refused, mut passed) = (0u64, roomy().memory);
-    let roomy_end = run(library, text, passed, u64::MAX, false).end;
-    assert!(matches!(roomy_end, End::Finished(_)), "{roomy_end:?}");
+    let (mut refused, mut passed) = (0u64, bounds.memory);
+    let end = run(library, text, bounds, u64::MAX, false).end;
+    assert!(matches!(end, End::Finished(_)), "{end:?}");
     while passed - refused > 1 {
         let mid = refused + (passed - refused) / 2;
         if finishes(mid) {
@@ -191,16 +184,18 @@ fn a_row_opened_cold_at_every_slice_finishes_under_the_bound_an_unpaused_run_nee
     for case in &shard.cases {
         let (prints, _) = literal(&case.expected);
         let slice = case.environment.slice;
-        let least = threshold(&library, &case.document);
-        let whole = run(&library, &case.document, least, u64::MAX, false);
-        let cold = run(&library, &case.document, least, slice, true);
+        let bounds: Bounds = case.environment.bounds.into();
+        let least = threshold(&library, &case.document, bounds);
+        let at = |memory| Bounds { memory, ..bounds };
+        let whole = run(&library, &case.document, at(least), u64::MAX, false);
+        let cold = run(&library, &case.document, at(least), slice, true);
         if cold.printed != prints || cold.charged != whole.charged {
             failures.push(format!(
                 "{} under {least}: cold printed {:?}, ended {:?}, charged {:?} where unpaused {:?}",
                 case.name, cold.printed, cold.end, cold.charged, whole.charged
             ));
         }
-        let under = run(&library, &case.document, least - 1, slice, true);
+        let under = run(&library, &case.document, at(least - 1), slice, true);
         let prefix = prints.starts_with(&under.printed);
         let cheaper = under.charged <= whole.charged;
         if !matches!(under.end, End::Finished(_)) && !(prefix && cheaper) {
