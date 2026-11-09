@@ -29,6 +29,7 @@ pub mod family;
 pub(crate) mod family_impl;
 pub mod heap;
 pub mod root;
+pub mod run;
 pub mod session;
 pub mod source;
 
@@ -92,4 +93,5 @@ mod laws {
     mod metadata;
     mod record_hints;
     pub mod root;
+    mod run;
 }

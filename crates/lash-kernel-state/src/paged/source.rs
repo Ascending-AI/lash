@@ -63,6 +63,16 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///         path = "crates/lash-kernel-state/src/paged/family_impl/mod.rs",
 ///         RelativeValue, RelativeEntry, FrozenHeader, encode, decode,
 ///     ),
+///     file(path = "crates/lash-kernel-state/src/paged/run/ids.rs", cover("impl TokenCodec for ObjectId", "impl TokenCodec for HighWater")),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/run/objects.rs",
+///         cover("impl TokenCodec for ObjectKind", "impl TokenCodec for RunValue", "impl TokenCodec for Record"),
+///     ),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/run/directory.rs",
+///         cover("impl TokenCodec for Row", "impl TokenCodec for DirectoryRoot"),
+///     ),
+///     file(path = "crates/lash-kernel-state/src/paged/run/root.rs", cover("impl TokenCodec for HeapRoot")),
 ///     items(path = "crates/lash-kernel-doc/src/graph_codec.rs", encode, decode),
 ///     file(path = "crates/lash-checkpoint-encoder/src/registry.rs", cover("SEMANTIC_REGISTRY")),
 /// )
