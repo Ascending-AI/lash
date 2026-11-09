@@ -22,6 +22,10 @@ LABEL = "//crates/lash-kernel-conformance:continuation_compat__bin"
 FORMAT_NAMES = {"PAGE_FORMAT", "KERNEL_PARKED_STATE_VERSION", "KERNEL_SAVED_FUNCTION_VERSION",
                 "KERNEL_DOCUMENT_SCHEMA_VERSION", "LASH_KERNEL_VERSION", "WORKER_PROTOCOL_VERSION",
                 "PAGE_DIGEST_DOMAIN"}
+# Contract §9 witnesses that guard admission of a parked image, in §9 order.
+# WORKER_PROTOCOL_VERSION is live worker admission, not a parked format.
+ADMISSION_WITNESSES = ("PAGE_FORMAT", "KERNEL_PARKED_STATE_VERSION", "KERNEL_SAVED_FUNCTION_VERSION",
+                       "KERNEL_DOCUMENT_SCHEMA_VERSION", "LASH_KERNEL_VERSION", "PAGE_DIGEST_DOMAIN")
 OBSERVATION_FIELDS = {"prints", "end", "trace", "charged", "charge_tape", "steps"}
 
 
@@ -260,7 +264,8 @@ def main():
     if not changed and not args.always:
         print("continuation compatibility: no runner dependency, build configuration or format witness changed")
         return
-    mode = "resume" if previous_has_runner and before == after else "refusal"
+    admission_changed = any(before[name] != after[name] for name in ADMISSION_WITNESSES)
+    mode = "resume" if previous_has_runner and not admission_changed else "refusal"
     inputs = read(args.inputs) if args.inputs.exists() else {}
     out = (args.out or ROOT / ".kiln/continuation-compat" / str(time.time_ns())).resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -286,8 +291,10 @@ def main():
         failures = [dict(case=case, pause=pause) for (case, pause), value in resumed.items() if value != baseline[case]]
     else:
         execute(candidate["binary"], ["resume", "--expect-refusal",
-                  "--expected", str(after["KERNEL_PARKED_STATE_VERSION"]),
-                  "--observed", str(before["KERNEL_PARKED_STATE_VERSION"]), "--corpus", str(corpus), "--imports", str(exports), "--out", str(out / "refusals.json")], out / "refusal.log")
+                  # A string witness cannot be stated through a u32 format; a
+                  # change to it alone opens and fails this mode closed.
+                  *(arg for name in ADMISSION_WITNESSES if isinstance(after[name], int)
+                    for arg in ("--stated", f"{name}={after[name]}:{before[name]}")), "--corpus", str(corpus), "--imports", str(exports), "--out", str(out / "refusals.json")], out / "refusal.log")
         refusals(out / "refusals.json", pauses, before, after)
         require("deployment_receipt" in inputs, "changed formats require L5's ticket-linked deployment receipt")
         deployment(inputs["deployment_receipt"], base, head)

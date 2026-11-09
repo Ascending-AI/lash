@@ -7,7 +7,7 @@
 //! continuation-compat export --corpus CORPUS --out EXPORT_DIR
 //! continuation-compat uninterrupted --corpus CORPUS --out RUNS_JSON
 //! continuation-compat resume --corpus CORPUS --imports EXPORT_DIR --out RESUMED_JSON
-//! continuation-compat resume --expect-refusal --expected N --observed N --corpus CORPUS --imports EXPORT_DIR --out REFUSALS_JSON
+//! continuation-compat resume --expect-refusal --stated SURFACE=EXPECTED:OBSERVED... --corpus CORPUS --imports EXPORT_DIR --out REFUSALS_JSON
 //! ```
 //!
 //! The sweep pauses once before the first step, then runs with slice 1 and
@@ -74,22 +74,30 @@ pub fn cli(args: &[String]) -> Result<(), HarnessError> {
     let usage = || {
         fault(
             "usage: continuation-compat (export|uninterrupted|resume [--expect-refusal \
-             --expected N --observed N]) --corpus CORPUS [--imports EXPORT_DIR] --out PATH",
+             (--stated SURFACE=EXPECTED:OBSERVED)...]) --corpus CORPUS [--imports EXPORT_DIR] \
+             --out PATH",
         )
     };
     let mut args = args.iter();
     let command = args.next().ok_or_else(usage)?.clone();
     let (mut corpus, mut imports, mut out, mut refusal) = (None, None, None, false);
-    let (mut expected, mut observed) = (None, None);
-    let witness = |value: Option<&String>| value.and_then(|value| value.parse::<u32>().ok());
+    let mut stated: Vec<StatedFormat> = Vec::new();
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--corpus" => corpus = args.next().map(PathBuf::from),
             "--imports" => imports = args.next().map(PathBuf::from),
             "--out" => out = args.next().map(PathBuf::from),
             "--expect-refusal" if command == "resume" => refusal = true,
-            "--expected" => expected = Some(witness(args.next()).ok_or_else(usage)?),
-            "--observed" => observed = Some(witness(args.next()).ok_or_else(usage)?),
+            "--stated" => {
+                let format = args
+                    .next()
+                    .and_then(|value| stated_format(value))
+                    .ok_or_else(usage)?;
+                if stated.iter().any(|known| known.surface == format.surface) {
+                    return Err(usage());
+                }
+                stated.push(format);
+            }
             _ => return Err(usage()),
         }
     }
@@ -100,20 +108,46 @@ pub fn cli(args: &[String]) -> Result<(), HarnessError> {
         ("export", None) => export(&library, &corpus, &out),
         ("uninterrupted", None) => uninterrupted(&library, &corpus, &out),
         ("resume", Some(imports)) if refusal => {
-            // The parked-state witnesses live with the embedding, outside the
+            // The admission witnesses live with the embedding, outside the
             // kernel crates this runner may name; the orchestrator states both
-            // builds' values, as a store states its envelope's.
-            let stated = StatedFormat {
-                surface: "KERNEL_PARKED_STATE_VERSION",
-                expected: expected.ok_or_else(usage)?,
-                observed: observed.ok_or_else(usage)?,
-            };
-            refuse(&library, &corpus, &imports, &out, stated)
+            // builds' values, as a store states its envelope's. A checkpoint
+            // holds one stated format, so the first mismatch is the one stated:
+            // the open refuses on it, as it would on the first of a list.
+            let first = stated.first().copied().ok_or_else(usage)?;
+            let format = stated
+                .iter()
+                .copied()
+                .find(|format| format.expected != format.observed)
+                .unwrap_or(first);
+            refuse(&library, &corpus, &imports, &out, format)
         }
-        _ if expected.is_some() || observed.is_some() => Err(usage()),
+        _ if !stated.is_empty() => Err(usage()),
         ("resume", Some(imports)) => resume(&library, &corpus, &imports, &out),
         _ => Err(usage()),
     }
+}
+
+/// The integer contract section 9 witnesses that guard admission of a parked
+/// image, as the orchestrator names them.
+const ADMISSION_SURFACES: [&str; 5] = [
+    "PAGE_FORMAT",
+    "KERNEL_PARKED_STATE_VERSION",
+    "KERNEL_SAVED_FUNCTION_VERSION",
+    "KERNEL_DOCUMENT_SCHEMA_VERSION",
+    "LASH_KERNEL_VERSION",
+];
+
+/// `SURFACE=EXPECTED:OBSERVED`, for a known admission surface.
+fn stated_format(value: &str) -> Option<StatedFormat> {
+    let (name, values) = value.split_once('=')?;
+    let (expected, observed) = values.split_once(':')?;
+    Some(StatedFormat {
+        surface: ADMISSION_SURFACES
+            .into_iter()
+            .find(|surface| *surface == name)?,
+        expected: expected.parse().ok()?,
+        observed: observed.parse().ok()?,
+    })
 }
 
 /// Every case of every shard under `root`, by id (`<shard path>#<index>`),
