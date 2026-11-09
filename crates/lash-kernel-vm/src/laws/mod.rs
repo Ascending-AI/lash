@@ -27,6 +27,7 @@ mod pinning;
 mod preparation;
 mod resident;
 mod scheduler;
+mod session;
 mod stream;
 mod tasks;
 mod verdict;

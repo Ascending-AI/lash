@@ -41,10 +41,12 @@ pub use census::{
     AccountingCertificate, AccountingMetric, AllocationCensus, CensusFault, CensusGraph,
     EntityFacts, SweepSet, TransientRoots,
 };
+pub use family::RUN_SESSION_REFUSED;
 pub use family::{
     CarryClassification, CarryRoots, DataOnlyCertificate, FamilyBase, FamilyRecord, FrozenRef,
     FrozenSummary, HeapLifecycle, MembershipRun, SessionRoot,
 };
+pub(crate) use family::{PagedSession, SessionForm};
 pub use heap::{
     ClosureView, EditEpoch, FieldName, HeapWriteError, NormalKey, ObjectInit, ObjectKind,
     SealBudget, SealedHeap, SemanticHeap, TableCursor,

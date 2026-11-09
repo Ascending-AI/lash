@@ -11,6 +11,7 @@
 
 mod admit;
 mod code;
+pub(crate) mod session;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -131,6 +132,7 @@ pub(crate) fn seal(
         charged,
         refused,
         globals,
+        session: vm.session.clone(),
         held,
         running,
         installed,
@@ -483,6 +485,17 @@ pub(crate) fn open(
             .copied()
             .ok_or_else(|| format!("value {at} is past the run's roots"))
     };
+    if record.session.windows(2).any(|pair| pair[0] >= pair[1])
+        || record
+            .session
+            .iter()
+            .any(|name| program.globals.contains(name))
+    {
+        return Err("the run's session names are not ascending past the program's".into());
+    }
+    vm.globals
+        .resize(program.globals.len() + record.session.len(), Value::Absent);
+    vm.session.clone_from(&record.session);
     if record.globals.len() != vm.globals.len() {
         return Err("the run holds another number of host bindings".into());
     }

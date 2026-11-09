@@ -27,7 +27,7 @@ use super::source::grant;
 use super::tree::{Access, Cell, SealWork, Tree};
 use super::{
     BindingRecord, BoundRecord, HeapWriteError, KeyedRoot, NameRef, PageSource, SealBudget,
-    SemanticHeap, SessionRoot,
+    SemanticHeap, SessionForm, SessionRoot,
 };
 
 #[derive(Default)]
@@ -246,22 +246,66 @@ impl PagedHeap {
 }
 
 impl SessionRoot {
-    /// The pages this session names, in its order: its heap header, then
-    /// the first page of its bindings and of its saved functions, where it
-    /// holds any.
+    /// The bytecode core's session sealed under run session page `page`.
     #[must_use]
-    pub fn pages(&self) -> Vec<PageRef> {
-        let mut pages = vec![self.heap];
-        pages.extend(self.bindings.page());
-        pages.extend(self.functions.page());
-        pages
+    pub fn run(page: PageRef) -> Self {
+        Self(SessionForm::Run(page))
     }
 
-    /// The first page of its bindings, none when it binds nothing: where a
-    /// host that reads every binding starts fetching.
+    /// The run session page, when this is the bytecode core's session.
+    #[must_use]
+    pub fn run_page(&self) -> Option<PageRef> {
+        match self.0 {
+            SessionForm::Run(page) => Some(page),
+            SessionForm::Paged(_) => None,
+        }
+    }
+
+    /// The pages this session names, in its order: the paged engine's
+    /// heap header, then the first page of its bindings and of its saved
+    /// functions, where it holds any; the bytecode core's run session page.
+    #[must_use]
+    pub fn pages(&self) -> Vec<PageRef> {
+        match &self.0 {
+            SessionForm::Paged(session) => {
+                let mut pages = vec![session.heap];
+                pages.extend(session.bindings.page());
+                pages.extend(session.functions.page());
+                pages
+            }
+            SessionForm::Run(page) => vec![*page],
+        }
+    }
+
+    /// Where a host that reads every binding starts fetching: the first
+    /// page of the paged engine's bindings, none when it binds nothing;
+    /// the bytecode core's run session page.
     #[must_use]
     pub fn bindings_page(&self) -> Option<PageRef> {
-        self.bindings.page()
+        match &self.0 {
+            SessionForm::Paged(session) => session.bindings.page(),
+            SessionForm::Run(page) => Some(*page),
+        }
+    }
+
+    /// The paged engine's form, for its laws.
+    #[cfg(test)]
+    pub(crate) fn paged(&self) -> super::PagedSession {
+        match self.0 {
+            SessionForm::Paged(session) => session,
+            SessionForm::Run(_) => panic!("{}", super::RUN_SESSION_REFUSED),
+        }
+    }
+
+    /// The pages [`Self::pages`] names, mutably, in its order.
+    fn pages_mut(&mut self) -> Vec<&mut PageRef> {
+        match &mut self.0 {
+            SessionForm::Paged(session) => std::iter::once(&mut session.heap)
+                .chain(session.bindings.page_mut())
+                .chain(session.functions.page_mut())
+                .collect(),
+            SessionForm::Run(page) => vec![page],
+        }
     }
 
     /// Sets the grant of each page it names to what `grant` gives it, in
@@ -274,11 +318,7 @@ impl SessionRoot {
         &mut self,
         mut grant: impl FnMut(PageRef) -> Result<PageGrant, E>,
     ) -> Result<(), E> {
-        self.heap.grant = grant(self.heap)?;
-        for page in [self.bindings.page_mut(), self.functions.page_mut()]
-            .into_iter()
-            .flatten()
-        {
+        for page in self.pages_mut() {
             page.grant = grant(*page)?;
         }
         Ok(())
@@ -291,11 +331,7 @@ impl SessionRoot {
     ///
     /// [`HeapFault::Corrupt`] for a page `children` does not declare.
     pub fn grant_children(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
-        grant(&mut self.heap, children)?;
-        for page in [self.bindings.page_mut(), self.functions.page_mut()]
-            .into_iter()
-            .flatten()
-        {
+        for page in self.pages_mut() {
             grant(page, children)?;
         }
         Ok(())

@@ -6,8 +6,9 @@ use lash_kernel_doc::{JoinMode, TaskId};
 
 use lash_kernel_value::names::DocumentId;
 use {
-    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
-    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+    lash_kernel_value::tokens::Tag, lash_kernel_value::tokens::TokenCodec,
+    lash_kernel_value::tokens::TokenError, lash_kernel_value::tokens::TokenReader,
+    lash_kernel_value::tokens::TokenWriter,
 };
 
 macro_rules! record {
@@ -118,12 +119,34 @@ record!(DataOnlyCertificate {
     closure_entities: u64,
     task_edges: u64
 });
-record!(SessionRoot {
+record!(PagedSession {
     heap: PageRef,
     bindings: KeyedRoot,
     functions: KeyedRoot,
     certificate: DataOnlyCertificate
 });
+// The paged form is its record; the run form a one-field sum, which no
+// record's token begins with.
+impl TokenCodec for SessionRoot {
+    fn encode(&self, out: &mut TokenWriter) {
+        match &self.0 {
+            SessionForm::Paged(session) => session.encode(out),
+            SessionForm::Run(page) => {
+                out.sum(0, 1);
+                page.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        if input.peek_tag()? != Tag::Sum {
+            return PagedSession::decode(input).map(|session| Self(SessionForm::Paged(session)));
+        }
+        match input.sum()? {
+            (0, 1) => Ok(Self(SessionForm::Run(PageRef::decode(input)?))),
+            (variant, _) => Err(TokenError::UnsupportedVariant { variant }),
+        }
+    }
+}
 // The numeric token denotes Exact; none denotes Off. The token type is
 // already a discriminant, retaining the bounded root's fixed footprint.
 impl TokenCodec for SavedMeters {

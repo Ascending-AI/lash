@@ -571,16 +571,19 @@ impl HeapLifecycle for PagedHeap {
         self.carried_collection_estimate();
         self.seal(budget())?
             .ok_or_else(|| invalid("unbounded heap seal incomplete"))?;
-        Ok(SessionRoot {
+        Ok(SessionRoot(SessionForm::Paged(PagedSession {
             heap: self
                 .sealed_root()
                 .ok_or_else(|| invalid("heap header missing"))?,
             bindings,
             functions: roots.functions,
             certificate: self.data_only_certificate(),
-        })
+        })))
     }
     fn adopt(&mut self, session: &SessionRoot) -> Result<KeyedRoot, HeapFault> {
+        let SessionForm::Paged(session) = &session.0 else {
+            return Err(invalid(RUN_SESSION_REFUSED));
+        };
         if self.sealed_root().map(|p| p.id) != Some(session.heap.id) {
             return Err(invalid("adopt requires the session's heap version"));
         }

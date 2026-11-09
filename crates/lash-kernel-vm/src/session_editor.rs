@@ -44,6 +44,16 @@ pub enum SessionValue {
     },
 }
 
+/// Refuses a bytecode-core session, which this editor never reads.
+fn paged(session: Option<&SessionRoot>) -> Result<(), HeapFault> {
+    match session {
+        Some(session) if session.run_page().is_some() => Err(HeapFault::Malformed(
+            lash_kernel_state::paged::RUN_SESSION_REFUSED.into(),
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// A carried session opened for its host.
 pub struct SessionEditor {
     heap: PagedHeap,
@@ -63,6 +73,7 @@ impl SessionEditor {
         session: Option<&SessionRoot>,
         source: Box<dyn PageSource>,
     ) -> Result<Self, HeapFault> {
+        paged(session)?;
         let mut heap = match session {
             Some(session) => PagedHeap::open_header(
                 lash_kernel_state::kernel_internals::session_heap(session),
@@ -121,6 +132,8 @@ impl SessionEditor {
         older: Option<&SessionRoot>,
         newer: &SessionRoot,
     ) -> Result<BTreeMap<Name, (bool, bool)>, HeapFault> {
+        paged(older)?;
+        paged(Some(newer))?;
         let older = Tree::<BindingRecord>::of_keyed(&older.map_or(KeyedRoot::Empty, |older| {
             lash_kernel_state::kernel_internals::session_bindings(older)
         }));
@@ -153,6 +166,8 @@ impl SessionEditor {
         older: Option<&SessionRoot>,
         newer: &SessionRoot,
     ) -> Result<BTreeMap<Name, Option<Vec<u8>>>, HeapFault> {
+        paged(older)?;
+        paged(Some(newer))?;
         let older = Tree::<FunctionRecord>::of_keyed(&older.map_or(KeyedRoot::Empty, |older| {
             lash_kernel_state::kernel_internals::session_functions(older)
         }));

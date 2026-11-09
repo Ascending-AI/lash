@@ -13,6 +13,16 @@ pub(super) fn open_tree<T: lash_kernel_state::kernel_internals::tree::Cell>(
 ) -> Tree<T> {
     Tree::of_keyed(&root)
 }
+/// Refuses a bytecode-core session, which this engine never opens.
+fn paged_only(start: &CellStart) -> Result<(), StartError> {
+    match &start.session {
+        Some(session) if session.run_page().is_some() => Err(StartError::Bindings {
+            problem: lash_kernel_state::paged::RUN_SESSION_REFUSED.into(),
+        }),
+        _ => Ok(()),
+    }
+}
+
 pub(crate) fn start(
     program: Program,
     bounds: Bounds,
@@ -22,6 +32,7 @@ pub(crate) fn start(
     layout: Layout,
     limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<KernelMachine, StartError> {
+    paged_only(&start)?;
     CellStart::admit_host_metadata(start.host.iter().map(|(name, _)| name.as_str()))?;
     program.validate_links()?;
     let library = program.library.in_charge(bounds.charge).in_layout(layout);
@@ -1125,6 +1136,7 @@ impl KernelMachine {
         layout: Layout,
         mut source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
+        paged_only(&start)?;
         let census = if bounds.memory_meter == crate::MemoryMeter::Off {
             None
         } else {
@@ -1154,6 +1166,7 @@ impl KernelMachine {
         limits: lash_kernel_value::data_limits::KernelDataLimits,
         mut source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
+        paged_only(&start)?;
         let census = if bounds.memory_meter == crate::MemoryMeter::Off {
             None
         } else {

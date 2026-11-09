@@ -85,7 +85,7 @@ fn next(
         })
         .expect("carry");
     let mut next = PagedHeap::open_header(
-        session.heap,
+        session.paged().heap,
         Box::new(Source(Rc::clone(pages))),
         EditEpoch(2),
     )
@@ -139,13 +139,13 @@ fn a_fork_isolates_later_mutations() {
         })
         .expect("carry");
     let mut parent = PagedHeap::open_header(
-        session.heap,
+        session.paged().heap,
         Box::new(Source(Rc::clone(&pages))),
         EditEpoch(2),
     )
     .expect("parent");
     let mut fork = PagedHeap::open_header(
-        session.heap,
+        session.paged().heap,
         Box::new(Source(Rc::clone(&pages))),
         EditEpoch(3),
     )
@@ -625,7 +625,7 @@ fn a_no_op_carry_over_a_million_names_reads_no_pages() {
         })
         .unwrap();
     let mut cold = PagedHeap::open_header(
-        session.heap,
+        session.paged().heap,
         Box::new(Source(Rc::clone(&pages))),
         EditEpoch(2),
     )
@@ -636,13 +636,13 @@ fn a_no_op_carry_over_a_million_names_reads_no_pages() {
     let before = pages.borrow().reads;
     let carried = cold
         .carry(CarryRoots {
-            bindings: session.bindings,
-            functions: session.functions,
+            bindings: session.paged().bindings,
+            functions: session.paged().functions,
         })
         .unwrap();
     assert_eq!(pages.borrow().reads, before);
     assert_eq!(carried, session);
-    assert_eq!(carried.bindings.len(), 1_000_000);
+    assert_eq!(carried.paged().bindings.len(), 1_000_000);
 }
 
 /// K-SES-003 / K-MACH-008: the census sees current slot values, including
@@ -783,7 +783,7 @@ fn saved_environments_keep_identity_and_shared_cells_across_carry() {
         })
         .unwrap();
     let mut cold = PagedHeap::open_header(
-        session.heap,
+        session.paged().heap,
         Box::new(Source(Rc::clone(&pages))),
         EditEpoch(2),
     )

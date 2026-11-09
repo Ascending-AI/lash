@@ -289,6 +289,11 @@ pub fn checkpoint(
 /// # Errors
 /// Any fault reading a reachable page.
 pub fn session(root: &SessionRoot, source: Box<dyn PageSource>) -> Result<Checkpoint, HeapFault> {
+    if root.run_page().is_some() {
+        return Err(HeapFault::Malformed(
+            crate::paged::RUN_SESSION_REFUSED.into(),
+        ));
+    }
     let mut heap = PagedHeap::open_header(
         crate::kernel_internals::session_heap(root),
         source,

@@ -1,6 +1,6 @@
 //! The bytecode core's durable heap format (cutover contract §6): object
 //! ids, object records with their exact edge sets, the copy-on-write
-//! directory and the run root.
+//! directory, the run root and the carried session.
 //!
 //! An object is written when it is first paged out or sealed, under an
 //! [`ObjectId`](ids::ObjectId) from the run root's high-water mark. Its
@@ -14,3 +14,4 @@ pub mod directory;
 pub mod ids;
 pub mod objects;
 pub mod root;
+pub mod session;

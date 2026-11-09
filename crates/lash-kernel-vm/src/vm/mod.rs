@@ -28,7 +28,7 @@ use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::arena::native::{NativeError, NewObject, Retry};
 use lash_kernel_doc::{Datum, Document, Measure, Value};
 use lash_kernel_value::data_limits::KernelDataLimits;
-use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::{FunctionId, Name};
 use lash_kernel_value::sites::Site;
 
 use crate::bytecode::charge_tables::RESULT;
@@ -184,8 +184,16 @@ pub(crate) struct Vm<H: Heap> {
     pub heap: H,
     /// The program's constants, materialized in this instance's heap.
     constants: Vec<Value>,
-    /// The host bindings main's free names read and write.
+    /// The host bindings main's free names read and write, then the
+    /// carried session's bindings it names nowhere, by
+    /// [`Self::session`].
     pub globals: Vec<Value>,
+    /// The names of the globals past the program's: the carried session's
+    /// bindings `main` names nowhere, ascending (`K-SES-001`).
+    pub(crate) session: Vec<Name>,
+    /// `main`'s locals as its bottom frame left them: what its top-level
+    /// bindings hand on (`K-SES-001`).
+    pub(crate) top: Option<Vec<Value>>,
     /// The running task's frames and stack.
     pub cx: Context,
     /// Every task, and what waits between them.
@@ -330,6 +338,8 @@ impl<H: Heap> Vm<H> {
             heap,
             constants,
             globals,
+            session: Vec::new(),
+            top: None,
             cx: Context::default(),
             tasks: tasks::Tasks::new(),
             document,
@@ -714,6 +724,7 @@ impl<H: Heap> Vm<H> {
             heap,
             constants,
             globals,
+            top,
             cx,
             tasks,
             held,
@@ -723,6 +734,7 @@ impl<H: Heap> Vm<H> {
         heap.collect(&mut |visit| {
             constants.iter().for_each(&mut *visit);
             globals.iter().for_each(&mut *visit);
+            top.iter().flatten().for_each(&mut *visit);
             held.iter().for_each(&mut *visit);
             cx.roots(&mut *visit);
             tasks.roots(&mut *visit);
@@ -741,6 +753,7 @@ impl<H: Heap> Vm<H> {
         let mut visit = |value: &Value| roots.push(*value);
         self.constants.iter().for_each(&mut visit);
         self.globals.iter().for_each(&mut visit);
+        self.top.iter().flatten().for_each(&mut visit);
         self.held.iter().for_each(&mut visit);
         self.cx.roots(&mut visit);
         self.tasks.roots(&mut visit);
@@ -756,11 +769,12 @@ impl<H: Heap> Vm<H> {
     /// latched for the next slice or park; a load polls nothing.
     #[cold]
     #[inline(never)]
-    fn reload(&mut self, object: ArenaHandle, chunk: u32) -> Result<(), Stop> {
+    pub(crate) fn reload(&mut self, object: ArenaHandle, chunk: u32) -> Result<(), Stop> {
         let Self {
             heap,
             constants,
             globals,
+            top,
             cx,
             tasks,
             held,
@@ -770,6 +784,7 @@ impl<H: Heap> Vm<H> {
         let loaded = heap.load(object, chunk, &mut |visit| {
             constants.iter().for_each(&mut *visit);
             globals.iter().for_each(&mut *visit);
+            top.iter().flatten().for_each(&mut *visit);
             held.iter().for_each(&mut *visit);
             cx.roots(&mut *visit);
             tasks.roots(&mut *visit);
@@ -1679,6 +1694,15 @@ impl<H: Heap> Vm<H> {
         let Some(frame) = self.cx.frames.pop() else {
             return Err(fault("a return with no frame"));
         };
+        if bottom && main {
+            let base = frame.base as usize;
+            let locals = usize::from(self.program.units[frame.unit as usize].locals);
+            self.top = self
+                .cx
+                .stack
+                .get(base..base + locals)
+                .map(<[Value]>::to_vec);
+        }
         self.heap.release(self.frames[frame.unit as usize]);
         self.drop_handlers();
         self.settle(completion)?;

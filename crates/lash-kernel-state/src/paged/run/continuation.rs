@@ -74,8 +74,12 @@ record! {
         pub charged: u64,
         /// The total a charge refusal reported, once one has.
         pub refused: Option<u64>,
-        /// Each host binding's value.
+        /// Each host binding's value, then each session binding's of
+        /// [`Self::session`].
         pub globals: Vec<u32>,
+        /// The carried session's bindings `main` names nowhere, ascending:
+        /// the globals past the program's.
+        pub session: Vec<Name>,
         /// Values the scheduler holds outside any task.
         pub held: Vec<u32>,
         /// The task whose context the machine holds.
@@ -486,7 +490,23 @@ record! {
 ///
 /// The page port's faults.
 pub fn write(access: &Access<'_>, record: &RunRecord) -> Result<PageRef, HeapFault> {
-    let bytes = encode_body(record);
+    write_segmented(
+        access,
+        PageKind::RUN_ROOT,
+        &encode_body(record),
+        record.heap.directory.page,
+    )
+}
+
+/// Seals `bytes` under a root page of `kind`: the bytes in segments, the
+/// root naming them and `directory`, which the root retains, as its
+/// children.
+pub(super) fn write_segmented(
+    access: &Access<'_>,
+    kind: PageKind,
+    bytes: &[u8],
+    directory: Option<PageRef>,
+) -> Result<PageRef, HeapFault> {
     let mut segments = Vec::with_capacity(bytes.len().div_ceil(SEGMENT_BYTES));
     for chunk in bytes.chunks(SEGMENT_BYTES) {
         let mut out = TokenWriter::new();
@@ -494,7 +514,7 @@ pub fn write(access: &Access<'_>, record: &RunRecord) -> Result<PageRef, HeapFau
         segments.push(access.seal(PageKind::RUN_SEGMENT, out.into_bytes(), Vec::new())?);
     }
     let page = RunPage {
-        directory: record.heap.directory.page,
+        directory,
         segments,
         length: bytes.len() as u64,
     };
@@ -504,7 +524,7 @@ pub fn write(access: &Access<'_>, record: &RunRecord) -> Result<PageRef, HeapFau
         .chain(&page.segments)
         .copied()
         .collect();
-    access.seal(PageKind::RUN_ROOT, encode_body(&page), children)
+    access.seal(kind, encode_body(&page), children)
 }
 
 /// The run sealed under run root page `page`.
@@ -515,13 +535,29 @@ pub fn write(access: &Access<'_>, record: &RunRecord) -> Result<PageRef, HeapFau
 /// a run root, a segment that is not one, or state that does not decode
 /// or names another directory than its root retains.
 pub fn read(access: &Access<'_>, page: PageRef) -> Result<RunRecord, HeapFault> {
+    let (directory, bytes) = read_segmented(access, page, PageKind::RUN_ROOT)?;
+    let mut record: RunRecord = decode_body(&bytes).map_err(|error| HeapFault::Corrupt {
+        page: page.id,
+        reason: error.to_string(),
+    })?;
+    retain(page, &mut record.heap, directory)?;
+    Ok(record)
+}
+
+/// The bytes sealed under root page `page` of `kind`, and the directory
+/// page it retains, granted by the root.
+pub(super) fn read_segmented(
+    access: &Access<'_>,
+    page: PageRef,
+    kind: PageKind,
+) -> Result<(Option<PageRef>, Vec<u8>), HeapFault> {
     let corrupt = |reason: String| HeapFault::Corrupt {
         page: page.id,
         reason,
     };
     let answer = access.read(page)?;
-    if answer.kind != PageKind::RUN_ROOT {
-        return Err(corrupt("not a run root".into()));
+    if answer.kind != kind {
+        return Err(corrupt(format!("not a page of kind {}", kind.0)));
     }
     let mut root: RunPage =
         decode_body(&answer.tokens).map_err(|error| corrupt(error.to_string()))?;
@@ -542,14 +578,24 @@ pub fn read(access: &Access<'_>, page: PageRef) -> Result<RunRecord, HeapFault> 
     if bytes.len() as u64 != root.length {
         return Err(corrupt("the run's segments hold another length".into()));
     }
-    let mut record: RunRecord = decode_body(&bytes).map_err(|error| corrupt(error.to_string()))?;
-    if record.heap.directory.page.map(|page| page.id) != root.directory.map(|page| page.id) {
-        return Err(corrupt(
-            "the run names another directory than its root".into(),
-        ));
+    Ok((root.directory, bytes))
+}
+
+/// Points `heap`'s directory at the granted `directory` its root page
+/// `page` retains, refusing a heap that names another.
+pub(super) fn retain(
+    page: PageRef,
+    heap: &mut HeapRoot,
+    directory: Option<PageRef>,
+) -> Result<(), HeapFault> {
+    if heap.directory.page.map(|page| page.id) != directory.map(|page| page.id) {
+        return Err(HeapFault::Corrupt {
+            page: page.id,
+            reason: "the run names another directory than its root".into(),
+        });
     }
-    record.heap.directory.page = root.directory;
-    Ok(record)
+    heap.directory.page = directory;
+    Ok(())
 }
 
 /// The run sealed under run root page `page`, read through `source`, and

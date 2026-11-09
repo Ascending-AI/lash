@@ -118,6 +118,9 @@ impl PageKind {
     pub const RUN_ROOT: Self = Self(1009);
     /// One segment of a bytecode-core run's encoded state.
     pub const RUN_SEGMENT: Self = Self(1010);
+    /// A bytecode-core session's root: its directory and the segments of
+    /// its encoded bindings ([`run::session`](super::run::session)).
+    pub const RUN_SESSION: Self = Self(1011);
     /// The first number past the semantic kinds a format may add.
     pub const END: u32 = 2000;
 }

@@ -13,14 +13,27 @@ pub mod semantic;
 /// FIG-6688); hosts use [`paged`]'s records, page port and session readers.
 #[doc(hidden)]
 pub mod kernel_internals {
+    /// The paged engine's session heap header; a bytecode-core session's
+    /// run page, which no paged heap opens.
     pub fn session_heap(session: &crate::paged::SessionRoot) -> lash_kernel_doc::heap::PageRef {
-        session.heap
+        match &session.0 {
+            crate::paged::SessionForm::Paged(session) => session.heap,
+            crate::paged::SessionForm::Run(page) => *page,
+        }
     }
+    /// The paged engine's session bindings; none in a bytecode-core one.
     pub fn session_bindings(session: &crate::paged::SessionRoot) -> crate::paged::KeyedRoot {
-        session.bindings
+        match &session.0 {
+            crate::paged::SessionForm::Paged(session) => session.bindings,
+            crate::paged::SessionForm::Run(_) => crate::paged::KeyedRoot::Empty,
+        }
     }
+    /// The paged engine's saved functions; none in a bytecode-core one.
     pub fn session_functions(session: &crate::paged::SessionRoot) -> crate::paged::KeyedRoot {
-        session.functions
+        match &session.0 {
+            crate::paged::SessionForm::Paged(session) => session.functions,
+            crate::paged::SessionForm::Run(_) => crate::paged::KeyedRoot::Empty,
+        }
     }
 
     pub fn checkpoint(root: crate::paged::CheckpointRoot) -> crate::paged::Checkpoint {

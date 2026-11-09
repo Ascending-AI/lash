@@ -136,6 +136,11 @@ impl SlotHeap {
         Ok((heap, values))
     }
 
+    /// The directory the heap writes its objects to, if it has one.
+    pub(crate) fn directory(&self) -> Option<&lash_kernel_state::paged::run::directory::Directory> {
+        self.durable.as_ref().map(|durable| &durable.directory)
+    }
+
     /// Seals every object `roots` reach into the heap's directory.
     ///
     /// # Errors

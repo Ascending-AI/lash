@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, Decoder, Document, Value};
+use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_state::paged::run::continuation;
 use lash_kernel_state::paged::{
     CellTargetKind, Checkpoint, CheckpointRoot, KeyedRoot, PageKind, PageSource, RootStatus,
@@ -236,11 +237,6 @@ impl Machine for CoreMachine {
         start: CellStart,
         source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
-        if start.session.is_some() {
-            return Err(StartError::Bindings {
-                problem: "the bytecode core opens no session before the durable heap lands".into(),
-            });
-        }
         let document = program.document.clone();
         let entry = match &start.target {
             Target::Main => None,
@@ -256,15 +252,37 @@ impl Machine for CoreMachine {
                 _ => None,
             });
         let params = export.map_or_else(Vec::new, |export| export.signature.params.clone());
-        let heap = SlotHeap::durable(
-            bounds.memory,
-            crate::heap::open::Durable {
-                directory: lash_kernel_state::paged::run::directory::Directory::new(source),
-                high_water: lash_kernel_state::paged::run::ids::HighWater(0),
-            },
-        );
+        let (heap, session) = match start.session.as_ref().map(SessionRoot::run_page) {
+            None => (
+                SlotHeap::durable(
+                    bounds.memory,
+                    crate::heap::open::Durable {
+                        directory: lash_kernel_state::paged::run::directory::Directory::new(source),
+                        high_water: lash_kernel_state::paged::run::ids::HighWater(0),
+                    },
+                ),
+                None,
+            ),
+            Some(None) => {
+                return Err(StartError::Bindings {
+                    problem: "the bytecode core opens no paged-engine session".into(),
+                });
+            }
+            Some(Some(page)) => {
+                let (session, directory) =
+                    lash_kernel_state::paged::run::session::open(source, page)?;
+                let (heap, values) = SlotHeap::open(bounds.memory, &session.heap, directory)
+                    .map_err(|error| StartError::Bindings {
+                        problem: format!("the session's heap does not open: {error:?}"),
+                    })?;
+                (heap, Some((session, values)))
+            }
+        };
         let (mut vm, convention) =
             build(&program, bounds, entry.as_ref(), start.modes, heap, 0, None)?;
+        if let Some((session, values)) = session {
+            crate::durable::session::bind(&mut vm, &session, values);
+        }
         let mut header = Header::of(&program, bounds, start.owner);
         header.host = start.host.iter().map(|(name, _)| name.clone()).collect();
         header.entry = entry;
@@ -466,32 +484,13 @@ impl Machine for CoreMachine {
         }
         self.partial = None;
         match self.vm.run(host, slice) {
-            Stop::Returned(result) => self.concluded(
-                None,
-                |result| {
-                    End::Finished(Box::new(Finished {
-                        result,
-                        finish: false,
-                        carry: None,
-                        not_carried: Vec::new(),
-                    }))
-                },
-                crate::bytecode::conventions::result(self.convention.as_ref(), result),
-            ),
+            Stop::Returned(result) => {
+                let result = crate::bytecode::conventions::result(self.convention.as_ref(), result);
+                self.end_cell(None, false, result)
+            }
             Stop::Finish(result) => {
                 let ender = Some(self.vm.tasks.running);
-                self.concluded(
-                    ender,
-                    |result| {
-                        End::Finished(Box::new(Finished {
-                            result,
-                            finish: true,
-                            carry: None,
-                            not_carried: Vec::new(),
-                        }))
-                    },
-                    result,
-                )
+                self.end_cell(ender, true, result)
             }
             Stop::Fail(datum) => {
                 let ender = Some(self.vm.tasks.running);
@@ -646,6 +645,34 @@ impl CoreMachine {
             Some(error) => self.ended(End::Error(error)),
             None => self.ended(end(result)),
         }
+    }
+
+    /// The run finished with `result`, ended by `ender`: a `main` cell
+    /// hands its session on (`K-SES-001`), an entry nothing.
+    fn end_cell(
+        &mut self,
+        ender: Option<usize>,
+        finish: bool,
+        result: Datum,
+    ) -> Result<Step, MachineError> {
+        if let Some(error) = self.vm.tasks.outstanding(ender, &self.vm.program.units) {
+            return self.ended(End::Error(error));
+        }
+        let (carry, not_carried) = match self.header.entry {
+            Some(_) => (None, Vec::new()),
+            None => {
+                self.ended = true;
+                let (carry, not_carried) =
+                    crate::durable::session::carry(&mut self.vm, &self.header.host)?;
+                (Some(carry), not_carried)
+            }
+        };
+        self.ended(End::Finished(Box::new(Finished {
+            result,
+            finish,
+            carry,
+            not_carried,
+        })))
     }
 
     fn uncaught(&mut self, value: Value) -> Result<Step, MachineError> {

@@ -115,6 +115,29 @@ fn chunk_page(access: &Access<'_>, chunk: &ChunkRef) -> Result<(ChunkPage, [u8; 
     Ok((page, logical_digest(&answer.tokens)))
 }
 
+/// Calls `visit` with every value large object `row` holds, its chunks
+/// read in order, until it answers `true`; gives whether one did.
+///
+/// # Errors
+///
+/// The page port's faults; [`HeapFault::Corrupt`] for an index or chunk
+/// page that is not the one the row describes.
+pub(crate) fn any_value(
+    access: &Access<'_>,
+    row: &Chunked,
+    visit: &mut dyn FnMut(&RunValue) -> bool,
+) -> Result<bool, HeapFault> {
+    for part in &row.parts {
+        for chunk in &index_page(access, part)?.0 {
+            let (page, _) = chunk_page(access, chunk)?;
+            if page.members.values().into_iter().any(&mut *visit) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// The part and slot of chunk `chunk`.
 fn locate(row: &Chunked, chunk: u32) -> Option<(usize, usize)> {
     let mut start = 0u32;

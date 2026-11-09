@@ -65,8 +65,29 @@ pub struct FamilyRecord {
 
 /// A carried session: what a cell starts from and a terminal cell hands
 /// on (kind [`PageKind::SESSION_ROOT`](super::PageKind::SESSION_ROOT)).
+///
+/// Each engine writes and reads only its own form: the paged engine's
+/// heap, bindings and functions, or the bytecode core's run session page
+/// ([`run::session`](super::run::session)). An engine refuses the other's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SessionRoot {
+pub struct SessionRoot(pub(crate) SessionForm);
+
+/// Either engine's session until the host flip deletes the paged form;
+/// each engine reads only its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum SessionForm {
+    Paged(PagedSession),
+    /// A [`PageKind::RUN_SESSION`](super::PageKind::RUN_SESSION) page.
+    Run(PageRef),
+}
+
+/// Why the paged engine refuses a bytecode-core session.
+pub const RUN_SESSION_REFUSED: &str = "the paged engine opens no bytecode-core session";
+
+/// The paged engine's session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PagedSession {
     pub(crate) heap: PageRef,
     /// Carried bindings: name to value.
     pub(crate) bindings: KeyedRoot,
