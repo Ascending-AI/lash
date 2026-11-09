@@ -776,7 +776,9 @@ fn shared_immutable_reopens_as_one_slot_and_one_holding() {
 }
 
 /// A map keyed by a tuple holding a ref to `list`, which it also holds as
-/// the key's value: the ref's referent stays reachable.
+/// the key's value (the ref's referent stays reachable), between two text
+/// keys. A first entry is deleted, so the map keys its own index, with
+/// sequences that are not its positions.
 fn keyed(arena: &mut Arena) -> (Value, Value) {
     let list = list(arena, vec![Value::Int(1)]);
     let key = arena
@@ -789,9 +791,48 @@ fn keyed(arena: &mut Arena) -> (Value, Value) {
         )
         .expect("a tuple");
     let map = arena
-        .create(NewObject::Map(vec![(key, list)]))
+        .create(NewObject::Map(vec![
+            (short("gone"), Value::Int(0)),
+            (short("first"), Value::Int(10)),
+            (key, list),
+            (short("last"), Value::Int(30)),
+        ]))
         .expect("a map");
+    arena
+        .table_delete(map.handle().expect("a map"), &short("gone"))
+        .expect("a delete");
     (map, list)
+}
+
+fn short(text: &str) -> Value {
+    Value::Text(lash_kernel_doc::arena::ShortText::new(text).expect("short"))
+}
+
+/// The map's entries in iteration order, each as the key and value it
+/// holds (handles included), and what each key looks up: one entry each.
+fn entries(arena: &mut Arena, map: Value, list: Value) -> Vec<String> {
+    let handle = map.handle().expect("a map");
+    let pairs: Vec<Value> = {
+        let objects = arena.objects();
+        let semantics = arena.semantics();
+        let args = Args::new(&[], objects, &semantics);
+        let table = args.table(&map).expect("a read").expect("a map");
+        table
+            .chunks()
+            .map(|chunk| chunk.expect("resident").to_vec())
+            .collect::<Vec<_>>()
+            .concat()
+    };
+    let mut seen: Vec<String> = pairs
+        .chunks(2)
+        .map(|pair| format!("{:?} => {:?}", pair[0], pair[1]))
+        .collect();
+    for key in ["first", "last"] {
+        let got = arena.table_get(handle, &short(key)).expect("a lookup");
+        seen.push(format!("{key} looks up {got:?}"));
+    }
+    seen.push(format!("the tuple looks up {:?}", lookup(arena, map, list)));
+    seen
 }
 
 fn lookup(arena: &mut Arena, map: Value, list: Value) -> Option<Value> {
@@ -817,10 +858,14 @@ fn reference_tuple_keys_survive_first_seal_and_reopen() {
     let mut arena = Arena::new();
     let (map, list) = keyed(&mut arena);
     assert!(lookup(&mut arena, map, list).is_some(), "before the seal");
+    let before = entries(&mut arena, map, list);
     let pages = Pages::default();
     let mut directory = pages.directory(None);
     let root = seal(&mut arena, &[map], &mut directory, &mut HighWater(0)).expect("a seal");
     assert!(lookup(&mut arena, map, list).is_some(), "after the seal");
+    // The re-key keeps each entry's place and what each key finds.
+    assert_eq!(entries(&mut arena, map, list), before);
+    assert!(before[3].ends_with("Some(Int(10))") && before[4].ends_with("Some(Int(30))"));
 
     let (mut heap, map) = opened(&pages, &root, u64::MAX);
     load(&mut heap, map, &[map]).expect("a load");
