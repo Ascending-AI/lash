@@ -124,6 +124,9 @@ pub(crate) struct Fun {
     pub path: Vec<u32>,
     /// The expression each op lowers, by path (`site_tables`).
     pub origin: Vec<Path>,
+    /// Where each slot was declared, and the variable it holds if any
+    /// (`site_tables`).
+    pub declared: Vec<(Path, Option<Name>)>,
 }
 
 impl Fun {
@@ -164,6 +167,7 @@ impl Fun {
             site,
             path: Vec::new(),
             origin: Vec::new(),
+            declared: Vec::new(),
         }
     }
 
@@ -278,6 +282,7 @@ impl Fun {
     pub(crate) fn declare(&mut self, name: &Name) -> u16 {
         let slot = self.temp();
         self.slots.insert(name.clone(), slot);
+        self.declared[usize::from(slot)].1 = Some(name.clone());
         slot
     }
 
@@ -285,6 +290,7 @@ impl Fun {
     pub(crate) fn temp(&mut self) -> u16 {
         let slot = self.locals;
         self.locals += 1;
+        self.declared.push((Path::from(self.path.as_slice()), None));
         slot
     }
 
@@ -866,6 +872,7 @@ impl<'a> Compiler<'a> {
             site,
             mut points,
             origin,
+            declared,
             ..
         } = f;
         // Points are recorded in lowering order; an `if`'s test and a
@@ -949,6 +956,7 @@ impl<'a> Compiler<'a> {
             points,
             fused: Vec::new(),
             origin,
+            declared,
             sites: Default::default(),
         }
     }

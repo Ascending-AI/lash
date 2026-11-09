@@ -484,6 +484,24 @@ impl Unit {
                 }
             }
         }
+        // Every slot is named, and found again by its name.
+        let locals = self.sites.locals();
+        if locals.len() != usize::from(self.locals) {
+            return Err(Malformed {
+                unit: id,
+                pc: None,
+                problem: format!("{} of {} slots are named", locals.len(), self.locals),
+            });
+        }
+        for local in locals {
+            if self.sites.local(&local.site, &local.role, local.copy) != Some(local) {
+                return Err(Malformed {
+                    unit: id,
+                    pc: None,
+                    problem: format!("slot {} is not found by its site", local.slot),
+                });
+            }
+        }
         Ok(())
     }
 
@@ -631,6 +649,7 @@ mod tests {
                 points: Vec::new(),
                 fused: Vec::new(),
                 origin: Vec::new(),
+                declared: Vec::new(),
                 sites: Default::default(),
             }],
             constants: vec![Constant::Immediate(Value::Bool(true))],

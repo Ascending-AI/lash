@@ -17,14 +17,20 @@
 //! - at a step, where the slice is tested: a statement start
 //!   ([`Phase::Statement`]) or a loop's back edge ([`Phase::Back`]).
 //!
+//! A frame's slots are named the same way: each by the site that declared
+//! it and what it holds there (a variable, a value held while cleanup
+//! runs, a loop's pass counter or its state), and each loop's state by the
+//! loop's site.
+//!
 //! A site can be compiled more than once in a unit: a `finally` body is
-//! lowered on each way out of its `try`. Its points are told apart by
-//! `copy`, their order in the unit's code.
+//! lowered on each way out of its `try`. Its points and slots are told
+//! apart by `copy`, their order in the unit's code.
 //!
 //! Role meanings and these tables are continuation format (contract §7).
 
 use std::sync::Arc;
 
+use lash_kernel_value::names::Name;
 use lash_kernel_value::sites::Site;
 
 use super::op::Op;
@@ -141,13 +147,64 @@ pub struct Entry {
     pub resume: Resume,
 }
 
-/// A unit's resume table: every point a frame of it can be saved at.
+/// What a frame's slot holds.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SlotRole {
+    /// A parameter or a variable, by name.
+    Variable(Name),
+    /// A positional argument of a unit that names none: a function
+    /// value's trampoline or a spawn's stub.
+    Argument(u16),
+    /// A value held while cleanup runs: a `return`'s value before its
+    /// `finally` blocks or its `via` policy, or a raise's.
+    Held,
+    /// A loop's count of the passes it has begun (`K-EFF-008`).
+    Passes,
+    /// A `for` loop's state, by its place in [`LoopState::slots`].
+    Loop(u8),
+}
+
+/// One slot of a frame, named by document coordinates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Local {
+    /// The site that declared it.
+    pub site: Path,
+    pub role: SlotRole,
+    /// Which compiled copy of the declaring site, in slot order, from 0.
+    pub copy: u32,
+    pub slot: u16,
+    /// The slot holds a cell (`K-CLO-001`): it is boxed at entry or when
+    /// declared.
+    pub cell: bool,
+}
+
+/// A `for` loop's state, in its slots' fixed order: what it walks and its
+/// cursor, and for a protocol loop then the size, what remains, the raw
+/// item and whether the step gave one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoopState {
+    pub site: Path,
+    /// Which compiled copy of the loop site, from 0.
+    pub copy: u32,
+    pub slots: Arc<[u16]>,
+    /// The slot counting its passes.
+    pub passes: Option<u16>,
+}
+
+/// A unit's resume table: every point a frame of it can be saved at, and
+/// what each of its slots holds.
 #[derive(Clone, Debug, Default)]
 pub struct SiteTable {
     /// By site, phase and copy.
     entries: Vec<Entry>,
     /// Indexes into `entries`, by resume pc and phase.
     by_pc: Vec<u32>,
+    /// By slot.
+    locals: Vec<Local>,
+    /// Indexes into `locals`, by site, role and copy.
+    by_site: Vec<u16>,
+    /// In loop order.
+    loops: Vec<LoopState>,
 }
 
 impl SiteTable {
@@ -175,6 +232,32 @@ impl SiteTable {
 
     pub fn entries(&self) -> &[Entry] {
         &self.entries
+    }
+
+    /// What slot `slot` holds.
+    pub fn slot(&self, slot: u16) -> Option<&Local> {
+        self.locals.get(usize::from(slot))
+    }
+
+    /// The slot declared at `site` for `role`.
+    pub fn local(&self, site: &[u32], role: &SlotRole, copy: u32) -> Option<&Local> {
+        self.by_site
+            .binary_search_by(|&at| {
+                let local = &self.locals[usize::from(at)];
+                (&*local.site, &local.role, local.copy).cmp(&(site, role, copy))
+            })
+            .ok()
+            .map(|at| &self.locals[usize::from(self.by_site[at])])
+    }
+
+    /// Every slot, by slot.
+    pub fn locals(&self) -> &[Local] {
+        &self.locals
+    }
+
+    /// Each `for` loop's state, in loop order (`LoopSite` index).
+    pub fn loops(&self) -> &[LoopState] {
+        &self.loops
     }
 }
 
@@ -291,7 +374,114 @@ pub(crate) fn build(unit: &Unit) -> SiteTable {
         let entry = &entries[at as usize];
         (entry.resume.pc, entry.phase)
     });
-    SiteTable { entries, by_pc }
+    let (locals, by_site, loops) = slots(unit, &root);
+    SiteTable {
+        entries,
+        by_pc,
+        locals,
+        by_site,
+        loops,
+    }
+}
+
+/// What each slot of `unit` holds, the slots by declaring site, and each
+/// `for` loop's state.
+fn slots(unit: &Unit, root: &Path) -> (Vec<Local>, Vec<u16>, Vec<LoopState>) {
+    let mut roles: Vec<(Path, SlotRole)> = (0..unit.locals)
+        .map(|slot| match unit.declared.get(usize::from(slot)) {
+            Some((site, Some(name))) => (site.clone(), SlotRole::Variable(name.clone())),
+            Some((site, None)) => (site.clone(), SlotRole::Held),
+            None => (root.clone(), SlotRole::Argument(slot)),
+        })
+        .collect();
+    let mut cell = vec![false; roles.len()];
+    for &slot in &unit.boxed {
+        if let Some(flag) = cell.get_mut(usize::from(slot)) {
+            *flag = true;
+        }
+    }
+    let mut passes = Vec::new();
+    for op in &unit.ops {
+        match *op {
+            Op::Box(slot) => {
+                if let Some(flag) = cell.get_mut(usize::from(slot)) {
+                    *flag = true;
+                }
+            }
+            Op::LoopStart(slot) => {
+                if let Some((_, role)) = roles.get_mut(usize::from(slot)) {
+                    *role = SlotRole::Passes;
+                }
+                passes.push(slot);
+            }
+            _ => {}
+        }
+    }
+    // A protocol loop keeps six slots of state, a plain one two.
+    let protocol: Vec<u32> = unit
+        .ops
+        .iter()
+        .filter_map(|op| match *op {
+            Op::ProtoOpen(n) => Some(n),
+            _ => None,
+        })
+        .collect();
+    let mut loops = Vec::with_capacity(unit.loops.len());
+    for (index, site) in unit.loops.iter().enumerate() {
+        let width: u16 = if protocol.contains(&(index as u32)) {
+            6
+        } else {
+            2
+        };
+        let slots: Arc<[u16]> = (site.slot..site.slot.saturating_add(width)).collect();
+        for (at, &slot) in slots.iter().enumerate() {
+            if let Some((_, role)) = roles.get_mut(usize::from(slot)) {
+                *role = SlotRole::Loop(at as u8);
+            }
+        }
+        let path: Path = Arc::from(site.site.path.as_slice());
+        // The pass counter is the loop statement's own, declared at it.
+        let counter = passes.iter().copied().find(|&slot| {
+            roles
+                .get(usize::from(slot))
+                .is_some_and(|(at, _)| *at == path)
+        });
+        loops.push(LoopState {
+            site: path,
+            copy: 0,
+            slots,
+            passes: counter,
+        });
+    }
+    let mut locals: Vec<Local> = roles
+        .into_iter()
+        .enumerate()
+        .map(|(slot, (site, role))| Local {
+            site,
+            role,
+            copy: 0,
+            slot: slot as u16,
+            cell: cell[slot],
+        })
+        .collect();
+    let mut by_site: Vec<u16> = (0..locals.len() as u16).collect();
+    by_site.sort_by(|&a, &b| {
+        let (a, b) = (&locals[usize::from(a)], &locals[usize::from(b)]);
+        (&a.site, &a.role, a.slot).cmp(&(&b.site, &b.role, b.slot))
+    });
+    for at in 1..by_site.len() {
+        let (last, this) = (usize::from(by_site[at - 1]), usize::from(by_site[at]));
+        if locals[last].site == locals[this].site && locals[last].role == locals[this].role {
+            locals[this].copy = locals[last].copy + 1;
+        }
+    }
+    let mut seen: Vec<(Path, u32)> = Vec::new();
+    for state in &mut loops {
+        let copies = seen.iter().filter(|(site, _)| *site == state.site).count();
+        state.copy = copies as u32;
+        seen.push((state.site.clone(), state.copy));
+    }
+    (locals, by_site, loops)
 }
 
 /// The operand stack before each op of `unit`, each value by the
