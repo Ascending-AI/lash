@@ -753,7 +753,9 @@ fn drive(text: &str, how: Drive<'_>) -> Observed {
 /// bodies the inline pass expands: `law.deep` returning with a fee that
 /// reads its argument deeply and its result, `law.pick` on its guard path
 /// and, below 2, off it into a call of `law.raises` whose raise escapes
-/// both, and `law.oops` returning or raising from inside its region.
+/// both, `law.oops` returning or raising from inside its region, and
+/// `law.at`, whose guard path folds to one list read: past the end of its
+/// list the fold declines and its region raises.
 const EVENT_CONTRACT: [&str; 3] = [
     r#"definition "function sq(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return num.add(x, x) }"
 main {
@@ -803,6 +805,12 @@ main {
     }
     let s = invoke law.oops("ab")
     set total = num.add(total, list.len(d))
+    set total = num.add(total, invoke law.at([5, 6, 7], i))
+    try {
+      set total = num.add(total, invoke law.at([5], i))
+    } catch e {
+      set total = num.add(total, 1000)
+    }
     set i = num.add(i, 1)
   }
   print total
@@ -838,6 +846,7 @@ fn inlined(text: &str, how: Drive<'_>) -> Observed {
 /// them through their frames, and a growing limiter is asked the same.
 #[test]
 fn the_prepaid_and_exact_paths_refuse_at_the_same_event_with_the_same_total() {
+    let held = crate::vm::inline::held();
     let inline = EVENT_CONTRACT[2];
     for text in EVENT_CONTRACT {
         let whole = core_run(text, ROOMY.charge_limit, u64::MAX, true, None);
@@ -909,6 +918,7 @@ fn the_prepaid_and_exact_paths_refuse_at_the_same_event_with_the_same_total() {
             );
         }
     }
+    assert!(crate::vm::inline::held() > held, "no region's fold held");
 }
 
 thread_local! {
@@ -921,8 +931,9 @@ thread_local! {
 /// and two kernel-bodied library functions billing at completion,
 /// `law.deep` returning and `law.fails` raising out of the covered
 /// `law.raises` it calls, whose own native calls are covered; `law.pick`,
-/// whose guard returns at once or calls `law.raises`; and `law.oops`,
-/// which raises unless its argument is text, billing its deep size.
+/// whose guard returns at once or calls `law.raises`; `law.oops`, which
+/// raises unless its argument is text, billing its deep size; and
+/// `law.at`, reading a list below 3 and billing its result's size.
 fn huge_charges(
     registry: &mut lash_kernel_doc::FunctionRegistry,
     ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
@@ -972,6 +983,11 @@ fn huge_charges(
         (
             "law.oops",
             "function law.oops(x: Any) -> Any\nkernel 1\ncharge sum(4, deep(x))\n{uses}body { let t = text.concat(x, \"!\") return t }",
+            false,
+        ),
+        (
+            "law.at",
+            "function law.at(xs: Any, i: Any) -> Any\nkernel 1\ncharge sum(2, size(result))\n{uses}body { if num.lt(i, 3) { return xs[i] } return i }",
             false,
         ),
     ] {
@@ -1045,7 +1061,8 @@ fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
 /// reading cold sizes, a raise unwinding through an uncovered completion,
 /// and a two-argument `perform` copying both out. `law.deep` and
 /// `law.oops` run inline: a cold index inside the region, a cold return
-/// fee and a cold fee of a raise leaving it.
+/// fee and a cold fee of a raise leaving it. `law.at`'s fold reads a cold
+/// element, declines, and its region reads it again.
 const COLD_CONTRACT: &str = r#"import 3 operation host.pair(a: Any, b: Any) -> Any
 main {
   let xs = [1, 2, 3]
@@ -1056,6 +1073,7 @@ main {
     let n = law.sized(m)
     let d = invoke law.deep(m)
     set total = num.add(total, num.add(xs[1], list.len(m["b"])))
+    set total = num.add(total, invoke law.at(xs, 1))
     for x in m["b"] { set total = num.add(total, x) }
     try {
       let bad = invoke law.fails(m)
@@ -1084,6 +1102,7 @@ main {
 /// them through their frames does.
 #[test]
 fn a_run_paged_out_at_every_statement_shows_its_host_what_a_resident_run_does() {
+    let held = crate::vm::inline::held();
     let both = |how: Drive<'_>| {
         let resident = inlined(COLD_CONTRACT, how);
         let cold = drive(COLD_CONTRACT, Drive { cold: true, ..how });
@@ -1145,6 +1164,7 @@ fn a_run_paged_out_at_every_statement_shows_its_host_what_a_resident_run_does() 
             });
         }
     }
+    assert!(crate::vm::inline::held() > held, "no region's fold held");
 }
 
 /// Astra cold path, item 10: a cold load the memory bound refuses, after

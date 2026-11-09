@@ -13,7 +13,7 @@ pub(crate) mod calls;
 pub(crate) mod charge;
 pub(crate) mod datum;
 pub(crate) mod frames;
-mod inline;
+pub(crate) mod inline;
 pub(crate) mod loops;
 pub(crate) mod machine;
 pub(crate) mod members;
@@ -1229,7 +1229,17 @@ impl<H: Heap> Vm<H> {
                     Op::Inline(n) => {
                         sync!(pc);
                         base = self.inline(unit, n)?;
-                        pc = unit.inlines[n as usize].entry as usize;
+                        let site = &unit.inlines[n as usize];
+                        pc = site.entry as usize;
+                        // A fold that holds returns its value at the
+                        // region's leave; otherwise the region runs.
+                        if let Some(fold) = site.fold {
+                            let fold = &unit.folds[fold as usize];
+                            if let Some(value) = self.folded(&program, fold, base) {
+                                self.push(value);
+                                pc = fold.leave as usize;
+                            }
+                        }
                     }
                     Op::Leave(n) => {
                         sync!(pc);

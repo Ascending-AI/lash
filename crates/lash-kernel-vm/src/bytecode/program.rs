@@ -136,6 +136,8 @@ pub struct Unit {
     /// The library bodies expanded in place of their calls (`inline`),
     /// each a region of ops past the unit's own.
     pub inlines: Vec<InlineSite>,
+    /// The guard paths' folds the inline sites name (`fold`).
+    pub folds: Vec<Fold>,
     /// The expression each op lowers, by its path under `site`. Ops added
     /// after sealing have none, and stand for the unit's root.
     pub origin: Vec<super::site_tables::Path>,
@@ -180,6 +182,49 @@ pub struct InlineSite {
     pub at: u32,
     pub entry: u32,
     pub end: u32,
+    /// The guard path's fold, in the unit's folds (`fold`), if it has one.
+    pub fold: Option<u32>,
+}
+
+/// The most steps, and values made, of one fold.
+pub const FOLD_STEPS: usize = 8;
+
+/// An inline region's guard path from its entry to one `Op::Leave`, as
+/// one guarded op (`fold`): its guards and the value it returns, read
+/// with no effect. Where a guard does not hold or a read declines, the
+/// region runs from its entry; otherwise the region's `Op::Leave` at
+/// `leave` returns the value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fold {
+    pub steps: [Step; FOLD_STEPS],
+    pub len: u8,
+    pub result: Slot,
+    pub leave: u32,
+}
+
+/// Where a fold step reads a value: a body local, a constant, or a value
+/// an earlier step made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Slot {
+    Local(u16),
+    Const(u32),
+    Made(u8),
+}
+
+/// One step of a fold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// A native call's inline answer (R8), making a value.
+    Answer {
+        native: u32,
+        args: [Slot; 2],
+        argc: u8,
+    },
+    /// A branch the path takes: the value must be `Bool(holds)`.
+    Guard { value: Slot, holds: bool },
+    /// An index read of a list or tuple at an integer that finds an
+    /// element, making it.
+    Index { target: Slot, index: Slot },
 }
 
 /// A run of one prepaid block's ops that dispatches at once (`fuse`): up

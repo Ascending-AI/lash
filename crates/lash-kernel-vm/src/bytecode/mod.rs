@@ -4,12 +4,14 @@
 //! The compiler takes one admitted document and its admission closure and
 //! emits one `Program`; the inline pass expands covered library bodies'
 //! guard paths into their callers, one validator pass checks its
-//! structure, and one fusion pass then fuses runs of its prepaid blocks. Each
+//! structure, one fold pass folds each region's guard path into one
+//! guarded op, and one fusion pass then fuses runs of its prepaid blocks. Each
 //! machine instance compiles its own.
 
 pub(crate) mod charge_tables;
 pub(crate) mod compile;
 pub(crate) mod conventions;
+pub(crate) mod fold;
 pub(crate) mod fuse;
 pub(crate) mod inline;
 pub(crate) mod lower;

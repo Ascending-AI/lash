@@ -956,6 +956,7 @@ impl<'a> Compiler<'a> {
             points,
             fused: Vec::new(),
             inlines: Vec::new(),
+            folds: Vec::new(),
             origin,
             declared,
             sites: Default::default(),

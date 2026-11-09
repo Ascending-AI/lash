@@ -108,6 +108,7 @@ fn build(
     .map_err(linked)?;
     crate::bytecode::inline::inline(&mut code);
     let heights = crate::bytecode::validate::validate(&code).map_err(linked)?;
+    crate::bytecode::fold::fold(&mut code);
     crate::bytecode::fuse::fuse(&mut code);
     let paced = matches!(bounds.charge, Charge::Off);
     let operations = operations(program, &code, modes)?;

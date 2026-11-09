@@ -5,14 +5,28 @@
 //! call's entry makes, all but the frame; `Op::Leave` completes it as a
 //! return does; `Op::Deopt` pushes the body's frame where the guard path
 //! ends; a raise completes it at the body's position before unwinding on.
+//! A region's fold (`bytecode::fold`) runs once its activation is made.
 
 use lash_kernel_doc::Value;
 
 use super::frames::{Activation, Frame};
 use super::{Flow, Restart, Run, Stop, Vm, fault};
 use crate::Bound;
-use crate::bytecode::program::{Callee, Unit};
+use crate::bytecode::program::{Callee, FOLD_STEPS, Fold, Program, Slot, Step, Unit};
 use crate::heap::Heap;
+
+#[cfg(test)]
+thread_local! {
+    /// The folds that held on this thread, for the laws: proof that a
+    /// law's run took a fold.
+    static HELD: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The folds that held on this thread so far.
+#[cfg(test)]
+pub(crate) fn held() -> u64 {
+    HELD.with(std::cell::Cell::get)
+}
 
 impl<H: Heap> Vm<H> {
     /// Enters inline site `n` of `unit`, the running frame's, whose
@@ -48,6 +62,50 @@ impl<H: Heap> Vm<H> {
             bill,
         });
         Ok(base)
+    }
+
+    /// What fold `fold` of the region whose activation's locals start at
+    /// `base` returns: each step read with no effect, `None` where a guard
+    /// does not hold or a step declines, so that the region runs.
+    pub(super) fn folded(&self, program: &Program, fold: &Fold, base: usize) -> Option<Value> {
+        let mut made = [Value::Absent; FOLD_STEPS];
+        let mut count = 0;
+        let read = |made: &[Value; FOLD_STEPS], slot: Slot| match slot {
+            Slot::Local(n) => self.cx.stack[base + usize::from(n)],
+            Slot::Const(n) => self.constants[n as usize],
+            Slot::Made(n) => made[usize::from(n)],
+        };
+        for &step in &fold.steps[..usize::from(fold.len)] {
+            let value = match step {
+                Step::Answer { native, args, argc } => {
+                    let args = [read(&made, args[0]), read(&made, args[1])];
+                    match self.answer(program, native, false, &args[..usize::from(argc)])? {
+                        Ok((value, None)) => value,
+                        _ => return None,
+                    }
+                }
+                Step::Guard { value, holds } => {
+                    if !matches!(read(&made, value), Value::Bool(found) if found == holds) {
+                        return None;
+                    }
+                    continue;
+                }
+                Step::Index { target, index } => {
+                    let arena = self.heap.arena();
+                    match (read(&made, target), read(&made, index)) {
+                        (Value::List(object) | Value::Tuple(object), Value::Int(at)) => {
+                            arena.item(object, u64::try_from(at).ok()?).ok()??
+                        }
+                        _ => return None,
+                    }
+                }
+            };
+            made[count] = value;
+            count += 1;
+        }
+        #[cfg(test)]
+        HELD.with(|held| held.set(held.get() + 1));
+        Some(read(&made, fold.result))
     }
 
     /// The inline region returns the top value, as its body's frame

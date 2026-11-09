@@ -801,6 +801,7 @@ mod tests {
                 points: Vec::new(),
                 fused: Vec::new(),
                 inlines: Vec::new(),
+                folds: Vec::new(),
                 origin: Vec::new(),
                 declared: Vec::new(),
                 sites: Default::default(),
