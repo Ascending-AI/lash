@@ -502,10 +502,18 @@ impl<H: Heap> Vm<H> {
     // --- The heap.
 
     /// Admits `units`, collecting once before it refuses (contract §2).
+    #[inline]
     fn admit(&mut self, units: u64) -> Run<()> {
         if self.heap.admit(units).is_ok() {
             return Ok(());
         }
+        self.admit_collected(units)
+    }
+
+    /// Admits `units` after a collection, or refuses.
+    #[cold]
+    #[inline(never)]
+    fn admit_collected(&mut self, units: u64) -> Run<()> {
         self.collect();
         self.heap
             .admit(units)

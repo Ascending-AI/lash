@@ -137,16 +137,29 @@ impl<H: Heap> Vm<H> {
         let Value::Record(record) = target else {
             return Err(self.error("type_error", "only a record has fields to assign"));
         };
-        let admitted = self.admit_growth(record, &name, [target, name, value])?;
+        let admitted = self.admit_growth(record, &name, 2 * meter::VALUE, [target, name, value])?;
         let written = self.heap.arena_mut().table_write(record, name, value);
         self.heap.settle(record, admitted);
         written.map_err(|e| self.native(e))
     }
 
     /// Admits what writing `key` into table `table` adds, before the write
-    /// (contract §2): a new key's entry, nothing for an overwrite. The
-    /// write's `operands` are held across the admission's collection.
-    fn admit_growth(&mut self, table: ArenaHandle, key: &Value, operands: [Value; 3]) -> Run<u64> {
+    /// (contract §2): `entry` for a new key, nothing for an overwrite. When
+    /// the room holds a new entry it is admitted without looking the key up,
+    /// and the write's settlement returns it for an overwrite; only a write
+    /// the room may refuse looks first. The write's `operands` are held
+    /// across the admission's collection.
+    #[inline]
+    fn admit_growth(
+        &mut self,
+        table: ArenaHandle,
+        key: &Value,
+        entry: u64,
+        operands: [Value; 3],
+    ) -> Run<u64> {
+        if self.heap.admit(entry).is_ok() {
+            return Ok(entry);
+        }
         let present = self
             .heap
             .arena()
@@ -156,17 +169,17 @@ impl<H: Heap> Vm<H> {
         if present {
             return Ok(0);
         }
-        let entry = match self.heap.arena().body(table) {
-            Ok(Body::Set(_)) => meter::VALUE,
-            _ => 2 * meter::VALUE,
-        };
         self.admit_holding(entry, operands)?;
         Ok(entry)
     }
 
     /// Admits `units`, holding `operands` across the collection it may
     /// make.
+    #[inline]
     fn admit_holding(&mut self, units: u64, operands: [Value; 3]) -> Run<()> {
+        if self.heap.admit(units).is_ok() {
+            return Ok(());
+        }
         let from = self.held.len();
         self.held.extend(operands);
         let admitted = self.admit(units);
@@ -185,24 +198,30 @@ impl<H: Heap> Vm<H> {
                     ));
                 };
                 // Assigning at the length appends: one more member.
-                let admitted = if at == length { meter::VALUE } else { 0 };
-                self.admit_holding(admitted, [target, index, value])?;
-                let written = self.heap.arena_mut().list_set(list, at, value);
-                self.heap.settle(list, admitted);
-                written
+                if at == length {
+                    self.admit_holding(meter::VALUE, [target, index, value])?;
+                    let written = self.heap.arena_mut().list_set(list, at, value);
+                    self.heap.settle(list, meter::VALUE);
+                    written
+                } else {
+                    // An overwrite holds what the list held.
+                    self.heap.arena_mut().list_set(list, at, value)
+                }
             }
             Value::Record(record) => {
                 if !is_text(&index) {
                     return Err(self.error("type_error", "a record index must be text"));
                 }
-                let admitted = self.admit_growth(record, &index, [target, index, value])?;
+                let admitted =
+                    self.admit_growth(record, &index, 2 * meter::VALUE, [target, index, value])?;
                 let written = self.heap.arena_mut().table_write(record, index, value);
                 self.heap.settle(record, admitted);
                 written
             }
             Value::Map(map) => {
                 self.key(&index)?;
-                let admitted = self.admit_growth(map, &index, [target, index, value])?;
+                let admitted =
+                    self.admit_growth(map, &index, 2 * meter::VALUE, [target, index, value])?;
                 let written = self.heap.arena_mut().table_write(map, index, value);
                 self.heap.settle(map, admitted);
                 written
@@ -216,7 +235,8 @@ impl<H: Heap> Vm<H> {
                     ));
                 };
                 if present {
-                    let admitted = self.admit_growth(set, &index, [target, index, value])?;
+                    let admitted =
+                        self.admit_growth(set, &index, meter::VALUE, [target, index, value])?;
                     let written = self.heap.arena_mut().table_write(set, index, Value::Absent);
                     self.heap.settle(set, admitted);
                     written
