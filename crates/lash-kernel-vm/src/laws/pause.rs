@@ -7,6 +7,10 @@
 //!   are delivered or after (the post-deliver window); a delivered
 //!   outcome survives the reopen, and delivering it again is refused
 //!   (contract §5).
+//! - SEAL-BUDGET: each of those seals runs under a budget of one page or
+//!   one byte. It yields before it produces the root, and produces it
+//!   within one call per phase (the heap, the run record, the checkpoint
+//!   root), so the whole seal is never the only way to finish.
 
 use lash_kernel_doc::Datum;
 use lash_kernel_state::paged::SealBudget;
@@ -47,14 +51,31 @@ fn run(text: &str, slice: u64, pause: Pause) -> (usize, Left) {
     .unwrap();
     let mut world = World::default();
     let (mut paused, mut requests) = (0, Vec::new());
+    let budget = match pause {
+        Pause::AfterDelivery => SealBudget {
+            pages: u64::MAX,
+            bytes: 1,
+        },
+        _ => SealBudget {
+            pages: 1,
+            bytes: u64::MAX,
+        },
+    };
     let mut reopen = |machine: &mut crate::CoreMachine| {
-        let sealed = machine
-            .seal(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            })
-            .unwrap_or_else(|error| panic!("{text}\nseal at pause {paused}: {error:?}"))
-            .unwrap();
+        let mut calls = 0;
+        let sealed = loop {
+            calls += 1;
+            let sealed = machine
+                .seal(budget)
+                .unwrap_or_else(|error| panic!("{text}\nseal at pause {paused}: {error:?}"));
+            if let Some(sealed) = sealed {
+                break sealed;
+            }
+        };
+        assert!(
+            (2..=3).contains(&calls),
+            "{text}\nat pause {paused}, a seal under {budget:?} took {calls} calls"
+        );
         // What a node commits is the root's encoding.
         let root = lash_kernel_value::tokens::decode_body(&lash_kernel_value::tokens::encode_body(
             crate::kernel_internals::sealed_root(&sealed),

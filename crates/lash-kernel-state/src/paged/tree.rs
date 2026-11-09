@@ -66,6 +66,7 @@ pub struct Access<'a> {
     resident: Rc<RefCell<cache::Residency>>,
     dirty: Rc<RefCell<residency::DirtyResidency>>,
     sizing: Rc<RefCell<TokenWriter>>,
+    written: Rc<std::cell::Cell<(u64, u64)>>,
 }
 impl<'a> Access<'a> {
     pub fn new(source: Box<dyn PageSource>) -> Self {
@@ -74,6 +75,7 @@ impl<'a> Access<'a> {
             resident: Default::default(),
             dirty: Default::default(),
             sizing: Default::default(),
+            written: Default::default(),
         }
     }
     pub fn borrowed(source: &'a mut dyn PageSource) -> Self {
@@ -82,6 +84,7 @@ impl<'a> Access<'a> {
             resident: Default::default(),
             dirty: Default::default(),
             sizing: Default::default(),
+            written: Default::default(),
         }
     }
     /// Packing and residency need the encoded length, not an owned body.
@@ -216,11 +219,18 @@ impl<'a> Access<'a> {
                 "semantic page exceeds its node bound".into(),
             ));
         }
+        let (pages, bytes) = self.written.get();
+        self.written
+            .set((pages + 1, bytes.saturating_add(tokens.len() as u64)));
         self.source.borrow_mut().seal(PageBody {
             kind,
             tokens,
             children,
         })
+    }
+    /// The pages sealed through this access, and their token bytes.
+    pub fn written(&self) -> (u64, u64) {
+        self.written.get()
     }
     pub fn with_source<T>(
         &self,

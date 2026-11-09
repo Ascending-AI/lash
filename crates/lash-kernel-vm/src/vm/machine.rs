@@ -41,6 +41,15 @@ pub struct CoreMachine {
     ended: bool,
     convention: Option<lash_kernel_doc::StartConvention>,
     header: Header,
+    /// A budgeted seal's written run record and what the checkpoint root
+    /// takes from it, until the run moves.
+    partial: Option<Partial>,
+}
+
+/// The run record a budgeted seal wrote before its budget ran out.
+struct Partial {
+    heap: lash_kernel_doc::heap::PageRef,
+    meters: SavedMeters,
 }
 
 /// What every root the run seals names besides its state: fixed at start.
@@ -152,6 +161,22 @@ fn linked(problem: impl ToString) -> StartError {
 }
 
 impl CoreMachine {
+    /// Seals the heap and makes the run record.
+    fn seal_heap(&mut self) -> Result<continuation::RunRecord, SealError> {
+        let mut reads: Vec<_> = self
+            .vm
+            .tasks
+            .operations
+            .values()
+            .filter_map(|operation| operation.as_ref().ok())
+            .filter(|operation| operation.read)
+            .map(|operation| operation.use_)
+            .collect();
+        reads.sort();
+        reads.dedup();
+        crate::durable::seal(&mut self.vm, self.header.entry.clone(), reads)
+    }
+
     /// Records every charge the run makes from here on in `tape`, in order
     /// (`K-CHG-002`); recording changes no result, charge or slice return.
     pub fn record_charges(&mut self, tape: ChargeTape) {
@@ -287,6 +312,7 @@ impl Machine for CoreMachine {
             vm,
             document,
             ended: false,
+            partial: None,
             convention,
             header,
         })
@@ -396,6 +422,7 @@ impl Machine for CoreMachine {
             vm,
             document: Arc::clone(&program.document),
             ended: false,
+            partial: None,
             convention,
             header,
         })
@@ -437,6 +464,7 @@ impl Machine for CoreMachine {
         if self.ended {
             return Err(MachineError::Ended);
         }
+        self.partial = None;
         match self.vm.run(host, slice) {
             Stop::Returned(result) => self.concluded(
                 None,
@@ -495,6 +523,7 @@ impl Machine for CoreMachine {
         if self.ended {
             return Err(DeliverError::Ended);
         }
+        self.partial = None;
         let n = lash_kernel_doc::kernel_internals::wait_number(wait);
         let held = crate::heap::meter::outcome(&outcome);
         let delivered = self.vm.tasks.deliver(n, outcome)?;
@@ -504,27 +533,54 @@ impl Machine for CoreMachine {
         Ok(delivered)
     }
 
-    /// Seals the whole run in one step: the budget is not divided yet.
-    fn seal(&mut self, _budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
+    /// Seals in three phases: the heap, the run record, the checkpoint
+    /// root. A phase started finishes, and what it wrote is kept: a heap
+    /// sealed is clean, and a record written is reused until the run
+    /// moves. Once a phase that wrote pages has spent `budget`, the seal
+    /// yields `None`; every call finishes a phase, so calling again
+    /// produces the root.
+    fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
         if self.ended {
             return Err(SealError::Ended);
         }
-        let mut reads: Vec<_> = self
-            .vm
-            .tasks
-            .operations
-            .values()
-            .filter_map(|operation| operation.as_ref().ok())
-            .filter(|operation| operation.read)
-            .map(|operation| operation.use_)
-            .collect();
-        reads.sort();
-        reads.dedup();
-        let record = crate::durable::seal(&mut self.vm, self.header.entry.clone(), reads)?;
+        let written = |machine: &Self| {
+            machine.vm.heap.access().map_or(
+                (0, 0),
+                lash_kernel_state::kernel_internals::tree::Access::written,
+            )
+        };
+        let start = written(self);
+        let spent = |now: (u64, u64), before: (u64, u64)| {
+            now.0 > before.0 && (now.0 - start.0 >= budget.pages || now.1 - start.1 >= budget.bytes)
+        };
+        let Partial { heap, meters } = match self.partial.take() {
+            Some(partial) => partial,
+            None => {
+                let record = self.seal_heap()?;
+                let sealed = written(self);
+                if spent(sealed, start) {
+                    return Ok(None);
+                }
+                let access = self.vm.heap.access().ok_or_else(|| SealError::Fault {
+                    problem: "the heap has no directory".into(),
+                })?;
+                let heap = continuation::write(access, &record).map_err(SealError::Heap)?;
+                let meters = SavedMeters {
+                    charged: (self.header.bounds.charge == Charge::Exact).then_some(record.charged),
+                    waits_issued: record.next_wait,
+                    next_join: record.next_join,
+                    live_tasks: record.live,
+                };
+                if spent(written(self), sealed) {
+                    self.partial = Some(Partial { heap, meters });
+                    return Ok(None);
+                }
+                Partial { heap, meters }
+            }
+        };
         let access = self.vm.heap.access().ok_or_else(|| SealError::Fault {
             problem: "the heap has no directory".into(),
         })?;
-        let heap = continuation::write(access, &record).map_err(SealError::Heap)?;
         let header = &self.header;
         let root = CheckpointRoot {
             limits: SavedLimits {
@@ -554,12 +610,7 @@ impl Machine for CoreMachine {
             reads: KeyedRoot::Empty,
             session: KeyedRoot::Empty,
             host: header.host.clone(),
-            meters: SavedMeters {
-                charged: (header.bounds.charge == Charge::Exact).then_some(record.charged),
-                waits_issued: record.next_wait,
-                next_join: record.next_join,
-                live_tasks: record.live,
-            },
+            meters,
         };
         let tokens = encode_body(&root);
         if tokens.len() > 4096 {
