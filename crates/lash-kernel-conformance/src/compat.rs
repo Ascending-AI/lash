@@ -127,26 +127,36 @@ pub fn cli(args: &[String]) -> Result<(), HarnessError> {
     }
 }
 
-/// The integer contract section 9 witnesses that guard admission of a parked
-/// image, as the orchestrator names them.
-const ADMISSION_SURFACES: [&str; 5] = [
-    "PAGE_FORMAT",
-    "KERNEL_PARKED_STATE_VERSION",
-    "KERNEL_SAVED_FUNCTION_VERSION",
-    "KERNEL_DOCUMENT_SCHEMA_VERSION",
-    "LASH_KERNEL_VERSION",
+/// The contract section 9 witnesses that guard admission of a parked image,
+/// as the orchestrator names them, and whether each one's value is text.
+const ADMISSION_SURFACES: [(&str, bool); 6] = [
+    ("PAGE_FORMAT", false),
+    ("KERNEL_PARKED_STATE_VERSION", false),
+    ("KERNEL_SAVED_FUNCTION_VERSION", false),
+    ("KERNEL_DOCUMENT_SCHEMA_VERSION", false),
+    ("LASH_KERNEL_VERSION", false),
+    ("PAGE_DIGEST_DOMAIN", true),
 ];
 
-/// `SURFACE=EXPECTED:OBSERVED`, for a known admission surface.
+/// `SURFACE=EXPECTED:OBSERVED`, for a known admission surface. A value of a
+/// text surface may not itself hold `:`.
 fn stated_format(value: &str) -> Option<StatedFormat> {
     let (name, values) = value.split_once('=')?;
     let (expected, observed) = values.split_once(':')?;
+    let (surface, text) = ADMISSION_SURFACES
+        .into_iter()
+        .find(|(surface, _)| *surface == name)?;
+    let value = |value: &str| {
+        if text {
+            (!value.is_empty() && !value.contains(':')).then(|| FormatValue::Text(value.into()))
+        } else {
+            value.parse().ok().map(FormatValue::Number)
+        }
+    };
     Some(StatedFormat {
-        surface: ADMISSION_SURFACES
-            .into_iter()
-            .find(|surface| *surface == name)?,
-        expected: FormatValue::Number(expected.parse().ok()?),
-        observed: FormatValue::Number(observed.parse().ok()?),
+        surface,
+        expected: value(expected)?,
+        observed: value(observed)?,
     })
 }
 

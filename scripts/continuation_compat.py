@@ -291,9 +291,7 @@ def main():
         failures = [dict(case=case, pause=pause) for (case, pause), value in resumed.items() if value != baseline[case]]
     else:
         execute(candidate["binary"], ["resume", "--expect-refusal",
-                  # A string witness cannot be stated through a u32 format; a
-                  # change to it alone opens and fails this mode closed.
-                  *(arg for name in ADMISSION_WITNESSES if isinstance(after[name], int)
+                  *(arg for name in ADMISSION_WITNESSES
                     for arg in ("--stated", f"{name}={after[name]}:{before[name]}")), "--corpus", str(corpus), "--imports", str(exports), "--out", str(out / "refusals.json")], out / "refusal.log")
         refusals(out / "refusals.json", pauses, before, after)
         require("deployment_receipt" in inputs, "changed formats require L5's ticket-linked deployment receipt")
