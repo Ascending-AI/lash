@@ -26,7 +26,8 @@
 //! - **Race:** the cell races `ext_fast` against `ext_slow`, whose body
 //!   runs until it is cancelled. Both calls are admitted executions: every
 //!   body entry is an admitted member's, and the loser settles on its own
-//!   after the race answered.
+//!   after the race answered. Its wait was withdrawn, so the cell is
+//!   answered with the winner's value and never sees the late outcome.
 //! - **Ends once (FIG-5999):** a cell whose end no commit of its own
 //!   records ends with the commit that consumes its answer. A node killed
 //!   between the two leaves the cell at its last park, and the node that
@@ -1465,6 +1466,14 @@ impl CellTurn {
                     "the race's winner and loser settled in {outcomes} outcome commits"
                 ));
             }
+        }
+        // The loser's wait was withdrawn when the race answered: its late
+        // outcome settles the call but never reaches the cell.
+        let last = self.last_request();
+        if !last.contains(FAST) || last.contains("ext_slow was cancelled") {
+            violations.push(format!(
+                "the cell was not answered with the winner's value alone; the model saw: {last}"
+            ));
         }
         violations.extend(turn_ended(nodes).await);
         violations
