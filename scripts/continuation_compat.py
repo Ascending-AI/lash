@@ -285,7 +285,9 @@ def main():
         resumed = observations(out / "resumed.json", pauses, True)
         failures = [dict(case=case, pause=pause) for (case, pause), value in resumed.items() if value != baseline[case]]
     else:
-        execute(candidate["binary"], ["resume", "--expect-refusal", "--corpus", str(corpus), "--imports", str(exports), "--out", str(out / "refusals.json")], out / "refusal.log")
+        execute(candidate["binary"], ["resume", "--expect-refusal",
+                  "--expected", str(after["KERNEL_PARKED_STATE_VERSION"]),
+                  "--observed", str(before["KERNEL_PARKED_STATE_VERSION"]), "--corpus", str(corpus), "--imports", str(exports), "--out", str(out / "refusals.json")], out / "refusal.log")
         refusals(out / "refusals.json", pauses, before, after)
         require("deployment_receipt" in inputs, "changed formats require L5's ticket-linked deployment receipt")
         deployment(inputs["deployment_receipt"], base, head)

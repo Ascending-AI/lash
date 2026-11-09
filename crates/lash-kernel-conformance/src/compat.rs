@@ -7,7 +7,7 @@
 //! continuation-compat export --corpus CORPUS --out EXPORT_DIR
 //! continuation-compat uninterrupted --corpus CORPUS --out RUNS_JSON
 //! continuation-compat resume --corpus CORPUS --imports EXPORT_DIR --out RESUMED_JSON
-//! continuation-compat resume --expect-refusal --corpus CORPUS --imports EXPORT_DIR --out REFUSALS_JSON
+//! continuation-compat resume --expect-refusal --expected N --observed N --corpus CORPUS --imports EXPORT_DIR --out REFUSALS_JSON
 //! ```
 //!
 //! The sweep pauses once before the first step, then runs with slice 1 and
@@ -25,7 +25,9 @@ use std::sync::Arc;
 
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_state::paged::{Checkpoint, PageAnswer, PageBody, PageKind, PageSource};
+use lash_kernel_state::paged::{
+    Checkpoint, PageAnswer, PageBody, PageKind, PageSource, StatedFormat,
+};
 use lash_kernel_value::sites::WaitId;
 use lash_kernel_vm::{
     CellStart, Delivered, Host, HostFault, KernelMachine, Machine, MachineError, PreparedLibrary,
@@ -71,19 +73,23 @@ pub fn registry() -> Result<lash_kernel_doc::FunctionRegistry, HarnessError> {
 pub fn cli(args: &[String]) -> Result<(), HarnessError> {
     let usage = || {
         fault(
-            "usage: continuation-compat (export|uninterrupted|resume [--expect-refusal]) \
-             --corpus CORPUS [--imports EXPORT_DIR] --out PATH",
+            "usage: continuation-compat (export|uninterrupted|resume [--expect-refusal \
+             --expected N --observed N]) --corpus CORPUS [--imports EXPORT_DIR] --out PATH",
         )
     };
     let mut args = args.iter();
     let command = args.next().ok_or_else(usage)?.clone();
     let (mut corpus, mut imports, mut out, mut refusal) = (None, None, None, false);
+    let (mut expected, mut observed) = (None, None);
+    let witness = |value: Option<&String>| value.and_then(|value| value.parse::<u32>().ok());
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--corpus" => corpus = args.next().map(PathBuf::from),
             "--imports" => imports = args.next().map(PathBuf::from),
             "--out" => out = args.next().map(PathBuf::from),
             "--expect-refusal" if command == "resume" => refusal = true,
+            "--expected" => expected = Some(witness(args.next()).ok_or_else(usage)?),
+            "--observed" => observed = Some(witness(args.next()).ok_or_else(usage)?),
             _ => return Err(usage()),
         }
     }
@@ -93,7 +99,18 @@ pub fn cli(args: &[String]) -> Result<(), HarnessError> {
     match (command.as_str(), imports) {
         ("export", None) => export(&library, &corpus, &out),
         ("uninterrupted", None) => uninterrupted(&library, &corpus, &out),
-        ("resume", Some(imports)) if refusal => refuse(&library, &corpus, &imports, &out),
+        ("resume", Some(imports)) if refusal => {
+            // The parked-state witnesses live with the embedding, outside the
+            // kernel crates this runner may name; the orchestrator states both
+            // builds' values, as a store states its envelope's.
+            let stated = StatedFormat {
+                surface: "KERNEL_PARKED_STATE_VERSION",
+                expected: expected.ok_or_else(usage)?,
+                observed: observed.ok_or_else(usage)?,
+            };
+            refuse(&library, &corpus, &imports, &out, stated)
+        }
+        _ if expected.is_some() || observed.is_some() => Err(usage()),
         ("resume", Some(imports)) => resume(&library, &corpus, &imports, &out),
         _ => Err(usage()),
     }
@@ -860,6 +877,7 @@ fn open(
     library: &PreparedLibrary,
     case: &Case,
     image: &Image,
+    stated: Option<StatedFormat>,
 ) -> Result<
     (
         Program,
@@ -876,6 +894,10 @@ fn open(
         pages.0.borrow_mut().insert(answer.page.id, answer);
     }
     let root = Checkpoint::of_answer(&image.root.to_answer()?).map_err(fault)?;
+    let root = match stated {
+        Some(format) => root.stated(format),
+        None => root,
+    };
     let opened = KernelMachine::open(
         program.clone(),
         image.bounds.into(),
@@ -921,7 +943,7 @@ fn continue_image(
     case: &Case,
     image: Image,
 ) -> Result<Observation, HarnessError> {
-    let (program, _pages, opened) = open(library, case, &image)?;
+    let (program, _pages, opened) = open(library, case, &image, None)?;
     let machine = opened.map_err(|error| fault(format!("open: {error}")))?;
     let mut running = Running::new(machine, &program, image.cursor, image.prefix);
     if image.phase == Phase::Park {
@@ -952,12 +974,22 @@ struct FormatRefusal {
     observed: u64,
 }
 
-/// The typed format refusal `error` carries. This build's `OpenError` has
-/// no format variant (the interface's L1 fit note 2), so no open error is
-/// one and refusal mode fails.
+/// The typed format refusal `error` carries; any other open error is not one.
 fn format_refusal(error: &lash_kernel_vm::OpenError) -> Option<FormatRefusal> {
-    let _ = error;
-    None
+    match *error {
+        lash_kernel_vm::OpenError::Format {
+            surface,
+            expected,
+            observed,
+        } => Some(FormatRefusal {
+            error: "OpenError",
+            kind: "format",
+            surface: surface.to_owned(),
+            expected: u64::from(expected),
+            observed: u64::from(observed),
+        }),
+        _ => None,
+    }
 }
 
 fn refuse(
@@ -965,12 +997,13 @@ fn refuse(
     corpus: &[(String, Case)],
     imports: &Path,
     out: &Path,
+    stated: StatedFormat,
 ) -> Result<(), HarnessError> {
     let mut runs = Vec::new();
     let mut failures = Vec::new();
     for (case, pause, path) in exported(corpus, imports)? {
         let image: Image = read_json(&path)?;
-        let (_, pages, opened) = open(library, case, &image)?;
+        let (_, pages, opened) = open(library, case, &image, Some(stated))?;
         let mutations = pages.1.get();
         let record = Refusal {
             case: image.case.clone(),
