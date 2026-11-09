@@ -22,7 +22,7 @@ use lash_kernel_state::arena::Arena;
 use lash_kernel_state::paged::run::directory::Directory;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
 use lash_kernel_state::paged::run::objects::RunValue;
-use lash_kernel_state::paged::run::session::{self, RunSession};
+use lash_kernel_state::paged::run::session::{self, RunFunction, RunSession};
 use lash_kernel_state::paged::{PageSource, SessionRoot};
 use lash_kernel_value::names::Name;
 
@@ -60,6 +60,9 @@ fn run_page(session: &SessionRoot) -> Result<lash_kernel_doc::heap::PageRef, Hea
 pub struct SessionEditor {
     heap: SlotHeap,
     bindings: BTreeMap<Name, Value>,
+    /// The session's saved functions and their objects, sealed as they
+    /// came (`K-SES-004`).
+    saved: Vec<(RunFunction, Value)>,
     /// The deepest value a copy out reads (`K-VAL-034`).
     depth: usize,
     changed: bool,
@@ -77,7 +80,7 @@ impl SessionEditor {
         session: Option<&SessionRoot>,
         source: Box<dyn PageSource>,
     ) -> Result<Self, HeapFault> {
-        let (heap, bindings) = match session {
+        let (heap, bindings, saved) = match session {
             None => (
                 SlotHeap::durable(
                     u64::MAX,
@@ -87,17 +90,25 @@ impl SessionEditor {
                     },
                 ),
                 BTreeMap::new(),
+                Vec::new(),
             ),
             Some(session) => {
                 let (session, directory) = session::open(source, run_page(session)?)?;
                 let (heap, values) =
                     SlotHeap::open(u64::MAX, &session.heap, directory).map_err(loaded)?;
-                (heap, session.names.into_iter().zip(values).collect())
+                let mut values = values.into_iter();
+                let bindings = session.names.into_iter().zip(&mut values).collect();
+                (
+                    heap,
+                    bindings,
+                    session.functions.into_iter().zip(values).collect(),
+                )
             }
         };
         Ok(Self {
             heap,
             bindings,
+            saved,
             depth: lash_kernel_value::data_limits::KernelDataLimits::standard().value_depth(),
             changed: false,
         })
@@ -359,13 +370,23 @@ impl SessionEditor {
     ///
     /// The heap's faults.
     pub fn seal(mut self) -> Result<SessionRoot, HeapFault> {
-        let (names, values): (Vec<Name>, Vec<Value>) =
+        let (names, mut values): (Vec<Name>, Vec<Value>) =
             std::mem::take(&mut self.bindings).into_iter().unzip();
+        let (functions, saved): (Vec<RunFunction>, Vec<Value>) =
+            std::mem::take(&mut self.saved).into_iter().unzip();
+        values.extend(saved);
         let heap = self.heap.seal(&values).map_err(|error| match error {
             crate::paged::SealError::Heap(fault) => fault,
             other => HeapFault::Malformed(other.to_string()),
         })?;
-        let page = session::write(self.directory()?.access(), &RunSession { heap, names })?;
+        let page = session::write(
+            self.directory()?.access(),
+            &RunSession {
+                heap,
+                names,
+                functions,
+            },
+        )?;
         Ok(SessionRoot::run(page))
     }
 }
