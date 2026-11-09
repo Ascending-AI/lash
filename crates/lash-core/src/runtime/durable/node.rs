@@ -24,11 +24,13 @@
 //!   `waiting` with the earliest due time its sources noted.
 //! - **Formats:** the node decodes the backend's format sets, so it claims
 //!   only actors whose state this build decodes (ADR 0106 §1).
-//! - **Retired formats:** a build that retires the format sets of the build
-//!   before it does not start while an actor is still in one: serving, it
-//!   would strand it (ADR 0115 §3.5). It refuses with
-//!   [`DurableError::Unmigrated`], naming how many and the command that
-//!   carries them forward.
+//! - **Retired formats:** a build that retires the format sets of an
+//!   earlier build does not start while an unfinished actor is still in one:
+//!   serving, it would strand it or act on state it does not decode (ADR
+//!   0115 §8). [`fence`] refuses with [`DurableError::RetiredStateRemains`],
+//!   naming what it found, before the node registers, redrives a park or
+//!   claims anything; the core's other background writers pass the same
+//!   fence before their first write.
 //! - **Packages** (FIG-6918, FIG-6993): the node installs the package code
 //!   its backend runs and advertises what it offers running code (natives,
 //!   kernels, providers, codec versions), so it claims to run only actors
@@ -89,8 +91,8 @@ pub struct NodeServe {
 ///
 /// # Errors
 ///
-/// [`DurableError::Unmigrated`] when an actor is still in a format set the
-/// backend's build retires, and the store's refusal of the node's package
+/// [`DurableError::RetiredStateRemains`] when an unfinished actor is still
+/// in a format set the backend's build retires ([`fence`]), and the store's refusal of the node's package
 /// install or its registration.
 pub async fn serve(
     backend: &Backend,
@@ -101,13 +103,7 @@ pub async fn serve(
     // The node decodes the backend's format sets: every one when it runs
     // processes, the session's alone when it runs none.
     let formats = backend.formats();
-    let unmigrated = unmigrated_actors(backend).await?;
-    if unmigrated > 0 {
-        return Err(DurableError::Unmigrated {
-            unmigrated,
-            command: formats.sweep().unwrap_or_default().to_owned(),
-        });
-    }
+    fence(backend).await?;
     redrive_session_parks(backend).await;
     let mut decodes = formats.session_decodes();
     let turn_profiles = serve.sessions.observes_physical_turns();
@@ -187,28 +183,50 @@ async fn redrive_session_parks(backend: &Backend) {
     }
 }
 
-/// How many actors are still in a format set `backend`'s build retires
-/// (ADR 0115 §3.5): none when it retires none.
+/// How many unfinished actors [`fence`]'s refusal names.
+const FENCE_NAMES: usize = 16;
+
+/// The serving fence (ADR 0115 §8): `Ok` when no unfinished actor is in a
+/// format set `backend`'s build retires. It only reads: a refusal leaves the
+/// store as it found it.
 ///
 /// # Errors
 ///
-/// The store's.
-pub async fn unmigrated_actors(backend: &Backend) -> Result<u64, DurableError> {
+/// [`DurableError::RetiredStateRemains`], naming the first actors found and
+/// counting all of them; the store's.
+pub async fn fence(backend: &Backend) -> Result<(), DurableError> {
     const PAGE: usize = 256;
-    let mut unmigrated = 0_u64;
-    for set in backend.formats().retired() {
+    let formats = backend.formats();
+    let mut remaining = 0_u64;
+    let mut found = Vec::new();
+    for set in formats.retired() {
         let mut after = None;
         loop {
             let page = backend
                 .durable()
                 .actors_in(set, after.as_ref(), PAGE)
                 .await?;
-            unmigrated = unmigrated.saturating_add(page.len() as u64);
+            remaining = remaining.saturating_add(page.len() as u64);
+            found.extend(
+                page.iter()
+                    .take(FENCE_NAMES.saturating_sub(found.len()))
+                    .map(|actor| lash_durable::RetiredActor {
+                        actor: actor.clone(),
+                        formats: set.clone(),
+                    }),
+            );
             if page.len() < PAGE {
                 break;
             }
             after = page.last().cloned();
         }
     }
-    Ok(unmigrated)
+    if remaining == 0 {
+        return Ok(());
+    }
+    Err(DurableError::RetiredStateRemains {
+        remaining,
+        found,
+        remedy: formats.sweep().map(str::to_owned),
+    })
 }

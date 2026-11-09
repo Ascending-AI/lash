@@ -1322,8 +1322,6 @@ FEATURE_LANE_TEST_TARGETS = [
     "//crates/lash-vm-worker:pool_laws__test__fv_abe4ed0b",
     "//crates/lash:artifact_referrers_evidence__test__fv_4f074aa7",
     "//crates/lash:integration__test__fv_4f074aa7",
-    "//crates/lash:kernel_two_build_claim__test__fv_297e7784",
-    "//crates/lash:kernel_two_build_claim__test__fv_4f074aa7",
     "//crates/lash:lash__unit_test__fv_4f074aa7",
     "//crates/lash:llm_profiles__test__fv_4f074aa7",
     "//crates/lash:otel_trace_evidence__test__fv_4f074aa7",

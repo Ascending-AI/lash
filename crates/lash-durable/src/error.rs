@@ -132,18 +132,28 @@ pub enum DurableError {
     /// its limits. The whole commit rolled back.
     #[error("checkpoint graph refused: {0}")]
     Graph(lash_core_store::checkpoint_graph::GraphRefusal),
-    /// The node's build no longer decodes format sets that `unmigrated`
-    /// actors are still in (ADR 0115 §3.5, drain by release): serving, it
-    /// would strand them, so it does not start. `command` is the operator
-    /// command that has a node of the build before it carry them forward.
+    /// The node's build retires format sets that `remaining` unfinished
+    /// actors are still in (ADR 0115 §8): serving, it would strand them or
+    /// act on state it does not decode, so it does not start, and has
+    /// written, claimed and redriven nothing. `found` names the first of
+    /// them with the set each is in; `remedy` is the operator command that
+    /// carries them forward, when the build has one. Without one, a store
+    /// holding them is reset before this build serves it.
     #[error(
-        "{unmigrated} actors are still in format sets this build no longer decodes: run `{command}` with a node of the build before this one serving, then start this one"
+        "{remaining} unfinished actors are still in format sets this build retires, first {}: {}",
+        found.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
+        remedy.as_deref().map_or_else(
+            || "reset the store before this build serves it".to_owned(),
+            |command| format!("run `{command}` with a node of the build before this one serving, then start this one"),
+        )
     )]
-    Unmigrated {
-        /// How many actors are still in a retired format set.
-        unmigrated: u64,
-        /// The operator command that carries them forward.
-        command: String,
+    RetiredStateRemains {
+        /// How many unfinished actors are in a retired format set.
+        remaining: u64,
+        /// The first of them, by set and key.
+        found: Vec<RetiredActor>,
+        /// The operator command that carries them forward, when there is one.
+        remedy: Option<String>,
     },
     /// A first resolution raced another state change. Reopen and retry.
     #[error("resolution owner {actor} is at revision {current:?}, expected {expected:?}")]
@@ -167,5 +177,21 @@ impl From<lash_core_store::checkpoint_graph::GraphRefusal> for DurableError {
             }
             refusal => Self::Graph(refusal),
         }
+    }
+}
+
+/// An unfinished actor in a format set its node's build retires, as the
+/// serving fence found it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RetiredActor {
+    /// The actor.
+    pub actor: crate::ids::ActorKey,
+    /// The retired set its state is in.
+    pub formats: crate::formats::FormatSet,
+}
+
+impl std::fmt::Display for RetiredActor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} in {}", self.actor, self.formats)
     }
 }

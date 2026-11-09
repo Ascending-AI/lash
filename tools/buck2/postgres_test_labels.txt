@@ -67,3 +67,6 @@
 //crates/lash-postgres-store:schema_drift__test
 //crates/lash-postgres-store:schema_drift__test__fv_1c8b838f
 //crates/lash-vm-worker:park_matrix__test
+//crates/lash:kernel_two_build_claim__test
+//crates/lash:kernel_two_build_claim__test__fv_297e7784
+//crates/lash:kernel_two_build_claim__test__fv_4f074aa7

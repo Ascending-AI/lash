@@ -5,7 +5,9 @@
 //! deployment of every store with no leader (ADR 0109 §1.6-§1.7), so a
 //! cleanup whose producer died before its immediate attempt is still
 //! delivered. Claim tokens fence each claim, so two deployments never deliver
-//! one row twice.
+//! one row twice. Like the core's node, the pass writes nothing while an
+//! unfinished actor is in a format set the build retires: it passes the
+//! serving fence before its first claim, and stops when the fence refuses.
 
 use std::sync::Arc;
 
@@ -31,7 +33,12 @@ impl CleanupPass {
     /// Run `relay`'s due pass on the configured interval on a task of its own
     /// until the pass is dropped or the core shuts down. Without a runtime to
     /// run it on, nothing starts: such a core has no background work.
-    pub(crate) fn start(&self, relay: Arc<dyn ObligationRelay>, pacing: crate::RecoveryPacing) {
+    pub(crate) fn start(
+        &self,
+        backend: lash_execution_contracts::backend::Backend,
+        relay: Arc<dyn ObligationRelay>,
+        pacing: crate::RecoveryPacing,
+    ) {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
@@ -40,6 +47,26 @@ impl CleanupPass {
         let cleanup = Arc::clone(&self.cleanup);
         runtime.spawn(async move {
             let mut interval = RecoveryInterval::new(Arc::clone(&clock), pacing.interval());
+            loop {
+                tokio::select! {
+                    () = shutdown.cancelled() => return,
+                    fenced = lash_core::runtime::durable::node::fence(&backend) => match fenced {
+                        Ok(()) => break,
+                        Err(error @ lash_core::durable_port::DurableError::RetiredStateRemains { .. }) => {
+                            tracing::error!(%error, "artifact cleanup does not run over retired state");
+                            return;
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "artifact cleanup's fence read failed; the next tick retries it");
+                        }
+                    },
+                }
+                tokio::select! {
+                    () = shutdown.cancelled() => return,
+                    _ = interval.tick() => {}
+                }
+            }
+            drop(backend);
             loop {
                 tokio::select! {
                     () = shutdown.cancelled() => break,

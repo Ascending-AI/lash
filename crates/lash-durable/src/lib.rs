@@ -71,7 +71,7 @@ pub use durable_config::{
     DurableConfig, DurableConfigError, DurableSettings, GroupCommit, Notifier,
     OwnerRetentionSettings, RetirementSettings,
 };
-pub use error::{DurableError, Fenced, MailRefusal, StoreFailure, StoreFailureKind};
+pub use error::{DurableError, Fenced, MailRefusal, RetiredActor, StoreFailure, StoreFailureKind};
 pub use formats::{FormatSet, FormatSurface, fleet_writable};
 pub use ids::{
     ActorKey, ActorKeyError, ActorKind, BootId, CommitLabel, DurableInstant, Epoch, MailKind,

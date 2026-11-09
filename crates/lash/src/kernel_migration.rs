@@ -174,23 +174,16 @@ pub async fn sweep_kernel_migration(
     Ok(sweep)
 }
 
-/// The kernel version a backend of this build retires, when the window the
-/// build before it opened is closed: what its nodes refuse to start over
-/// while a process or session is still in it.
-pub(crate) fn retired_kernel_version() -> Option<u32> {
-    lash_vm_runtime::retired_kernel_version()
-}
-
-/// `backend`, retiring the format sets of kernel version `kernel`.
+/// `backend`, retiring the format sets a build of kernel version `kernel`
+/// wrote: the window the build after it opened is closed.
+#[cfg(feature = "synthetic-next")]
 pub(crate) fn retiring(backend: &crate::Backend, kernel: u32) -> crate::Backend {
-    backend.retiring(
-        &lash_execution_contracts::process::EngineStateFormat {
-            kind: LASH_VM_ENGINE_KIND.to_owned(),
-            version: kernel,
-        },
-        &crate::formats::kernel_actor_state_surfaces(kernel),
-        KERNEL_MIGRATION_SWEEP,
-    )
+    let mut earlier = vec![lash_core::durable_port::FormatSurface::engine(
+        LASH_VM_ENGINE_KIND,
+        kernel,
+    )];
+    earlier.extend(crate::formats::kernel_actor_state_surfaces(kernel));
+    backend.retiring(&earlier, Some(KERNEL_MIGRATION_SWEEP))
 }
 
 /// The root of each cell of `session`'s `run`, each read whole under one

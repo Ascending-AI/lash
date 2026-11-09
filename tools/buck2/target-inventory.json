@@ -4003,8 +4003,6 @@
     "//crates/lash-vm-worker:pool_laws__test__fv_abe4ed0b",
     "//crates/lash:artifact_referrers_evidence__test__fv_4f074aa7",
     "//crates/lash:integration__test__fv_4f074aa7",
-    "//crates/lash:kernel_two_build_claim__test__fv_297e7784",
-    "//crates/lash:kernel_two_build_claim__test__fv_4f074aa7",
     "//crates/lash:lash__unit_test__fv_4f074aa7",
     "//crates/lash:llm_profiles__test__fv_4f074aa7",
     "//crates/lash:otel_trace_evidence__test__fv_4f074aa7",
@@ -106437,7 +106435,9 @@
           "clippy_label": "//crates/lash:kernel_two_build_claim__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash:kernel_two_build_claim__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash:llm_profiles__test",
@@ -107505,7 +107505,10 @@
       "//crates/lash-postgres-store:schema_constraints__test__fv_1c8b838f",
       "//crates/lash-postgres-store:schema_drift__test",
       "//crates/lash-postgres-store:schema_drift__test__fv_1c8b838f",
-      "//crates/lash-vm-worker:park_matrix__test"
+      "//crates/lash-vm-worker:park_matrix__test",
+      "//crates/lash:kernel_two_build_claim__test",
+      "//crates/lash:kernel_two_build_claim__test__fv_297e7784",
+      "//crates/lash:kernel_two_build_claim__test__fv_4f074aa7"
     ],
     "s3": [
       "//crates/lash-s3-store:lash-s3-store__unit_test"

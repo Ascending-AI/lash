@@ -651,7 +651,9 @@ lash_rust_integration_test(
     package_name = "lash-runtime",
     rustc_env = {},
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    tags = [],
+    tags = [
+        "hermetic-postgres",
+    ],
     version = "0.0.0-dev",
 )
 
@@ -4666,6 +4668,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -4736,6 +4739,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -4814,6 +4818,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -4887,6 +4892,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -4962,6 +4968,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_abe4ed0b)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5031,6 +5038,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5110,6 +5118,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5182,6 +5191,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     extra_deps = {"//crates/lash-provider-google:lash-provider-google__fv_d829c445": "lash_provider_google"},
@@ -5260,6 +5270,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5335,6 +5346,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5414,6 +5426,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5492,6 +5505,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5564,6 +5578,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5636,6 +5651,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5721,6 +5737,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5789,6 +5806,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5867,6 +5885,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [
@@ -5944,6 +5963,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     extra_deps = {"//crates/lash-s3-store:lash-s3-store__fv_dad8df45": "lash_s3_store"},
@@ -6024,6 +6044,7 @@ lash_rust_feature_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
+        "hermetic-postgres",
         "manual",
     ],
     pruned_deps = [

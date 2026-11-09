@@ -614,3 +614,36 @@ pub fn kernel_actor_state_surfaces(kernel: u32) -> Vec<lash_core::durable_port::
         FormatSurface::new("codemode-snapshot", CODEMODE_SNAPSHOT_VERSION),
     ]
 }
+
+/// Each durable format the actors of the last deployed build before this
+/// one held, with the version that build wrote: main at `fc9f8f4f3c`, the
+/// build before the bytecode core. A node of this build retires each of its
+/// own format sets spelled at these versions that is not one of its own
+/// (ADR 0115 §8): it neither decodes nor carries one forward, and does not
+/// start while an unfinished actor is in one. A set that comes out as one of
+/// this build's own retires nothing, so the fence opens on that build's
+/// state only once `scripts/land` advances a witness whose guarded shapes
+/// changed.
+///
+/// These are the predecessor's versions, written down once when it was
+/// deployed; they are not this build's witnesses and never advance with
+/// them. They change only when a later build declares a later predecessor.
+const RETIRED_BUILD: &[(&str, u32)] = &[
+    ("codemode-snapshot", 16),
+    ("engine/lashvm", 1),
+    ("kernel-parked-state", 15),
+    ("kernel-saved-function", 4),
+    ("outcome-material", 1),
+    ("run-record", 19),
+    ("session-state", 3),
+    ("turn-journal", 1),
+    ("wait-row", 1),
+];
+
+/// The surfaces of the build this one retires: [`RETIRED_BUILD`].
+pub(crate) fn retired_build_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
+    RETIRED_BUILD
+        .iter()
+        .map(|(id, version)| lash_core::durable_port::FormatSurface::new(*id, *version))
+        .collect()
+}

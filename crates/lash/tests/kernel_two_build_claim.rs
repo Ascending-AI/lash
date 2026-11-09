@@ -745,43 +745,153 @@ async fn idle_session(
     in_state(backend, &actor, ActorState::Idle).await.formats
 }
 
+/// Every row of every table of the SQLite store at `path`, by table, each
+/// row spelled and the rows sorted: what a start that writes nothing leaves
+/// as it found it.
+fn dump(path: &std::path::Path) -> std::collections::BTreeMap<String, Vec<String>> {
+    let connection =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .expect("the store opens to read");
+    let tables: Vec<String> = connection
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        .expect("the tables")
+        .query_map([], |row| row.get(0))
+        .expect("the tables")
+        .collect::<Result<_, _>>()
+        .expect("the tables");
+    tables
+        .into_iter()
+        .map(|table| {
+            let mut statement = connection
+                .prepare(&format!("SELECT * FROM \"{table}\""))
+                .expect("the rows");
+            let columns = statement.column_count();
+            let mut rows: Vec<String> = statement
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|column| row.get_ref(column).map(|value| format!("{value:?}")))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map(|values| values.join("|"))
+                })
+                .expect("the rows")
+                .collect::<Result<_, _>>()
+                .expect("the rows");
+            rows.sort();
+            (table, rows)
+        })
+        .collect()
+}
+
 /// The binding turn of [`idle_session`].
 const BIND: &str = "function double(n: number) { return n * 2; }\nawait control.finish('bound');";
 
-/// FIG-5787 (ADR 0115 §3.5, drain by release): the build that closes the
-/// window does not start while a session is still in build N's formats,
-/// and its refusal names how many and the command that carries them; once
-/// the sweep has a node of build N+1 carry the session, it starts and runs
-/// the session's turn.
+/// Every row of every table of the PostgreSQL database at `url`, as
+/// [`dump`] reads a SQLite store.
+async fn dump_postgres(url: &str) -> std::collections::BTreeMap<String, Vec<String>> {
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(url)
+        .await
+        .expect("the database opens to read");
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT table_name::text FROM information_schema.tables \
+         WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY 1",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("the tables");
+    let mut dump = std::collections::BTreeMap::new();
+    for table in tables {
+        let mut rows: Vec<String> =
+            sqlx::query_scalar(&format!("SELECT t::text FROM \"{table}\" t"))
+                .fetch_all(&pool)
+                .await
+                .expect("the rows");
+        rows.sort();
+        dump.insert(table, rows);
+    }
+    pool.close().await;
+    dump
+}
+
+/// Session `SESSION` idles in build N's formats over `stores`; the closing
+/// build then refuses to start, naming it, and every row `dump` reads is as
+/// it was before the refused start. Answers the set the session is in.
+async fn the_closing_build_refuses_unchanged<F, D>(
+    stores: &Arc<dyn StoreSet>,
+    session_actor: &ActorKey,
+    dump: D,
+) -> lash_core::durable_port::FormatSet
+where
+    D: Fn() -> F,
+    F: std::future::Future<Output = std::collections::BTreeMap<String, Vec<String>>>,
+{
+    let (old_backend, old) = idling(stores, Build::N, "build-n", &[BIND]);
+    let written = idle_session(&old_backend, &old, session_actor.id()).await;
+    old.drain().await.expect("build N's node drains");
+    drop(old);
+    drop(old_backend);
+
+    let before = dump().await;
+    let (_refusing_backend, refusing) = serving(stores, Build::Closing, "build-closing", &[]);
+    let stopped = tokio::time::timeout(Duration::from_secs(60), refusing.node_stopped())
+        .await
+        .expect("the closing build's node stops within a minute");
+    drop(refusing);
+    let after = dump().await;
+    let changed: Vec<_> = before
+        .iter()
+        .filter(|(table, rows)| after.get(*table) != Some(rows))
+        .map(|(table, _)| table)
+        .chain(after.keys().filter(|table| !before.contains_key(*table)))
+        .collect();
+    assert!(
+        changed.is_empty(),
+        "the refused start changed rows of {changed:?}"
+    );
+    match stopped {
+        Some(Err(lash::durable::DurableError::RetiredStateRemains {
+            remaining,
+            found,
+            remedy,
+        })) => {
+            assert_eq!(remaining, 1);
+            assert_eq!(
+                found
+                    .iter()
+                    .map(|found| (&found.actor, &found.formats))
+                    .collect::<Vec<_>>(),
+                [(session_actor, &written)]
+            );
+            assert_eq!(remedy.as_deref(), Some(lash::vm::KERNEL_MIGRATION_SWEEP));
+        }
+        other => panic!("the closing build started over an unmigrated session: {other:?}"),
+    }
+    written
+}
+
+/// FIG-5787, FIG-7695 (ADR 0115 §8): the build that closes the window does
+/// not start while a session is still in build N's formats. Its refusal
+/// names the session, the set it is in and the command that carries it, and
+/// the refused start leaves every row of the store as it found it: no node
+/// registration, park redrive, claim or background cleanup writes over
+/// state the build retires. Once the sweep has a node of build N+1 carry the
+/// session, it starts and runs the session's turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_closing_build_refuses_to_start_while_a_session_is_unmigrated_and_starts_after_the_sweep()
  {
     const SESSION: &str = "kernel-gate-session";
+    let root = tempfile::tempdir().expect("a store directory");
+    let path = root.path().join("lash.db");
     let stores: Arc<dyn StoreSet> = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::memory()
+        lash_sqlite_store::SqliteStoreSet::open(&path, lash_sqlite_store::SqliteSynchronous::Full)
             .await
-            .expect("an in-memory store set opens"),
+            .expect("a file store set opens"),
     );
     let session_actor = ActorKey::session(SESSION).expect("a session actor key");
-    let (old_backend, old) = idling(&stores, Build::N, "build-n", &[BIND]);
-    let written = idle_session(&old_backend, &old, SESSION).await;
-    old.drain().await.expect("build N's node drains");
-
-    let (_refusing_backend, refusing) = serving(&stores, Build::Closing, "build-closing", &[]);
-    let stopped = tokio::time::timeout(Duration::from_secs(60), refusing.node_stopped())
-        .await
-        .expect("the closing build's node stops within a minute");
-    match stopped {
-        Some(Err(lash::durable::DurableError::Unmigrated {
-            unmigrated,
-            command,
-        })) => {
-            assert_eq!(unmigrated, 1);
-            assert_eq!(command, lash::vm::KERNEL_MIGRATION_SWEEP);
-        }
-        other => panic!("the closing build started over an unmigrated session: {other:?}"),
-    }
-    drop(refusing);
+    let written =
+        the_closing_build_refuses_unchanged(&stores, &session_actor, || async { dump(&path) })
+            .await;
 
     let (new_backend, new) = serving(&stores, Build::NPlus1, "build-n-plus-1", &[]);
     lash::vm::sweep_kernel_migration(&new_backend)
@@ -822,6 +932,38 @@ async fn the_closing_build_refuses_to_start_while_a_session_is_unmigrated_and_st
         .last(),
         Some(&serde_json::json!(42))
     );
+}
+
+/// FIG-7695 (ADR 0115 §8): the closing build's refusal writes nothing on
+/// PostgreSQL either; the fence reads the store's actors through its own
+/// queries there.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_closing_build_refuses_to_start_over_a_postgres_store_and_changes_no_row() {
+    let Some(url) = std::env::var("LASH_POSTGRES_DATABASE_URL")
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+    else {
+        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let storage = lash_postgres_store::testing::connect(database.url())
+        .await
+        .expect("open provisioned PostgreSQL storage");
+    let attachments = tempfile::tempdir().expect("an attachment directory");
+    let stores: Arc<dyn StoreSet> = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        lash_sqlite_store::SqliteStoreSet::open(
+            attachments.path().join("attachments.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("a SQLite attachment store")
+        .attachment_store(),
+    ));
+    let session_actor = ActorKey::session("kernel-gate-session").expect("a session actor key");
+    the_closing_build_refuses_unchanged(&stores, &session_actor, || dump_postgres(database.url()))
+        .await;
 }
 
 // --- NO-CLAIM-WITHOUT-COMPONENT (FIG-6034, D3) -----------------------------

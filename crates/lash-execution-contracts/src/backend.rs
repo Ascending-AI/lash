@@ -300,18 +300,14 @@ impl Backend {
         &self.inner.config
     }
 
-    /// This backend retiring the sets of the build before it, whose process
-    /// engine state was in `format` and whose actors also held `previous`
-    /// (ADR 0115 §3.5): its nodes neither decode nor carry them forward, and
-    /// do not start while an actor is still in one. `sweep` is the operator
-    /// command that has a node of that build carry one forward.
+    /// This backend retiring the sets an earlier build that wrote
+    /// `earlier` wrote (ADR 0115 §8): each of its sets with every surface
+    /// `earlier` names at the version named there. Its nodes neither decode
+    /// nor carry one forward, and do not start while an unfinished actor is
+    /// in one. `sweep` is the operator command that has a node of that
+    /// build carry one forward, when there is one.
     #[must_use]
-    pub fn retiring(
-        &self,
-        format: &crate::EngineStateFormat,
-        previous: &[lash_durable::FormatSurface],
-        sweep: &str,
-    ) -> Self {
+    pub fn retiring(&self, earlier: &[lash_durable::FormatSurface], sweep: Option<&str>) -> Self {
         let durable = std::sync::OnceLock::from(Arc::clone(self.durable()));
         Self {
             inner: Arc::new(BackendInner {
@@ -321,7 +317,7 @@ impl Backend {
                 retention: self.inner.retention,
                 max_ingress_bytes: self.inner.max_ingress_bytes,
 
-                formats: self.inner.formats.clone().retiring(format, previous, sweep),
+                formats: self.inner.formats.clone().retiring(earlier, sweep),
                 engines: self.inner.engines.clone(),
                 status_projections: self.inner.status_projections.clone(),
 
