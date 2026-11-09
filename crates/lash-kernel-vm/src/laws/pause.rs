@@ -3,7 +3,9 @@
 //! - PAUSE-ANY: a core run sealed at every slice and every park and opened
 //!   cold, each time in a machine built from a program compiled afresh,
 //!   leaves what the run that never paused leaves: its end, prints,
-//!   requests and charge. A park is sealed either before its requests
+//!   requests and charge. Each request keeps its effect identity and its
+//!   wait: a reopen continues the occurrence and wait counters, never
+//!   recycling one. A park is sealed either before its requests
 //!   are delivered or after (the post-deliver window); a delivered
 //!   outcome survives the reopen, and delivering it again is refused
 //!   (contract §5).
@@ -23,7 +25,8 @@ use crate::{End, Machine, Step};
 struct Left {
     end: String,
     printed: Vec<Datum>,
-    requests: Vec<Vec<Datum>>,
+    /// Each request's identity, wait and arguments.
+    requests: Vec<(String, String, Vec<Datum>)>,
     charged: Option<u64>,
 }
 
@@ -105,7 +108,11 @@ fn run(text: &str, slice: u64, pause: Pause) -> (usize, Left) {
                 }
                 for request in &park.requests {
                     let crate::Request::Effect(effect) = request;
-                    requests.push(effect.args.clone());
+                    requests.push((
+                        format!("{:?}", effect.identity),
+                        format!("{:?}", wait_of(request)),
+                        effect.args.clone(),
+                    ));
                     machine.deliver(wait_of(request), answer(request)).unwrap();
                 }
                 if pause == Pause::AfterDelivery && !park.requests.is_empty() {
@@ -135,7 +142,10 @@ fn run(text: &str, slice: u64, pause: Pause) -> (usize, Left) {
 /// Runs whose frames stand at every kind of point: statements and loop
 /// back edges, calls under a callee, a `try` handler, an action ready and
 /// issued, a spawned task and a join, a cancelled task's cleanup, and a
-/// variable a closure shares, held in its frame as the cell itself.
+/// variable a closure shares, held in its frame as the cell itself. The
+/// closure performs with a list it holds, cold after each reopen: the
+/// `perform` that loads it runs again, and must name the effect as the
+/// unpaused run does.
 fn cases() -> Vec<String> {
     let g = "definition \"function g(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let v = perform 0(x) as Any return (x, v) }\"\n";
     let sq = "definition \"function sq(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { return num.add(x, x) }\"\n";
@@ -149,7 +159,7 @@ fn cases() -> Vec<String> {
         ),
         super::scheduler::document(false),
         super::scheduler::document(true),
-        "main {\n  let k = 5\n  let f = fn(x) { let v = perform 0(x) as Any return (v, k) }\n  let a = apply f(1)\n  set k = 6\n  let b = apply f(2)\n  print (a, b)\n  return (a, b)\n}".into(),
+        "main {\n  let k = 5\n  let f = fn(x) { let v = perform 0(x) as Any return (v, k) }\n  let a = apply f([1, k])\n  set k = 6\n  let b = apply f([2, k])\n  print (a, b)\n  return (a, b)\n}".into(),
     ]
 }
 
