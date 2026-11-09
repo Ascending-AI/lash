@@ -608,33 +608,125 @@ fn core_run(
     exact: bool,
     limiter: Option<&Scripted>,
 ) -> CoreTrace {
+    let seen = drive(
+        text,
+        Drive {
+            limit,
+            slice,
+            exact,
+            limiter,
+            ..Drive::default()
+        },
+    );
+    (seen.end, seen.charged, seen.printed)
+}
+
+/// How a law drives a core run.
+#[derive(Clone, Copy)]
+struct Drive<'a> {
+    limit: u64,
+    slice: u64,
+    /// Records the charges: every block runs event by event.
+    exact: bool,
+    limiter: Option<&'a Scripted>,
+    /// A limiter of the run's own that grows the limit once by this much.
+    grow: Option<u64>,
+    charge: crate::Charge,
+    /// Pages every object out at each statement boundary.
+    cold: bool,
+    /// Cancellation is latched from the start.
+    cancel: bool,
+}
+
+impl Default for Drive<'_> {
+    fn default() -> Self {
+        Self {
+            limit: ROOMY.charge_limit,
+            slice: u64::MAX,
+            exact: false,
+            limiter: None,
+            grow: None,
+            charge: ROOMY.charge,
+            cold: false,
+            cancel: false,
+        }
+    }
+}
+
+/// What a core run showed its host: its end, charge, output, recorded
+/// charges, slices, the requests it handed out, the questions its
+/// limiter was asked and how often its natives ran.
+#[derive(Debug, PartialEq)]
+struct Observed {
+    end: String,
+    charged: Option<u64>,
+    printed: Vec<lash_kernel_doc::Datum>,
+    tape: Option<Vec<lash_kernel_exec::Weight>>,
+    slices: usize,
+    requests: Vec<Vec<lash_kernel_doc::Datum>>,
+    asked: Vec<(u64, u64)>,
+    natives: u64,
+}
+
+fn drive(text: &str, how: Drive<'_>) -> Observed {
     let bounds = Bounds {
-        charge_limit: limit,
+        charge: how.charge,
+        charge_limit: how.limit,
         ..ROOMY
     };
     let mut machine = super::embedder::core_machine(text, bounds, Some(huge_charges)).unwrap();
-    if exact {
-        machine.record_charges(crate::ChargeTape::new());
+    let tape = how.exact.then(|| {
+        let tape = crate::ChargeTape::new();
+        machine.record_charges(tape.clone());
+        tape
+    });
+    if how.cold {
+        machine.force_cold();
     }
+    let limiter = how.limiter.cloned().or_else(|| {
+        how.grow
+            .map(|grow| Scripted::answering([LimitDecision::Grow(grow)]))
+    });
     machine.set_options(MachineOptions {
         charge_limiter: limiter
-            .cloned()
+            .clone()
             .map(|limiter| Box::new(limiter) as Box<dyn ChargeLimiter>),
         ..MachineOptions::default()
     });
-    let mut world = super::embedder::World::default();
-    loop {
-        match machine.run(&mut world, slice).unwrap() {
-            Step::Ended(end) => {
-                let end = match end {
-                    End::Finished(finished) => format!("{:?}", finished.result),
-                    other => format!("{other:?}"),
-                };
-                return (end, machine.meters().charged, world.printed);
+    let mut world = super::embedder::World {
+        cancel: how.cancel,
+        ..super::embedder::World::default()
+    };
+    let (mut slices, mut requests) = (0, Vec::new());
+    NATIVE_CALLS.set(0);
+    let end = loop {
+        match machine.run(&mut world, how.slice).unwrap() {
+            Step::Ended(End::Finished(finished)) => break format!("{:?}", finished.result),
+            Step::Ended(other) => break format!("{other:?}"),
+            Step::Slice => slices += 1,
+            Step::Parked(park) => {
+                for request in &park.requests {
+                    let crate::Request::Effect(effect) = request;
+                    requests.push(effect.args.clone());
+                    machine
+                        .deliver(
+                            super::embedder::wait_of(request),
+                            super::embedder::answer(request),
+                        )
+                        .unwrap();
+                }
             }
-            Step::Slice => {}
-            Step::Parked(_) => panic!("the event-contract documents perform nothing"),
         }
+    };
+    Observed {
+        end,
+        charged: machine.meters().charged,
+        printed: world.printed,
+        tape: tape.map(|tape| tape.steps()),
+        slices,
+        requests,
+        asked: limiter.map_or_else(Vec::new, |limiter| limiter.asked.borrow().clone()),
+        natives: NATIVE_CALLS.get(),
     }
 }
 
@@ -721,11 +813,19 @@ fn the_prepaid_and_exact_paths_refuse_at_the_same_event_with_the_same_total() {
     }
 }
 
+thread_local! {
+    /// How many times `law.wide` and `law.sized` ran on this thread.
+    static NATIVE_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// `law.wide`, whose completion formula saturates on any argument of size
-/// 3 or more.
+/// 3 or more; `law.sized`, a native whose fee reads its argument deeply;
+/// and two kernel-bodied library functions billing at completion,
+/// `law.deep` returning and `law.fails` raising out of the covered
+/// `law.raises` it calls, whose own native calls are covered.
 fn huge_charges(
     registry: &mut lash_kernel_doc::FunctionRegistry,
-    _: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+    ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
 ) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
     struct Nothing;
     impl lash_kernel_doc::NativeFunction for Nothing {
@@ -733,19 +833,53 @@ fn huge_charges(
             &self,
             _: lash_kernel_doc::NativeCall<'_, '_>,
         ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            NATIVE_CALLS.set(NATIVE_CALLS.get() + 1);
             Ok(lash_kernel_doc::Value::Null)
         }
     }
-    let definition = lash_kernel_doc::parse_definition(
-        "function law.wide(x: Any) -> Any\nkernel 1\ncharge product(size(x), 9223372036854775807)\nnative\n",
-    )
-    .unwrap();
-    vec![(
-        "law.wide",
-        registry
-            .register(definition, Some(std::sync::Arc::new(Nothing)))
-            .unwrap(),
-    )]
+    let mut registered: Vec<(&'static str, lash_kernel_value::FunctionId)> = Vec::new();
+    for (name, source, native) in [
+        (
+            "law.wide",
+            "function law.wide(x: Any) -> Any\nkernel 1\ncharge product(size(x), 9223372036854775807)\nnative\n",
+            true,
+        ),
+        (
+            "law.sized",
+            "function law.sized(xs: Any) -> Any\nkernel 1\ncharge sum(1, deep(xs))\nnative\n",
+            true,
+        ),
+        (
+            "law.deep",
+            "function law.deep(xs: Any) -> Any\nkernel 1\ncharge sum(3, deep(xs), size(result))\n{uses}body { let n = list.len(xs[\"a\"]) return [n, xs] }",
+            false,
+        ),
+        (
+            "law.raises",
+            "function law.raises(xs: Any) -> Any\nkernel 1\ncharge 0\n{uses}body { let n = law.sized(1) let bad = text.concat(1, \"x\") return bad }",
+            false,
+        ),
+        (
+            "law.fails",
+            "function law.fails(xs: Any) -> Any\nkernel 1\ncharge sum(5, deep(xs), size(result))\n{uses}body { let n = list.len(xs) let bad = invoke law.raises(xs) return bad }",
+            false,
+        ),
+    ] {
+        let mut uses = format!(
+            "use list.len = @{}\nuse text.concat = @{}\n",
+            ids["list.len"], ids["text.concat"]
+        );
+        for (name, id) in &registered {
+            uses.push_str(&format!("use {name} = @{id}\n"));
+        }
+        let source = source.replace("{uses}", &uses);
+        let definition = lash_kernel_doc::parse_definition(&source).unwrap();
+        let native = native.then(|| {
+            std::sync::Arc::new(Nothing) as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>
+        });
+        registered.push((name, registry.register(definition, native).unwrap()));
+    }
+    registered
 }
 
 /// Contract §3 and `K-CHG-003` at the top of `u64`. A `metered u64::MAX`
@@ -792,6 +926,97 @@ fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
                 exact,
                 "limit {limit}, sliced"
             );
+        }
+    }
+}
+
+/// A run over mutable lists and maps that a cold run faults on again and
+/// again: index and loop reads, a native fee and two library completions
+/// reading cold sizes, a raise unwinding through an uncovered completion,
+/// and a two-argument `perform` copying both out.
+const COLD_CONTRACT: &str = r#"import 3 operation host.pair(a: Any, b: Any) -> Any
+main {
+  let xs = [1, 2, 3]
+  let m = map{"a": xs, "b": [4, 5]}
+  let total = 0
+  let i = 0
+  while num.lt(i, 3) {
+    let n = law.sized(m)
+    let d = invoke law.deep(m)
+    set total = num.add(total, num.add(xs[1], list.len(m["b"])))
+    for x in m["b"] { set total = num.add(total, x) }
+    try {
+      let bad = invoke law.fails(m)
+    } catch e {
+      set total = num.add(total, list.len(d))
+    }
+    set i = num.add(i, 1)
+  }
+  let echoed = perform 3(xs, m) as Any
+  print (total, echoed)
+  return [total, xs, m]
+}"#;
+
+/// Astra cold path, items 1-10: a run whose objects are paged out at
+/// every statement boundary shows its host what the resident run does,
+/// on the prepaid and exact paths, under Exact and Off, at every charge
+/// limit, in slices, when a limiter grows a refused dynamic fee and with
+/// cancellation latched across every load. Each fault loads and re-runs
+/// only what was not committed: no event, fee, slice test or step twice.
+#[test]
+fn a_run_paged_out_at_every_statement_shows_its_host_what_a_resident_run_does() {
+    let both = |how: Drive<'_>| {
+        let resident = drive(COLD_CONTRACT, how);
+        let cold = drive(COLD_CONTRACT, Drive { cold: true, ..how });
+        assert_eq!(
+            cold, resident,
+            "cold, exact {}, {:?}",
+            how.exact, how.charge
+        );
+        resident
+    };
+    for charge in [crate::Charge::Exact, crate::Charge::Off] {
+        for exact in [true, false] {
+            for slice in [u64::MAX, 7, 1] {
+                for cancel in [false, true] {
+                    both(Drive {
+                        exact,
+                        charge,
+                        slice,
+                        cancel,
+                        ..Drive::default()
+                    });
+                }
+            }
+        }
+    }
+    let whole = both(Drive {
+        exact: true,
+        ..Drive::default()
+    });
+    assert!(whole.end.starts_with("List"), "{whole:?}");
+    assert_eq!(whole.requests.len(), 1, "{whole:?}");
+    let total = whole.charged.expect("charge is metered");
+    let grow = total / 3 + 1;
+    for limit in 0..=total + 1 {
+        for exact in [true, false] {
+            both(Drive {
+                limit,
+                exact,
+                ..Drive::default()
+            });
+            both(Drive {
+                limit,
+                exact,
+                slice: 7,
+                ..Drive::default()
+            });
+            both(Drive {
+                limit,
+                exact,
+                grow: Some(grow),
+                ..Drive::default()
+            });
         }
     }
 }

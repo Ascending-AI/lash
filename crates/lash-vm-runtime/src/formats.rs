@@ -76,6 +76,8 @@ const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMEN
 ///     ),
 ///     file(path = "crates/lash-kernel-state/src/paged/codec.rs", cover("record!(CheckpointRoot", "record!(HeapRoot")),
 ///     items(path = "crates/lash-kernel-state/src/paged/source.rs", PAGE_FORMAT),
+///     file(path = "crates/lash-kernel-vm/src/bytecode/site_tables.rs"),
+///     file(path = "crates/lash-kernel-vm/src/bytecode/charge_tables.rs"),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// format_manifest = "KernelParkedState"

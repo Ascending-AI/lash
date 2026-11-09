@@ -179,6 +179,9 @@ impl SessionEditor {
         match crate::data::copy_page_out(&self.heap, &record.meta) {
             Ok(Datum::Bytes(meta)) => Ok(meta.as_slice().to_vec()),
             Err(crate::data::CopyError::Heap(fault)) => Err(fault),
+            Err(crate::data::CopyError::Cold { .. }) => Err(HeapFault::Malformed(
+                "a page copy reached a cold chunk".into(),
+            )),
             Ok(_) | Err(crate::data::CopyError::Raised(_)) => Err(HeapFault::Malformed(format!(
                 "saved function `{name}`'s description is not bytes"
             ))),
@@ -206,6 +209,11 @@ impl SessionEditor {
         Ok(Some(match crate::data::copy_page_out(&self.heap, &value) {
             Ok(datum) => SessionValue::Data(datum),
             Err(crate::data::CopyError::Heap(fault)) => return Err(fault),
+            Err(crate::data::CopyError::Cold { .. }) => {
+                return Err(HeapFault::Malformed(
+                    "a page copy reached a cold chunk".into(),
+                ));
+            }
             Err(crate::data::CopyError::Raised(_)) => SessionValue::Opaque,
         }))
     }

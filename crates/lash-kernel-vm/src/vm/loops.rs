@@ -144,9 +144,9 @@ impl<H: Heap> Vm<H> {
 
     pub(super) fn proto_open(&mut self, unit: &Unit, n: u32) -> Run<()> {
         let site = &unit.loops[n as usize];
-        let opened = self.pop();
-        self.set_slot(site, WALKED, opened);
-        self.set_slot(site, CURSOR, Self::first(&opened));
+        // The opened value is read where it stands: a cold read runs the
+        // op again with nothing set.
+        let [opened] = self.operands();
         let size = match opened {
             Value::Map(table) | Value::Set(table) => {
                 let len = self
@@ -158,6 +158,9 @@ impl<H: Heap> Vm<H> {
             }
             _ => Value::Absent,
         };
+        self.popped(1);
+        self.set_slot(site, WALKED, opened);
+        self.set_slot(site, CURSOR, Self::first(&opened));
         self.set_slot(site, SIZE, size);
         self.set_slot(site, REMAINING, size);
         self.set_slot(site, RAW, Value::Absent);
@@ -223,7 +226,7 @@ impl<H: Heap> Vm<H> {
 
     pub(super) fn proto_pull(&mut self, unit: &Unit, n: u32) -> Run<()> {
         let site = &unit.loops[n as usize];
-        let stepped = self.pop();
+        let [stepped] = self.operands();
         let pulled = match stepped {
             Value::Tuple(tuple) => {
                 let arena = self.heap.arena();
@@ -241,6 +244,7 @@ impl<H: Heap> Vm<H> {
             }
             _ => None,
         };
+        self.popped(1);
         let Some(item) = pulled else {
             return Err(self.error(
                 "type_error",

@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
-use lash_kernel_doc::arena::native::{NativeError, NewObject};
+use lash_kernel_doc::arena::native::{NativeError, NewObject, Retry};
 use lash_kernel_doc::{Datum, Document, Measure, Value};
 use lash_kernel_value::data_limits::KernelDataLimits;
 use lash_kernel_value::names::FunctionId;
@@ -33,7 +33,7 @@ use lash_kernel_value::sites::Site;
 use crate::bytecode::charge_tables::RESULT;
 use crate::bytecode::op::Op;
 use crate::bytecode::program::{Callee, Constant, Operand, Program, Then, Unit, UnitId, UnitKind};
-use crate::heap::{Heap, MemoryRefused};
+use crate::heap::{Heap, LoadError, MemoryRefused};
 use crate::{Bound, ChargeLimiter, Host, LimitDecision};
 use charge::{Meter, Refused, Rest};
 use frames::{Bill, Context, Frame, Handler};
@@ -92,6 +92,11 @@ pub(crate) enum Flow {
     Raise(Value),
     /// Boxed: a stop is rare, and the hot path's `Result` stays small.
     Stop(Box<Stop>),
+    /// A read reached chunk `chunk` of `object` while it was cold. The op
+    /// has committed nothing: the run loads the chunk and runs it again,
+    /// or resumes the phase [`Vm::restart`] holds (contract §6, cold path).
+    /// No guest sees it.
+    Cold { object: ArenaHandle, chunk: u32 },
 }
 
 impl From<Stop> for Flow {
@@ -104,6 +109,63 @@ pub(crate) type Run<T> = Result<T, Flow>;
 
 pub(crate) fn fault(what: impl Into<String>) -> Flow {
     Flow::from(Stop::Fault(what.into()))
+}
+
+/// What a read's native error is to the run: a cold chunk to load, or a
+/// fault.
+pub(crate) fn read(error: NativeError) -> Flow {
+    match error {
+        NativeError::Retry(Retry::Cold { object, chunk }) => Flow::Cold { object, chunk },
+        other => fault(other.to_string()),
+    }
+}
+
+/// A phase whose earlier work has committed, resumed after a cold load in
+/// place of the op that began it: it never runs a native again, pops
+/// another frame or bills a fee twice.
+#[derive(Debug)]
+pub(crate) enum Restart {
+    /// The unwind of a raise of this value, at the running frame.
+    Unwind(Value),
+    /// A native call's completion: its result is built and installed, its
+    /// arguments are at `from`, and its formula `charge` is yet to bill.
+    Native {
+        from: u32,
+        charge: Option<u32>,
+        done: calls::Done,
+    },
+}
+
+/// A leaving frame's completion, measured before the frame leaves: where
+/// its call's billed arguments begin, and the fee its formula comes to.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Completion {
+    from: Option<usize>,
+    units: Option<u64>,
+}
+
+/// A copy out of the run, read whole before any of it bills: its deep
+/// size (none under `Charge::Off`) and the copy, or the raise it makes.
+pub(crate) struct Copied {
+    size: Option<u64>,
+    datum: Result<Datum, crate::data::Raised>,
+}
+
+impl Copied {
+    /// Whether the copy raises once billed.
+    pub(crate) fn raises(&self) -> bool {
+        self.datum.is_err()
+    }
+}
+
+impl Restart {
+    /// The values the phase holds, for the collector.
+    fn roots(&self, visit: &mut dyn FnMut(&Value)) {
+        match self {
+            Self::Unwind(value) => visit(value),
+            Self::Native { done, .. } => done.roots(visit),
+        }
+    }
 }
 
 /// The run's limits on values (`K-VAL-034`).
@@ -155,6 +217,17 @@ pub(crate) struct Vm<H: Heap> {
     /// The program or its constants did not fit the memory bound: the
     /// run refuses before it runs anything.
     unadmitted: Option<MemoryRefused>,
+    /// The committed phase a cold read interrupted, resumed once its chunk
+    /// is loaded; none when the interrupted op runs again.
+    restart: Option<Restart>,
+    /// A cold load has just ended: the running frame's op before its `pc`
+    /// runs again, its fixed event already billed, its slice test, step
+    /// and points already passed.
+    retrying: bool,
+    /// The laws' forced-cold runs: pages every object out at each
+    /// statement boundary, the machine's values rooted.
+    #[cfg(test)]
+    pub(crate) chill: Option<fn(&mut H, &[Value])>,
 }
 
 /// A map keyed by function digests.
@@ -264,6 +337,10 @@ impl<H: Heap> Vm<H> {
             watch: None,
             frames,
             unadmitted,
+            restart: None,
+            retrying: false,
+            #[cfg(test)]
+            chill: None,
         })
     }
 
@@ -463,18 +540,33 @@ impl<H: Heap> Vm<H> {
         Bill { charge, from }
     }
 
-    /// Bills a leaving frame's `bill` over its call's arguments and its
-    /// result, of size 0 when the call raised, and drops the arguments.
-    fn settle(&mut self, bill: Bill, result: Option<&Value>) -> Run<()> {
+    /// What a leaving frame's `bill` comes to over its call's arguments and
+    /// its result, of size 0 when the call raised: every read the
+    /// completion makes, before the frame leaves.
+    fn completion(&self, bill: Option<Bill>, result: Option<&Value>) -> Run<Completion> {
+        let Some(bill) = bill else {
+            return Ok(Completion::default());
+        };
         let from = bill.from as usize;
         let units = if self.paced {
             None
         } else {
-            Some(self.formula(bill.charge, &self.cx.billed[from..], result))
+            Some(self.formula(bill.charge, &self.cx.billed[from..], result)?)
         };
-        self.cx.billed.truncate(from);
-        match units {
-            Some(units) => self.fee(units?),
+        Ok(Completion {
+            from: Some(from),
+            units,
+        })
+    }
+
+    /// Bills a completion measured before its frame left, and drops the
+    /// call's arguments.
+    fn settle(&mut self, completion: Completion) -> Run<()> {
+        if let Some(from) = completion.from {
+            self.cx.billed.truncate(from);
+        }
+        match completion.units {
+            Some(units) => self.fee(units),
             None => Ok(()),
         }
     }
@@ -511,7 +603,7 @@ impl<H: Heap> Vm<H> {
             })
         });
         match failed {
-            Some(error) => Err(fault(error.to_string())),
+            Some(error) => Err(read(error)),
             None => Ok(units),
         }
     }
@@ -557,6 +649,7 @@ impl<H: Heap> Vm<H> {
             cx,
             tasks,
             held,
+            restart,
             ..
         } = self;
         heap.collect(&mut |visit| {
@@ -565,12 +658,91 @@ impl<H: Heap> Vm<H> {
             held.iter().for_each(&mut *visit);
             cx.roots(&mut *visit);
             tasks.roots(&mut *visit);
+            if let Some(restart) = restart {
+                restart.roots(&mut *visit);
+            }
         });
+    }
+
+    /// Pages out every object the heap can, at a statement boundary, under
+    /// the laws' forced-cold runs.
+    #[cfg(test)]
+    fn chill(&mut self) {
+        let Some(chill) = self.chill else { return };
+        let mut roots = Vec::new();
+        let mut visit = |value: &Value| roots.push(*value);
+        self.constants.iter().for_each(&mut visit);
+        self.globals.iter().for_each(&mut visit);
+        self.held.iter().for_each(&mut visit);
+        self.cx.roots(&mut visit);
+        self.tasks.roots(&mut visit);
+        if let Some(restart) = &self.restart {
+            restart.roots(&mut visit);
+        }
+        chill(&mut self.heap, &roots);
+    }
+
+    /// Loads chunk `chunk` of `object`, with no view of the heap live and
+    /// every value the machine holds rooted: the interrupted op's operands
+    /// on its stack, and what a held phase holds. Cancellation stays
+    /// latched for the next slice or park; a load polls nothing.
+    #[cold]
+    #[inline(never)]
+    fn reload(&mut self, object: ArenaHandle, chunk: u32) -> Result<(), Stop> {
+        let Self {
+            heap,
+            constants,
+            globals,
+            cx,
+            tasks,
+            held,
+            restart,
+            ..
+        } = self;
+        let loaded = heap.load(object, chunk, &mut |visit| {
+            constants.iter().for_each(&mut *visit);
+            globals.iter().for_each(&mut *visit);
+            held.iter().for_each(&mut *visit);
+            cx.roots(&mut *visit);
+            tasks.roots(&mut *visit);
+            if let Some(restart) = restart {
+                restart.roots(&mut *visit);
+            }
+        });
+        match loaded {
+            Ok(()) => Ok(()),
+            // The faulting op's reservation is unbilled once, as at any
+            // stop, and the run refuses at the memory bound.
+            Err(LoadError::Memory(refused)) => Err(Stop::bound(memory(refused))),
+            // The store failed: infrastructure, never a guest raise or a
+            // retry; the last committed root stands.
+            Err(LoadError::Store(error)) => {
+                Err(Stop::Host(crate::HostFault::new(error.to_string())))
+            }
+        }
+    }
+
+    /// Goes on after a cold load: the held phase resumes, or the op the
+    /// load interrupted runs again.
+    #[cold]
+    #[inline(never)]
+    fn resume(&mut self) -> Run<Option<Stop>> {
+        match self.restart.take() {
+            None => {
+                self.retrying = true;
+                Ok(None)
+            }
+            Some(Restart::Unwind(value)) => self.raise(value).map(|()| None),
+            Some(Restart::Native { from, charge, done }) => self
+                .complete_native(from as usize, charge, done)
+                .map(|()| None),
+        }
     }
 
     /// The raise or stop a native error is.
     fn native(&mut self, error: NativeError) -> Flow {
         match error {
+            NativeError::Retry(Retry::Cold { object, chunk }) => Flow::Cold { object, chunk },
             NativeError::Raised(value) => Flow::Raise(value),
             NativeError::Refused { kind, message } => self.error(kind, &message),
             NativeError::Guard(guard) => Flow::from(Stop::bound(Exceeded {
@@ -616,18 +788,56 @@ impl<H: Heap> Vm<H> {
     /// Copies `value` out of the run, billing its deep size first
     /// (`K-EFF-002`, `K-CHG-005`).
     pub(crate) fn copy_out(&mut self, value: &Value) -> Run<Datum> {
-        if !self.paced {
-            let size = crate::data::deep_size(self.heap.arena(), value)
-                .map_err(|error| fault(error.to_string()))?;
+        let copied = self.copied(value)?;
+        self.bill_copy(copied)
+    }
+
+    /// Every read a copy of `value` out of the run makes: its deep size
+    /// and its copy, neither billed nor raised yet.
+    pub(crate) fn copied(&self, value: &Value) -> Run<Copied> {
+        let size = if self.paced {
+            None
+        } else {
+            Some(crate::data::deep_size(self.heap.arena(), value).map_err(read)?)
+        };
+        let datum = match crate::data::copy_out(self.heap.arena(), value_depth(), value) {
+            Ok(datum) => Ok(datum),
+            Err(crate::data::CopyError::Raised(raised)) => Err(raised),
+            Err(crate::data::CopyError::Cold { object, chunk }) => {
+                return Err(Flow::Cold { object, chunk });
+            }
+            Err(crate::data::CopyError::Heap(error)) => return Err(fault(error.to_string())),
+        };
+        Ok(Copied { size, datum })
+    }
+
+    /// Bills a copy's deep size, then gives the copy or raises its error.
+    pub(crate) fn bill_copy(&mut self, copied: Copied) -> Run<Datum> {
+        if let Some(size) = copied.size {
             self.fee(size)?;
         }
-        match crate::data::copy_out(self.heap.arena(), value_depth(), value) {
-            Ok(datum) => Ok(datum),
-            Err(crate::data::CopyError::Raised(raised)) => {
-                Err(self.error(raised.kind, &raised.message))
+        copied
+            .datum
+            .map_err(|raised| self.error(raised.kind, &raised.message))
+    }
+
+    /// Copies `value`, which no frame holds, out of a run that has
+    /// stopped, loading each chunk it reaches cold.
+    pub(crate) fn copy_stopped(&mut self, value: Value) -> Result<Datum, String> {
+        self.held.push(value);
+        let copied = loop {
+            match crate::data::copy_out(self.heap.arena(), value_depth(), &value) {
+                Err(crate::data::CopyError::Cold { object, chunk }) => {
+                    if let Err(stop) = self.reload(object, chunk) {
+                        break Err(format!("{stop:?}"));
+                    }
+                }
+                Ok(datum) => break Ok(datum),
+                Err(error) => break Err(format!("{error:?}")),
             }
-            Err(crate::data::CopyError::Heap(error)) => Err(fault(error.to_string())),
-        }
+        };
+        self.held.pop();
+        copied
     }
 
     // --- Frames.
@@ -712,11 +922,7 @@ impl<H: Heap> Vm<H> {
             .last()
             .and_then(|frame| frame.closure)
             .ok_or_else(|| fault("a capture outside a closure"))?;
-        let (_, captures, _) = self
-            .heap
-            .arena()
-            .closure(closure)
-            .map_err(|error| fault(error.to_string()))?;
+        let (_, captures, _) = self.heap.arena().closure(closure).map_err(read)?;
         captures
             .get(usize::from(n))
             .copied()
@@ -725,7 +931,9 @@ impl<H: Heap> Vm<H> {
 
     /// Unwinds to the innermost handler of the running task: each frame
     /// left bills its completion formula with a result of size 0
-    /// (`K-CHG-003`). Without a handler the task's raise is uncaught.
+    /// (`K-CHG-003`). Without a handler the task's raise is uncaught. A
+    /// completion that reads a cold chunk resumes the unwind at its frame,
+    /// the frames already left gone.
     fn raise(&mut self, value: Value) -> Run<()> {
         self.cancel();
         loop {
@@ -743,14 +951,22 @@ impl<H: Heap> Vm<H> {
                 }
                 return Ok(());
             }
+            let bill = self.cx.frames[top].bill;
+            let completion = match self.completion(bill, None) {
+                Ok(completion) => completion,
+                Err(flow) => {
+                    if let Flow::Cold { .. } = flow {
+                        self.restart = Some(Restart::Unwind(value));
+                    }
+                    return Err(flow);
+                }
+            };
             let Some(frame) = self.cx.frames.pop() else {
                 return Err(Flow::from(Stop::Uncaught(value)));
             };
             self.heap.release(self.frames[frame.unit as usize]);
             self.drop_handlers();
-            if let Some(bill) = frame.bill {
-                self.settle(bill, None)?;
-            }
+            self.settle(completion)?;
             self.cx.stack.truncate(frame.base as usize);
             if self.cx.frames.is_empty() {
                 return Err(Flow::from(Stop::Uncaught(value)));
@@ -792,6 +1008,13 @@ impl<H: Heap> Vm<H> {
                 Ok(Some(stop)) => return stop,
                 Ok(None) => self.dispatch(host).map(Some),
                 Err(Flow::Raise(value)) => self.raise(value).map(|()| None),
+                Err(Flow::Cold { object, chunk }) => match self.reload(object, chunk) {
+                    Ok(()) => self.resume(),
+                    Err(stop) => {
+                        self.restart = None;
+                        Err(Flow::from(stop))
+                    }
+                },
                 Err(Flow::Stop(stop)) => {
                     self.cancel();
                     match *stop {
@@ -817,12 +1040,18 @@ impl<H: Heap> Vm<H> {
         let program = Arc::clone(&self.program);
         // The run's first op ends no step: the slice was just started.
         let mut fresh = std::mem::take(&mut self.fresh);
+        // After a cold load the op it interrupted runs again, its start
+        // already passed: no event, slice test or point a second time.
+        let mut retrying = std::mem::take(&mut self.retrying);
         'frames: loop {
             let Some(frame) = self.cx.frames.last() else {
                 return Err(fault("a context with no frame ran"));
             };
             let top = self.cx.frames.len() - 1;
             let (id, mut pc, base) = (frame.unit, frame.pc as usize, frame.base as usize);
+            if retrying {
+                pc -= 1;
+            }
             let unit = &program.units[id as usize];
             let ops = &unit.ops[..];
             // Writes the local `pc` back to the running frame.
@@ -845,6 +1074,10 @@ impl<H: Heap> Vm<H> {
             }
             loop {
                 let mut op = ops[pc];
+                #[cfg(test)]
+                if !retrying && unit.step[pc] {
+                    self.chill();
+                }
                 if let Op::Block(_) = op {
                     // The block before ended: what it reserved is spent,
                     // and the charge is exact at the boundary.
@@ -855,7 +1088,7 @@ impl<H: Heap> Vm<H> {
                     // A refusal, a limiter and a slice read the frame at
                     // the op.
                     sync!(pc);
-                    if self.exact_step(id, unit, pc, op, fresh)? {
+                    if !retrying && self.exact_step(id, unit, pc, op, fresh)? {
                         return Ok(Stop::Slice);
                     }
                     // A fused run is a prepaid path's: here its first op
@@ -865,6 +1098,7 @@ impl<H: Heap> Vm<H> {
                     }
                 }
                 fresh = false;
+                retrying = false;
                 pc += 1;
                 match op {
                     Op::Block(block) => {
@@ -1081,43 +1315,44 @@ impl<H: Heap> Vm<H> {
                     .map_err(|error| self.native(error))?;
             }
             Op::MakeTuple(n) => self.make_tuple(n as usize)?,
+            // A built value's members stay on the stack, rooted, until it
+            // is placed; a key is read before anything is placed.
             Op::MakeList(n) => {
-                let values = self.take(n as usize);
-                let value = self.alloc(NewObject::List(values))?;
-                self.push(value);
+                let values = self.top(n as usize).to_vec();
+                self.place(n as usize, NewObject::List(values))?;
             }
             Op::MakeSet(n) => {
-                let values = self.take(n as usize);
-                for value in &values {
-                    self.key(value)?;
+                let from = self.cx.stack.len() - n as usize;
+                for at in from..self.cx.stack.len() {
+                    let key = self.cx.stack[at];
+                    self.key(&key)?;
                 }
-                let value = self.alloc(NewObject::Set(values))?;
-                self.push(value);
+                let values = self.top(n as usize).to_vec();
+                self.place(n as usize, NewObject::Set(values))?;
             }
             Op::MakeMap(n) => {
-                let flat = self.take(2 * n as usize);
-                let pairs: Vec<(Value, Value)> = flat
+                let from = self.cx.stack.len() - 2 * n as usize;
+                for at in (from..self.cx.stack.len()).step_by(2) {
+                    let key = self.cx.stack[at];
+                    self.key(&key)?;
+                }
+                let pairs: Vec<(Value, Value)> = self
+                    .top(2 * n as usize)
                     .as_chunks::<2>()
                     .0
                     .iter()
                     .map(|&[key, value]| (key, value))
                     .collect();
-                for (key, _) in &pairs {
-                    self.key(key)?;
-                }
-                let value = self.alloc(NewObject::Map(pairs))?;
-                self.push(value);
+                self.place(2 * n as usize, NewObject::Map(pairs))?;
             }
             Op::MakeRecord(shape) => {
                 let shape = Arc::clone(&unit.records[shape as usize]);
-                let values = self.take(shape.len());
                 let pairs = shape
                     .iter()
                     .map(|field| self.constants[*field as usize])
-                    .zip(values)
+                    .zip(self.top(shape.len()).iter().copied())
                     .collect();
-                let value = self.alloc(NewObject::Record(pairs))?;
-                self.push(value);
+                self.place(shape.len(), NewObject::Record(pairs))?;
             }
             Op::MakeClosure(n) => {
                 let site = &unit.closures[n as usize];
@@ -1132,52 +1367,54 @@ impl<H: Heap> Vm<H> {
                 let closure = self.heap.closure(Arc::clone(&site.identity), captures);
                 self.push(Value::Closure(closure));
             }
+            // A member op reads its operands where they stand and pops
+            // them once it is done: a cold read runs it again whole.
             Op::Index => {
-                let index = self.pop();
-                let target = self.pop();
+                let [target, index] = self.operands();
                 let value = self.index(target, index)?;
+                self.popped(2);
                 self.push(value);
             }
             Op::Field(field) => {
-                let target = self.pop();
+                let [target] = self.operands();
                 let name = self.constants[field as usize];
                 let value = self.field(target, name)?;
+                self.popped(1);
                 self.push(value);
             }
             Op::SetIndex => {
-                let index = self.pop();
-                let target = self.pop();
-                let value = self.pop();
+                let [value, target, index] = self.operands();
                 self.set_index(target, index, value)?;
+                self.popped(3);
             }
             Op::SetIndexPlaceFirst => {
-                let value = self.pop();
-                let index = self.pop();
-                let target = self.pop();
+                let [target, index, value] = self.operands();
                 self.set_index(target, index, value)?;
+                self.popped(3);
             }
             Op::SetField(field) => {
-                let target = self.pop();
-                let value = self.pop();
+                let [value, target] = self.operands();
                 self.set_field(target, self.constants[field as usize], value)?;
+                self.popped(2);
             }
             Op::SetFieldPlaceFirst(field) => {
-                let value = self.pop();
-                let target = self.pop();
+                let [target, value] = self.operands();
                 self.set_field(target, self.constants[field as usize], value)?;
+                self.popped(2);
             }
             Op::RemoveIndex => {
-                let index = self.pop();
-                let target = self.pop();
+                let [target, index] = self.operands();
                 self.remove_index(target, index)?;
+                self.popped(2);
             }
             Op::RemoveField(field) => {
-                let target = self.pop();
+                let [target] = self.operands();
                 self.remove_field(target, self.constants[field as usize])?;
+                self.popped(1);
             }
             Op::Call(site) => self.call(program, unit, site)?,
             Op::Return => {
-                let value = self.pop();
+                let [value] = self.operands();
                 if let Some(stop) = self.ret(host, value, true)? {
                     return Ok(Some(stop));
                 }
@@ -1219,18 +1456,21 @@ impl<H: Heap> Vm<H> {
                 }
             }
             Op::Print => {
-                let value = self.pop();
+                let [value] = self.operands();
                 let datum = self.copy_out(&value)?;
+                self.popped(1);
                 host.print(&datum);
             }
             Op::Finish => {
-                let value = self.pop();
+                let [value] = self.operands();
                 let datum = self.copy_out(&value)?;
+                self.popped(1);
                 return Ok(Some(Stop::Finish(datum)));
             }
             Op::Fail => {
-                let value = self.pop();
+                let [value] = self.operands();
                 let datum = self.copy_out(&value)?;
+                self.popped(1);
                 return Ok(Some(Stop::Fail(datum)));
             }
             Op::Unavailable(reason) => {
@@ -1298,9 +1538,19 @@ impl<H: Heap> Vm<H> {
         // A return that leaves the run copies its value out where it
         // stands, so a raise of the copy is caught by the frame's own
         // handlers; falling off the end copies nothing (`K-FORM-015`).
-        let leaving = match (bottom && main, explicit) {
-            (true, true) => Some(self.copy_out(&value)?),
-            (true, false) => Some(Datum::Null),
+        // Every read comes before anything commits: a cold read runs the
+        // return again whole, its frame still in place.
+        let copied = match (bottom && main, explicit) {
+            (true, true) => Some(self.copied(&value)?),
+            _ => None,
+        };
+        let Some(bill) = self.cx.frames.last().map(|frame| frame.bill) else {
+            return Err(fault("a return with no frame"));
+        };
+        let completion = self.completion(bill, Some(&value))?;
+        let leaving = match (bottom && main, copied) {
+            (true, Some(copied)) => Some(self.bill_copy(copied)?),
+            (true, None) => Some(Datum::Null),
             (false, _) => None,
         };
         let Some(frame) = self.cx.frames.pop() else {
@@ -1308,9 +1558,7 @@ impl<H: Heap> Vm<H> {
         };
         self.heap.release(self.frames[frame.unit as usize]);
         self.drop_handlers();
-        if let Some(bill) = frame.bill {
-            self.settle(bill, Some(&value))?;
-        }
+        self.settle(completion)?;
         self.cx.stack.truncate(frame.base as usize);
         if let Some(datum) = leaving {
             return Ok(Some(Stop::Returned(datum)));
@@ -1335,6 +1583,37 @@ impl<H: Heap> Vm<H> {
         self.cx.stack.split_off(from)
     }
 
+    /// The top `n` operands, in order, left in place.
+    #[inline]
+    fn top(&self, n: usize) -> &[Value] {
+        &self.cx.stack[self.cx.stack.len() - n..]
+    }
+
+    /// The top `N` operands, in order, left in place until the op that
+    /// reads them has done every read.
+    #[inline]
+    fn operands<const N: usize>(&self) -> [Value; N] {
+        let mut operands = [Value::Absent; N];
+        operands.copy_from_slice(self.top(N));
+        operands
+    }
+
+    /// Pops the `n` operands an op has finished with.
+    #[inline]
+    fn popped(&mut self, n: usize) {
+        let len = self.cx.stack.len();
+        self.cx.stack.truncate(len - n);
+    }
+
+    /// Places `object`, built of the top `n` operands, in their place: they
+    /// stay rooted across the admission's collection.
+    fn place(&mut self, n: usize, object: NewObject) -> Run<()> {
+        let value = self.alloc(object)?;
+        self.popped(n);
+        self.push(value);
+        Ok(())
+    }
+
     /// Refuses a value that is no legal key (`K-KEY-002`).
     fn key(&mut self, value: &Value) -> Run<()> {
         match self.heap.arena().key(value) {
@@ -1346,7 +1625,7 @@ impl<H: Heap> Vm<H> {
     /// A tuple of the top `n` operands, refused past the value depth
     /// (`K-VAL-034`).
     fn make_tuple(&mut self, n: usize) -> Run<()> {
-        let values = self.take(n);
+        let values = self.top(n).to_vec();
         let arena = self.heap.arena();
         let depth = values
             .iter()
@@ -1361,9 +1640,7 @@ impl<H: Heap> Vm<H> {
                 &format!("a value exceeds the configured {limit}-level value depth"),
             ));
         }
-        let value = self.alloc(NewObject::Tuple(values))?;
-        self.push(value);
-        Ok(())
+        self.place(n, NewObject::Tuple(values))
     }
 }
 

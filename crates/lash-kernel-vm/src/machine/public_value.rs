@@ -369,6 +369,9 @@ impl KernelMachine {
             Ok(datum) => datum,
             Err(crate::data::CopyError::Raised(error)) => return Err(error.into()),
             Err(crate::data::CopyError::Heap(error)) => return Err(error.into()),
+            Err(cold @ crate::data::CopyError::Cold { .. }) => {
+                return Err(cold.heap_fault().into());
+            }
         };
         let decoder = lash_kernel_doc::Decoder {
             max_depth: self.limits.value_depth(),

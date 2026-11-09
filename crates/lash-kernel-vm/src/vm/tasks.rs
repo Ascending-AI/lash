@@ -500,8 +500,7 @@ impl<H: Heap> Vm<H> {
     fn decoded(&mut self, datum: &Datum) -> Run<Value> {
         let value = super::datum::copy_in(self, datum)?;
         if !self.paced {
-            let size = crate::data::deep_size(self.heap.arena(), &value)
-                .map_err(|error| fault(error.to_string()))?;
+            let size = crate::data::deep_size(self.heap.arena(), &value).map_err(super::read)?;
             self.held.push(value);
             let charged = self.fee(size);
             self.held.pop();
@@ -618,11 +617,22 @@ impl<H: Heap> Vm<H> {
                     Some(Err(problem)) => return Err(fault(problem.clone())),
                     None => return Err(fault("a perform whose operation was never resolved")),
                 };
+                // Every argument is read before the first is billed: a cold
+                // read runs the action again with no fee billed twice. Each
+                // copy then bills in order, up to the first that raises.
                 let from = self.cx.stack.len() - usize::from(*argc);
-                let mut args = Vec::with_capacity(usize::from(*argc));
+                let mut copies = Vec::with_capacity(usize::from(*argc));
                 for at in from..self.cx.stack.len() {
-                    let value = self.cx.stack[at];
-                    args.push(self.copy_out(&value)?);
+                    let copied = self.copied(&self.cx.stack[at])?;
+                    let raises = copied.raises();
+                    copies.push(copied);
+                    if raises {
+                        break;
+                    }
+                }
+                let mut args = Vec::with_capacity(usize::from(*argc));
+                for copied in copies {
+                    args.push(self.bill_copy(copied)?);
                 }
                 self.cx.stack.truncate(from);
                 if operation.read {
@@ -687,7 +697,7 @@ impl<H: Heap> Vm<H> {
                 self.next_turn(host)
             }
             ActionSite::JoinMany { mode, .. } => {
-                let handles = self.pop();
+                let [handles] = self.operands();
                 self.join_many(host, *mode, handles)
             }
             ActionSite::Yield { .. } => {
@@ -801,9 +811,11 @@ impl<H: Heap> Vm<H> {
                 self.exceeded(Bound::LiveTasks, u64::from(limit)),
             )));
         }
-        let occurrence = self.running().advance(mark);
+        // The callee is read before the occurrence advances: a cold read
+        // runs the spawn again with nothing advanced.
         let from = self.cx.stack.len() - argc;
-        let rooted_in_document = self.callee_authored(stub, self.cx.stack.get(from).copied());
+        let rooted_in_document = self.callee_authored(stub, self.cx.stack.get(from).copied())?;
+        let occurrence = self.running().advance(mark);
         let spawn_origin = (!unit.authored || !rooted_in_document).then(|| self.task_origin());
         let parent = Arc::clone(&self.tasks.all[self.tasks.running].identity);
         let identity = Arc::new(TaskIdentity::Spawned(SpawnIdentity {
@@ -828,26 +840,18 @@ impl<H: Heap> Vm<H> {
     }
 
     /// Whether the code a spawn stub calls is document code.
-    fn callee_authored(&self, stub: UnitId, value: Option<Value>) -> bool {
+    fn callee_authored(&self, stub: UnitId, value: Option<Value>) -> Run<bool> {
         let units = &self.program.units;
         let Some(call) = units[stub as usize].calls.first() else {
-            return false;
+            return Ok(false);
         };
         let unit = match call.callee {
             Callee::Unit { unit, .. } => Some(unit),
             Callee::Value => match value {
-                Some(Value::Closure(handle)) => self
-                    .heap
-                    .arena()
-                    .closure(handle)
-                    .ok()
+                Some(Value::Closure(handle)) => found(self.heap.arena().closure(handle))?
                     .and_then(|(identity, _, _)| self.closures.get(&identity.callable.function))
                     .copied(),
-                Some(Value::Function(handle)) => self
-                    .heap
-                    .arena()
-                    .callable(handle)
-                    .ok()
+                Some(Value::Function(handle)) => found(self.heap.arena().callable(handle))?
                     .and_then(|callable| self.functions.get(&callable.function))
                     .and_then(|trampoline| units[*trampoline as usize].calls.first())
                     .and_then(|call| match call.callee {
@@ -858,7 +862,7 @@ impl<H: Heap> Vm<H> {
             },
             Callee::Native { .. } | Callee::Machine { .. } => None,
         };
-        unit.is_some_and(|unit| units[unit as usize].authored)
+        Ok(unit.is_some_and(|unit| units[unit as usize].authored))
     }
 
     /// A list `join` in `mode` (`K-TASK-010` … `K-TASK-015`).
@@ -902,6 +906,8 @@ impl<H: Heap> Vm<H> {
             }
             members.push(member);
         }
+        // The handles are read: from here the join commits.
+        self.popped(1);
         if len == 0 && matches!(mode, JoinMode::Race | JoinMode::Any) {
             return Err(self.error("empty_join", "this `join` needs at least one task"));
         }
@@ -1102,6 +1108,18 @@ impl<H: Heap> Vm<H> {
             Flow::Raise(value) => Ok(value),
             flow => Err(flow),
         }
+    }
+}
+
+/// What a read found: only a cold read stops the answer; any other failure
+/// finds nothing.
+fn found<T>(found: Result<T, lash_kernel_doc::NativeError>) -> Run<Option<T>> {
+    match found {
+        Ok(found) => Ok(Some(found)),
+        Err(error) => match super::read(error) {
+            cold @ Flow::Cold { .. } => Err(cold),
+            _ => Ok(None),
+        },
     }
 }
 

@@ -204,6 +204,7 @@ impl From<crate::data::CopyError> for Interrupt {
         match error {
             CopyError::Raised(error) => error.into(),
             CopyError::Heap(error) => error.into(),
+            cold @ CopyError::Cold { .. } => cold.heap_fault().into(),
         }
     }
 }

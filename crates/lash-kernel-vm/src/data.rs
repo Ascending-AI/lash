@@ -395,7 +395,12 @@ fn word_magnitude(value: &Value) -> u64 {
 
 impl From<NativeError> for CopyError {
     fn from(error: NativeError) -> Self {
-        Self::Heap(HeapFault::Malformed(error.to_string()))
+        match error {
+            NativeError::Retry(lash_kernel_doc::Retry::Cold { object, chunk }) => {
+                Self::Cold { object, chunk }
+            }
+            error => Self::Heap(HeapFault::Malformed(error.to_string())),
+        }
     }
 }
 
@@ -533,7 +538,25 @@ fn copy(
 pub(crate) enum CopyError {
     Raised(Raised),
     Heap(HeapFault),
+    /// A read reached a cold chunk: the copy runs again once it is loaded.
+    Cold {
+        object: ArenaHandle,
+        chunk: u32,
+    },
 }
+impl CopyError {
+    /// A cold read as the fault a reader with no cold path takes it for.
+    pub(crate) fn heap_fault(self) -> HeapFault {
+        match self {
+            Self::Heap(fault) => fault,
+            Self::Cold { object, chunk } => HeapFault::Malformed(
+                NativeError::from(lash_kernel_doc::Retry::Cold { object, chunk }).to_string(),
+            ),
+            Self::Raised(raised) => HeapFault::Malformed(raised.message),
+        }
+    }
+}
+
 impl From<Raised> for CopyError {
     fn from(error: Raised) -> Self {
         Self::Raised(error)

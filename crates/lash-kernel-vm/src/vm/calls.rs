@@ -19,11 +19,29 @@ use lash_kernel_doc::arena::native::{
 use lash_kernel_doc::heap::LogicalBytes;
 
 use super::frames::Bill;
-use super::{Exceeded, Flow, Run, Stop, Vm, fault, value_depth};
+use super::{Exceeded, Flow, Restart, Run, Stop, Vm, fault, read, value_depth};
 use crate::Bound;
 use crate::bytecode::program::{Callee, NativeEntry, Program, Unit};
 use crate::functions::MachineFunction;
 use crate::heap::Heap;
+
+/// How a native call that ran ended, before its completion bills.
+#[derive(Debug)]
+pub(crate) enum Done {
+    Value(Value),
+    Raised(Value),
+    Refused(&'static str, String),
+}
+
+impl Done {
+    /// The value it holds, for the collector.
+    pub(super) fn roots(&self, visit: &mut dyn FnMut(&Value)) {
+        match self {
+            Self::Value(value) | Self::Raised(value) => visit(value),
+            Self::Refused(..) => {}
+        }
+    }
+}
 
 impl<H: Heap> Vm<H> {
     /// Call site `site` of `unit`, its arguments on the stack.
@@ -54,18 +72,15 @@ impl<H: Heap> Vm<H> {
     }
 
     /// Calls the closure or function value below the top `argc` operands
-    /// (`K-FN-004`, `K-CLO-001`).
+    /// (`K-FN-004`, `K-CLO-001`). The callee is read where it stands and
+    /// removed once read.
     fn call_value(&mut self, argc: usize) -> Run<()> {
         let at = self.cx.stack.len() - argc - 1;
-        let callee = self.cx.stack.remove(at);
+        let callee = self.cx.stack[at];
         let (unit, closure) = match callee {
             Value::Closure(handle) => {
                 let function = {
-                    let (identity, _, _) = self
-                        .heap
-                        .arena()
-                        .closure(handle)
-                        .map_err(|error| fault(error.to_string()))?;
+                    let (identity, _, _) = self.heap.arena().closure(handle).map_err(read)?;
                     identity.callable.function
                 };
                 let unit = *self
@@ -75,11 +90,7 @@ impl<H: Heap> Vm<H> {
                 (unit, Some(handle))
             }
             Value::Function(handle) => {
-                let callable = self
-                    .heap
-                    .arena()
-                    .callable(handle)
-                    .map_err(|error| fault(error.to_string()))?;
+                let callable = self.heap.arena().callable(handle).map_err(read)?;
                 let unit = *self
                     .functions
                     .get(&callable.function)
@@ -93,6 +104,7 @@ impl<H: Heap> Vm<H> {
                 ));
             }
         };
+        self.cx.stack.remove(at);
         let params = usize::from(self.program.units[unit as usize].params);
         if argc > params {
             return Err(self.error(
@@ -126,13 +138,21 @@ impl<H: Heap> Vm<H> {
         }
         let entry: &NativeEntry = &program.natives[native as usize];
         let params = usize::from(entry.params);
+        // The missing parameters are padded absent, and the padding is
+        // taken back when a cold read runs the call again.
         for _ in argc..params {
             self.push(Value::Absent);
         }
         let from = self.cx.stack.len() - params.max(argc);
         let charged = charged && !self.paced;
         let limit = match entry.guard {
-            Some(guard) => Some(self.formula(guard, &self.cx.stack[from..], None)?),
+            Some(guard) => match self.formula(guard, &self.cx.stack[from..], None) {
+                Ok(limit) => Some(limit),
+                Err(flow) => {
+                    self.cx.stack.truncate(len);
+                    return Err(flow);
+                }
+            },
             None => None,
         };
         // The call builds into a nursery with the room the bound leaves.
@@ -214,6 +234,9 @@ impl<H: Heap> Vm<H> {
             // The transient part of the peak ends with the call.
             self.heap.release(peak - placed);
         }
+        // What the call built is installed: from here a cold read resumes
+        // its completion, never the native.
+        let charge = charged.then_some(entry.charge);
         match answer {
             Ok(value) => {
                 // An immediate answer holds no other value.
@@ -226,25 +249,13 @@ impl<H: Heap> Vm<H> {
                         &format!("a value exceeds the configured {limit}-level value depth"),
                     ));
                 }
-                let fee = if charged {
-                    Some(self.formula(entry.charge, &self.cx.stack[from..], Some(&value))?)
-                } else {
-                    None
-                };
-                self.cx.stack.truncate(from);
-                self.push(value);
-                if let Some(units) = fee {
-                    self.fee(units)?;
-                }
-                Ok(())
+                self.complete_native(from, charge, Done::Value(value))
             }
             Err(NativeError::Raised(value)) => {
-                self.billed_raise(charged, entry.charge, from)?;
-                Err(Flow::Raise(value))
+                self.complete_native(from, charge, Done::Raised(value))
             }
             Err(NativeError::Refused { kind, message }) => {
-                self.billed_raise(charged, entry.charge, from)?;
-                Err(self.error(kind, &message))
+                self.complete_native(from, charge, Done::Refused(kind, message))
             }
             Err(NativeError::Guard(guard)) => Err(Flow::from(Stop::bound(Exceeded {
                 bound: Bound::Guard {
@@ -265,8 +276,14 @@ impl<H: Heap> Vm<H> {
                 self.cancel();
                 self.enter(body, argc, None, bill)
             }
-            Err(NativeError::Retry(_)) => {
-                Err(fault("a native asked for what the core gives at once"))
+            // It read a cold chunk and did nothing a run sees: the call
+            // runs again, unpadded, once the chunk is loaded.
+            Err(NativeError::Retry(Retry::Cold { object, chunk })) => {
+                self.cx.stack.truncate(len);
+                Err(Flow::Cold { object, chunk })
+            }
+            Err(NativeError::Retry(Retry::Room { .. })) => {
+                Err(fault("a native asked for room the core gives at once"))
             }
             Err(NativeError::Host(error)) => Err(fault(error.to_string())),
             Err(NativeError::Malformed(problem)) => Err(fault(problem)),
@@ -335,19 +352,56 @@ impl<H: Heap> Vm<H> {
         Some(units.map(|units| (value, Some(units))))
     }
 
-    /// Bills a raising call's formula with a result of size 0, and drops
-    /// its arguments.
-    fn billed_raise(&mut self, charged: bool, charge: u32, from: usize) -> Run<()> {
-        let fee = if charged {
-            Some(self.formula(charge, &self.cx.stack[from..], None)?)
-        } else {
-            None
+    /// Completes a native call that answered or raised: bills formula
+    /// `charge` over its arguments at `from` and its result, of size 0
+    /// when it raised, drops the arguments and gives the result or the
+    /// raise. A cold read of the formula holds the completion, so that it
+    /// resumes once the chunk is loaded.
+    pub(super) fn complete_native(
+        &mut self,
+        from: usize,
+        charge: Option<u32>,
+        done: Done,
+    ) -> Run<()> {
+        let fee = match charge {
+            Some(charge) => {
+                let result = match &done {
+                    Done::Value(value) => Some(value),
+                    Done::Raised(_) | Done::Refused(..) => None,
+                };
+                match self.formula(charge, &self.cx.stack[from..], result) {
+                    Ok(units) => Some(units),
+                    Err(flow) => {
+                        if let Flow::Cold { .. } = flow {
+                            self.restart = Some(Restart::Native {
+                                from: from as u32,
+                                charge: Some(charge),
+                                done,
+                            });
+                        }
+                        return Err(flow);
+                    }
+                }
+            }
+            None => None,
         };
         self.cx.stack.truncate(from);
+        let raised = match done {
+            Done::Value(value) => {
+                self.push(value);
+                None
+            }
+            Done::Raised(value) => Some(Ok(value)),
+            Done::Refused(kind, message) => Some(Err((kind, message))),
+        };
         if let Some(units) = fee {
             self.fee(units)?;
         }
-        Ok(())
+        match raised {
+            None => Ok(()),
+            Some(Ok(value)) => Err(Flow::Raise(value)),
+            Some(Err((kind, message))) => Err(self.error(kind, &message)),
+        }
     }
 
     /// A function the machine answers itself (`K-LIB-010`).

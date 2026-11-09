@@ -57,6 +57,16 @@ impl CoreMachine {
         }
     }
 
+    /// Pages every object the heap can out at each statement boundary:
+    /// the laws' forced-cold runs.
+    #[cfg(test)]
+    pub(crate) fn force_cold(&mut self) {
+        self.vm.chill = Some(|heap, roots| {
+            heap.page_out(roots)
+                .expect("a forced-cold run seals its heap");
+        });
+    }
+
     /// Builds `datum` into the run's heap, every mutable object fresh.
     fn copy_in(vm: &mut Vm<SlotHeap>, datum: &Datum) -> Result<Value, StartError> {
         let built = super::datum::copy_in(vm, datum);
@@ -85,7 +95,7 @@ impl Machine for CoreMachine {
         program: Program,
         bounds: Bounds,
         start: CellStart,
-        _source: Box<dyn PageSource>,
+        source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
         if start.session.is_some() {
             return Err(StartError::Bindings {
@@ -134,7 +144,14 @@ impl Machine for CoreMachine {
             Arc::clone(&document),
             Arc::new(code),
             &heights,
-            SlotHeap::new(bounds.memory),
+            // The run writes its objects to its own source.
+            SlotHeap::durable(
+                bounds.memory,
+                crate::heap::open::Durable {
+                    directory: lash_kernel_state::paged::run::directory::Directory::new(source),
+                    high_water: lash_kernel_state::paged::run::ids::HighWater(0),
+                },
+            ),
             0,
             bounds.charge_limit,
             paced,
@@ -350,12 +367,12 @@ impl CoreMachine {
     }
 
     fn uncaught(&mut self, value: Value) -> Result<Step, MachineError> {
-        match crate::data::copy_out(self.vm.heap.arena(), value_depth(), &value) {
+        match self.vm.copy_stopped(value) {
             Ok(error) => self.ended(End::Error(RunError::Uncaught { error, site: None })),
             Err(error) => {
                 self.ended = true;
                 Err(MachineError::Fault {
-                    problem: format!("an uncaught value does not copy out: {error:?}"),
+                    problem: format!("an uncaught value does not copy out: {error}"),
                 })
             }
         }
