@@ -209,45 +209,50 @@ async fn lease_host(clock: Arc<LeaseClock>) -> DurableHost {
 
 /// Session page authority (FIG-6193): the cells of a turn read the
 /// session's committed pages under one lease, which the first read takes
-/// and every later cell reuses before renewal is due, so N cells make
-/// one lease write; and a
-/// cell that rebinds one binding of many commits only the pages it
-/// changed, never the session's whole heap.
+/// and every later cell reuses before renewal is due, so N cells make one
+/// lease write. A cell that rebinds one binding commits as many pages in a
+/// session of 1,024 bindings as in one of 256: what a rebind writes does
+/// not grow with the session.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_turns_cells_share_one_lease_and_commit_only_the_pages_they_changed() {
-    let clock = LeaseClock::new();
-    let host = lease_host(clock.clone()).await;
-    let mut state = typescript_state();
-    state.page_clock(clock);
-    let mut patch = lash_rlm_types::RlmGlobalsPatchPluginBody::default();
-    for index in 0..256 {
-        patch.set_default.insert(
-            format!("b{index}"),
-            serde_json::json!(format!("{index}:{}", "x".repeat(1024))),
+async fn a_turns_cells_share_one_lease_and_a_rebind_commits_pages_that_do_not_grow_with_the_session()
+ {
+    async fn rebind(bindings: usize) -> u64 {
+        let clock = LeaseClock::new();
+        let host = lease_host(clock.clone()).await;
+        let mut state = typescript_state();
+        state.page_clock(clock);
+        let mut patch = lash_rlm_types::RlmGlobalsPatchPluginBody::default();
+        for index in 0..bindings {
+            patch.set_default.insert(
+                format!("b{index}"),
+                serde_json::json!(format!("{index}:{}", "x".repeat(1024))),
+            );
+        }
+        state
+            .patch_globals(&patch)
+            .await
+            .expect("bind the session's values");
+        commit_working(&mut state, &host).await;
+        for (key, code) in [
+            ("exec-code:0", "const r0 = b0.length;"),
+            ("exec-code:1", "const r1 = b1.length;"),
+            ("exec-code:2", "const r2 = b2.length;"),
+            ("exec-code:3", "b7 = 'changed';"),
+        ] {
+            cell(&mut state, &host, key, code).await;
+        }
+        assert_eq!(
+            state.lease_writes(),
+            1,
+            "the turn's cells read under the one lease the first read took"
         );
+        sent(&commit_working(&mut state, &host).await).1
     }
-    state
-        .patch_globals(&patch)
-        .await
-        .expect("bind the session's values");
-    let (_, whole) = sent(&commit_working(&mut state, &host).await);
-    for (key, code) in [
-        ("exec-code:0", "const r0 = b0.length;"),
-        ("exec-code:1", "const r1 = b1.length;"),
-        ("exec-code:2", "const r2 = b2.length;"),
-        ("exec-code:3", "b7 = 'changed';"),
-    ] {
-        cell(&mut state, &host, key, code).await;
-    }
+    let small = rebind(256).await;
+    let large = rebind(1024).await;
     assert_eq!(
-        state.lease_writes(),
-        1,
-        "the turn's cells read under the one lease the first read took"
-    );
-    let (_, changed) = sent(&commit_working(&mut state, &host).await);
-    assert!(
-        changed * 8 < whole,
-        "the turn commits the pages its cells changed: {changed} of the session's {whole}"
+        large, small,
+        "a one-binding rebind commits {small} pages at 256 bindings and {large} at 1,024"
     );
 }
 
