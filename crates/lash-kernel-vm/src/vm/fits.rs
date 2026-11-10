@@ -1,17 +1,23 @@
 //! An authored call of a typed build helper's body holds its arguments
-//! to the helper's signature, as an export's are (`function_argument`):
-//! a dialect helper's body may rely on the types it declares.
+//! to the helper's signature, as an export's are (`function_argument`),
+//! and the value the body returns to its result (`entry_type_mismatch`
+//! at `output`): a dialect helper's body may rely on the types it
+//! declares, and its caller on the type it returns.
 //!
 //! A value fits a type as the decoder admits its copy, member by member
 //! where it holds members, so a function or a task among them is judged
-//! by its kind rather than refused as data.
+//! by its kind rather than refused as data. A function fits a function
+//! type when the signature it presents serves it.
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
-use lash_kernel_doc::{Datum, Decoder, Value};
+use lash_kernel_doc::snapshot::closure_at;
+use lash_kernel_doc::{Datum, Decoder, Export, FunctionRepresentation, Value};
+use lash_kernel_value::type_relations::serves;
 use lash_kernel_value::{EntryTypeMismatch, RecordRest, Signature, Type, TypeMismatch};
 
 use super::datum::copy_in;
 use super::{Run, Vm, fault, read};
+use crate::bytecode::op::Op;
 use crate::bytecode::program::Checked;
 use crate::heap::Heap;
 
@@ -43,9 +49,135 @@ impl<H: Heap> Vm<H> {
         Ok(())
     }
 
+    /// Why `value`, returned to an authored call of a typed build
+    /// helper's body, does not fit the helper's declared result: the
+    /// caller's frame stands below the returning one, at the call.
+    pub(super) fn unfit_result(&mut self, value: Value) -> Run<Option<EntryTypeMismatch>> {
+        let Some(caller) = self.cx.frames.len().checked_sub(2) else {
+            return Ok(None);
+        };
+        let frame = &self.cx.frames[caller];
+        let unit = self.program.unit(frame.unit);
+        let checked = match (frame.pc as usize)
+            .checked_sub(1)
+            .and_then(|pc| unit.ops.get(pc))
+        {
+            Some(Op::Call(site)) => unit.calls[*site as usize].checked.clone(),
+            _ => None,
+        };
+        let Some(checked) = checked.filter(|checked| checked.signature.result != Type::Any) else {
+            return Ok(None);
+        };
+        Ok(self
+            .fits(value, &checked.signature.result, self.value_depth)?
+            .map(|mismatch| EntryTypeMismatch {
+                callable: checked.callable,
+                mismatch: mismatch.within("output"),
+            }))
+    }
+
+    /// The signature function value `value` presents: a closure's
+    /// dialect presentation, else its definition's or an admitted
+    /// helper's. A tuple presents one only as a dialect token: its first
+    /// member is the token's tag and the closure it holds stands where
+    /// its presentation says.
+    fn presented(&mut self, value: Value) -> Run<Option<Signature>> {
+        let value = match value {
+            Value::Tuple(tuple) => match self.token(tuple)? {
+                Some(closure) => closure,
+                None => return Ok(None),
+            },
+            other => other,
+        };
+        let (callable, site) = match value {
+            Value::Closure(handle) => {
+                let (identity, _, _) = self.heap.arena().closure(handle).map_err(read)?;
+                (identity.callable, Some(identity.site.site.clone()))
+            }
+            Value::Function(handle) => (self.heap.arena().callable(handle).map_err(read)?, None),
+            _ => return Ok(None),
+        };
+        let program = &self.crossing.program;
+        let Some(document) = program
+            .instances
+            .get(&callable.link)
+            .and_then(|instance| program.documents.get(&instance.document))
+        else {
+            return Ok(None);
+        };
+        let helpers = program.helpers();
+        let presented = site
+            .and_then(|site| closure_at(document, &site, helpers))
+            .and_then(|closure| closure.presentation.as_ref())
+            .map(|presentation| presentation.signature.clone());
+        let exported = || {
+            document.exports.values().find_map(|export| match export {
+                Export::Function(export) if export.function == callable.function => {
+                    Some(export.signature.clone())
+                }
+                _ => None,
+            })
+        };
+        let defined = || {
+            document
+                .functions
+                .get(&callable.function)
+                .map(|definition| definition.signature.clone())
+        };
+        let admitted = || {
+            helpers
+                .admits(&document.library, &callable.function)
+                .then(|| helpers.registered(&callable.function))
+                .flatten()
+                .map(|registered| registered.header().signature.clone())
+        };
+        Ok(presented
+            .or_else(exported)
+            .or_else(defined)
+            .or_else(admitted))
+    }
+
+    /// The closure dialect token `tuple` holds, if it is one.
+    fn token(&mut self, tuple: ArenaHandle) -> Run<Option<Value>> {
+        let members = self.heap.arena().sequence(tuple).map_err(read)?.to_vec();
+        let Some(first) = members.first().copied() else {
+            return Ok(None);
+        };
+        for (index, member) in members.iter().enumerate() {
+            let Value::Closure(handle) = member else {
+                continue;
+            };
+            let identity = self.heap.arena().closure(*handle).map_err(read)?.0.clone();
+            let program = &self.crossing.program;
+            let token = program
+                .instances
+                .get(&identity.callable.link)
+                .and_then(|instance| program.documents.get(&instance.document))
+                .and_then(|document| closure_at(document, &identity.site.site, program.helpers()))
+                .and_then(|closure| closure.presentation.as_ref())
+                .and_then(|presentation| match &presentation.representation {
+                    FunctionRepresentation::Token { tag, callable } => {
+                        (*callable as usize == index).then(|| tag.clone())
+                    }
+                    FunctionRepresentation::Bare => None,
+                });
+            if let Some(tag) = token
+                && matches!(first, Value::Text(_) | Value::LongText(_))
+                && self.text_of(&first)? == tag
+            {
+                return Ok(Some(*member));
+            }
+        }
+        Ok(None)
+    }
+
     /// The raise of an error of `kind` whose data is `payload`'s
     /// diagnostic datum.
-    fn typed_error(&mut self, kind: &str, payload: &impl serde::Serialize) -> super::Flow {
+    pub(super) fn typed_error(
+        &mut self,
+        kind: &str,
+        payload: &impl serde::Serialize,
+    ) -> super::Flow {
         let datum = match lash_kernel_doc::diagnostic_datum(payload) {
             Ok(datum) => datum,
             Err(error) => return fault(error.to_string()),
@@ -90,19 +222,13 @@ impl<H: Heap> Vm<H> {
         match (ty, value) {
             (Type::Task(_), Value::Task(_) | Value::TaskRef(_)) => return Ok(None),
             (Type::Task(_), _) => return mismatch(self),
-            (Type::Function(_), Value::Closure(_) | Value::Function(_)) => return Ok(None),
-            (Type::Function(_), Value::Tuple(tuple)) => {
-                let members = self.heap.arena().sequence(tuple).map_err(read)?;
-                return if members
-                    .iter()
-                    .any(|member| matches!(member, Value::Closure(_)))
-                {
-                    Ok(None)
-                } else {
-                    mismatch(self)
+            (Type::Function(expected), _) => {
+                let Some(provided) = self.presented(value)? else {
+                    return mismatch(self);
                 };
+                return Ok(serves(&provided, expected)
+                    .map(|_| TypeMismatch::new(ty.clone(), Type::Function(Box::new(provided)))));
             }
-            (Type::Function(_), _) => return mismatch(self),
             (Type::Json, Value::Error(error)) => {
                 let data = self.error_data(error)?;
                 return Ok(self

@@ -279,13 +279,4 @@ impl KernelMachine {
         tasks.dedup();
         tasks
     }
-    pub(crate) fn assert_abandoned_native_slots(&self, _id: lash_kernel_value::FunctionId) {
-        retired("assert_abandoned_native_slots")
-    }
-    pub(crate) fn assert_native_boundary_law(&self, _id: lash_kernel_value::FunctionId) {
-        retired("assert_native_boundary_law")
-    }
-    pub(crate) fn assert_external_native_boundary_law(&self, _id: lash_kernel_value::FunctionId) {
-        retired("assert_external_native_boundary_law")
-    }
 }

@@ -1328,8 +1328,10 @@ impl<'a> Compiler<'a> {
 
     /// The contract a call from `f` of build helper `id` through `callee`
     /// is checked against: an authored, uncovered caller's call of a
-    /// helper body whose signature types something (`K-FN-004`). A
-    /// native's own arguments are its formula's to bound.
+    /// helper body whose signature types something (`K-FN-004`), whether
+    /// or not the document carries the helper's definition: a function's
+    /// identity is its content. A native's own arguments are its
+    /// formula's to bound.
     pub(crate) fn checked(&self, f: &Fun, id: FunctionId, callee: &Callee) -> Option<Arc<Checked>> {
         let authored = !self.in_library()
             && !f.covered
@@ -1339,7 +1341,6 @@ impl<'a> Compiler<'a> {
             };
         if !authored
             || !matches!(callee, Callee::Unit { .. })
-            || self.document.functions.contains_key(&id)
             || !self.helpers.is_some_and(|helpers| helpers.contains(&id))
         {
             return None;

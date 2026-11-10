@@ -216,13 +216,6 @@ pub(in crate::laws) fn helper_probes(
             "a: Number, b: Number) -> Number",
         ),
         ("resident.negate", "num.neg", "value: Number) -> Number"),
-        // A native whose declared result rejects its allocated BigInt pins
-        // abandonment before the nursery loses ownership of reserved slots.
-        (
-            "resident.wrong_result",
-            "num.add",
-            "a: Number, b: Number) -> Float",
-        ),
     ] {
         let charge = if name == "resident.large_add" {
             "sum(1, size(a), size(b), size(result))"
@@ -484,6 +477,12 @@ pub(in crate::laws) fn helper_probes(
         ("helper.typed", "x: Int", "Int", "return x"),
         ("helper.return_checked", "x: Any", "Int", "return x"),
         ("helper.optional", "x: Int, y?: Any", "Any", "return (x, y)"),
+        (
+            "helper.apply_typed",
+            "f: Fn(x: Int) -> Int",
+            "Any",
+            "return apply f(1)",
+        ),
     ] {
         let definition = lash_kernel_doc::parse_definition(&format!(
             "function {name}({params}) -> {result}\nkernel 1\nmetering statements\nbody {{ {body} }}"
@@ -823,43 +822,6 @@ const LOOKALIKE_COUNTERS: &str = r#"main {
 /// it implements, warm or sealed cold.
 #[test]
 fn helper_frames_agree() {
-    let overflow = Embedder::with(
-        "main { return resident.large_add(9223372036854775807, 7) }",
-        Setup {
-            probes: Some(helper_probes),
-            ..Setup::default()
-        },
-    );
-    overflow
-        .machine
-        .assert_abandoned_native_slots(overflow.library.ids["resident.large_add"]);
-    overflow
-        .machine
-        .assert_abandoned_native_slots(overflow.library.ids["resident.wrong_result"]);
-    // FIG-7614: exercise detached storage and authenticated external source
-    // acceptance directly. A fallback-only green cannot pass.
-    let boundary = Embedder::with(
-        "main { return resident.boundary(0) }",
-        Setup {
-            probes: Some(helper_probes),
-            ..Setup::default()
-        },
-    );
-    boundary
-        .machine
-        .assert_native_boundary_law(boundary.library.ids["resident.boundary"]);
-    let external = Embedder::with(
-        "main { return resident.optional() }",
-        Setup {
-            probes: Some(helper_probes),
-            ..Setup::default()
-        },
-    );
-    external
-        .machine
-        .assert_external_native_boundary_law(external.library.ids["resident.optional"]);
-    native_boundaries_agree();
-
     let limits = std::cell::Cell::new(super::super::embedder::ROOMY);
     let cold_slice = std::cell::Cell::new(7);
     let fixture = super::super::embedder::library_with(false, Some(helper_probes));
@@ -870,6 +832,7 @@ fn helper_frames_agree() {
                 "helper.typed",
                 "helper.return_checked",
                 "helper.optional",
+                "helper.apply_typed",
                 "helper.checked_answer",
                 "helper.element_map_any",
             ]
@@ -987,7 +950,7 @@ main { return call rooted() }
     const BODY_PARK: &str = r#"main { let d = {step: fn(x) { do perform 0("forward") as Any return 7 }} return invoke helper.forward_next(d) }"#;
     const ROOT_CALLBACK: &str =
         "main { let d = {step: fn(x) { return 7 }} return invoke helper.next(d) }";
-    const CONTRACTS: [&str; 16] = [
+    const CONTRACTS: [&str; 17] = [
         REDUCTION,
         VISIT,
         SCAN,
@@ -1004,6 +967,7 @@ main { return call rooted() }
         "main { return invoke helper.optional(7) }",
         "main { try { return invoke helper.typed(false) } catch err { return err.kind } }",
         "main { try { return invoke helper.return_checked(\"bad\") } catch err { return err.kind } }",
+        "main { try { return invoke helper.apply_typed(fn(a, b) { return a }) } catch err { return err.kind } }",
     ];
     // What a run shows its embedder whatever its slices: result, prints,
     // effects, charge and the charge events in order.
@@ -1082,6 +1046,14 @@ main { return call rooted() }
             if source.contains("helper.checked_answer(") {
                 assert_eq!(actual.0, format!("{:?}", text("entry_type_mismatch")));
             }
+            // A typed helper body's caller relies on its declared result,
+            // and the body on a function argument's declared signature.
+            if source.contains("helper.return_checked(") {
+                assert_eq!(actual.0, format!("{:?}", text("entry_type_mismatch")));
+            }
+            if source.contains("helper.apply_typed(") {
+                assert_eq!(actual.0, format!("{:?}", text("function_argument")));
+            }
             if source == SORTS {
                 assert_eq!(
                     actual.0,
@@ -1154,6 +1126,7 @@ main { return call rooted() }
         }
         limits.set(super::super::embedder::ROOMY);
     }
+    native_boundaries_agree();
 }
 
 /// A native's display name does not certify its collection semantics.

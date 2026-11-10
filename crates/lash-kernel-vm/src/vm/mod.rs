@@ -1683,6 +1683,10 @@ impl<H: Heap> Vm<H> {
             (true, true) => Some(self.copied(&value)?),
             _ => None,
         };
+        let unfit = match bottom {
+            true => None,
+            false => self.unfit_result(value)?,
+        };
         let Some(bill) = self.cx.frames.last().map(|frame| frame.bill) else {
             return Err(fault("a return with no frame"));
         };
@@ -1713,6 +1717,9 @@ impl<H: Heap> Vm<H> {
         }
         if bottom {
             return self.end_task(host, Ok(value));
+        }
+        if let Some(unfit) = unfit {
+            return Err(self.typed_error("entry_type_mismatch", &unfit));
         }
         self.push(value);
         Ok(None)
