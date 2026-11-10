@@ -220,6 +220,14 @@ impl<H: Heap> Vm<H> {
             return mismatch(self);
         }
         match (ty, value) {
+            // An inline scalar of the kind the type names is the decoder's
+            // own admission of its copy, so it fits without one.
+            (Type::Null, Value::Null)
+            | (Type::Absent, Value::Absent)
+            | (Type::Bool, Value::Bool(_))
+            | (Type::Text, Value::Text(_))
+            | (Type::Int | Type::Number, Value::Int(_))
+            | (Type::Float | Type::Number, Value::Float(_)) => return Ok(None),
             (Type::Task(_), Value::Task(_) | Value::TaskRef(_)) => return Ok(None),
             (Type::Task(_), _) => return mismatch(self),
             (Type::Function(expected), _) => {
@@ -300,17 +308,26 @@ impl<H: Heap> Vm<H> {
         } else {
             arena.sequence(handle)
         }
-        .map_err(read)?
-        .iter()
-        .step_by(stride)
-        .copied()
-        .collect::<Vec<_>>();
+        .map_err(read)?;
+        if matches!(ty, Type::Any) {
+            return self.any_members(members.is_empty(), depth);
+        }
+        let members = members.iter().step_by(stride).copied().collect::<Vec<_>>();
         for (index, member) in members.into_iter().enumerate() {
             if let Some(error) = self.fits(member, ty, depth - 1)? {
                 return Ok(Some(error.within(&index.to_string())));
             }
         }
         Ok(None)
+    }
+
+    /// Members of a collection held to [`Type::Any`] at `depth`: each fits
+    /// unless it stands past the value depth, as [`Self::fits`] holds it.
+    fn any_members(&mut self, empty: bool, depth: usize) -> Run<Option<TypeMismatch>> {
+        if empty || depth > 1 {
+            return Ok(None);
+        }
+        self.fits(Value::Null, &Type::Any, depth - 1)
     }
 
     /// Each key and value of the map `handle` against `key` and `value`.
@@ -321,7 +338,11 @@ impl<H: Heap> Vm<H> {
         value: &Type,
         depth: usize,
     ) -> Run<Option<TypeMismatch>> {
-        let entries = self.heap.arena().entries(handle).map_err(read)?.to_vec();
+        let entries = self.heap.arena().entries(handle).map_err(read)?;
+        if matches!((key, value), (Type::Any, Type::Any)) {
+            return self.any_members(entries.is_empty(), depth);
+        }
+        let entries = entries.to_vec();
         for (index, pair) in entries.as_chunks::<2>().0.iter().enumerate() {
             for (part, member, ty) in [("0", pair[0], key), ("1", pair[1], value)] {
                 if let Some(error) = self.fits(member, ty, depth - 1)? {
