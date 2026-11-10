@@ -360,55 +360,11 @@ async fn kernel_run(
         .load_execution_content(&process_input.code, &run.environment.retained_code)
         .await
         .map_err(|error| RunFault(error.to_string()))?;
-    let content = &loaded_execution.content;
-    let restore_selection = if let Some(parked) = &input.parked {
-        let step = run
-            .pages
-            .as_ref()
-            .ok_or_else(|| RunFault("the store holds no heap pages for the run".into()))?;
-        let exec = lash_durable::domain::ExecKey::Process(run.process.clone());
-        let row = step
-            .store
-            .exec_root(&exec)
-            .await
-            .map_err(|error| RunFault(error.to_string()))?
-            .ok_or_else(|| RunFault("the process has no execution root".into()))?;
-        let binding = lash_vm_broker::kernel::graph::owner_binding_node(&exec)
-            .map_err(|error| RunFault(error.to_string()))?;
-        let checked = super::pages::check_parked_helpers(
-            Arc::clone(&step.store),
-            lash_durable::domain::pages::RootLeaseRequest {
-                owner: lash_durable::domain::RootOwner::Exec(exec),
-                expected: row.root,
-                fence: lash_durable::domain::pages::LeaseFence::Actor {
-                    actor: step.actor.clone(),
-                    epoch: step.epoch,
-                },
-                ttl_millis: 60_000,
-            },
-            parked.page.root,
-            binding,
-            content,
-            Arc::clone(&engine.helpers),
-        )
-        .await;
-        match checked {
-            Ok(selection) => selection,
-            Err(failure) => {
-                return worker_failure(
-                    failure,
-                    &settings.bounds(),
-                    worker_bound_readings(&engine.workers),
-                );
-            }
-        }
-    } else {
-        lash_kernel_doc::Selection::Fresh
-    };
+    let selection = lash_kernel_doc::Selection::Fresh;
 
     let loaded_execution = engine
         .documents
-        .admit_execution(loaded_execution, &restore_selection)
+        .admit_execution(loaded_execution, &selection)
         .map_err(|error| RunFault(error.to_string()))?;
     let ordinary = loaded_execution.ordinary;
     let content = loaded_execution.content;
@@ -426,12 +382,7 @@ async fn kernel_run(
         .get(&root.document)
         .ok_or_else(|| RunFault("process Document is absent".into()))?
         .clone();
-    let args = match entry_args(
-        &document,
-        &process_input,
-        &engine.helpers,
-        &restore_selection,
-    ) {
+    let args = match entry_args(&document, &process_input, &engine.helpers, &selection) {
         Ok(args) => args,
         Err(error) => {
             let cause = match &error {
@@ -475,7 +426,7 @@ async fn kernel_run(
         &reach.machine,
         &engine.functions,
         &engine.helpers,
-        &restore_selection,
+        &selection,
     )
     .map_err(|error| RunFault(error.to_string()))?;
     let closure = loaded.closure;
@@ -494,7 +445,7 @@ async fn kernel_run(
         lash_kernel_doc::heap::PageId(closure.reference().0),
         lash_kernel_vm::PreparedLibrary::with_charge(loaded.registry, settings.charge)
             .with_helper_handle(Arc::clone(&engine.helpers)),
-        restore_selection.clone(),
+        selection.clone(),
     )
     .map_err(|error| RunFault(error.to_string()))?;
     program.functions = closure.body().identities().collect();
@@ -591,12 +542,6 @@ async fn kernel_run(
         closure,
     )
     .map_err(|error| RunFault(error.to_string()))?;
-    let machines = match restore_selection {
-        lash_kernel_doc::Selection::Fresh => machines,
-        lash_kernel_doc::Selection::Restored(selection) => {
-            machines.with_restore_selection(selection)
-        }
-    };
     let Some(step_pages) = run.pages.as_ref() else {
         return Err(RunFault("the store holds no heap pages for the run".to_owned()).into());
     };

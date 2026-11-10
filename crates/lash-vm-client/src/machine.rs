@@ -174,7 +174,6 @@ pub struct RemoteMachines {
     closure: Closure,
     /// The closures of the session's earlier cells no commit installed.
     carried: Vec<Closure>,
-    restore_selection: Option<lash_kernel_doc::RestoreSelection>,
 }
 
 impl RemoteMachines {
@@ -218,15 +217,7 @@ impl RemoteMachines {
             bounds,
             closure,
             carried: Vec::new(),
-            restore_selection: None,
         })
-    }
-
-    /// Carry the parent's admitted live reach across this restore only.
-    #[must_use]
-    pub fn with_restore_selection(mut self, selection: lash_kernel_doc::RestoreSelection) -> Self {
-        self.restore_selection = Some(selection);
-        self
     }
 
     /// These machines, whose session's earlier cells ran under `carried`,
@@ -472,12 +463,6 @@ impl Machines for RemoteMachines {
         let root = pages.lock().await.issue(parked.root);
         let from = StartFrom::Checkpoint(CheckpointStart {
             root,
-            selection: self
-                .restore_selection
-                .as_ref()
-                .map(|selection| wire::encode(PayloadKind::Start, selection))
-                .transpose()
-                .map_err(worker)?,
             admissions: parked
                 .admissions
                 .iter()

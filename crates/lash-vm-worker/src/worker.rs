@@ -574,33 +574,7 @@ impl<'embedding> Server<'embedding> {
                 Some(root)
             }
         };
-        let selection = match (&checkpoint, &start.from) {
-            (Some(root), StartFrom::Checkpoint(checkpoint))
-                if root.header().helper_library
-                    != self.embedding.library_image().helpers().identity() =>
-            {
-                let payload = checkpoint.selection.as_ref().ok_or_else(|| {
-                    PoolError::refused(RunRefusal::Checkpoint {
-                        refusal: CheckpointRefusal::Malformed {
-                            problem:
-                                "a changed helper library requires the parent's live selection"
-                                    .into(),
-                        },
-                    })
-                })?;
-                self.codec.check_payload(&payload.0)?;
-                let selection: lash_kernel_doc::RestoreSelection =
-                    wire::decode(PayloadKind::Start, payload)?;
-                lash_kernel_state::paged::check_helper_compatibility(
-                    root.header().helper_library,
-                    || Ok(lash_kernel_state::paged::HelperPins(selection.pins.clone())),
-                    self.embedding.library_image().helpers(),
-                )
-                .map_err(helper_compatibility_refusal)?;
-                lash_kernel_doc::Selection::Restored(selection)
-            }
-            _ => lash_kernel_doc::Selection::Fresh,
-        };
+        let selection = lash_kernel_doc::Selection::Fresh;
         let source: Box<dyn PageSource> = Box::new(source);
         let program = self.program(&start, fresh, content, selection)?;
         let path = start.observe_path.then(|| program.document.site_ordinals());
@@ -897,30 +871,22 @@ impl<'embedding> Server<'embedding> {
             self.bootstrap.tuning.kernel_data,
             &selection,
         );
-        let executable = match &selection {
-            lash_kernel_doc::Selection::Fresh => {
-                let mut executable = functions.clone();
-                for document in documents.values() {
-                    executable.extend(
-                        self.embedding
-                            .library_image()
-                            .helpers()
-                            .reach(&document.library)
-                            .map_err(|error| {
-                                PoolError::refused(RunRefusal::Start {
-                                    detail: Detail::new(error),
-                                })
-                            })?,
-                    );
-                }
-                executable
+        let executable = {
+            let mut executable = functions.clone();
+            for document in documents.values() {
+                executable.extend(
+                    self.embedding
+                        .library_image()
+                        .helpers()
+                        .reach(&document.library)
+                        .map_err(|error| {
+                            PoolError::refused(RunRefusal::Start {
+                                detail: Detail::new(error),
+                            })
+                        })?,
+                );
             }
-            lash_kernel_doc::Selection::Restored(restored) => restored
-                .live
-                .iter()
-                .map(|callable| callable.function)
-                .chain(restored.pins.iter().copied())
-                .collect(),
+            executable
         };
         let program = Program {
             selection,
@@ -1227,20 +1193,6 @@ fn heap_fault(fault: lash_kernel_doc::heap::HeapFault) -> PoolError {
     InfrastructureOutcome::HeapFault { fault }.into()
 }
 
-fn helper_compatibility_refusal(
-    error: lash_kernel_state::paged::HelperCompatibilityError,
-) -> PoolError {
-    match error {
-        lash_kernel_state::paged::HelperCompatibilityError::Heap(fault) => heap_fault(fault),
-        lash_kernel_state::paged::HelperCompatibilityError::HelperUnavailable {
-            reason,
-            function,
-        } => PoolError::refused(RunRefusal::Restore {
-            refusal: KernelRestoreRefusal::HelperUnavailable { reason, function },
-        }),
-    }
-}
-
 /// The kernel's refusal of a root as the protocol carries it.
 fn restore_refusal(error: OpenError) -> KernelRestoreRefusal {
     match error {
@@ -1283,7 +1235,5 @@ fn machine_breach(error: impl std::fmt::Display) -> PoolError {
     })
 }
 
-#[cfg(test)]
-mod helper_restore_tests;
 #[cfg(test)]
 mod tests;

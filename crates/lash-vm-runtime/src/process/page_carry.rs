@@ -7,6 +7,7 @@ use lash_durable::domain::pages::{LeaseFence, PageStore, RootLease, RootLeaseReq
 use lash_durable::domain::{ExecKey, RootOwner};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_migrate::{CarryFault, ParkedRefusal, Rewritten};
+use lash_kernel_state::paged::run::rewrite::{LiveCode, RunCorrespondence};
 use lash_kernel_state::paged::{Checkpoint, PageAnswer, PageBody, PageSource};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -154,24 +155,17 @@ impl KernelProcessEngine {
         // requirements from the successor env at the same commit that
         // repoints that env.
         park.requirements.machine = prepared.machine;
-        let correspondence = &rewritten.correspondence;
+        let (map, live) = (&prepared.map, &prepared.live);
         for held in state.admissions.values_mut() {
-            held.admission.0.identity = lash_kernel_migrate::carry_effect(
-                correspondence,
-                &held.admission.0.identity,
-                &self.helpers,
-            )?;
+            held.admission.0.identity =
+                lash_kernel_migrate::carry_effect(map, live, &held.admission.0.identity)?;
         }
         for wait in state.waits.values_mut() {
             let super::state::Wait::Step { identity, .. } = wait;
-            *identity = lash_kernel_migrate::carry_effect(correspondence, identity, &self.helpers)?;
+            *identity = lash_kernel_migrate::carry_effect(map, live, identity)?;
         }
         for delivery in &mut state.settled {
-            delivery.identity = lash_kernel_migrate::carry_effect(
-                correspondence,
-                &delivery.identity,
-                &self.helpers,
-            )?;
+            delivery.identity = lash_kernel_migrate::carry_effect(map, live, &delivery.identity)?;
         }
         Ok((prepared.nodes, prepared.retained))
     }
@@ -206,7 +200,6 @@ impl KernelProcessEngine {
             .load_execution_content(predecessor_code, retained)
             .await
             .map_err(|error| refused(error.to_string()))?;
-        let content = &prior_content.content;
         let pages = stores
             .durable_store()
             .pages()
@@ -216,25 +209,10 @@ impl KernelProcessEngine {
             .await
             .map_err(|error| HeapFault::Transport(error.to_string()))?
             .ok_or_else(|| refused("the process has no execution root"))?;
-        let binding = lash_vm_broker::kernel::graph::owner_binding_node(exec)
-            .map_err(|error| refused(error.to_string()))?;
-        let restore_selection = super::pages::check_parked_helpers(
-            Arc::clone(&pages),
-            RootLeaseRequest { owner: RootOwner::Exec(exec.clone()), expected: row.root, fence: LeaseFence::Reader, ttl_millis: 600_000 },
-            root, binding, content, Arc::clone(&self.helpers),
-        ).await.map_err(|error| match error {
-            lash_vm_broker::kernel::KernelFailure::Worker {
-                outcome: lash_protocol_types::engine_fault::InfrastructureOutcome::RunRefused {
-                    refusal: lash_protocol_types::engine_fault::RunRefusal::Restore {
-                        refusal: lash_protocol_types::engine_fault::KernelRestoreRefusal::HelperUnavailable { reason, function },
-                    },
-                },
-            } => CarryFault::Refused(ParkedRefusal::HelperUnavailable { reason, function }),
-            other => refused(other.to_string()),
-        })?;
+        let selection = lash_kernel_doc::Selection::Fresh;
         let prior = self
             .documents
-            .admit_execution(prior_content, &restore_selection)
+            .admit_execution(prior_content, &selection)
             .map_err(|error| refused(error.to_string()))?;
         let pinned_document = prior
             .content
@@ -258,45 +236,42 @@ impl KernelProcessEngine {
             &prior.reach.machine,
             &self.functions,
             &self.helpers,
-            &restore_selection,
+            &selection,
         )
         .map_err(|error| refused(error.to_string()))?;
         let pinned_closure = PageId(old.closure.reference().0);
-        let mut debt = match &restore_selection {
-            lash_kernel_doc::Selection::Restored(selection) => selection.live.clone(),
-            lash_kernel_doc::Selection::Fresh => {
-                let request = RootLeaseRequest {
-                    owner: RootOwner::Exec(exec.clone()),
-                    expected: row.root,
-                    fence: LeaseFence::Reader,
-                    ttl_millis: 600_000,
-                };
-                let source = leased_pages(Arc::clone(&pages), request.clone()).await?;
-                let live = tokio::task::spawn_blocking(move || {
-                    let mut source = source;
-                    let answer = source
-                        .read(&[PageRef {
-                            id: PageId(root.0),
-                            grant: PageGrant::NONE,
-                        }])?
-                        .remove(0)?;
-                    let checkpoint = Checkpoint::of_answer(&answer)?;
-                    lash_kernel_state::paged::checkpoint_code(&checkpoint, Box::new(source))
-                })
-                .await
-                .map_err(|error| HeapFault::Transport(error.to_string()))??;
-                let mut predecessor_code = live.callables;
-                for (link, unit) in live.frames {
-                    if link == predecessor {
-                        continue;
-                    }
-                    let lash_kernel_value::sites::Unit::Library(function) = unit else {
-                        return Err(refused("foreign frame has no defining callable"));
-                    };
-                    predecessor_code.insert(lash_kernel_value::CallableId { link, function });
+        let mut debt = {
+            let request = RootLeaseRequest {
+                owner: RootOwner::Exec(exec.clone()),
+                expected: row.root,
+                fence: LeaseFence::Reader,
+                ttl_millis: 600_000,
+            };
+            let source = leased_pages(Arc::clone(&pages), request).await?;
+            let live = tokio::task::spawn_blocking(move || {
+                let mut source = source;
+                let answer = source
+                    .read(&[PageRef {
+                        id: PageId(root.0),
+                        grant: PageGrant::NONE,
+                    }])?
+                    .remove(0)?;
+                let checkpoint = Checkpoint::of_answer(&answer)?;
+                lash_kernel_migrate::run_code(&mut source, &checkpoint)
+            })
+            .await
+            .map_err(|error| HeapFault::Transport(error.to_string()))??;
+            let mut predecessor_code = live.callables;
+            for (link, unit) in live.frames {
+                if link == predecessor {
+                    continue;
                 }
-                predecessor_code
+                let lash_kernel_value::sites::Unit::Library(function) = unit else {
+                    return Err(refused("foreign frame has no defining callable"));
+                };
+                predecessor_code.insert(lash_kernel_value::CallableId { link, function });
             }
+            predecessor_code
         };
         let mut next_content = self
             .documents
@@ -335,7 +310,12 @@ impl KernelProcessEngine {
                 next_content.links.extend(held.links);
                 next_content.packages.extend(held.packages);
             }
-            let debt = carried_reach(&next_content, *callable, &restore_selection, &self.helpers)
+            let debt = next_content
+                .inspect(
+                    callable.link,
+                    &lash_kernel_package::ReachSelection::Callable(callable.function),
+                    self.helpers.as_ref(),
+                )
                 .map_err(|error| refused(error.to_string()))?;
             selected.machine.extend(&debt.machine);
             for (link, functions) in debt.functions {
@@ -346,16 +326,6 @@ impl KernelProcessEngine {
                     .extend(functions);
             }
         }
-        // The successor's fresh reach and the carried exact live facts form
-        // one executable selection. Retained predecessor manifests may still
-        // mention removed helpers that are outside this continuation.
-        let successor_selection = carried_selection(
-            &restore_selection,
-            &selected.functions,
-            predecessor,
-            successor_link,
-            &self.helpers,
-        );
         let mut closure_functions = selected.functions.clone();
         for link in authored {
             let ordinary = next_content
@@ -376,28 +346,10 @@ impl KernelProcessEngine {
             &selected.machine,
             &self.functions,
             &self.helpers,
-            &successor_selection,
+            &selection,
         )
         .map_err(|error| refused(error.to_string()))?;
         let closure = assembled.closure;
-        let retained_documents = next_content
-            .links
-            .iter()
-            .filter(|(link, _)| **link != successor_link)
-            .filter_map(|(link, instance)| {
-                next_content
-                    .documents
-                    .get(&instance.document)
-                    .map(|doc| (*link, doc.as_ref().clone()))
-            })
-            .collect();
-        let rewritten = qualify_correspondence(
-            rewritten.clone(),
-            predecessor,
-            &next_content.links,
-            &retained_documents,
-            &prior.ordinary,
-        )?;
         let mut program = lash_kernel_vm::Program::prepare(
             successor_link,
             next_content
@@ -411,11 +363,11 @@ impl KernelProcessEngine {
                 assembled.registry,
                 Arc::clone(&self.helpers),
             ),
-            successor_selection,
+            lash_kernel_doc::Selection::Fresh,
         )
         .map_err(|e| refused(e.to_string()))?;
         program.functions = closure.body().identities().collect();
-        let (page, mut nodes) = carry_parked_checkpoint(
+        let (page, mut nodes, map, live) = carry_run_pages(
             pages,
             RootLeaseRequest {
                 owner: RootOwner::Exec(exec.clone()),
@@ -432,7 +384,7 @@ impl KernelProcessEngine {
                 closure: pinned_closure,
                 code: prior.ordinary.clone(),
                 links: next_content.links.clone(),
-                selection: restore_selection,
+                selection,
                 retained: Default::default(),
                 uses: uses.uses.clone(),
             },
@@ -442,6 +394,8 @@ impl KernelProcessEngine {
         Ok(PreparedCheckpointCarry {
             root: page,
             nodes,
+            map,
+            live,
             retained: debt,
             machine: selected.machine,
         })
@@ -458,6 +412,23 @@ pub async fn carry_parked_checkpoint(
     bounds: lash_kernel_vm::Bounds,
     context: lash_kernel_migrate::CarryContext,
 ) -> Result<(NodeId, Vec<EncodedNode>), CarryFault> {
+    carry_run_pages(store, request, root, rewritten, program, bounds, context)
+        .await
+        .map(|(page, nodes, ..)| (page, nodes))
+}
+
+/// As [`carry_parked_checkpoint`], with the run's code and the
+/// correspondence it was rewritten by, which the embedding rekeys its own
+/// wait records with.
+async fn carry_run_pages(
+    store: Arc<dyn PageStore>,
+    request: RootLeaseRequest,
+    root: NodeId,
+    rewritten: Rewritten,
+    program: lash_kernel_vm::Program,
+    bounds: lash_kernel_vm::Bounds,
+    context: lash_kernel_migrate::CarryContext,
+) -> Result<(NodeId, Vec<EncodedNode>, RunCorrespondence, LiveCode), CarryFault> {
     let RootOwner::Exec(exec) = &request.owner else {
         return Err(refused("a checkpoint carry requires an execution owner"));
     };
@@ -567,7 +538,7 @@ pub async fn carry_parked_checkpoint(
             other => refused(format!("foreign image: {other}")),
         })?;
         let nodes = source.nodes().values().cloned().collect();
-        Ok((NodeId(page.id.0), nodes))
+        Ok((NodeId(page.id.0), nodes, map, live))
     })
     .await
     .map_err(|error| HeapFault::Transport(error.to_string()))?
@@ -584,7 +555,7 @@ fn run_correspondence(
     rewritten: &Rewritten,
     program: &lash_kernel_vm::Program,
 ) -> Result<lash_kernel_state::paged::run::rewrite::RunCorrespondence, CarryFault> {
-    use lash_kernel_state::paged::run::rewrite::{RunCorrespondence, SiteMap};
+    use lash_kernel_state::paged::run::rewrite::SiteMap;
     let successor = program.link;
     let function =
         |id: lash_kernel_value::FunctionId| rewritten.functions.get(&id).copied().unwrap_or(id);
@@ -639,129 +610,6 @@ pub(super) async fn leased_pages(
     })
 }
 
-fn carried_reach(
-    content: &lash_kernel_package::LinkedContent,
-    callable: lash_kernel_value::CallableId,
-    selection: &lash_kernel_doc::Selection,
-    helpers: &lash_kernel_doc::BuildHelpers,
-) -> Result<lash_kernel_package::LinkedReach, lash_kernel_package::LinkRefusal> {
-    match selection {
-        lash_kernel_doc::Selection::Fresh => content.inspect(
-            callable.link,
-            &lash_kernel_package::ReachSelection::Callable(callable.function),
-            helpers,
-        ),
-        lash_kernel_doc::Selection::Restored(restored) => {
-            content.inspect_restored(callable.link, restored, helpers)
-        }
-    }
-}
-
-/// Project producer-owned selected facts without re-deriving predecessor
-/// manifest ancestry. Saved callables keep their defining Links; active
-/// helper frames additionally gain the successor's operation context.
-fn carried_selection(
-    prior: &lash_kernel_doc::Selection,
-    selected: &BTreeMap<
-        lash_kernel_value::LinkId,
-        std::collections::BTreeSet<lash_kernel_value::FunctionId>,
-    >,
-    predecessor: lash_kernel_value::LinkId,
-    successor: lash_kernel_value::LinkId,
-    helpers: &lash_kernel_doc::BuildHelpers,
-) -> lash_kernel_doc::Selection {
-    let lash_kernel_doc::Selection::Restored(prior) = prior else {
-        return lash_kernel_doc::Selection::Fresh;
-    };
-    let mut restored = prior.clone();
-    for (link, functions) in selected {
-        for function in functions {
-            restored.live.insert(lash_kernel_value::CallableId {
-                link: *link,
-                function: *function,
-            });
-            if helpers.contains(function) {
-                restored.pins.insert(*function);
-            }
-        }
-    }
-    restored.live.extend(
-        prior
-            .live
-            .iter()
-            .filter(|callable| {
-                callable.link == predecessor && prior.pins.contains(&callable.function)
-            })
-            .map(|callable| lash_kernel_value::CallableId {
-                link: successor,
-                function: callable.function,
-            }),
-    );
-    lash_kernel_doc::Selection::Restored(restored)
-}
-
-/// Sites in retained code keep their exact identities. A Link authenticates
-/// each defining document; the root rewrite alone authorizes moving its sites.
-pub fn qualify_correspondence(
-    mut rewritten: Rewritten,
-    predecessor: lash_kernel_value::LinkId,
-    links: &BTreeMap<lash_kernel_value::LinkId, lash_kernel_value::package::Link>,
-    documents: &BTreeMap<lash_kernel_value::LinkId, lash_kernel_doc::Document>,
-    code: &BTreeMap<
-        lash_kernel_value::LinkId,
-        std::collections::BTreeSet<lash_kernel_value::FunctionId>,
-    >,
-) -> Result<Rewritten, CarryFault> {
-    let prior = links
-        .get(&predecessor)
-        .ok_or_else(|| refused("pinned defining Link is absent"))?;
-    if prior.identity() != predecessor || prior.document != rewritten.correspondence.base {
-        return Err(refused("pinned defining Link differs from the rewrite"));
-    }
-    let mut entries: BTreeMap<_, _> = rewritten
-        .correspondence
-        .entries()
-        .iter()
-        .cloned()
-        .map(|entry| (entry.from.clone(), entry))
-        .collect();
-    for (link, document) in documents {
-        if *link == predecessor || !code.contains_key(link) {
-            continue;
-        }
-        let instance = links
-            .get(link)
-            .ok_or_else(|| refused("retained defining Link is absent"))?;
-        if instance.identity() != *link || instance.document != document.identity() {
-            return Err(refused("retained defining Link differs from its document"));
-        }
-        let identity = lash_kernel_migrate::unchanged(document, document)
-            .map_err(|error| refused(error.to_string()))?;
-        for entry in identity.entries() {
-            let lash_kernel_value::sites::Unit::Library(function) = &entry.from.unit else {
-                continue;
-            };
-            if !code[link].contains(function) {
-                continue;
-            }
-            if let Some(known) = entries.get(&entry.from) {
-                if known.to != entry.to {
-                    return Err(refused("retained coordinate has conflicting successors"));
-                }
-            } else {
-                entries.insert(entry.from.clone(), entry.clone());
-            }
-        }
-    }
-    rewritten.correspondence = lash_kernel_doc::Correspondence::of(
-        rewritten.correspondence.base,
-        rewritten.correspondence.result,
-        entries.into_values().collect(),
-    )
-    .ok_or_else(|| refused("retained coordinates collide"))?;
-    Ok(rewritten)
-}
-
 fn check_origin(
     link: lash_kernel_value::LinkId,
     function: lash_kernel_value::FunctionId,
@@ -796,16 +644,23 @@ fn check_origin(
 pub struct PreparedCheckpointCarry {
     pub root: NodeId,
     pub nodes: Vec<EncodedNode>,
+    /// The correspondence the run was rewritten by.
+    pub map: RunCorrespondence,
+    /// The code the run named before it was rewritten.
+    pub live: LiveCode,
     pub retained: std::collections::BTreeSet<lash_kernel_value::CallableId>,
     pub machine: lash_kernel_value::claims::NodeRequirements,
 }
 
 impl KernelProcessEngine {
+    /// Whether a helper upgrade may proceed over this process's parked run.
+    /// Code the run holds as a value is frozen with the helpers it records,
+    /// so a changed one refuses; a changed helper only a resume point pins
+    /// defers the upgrade until the run drains.
     pub(super) async fn check_helper_upgrade(
         &self,
         process: &lash_core::ProcessId,
         state: &KernelEngineState,
-        retained: &std::collections::BTreeSet<lash_kernel_value::CallableId>,
         upgrade: &lash_kernel_doc::HelperUpgrade,
     ) -> Result<
         lash_kernel_doc::HelperUpgradeSafety,
@@ -816,14 +671,6 @@ impl KernelProcessEngine {
         let Some(root) = state.progress.park().map(|park| park.run.page.root) else {
             return Ok(lash_kernel_doc::HelperUpgradeSafety::Safe);
         };
-        let input = super::KernelProcessInput::from_payload(&state.payload)
-            .map_err(|e| unavailable(e.to_string()))?;
-        let content = self
-            .documents
-            .load_execution_content(&input.code, retained)
-            .await
-            .map_err(|e| unavailable(e.to_string()))?
-            .content;
         let stores = self
             .carry_stores
             .as_ref()
@@ -849,132 +696,33 @@ impl KernelProcessEngine {
         )
         .await
         .map_err(|e| unavailable(e.to_string()))?;
-        let helpers = Arc::clone(&self.helpers);
-        let upgrade = upgrade.clone();
-        tokio::task::spawn_blocking(move || {
+        let live = tokio::task::spawn_blocking(move || {
             let mut source = source;
             let page = source
                 .read(&[PageRef {
                     id: PageId(root.0),
                     grant: PageGrant::NONE,
-                }])
-                .map_err(|e| unavailable(e.to_string()))?
-                .remove(0)
-                .map_err(|e| unavailable(e.to_string()))?;
-            let checkpoint =
-                Checkpoint::of_answer(&page).map_err(|e| unavailable(e.to_string()))?;
-            let (documents, imports) =
-                super::pages::helper_code(&content).map_err(|e| unavailable(e.to_string()))?;
-            checkpoint
-                .check_helper_upgrade(Box::new(source), &documents, &imports, &helpers, &upgrade)
-                .map_err(|error| match error {
-                    lash_kernel_state::paged::HelperUpgradeCheckError::Heap(error) => {
-                        unavailable(error.to_string())
-                    }
-                    lash_kernel_state::paged::HelperUpgradeCheckError::Refused(refusal) => {
-                        super::succession::typed_refusal(refusal)
-                    }
-                })
+                }])?
+                .remove(0)?;
+            let checkpoint = Checkpoint::of_answer(&page)?;
+            lash_kernel_migrate::run_code(&mut source, &checkpoint)
         })
         .await
         .map_err(|e| unavailable(e.to_string()))?
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// FIG-7169: retained predecessor manifests describe durable origins,
-    /// not fresh successor admission. Exact live helper facts survive the join.
-    #[test]
-    fn a_carried_successor_ignores_dead_predecessor_helper_manifests() {
-        use lash_kernel_doc::{
-            BuildHelpers, Document, FunctionRegistry, NumberPolicy, RestoreSelection, Selection,
-        };
-        use {
-            lash_kernel_value::CallableId, lash_kernel_value::FunctionId, lash_kernel_value::Link,
-        };
-        let mut registry = FunctionRegistry::new();
-        let member = registry
-            .register(
-                lash_kernel_doc::parse_definition(
-                    "function carried.child() -> Any\nkernel 1\ncharge 1\nbody { return 7 }",
-                )
-                .unwrap(),
-                None,
-            )
-            .unwrap();
-        let helpers = Arc::new(BuildHelpers::new(registry.clone(), [member]).unwrap());
-        let mut before = Document::new(NumberPolicy::BySpelling, vec![]);
-        before.library.insert(FunctionId::from_bytes([47; 32]));
-        let after = Document::new(NumberPolicy::BySpelling, vec![]);
-        let old = Link {
-            helper_fills: Default::default(),
-            document: before.identity(),
-            fills: BTreeMap::new(),
-        };
-        let next = Link {
-            helper_fills: Default::default(),
-            document: after.identity(),
-            fills: BTreeMap::new(),
-        };
-        let prior = Selection::Restored(RestoreSelection {
-            pins: [member].into(),
-            live: [CallableId {
-                link: old.identity(),
-                function: member,
-            }]
-            .into(),
-        });
-        let content = lash_kernel_package::LinkedContent {
-            documents: [
-                (before.identity(), std::sync::Arc::new(before.clone())),
-                (after.identity(), std::sync::Arc::new(after.clone())),
-            ]
-            .into(),
-            links: [
-                (old.identity(), old.clone()),
-                (next.identity(), next.clone()),
-            ]
-            .into(),
-            packages: BTreeMap::new(),
-        };
-        let debt = carried_reach(
-            &content,
-            CallableId {
-                link: old.identity(),
-                function: member,
-            },
-            &prior,
-            &helpers,
-        );
-        assert!(
-            debt.is_ok(),
-            "retained callable admission uses its live proof: {debt:?}"
-        );
-        let selected = carried_selection(
-            &prior,
-            &BTreeMap::new(),
-            old.identity(),
-            next.identity(),
-            &helpers,
-        );
-        let program = lash_kernel_vm::Program::prepare(
-            next.identity(),
-            [
-                (before.identity(), Arc::new(before)),
-                (after.identity(), Arc::new(after)),
-            ]
-            .into(),
-            &[(old.identity(), old), (next.identity(), next)].into(),
-            PageId([8; 32]),
-            lash_kernel_vm::PreparedLibrary::with_helpers(Arc::new(registry), helpers),
-            selected,
-        );
-        assert!(
-            program.is_ok(),
-            "the dead predecessor manifest cannot veto a carried live helper: {program:?}"
-        );
+        .map_err(|e| unavailable(e.to_string()))?;
+        if let Some(function) = live.held_code.intersection(&upgrade.changed).next() {
+            return Err(super::succession::typed_refusal(
+                lash_kernel_doc::HelperUpgradeRefusal::RetainedCallable {
+                    function: *function,
+                },
+            ));
+        }
+        let functions: std::collections::BTreeSet<_> =
+            live.pins.intersection(&upgrade.changed).copied().collect();
+        Ok(if functions.is_empty() {
+            lash_kernel_doc::HelperUpgradeSafety::Safe
+        } else {
+            lash_kernel_doc::HelperUpgradeSafety::Deferred { functions }
+        })
     }
 }

@@ -693,45 +693,7 @@ async fn run_linked_cell(
         link: host.envelope.link,
         selector: lash_kernel_value::names::StartSelector::Main,
     };
-    let helpers = match services.workers.config().worker_library() {
-        Ok(library) => Arc::clone(library.helpers()),
-        Err(error) => {
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
-            );
-        }
-    };
-    let selection = match cell_helper_selection(snapshots, &loaded.content, Arc::clone(&helpers))
-        .await
-    {
-        Ok(selection) => selection,
-        Err(error) => {
-            if let KernelFailure::Worker {
-                outcome:
-                    lash_protocol_types::engine_fault::InfrastructureOutcome::RunRefused { refusal },
-            } = &error
-            {
-                let mut typed = lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::VmWorkerFailed,
-                    error.to_string(),
-                );
-                typed.cause = Some(lash_core::RuntimeErrorCause::CellSnapshotUndecodable {
-                    refusal: Box::new(refusal.clone()),
-                });
-                ctx.record_nested_effect_error(
-                    lash_core::RuntimeEffectControllerError::from(typed)
-                        .retryable_uncommitted_derivation(),
-                );
-            }
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
-            );
-        }
-    };
+    let selection = lash_kernel_doc::Selection::Fresh;
     let retained_code = loaded.clone();
     let prepared = match (services.kernel.library(), state.documents.as_ref()) {
         (Ok(functions), Some(documents)) => processes::prepare(
@@ -799,15 +761,7 @@ async fn run_linked_cell(
         bounds,
         closure,
     ) {
-        Ok(machines) => {
-            let machines = machines.with_carried(carried);
-            match selection {
-                lash_kernel_doc::Selection::Fresh => machines,
-                lash_kernel_doc::Selection::Restored(selection) => {
-                    machines.with_restore_selection(selection)
-                }
-            }
-        }
+        Ok(machines) => machines.with_carried(carried),
         Err(error) => {
             return exec_setup_failure_or_stop(
                 state,
@@ -1338,47 +1292,6 @@ async fn record_end(
         .await
         .map(|saved| saved.root)
         .map_err(KernelFailure::from)
-}
-
-/// Check the authenticated parked root before any helper admission or assembly.
-async fn cell_helper_selection(
-    snapshots: &lash_vm_broker::DurableSnapshotStore,
-    content: &lash_kernel_package::LinkedContent,
-    helpers: Arc<lash_kernel_doc::BuildHelpers>,
-) -> Result<lash_kernel_doc::Selection, KernelFailure> {
-    let Some(read) = snapshots
-        .latest_root()
-        .await
-        .map_err(KernelFailure::Checkpoint)?
-    else {
-        return Ok(lash_kernel_doc::Selection::Fresh);
-    };
-    if read.body.status != lash_core_store::checkpoint_graph::bodies::ExecStatus::Parked {
-        return Ok(lash_kernel_doc::Selection::Fresh);
-    }
-    let cx = snapshots.context();
-    let store = cx
-        .pages()
-        .map_err(|error| KernelFailure::Parent(lash_vm_broker::ParentFault(error.to_string())))?;
-    let binding = lash_vm_broker::kernel::graph::owner_binding_node(snapshots.exec())
-        .map_err(|error| KernelFailure::State(error.into()))?;
-    lash_vm_runtime::process::check_parked_helpers(
-        store,
-        lash_durable::domain::pages::RootLeaseRequest {
-            owner: lash_durable::domain::graph::RootOwner::Exec(snapshots.exec().clone()),
-            expected: read.held.root,
-            fence: lash_durable::domain::pages::LeaseFence::Actor {
-                actor: cx.actor().clone(),
-                epoch: cx.epoch(),
-            },
-            ttl_millis: i64::try_from(pages::LEASE_TTL.as_millis()).unwrap_or(i64::MAX),
-        },
-        read.body.state,
-        binding,
-        content,
-        helpers,
-    )
-    .await
 }
 
 /// The pages a cell's run reads and stages: the turn's spool, the

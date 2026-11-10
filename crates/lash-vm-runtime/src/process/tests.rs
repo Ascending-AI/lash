@@ -716,18 +716,7 @@ fn a_helper_called_from_another_link_keeps_its_defining_fills() {
                     waited.push(request.use_);
                     let checkpoint = machine.checkpoint().unwrap().checkpoint();
                     drop(machine);
-                    let mut restored = program.clone();
-                    restored.selection =
-                        lash_kernel_doc::Selection::Restored(lash_kernel_doc::RestoreSelection {
-                            live: [a_id, b_id]
-                                .into_iter()
-                                .map(|link| CallableId {
-                                    link,
-                                    function: helper_id,
-                                })
-                                .collect(),
-                            pins: [helper_id].into(),
-                        });
+                    let restored = program.clone();
                     machine =
                         KernelMachine::open(restored, bounds, &checkpoint, Box::new(pages.clone()))
                             .unwrap();

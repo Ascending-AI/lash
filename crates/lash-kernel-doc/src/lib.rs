@@ -110,8 +110,7 @@ pub use ast::{
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{
     DecodeError, Document, DocumentCatalog, EncodeError, Export, FunctionExport, KERNEL_VERSION,
-    LibraryDependencies, MAX_NESTING_DEPTH, Ordinals, RestoreSelection, Selection, TypeDef,
-    TypeMember, validate_restored_document_with_limits,
+    LibraryDependencies, MAX_NESTING_DEPTH, Ordinals, Selection, TypeDef, TypeMember,
 };
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition,

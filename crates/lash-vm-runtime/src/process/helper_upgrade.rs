@@ -100,27 +100,18 @@ pub(super) fn check_frozen(
     retain_root: bool,
 ) -> Result<(), HelperUpgradeRefusal> {
     lash_kernel_migrate::check_upgrade_captures(value, upgrade)?;
-    let mut live = lash_kernel_state::paged::RetainedCode::default();
+    let mut reached = BTreeSet::new();
     for node in value.nodes().into_iter().skip(usize::from(!retain_root)) {
-        live.callables.insert(node.callable);
-        for target in node.convention.targets() {
-            match target {
-                lash_kernel_doc::FunctionTarget::Local(function) => {
-                    live.callables.insert(lash_kernel_value::CallableId {
-                        link: node.callable.link,
-                        function: *function,
-                    });
-                }
-                lash_kernel_doc::FunctionTarget::Import(slot) => {
-                    live.imports.insert((node.callable.link, *slot));
-                }
-            }
-        }
+        let reach = content
+            .inspect(
+                node.callable.link,
+                &lash_kernel_package::ReachSelection::Callable(node.callable.function),
+                helpers,
+            )
+            .map_err(invalid)?;
+        reached.extend(reach.functions.into_values().flatten());
     }
-    let (documents, imports) = super::pages::helper_code(content).map_err(invalid)?;
-    let retained = lash_kernel_state::paged::restore_selection(live, &documents, &imports, helpers)
-        .map_err(invalid)?;
-    if let Some(function) = retained.pins.intersection(&upgrade.changed).next() {
+    if let Some(function) = reached.intersection(&upgrade.changed).next() {
         return Err(HelperUpgradeRefusal::RetainedCallable {
             function: *function,
         });

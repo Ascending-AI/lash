@@ -23,11 +23,7 @@ mod inline;
 mod migrate;
 mod page_carry;
 mod pages;
-pub use page_carry::{
-    PreparedCheckpointCarry, carry_parked_checkpoint, carry_snapshot, qualify_correspondence,
-};
-#[doc(hidden)]
-pub use pages::check_parked_helpers;
+pub use page_carry::{PreparedCheckpointCarry, carry_parked_checkpoint, carry_snapshot};
 mod replay;
 mod run;
 mod state;
@@ -1068,5 +1064,3 @@ pub fn kernel_process_engine_registration(
         engine: Arc::clone(&engine),
     }))
 }
-
-pub use lash_kernel_state::paged::HelperUpgradeCheckError;

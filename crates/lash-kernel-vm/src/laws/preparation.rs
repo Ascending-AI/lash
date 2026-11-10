@@ -213,52 +213,6 @@ fn helper_admission_work_is_bounded_by_distinct_origins() {
         ..callable
     }));
     assert!(!exe.admits_callable(&callable));
-    // The same retained source under Restored is selected by exact live
-    // CallableId AND pin AND current membership, independently of Fresh.
-    for (live, pins, permitted) in [
-        (true, true, true),
-        (false, true, false),
-        (true, false, false),
-    ] {
-        let selection = Selection::Restored(lash_kernel_doc::RestoreSelection {
-            live: if live {
-                [callable].into()
-            } else {
-                Default::default()
-            },
-            pins: if pins {
-                [child_id].into()
-            } else {
-                Default::default()
-            },
-        });
-        let admitted = library
-            .admit(
-                &root,
-                lash_kernel_value::data_limits::KernelDataLimits::standard(),
-                &selection,
-            )
-            .unwrap_or_else(|_| panic!("retained empty body"));
-        let restored = admitted
-            .executable(
-                &root,
-                &library,
-                &program.documents,
-                &BTreeSet::new(),
-                &program.instances,
-            )
-            .unwrap_or_else(|_| panic!("restored origin"));
-        assert_eq!(restored.admits_callable(&callable), permitted);
-        assert!(!restored.admits_callable(&CallableId {
-            link: other.link,
-            ..callable
-        }));
-        BuildHelpers::take_admission_edge_visits();
-        for _ in 0..64 {
-            assert_eq!(restored.admits_callable(&callable), permitted);
-        }
-        assert_eq!(BuildHelpers::take_admission_edge_visits(), 0);
-    }
     let replaced = library.with_helper_handle(BuildHelpers::empty());
     assert!(
         replaced

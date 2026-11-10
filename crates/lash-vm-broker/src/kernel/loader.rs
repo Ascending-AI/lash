@@ -775,17 +775,10 @@ fn admit_reach(
     Ok((admitted, library))
 }
 
-/// A restored selection narrows executable admission only. The durable
-/// closure retains the original ordinary definitions and its identity, so
-/// root.closure still authenticates the original code independently of which
-/// authored functions remain live after a helper-library upgrade.
-fn selected(function: FunctionId, selection: &lash_kernel_doc::Selection) -> bool {
+/// Whether `selection` admits `function` to execution.
+fn selected(_function: FunctionId, selection: &lash_kernel_doc::Selection) -> bool {
     match selection {
         lash_kernel_doc::Selection::Fresh => true,
-        lash_kernel_doc::Selection::Restored(selection) => selection
-            .live
-            .iter()
-            .any(|callable| callable.function == function),
     }
 }
 

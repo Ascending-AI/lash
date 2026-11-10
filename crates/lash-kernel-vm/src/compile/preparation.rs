@@ -371,16 +371,6 @@ impl PreparedLibrary {
                         ));
                     }
                 }
-                doc::Selection::Restored(restored) => {
-                    doc::validate_restored_document_with_limits(
-                        document,
-                        self.helpers(),
-                        self.registry().as_ref(),
-                        restored,
-                        limits,
-                    )
-                    .map_err(Refused::Invalid)?;
-                }
             }
         }
         let admitted = Arc::new(Admission {
@@ -603,81 +593,7 @@ impl Admission {
             None
         };
         let library = loaded.as_ref().unwrap_or(library);
-        let mut ancestors = BTreeMap::new();
-        if matches!(selection, doc::Selection::Restored(_)) {
-            let mut needed = functions.clone();
-            loop {
-                let before = ancestors.len();
-                for source in std::iter::once(document).chain(documents.values().map(Arc::as_ref)) {
-                    for (id, definition) in &source.functions {
-                        if reached.contains_key(id)
-                            || ancestors.contains_key(id)
-                            || !authored.contains(id)
-                        {
-                            continue;
-                        }
-                        let Some(body) = definition.body() else {
-                            continue;
-                        };
-                        let mut nodes = vec![doc::Node::Block(&body.block)];
-                        let mut creates = false;
-                        while let Some(node) = nodes.pop() {
-                            if let doc::Node::Expr(doc::Expr::Closure(closure)) = node
-                                && needed.contains(&closure.function)
-                            {
-                                creates = true;
-                                break;
-                            }
-                            node.children_into(&mut nodes);
-                        }
-                        if creates && definition.identity() == *id {
-                            ancestors.insert(*id, definition);
-                            needed.insert(*id);
-                        }
-                    }
-                }
-                if ancestors.len() == before {
-                    break;
-                }
-            }
-        }
-        let origins = (!ancestors.is_empty()).then_some(document_code::LexicalOrigins {
-            definitions: ancestors,
-            admitted: functions,
-        });
-        let mut own = compile_document(
-            document,
-            identity,
-            &reached,
-            library,
-            &authored,
-            imports,
-            origins.as_ref(),
-        )?;
-        if matches!(selection, doc::Selection::Restored(_)) {
-            // These are the original, already decoded ordinary definitions.
-            // Census does not admit/register them or consult helper bodies.
-            // Their historical rows remain valid after executable reach narrows.
-            let mut seen = BTreeSet::new();
-            let sites = std::iter::once(document)
-                .chain(documents.values().map(Arc::as_ref))
-                .flat_map(|source| {
-                    source
-                        .functions
-                        .iter()
-                        .filter_map(|(id, definition)| {
-                            if !seen.insert(*id) {
-                                return None;
-                            }
-                            lazy::body_census(definition, &source.functions)
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .flat_map(|census| census.occurrences)
-                .filter(|site| !library.0.tables.occurrence_at.contains_key(site));
-            own.tables
-                .retain_occurrences(sites, library.0.tables.occurrence_keys.len());
-        }
+        let own = compile_document(document, identity, &reached, library, &authored, imports)?;
         let own = Arc::new(own);
         let helper_reach: Box<[(DocumentId, Box<[FunctionId]>)]> =
             if matches!(selection, doc::Selection::Fresh) {
@@ -750,14 +666,6 @@ impl PreparedCode {
                         reached.extend(self.helper_reach[at].1.iter().copied());
                     }
                 }
-                doc::Selection::Restored(selected) => {
-                    reached.extend(selected.live.iter().filter_map(|callable| {
-                        (callable.link == *link
-                            && selected.pins.contains(&callable.function)
-                            && library.helpers().contains(&callable.function))
-                        .then_some(callable.function)
-                    }));
-                }
             }
             library_reached.extend(source.functions.keys().copied());
             library_reached.extend(reached.iter().copied());
@@ -815,37 +723,6 @@ mod tests {
 
     /// A closure creation before the saved continuation can refer to a helper
     /// omitted by the live proof. Compiling retained Main bytes must not panic.
-    #[test]
-    fn unselected_removed_closure_does_not_panic_during_preparation() {
-        let missing = FunctionId::from_bytes([41; 32]);
-        let mut document = Document::new(
-            doc::NumberPolicy::BySpelling,
-            vec![doc::Stmt::Print {
-                value: doc::Expr::Closure(Box::new(doc::Closure {
-                    function: missing,
-                    presentation: None,
-                })),
-            }],
-        );
-        document.library.insert(missing);
-        let library = PreparedLibrary::new(Arc::new(doc::FunctionRegistry::declarations()));
-        let code = compile_document(
-            &document,
-            document.identity(),
-            &BTreeMap::new(),
-            &library,
-            &BTreeSet::new(),
-            &BTreeMap::new(),
-            None,
-        );
-        assert!(
-            code.is_ok(),
-            "dead closure code is outside the restored executable selection"
-        );
-    }
-
-    /// FIG-7135: starts share immutable import-source facts, and selecting one
-    /// function never copies the unrelated retained library definitions.
     #[test]
     fn linked_preparation_work_is_bounded_by_selected_content() {
         let mut root = Document::new(doc::NumberPolicy::BySpelling, vec![]);

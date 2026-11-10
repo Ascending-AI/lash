@@ -423,19 +423,11 @@ pub(super) async fn run_across_deploy(tier: super::served::Tier) {
     let document: Document = lash_kernel_value::tokens::decode_body(&bytes).unwrap();
     assert_eq!(document.identity(), fixture.document.identity());
     let release = fixture.upgraded();
-    let (source, selection) = checkpoint
-        .check_helper_compatibility(
-            Box::new(loaded),
-            &[(fixture.link.identity(), document)].into(),
-            &Default::default(),
-            &release.helpers,
-        )
-        .unwrap();
     let mut restored = KernelMachine::open(
-        fixture.program(&release, selection),
+        fixture.program(&release, lash_kernel_doc::Selection::Fresh),
         bounds(),
         &checkpoint,
-        source,
+        Box::new(loaded),
     )
     .unwrap();
     restored

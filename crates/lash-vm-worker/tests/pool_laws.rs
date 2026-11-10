@@ -367,11 +367,7 @@ fn resumed(
         dialect: dialect.into(),
         document: lash_vm_protocol::message::StoredDocument::supplied(document.clone()),
         definitions: Vec::new(),
-        from: StartFrom::Checkpoint(CheckpointStart {
-            root,
-            admissions,
-            selection: None,
-        }),
+        from: StartFrom::Checkpoint(CheckpointStart { root, admissions }),
         bounds: bounds(),
         binding: BINDING,
         save: None,

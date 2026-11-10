@@ -242,6 +242,3 @@ pub use lash_kernel_doc::{
     HelperPublicationUpgradeRequest, HelperRunUpgrade, HelperRunUpgradeOutcome,
     HelperRunUpgradeRequest, HelperUpgrade, HelperUpgradeRefusal, HelperUpgradeSafety,
 };
-
-#[cfg(feature = "codemode")]
-pub use lash_vm_runtime::process::HelperUpgradeCheckError;

@@ -15,14 +15,7 @@
 //! - [`family`] (S8): frozen values, lazy identity families and cell carry.
 
 pub(crate) mod checkpoint;
-mod code;
-#[cfg(any(test, feature = "perf-witness"))]
-pub use checkpoint::helper_compatibility_work;
-pub use checkpoint::{
-    Checkpoint, CheckpointHeader, FormatValue, HelperCompatibilityError, HelperPins,
-    HelperUpgradeCheckError, StatedFormat, check_helper_compatibility, inspect_checkpoint,
-};
-pub use code::{RetainedCode, checkpoint_code, restore_selection};
+pub use checkpoint::{Checkpoint, CheckpointHeader, FormatValue, StatedFormat, inspect_checkpoint};
 pub mod census;
 pub(crate) mod census_impl;
 pub mod family;

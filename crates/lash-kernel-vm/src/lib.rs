@@ -68,8 +68,8 @@
 //! worker cancellation is separately acknowledged by `WorkerMessage::Cancelled`.
 //! This library neither starts processes nor owns that durable winner.
 //!
-//! Carry is also outside execution: `lash_kernel_migrate::carry_checkpoint`
-//! accepts a completed checkpoint, returns a typed `CarryFault` (including
+//! Carry is also outside execution: `lash_kernel_migrate::carry_run`
+//! accepts a parked run, returns a typed `CarryFault` (including
 //! `ParkedRefusal`), and its owner calls [`validate_foreign_checkpoint`]
 //! before publication. Open/admission returns [`OpenError`] (including
 //! `HelperUnavailable`, `MissingFunction`, identity errors and `Heap` for

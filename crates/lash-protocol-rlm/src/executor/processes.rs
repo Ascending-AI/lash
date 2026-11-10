@@ -70,11 +70,9 @@ pub(super) fn prepare(
         .retain(|id, _| retained.contains(&lash_kernel_package::RetainedContent::Document(*id)));
     identified.retain(|id, _| content.documents.contains_key(id));
     let selected = |link, selector: &lash_kernel_package::ReachSelection| {
-        match selection {
-            lash_kernel_doc::Selection::Fresh => documents.inspect(&content, link, selector),
-            lash_kernel_doc::Selection::Restored(_) => content.inspect_ordinary(link, selector),
-        }
-        .map_err(|error| error.to_string())
+        documents
+            .inspect(&content, link, selector)
+            .map_err(|error| error.to_string())
     };
     let mut reach = selected(
         start.link,
@@ -86,12 +84,6 @@ pub(super) fn prepare(
             reach.functions.entry(link).or_default().extend(functions);
         }
         reach.machine.extend(&saved_reach.machine);
-    }
-    if let lash_kernel_doc::Selection::Restored(restored) = selection {
-        reach.machine = content
-            .inspect_restored(start.link, restored, helpers)
-            .map_err(|error| error.to_string())?
-            .machine;
     }
     let link = content
         .links

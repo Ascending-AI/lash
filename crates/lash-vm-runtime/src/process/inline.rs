@@ -251,13 +251,9 @@ impl super::KernelDocuments {
             {
                 ordinary.entry(link).or_default().extend(functions);
             }
-            let selected = match selection {
-                lash_kernel_doc::Selection::Fresh => self.inspect(&content, link, &selected_start),
-                lash_kernel_doc::Selection::Restored(restored) => {
-                    content.inspect_restored(link, restored, self.helpers().as_ref())
-                }
-            }
-            .map_err(super::map_link_refusal)?;
+            let selected = self
+                .inspect(&content, link, &selected_start)
+                .map_err(super::map_link_refusal)?;
             if reach.signature.is_none() {
                 reach.signature = selected.signature.clone();
             }

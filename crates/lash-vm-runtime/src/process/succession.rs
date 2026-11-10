@@ -220,12 +220,7 @@ impl EngineSuccession for KernelSuccession {
                 }
                 match self
                     .engine
-                    .check_helper_upgrade(
-                        process,
-                        &state,
-                        &context.predecessor.retained_code,
-                        &plan.upgrade,
-                    )
+                    .check_helper_upgrade(process, &state, &plan.upgrade)
                     .await?
                 {
                     lash_kernel_doc::HelperUpgradeSafety::Safe => {}

@@ -314,27 +314,19 @@ impl Program {
             links: links.clone(),
             packages: BTreeMap::new(),
         };
-        program.functions = match &program.selection {
-            lash_kernel_doc::Selection::Restored(selection) => selection
-                .live
-                .iter()
-                .map(|callable| callable.function)
-                .chain(selection.pins.iter().copied())
-                .collect(),
-            lash_kernel_doc::Selection::Fresh => content
-                .inspect(
-                    link,
-                    &lash_kernel_package::ReachSelection::AllExports,
-                    program.helpers().as_ref(),
-                )
-                .map_err(|error| StartError::Linked {
-                    problem: error.to_string(),
-                })?
-                .functions
-                .into_values()
-                .flatten()
-                .collect(),
-        };
+        program.functions = content
+            .inspect(
+                link,
+                &lash_kernel_package::ReachSelection::AllExports,
+                program.helpers().as_ref(),
+            )
+            .map_err(|error| StartError::Linked {
+                problem: error.to_string(),
+            })?
+            .functions
+            .into_values()
+            .flatten()
+            .collect();
         Ok(program)
     }
 
@@ -343,45 +335,6 @@ impl Program {
         let invalid = |problem: &str| StartError::Linked {
             problem: problem.into(),
         };
-        if let lash_kernel_doc::Selection::Restored(selection) = &self.selection {
-            for callable in &selection.live {
-                let instance = self
-                    .instances
-                    .get(&callable.link)
-                    .ok_or_else(|| invalid("retained callable Link is not loaded"))?;
-                let document = self
-                    .documents
-                    .get(&instance.document)
-                    .ok_or_else(|| invalid("retained callable document is not loaded"))?;
-                if document.functions.contains_key(&callable.function) {
-                    continue;
-                }
-                let mut pending = vec![callable.function];
-                let mut seen = std::collections::BTreeSet::new();
-                while let Some(function) = pending.pop() {
-                    if !seen.insert(function) {
-                        continue;
-                    }
-                    if !selection.pins.contains(&function) {
-                        return Err(invalid("retained helper has no proven pin"));
-                    }
-                    let registered = self
-                        .helpers()
-                        .registered(&function)
-                        .ok_or_else(|| invalid("pinned helper is not installed"))?;
-                    if registered.kernel() != document.kernel() {
-                        return Err(invalid("retained helper requires another kernel"));
-                    }
-                    for import in registered.imports().values() {
-                        let id = lash_kernel_value::HelperOperationId::of_import(import);
-                        if instance.helper_operations.get(&id) != Some(import) {
-                            return Err(invalid("retained helper operation context differs"));
-                        }
-                    }
-                    pending.extend(registered.callees());
-                }
-            }
-        }
         let root = self
             .instances
             .get(&self.link)
