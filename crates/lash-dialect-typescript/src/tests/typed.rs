@@ -851,3 +851,70 @@ fn stable_paths_keep_restored_roots_and_nonterminal_effects_guarded() {
     );
     assert_eq!(super::lower("const r = { a: { b: {} } }; for (let i = 0; i < 2; i++) { middle.b; const middle = r.a; }").unwrap_err().code(), crate::DiagnosticCode::TemporalDeadZone);
 }
+
+/// TS-DEFINITE-ASSIGNMENT: a `var`, or a `let` without an initialiser, is
+/// typed from its values only where every read follows a value certainly
+/// given on every path; a read any path reaches first sees `undefined`, so
+/// `undefined + 1` is `NaN` (ECMA-262 ToNumber(undefined)).
+#[test]
+fn reads_before_a_certain_assignment_see_undefined() {
+    let cases = [
+        ("var x; if (c) x = 1; return String(x + 1);", "NaN"),
+        (
+            "var x; for (var i = 0; i < 0; i++) x = 1; return String(x + 1);",
+            "NaN",
+        ),
+        (
+            "var x; while (c) { x = 1; c = false; } return String(x + 1);",
+            "NaN",
+        ),
+        ("for (var e of []) {} return String(e + 1);", "NaN"),
+        (
+            "var x; try { if (!c) throw 0; x = 1; } catch {} return String(x + 1);",
+            "NaN",
+        ),
+        (
+            "var x; switch (c) { case true: x = 1; } return String(x + 1);",
+            "NaN",
+        ),
+        (
+            "var x; l: { if (!c) break l; x = 1; } return String(x + 1);",
+            "NaN",
+        ),
+        (
+            "var x; do { if (!c) continue; x = 1; } while (false); return String(x + 1);",
+            "NaN",
+        ),
+        ("var x; c && (x = 1); return String(x + 1);", "NaN"),
+        ("var x; c ? (x = 1) : 0; return String(x + 1);", "NaN"),
+        (
+            "var x; var [a = (x = 1)] = [5]; return String(x + 1);",
+            "NaN",
+        ),
+        (
+            "function g() { return String(x + 1); } var r = g(); var x = 1; return r;",
+            "NaN",
+        ),
+        ("var x = String(x + 1); return x;", "NaN"),
+        ("var x; x += 1; return String(x);", "NaN"),
+        (
+            "var r = ''; for (var i = 0; i < 2; i++) { let y; if (i === 0) y = 1; r += String(y + 1); } return r;",
+            "2NaN",
+        ),
+    ];
+    let observed: Vec<_> = cases
+        .iter()
+        .map(|(body, _)| {
+            super::machine::end(&format!(
+                "function f(c) {{ {body} }} await control.finish(f(false));"
+            ))
+        })
+        .collect();
+    let expected: Vec<_> = cases
+        .iter()
+        .map(|(_, value)| {
+            super::machine::Ended::Finished(lash_kernel_doc::Datum::Text((*value).into()))
+        })
+        .collect();
+    assert_eq!(observed, expected);
+}

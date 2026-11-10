@@ -14,11 +14,18 @@
 //! and a name it makes up resolves to nothing and is unknown.
 //!
 //! A binding with an annotation is believed to be what the annotation says,
-//! whatever is assigned to it. One without is inferred: a `const`, or a
-//! `let` with an initialiser, is a type when its initialiser and every
-//! assignment to its name are that type. A `var` is not inferred, because
-//! it is `undefined` until its declaration runs; a parameter is not,
-//! because a caller may pass anything. A rest parameter starts as a fresh list.
+//! whatever is assigned to it. One without is inferred: it is a type when
+//! its initialiser and every assignment to its name are that type. A `var`,
+//! and a `let` without an initialiser, is `undefined` until a value is
+//! first given to it, so it is unknown unless every read of it comes after
+//! a value was certainly given: the read is in its own function, and an
+//! assignment or initialiser at statement level runs on every path to the
+//! read (a branch, a loop's body, a `switch`, a `try` and a labelled
+//! statement give nothing to what follows them, and neither does an
+//! assignment in a conditional part of an expression). A binding of the
+//! program's own scope stays unknown, because it is the session's. A
+//! parameter is not inferred, because a caller may pass anything. A rest
+//! parameter starts as a fresh list.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -37,6 +44,7 @@ use crate::adapter::{
 const MAX_ROUNDS: usize = 32;
 
 mod bindings;
+mod flow;
 mod forwarding;
 
 use bindings::Shape;
@@ -65,6 +73,10 @@ fn spelling(name: &str) -> usize {
 enum Source<'a> {
     /// A value the analysis says nothing about.
     Opaque,
+    /// The `undefined` a `var`, or a `let` without an initialiser, holds
+    /// until a value is first given to it. The walk resolves it to `Opaque`
+    /// when a read may come first and drops it otherwise, so no type reads it.
+    Unassigned,
     Is(Ty),
     /// Increment/decrement preserves the numeric kind of this binding.
     Step,
@@ -107,6 +119,10 @@ struct Entry<'a> {
     depth: usize,
     /// A nested function may retain this binding beyond its declaring call.
     captured: bool,
+    /// Holds `undefined` until a value is first given to it.
+    unassigned: bool,
+    /// A read may come before a value was certainly given to it.
+    early: bool,
     sources: Vec<Source<'a>>,
     declarations: usize,
     annotated: usize,
@@ -152,6 +168,15 @@ struct Collector<'a> {
     constructors: BTreeMap<String, &'static str>,
     active_functions: Vec<usize>,
     module_reads: BTreeMap<usize, BTreeSet<String>>,
+    /// The bindings of the current function a value was certainly given to
+    /// on every path to where the walk stands.
+    defined: HashSet<usize>,
+    /// Bindings an assignment or declaration being walked gives a value
+    /// once its value has run.
+    pending: Vec<usize>,
+    /// How many conditionally evaluated parts of an expression enclose the
+    /// walk: what they assign is not certainly given.
+    conditional: usize,
 }
 
 /// What the analysis found.
@@ -222,6 +247,14 @@ impl Facts {
         collector.declare_vars(&program.statements);
         collector.declare_block(&program.statements);
         collector.statements(&program.statements);
+        for entry in &mut collector.bindings {
+            entry
+                .sources
+                .retain(|source| !matches!(source, Source::Unassigned));
+            if entry.unassigned && (entry.early || entry.session_scope) {
+                entry.sources.push(Source::Opaque);
+            }
+        }
         let mut aliases = BTreeMap::new();
         // A package's value type is named by its dotted path, which no
         // local alias can spell.
@@ -763,6 +796,8 @@ impl<'a> Collector<'a> {
                 session_scope,
                 depth,
                 captured: false,
+                unassigned: false,
+                early: false,
                 sources: Vec::new(),
                 declarations: 0,
                 annotated: 0,
@@ -808,6 +843,7 @@ impl<'a> Collector<'a> {
                     }
                 }
                 self.capture(binding);
+                self.use_of(binding);
             }
             None if self.function_depth > 0 => {
                 self.plain
@@ -854,8 +890,8 @@ impl<'a> Collector<'a> {
             // which nothing here types.
             Role::Assigned => self.lookup(name),
         };
-        let value = match &source {
-            Source::Value(value) => Some(*value),
+        let value = match (&source, role) {
+            (Source::Value(value), Role::Declared { .. } | Role::Assigned) => Some(*value),
             _ => None,
         };
         self.plain.name(name, binding, value);
@@ -864,7 +900,21 @@ impl<'a> Collector<'a> {
         };
         self.spellings.insert(spelling(name), binding);
         self.capture(binding);
+        // `op=`, `++` and a logical assignment read the name first.
+        if matches!(role, Role::Assigned)
+            && matches!(source, Source::Compound(..) | Source::Step | Source::Opaque)
+        {
+            self.use_of(binding);
+        }
+        if matches!(source, Source::Unassigned) {
+            self.defined.remove(&binding);
+        } else if self.function_depth == self.bindings[binding].depth {
+            self.pending.push(binding);
+        }
         let entry = &mut self.bindings[binding];
+        if matches!(role, Role::Var) || matches!(source, Source::Unassigned) {
+            entry.unassigned = true;
+        }
         if let Role::Assigned = role {
             entry.assignments += 1;
         } else {
@@ -911,7 +961,7 @@ impl<'a> Collector<'a> {
             }
             // The default runs before its target is declared.
             Pattern::Assign { target, default } => {
-                self.expr(default);
+                self.conditionally(|this| this.expr(default));
                 self.pattern(target, role);
             }
             Pattern::Array { elements, rest, .. } => {
@@ -1013,7 +1063,7 @@ impl<'a> Collector<'a> {
                 }
             }
             Pattern::Assign { target, default } => {
-                self.expr(default);
+                self.conditionally(|this| this.expr(default));
                 self.bound(target, role, Source::Default(Box::new(source), default));
             }
             _ => self.pattern(pattern, role),
@@ -1046,21 +1096,30 @@ impl<'a> Collector<'a> {
                     self.expr(value);
                 }
             }
-            Stmt::Labeled { body, .. } | Stmt::ExitHandler { body, .. } => self.statement(body),
+            Stmt::Labeled { body, .. } | Stmt::ExitHandler { body, .. } => {
+                self.branch(|this| this.statement(body));
+            }
             Stmt::Block(body) => self.scoped(|this| {
                 this.declare_block(body);
                 this.statements(body);
             }),
             Stmt::Var { kind, declarations } => {
                 for declaration in declarations {
-                    let (role, source) = match (&declaration.init, kind) {
-                        (_, VarKind::Var) => (Role::Var, Source::Opaque),
-                        (Some(init), _) => (Role::Declared { hoisted: false }, Source::Value(init)),
-                        (None, _) => (Role::Declared { hoisted: false }, Source::Opaque),
+                    let role = match kind {
+                        VarKind::Var => Role::Var,
+                        _ => Role::Declared { hoisted: false },
                     };
+                    let source = declaration
+                        .init
+                        .as_ref()
+                        .map_or(Source::Unassigned, Source::Value);
+                    let mark = self.pending.len();
                     self.bound(&declaration.pattern, role, source);
                     if let Some(init) = &declaration.init {
                         self.expr(init);
+                        self.settle(mark);
+                    } else {
+                        self.pending.truncate(mark);
                     }
                 }
             }
@@ -1090,14 +1149,19 @@ impl<'a> Collector<'a> {
                 alternate,
             } => {
                 self.expr(test);
+                let before = self.defined.clone();
                 self.statement(consequent);
+                let given = std::mem::replace(&mut self.defined, before);
                 if let Some(alternate) = alternate {
                     self.statement(alternate);
                 }
+                self.defined.retain(|binding| given.contains(binding));
             }
             Stmt::While { test, body } | Stmt::DoWhile { body, test, .. } => {
-                self.expr(test);
-                self.statement(body);
+                self.branch(|this| {
+                    this.expr(test);
+                    this.statement(body);
+                });
             }
             // The head's `let` and `const` are declared before it runs.
             Stmt::For {
@@ -1116,10 +1180,16 @@ impl<'a> Collector<'a> {
                     }
                     this.statement(init);
                 }
-                for expr in [test, update].into_iter().flatten() {
-                    this.expr(expr);
+                if let Some(test) = test {
+                    this.expr(test);
                 }
-                this.statement(body);
+                // The update runs after a pass or a `continue`.
+                this.branch(|this| this.statement(body));
+                this.branch(|this| {
+                    if let Some(update) = update {
+                        this.expr(update);
+                    }
+                });
             }),
             Stmt::ForOf {
                 pattern,
@@ -1127,16 +1197,16 @@ impl<'a> Collector<'a> {
                 iterable,
                 body,
             } => self.scoped(|this| {
-                this.bound(
-                    pattern,
-                    loop_role(*kind),
-                    loop_source(*kind, Source::ElementOf(iterable)),
-                );
+                let mark = this.pending.len();
+                this.bound(pattern, loop_role(*kind), Source::ElementOf(iterable));
                 this.outside(|this| {
                     this.plain.escape(iterable);
                     this.expr(iterable);
                 });
-                this.statement(body);
+                this.branch(|this| {
+                    this.settle(mark);
+                    this.statement(body);
+                });
             }),
             Stmt::ForIn {
                 pattern,
@@ -1144,17 +1214,17 @@ impl<'a> Collector<'a> {
                 object,
                 body,
             } => self.scoped(|this| {
+                let mark = this.pending.len();
                 // `for...in` visits property names.
-                this.bound(
-                    pattern,
-                    loop_role(*kind),
-                    loop_source(*kind, Source::Is(Ty::Text)),
-                );
+                this.bound(pattern, loop_role(*kind), Source::Is(Ty::Text));
                 this.outside(|this| {
                     this.plain.escape(object);
                     this.expr(object);
                 });
-                this.statement(body);
+                this.branch(|this| {
+                    this.settle(mark);
+                    this.statement(body);
+                });
             }),
             // Every clause shares one scope.
             Stmt::Switch {
@@ -1167,10 +1237,12 @@ impl<'a> Collector<'a> {
                         this.declare_block(&case.consequent);
                     }
                     for case in cases {
-                        if let Some(test) = &case.test {
-                            this.outside(|this| this.expr(test));
-                        }
-                        this.statements(&case.consequent);
+                        this.branch(|this| {
+                            if let Some(test) = &case.test {
+                                this.outside(|this| this.expr(test));
+                            }
+                            this.statements(&case.consequent);
+                        });
                     }
                 });
             }
@@ -1179,17 +1251,23 @@ impl<'a> Collector<'a> {
                 catch,
                 finally,
             } => {
-                self.scoped(|this| this.block(body));
+                self.branch(|this| this.scoped(|this| this.block(body)));
                 if let Some(Catch { binding, body }) = catch {
-                    self.scoped(|this| {
-                        if let Some(binding) = binding {
-                            this.bound(binding, Role::Declared { hoisted: false }, Source::Opaque);
-                        }
-                        this.block(body);
+                    self.branch(|this| {
+                        this.scoped(|this| {
+                            if let Some(binding) = binding {
+                                this.bound(
+                                    binding,
+                                    Role::Declared { hoisted: false },
+                                    Source::Opaque,
+                                );
+                            }
+                            this.block(body);
+                        });
                     });
                 }
                 if let Some(finally) = finally {
-                    self.scoped(|this| this.block(finally));
+                    self.branch(|this| this.scoped(|this| this.block(finally)));
                 }
             }
         }
@@ -1234,6 +1312,9 @@ impl<'a> Collector<'a> {
         self.active_functions
             .push(std::ptr::from_ref(function).addr());
         self.function_depth += 1;
+        let defined = std::mem::take(&mut self.defined);
+        let pending = std::mem::take(&mut self.pending);
+        let conditional = std::mem::replace(&mut self.conditional, 0);
         self.scoped(|this| {
             this.annotations
                 .parameters(&function.type_parameters, function.result_span);
@@ -1258,6 +1339,9 @@ impl<'a> Collector<'a> {
                 FunctionBody::Expression(value) => this.expr(value),
             }
         });
+        self.defined = defined;
+        self.pending = pending;
+        self.conditional = conditional;
         self.function_depth -= 1;
         self.active_functions.pop();
     }
@@ -1346,10 +1430,21 @@ impl<'a> Collector<'a> {
                     AssignOp::Binary(op) => Source::Compound(*op, value),
                     AssignOp::Logical(_) => Source::Opaque,
                 };
+                let mark = self.pending.len();
                 self.target(target, source);
-                self.expr(value);
+                if matches!(op, AssignOp::Logical(_)) {
+                    self.conditionally(|this| this.expr(value));
+                    self.pending.truncate(mark);
+                } else {
+                    self.expr(value);
+                    self.settle(mark);
+                }
             }
-            Expr::Update { target, .. } => self.target(target, Source::Step),
+            Expr::Update { target, .. } => {
+                let mark = self.pending.len();
+                self.target(target, Source::Step);
+                self.settle(mark);
+            }
             Expr::Delete { object, property } => {
                 self.contents_unstable = true;
                 self.plain.write(property);
@@ -1382,7 +1477,7 @@ impl<'a> Collector<'a> {
             }
             Expr::Logical { left, right, .. } => {
                 self.expr(left);
-                self.expr(right);
+                self.conditionally(|this| this.expr(right));
             }
             Expr::Conditional {
                 test,
@@ -1390,8 +1485,10 @@ impl<'a> Collector<'a> {
                 alternate,
             } => {
                 self.expr(test);
-                self.expr(consequent);
-                self.expr(alternate);
+                self.conditionally(|this| {
+                    this.expr(consequent);
+                    this.expr(alternate);
+                });
             }
             Expr::Sequence(values) => {
                 for value in values {
@@ -1477,6 +1574,7 @@ impl<'a> Collector<'a> {
                 self.contents_unstable = true;
                 self.plain.escape(base);
                 self.expr(base);
+                self.conditional += 1;
                 for operation in operations {
                     match operation {
                         OptionalOperation::Member { property, .. } => self.property(property),
@@ -1489,6 +1587,7 @@ impl<'a> Collector<'a> {
                         }
                     }
                 }
+                self.conditional -= 1;
             }
         }
     }
@@ -1501,16 +1600,6 @@ fn loop_role(kind: Option<VarKind>) -> Role {
         Some(VarKind::Var) => Role::Var,
         Some(_) => Role::Declared { hoisted: false },
         None => Role::Assigned,
-    }
-}
-
-/// What a loop's head gives its name. A `var` is `undefined` before the
-/// loop's first pass, so it is not what the loop gives it.
-fn loop_source(kind: Option<VarKind>, source: Source<'_>) -> Source<'_> {
-    if kind == Some(VarKind::Var) {
-        Source::Opaque
-    } else {
-        source
     }
 }
 
