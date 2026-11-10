@@ -86,7 +86,17 @@ impl Path {
 /// at most [`FOLD_PATHS`] of them.
 fn derive(program: &Program, unit: &Unit, n: u32) -> Vec<Fold> {
     let site = unit.inlines[n as usize];
-    let argc = unit.calls[site.call as usize].argc;
+    let call = &unit.calls[site.call as usize];
+    // A call held to a typed result checks the value at the region's
+    // leave, which a fold skips.
+    if call
+        .checked
+        .as_ref()
+        .is_some_and(|checked| checked.signature.result != lash_kernel_value::Type::Any)
+    {
+        return Vec::new();
+    }
+    let argc = call.argc;
     let path = Path {
         stack: Vec::new(),
         set: Vec::new(),

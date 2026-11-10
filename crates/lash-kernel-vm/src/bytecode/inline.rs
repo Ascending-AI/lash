@@ -96,7 +96,6 @@ pub(crate) fn inline(program: &mut Program) {
                 Op::Call(site) => match &program.units[at].calls[site as usize] {
                     CallSite {
                         callee: Callee::Unit { unit, .. },
-                        checked: None,
                         ..
                     } if admissible(program, caller, *unit) => Some((pc, site, *unit)),
                     _ => None,

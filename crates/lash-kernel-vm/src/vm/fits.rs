@@ -63,11 +63,27 @@ impl<H: Heap> Vm<H> {
             .and_then(|pc| unit.ops.get(pc))
         {
             Some(Op::Call(site)) => unit.calls[*site as usize].checked.clone(),
+            Some(Op::Inline(n)) => unit.calls[unit.inlines[*n as usize].call as usize]
+                .checked
+                .clone(),
             _ => None,
         };
-        let Some(checked) = checked.filter(|checked| checked.signature.result != Type::Any) else {
+        match checked {
+            Some(checked) => self.result_unfit(&checked, value),
+            None => Ok(None),
+        }
+    }
+
+    /// Why `value`, returned through a call held to `checked`, does not
+    /// fit the helper's declared result.
+    pub(super) fn result_unfit(
+        &mut self,
+        checked: &Checked,
+        value: Value,
+    ) -> Run<Option<EntryTypeMismatch>> {
+        if checked.signature.result == Type::Any {
             return Ok(None);
-        };
+        }
         Ok(self
             .fits(value, &checked.signature.result, self.value_depth)?
             .map(|mismatch| EntryTypeMismatch {

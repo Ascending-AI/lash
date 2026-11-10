@@ -1293,7 +1293,11 @@ impl<H: Heap> Vm<H> {
                     Op::Inline(n) => {
                         sync!(pc);
                         let site = &unit.inlines[n as usize];
-                        enter!(&unit.calls[site.call as usize], pc, rerun);
+                        let call = &unit.calls[site.call as usize];
+                        enter!(call, pc, rerun);
+                        if let Some(checked) = &call.checked {
+                            self.check_arguments(checked, usize::from(call.argc))?;
+                        }
                         // A fold that holds completes the activation at
                         // the region's leave, and the caller runs on after
                         // the call; otherwise the region runs.
@@ -1311,7 +1315,7 @@ impl<H: Heap> Vm<H> {
                     }
                     Op::Leave(n) => {
                         sync!(pc);
-                        self.leave()?;
+                        self.leave(unit, n)?;
                         base = self.cx.frames[top].base as usize;
                         pc = unit.inlines[n as usize].at as usize + 1;
                     }

@@ -192,18 +192,29 @@ impl<H: Heap> Vm<H> {
     /// The inline region returns the top value, as its body's frame
     /// would: the completion read first, so a cold read runs the op again,
     /// then the activation released and its bill settled.
-    pub(super) fn leave(&mut self) -> Run<()> {
+    /// A call held to a typed result raises `entry_type_mismatch` there
+    /// instead, from the caller after the call, as a return does.
+    pub(super) fn leave(&mut self, unit: &Unit, n: u32) -> Run<()> {
         self.meter.leave();
         self.exact = true;
         let Some(activation) = self.cx.inline else {
             return Err(fault("a region left with no activation"));
         };
         let [value] = self.operands();
+        let site = unit.inlines[n as usize];
+        let unfit = match &unit.calls[site.call as usize].checked {
+            Some(checked) => self.result_unfit(checked, value)?,
+            None => None,
+        };
         let completion = self.completion(activation.bill, Some(&value))?;
         self.cx.inline = None;
         self.heap.release(self.frame_cost(activation.callee));
         self.settle(completion)?;
         self.cx.stack.truncate(activation.base as usize);
+        if let Some(unfit) = unfit {
+            self.jump(site.at + 1);
+            return Err(self.typed_error("entry_type_mismatch", &unfit));
+        }
         self.push(value);
         Ok(())
     }
