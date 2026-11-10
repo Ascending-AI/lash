@@ -1933,9 +1933,8 @@ fn every_installed_definition_runs_on_the_core() {
 }
 
 /// FIG-6960 PB, K-LIB-006: the helpers' natives preserve their bodies'
-/// results, effects and exact charge, across slices and the charge bounds
-/// [`charge_bounds`] names, and
-/// retain what the bodies retain at each park.
+/// results, effects and exact charge, across slices and at every charge
+/// bound, and retain what the bodies retain at each park.
 #[test]
 fn sequence_facts_agree_with_bodies_at_charge_bounds() {
     let started = std::time::Instant::now();
@@ -2025,7 +2024,7 @@ await build()
         execution_observation_with_memory(on.clone(), BOUNDS, false),
         "completed guest state is independent of earlier memory pressure",
     );
-    for charge_limit in charge_bounds(reference.charged + 1) {
+    for charge_limit in 0..=reference.charged {
         let bounds = Bounds {
             charge_limit,
             ..BOUNDS
@@ -2060,18 +2059,6 @@ await build()
 // read/update and allocating format paths leave the same end, effects, stop
 // kinds and charge with the helpers' natives as with their bodies, at every
 // stop, every cold reopen and every finite charge bound.
-/// The charge bounds below `charged` a native and body comparison refuses
-/// at: both edges, the first steps, and a stride across the rest. The core
-/// compiles a program at every start, so every bound of a long run does not
-/// fit a test's time.
-fn charge_bounds(charged: u64) -> impl Iterator<Item = u64> {
-    let stride = (charged / 64).max(1);
-    let mut bounds: BTreeSet<u64> = (0..charged.min(16)).collect();
-    bounds.extend((0..charged).step_by(usize::try_from(stride).unwrap_or(usize::MAX)));
-    bounds.extend(charged.checked_sub(1));
-    bounds.into_iter()
-}
-
 fn whole_path_regions_agree() {
     let cases = [
         (
@@ -2125,7 +2112,7 @@ fn whole_path_regions_agree() {
                 "Python {label}, cold={rebuild}: {source}"
             );
         }
-        for charge_limit in charge_bounds(charged) {
+        for charge_limit in 0..charged {
             let bounds = Bounds {
                 charge_limit,
                 ..BOUNDS
