@@ -1171,7 +1171,8 @@ fn collection_length_admission_uses_native_evidence() {
 
 /// Native exact acceptance binds real operands and preserves paid closes,
 /// optional padding, graph/scratch peaks and durable cold source handoffs:
-/// sealed and reopened cold, a run ends and refuses as it does warm.
+/// sealed and reopened cold, a run ends and refuses as it does warm,
+/// holding no more (contract §2).
 fn native_boundaries_agree() {
     const SOURCE: &str = "main { let xs = resident.optional() let ys = resident.boundary(1) let n = list.len(xs) let value = resident.boundary(0) return (value, n, list.get(ys, 0)) }";
     let observe = |source: &str, cold, taped, bounds| {
@@ -1236,11 +1237,11 @@ fn native_boundaries_agree() {
         result(reference.0.clone()),
         Datum::Tuple(vec![int(7), int(2), int(7)])
     );
-    assert_eq!(observe(SOURCE, true, false, roomy), reference, "cold");
-    assert_eq!(
-        observe(SOURCE, true, true, roomy),
-        observe(SOURCE, false, true, roomy),
-        "native canonical cold charge tape"
+    super::native_codecs::cold_continues(&observe(SOURCE, true, false, roomy), &reference, "cold");
+    super::native_codecs::cold_continues(
+        &observe(SOURCE, true, true, roomy),
+        &observe(SOURCE, false, true, roomy),
+        "native canonical cold charge tape",
     );
     let exact_charge = reference.1.unwrap();
     for charge_limit in [0, 3, 7, exact_charge - 1, exact_charge] {
@@ -1248,18 +1249,18 @@ fn native_boundaries_agree() {
             charge_limit,
             ..roomy
         };
-        assert_eq!(
-            observe(SOURCE, true, true, bounds),
-            observe(SOURCE, false, true, bounds),
-            "native first charge refusal at {charge_limit}"
+        super::native_codecs::cold_continues(
+            &observe(SOURCE, true, true, bounds),
+            &observe(SOURCE, false, true, bounds),
+            &format!("native first charge refusal at {charge_limit}"),
         );
     }
     for memory in [128, 229, 230, 256, 512] {
         let bounds = Bounds { memory, ..roomy };
-        assert_eq!(
-            observe(SOURCE, true, true, bounds),
-            observe(SOURCE, false, true, bounds),
-            "native normalized first memory refusal at {memory}"
+        super::native_codecs::cold_continues(
+            &observe(SOURCE, true, true, bounds),
+            &observe(SOURCE, false, true, bounds),
+            &format!("native normalized first memory refusal at {memory}"),
         );
     }
 
