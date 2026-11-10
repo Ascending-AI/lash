@@ -180,7 +180,7 @@ pub fn save(
                     .ok_or_else(|| super::unreadable("the defining linked document is not loaded"))?
                     .clone()
             };
-            super::check_controls(&left, callable, &document)?;
+            super::check_controls(left.controls, left.catalog, callable, &document)?;
             let mut function = SavedFunction {
                 name: name.clone(),
                 link: callable.link,

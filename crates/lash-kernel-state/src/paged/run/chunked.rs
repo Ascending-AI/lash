@@ -249,6 +249,39 @@ pub fn edge_ids(access: &Access<'_>, parts: &[EdgePart]) -> Result<Vec<ObjectId>
     Ok(ids)
 }
 
+/// Calls `each` with the members of every chunk of `chunked`, in order:
+/// one read of each index page and each chunk.
+///
+/// # Errors
+///
+/// The page port's faults; [`HeapFault::Corrupt`] for an index or chunk
+/// page that is not one.
+pub fn each_members(
+    access: &Access<'_>,
+    chunked: &Chunked,
+    each: &mut dyn FnMut(&Members),
+) -> Result<(), HeapFault> {
+    for part in &chunked.parts {
+        let answer = access.read(part.page)?;
+        if answer.kind != PageKind::SEQUENCE_INDEX {
+            return Err(corrupt(part.page, "an index part is not an index page"));
+        }
+        let mut index: IndexPage =
+            decode_body(&answer.tokens).map_err(|error| corrupt(part.page, error.to_string()))?;
+        for chunk in &mut index.0 {
+            super::super::source::grant(&mut chunk.page, &answer.children)?;
+            let read = access.read(chunk.page)?;
+            if read.kind != PageKind::SEQUENCE_LEAF {
+                return Err(corrupt(chunk.page, "a chunk is not a leaf page"));
+            }
+            let page: ChunkPage = decode_body(&read.tokens)
+                .map_err(|error| corrupt(chunk.page, error.to_string()))?;
+            each(&page.members);
+        }
+    }
+    Ok(())
+}
+
 /// The edge parts of `parts` with `delta` applied to the counts: only the
 /// edge pages an id of `delta` falls in are read and written again.
 ///

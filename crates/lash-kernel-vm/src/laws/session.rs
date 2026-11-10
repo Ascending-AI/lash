@@ -279,3 +279,137 @@ fn a_binding_holding_a_saved_function_carries_it_by_identity() {
         assert_eq!(members.first(), carried.function(0));
     }
 }
+
+/// A dialect's save on the core: the dialect's rules over the sealed heap,
+/// each saved function described by its name.
+struct DialectSave {
+    program: crate::Program,
+}
+
+impl crate::durable::session::Save for DialectSave {
+    fn save(
+        &mut self,
+        cell: crate::durable::session::SaveCell<'_>,
+    ) -> Result<crate::durable::session::SavedCell, lash_kernel_doc::heap::HeapFault> {
+        let held = cell
+            .held
+            .iter()
+            .map(|(_, function)| function.name.clone())
+            .collect();
+        let saved = lash_kernel_dialect::kernel_internals::save_run(
+            cell.directory,
+            lash_kernel_dialect::kernel_internals::RunLeft {
+                document: &self.program.document,
+                link: self.program.link,
+                documents: &std::collections::BTreeMap::new(),
+                bindings: cell.bindings,
+                not_carried: cell.dropped,
+                controls: &std::collections::BTreeMap::new(),
+                written: &std::collections::BTreeMap::new(),
+                values: &lash_kernel_doc::FunctionRepresentation::Bare,
+                catalog: self.program.library.registry().as_ref(),
+            },
+            &held,
+        )?;
+        Ok(crate::durable::session::SavedCell {
+            functions: saved
+                .functions
+                .into_values()
+                .map(|function| {
+                    (
+                        function.object,
+                        RunFunction {
+                            description: function.name.as_str().as_bytes().to_vec(),
+                            name: function.name,
+                        },
+                    )
+                })
+                .collect(),
+            carried: saved.carried.into_iter().collect(),
+            refused: saved
+                .refused
+                .into_iter()
+                .map(|(name, why)| (name, why.to_string()))
+                .collect(),
+        })
+    }
+}
+
+/// `K-SES-004`: at a cell's end a closure `main` made is saved, and the
+/// bindings holding it carry it by identity; a task is not carried, and a
+/// closure whose captured variable holds one is refused, as is every
+/// binding that holds that closure.
+#[test]
+fn a_cell_end_saves_its_closures_and_refuses_one_that_captures_a_task() {
+    let source = Source::default();
+    let text = "definition \"function work() -> Any\\nkernel 1\\nmetering statements\\nbody { return 1 }\"\n\
+main {\n  let k = 1\n  let f = fn() { return k }\n  let fs = [f]\n  let t = spawn call work()\n  let v = join t\n  let g = fn() { return t }\n  let gs = [g]\n  return 0\n}";
+    let program = core_program(text, None);
+    let mut machine = <CoreMachine as Machine>::start(
+        program.clone(),
+        ROOMY,
+        start(None, Vec::new()),
+        Box::new(source.clone()),
+    )
+    .unwrap();
+    machine.saving(Box::new(DialectSave { program }));
+    let end = drive(&mut machine);
+    let needs_t = lash_kernel_dialect::NotSaved::Capture {
+        name: Name::new("t"),
+        why: lash_kernel_dialect::CaptureRefusal::Task,
+    }
+    .to_string();
+    let dropped: Vec<(String, String)> = end
+        .not_carried
+        .iter()
+        .map(|(name, why)| (name.as_str().to_owned(), why.clone()))
+        .collect();
+    assert_eq!(
+        dropped,
+        vec![
+            ("g".to_owned(), needs_t.clone()),
+            ("gs".to_owned(), needs_t),
+            (
+                "t".to_owned(),
+                lash_kernel_dialect::NotSaved::Task.to_string()
+            ),
+        ]
+    );
+    assert_eq!(carried(&end, &source), names(&["f", "fs", "k", "v"]));
+    let page = end.carry.as_ref().and_then(SessionRoot::run_page).unwrap();
+    let (session, directory) = session::open(Box::new(source.clone()), page).unwrap();
+    assert_eq!(
+        session.functions,
+        vec![RunFunction {
+            name: Name::new("f"),
+            description: b"f".to_vec(),
+        }]
+    );
+    let saved = session.function(0).and_then(RunValue::id).unwrap();
+    assert_eq!(session.binding(0).and_then(RunValue::id), Some(saved));
+    let list = session.binding(1).and_then(RunValue::id).unwrap();
+    let Record::List(members) = directory.get(list).unwrap().unwrap().record else {
+        panic!("`fs` holds a list");
+    };
+    assert_eq!(members.first().and_then(RunValue::id), Some(saved));
+}
+
+/// `K-SES-001` with `K-CLO-001`: a top-level variable a closure captures
+/// is carried as its value, not as the cell the closure shares, and the
+/// next cell reads it.
+#[test]
+fn a_variable_a_closure_captures_carries_its_value() {
+    let source = Source::default();
+    let first = cell(
+        "main {\n  let o = [1]\n  let f = fn() { return o[0] }\n  let r = apply f()\n  return r\n}",
+        start(None, Vec::new()),
+        &source,
+    );
+    assert_eq!(carried(&first, &source), names(&["o", "r"]));
+    let second = cell(
+        "main {\n  return [o[0], r]\n}",
+        start(first.carry, Vec::new()),
+        &source,
+    );
+    assert_eq!(second.result, Datum::List(vec![int(1), int(1)]));
+}

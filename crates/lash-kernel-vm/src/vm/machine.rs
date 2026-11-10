@@ -45,6 +45,8 @@ pub struct CoreMachine {
     /// A budgeted seal's written run record and what the checkpoint root
     /// takes from it, until the run moves.
     partial: Option<Partial>,
+    /// What saves the functions a session cell's end drops (`K-SES-004`).
+    save: Option<Box<dyn crate::durable::session::Save>>,
 }
 
 /// The run record a budgeted seal wrote before its budget ran out.
@@ -370,6 +372,7 @@ impl CoreMachine {
             document,
             ended: false,
             partial: None,
+            save: None,
             convention,
             header,
         })
@@ -497,6 +500,7 @@ impl Machine for CoreMachine {
             document: Arc::clone(&program.document),
             ended: false,
             partial: None,
+            save: None,
             convention,
             header,
         })
@@ -689,6 +693,12 @@ impl Machine for CoreMachine {
 }
 
 impl CoreMachine {
+    /// Saves the functions this cell's end drops through `save`.
+    #[cfg(test)]
+    pub(crate) fn saving(&mut self, save: Box<dyn crate::durable::session::Save>) {
+        self.save = Some(save);
+    }
+
     /// The run reached its end: an error when tasks other than `main` and
     /// `ender` are outstanding (`K-TASK-018`), else `end` of `result`.
     fn concluded(
@@ -718,8 +728,13 @@ impl CoreMachine {
             Some(_) => (None, Vec::new()),
             None => {
                 self.ended = true;
-                let (carry, not_carried) =
-                    crate::durable::session::carry(&mut self.vm, &self.header.host)?;
+                let mut save = self.save.take();
+                let (carry, not_carried) = crate::durable::session::carry(
+                    &mut self.vm,
+                    &self.header.host,
+                    save.as_deref_mut(),
+                )?;
+                self.save = save;
                 (Some(carry), not_carried)
             }
         };

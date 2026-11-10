@@ -20,6 +20,7 @@ mod graph;
 mod relink;
 #[cfg(test)]
 mod relink_laws;
+pub mod run;
 pub use carry::{Saved, save};
 pub use graph::{
     Bundle, BundleBody, BundleRefusal, DOCUMENT_NODE_KIND, FUNCTION_BUNDLE_NODE_KIND, MemberBody,
@@ -315,7 +316,8 @@ pub fn closure_of<'a>(
 /// A closure cannot end a cell through a known control operation. Follow
 /// immutable local identities; diagnostic spellings do not select controls.
 fn check_controls(
-    left: &Left<'_>,
+    controls: &BTreeMap<lash_kernel_value::OperationUse, BTreeSet<crate::EffectControl>>,
+    catalog: &dyn FunctionCatalog,
     callable: CallableId,
     document: &Document,
 ) -> Result<(), SaveError> {
@@ -328,7 +330,7 @@ fn check_controls(
         let definition = document
             .functions
             .get(&id)
-            .or_else(|| left.catalog.definition(&id))
+            .or_else(|| catalog.definition(&id))
             .ok_or_else(|| unreadable("the saved callable definition is not loaded"))?;
         if let Some(body) = definition.body() {
             pending.extend(lash_kernel_doc::Node::Block(&body.block).functions_within());
@@ -347,8 +349,7 @@ fn check_controls(
                         )
                     },
                 };
-                if left
-                    .controls
+                if controls
                     .get(&use_)
                     .is_some_and(|controls| !controls.is_empty())
                 {

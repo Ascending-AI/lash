@@ -94,5 +94,8 @@ pub mod source_types;
 /// `crates/lash-kernel-*` names this module (scripts/check-kernel-boundary.py).
 #[doc(hidden)]
 pub mod kernel_internals {
+    pub use crate::saved::run::{
+        Left as RunLeft, Saved as RunSaved, SavedFunction as RunSavedFunction, save as save_run,
+    };
     pub use crate::saved::save;
 }
