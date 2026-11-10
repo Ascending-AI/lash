@@ -65,13 +65,25 @@ fn setup(slice: u64) -> Setup {
     }
 }
 
+/// A checkpoint's continuation and object graph, without its ids.
+type Logical = (Vec<Vec<u8>>, Vec<Vec<u8>>);
+
+fn logical(checkpoint: &lash_kernel_state::semantic::Checkpoint) -> Logical {
+    (
+        checkpoint.continuation().to_vec(),
+        checkpoint.graph().to_vec(),
+    )
+}
+
 /// What a run leaves observable: its end, what it printed, every request
 /// it handed out, every read-bound `perform` it made, each effect's
 /// origin, and its charge.
 #[derive(Debug, PartialEq)]
 struct Trace {
-    /// The run sealed at each park, and the carry it ended with, encoded.
-    checkpoints: Vec<Vec<u8>>,
+    /// The run sealed at each park, and the carry it ended with, as their
+    /// object graphs: ids depend on seal history and are not compared
+    /// (contract §6, ObjectIds).
+    checkpoints: Vec<Logical>,
     end: String,
     printed: Vec<String>,
     requests: Vec<String>,
@@ -189,9 +201,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             Err(error) => break format!("machine refused: {error:?}"),
         };
         if let Step::Parked(park) = &step {
-            checkpoints.push(lash_kernel_value::tokens::encode_body(
-                &embedder.checkpoint(),
-            ));
+            checkpoints.push(logical(&embedder.machine.semantic_checkpoint()));
             embedder.requests.extend(park.requests.iter().cloned());
             embedder.pending.extend(park.requests.iter().cloned());
         }
@@ -199,7 +209,10 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             if let End::Finished(finished) = end
                 && let Some(carry) = &finished.carry
             {
-                checkpoints.push(lash_kernel_value::tokens::encode_body(carry));
+                checkpoints.push(logical(
+                    &lash_kernel_state::semantic::session(carry, Box::new(embedder.source.clone()))
+                        .expect("the carry reads back"),
+                ));
             }
             break end_of(end);
         }
