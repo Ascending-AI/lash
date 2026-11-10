@@ -127,13 +127,29 @@ fn prepared(registry: &Arc<FunctionRegistry>) -> PreparedLibrary {
 
 /// Test262 executes the worker's operation implementations, including their
 /// interpreted fallbacks, rather than an interpreter-only library fixture.
+/// R8: a native's declared inline specialization names a native version some
+/// installed definition of its helper is at; any other version selects
+/// nothing, so the declaration would never run.
 #[test]
 fn conformance_registry_installs_the_workers_operation_natives() {
     for operation in lash_ext_ts_core::OPERATIONS {
+        let native = registry().native_named(operation);
         assert!(
-            registry().native_named(operation).is_some(),
+            native.is_some(),
             "the worker's {operation} native is missing from the conformance registry"
         );
+        if let Some(inline) = native.and_then(|native| native.specialization().inline) {
+            assert!(
+                registry().named(operation).any(|function| {
+                    registry().get(&function).is_some_and(|registered| {
+                        inline
+                            .for_version(registered.definition().native_version)
+                            .is_some()
+                    })
+                }),
+                "{operation} declares its inline specialization at a native version no installed definition is at"
+            );
+        }
     }
 }
 

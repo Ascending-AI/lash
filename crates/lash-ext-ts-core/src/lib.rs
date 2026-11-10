@@ -222,7 +222,8 @@ impl NativeFunction for Relate {
         lash_kernel_doc::NativeSpecialization {
             immediate: self.prepare(),
             inline: Some(lash_kernel_doc::arena::native::InlineNative {
-                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                // The helpers' definitions state `native 2`.
+                native_version: 2,
                 operation: lash_kernel_doc::arena::native::InlineOperation::Scalar {
                     operation: match self.relation {
                         Relation::Lt => ScalarOp::Lt,
