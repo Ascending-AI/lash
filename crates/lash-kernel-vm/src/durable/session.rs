@@ -243,10 +243,16 @@ pub(crate) fn carry(
     {
         bindings.insert(name.clone(), *value);
     }
+    // A module binding the cell declared and never assigned carries
+    // unbound (`K-SES-001`): the next cell names it, and reading it raises.
     for (name, value) in top_level(vm)? {
-        bindings.insert(name, value);
+        if matches!(value, Value::Absent) {
+            bindings.entry(name).or_insert(value);
+        } else {
+            bindings.insert(name, value);
+        }
     }
-    bindings.retain(|name, value| !matches!(value, Value::Absent) && !host.contains(name));
+    bindings.retain(|name, _| !host.contains(name));
     let (names, mut values): (Vec<Name>, Vec<Value>) = bindings.into_iter().unzip();
     let bound = values.len();
     values.extend_from_slice(&functions);
@@ -441,9 +447,7 @@ fn top_level(vm: &mut Vm<SlotHeap>) -> Result<Vec<(Name, Value)>, MachineError> 
                 }
             };
         }
-        if !matches!(value, Value::Absent) {
-            bound.push((name.clone(), value));
-        }
+        bound.push((name.clone(), value));
     }
     Ok(bound)
 }
