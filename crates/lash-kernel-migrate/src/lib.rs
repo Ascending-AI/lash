@@ -36,6 +36,8 @@ mod migration;
 mod parked;
 pub use parked::{CarryContext, CarryFault, carry_checkpoint, carry_effect};
 mod rewrite;
+mod run;
+pub use run::{Successor, carry_run, run_code};
 mod saved;
 #[cfg(feature = "synthetic-next")]
 mod synthetic;

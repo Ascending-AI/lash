@@ -456,7 +456,7 @@ pub async fn carry_parked_checkpoint(
     rewritten: Rewritten,
     program: lash_kernel_vm::Program,
     bounds: lash_kernel_vm::Bounds,
-    mut context: lash_kernel_migrate::CarryContext,
+    context: lash_kernel_migrate::CarryContext,
 ) -> Result<(NodeId, Vec<EncodedNode>), CarryFault> {
     let RootOwner::Exec(exec) = &request.owner else {
         return Err(refused("a checkpoint carry requires an execution owner"));
@@ -471,25 +471,46 @@ pub async fn carry_parked_checkpoint(
             grant: PageGrant::NONE,
         };
         let answer = source.read(&[reference])?.remove(0)?;
-        let checkpoint = Checkpoint::of_answer(&answer)?;
-        if checkpoint.header().owner != PageId(owner.0) {
+        let parked = Checkpoint::of_answer(&answer)?;
+        let header = parked.header();
+        if header.owner != PageId(owner.0) {
             return Err(refused("checkpoint belongs to another execution owner"));
         }
-        let live =
-            lash_kernel_state::paged::checkpoint_code(&checkpoint, Box::new(source.clone()))?;
+        if header.kernel != context.kernel {
+            return Err(ParkedRefusal::Version {
+                found: header.kernel,
+                from: context.kernel,
+            }
+            .into());
+        }
+        if header.closure != context.closure {
+            return Err(refused("checkpoint closure differs from its pinned code"));
+        }
+        if header.document != rewritten.correspondence.base {
+            return Err(ParkedRefusal::Document {
+                parked: header.document,
+                rewritten: rewritten.correspondence.base,
+            }
+            .into());
+        }
+        let live = lash_kernel_migrate::run_code(&mut source, &parked)?;
         for (link, unit) in &live.frames {
             match unit {
-                lash_kernel_value::sites::Unit::Main if *link == checkpoint.header().link => {}
+                lash_kernel_value::sites::Unit::Main
+                | lash_kernel_value::sites::Unit::Function(_)
+                    if *link == header.link => {}
                 lash_kernel_value::sites::Unit::Library(function) => {
                     check_origin(*link, *function, &context, &program)?;
                 }
-                _ => return Err(refused("foreign frame has no authenticated defining code")),
+                lash_kernel_value::sites::Unit::Main
+                | lash_kernel_value::sites::Unit::Function(_) => {
+                    return Err(refused("foreign frame has no authenticated defining code"));
+                }
             }
         }
         for callable in &live.callables {
             check_origin(callable.link, callable.function, &context, &program)?;
         }
-        context.retained = live.callables;
         for (before, after) in &context.uses {
             let old = context
                 .links
@@ -516,73 +537,22 @@ pub async fn carry_parked_checkpoint(
                 ));
             }
         }
-        let documents = program
-            .instances
-            .iter()
-            .filter_map(|(link, instance)| {
-                program
-                    .documents
-                    .get(&instance.document)
-                    .map(|document| (*link, document.as_ref().clone()))
-            })
-            .collect();
-        let imports = program
-            .instances
-            .iter()
-            .flat_map(|(link, instance)| {
-                instance
-                    .slots
-                    .iter()
-                    .filter_map(move |(slot, fill)| match fill {
-                        lash_kernel_vm::PreparedSlot::Function { callable, .. } => {
-                            Some(((*link, *slot), *callable))
-                        }
-                        _ => None,
-                    })
-            })
-            .collect();
-        // A parent-produced mismatch proof is membership-only here. A direct
-        // carry caller still performs compatibility before the first write.
-        match &context.selection {
-            lash_kernel_doc::Selection::Restored(selection) => {
-                lash_kernel_state::paged::check_helper_compatibility(
-                    checkpoint.header().helper_library,
-                    || Ok(lash_kernel_state::paged::HelperPins(selection.pins.clone())),
-                    program.helpers(),
-                )
-                .map_err(carry_helper_refusal)?;
-            }
-            lash_kernel_doc::Selection::Fresh => {
-                checkpoint
-                    .check_helper_compatibility(
-                        Box::new(source.clone()),
-                        &documents,
-                        &imports,
-                        program.helpers(),
-                    )
-                    .map_err(carry_helper_refusal)?;
-            }
-        }
-        let rewritten = qualify_correspondence(
-            rewritten,
-            checkpoint.header().link,
-            &context.links,
-            &documents
-                .iter()
-                .filter(|(link, _)| **link != program.link)
-                .map(|(link, doc)| (*link, doc.clone()))
-                .collect(),
-            &context.code,
-        )?;
-        let (page, checkpoint) = lash_kernel_migrate::carry_checkpoint(
+        // The core's own open refuses a helper the live resume closure pins
+        // and this image lacks (contract §7); the carry checks no helper.
+        let map = run_correspondence(header.link, &live, &rewritten, &program)?;
+        let page = lash_kernel_migrate::carry_run(
             &mut source,
-            &checkpoint,
-            &rewritten,
-            program.closure,
-            program.link,
-            &context,
-            program.helpers(),
+            &parked,
+            &map,
+            lash_kernel_migrate::Successor {
+                document: rewritten.identity(),
+                kernel: program.document.kernel(),
+                closure: program.closure,
+                helper_library: program.helpers().identity(),
+            },
         )?;
+        let sealed = source.read(&[page])?.remove(0)?;
+        let checkpoint = Checkpoint::of_answer(&sealed)?;
         lash_kernel_vm::validate_foreign_checkpoint(
             program,
             bounds,
@@ -601,6 +571,59 @@ pub async fn carry_parked_checkpoint(
     })
     .await
     .map_err(|error| HeapFault::Transport(error.to_string()))?
+}
+
+/// The run's code ids onto the successor: the predecessor's Link and
+/// every callable of it onto the successor's, a library function onto its
+/// redeclaration, a site of the predecessor's own code onto its survivor;
+/// code of any other Link keeps its identity and must be in the successor.
+fn run_correspondence(
+    predecessor: lash_kernel_value::LinkId,
+    live: &lash_kernel_state::paged::run::rewrite::LiveCode,
+    rewritten: &Rewritten,
+    program: &lash_kernel_vm::Program,
+) -> Result<lash_kernel_state::paged::run::rewrite::RunCorrespondence, CarryFault> {
+    use lash_kernel_state::paged::run::rewrite::{RunCorrespondence, SiteMap};
+    let successor = program.link;
+    let function =
+        |id: lash_kernel_value::FunctionId| rewritten.functions.get(&id).copied().unwrap_or(id);
+    let mut map = RunCorrespondence {
+        sites: Some(SiteMap::new(rewritten.correspondence.clone())),
+        ..RunCorrespondence::default()
+    };
+    map.links.insert(predecessor, successor);
+    for link in live.links.iter().filter(|link| **link != predecessor) {
+        if !program.instances.contains_key(link) {
+            return Err(refused(
+                "live code's defining Link is absent from the successor",
+            ));
+        }
+        map.links.insert(*link, *link);
+    }
+    for id in &live.functions {
+        map.functions.insert(*id, function(*id));
+    }
+    for callable in &live.callables {
+        let image = if callable.link == predecessor {
+            let image = function(callable.function);
+            if !program.document.functions.contains_key(&image)
+                && !program.helpers().contains(&image)
+            {
+                return Err(ParkedRefusal::FunctionNotCarried {
+                    function: callable.function,
+                }
+                .into());
+            }
+            lash_kernel_value::CallableId {
+                link: successor,
+                function: image,
+            }
+        } else {
+            *callable
+        };
+        map.callables.insert(*callable, image);
+    }
+    Ok(map)
 }
 
 pub(super) async fn leased_pages(
@@ -628,16 +651,6 @@ pub(super) async fn leased_pages(
         }),
         nodes: Arc::default(),
     })
-}
-
-fn carry_helper_refusal(error: lash_kernel_state::paged::HelperCompatibilityError) -> CarryFault {
-    match error {
-        lash_kernel_state::paged::HelperCompatibilityError::Heap(fault) => CarryFault::Heap(fault),
-        lash_kernel_state::paged::HelperCompatibilityError::HelperUnavailable {
-            reason,
-            function,
-        } => CarryFault::Refused(ParkedRefusal::HelperUnavailable { reason, function }),
-    }
 }
 
 fn carried_reach(
