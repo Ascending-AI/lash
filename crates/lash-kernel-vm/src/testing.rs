@@ -8,7 +8,7 @@ use lash_kernel_state::paged::{Checkpoint, PageSource};
 
 /// The execution paths an embedder can compare without naming VM layout.
 /// Every strategy runs the one bytecode core: a start or open takes no
-/// strategy, and [`library`] alone reprepares helpers under its layout.
+/// strategy, and [`library`] alone reprepares the helpers it selects.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ExecutionStrategy {
     #[default]
@@ -60,8 +60,52 @@ pub fn semantic_checkpoint(
 }
 
 /// Prepares the same installed definitions under the selected strategy.
+///
+/// Under [`ExecutionStrategy::Interpreted`] every definition that has a body
+/// is registered without its native, so the core calls the body where it
+/// would call the native (`K-LIB-006`): the two give equal values, errors
+/// and charge. A definition with no body keeps its native.
+///
+/// # Panics
+/// When the installed registry refuses one of its own definitions again.
 pub fn library(library: &PreparedLibrary, strategy: ExecutionStrategy) -> PreparedLibrary {
-    library.in_layout(strategy.layout())
+    if strategy != ExecutionStrategy::Interpreted {
+        return library.in_layout(strategy.layout());
+    }
+    let registry = library.registry();
+    // Declarations admit a native definition the installed registry also
+    // holds without its implementation; nothing else differs.
+    let mut bodies = lash_kernel_doc::FunctionRegistry::declarations();
+    let mut placed = std::collections::BTreeSet::new();
+    for (function, _) in registry.iter() {
+        let mut pending = vec![(*function, false)];
+        while let Some((function, ready)) = pending.pop() {
+            if placed.contains(&function) {
+                continue;
+            }
+            let Some(registered) = registry.get(&function) else {
+                continue;
+            };
+            if !ready {
+                pending.push((function, true));
+                pending.extend(registered.callees().map(|callee| (callee, false)));
+                continue;
+            }
+            let definition = (**registered.definition()).clone();
+            let native = match definition.body() {
+                Some(_) => None,
+                None => registered.native().cloned(),
+            };
+            bodies
+                .register(definition, native)
+                .unwrap_or_else(|error| panic!("{function} registers without its native: {error}"));
+            placed.insert(function);
+        }
+    }
+    PreparedLibrary::with_helpers(
+        std::sync::Arc::new(bodies),
+        std::sync::Arc::clone(library.helpers()),
+    )
 }
 
 /// Starts a law's run under the selected strategy.
@@ -127,4 +171,67 @@ pub fn compile_document(
         problem: problem.to_string(),
     })?;
     Ok(BytecodeProgram { _code: code })
+}
+
+/// How a registered definition runs on the core.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DefinitionClass {
+    /// A native answers every call.
+    NativeOnly,
+    /// The kernel-code body runs every call.
+    BodyOnly,
+    /// The native answers; on a decline, or with natives off, the body.
+    Both,
+    /// The machine answers it itself (`K-LIB-010`).
+    Machine,
+    /// Its native is stated but not installed: no machine can call it.
+    Declared,
+}
+
+/// Classifies every definition `registry` holds and compiles each body, with
+/// everything it calls, on the core as a run's entry. Gives each function's
+/// class, or the core's refusal to compile its body.
+pub fn library_inventory(
+    registry: &lash_kernel_doc::FunctionRegistry,
+) -> Vec<(
+    lash_kernel_value::names::FunctionId,
+    String,
+    Result<DefinitionClass, StartError>,
+)> {
+    let empty = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
+    let link = lash_kernel_value::LinkId::from_bytes([0; 32]);
+    registry
+        .iter()
+        .map(|(function, registered)| {
+            let definition = registered.definition();
+            let class = if crate::functions::machine_function(definition).is_some() {
+                Ok(DefinitionClass::Machine)
+            } else {
+                let compiled = match definition.body() {
+                    Some(_) => crate::bytecode::compile::compile(
+                        &empty,
+                        registry,
+                        link,
+                        &[],
+                        Some(*function),
+                        None,
+                    )
+                    .map(drop)
+                    .map_err(|problem| StartError::Linked {
+                        problem: problem.to_string(),
+                    }),
+                    None => Ok(()),
+                };
+                compiled.map(|()| {
+                    match (definition.body().is_some(), registered.native().is_some()) {
+                        (true, true) => DefinitionClass::Both,
+                        (true, false) => DefinitionClass::BodyOnly,
+                        (false, true) => DefinitionClass::NativeOnly,
+                        (false, false) => DefinitionClass::Declared,
+                    }
+                })
+            };
+            (*function, definition.name.as_str().to_owned(), class)
+        })
+        .collect()
 }

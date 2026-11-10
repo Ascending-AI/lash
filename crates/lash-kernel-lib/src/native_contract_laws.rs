@@ -1441,3 +1441,85 @@ fn more_shapes(registry: &FunctionRegistry) -> usize {
     }
     checked
 }
+
+/// K-LIB-006 / K-BND-002 (G147): a Declined native's nursery is released
+/// before its body runs. A native that builds 48 KiB and declines leaves the
+/// body the room a body-only call has: at the least memory bound the
+/// body-only run finishes under, the declining run finishes with the same
+/// result and charge.
+#[test]
+fn a_declined_natives_nursery_is_released_before_the_body_runs() {
+    use lash_kernel_vm::{Bounds, Charge, CoreMachine, End, Machine, PreparedLibrary, Step};
+    struct BuildsThenDeclines;
+    impl lash_kernel_doc::NativeFunction for BuildsThenDeclines {
+        fn call(&self, call: lash_kernel_doc::NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            let built = "n".repeat(48 << 10);
+            call.new.reserve(1, built.len() as u64)?;
+            let _ = call.new.text(&built);
+            Err(NativeError::Decline)
+        }
+    }
+    let run = |native: bool, memory: u64| {
+        let mut registry = FunctionRegistry::new();
+        lash_kernel_vm::register_machine_functions(&mut registry).unwrap();
+        crate::register_text_json(&mut registry).unwrap();
+        let repeat = registry.named("text.repeat").next().unwrap();
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function probe.fill(n: Int) -> Text\nkernel 1\ncharge 5\nnative\nbody {{ return text.repeat(\"b\", n) }}\nuse text.repeat = @{repeat}"
+        ))
+        .unwrap();
+        let native: Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> =
+            native.then(|| std::sync::Arc::new(BuildsThenDeclines) as _);
+        registry.register(definition, native).unwrap();
+        let document = std::sync::Arc::new(crate::testsupport::document(
+            "kernel 1\nmain { return text.len(probe.fill(49152)) }",
+            &registry,
+        ));
+        let program = crate::testsupport::program(
+            document,
+            PreparedLibrary::new(std::sync::Arc::new(registry)),
+        );
+        let mut machine = CoreMachine::start(
+            program,
+            Bounds {
+                memory_meter: lash_kernel_vm::MemoryMeter::On,
+                charge: Charge::Exact,
+                charge_limit: u64::MAX,
+                memory,
+                call_depth: 100,
+                live_tasks: 100,
+                requests_per_park: 100,
+                join_members: 100,
+            },
+            lash_kernel_vm::CellStart {
+                owner: lash_kernel_doc::heap::PageId([9; 32]),
+                target: lash_kernel_vm::Target::Main,
+                args: vec![],
+                session: None,
+                modes: Default::default(),
+                host: vec![],
+            },
+            Box::<crate::testsupport::Source>::default(),
+        )
+        .unwrap();
+        let step = machine
+            .run(&mut crate::testsupport::World::default(), u64::MAX)
+            .unwrap();
+        let Step::Ended(end) = step else {
+            panic!("the run ends")
+        };
+        (end, machine.meters().charged)
+    };
+    let finishes = |native, memory| matches!(run(native, memory).0, End::Finished(_));
+    let (mut low, mut high) = (0u64, 64 << 20);
+    assert!(finishes(false, high));
+    while low + 1 < high {
+        let middle = low + (high - low) / 2;
+        if finishes(false, middle) {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    assert_eq!(run(true, high), run(false, high), "memory bound {high}");
+}

@@ -651,6 +651,15 @@ fn write(
 /// `not_data`; no value is silently omitted or coerced. NaN/infinity raise
 /// `json_number`, non-text map keys `json_key`, excessive nesting `json_depth`.
 /// The text is reserved in `new` as it grows.
+///
+/// Number tokens (`K-LJSON-004`): an integer is its exact decimal digits; a
+/// finite float is its canonical spelling (`K-VAL-031`, `K-VAL-032`); a
+/// non-finite float has no token and raises `json_number`. Whichever answers
+/// a call, this native or a kernel-code body standing beside it, writes the
+/// same text (`K-LIB-006`). Python's `json.dumps` and ECMAScript's
+/// `JSON.stringify` keep their own spellings through their helpers, which
+/// pass them to `json.encode` and `json.render` as layout and style; a change
+/// to any spelling is a new native version (`K-VER-002`).
 pub fn stringify_json<'call>(
     value: &Value,
     args: &Args<'call>,

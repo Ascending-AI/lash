@@ -95,7 +95,8 @@ pub(crate) fn implement(
             lash_kernel_vm::implement_machine_functions(registry)
                 .map_err(|error| error.to_string())?;
             lash_kernel_lib::implement_brands(registry).map_err(|error| error.to_string())?;
-            lash_kernel_lib::implement_collections(registry).map_err(|error| error.to_string())
+            lash_kernel_lib::implement_collections(registry).map_err(|error| error.to_string())?;
+            implement_retained(registry)
         }
         #[cfg(feature = "dialect-typescript")]
         "regex.ecma" => lash_ext_regex_ecma::implement(
@@ -118,4 +119,38 @@ pub(crate) fn implement(
             .map_err(|error| error.to_string()),
         _ => Ok(()),
     }
+}
+
+/// Adds the retained native of every archived kernel-library definition the
+/// registry holds (ADR 0149, `K-LIB-011`): a definition binds the native
+/// version it states, and archived helpers still call the superseded ones.
+#[allow(
+    dead_code,
+    reason = "a worker implements the packages; the build defines them"
+)]
+fn implement_retained(registry: &mut FunctionRegistry) -> Result<(), String> {
+    let archived: Vec<_> = registry
+        .iter()
+        .filter(|(_, registered)| {
+            let definition = registered.definition();
+            definition.has_native()
+                && registered.native().is_none()
+                && definition.native_version != lash_kernel_lib::native_version(registered.name())
+        })
+        .map(|(function, registered)| {
+            (
+                *function,
+                registered.name().to_owned(),
+                registered.definition().native_version,
+            )
+        })
+        .collect();
+    for (function, name, version) in archived {
+        if let Some(native) = lash_kernel_lib::retained_native(&name, version) {
+            registry
+                .implement(function, native)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }

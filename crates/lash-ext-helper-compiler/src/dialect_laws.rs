@@ -71,8 +71,23 @@ impl Fixture {
             .expect("closed helper image"),
         );
         let library = built.names;
+        let mut registry = built.registry;
+        if dialect == Dialect::TypeScript {
+            // The extension operations are declarations until their natives
+            // are installed, as a worker installs them; the core links every
+            // callee a program names when it starts.
+            let functions: Vec<_> = registry.iter().map(|(id, _)| *id).collect();
+            lash_ext_date_ecma::implement(&mut registry, functions.iter().copied())
+                .expect("date natives");
+            lash_ext_url_whatwg::implement(&mut registry, functions).expect("url natives");
+            lash_ext_regex_ecma::implement(
+                &mut registry,
+                &Arc::new(lash_ext_regex_ecma::Engine::new(4)),
+            )
+            .expect("regex natives");
+        }
         Self {
-            registry: Arc::new(built.registry),
+            registry: Arc::new(registry),
             library,
             helpers,
         }
