@@ -216,22 +216,32 @@ impl<H: Heap> Vm<H> {
 
     /// Copies `value`, which no frame holds, out of a run that has
     /// stopped, loading each chunk it reaches cold.
-    pub(crate) fn copy_stopped(&mut self, value: Value) -> Result<Datum, String> {
+    pub(crate) fn copy_stopped(&mut self, value: Value) -> Result<Datum, StoppedCopy> {
         self.held.push(value);
         let copied = loop {
             match crate::data::copy_out(self.heap.arena(), self.value_depth, &value) {
                 Err(crate::data::CopyError::Cold { object, chunk }) => {
                     if let Err(stop) = self.reload(object, chunk) {
-                        break Err(format!("{stop:?}"));
+                        break Err(StoppedCopy::Fault(format!("{stop:?}")));
                     }
                 }
                 Ok(datum) => break Ok(datum),
-                Err(error) => break Err(format!("{error:?}")),
+                Err(crate::data::CopyError::Raised(raised)) => {
+                    break Err(StoppedCopy::Raised(raised));
+                }
+                Err(error) => break Err(StoppedCopy::Fault(format!("{error:?}"))),
             }
         };
         self.held.pop();
         copied
     }
+}
+
+/// Why a stopped run's value did not copy out: a typed copy failure the
+/// value itself raises (`K-EFF-002`), or a machine fault.
+pub(crate) enum StoppedCopy {
+    Raised(crate::data::Raised),
+    Fault(String),
 }
 
 /// Builds `datum`, already decoded by its type, in `into`'s heap.

@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use lash_kernel_value::sites::Site;
+
 use super::{Exceeded, Flow, Stop, Vm};
 use crate::Bound;
 use crate::heap::Heap;
@@ -18,24 +20,7 @@ impl<H: Heap> Vm<H> {
     /// stands. A frame below the top stands past its call, the top past the
     /// op that passed the bound or, not `past`, at it.
     pub(super) fn exceeded_at(&self, bound: Bound, limit: u64, past: bool) -> Exceeded {
-        let top = self.cx.frames.len();
-        let authored = self
-            .cx
-            .frames
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(at, frame)| {
-                let unit = self.program.unit(frame.unit);
-                let pc = match at + 1 == top && !past {
-                    true => Some(frame.pc as usize),
-                    false => (frame.pc as usize).checked_sub(1),
-                };
-                unit.authored.then_some(unit).map(|unit| {
-                    let site = pc.and_then(|pc| unit.statement(pc));
-                    (unit, site.unwrap_or_else(|| unit.site.clone()))
-                })
-            });
+        let authored = self.authored_statement(past);
         let (function, site) = match authored {
             Some((unit, site)) => (Some(unit.name.clone()), Some(site)),
             None => {
@@ -56,6 +41,73 @@ impl<H: Heap> Vm<H> {
             limit,
             function,
             site,
+        }
+    }
+
+    /// The nearest authored function and the statement it stands in: a
+    /// frame below the top stands past its call, the top past its op or,
+    /// not `past`, at it.
+    fn authored_statement(&self, past: bool) -> Option<(&crate::bytecode::program::Unit, Site)> {
+        let top = self.cx.frames.len();
+        self.cx
+            .frames
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(at, frame)| {
+                let unit = self.program.unit(frame.unit);
+                let pc = match at + 1 == top && !past {
+                    true => Some(frame.pc as usize),
+                    false => (frame.pc as usize).checked_sub(1),
+                };
+                unit.authored.then_some(unit).map(|unit| {
+                    let site = pc.and_then(|pc| unit.statement(pc));
+                    (unit, site.unwrap_or_else(|| unit.site.clone()))
+                })
+            })
+    }
+
+    /// Where a raise the running op made stands in document code, for an
+    /// uncaught end (`RunError::Uncaught`): the nearest authored
+    /// statement, none once a run-root cleanup holds the raise.
+    pub(super) fn raise_site(&self) -> Option<Site> {
+        if let [root] = self.cx.frames.as_slice()
+            && self.cx.inline.is_none()
+            && self
+                .program
+                .unit(root.unit)
+                .cleanup
+                .is_some_and(|cleanup| root.pc > cleanup.body)
+        {
+            return None;
+        }
+        if let Some(site) = self.wait_site() {
+            return Some(site);
+        }
+        self.authored_statement(true).map(|(_, site)| site)
+    }
+
+    /// The site of the wait action (`perform`, `join`) the running
+    /// authored frame stands past, whose outcome raised: the action's own
+    /// expression, not its statement.
+    fn wait_site(&self) -> Option<Site> {
+        use crate::bytecode::site_tables::ActionKind;
+        if self.cx.inline.is_some() {
+            return None;
+        }
+        let frame = self.cx.frames.last()?;
+        let unit = self.program.unit(frame.unit);
+        let pc = (frame.pc as usize).checked_sub(1)?;
+        let crate::bytecode::op::Op::Action(n) = unit.original(pc)? else {
+            return None;
+        };
+        let action = unit.actions.get(n as usize)?;
+        match unit.authored && ActionKind::of(action).outcome_raises() {
+            true => Some(Site::new(
+                unit.site.unit.clone(),
+                unit.origin.get(pc)?.to_vec(),
+            )),
+            false => None,
         }
     }
 

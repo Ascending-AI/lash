@@ -83,6 +83,12 @@ pub enum ActionKind {
 }
 
 impl ActionKind {
+    /// Whether the action's outcome can raise, an uncaught raise then
+    /// naming the action itself: `perform` and `join`.
+    pub fn outcome_raises(self) -> bool {
+        matches!(self, Self::Perform | Self::Join | Self::JoinMany)
+    }
+
     pub fn of(action: &ActionSite) -> Self {
         match action {
             ActionSite::Perform { .. } => Self::Perform,

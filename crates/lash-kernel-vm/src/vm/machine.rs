@@ -966,9 +966,19 @@ impl CoreMachine {
     }
 
     fn uncaught(&mut self, value: Value) -> Result<Step, MachineError> {
-        match self.vm.copy_stopped(value) {
-            Ok(error) => self.ended(End::Error(RunError::Uncaught { error, site: None })),
-            Err(error) => {
+        let site = self.vm.raised_at.take();
+        let error = self.vm.copy_stopped(value);
+        match error {
+            Ok(error) => self.ended(End::Error(RunError::Uncaught { error, site })),
+            Err(super::datum::StoppedCopy::Raised(raised)) => {
+                let error = Datum::Error(Box::new(lash_kernel_doc::ErrorDatum::new(
+                    raised.kind.into(),
+                    raised.message,
+                    Datum::Null,
+                )));
+                self.ended(End::Error(RunError::Uncaught { error, site }))
+            }
+            Err(super::datum::StoppedCopy::Fault(error)) => {
                 self.ended = true;
                 Err(MachineError::Fault {
                     problem: format!("an uncaught value does not copy out: {error}"),
