@@ -16,7 +16,7 @@ use lash_kernel_state::arena::{Arena, ArenaSemantics, Visit};
 use lash_kernel_state::arena::{LOOKUP, ProxyKind};
 use lash_kernel_state::paged::run::chunked::{Chunked, Members, Placement, placement};
 use lash_kernel_state::paged::run::ids::ObjectId;
-use lash_kernel_state::paged::run::objects::{ObjectKind, Record};
+use lash_kernel_state::paged::run::objects::{ObjectKind, Paged, PagedNode, Record};
 
 use super::open;
 use super::{Heap, LoadError, MemoryRefused};
@@ -54,6 +54,11 @@ pub(crate) struct SlotHeap {
     durable: Option<super::open::Durable>,
     /// The large lists and tables the heap opened or wrote by chunk.
     large: super::large::Large,
+    /// The edge each cold chunk of a paged text or bytes stands for, by
+    /// object and in chunk order (none for a resident chunk): the counts
+    /// and identity its parent's read certified, which its own read is
+    /// checked against.
+    payloads: std::collections::HashMap<ObjectId, Vec<Option<Paged>>>,
     /// The edge summary of each cold object the collector traced past,
     /// from its row in the current directory, until the next seal.
     summaries: std::collections::HashMap<ObjectId, Vec<lash_kernel_doc::heap::EntityId>>,
@@ -73,6 +78,7 @@ impl SlotHeap {
             arena: Arena::new(),
             durable: None,
             large: super::large::Large::default(),
+            payloads: std::collections::HashMap::new(),
             summaries: std::collections::HashMap::new(),
             units: Vec::new(),
             held: 0,
@@ -357,10 +363,11 @@ impl SlotHeap {
     ) -> Result<(), LoadError> {
         use lash_kernel_doc::heap::HeapFault;
         let malformed = |reason: String| LoadError::Store(HeapFault::Malformed(reason));
-        let Some(id) = open::id_of(&self.arena, object)
-            .ok()
-            .filter(|id| self.large.row(*id).is_some())
-        else {
+        let id = open::id_of(&self.arena, object).ok();
+        if let Some(id) = id.filter(|id| self.payloads.contains_key(id)) {
+            return self.read_payload(object, id, chunk, roots);
+        }
+        let Some(id) = id.filter(|id| self.large.row(*id).is_some()) else {
             return Ok(());
         };
         let cold = |heap: &Self, chunk: u32| -> Result<bool, LoadError> {
@@ -423,6 +430,89 @@ impl SlotHeap {
                 self.resettle(object);
             }
         }
+        Ok(())
+    }
+
+    /// Reads cold chunk `chunk` of the paged text or bytes `object` (the
+    /// object `id`): the one node its edge names, checked against the
+    /// counts and identity that edge commits to. A leaf becomes resident;
+    /// an index node becomes one cold chunk per child, each standing for
+    /// the edge the read certified.
+    fn read_payload(
+        &mut self,
+        object: ArenaHandle,
+        id: ObjectId,
+        chunk: u32,
+        roots: &mut dyn FnMut(&mut Visit<'_>),
+    ) -> Result<(), LoadError> {
+        use lash_kernel_doc::heap::HeapFault;
+        use lash_kernel_state::arena::PayloadPart;
+        let malformed = |reason: String| LoadError::Store(HeapFault::Malformed(reason));
+        let edge = self
+            .payloads
+            .get(&id)
+            .and_then(|edges| edges.get(chunk as usize).copied().flatten())
+            .ok_or_else(|| malformed(format!("payload {} has no cold chunk {chunk}", id.0)))?;
+        let span = self
+            .arena
+            .payload_chunk(object, chunk)
+            .map_err(|error| malformed(error.to_string()))?;
+        // A chunk's length saturates at `u32::MAX`; its node's read then
+        // checks its counts.
+        if span.is_none_or(|span| {
+            let len = span.end - span.start;
+            len != edge.summary.utf8_bytes && len != u64::from(u32::MAX)
+        }) {
+            return Err(malformed(format!(
+                "payload {} chunk {chunk} is not the node its edge names",
+                id.0
+            )));
+        }
+        let durable = self
+            .durable
+            .as_ref()
+            .ok_or_else(|| malformed("a paged payload in a heap with no directory".into()))?;
+        let node = edge
+            .node(durable.directory.access())
+            .map_err(LoadError::Store)?;
+        let (part, edges) = match node {
+            PagedNode::Leaf(bytes) => {
+                let wanted = bytes.len() as u64;
+                if self.admit(wanted).is_err() {
+                    self.collect(roots);
+                    self.admit(wanted).map_err(LoadError::Memory)?;
+                }
+                self.held = self.held.saturating_sub(wanted);
+                (PayloadPart::Leaf(bytes), vec![None])
+            }
+            PagedNode::Index(children) => (
+                PayloadPart::Index(
+                    children
+                        .iter()
+                        .map(|child| (child.root.page, child.summary.utf8_bytes))
+                        .collect(),
+                ),
+                children.into_iter().map(Some).collect(),
+            ),
+        };
+        self.arena
+            .decoded_payload(object, chunk, part)
+            .map_err(|error| malformed(error.to_string()))?;
+        if let Some(held) = self.payloads.get_mut(&id) {
+            held.splice(chunk as usize..=chunk as usize, edges);
+            if held.iter().all(Option::is_none) {
+                self.payloads.remove(&id);
+            }
+        }
+        // It holds what its body does.
+        let before = self
+            .units
+            .get(object.index() as usize)
+            .copied()
+            .unwrap_or(0);
+        let now = self.arena.body(object).map_or(0, super::meter::body);
+        self.held = self.held.saturating_sub(before).saturating_add(now);
+        self.place(object, now);
         Ok(())
     }
 
@@ -829,41 +919,22 @@ impl Heap for SlotHeap {
         {
             return Err(refuse!(paged.head()));
         }
-        // A text or bytes past one payload leaf opens whole, read from its
-        // payload tree once its growth is admitted.
-        let paged = match &row.record {
+        // A text or bytes past one payload leaf opens cold: one chunk
+        // standing for its root, read node by node as reads reach it.
+        let body = match &row.record {
             Record::Paged(paged) => {
-                let durable = self.durable.as_ref().ok_or_else(|| {
-                    malformed("a paged payload in a heap with no directory".into())
-                })?;
-                let whole = paged
-                    .read(durable.directory.access())
-                    .map_err(LoadError::Store)?;
-                Some(if paged.text {
-                    Record::LongText(
-                        String::from_utf8(whole)
-                            .map_err(|error| malformed(error.to_string()))?
-                            .into(),
-                    )
-                } else {
-                    Record::Bytes(whole.into())
-                })
+                self.payloads.insert(id, vec![Some(*paged)]);
+                payload_body(paged)
             }
-            _ => None,
+            record => open::body(&mut self.arena, record, &row.heads).map_err(malformed)?,
         };
-        let body = open::body(
-            &mut self.arena,
-            paged.as_ref().unwrap_or(&row.record),
-            &row.heads,
-        )
-        .map_err(malformed)?;
         for (id, units) in fresh {
             if let Some(handle) = self.arena.entity_handle(open::entity(id)) {
                 self.place(handle, units);
             }
         }
         if let Some(head) = head
-            && paged.is_none()
+            && !matches!(row.record, Record::Paged(_))
         {
             let held = self.arena.detached_head(&body);
             if held.as_ref().ok() != Some(&head) {
@@ -882,5 +953,28 @@ impl Heap for SlotHeap {
             .saturating_add(now);
         self.place(object, now);
         Ok(())
+    }
+}
+
+/// The body a paged text or bytes opens to: its counts, and one cold chunk
+/// standing for its root.
+fn payload_body(paged: &Paged) -> lash_kernel_doc::arena::Body {
+    use lash_kernel_doc::arena::{Body, Bytes, Chunk};
+    fn root<T>(paged: &Paged) -> [Chunk<T>; 1] {
+        [Chunk::Cold {
+            page: paged.root.page,
+            len: u32::try_from(paged.summary.utf8_bytes).unwrap_or(u32::MAX),
+        }]
+    }
+    if paged.text {
+        Body::LongText(lash_kernel_doc::arena::LongText {
+            summary: paged.summary,
+            chunks: Box::new(root(paged)),
+        })
+    } else {
+        Body::Bytes(Bytes {
+            len: paged.summary.utf8_bytes,
+            chunks: Box::new(root(paged)),
+        })
     }
 }

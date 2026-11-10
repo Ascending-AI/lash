@@ -516,6 +516,51 @@ impl<'call> BytesView<'call> {
             .map(move |(at, chunk)| resident(object, at as u32, chunk))
     }
 
+    /// Bytes `range` of the value, which is within it, borrowed when one
+    /// resident chunk holds them. Only the chunks the range overlaps are
+    /// read: a cold chunk before it is skipped by its length, so a read
+    /// faults the payload path to the bytes it addresses (FIG-6193).
+    pub fn range(self, range: std::ops::Range<u64>) -> Result<Cow<'call, [u8]>, NativeError> {
+        if let Some(bytes) = self.as_slice() {
+            return bytes
+                .get(range.start as usize..range.end as usize)
+                .map(Cow::Borrowed)
+                .ok_or(NativeError::Malformed("a bytes range is outside its value"));
+        }
+        if range.start >= range.end {
+            return Ok(Cow::Borrowed(&[]));
+        }
+        let mut out: Option<Cow<'call, [u8]>> = None;
+        let mut offset = 0u64;
+        for (at, chunk) in self.bytes.chunks.iter().enumerate() {
+            if offset >= range.end {
+                break;
+            }
+            let len = match chunk {
+                // A length past `u32` saturates: such a chunk is decoded
+                // before anything after it is placed.
+                Chunk::Cold { len, .. } if *len != u32::MAX => u64::from(*len),
+                _ => resident(self.object, at as u32, chunk)?.len() as u64,
+            };
+            let end = offset + len;
+            if end > range.start && offset < range.end {
+                let held = resident(self.object, at as u32, chunk)?;
+                let part = &held[range.start.saturating_sub(offset) as usize
+                    ..(range.end.min(end) - offset) as usize];
+                out = Some(match out {
+                    None => Cow::Borrowed(part),
+                    Some(previous) => {
+                        let mut joined = previous.into_owned();
+                        joined.extend_from_slice(part);
+                        Cow::Owned(joined)
+                    }
+                });
+            }
+            offset = end;
+        }
+        Ok(out.unwrap_or(Cow::Borrowed(&[])))
+    }
+
     /// The bytes whole, borrowed when they are one resident piece.
     pub fn whole(self) -> Result<Cow<'call, [u8]>, NativeError> {
         if let Some(bytes) = self.as_slice() {

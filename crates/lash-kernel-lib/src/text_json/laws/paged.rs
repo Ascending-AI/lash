@@ -15,17 +15,39 @@ use lash_kernel_vm::{
 
 use crate::testsupport::{Source, World};
 
-/// The pages a source has read.
+/// The pages a source has read, the payload leaves among them, and a page
+/// it answers with another's content.
 #[derive(Clone, Default)]
 struct Counting {
     inner: Source,
     reads: Rc<Cell<u64>>,
+    leaves: Rc<std::cell::RefCell<Vec<PageId>>>,
+    swap: Rc<Cell<Option<(PageId, PageId)>>>,
 }
 
 impl PageSource for Counting {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         self.reads.set(self.reads.get() + pages.len() as u64);
-        self.inner.read(pages)
+        let asked: Vec<PageRef> = pages
+            .iter()
+            .map(|page| match self.swap.get() {
+                Some((from, to)) if page.id == from => PageRef { id: to, ..*page },
+                _ => *page,
+            })
+            .collect();
+        let mut answers = self.inner.read(&asked)?;
+        for (page, answer) in pages.iter().zip(&mut answers) {
+            if let Ok(answer) = answer {
+                // A substituted answer names the page it was asked for.
+                answer.page = *page;
+            }
+            if let Ok(answer) = answer
+                && answer.kind == lash_kernel_state::paged::PageKind::PAYLOAD_LEAF
+            {
+                self.leaves.borrow_mut().push(page.id);
+            }
+        }
+        Ok(answers)
     }
     fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
         self.inner.seal(body)
@@ -55,7 +77,14 @@ fn program(operation: &str) -> Program {
     let mut text = String::from(
         "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Any) -> Any\n",
     );
-    text.push_str(&ENTRY.replace("text.utf16_slice", operation));
+    let entry = ENTRY.replace("text.utf16_slice", operation);
+    // A bytes operation takes its bytes as the entry's argument.
+    let entry = if operation.starts_with("bytes.") {
+        entry.replace("t: Text", "t: Bytes")
+    } else {
+        entry
+    };
+    text.push_str(&entry);
     let mut document = crate::testsupport::document(&text, &registry);
     let (id, definition) = document
         .functions
@@ -130,8 +159,23 @@ fn a_scalar_slice_of_a_cold_paged_text_reads_only_the_pages_it_addresses() {
     cold_slice_reads_only_addressed_pages("text.slice");
 }
 
+/// FIG-7692: a byte slice of cold paged bytes faults only the payload path
+/// to the bytes it addresses, each node checked against the identity its
+/// edge commits to, with the same ceiling as a text slice.
+#[test]
+fn a_byte_slice_of_cold_paged_bytes_reads_only_the_pages_it_addresses() {
+    cold_slice_reads_only_addressed_pages("bytes.slice");
+}
+
 fn cold_slice_reads_only_addressed_pages(operation: &str) {
     let text: String = (0..20_000).map(|i| format!("{i:05}")).collect();
+    let datum = |part: &str| {
+        if operation.starts_with("bytes.") {
+            Datum::Bytes(lash_kernel_doc::Bytes::new(part.as_bytes().to_vec()))
+        } else {
+            Datum::Text(part.to_string())
+        }
+    };
     let source = Counting::default();
     let mut machine = <lash_kernel_vm::KernelMachine as lash_kernel_vm::Machine>::start(
         program(operation),
@@ -139,7 +183,7 @@ fn cold_slice_reads_only_addressed_pages(operation: &str) {
         CellStart {
             owner: PageId([9; 32]),
             target: Target::Entry("f".into()),
-            args: vec![Datum::Text(text.clone())],
+            args: vec![datum(&text)],
             session: None,
             modes: Default::default(),
             host: Vec::new(),
@@ -166,13 +210,7 @@ fn cold_slice_reads_only_addressed_pages(operation: &str) {
         }
     };
     assert!(matches!(end, lash_kernel_vm::End::Finished(_)), "{end:?}");
-    assert_eq!(
-        world.prints,
-        [
-            Datum::Text(text[..4096].to_string()),
-            Datum::Text(text[7..9].to_string())
-        ]
-    );
+    assert_eq!(world.prints, [datum(&text[..4096]), datum(&text[7..9])]);
     let [wide, narrow, none] = reads[..] else {
         unreachable!()
     };
@@ -180,4 +218,58 @@ fn cold_slice_reads_only_addressed_pages(operation: &str) {
         wide <= none + 4 && narrow <= none + 4,
         "pages read: {wide} for 0..4096, {narrow} for 7..9, {none} for no text"
     );
+}
+
+/// Contract §6: a cold slice reads its payload node by node, each checked
+/// against the identity its parent's edge commits to. A store that answers
+/// the first leaf with another text's first leaf, equal in every count, is
+/// refused when the slice reaches it, and no byte of it is exposed.
+#[test]
+fn a_cold_slice_refuses_a_leaf_that_is_not_the_identity_its_edge_commits_to() {
+    let source = Counting::default();
+    let operation = "text.utf16_slice";
+    let start = |text: String| {
+        let mut machine = <KernelMachine as Machine>::start(
+            program(operation),
+            BOUNDS,
+            CellStart {
+                owner: PageId([9; 32]),
+                target: Target::Entry("f".into()),
+                args: vec![Datum::Text(text)],
+                session: None,
+                modes: Default::default(),
+                host: Vec::new(),
+            },
+            Box::new(source.clone()),
+        )
+        .unwrap();
+        let mut world = World::default();
+        let request = park(&mut machine, &mut world);
+        reopen(&mut machine, &source, operation);
+        (machine, world, request)
+    };
+    // The first leaf a slice of each text reads.
+    let first_leaf = |text: String| {
+        let (mut machine, mut world, request) = start(text);
+        source.leaves.borrow_mut().clear();
+        deliver(&mut machine, &request);
+        park(&mut machine, &mut world);
+        source.leaves.borrow()[0]
+    };
+    let honest: String = (0..20_000).map(|i| format!("{i:05}")).collect();
+    let other: String = (1..20_001).map(|i| format!("{i:05}")).collect();
+    let (leaf, foreign) = (first_leaf(honest.clone()), first_leaf(other));
+    assert_ne!(leaf, foreign);
+    let (mut machine, mut world, request) = start(honest);
+    source.swap.set(Some((leaf, foreign)));
+    deliver(&mut machine, &request);
+    let fault = loop {
+        match machine.run(&mut world, u64::MAX) {
+            Ok(Step::Slice) => (),
+            Ok(step) => panic!("a substituted leaf was read: {step:?}"),
+            Err(error) => break format!("{error:?}"),
+        }
+    };
+    assert!(fault.contains("payload leaf identity mismatch"), "{fault}");
+    assert!(world.prints.is_empty());
 }

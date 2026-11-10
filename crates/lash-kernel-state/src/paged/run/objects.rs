@@ -413,6 +413,38 @@ impl Paged {
     pub fn read(&self, access: &Access<'_>) -> Result<Vec<u8>, HeapFault> {
         super::super::payload::copy(access, self.root, self.summary, self.text)
     }
+
+    /// The root node of this payload alone, checked against the counts and
+    /// the identity this edge commits to: a leaf's bytes, or the children,
+    /// each a payload of its own whose edge the read certified. A reader
+    /// that descends through them checks every edge it consumes.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults, and a node its edge does not certify.
+    pub fn node(&self, access: &Access<'_>) -> Result<PagedNode, HeapFault> {
+        use super::super::payload::{PayloadNode, node};
+        Ok(match node(access, self.root, self.summary, self.text)? {
+            PayloadNode::Leaf(bytes) => PagedNode::Leaf(bytes),
+            PayloadNode::Index(children) => PagedNode::Index(
+                children
+                    .into_iter()
+                    .map(|(root, summary)| Self {
+                        text: self.text,
+                        summary,
+                        root,
+                    })
+                    .collect(),
+            ),
+        })
+    }
+}
+
+/// One node of a payload tree ([`Paged::node`]).
+#[derive(Clone, Debug)]
+pub enum PagedNode {
+    Leaf(Vec<u8>),
+    Index(Vec<Paged>),
 }
 
 impl TokenCodec for Paged {
