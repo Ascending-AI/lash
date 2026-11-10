@@ -6,7 +6,7 @@
 //! root's values, named here by its index into [`HeapRoot::roots`]; the
 //! objects those values reach are the heap's.
 //!
-//! A frame names its unit by the unit's kind and site, and where it stands
+//! A frame names its unit by the unit's Link, kind and site, and where it stands
 //! by a site, a phase and which compiled copy of the site; its slots by
 //! the site that declared each, what the slot holds there, and the copy;
 //! its operands in the order the opening build's resume table lists them;
@@ -16,6 +16,7 @@
 
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::{HeapFault, PageRef};
+use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::{FunctionId, Name, OperationUse};
 use lash_kernel_value::sites::{EffectIdentity, Site, TaskIdentity, WaitCancellation};
 use lash_kernel_value::tokens::{
@@ -148,8 +149,10 @@ record! {
 }
 
 record! {
-    /// How many times a task has run the action site `site`.
+    /// How many times a task has run the action site `site` of Link
+    /// `link`.
     pub struct RunOccurrence {
+        pub link: LinkId,
         pub site: Site,
         pub count: u64,
     }
@@ -175,8 +178,9 @@ record! {
 }
 
 record! {
-    /// A unit, by its kind and site.
+    /// A unit, by its Link, kind and site.
     pub struct RunUnit {
+        pub link: LinkId,
         pub kind: UnitKind,
         pub site: Site,
     }

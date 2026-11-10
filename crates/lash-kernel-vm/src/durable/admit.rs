@@ -15,6 +15,7 @@ use lash_kernel_state::paged::run::continuation::{
     PointPhase, RunFrame, RunJoiner, RunRecord, RunResume, RunTask, RunTaskState, UnitKind,
     WaitPhase,
 };
+use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::sites::{Site, TaskIdentity};
 
 use super::save_kind;
@@ -33,17 +34,16 @@ pub(crate) fn admit(
     operations: &Operations,
     record: &RunRecord,
 ) -> Result<(), Inadmissible> {
-    let units: HashMap<(UnitKind, &Site), &Unit> = program
+    let units: HashMap<(LinkId, UnitKind, &Site), &Unit> = program
         .units
         .iter()
-        .filter(|unit| unit.link == program.link)
-        .map(|unit| ((save_kind(&unit.kind), &unit.site), unit))
+        .map(|unit| ((unit.link, save_kind(&unit.kind), &unit.site), unit))
         .collect();
     let tasks = &record.tasks;
     tasks_in_order(program, &units, tasks)?;
     running(record)?;
     queue(record)?;
-    waits(program.link, &units, operations, record)?;
+    waits(&units, operations, record)?;
     joins(record)?;
     for (number, task) in tasks.iter().enumerate() {
         frames(number as u32, task)?;
@@ -54,7 +54,7 @@ pub(crate) fn admit(
 /// Spawn order, roots, ended tasks and the counters spawning minted.
 fn tasks_in_order(
     program: &Program,
-    units: &HashMap<(UnitKind, &Site), &Unit>,
+    units: &HashMap<(LinkId, UnitKind, &Site), &Unit>,
     tasks: &[RunTask],
 ) -> Result<(), Inadmissible> {
     let main = &program.units[program.main as usize];
@@ -67,7 +67,16 @@ fn tasks_in_order(
                     .iter()
                     .position(|earlier| earlier.identity == *spawned.parent)
                     .ok_or(Inadmissible::SpawnOrder { task: at })?;
-                if count(&tasks[parent], &spawned.site) <= spawned.occurrence {
+                // A spawn identity names its site but not its Link: the
+                // spawner's counter at that site in any Link it ran.
+                let spawns = tasks[parent]
+                    .occurrences
+                    .iter()
+                    .filter(|occurrence| occurrence.site == spawned.site)
+                    .map(|occurrence| occurrence.count)
+                    .max()
+                    .unwrap_or(0);
+                if spawns <= spawned.occurrence {
                     return Err(Inadmissible::Counter {
                         task: parent as u32,
                     });
@@ -83,7 +92,7 @@ fn tasks_in_order(
             return Err(Inadmissible::Ended { task: at });
         }
         if let Some(root) = task.frames.first() {
-            let unit = units.get(&(root.unit.kind, &root.unit.site));
+            let unit = units.get(&(root.unit.link, root.unit.kind, &root.unit.site));
             let starts = match number {
                 0 => unit.is_some_and(|unit| std::ptr::eq(*unit, main)),
                 _ => root.unit.kind == UnitKind::Spawn,
@@ -97,10 +106,10 @@ fn tasks_in_order(
 }
 
 /// How many times `task` has run the action at `site`.
-fn count(task: &RunTask, site: &Site) -> u64 {
+fn count(task: &RunTask, link: LinkId, site: &Site) -> u64 {
     task.occurrences
         .iter()
-        .find(|occurrence| occurrence.site == *site)
+        .find(|occurrence| occurrence.link == link && occurrence.site == *site)
         .map_or(0, |occurrence| occurrence.count)
 }
 
@@ -169,8 +178,7 @@ fn queue(record: &RunRecord) -> Result<(), Inadmissible> {
 /// delivered with its raw outcome while the task is ready to resume with
 /// it. No wait performs a read.
 fn waits(
-    link: lash_kernel_value::LinkId,
-    units: &HashMap<(UnitKind, &Site), &Unit>,
+    units: &HashMap<(LinkId, UnitKind, &Site), &Unit>,
     operations: &Operations,
     record: &RunRecord,
 ) -> Result<(), Inadmissible> {
@@ -203,12 +211,13 @@ fn waits(
         if !owned {
             return Err(Inadmissible::OrphanWait { wait: number });
         }
-        let action = task
+        let top = task
             .frames
             .last()
             .filter(|top| top.phase == PointPhase::Issued)
-            .and_then(|top| perform(units, top))
             .ok_or(Inadmissible::WaitPoint { wait: number })?;
+        let link = top.unit.link;
+        let action = perform(units, top).ok_or(Inadmissible::WaitPoint { wait: number })?;
         let ActionSite::Perform {
             owner,
             slot,
@@ -226,7 +235,7 @@ fn waits(
         if let Some(request) = &wait.request
             && (request.identity.task != task.identity
                 || request.identity.site != *site
-                || count(task, site) <= request.identity.occurrence)
+                || count(task, link, site) <= request.identity.occurrence)
         {
             return Err(Inadmissible::WaitPoint { wait: number });
         }
@@ -260,11 +269,11 @@ fn waits(
 
 /// The action a frame stands at, by its point's site.
 fn perform<'u>(
-    units: &HashMap<(UnitKind, &Site), &'u Unit>,
+    units: &HashMap<(LinkId, UnitKind, &Site), &'u Unit>,
     frame: &RunFrame,
 ) -> Option<&'u ActionSite> {
     units
-        .get(&(frame.unit.kind, &frame.unit.site))?
+        .get(&(frame.unit.link, frame.unit.kind, &frame.unit.site))?
         .actions
         .iter()
         .find(|action| matches!(action, ActionSite::Perform { site, .. } if *site == frame.site))

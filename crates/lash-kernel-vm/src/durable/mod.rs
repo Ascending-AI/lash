@@ -22,6 +22,7 @@ use lash_kernel_state::paged::run::continuation::{
     RunRecord, RunRequest, RunResume, RunSlot, RunTask, RunTaskState, RunUnit, RunWait,
     SlotRole as SavedRole, UnitKind as SavedKind, WaitPhase,
 };
+use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::{Name, OperationUse};
 use lash_kernel_value::sites::Site;
 
@@ -169,18 +170,14 @@ fn number(at: usize) -> Result<u32, SealError> {
 ///
 /// Only the root Link's: a saved site names no Link, so another Link's
 /// counter is refused where it is saved, never read as the root's.
-fn occurrence_sites(program: &Program) -> HashMap<u32, Site> {
+fn occurrence_sites(program: &Program) -> HashMap<u32, (LinkId, Site)> {
     let mut sites = HashMap::new();
-    for unit in program
-        .units
-        .iter()
-        .filter(|unit| unit.link == program.link)
-    {
+    for unit in &program.units {
         for call in &unit.calls {
-            sites.insert(call.mark.occurrence, call.site.clone());
+            sites.insert(call.mark.occurrence, (unit.link, call.site.clone()));
         }
         for (action, mark) in unit.actions.iter().zip(&unit.action_marks) {
-            sites.insert(mark.occurrence, action.site().clone());
+            sites.insert(mark.occurrence, (unit.link, action.site().clone()));
         }
     }
     sites
@@ -188,7 +185,7 @@ fn occurrence_sites(program: &Program) -> HashMap<u32, Site> {
 
 fn save_task(
     program: &Program,
-    occurrences: &HashMap<u32, Site>,
+    occurrences: &HashMap<u32, (LinkId, Site)>,
     task: &Task,
     cx: &Context,
     values: &mut Values,
@@ -229,15 +226,16 @@ fn save_task(
     };
     let mut counts = Vec::with_capacity(task.occurrences.len());
     for (occurrence, count) in &task.occurrences {
-        let site = occurrences
+        let (link, site) = occurrences
             .get(occurrence)
-            .ok_or_else(|| fault("an occurrence counter names no root Link site"))?;
+            .ok_or_else(|| fault("an occurrence counter names no site"))?;
         counts.push(RunOccurrence {
+            link: *link,
             site: site.clone(),
             count: *count,
         });
     }
-    counts.sort_by(|a, b| a.site.cmp(&b.site));
+    counts.sort_by(|a, b| (a.link, &a.site).cmp(&(b.link, &b.site)));
     let joiners = task
         .joiners
         .iter()
@@ -283,14 +281,6 @@ fn save_frame(
     values: &mut Values,
 ) -> Result<RunFrame, SealError> {
     let unit = &program.units[frame.unit as usize];
-    // A saved unit names no Link: another Link's frame cannot be saved
-    // until it does, and is never reopened as the root's.
-    if unit.link != program.link {
-        return Err(fault(format!(
-            "unit {} of another Link stands in the run",
-            unit.name
-        )));
-    }
     let base = frame.base as usize;
     let size = end
         .checked_sub(base)
@@ -325,6 +315,7 @@ fn save_frame(
         .collect();
     Ok(RunFrame {
         unit: RunUnit {
+            link: unit.link,
             kind: save_kind(&unit.kind),
             site: unit.site.clone(),
         },
@@ -532,14 +523,13 @@ pub(crate) fn open(
         .iter()
         .map(|at| value(*at))
         .collect::<Result<_, _>>()?;
-    let units: HashMap<(SavedKind, &Site), UnitId> = program
+    let units: HashMap<(LinkId, SavedKind, &Site), UnitId> = program
         .units
         .iter()
         .enumerate()
-        .filter(|(_, unit)| unit.link == program.link)
-        .map(|(at, unit)| ((save_kind(&unit.kind), &unit.site), at as UnitId))
+        .map(|(at, unit)| ((unit.link, save_kind(&unit.kind), &unit.site), at as UnitId))
         .collect();
-    let occurrences: HashMap<Site, u32> = occurrence_sites(&program)
+    let occurrences: HashMap<(LinkId, Site), u32> = occurrence_sites(&program)
         .into_iter()
         .map(|(at, site)| (site, at))
         .collect();
@@ -586,7 +576,7 @@ pub(crate) fn open(
         task.turn = saved.turn;
         for occurrence in &saved.occurrences {
             let at = occurrences
-                .get(&occurrence.site)
+                .get(&(occurrence.link, occurrence.site.clone()))
                 .ok_or_else(|| format!("no action stands at {:?}", occurrence.site))?;
             task.occurrences.insert(*at, occurrence.count);
         }
@@ -669,14 +659,14 @@ pub(crate) fn open(
 fn open_frame(
     vm: &mut Vm<SlotHeap>,
     program: &Program,
-    units: &HashMap<(SavedKind, &Site), UnitId>,
+    units: &HashMap<(LinkId, SavedKind, &Site), UnitId>,
     cx: &mut Context,
     saved: &RunFrame,
     value: &dyn Fn(u32) -> Result<Value, String>,
 ) -> Result<(), String> {
     let id = *units
-        .get(&(saved.unit.kind, &saved.unit.site))
-        .ok_or_else(|| format!("the program has no unit {:?}", saved.unit.site))?;
+        .get(&(saved.unit.link, saved.unit.kind, &saved.unit.site))
+        .ok_or_else(|| format!("the program has no unit {:?}", saved.unit))?;
     let unit = &program.units[id as usize];
     let entry = unit
         .sites
