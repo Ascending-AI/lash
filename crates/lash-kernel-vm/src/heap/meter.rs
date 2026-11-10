@@ -144,6 +144,7 @@ pub(crate) fn record(record: &Record) -> u64 {
         Record::BigInt(int) | Record::Timestamp(int) => integer(int),
         Record::LongText(text) => text.len() as u64,
         Record::Bytes(bytes) => bytes.len() as u64,
+        Record::Paged(paged) => paged.summary.utf8_bytes,
         Record::List(members) | Record::Tuple(members) | Record::Set(members) => {
             values(members.len() as u64)
         }

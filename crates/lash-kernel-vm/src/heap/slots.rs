@@ -794,7 +794,34 @@ impl Heap for SlotHeap {
             .filter(|(id, _)| self.arena.entity_handle(open::entity(*id)).is_none())
             .map(|(id, opening)| (id, super::meter::body(&opening.placeholder())))
             .collect();
-        let body = open::body(&mut self.arena, &row.record, &row.heads).map_err(malformed)?;
+        // A text or bytes past one payload leaf opens whole, read from its
+        // payload tree once its growth is admitted.
+        let paged = match &row.record {
+            Record::Paged(paged) => {
+                let durable = self.durable.as_ref().ok_or_else(|| {
+                    malformed("a paged payload in a heap with no directory".into())
+                })?;
+                let whole = paged
+                    .read(durable.directory.access())
+                    .map_err(LoadError::Store)?;
+                Some(if paged.text {
+                    Record::LongText(
+                        String::from_utf8(whole)
+                            .map_err(|error| malformed(error.to_string()))?
+                            .into(),
+                    )
+                } else {
+                    Record::Bytes(whole.into())
+                })
+            }
+            _ => None,
+        };
+        let body = open::body(
+            &mut self.arena,
+            paged.as_ref().unwrap_or(&row.record),
+            &row.heads,
+        )
+        .map_err(malformed)?;
         for (id, units) in fresh {
             if let Some(handle) = self.arena.entity_handle(open::entity(id)) {
                 self.place(handle, units);

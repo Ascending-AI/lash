@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::heap::{IntSummary, NormalKey, TextSummary};
+use lash_kernel_doc::heap::HeapFault;
+use lash_kernel_doc::heap::{IntSummary, NormalKey, PAYLOAD_LEAF_BYTES, PageRef, TextSummary};
+use lash_kernel_doc::heap_values::text_summary;
 use lash_kernel_doc::linked_site::LinkedSite;
 use lash_kernel_doc::{Float, Handle, Integer};
 use lash_kernel_value::Name;
@@ -13,6 +15,7 @@ use lash_kernel_value::names::CallableId;
 use lash_kernel_value::sites::Site;
 use lash_kernel_value::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 
+use super::super::tree::Access;
 use super::chunked::Chunked;
 use super::ids::ObjectId;
 use crate::arena::Summary;
@@ -271,8 +274,15 @@ pub enum Record {
     },
     BigInt(Integer),
     Timestamp(Integer),
+    /// A text of at most [`PAYLOAD_LEAF_BYTES`] bytes; a longer one is
+    /// [`Self::Paged`].
     LongText(Arc<str>),
+    /// Bytes, at most [`PAYLOAD_LEAF_BYTES`]; longer ones are
+    /// [`Self::Paged`].
     Bytes(Arc<[u8]>),
+    /// A text or bytes past one payload leaf: its canonical payload tree
+    /// ([`crate::paged::payload`]), so no row outgrows its page.
+    Paged(Paged),
     Function(CallableId),
     Handle(Handle),
     /// A large list or table: its index, its chunks on their own pages
@@ -321,11 +331,89 @@ impl Record {
             | Self::Timestamp(_)
             | Self::LongText(_)
             | Self::Bytes(_)
+            | Self::Paged(_)
             | Self::Function(_)
             | Self::Handle(_)
             | Self::Chunked(_) => {}
         }
         values
+    }
+}
+
+/// A text's or bytes' payload tree: whether it is text, its summary (bytes'
+/// counts only their bytes) and its root page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Paged {
+    pub text: bool,
+    pub summary: TextSummary,
+    pub page: PageRef,
+}
+
+impl Paged {
+    pub fn kind(&self) -> ObjectKind {
+        if self.text {
+            ObjectKind::LongText
+        } else {
+            ObjectKind::Bytes
+        }
+    }
+
+    /// `bytes`, a text's when `text`, written as a payload tree.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults; a text that is no UTF-8.
+    pub fn write(access: &Access<'_>, bytes: &[u8], text: bool) -> Result<Self, HeapFault> {
+        let summary = if text {
+            text_summary(
+                std::str::from_utf8(bytes)
+                    .map_err(|error| HeapFault::Malformed(error.to_string()))?,
+            )
+        } else {
+            TextSummary {
+                utf8_bytes: bytes.len() as u64,
+                chars: 0,
+                utf16_units: 0,
+            }
+        };
+        Ok(Self {
+            text,
+            summary,
+            page: crate::paged::payload::build(access, bytes, text)?,
+        })
+    }
+
+    /// The whole payload, read from its pages, each level's siblings in
+    /// one batch.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults, and a tree that disagrees with the summary.
+    pub fn read(&self, access: &Access<'_>) -> Result<Vec<u8>, HeapFault> {
+        super::super::payload::copy(access, self.page, self.summary, self.text)
+    }
+}
+
+impl TokenCodec for Paged {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(3);
+        self.text.encode(out);
+        self.summary.encode(out);
+        self.page.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(3)?;
+        let paged = Self {
+            text: bool::decode(input)?,
+            summary: TextSummary::decode(input)?,
+            page: PageRef::decode(input)?,
+        };
+        if paged.summary.utf8_bytes <= PAYLOAD_LEAF_BYTES {
+            return Err(TokenError::Invalid(
+                "a payload within one leaf is paged".into(),
+            ));
+        }
+        Ok(paged)
     }
 }
 
@@ -422,6 +510,10 @@ impl TokenCodec for Record {
                 out.sum(14, 1);
                 chunked.encode(out);
             }
+            Self::Paged(paged) => {
+                out.sum(15, 1);
+                paged.encode(out);
+            }
         }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -477,11 +569,23 @@ impl TokenCodec for Record {
             }
             10 => {
                 expect(1)?;
-                Self::LongText(input.text()?.into())
+                let text = input.text()?;
+                if text.len() as u64 > PAYLOAD_LEAF_BYTES {
+                    return Err(TokenError::Invalid(
+                        "a text past one payload leaf is inline".into(),
+                    ));
+                }
+                Self::LongText(text.into())
             }
             11 => {
                 expect(1)?;
-                Self::Bytes(input.bytes()?.into())
+                let bytes = input.bytes()?;
+                if bytes.len() as u64 > PAYLOAD_LEAF_BYTES {
+                    return Err(TokenError::Invalid(
+                        "bytes past one payload leaf are inline".into(),
+                    ));
+                }
+                Self::Bytes(bytes.into())
             }
             12 => {
                 expect(1)?;
@@ -494,6 +598,10 @@ impl TokenCodec for Record {
             14 => {
                 expect(1)?;
                 Self::Chunked(Box::new(Chunked::decode(input)?))
+            }
+            15 => {
+                expect(1)?;
+                Self::Paged(Paged::decode(input)?)
             }
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })

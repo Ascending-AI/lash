@@ -264,5 +264,6 @@ pub(crate) fn body(arena: &mut Arena, record: &Record, heads: &Heads) -> Result<
         Record::Function(callable) => Body::Function(Box::new(*callable)),
         Record::Handle(host) => Body::Handle(host.clone()),
         Record::Chunked(_) => return Err("a chunked row opens by its index, not whole".into()),
+        Record::Paged(_) => return Err("a paged payload opens from its pages, not its row".into()),
     })
 }

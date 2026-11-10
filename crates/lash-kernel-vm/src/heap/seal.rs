@@ -18,12 +18,15 @@ use std::sync::Arc;
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunks, ErrorBody};
-use lash_kernel_doc::heap::{EntityId, FamilyId};
+use lash_kernel_doc::heap::{EntityId, FamilyId, PAYLOAD_LEAF_BYTES};
 use lash_kernel_state::arena::Arena;
+use lash_kernel_state::kernel_internals::tree::Access;
 use lash_kernel_state::paged::run::directory::Directory;
 use lash_kernel_state::paged::run::directory::Row;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
-use lash_kernel_state::paged::run::objects::{ClosureCode, Heads, ObjectKind, Record, RunValue};
+use lash_kernel_state::paged::run::objects::{
+    ClosureCode, Heads, ObjectKind, Paged, Record, RunValue,
+};
 use lash_kernel_state::paged::run::root::HeapRoot;
 use lash_kernel_value::FunctionId;
 
@@ -89,7 +92,7 @@ pub(crate) fn seal(
             large.forget(id);
             let mut members = Vec::new();
             lash_kernel_state::arena::each_member(body, &mut |value| members.push(*value));
-            let record = record(arena, handle)?;
+            let record = record(arena, handle, directory.access())?;
             match &record {
                 Record::Closure { code: closure, .. } => {
                     code.insert(closure.callable.function);
@@ -300,7 +303,7 @@ fn resident(chunks: &Chunks) -> Result<Vec<&Value>, SealError> {
     Ok(values)
 }
 
-fn record(arena: &Arena, handle: ArenaHandle) -> Result<Record, SealError> {
+fn record(arena: &Arena, handle: ArenaHandle, access: &Access<'_>) -> Result<Record, SealError> {
     let value = |value: &Value| run_value(arena, value);
     let values = |chunks: &Chunks| -> Result<Vec<RunValue>, SealError> {
         resident(chunks)?.into_iter().map(value).collect()
@@ -369,7 +372,13 @@ fn record(arena: &Arena, handle: ArenaHandle) -> Result<Record, SealError> {
             if text.moved() {
                 return Err(fault("a moved text reached the seal"));
             }
-            Record::LongText(Arc::from(whole))
+            if whole.len() as u64 > PAYLOAD_LEAF_BYTES {
+                Record::Paged(
+                    Paged::write(access, whole.as_bytes(), true).map_err(SealError::Heap)?,
+                )
+            } else {
+                Record::LongText(Arc::from(whole))
+            }
         }
         Body::Bytes(bytes) => {
             let mut whole = Vec::with_capacity(bytes.len as usize);
@@ -381,7 +390,11 @@ fn record(arena: &Arena, handle: ArenaHandle) -> Result<Record, SealError> {
                     }
                 }
             }
-            Record::Bytes(Arc::from(whole))
+            if whole.len() as u64 > PAYLOAD_LEAF_BYTES {
+                Record::Paged(Paged::write(access, &whole, false).map_err(SealError::Heap)?)
+            } else {
+                Record::Bytes(Arc::from(whole))
+            }
         }
         Body::Function(callable) => Record::Function(**callable),
         Body::Handle(host) => Record::Handle(host.clone()),
