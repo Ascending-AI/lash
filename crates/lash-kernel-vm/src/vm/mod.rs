@@ -158,6 +158,7 @@ pub(crate) enum Restart {
     /// arguments are at `from`, and its formula `charge` is yet to bill.
     Native {
         from: u32,
+        native: u32,
         charge: Option<u32>,
         done: calls::Done,
     },
@@ -840,8 +841,13 @@ impl<H: Heap> Vm<H> {
                 Ok(None)
             }
             Some(Restart::Unwind(value)) => self.raise(value).map(|()| None),
-            Some(Restart::Native { from, charge, done }) => self
-                .complete_native(from as usize, charge, done)
+            Some(Restart::Native {
+                from,
+                native,
+                charge,
+                done,
+            }) => self
+                .complete_native(from as usize, native, charge, done)
                 .map(|()| None),
         }
     }

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use super::{Exceeded, Vm};
+use super::{Exceeded, Flow, Stop, Vm};
 use crate::Bound;
 use crate::heap::Heap;
 
@@ -76,5 +76,19 @@ impl<H: Heap> Vm<H> {
             || Arc::clone(native),
             |unit| Arc::clone(&self.program.unit(unit).name),
         )
+    }
+
+    /// A stop native `native`'s own bill raised: a charge or memory bound
+    /// names the library call that made it, not the authored function.
+    pub(super) fn billed_by(&self, flow: Flow, native: u32) -> Flow {
+        match flow {
+            Flow::Stop(mut stop) => {
+                if let Stop::Bound(exceeded) = stop.as_mut() {
+                    exceeded.function = Some(self.library_call(&self.program.native(native).name));
+                }
+                Flow::Stop(stop)
+            }
+            other => other,
+        }
     }
 }

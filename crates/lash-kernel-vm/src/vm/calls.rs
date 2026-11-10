@@ -147,8 +147,10 @@ impl<H: Heap> Vm<H> {
             let (value, fee) = answer?;
             self.cx.stack.truncate(len - argc);
             self.push(value);
-            if let Some(units) = fee {
-                self.fee(units)?;
+            if let Some(units) = fee
+                && let Err(flow) = self.fee(units)
+            {
+                return Err(self.billed_by(flow, native));
             }
             return Ok(());
         }
@@ -280,20 +282,20 @@ impl<H: Heap> Vm<H> {
                         &format!("a value exceeds the configured {limit}-level value depth"),
                     ));
                 }
-                self.complete_native(from, charge, Done::Value(value))
+                self.complete_native(from, native, charge, Done::Value(value))
             }
             Err(NativeError::Raised(value)) => {
-                self.complete_native(from, charge, Done::Raised(value))
+                self.complete_native(from, native, charge, Done::Raised(value))
             }
             Err(NativeError::Refused { kind, message }) => {
-                self.complete_native(from, charge, Done::Refused(kind, message))
+                self.complete_native(from, native, charge, Done::Refused(kind, message))
             }
             Err(NativeError::Guard(guard)) => Err(Flow::from(Stop::bound(Exceeded {
                 bound: Bound::Guard {
                     function: entry.function,
                 },
                 limit: guard.limit,
-                function: Some(entry.name.clone()),
+                function: Some(self.library_call(&entry.name)),
                 site: None,
             }))),
             Err(NativeError::Decline) => {
@@ -424,6 +426,7 @@ impl<H: Heap> Vm<H> {
     pub(super) fn complete_native(
         &mut self,
         from: usize,
+        native: u32,
         charge: Option<u32>,
         done: Done,
     ) -> Run<()> {
@@ -439,6 +442,7 @@ impl<H: Heap> Vm<H> {
                         if let Flow::Cold { .. } = flow {
                             self.restart = Some(Restart::Native {
                                 from: from as u32,
+                                native,
                                 charge: Some(charge),
                                 done,
                             });
@@ -458,8 +462,10 @@ impl<H: Heap> Vm<H> {
             Done::Raised(value) => Some(Ok(value)),
             Done::Refused(kind, message) => Some(Err((kind, message))),
         };
-        if let Some(units) = fee {
-            self.fee(units)?;
+        if let Some(units) = fee
+            && let Err(flow) = self.fee(units)
+        {
+            return Err(self.billed_by(flow, native));
         }
         match raised {
             None => Ok(()),
