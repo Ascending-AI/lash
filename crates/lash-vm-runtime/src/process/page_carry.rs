@@ -573,10 +573,11 @@ pub async fn carry_parked_checkpoint(
     .map_err(|error| HeapFault::Transport(error.to_string()))?
 }
 
-/// The run's code ids onto the successor: the predecessor's Link and
-/// every callable of it onto the successor's, a library function onto its
+/// The run's active code ids onto the successor (`K-VER-005`): the
+/// predecessor's Link onto the successor's, a library function onto its
 /// redeclaration, a site of the predecessor's own code onto its survivor;
 /// code of any other Link keeps its identity and must be in the successor.
+/// Every callable the run holds keeps its exact defining Link and code.
 fn run_correspondence(
     predecessor: lash_kernel_value::LinkId,
     live: &lash_kernel_state::paged::run::rewrite::LiveCode,
@@ -603,26 +604,11 @@ fn run_correspondence(
     for id in &live.functions {
         map.functions.insert(*id, function(*id));
     }
-    for callable in &live.callables {
-        let image = if callable.link == predecessor {
-            let image = function(callable.function);
-            if !program.document.functions.contains_key(&image)
-                && !program.helpers().contains(&image)
-            {
-                return Err(ParkedRefusal::FunctionNotCarried {
-                    function: callable.function,
-                }
-                .into());
-            }
-            lash_kernel_value::CallableId {
-                link: successor,
-                function: image,
-            }
-        } else {
-            *callable
-        };
-        map.callables.insert(*callable, image);
-    }
+    map.retained = live
+        .callables
+        .iter()
+        .map(|callable| callable.link)
+        .collect();
     Ok(map)
 }
 

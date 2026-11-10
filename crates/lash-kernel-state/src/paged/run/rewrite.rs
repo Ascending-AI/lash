@@ -1,53 +1,51 @@
-//! A sealed run's or session's code ids, rewritten (cutover contract §6):
-//! the succession of a run onto another document or helper library.
+//! A sealed run's code ids, rewritten (cutover contract §6): the
+//! succession of a run onto another document or helper library.
 //!
-//! A run names code by content id in its state: the operation uses it
-//! reads and waits on name their link, every site a library function's
-//! [`FunctionId`], its live helpers' pins too, and a closure's or a
-//! function's object, its head and a request's argument their
-//! [`CallableId`]. A rewrite reads every one of them, refuses before it
-//! writes anything when the correspondence names no image for one, and
-//! then writes, copy-on-write, each page that holds one: the rows and
-//! large chunks that do, the directory paths to them, the run's state and
-//! a root over them. Every page the old root names stays as it was.
-//!
-//! A [`FunctionValue`] a request's argument holds, the closure a run
-//! crossed into an effect, is rewritten like the rest: its callable, the
-//! local functions its start convention names (its own link's), its
-//! creation site, its token's members and every capture, nested function
-//! values included. Its captions and signature origin are display
-//! coordinates of a document, not code ids, and stay.
+//! A run's active code moves (`K-VER-005`): the run's own Link, its
+//! frames' and occurrence counters' units, the operation uses it reads and
+//! waits on, and every site, a library function's [`FunctionId`] and its
+//! live helpers' pins included, take their images. A callable the run
+//! holds does not: a closure's or a function's object, its head, a
+//! request's argument and a [`FunctionValue`]'s callable and captures keep
+//! their exact defining Link and code, and so do a held closure's
+//! expression site and every frame, occurrence counter and site of its
+//! body. The correspondence declares those Links; a held callable of
+//! another refuses. A rewrite therefore never changes the heap: it reads
+//! every id first, refuses before it writes anything, and then writes the
+//! run's state and a root over the same heap.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageRef};
 use lash_kernel_doc::{
-    CaptureValue, Correspondence, Datum, ErrorDatum, FunctionTarget, FunctionValue, StartConvention,
+    CaptureValue, Correspondence, Datum, FunctionTarget, FunctionValue, StartConvention,
 };
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::{CallableId, FunctionId};
 use lash_kernel_value::sites::{EffectIdentity, Site, TaskIdentity, Unit};
-use lash_kernel_value::tokens::{decode_body, encode_body};
+use lash_kernel_value::tokens::decode_body;
 
 use super::super::source::grant;
 use super::super::tree::{Access, Tree};
-use super::super::{CheckpointRoot, PageKind, PageSource, SessionRoot};
+use super::super::{CheckpointRoot, PageKind, PageSource};
 use super::chunked::{ChunkPage, IndexPage};
 use super::continuation::{self, RunRecord};
-use super::directory::{DirectoryRoot, Row, whole};
-use super::ids::ObjectId;
+use super::directory::{DirectoryRoot, Row};
 use super::objects::{Head, Heads, Record};
 use super::root::HeapRoot;
-use super::session;
 
-/// The image of each code id a run names, identity entries included.
+/// The image of each code id a run's active code names, identity entries
+/// included, and the Links of the code it holds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RunCorrespondence {
+    /// The image of each Link active code names: the run's own, its
+    /// frames' and occurrence counters' units' and its operation uses'.
     pub links: BTreeMap<LinkId, LinkId>,
-    /// A callable's image's link is its link's image.
-    pub callables: BTreeMap<CallableId, CallableId>,
     pub functions: BTreeMap<FunctionId, FunctionId>,
+    /// The Links of the callables the run holds (`K-VER-005`): each keeps
+    /// its exact defining Link and code.
+    pub retained: BTreeSet<LinkId>,
     /// Where each node of the predecessor's own code went, when the
     /// succession moved or rewrote nodes: a site in one of its units is
     /// carried to its successor or refused; any other site keeps its path,
@@ -82,35 +80,39 @@ impl SiteMap {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Unmapped {
     Link(LinkId),
-    Callable(CallableId),
     Function(FunctionId),
     /// A site of the predecessor's code whose node did not survive.
     Site(Site),
 }
 
 /// Why a run was not rewritten. Nothing was written when the fault is
-/// [`Self::Unmapped`] or [`Self::Inconsistent`].
+/// [`Self::Unmapped`] or [`Self::NotRetained`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum RewriteFault {
     #[error("the run names {0:?}, which the correspondence does not map")]
     Unmapped(Unmapped),
-    #[error("{0:?} maps to a callable whose link is not its link's image")]
-    Inconsistent(CallableId),
+    #[error("the run holds {0:?}, whose Link the correspondence does not retain")]
+    NotRetained(CallableId),
     #[error(transparent)]
     Heap(#[from] HeapFault),
 }
 
-/// The code a sealed run names: the links its frames run, and every link,
-/// callable and function id a rewrite needs an image for.
+/// The code a sealed run names: the links its frames run, every link and
+/// function id its active code names, and the code it holds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LiveCode {
     /// The code each live frame runs: its unit's link, the defining link
     /// of the code it runs, and the unit its site stands in, a helper's
     /// body as that helper's [`Unit::Library`].
     pub frames: BTreeSet<(LinkId, Unit)>,
+    /// Every Link the run names; the successor holds each.
     pub links: BTreeSet<LinkId>,
+    /// Every callable the run holds; a rewrite retains their Links.
     pub callables: BTreeSet<CallableId>,
+    /// Each closure the run holds: a site in its function's unit is its
+    /// body's.
+    pub closures: BTreeSet<CallableId>,
     pub functions: BTreeSet<FunctionId>,
     /// Every site the run stands at or names.
     pub sites: BTreeSet<Site>,
@@ -121,10 +123,14 @@ pub struct LiveCode {
     pub held_code: BTreeSet<FunctionId>,
 }
 
-/// Either the ids met, or the images they are rewritten to.
+/// Either the ids met, or the images they are rewritten to, with the
+/// closures the run holds, whose code keeps its identity.
 enum Ids<'a> {
     Collect(&'a mut LiveCode),
-    Map(&'a RunCorrespondence),
+    Map {
+        map: &'a RunCorrespondence,
+        held: &'a BTreeSet<CallableId>,
+    },
 }
 
 impl Ids<'_> {
@@ -133,7 +139,7 @@ impl Ids<'_> {
             Self::Collect(live) => {
                 live.links.insert(*link);
             }
-            Self::Map(map) => {
+            Self::Map { map, .. } => {
                 *link = *map
                     .links
                     .get(link)
@@ -148,7 +154,7 @@ impl Ids<'_> {
             Self::Collect(live) => {
                 live.functions.insert(*function);
             }
-            Self::Map(map) => {
+            Self::Map { map, .. } => {
                 *function = *map
                     .functions
                     .get(function)
@@ -164,32 +170,48 @@ impl Ids<'_> {
                 live.links.insert(callable.link);
                 live.callables.insert(*callable);
             }
-            Self::Map(map) => {
-                let image = *map
-                    .callables
-                    .get(callable)
-                    .ok_or(RewriteFault::Unmapped(Unmapped::Callable(*callable)))?;
-                let link = *map
-                    .links
-                    .get(&callable.link)
-                    .ok_or(RewriteFault::Unmapped(Unmapped::Link(callable.link)))?;
-                if image.link != link {
-                    return Err(RewriteFault::Inconsistent(*callable));
+            Self::Map { map, .. } => {
+                if !map.retained.contains(&callable.link) {
+                    return Err(RewriteFault::NotRetained(*callable));
                 }
-                *callable = image;
             }
         }
         Ok(())
     }
 
+    /// Whether `site`, of code of `link` when that is known, is a held
+    /// closure's body's, which keeps its identity.
+    fn held(&self, link: Option<LinkId>, site: &Site) -> bool {
+        match self {
+            Self::Collect(_) => false,
+            Self::Map { held, .. } => match site.unit {
+                Unit::Library(function) => held.iter().any(|closure| {
+                    closure.function == function && link.is_none_or(|link| link == closure.link)
+                }),
+                Unit::Main | Unit::Function(_) => false,
+            },
+        }
+    }
+
     fn site(&mut self, site: &mut Site) -> Result<(), RewriteFault> {
+        self.site_of(None, site)
+    }
+
+    /// `site`, of code of `link` when that is known.
+    fn site_of(&mut self, link: Option<LinkId>, site: &mut Site) -> Result<(), RewriteFault> {
+        if self.held(link, site) {
+            return Ok(());
+        }
         match self {
             Self::Collect(live) => {
                 live.sites.insert(site.clone());
             }
-            Self::Map(RunCorrespondence {
-                sites: Some(map), ..
-            }) if map.units.contains(&site.unit) => {
+            Self::Map {
+                map: RunCorrespondence {
+                    sites: Some(map), ..
+                },
+                ..
+            } if map.units.contains(&site.unit) => {
                 *site = map
                     .correspondence
                     .successor(site)
@@ -197,7 +219,7 @@ impl Ids<'_> {
                     .ok_or_else(|| RewriteFault::Unmapped(Unmapped::Site(site.clone())))?;
                 return Ok(());
             }
-            Self::Map(_) => {}
+            Self::Map { .. } => {}
         }
         match &mut site.unit {
             Unit::Library(function) => self.function(function),
@@ -241,13 +263,7 @@ impl Ids<'_> {
                     self.datum(member)?;
                 }
             }
-            Datum::Error(error) => {
-                let mut data = error.data().clone();
-                self.datum(&mut data)?;
-                if &data != error.data() {
-                    **error = ErrorDatum::new(error.kind.clone(), error.message.clone(), data);
-                }
-            }
+            Datum::Error(error) => self.datum(&mut error.data().clone())?,
             Datum::Null
             | Datum::Absent
             | Datum::Bool(_)
@@ -263,6 +279,9 @@ impl Ids<'_> {
         Ok(())
     }
 
+    /// A held function value: its callable, the local functions its start
+    /// convention names (its own Link's), its creation site, its token's
+    /// members and every capture, nested function values included.
     fn function_value(&mut self, value: &mut FunctionValue) -> Result<(), RewriteFault> {
         let link = value.callable.link;
         self.callable(&mut value.callable)?;
@@ -275,8 +294,8 @@ impl Ids<'_> {
                 self.target(link, same_fn)?;
             }
         }
-        if let Some(site) = &mut value.creation {
-            self.site(site)?;
+        if let (Self::Collect(live), Some(site)) = (&mut *self, &value.creation) {
+            live.sites.insert(site.clone());
         }
         for member in value.token.iter_mut().flatten() {
             self.datum(member)?;
@@ -335,8 +354,11 @@ impl Ids<'_> {
         match &mut row.record {
             Record::Closure { code, .. } => {
                 self.callable(&mut code.callable)?;
-                self.link(&mut code.link)?;
-                self.site(&mut code.site)?;
+                if let Self::Collect(live) = self {
+                    live.links.insert(code.link);
+                    live.sites.insert(code.site.clone());
+                    live.closures.insert(code.callable);
+                }
             }
             Record::Function(callable) => self.callable(callable)?,
             _ => {}
@@ -352,13 +374,18 @@ impl Ids<'_> {
         for task in &mut record.tasks {
             self.task(&mut task.identity)?;
             for frame in &mut task.frames {
-                self.link(&mut frame.unit.link)?;
-                self.site(&mut frame.unit.site)?;
-                self.site(&mut frame.site)?;
+                // A frame running a held closure runs its retained code.
+                if frame.closure.is_none() || matches!(self, Self::Collect(_)) {
+                    self.link(&mut frame.unit.link)?;
+                    self.site(&mut frame.unit.site)?;
+                    self.site(&mut frame.site)?;
+                }
             }
             for occurrence in &mut task.occurrences {
-                self.link(&mut occurrence.link)?;
-                self.site(&mut occurrence.site)?;
+                if !self.held(Some(occurrence.link), &occurrence.site) {
+                    self.link(&mut occurrence.link)?;
+                }
+                self.site_of(Some(occurrence.link), &mut occurrence.site)?;
             }
             if let Some(origin) = &mut task.spawn_origin {
                 self.site(origin)?;
@@ -399,32 +426,23 @@ fn tree(root: DirectoryRoot) -> Tree<Row> {
 fn rows(
     access: &Access<'_>,
     root: DirectoryRoot,
-    each: &mut dyn FnMut(ObjectId, Row) -> Result<(), RewriteFault>,
+    each: &mut dyn FnMut(Row) -> Result<(), RewriteFault>,
 ) -> Result<(), RewriteFault> {
     let mut found = Vec::new();
-    tree(root).visit(access, &mut |key, row| {
-        if let Some(id) = ObjectId::of_key(key) {
-            found.push((id, row.clone()));
-        }
+    tree(root).visit(access, &mut |_, row| {
+        found.push(row.clone());
         true
     })?;
-    for (id, row) in found {
-        each(id, row)?;
-    }
-    Ok(())
+    found.into_iter().try_for_each(each)
 }
 
-/// A visitor of a large object's chunks.
-type Chunks<'a> = dyn FnMut(usize, &IndexPage, usize, ChunkPage) -> Result<(), RewriteFault> + 'a;
-
-/// Calls `each` with every chunk page of large object `chunked`, its index
-/// page's position among the parts and its own among the index's.
+/// Calls `each` with every chunk page of the large object of `parts`.
 fn chunks(
     access: &Access<'_>,
     parts: &[super::chunked::Part],
-    each: &mut Chunks<'_>,
+    each: &mut dyn FnMut(ChunkPage) -> Result<(), RewriteFault>,
 ) -> Result<(), RewriteFault> {
-    for (at, part) in parts.iter().enumerate() {
+    for part in parts {
         let answer = access.read(part.page)?;
         if answer.kind != PageKind::SEQUENCE_INDEX {
             return Err(corrupt(part.page, "an index part is not an index page").into());
@@ -434,75 +452,44 @@ fn chunks(
         for chunk in &mut index.0 {
             grant(&mut chunk.page, &answer.children)?;
         }
-        for slot in 0..index.0.len() {
-            let page = index.0[slot].page;
-            let read = access.read(page)?;
+        for chunk in &index.0 {
+            let read = access.read(chunk.page)?;
             if read.kind != PageKind::SEQUENCE_LEAF {
-                return Err(corrupt(page, "a chunk is not a leaf page").into());
+                return Err(corrupt(chunk.page, "a chunk is not a leaf page").into());
             }
-            let chunk: ChunkPage =
-                decode_body(&read.tokens).map_err(|error| corrupt(page, &error.to_string()))?;
-            each(at, &index, slot, chunk)?;
+            each(
+                decode_body(&read.tokens)
+                    .map_err(|error| corrupt(chunk.page, &error.to_string()))?,
+            )?;
         }
     }
     Ok(())
 }
 
-/// Visits every code id the heap `heap` names, its directory's rows and
-/// large chunks included, rewriting them when `ids` maps; gives the
-/// rewritten heap root, or `heap` unchanged when collecting.
-fn heap(access: &Access<'_>, heap: &HeapRoot, ids: &mut Ids<'_>) -> Result<HeapRoot, RewriteFault> {
-    let mut changed: Vec<(ObjectId, Row)> = Vec::new();
-    rows(access, heap.directory, &mut |id, mut row| {
-        let before = row.clone();
+/// Visits every code id the heap `heap` holds: its directory's rows, their
+/// heads and their large chunks', and its root's heads. The heap holds
+/// only held code, which a rewrite keeps, so the visit never changes it.
+fn heap(access: &Access<'_>, heap: &HeapRoot, ids: &mut Ids<'_>) -> Result<(), RewriteFault> {
+    rows(access, heap.directory, &mut |mut row| {
         ids.row(&mut row)?;
-        if let Record::Chunked(chunked) = &mut row.record {
-            let mut indexes: BTreeMap<usize, IndexPage> = BTreeMap::new();
-            chunks(access, &chunked.parts, &mut |at, index, slot, mut chunk| {
-                let old = chunk.heads.clone();
-                ids.heads(&mut chunk.heads)?;
-                if chunk.heads != old {
-                    let page =
-                        access.seal(PageKind::SEQUENCE_LEAF, encode_body(&chunk), Vec::new())?;
-                    indexes.entry(at).or_insert_with(|| index.clone()).0[slot].page = page;
-                }
-                Ok(())
+        if let Record::Chunked(chunked) = &row.record {
+            chunks(access, &chunked.parts, &mut |mut chunk| {
+                ids.heads(&mut chunk.heads)
             })?;
-            for (at, index) in indexes {
-                let children = index.0.iter().map(|chunk| chunk.page).collect();
-                chunked.parts[at].page =
-                    access.seal(PageKind::SEQUENCE_INDEX, encode_body(&index), children)?;
-            }
-        }
-        if row != before {
-            changed.push((id, row));
         }
         Ok(())
     })?;
-    let mut out = heap.clone();
-    if !changed.is_empty() {
-        let mut directory = tree(heap.directory);
-        for (id, row) in changed {
-            directory.write(id.key().to_vec(), row, access)?;
-        }
-        directory.seal(access, &mut whole())?;
-        out.directory = DirectoryRoot {
-            page: directory.page(),
-            rows: directory.len(),
-        };
-    }
-    ids.heads(&mut out.heads)?;
-    Ok(out)
+    ids.heads(&mut heap.heads.clone())
 }
 
-/// The run sealed under `root`, its code ids rewritten by `map`: the
-/// root's link, its state's and its heap's ids.
+/// The run sealed under `root`, its active code's ids rewritten by
+/// `map`: the root's link and its state's ids, over the same heap.
 ///
 /// # Errors
 ///
-/// [`RewriteFault::Unmapped`] or [`RewriteFault::Inconsistent`] for an id
-/// `map` has no consistent image for, before any page is written; the
-/// page port's faults.
+/// [`RewriteFault::Unmapped`] for an id of active code `map` has no image
+/// for, [`RewriteFault::NotRetained`] for a held callable whose Link `map`
+/// does not retain, before any page is written; the page port's faults.
 pub fn rewrite(
     pages: &mut dyn PageSource,
     root: &CheckpointRoot,
@@ -511,58 +498,36 @@ pub fn rewrite(
     let access = Access::borrowed(pages);
     let mut record = continuation::read(&access, root.heap)?;
     let mut live = LiveCode::default();
-    let mut collect = Ids::Collect(&mut live);
-    collect.run(&mut record.clone())?;
-    heap(&access, &record.heap, &mut collect)?;
+    heap(&access, &record.heap, &mut Ids::Collect(&mut live))?;
+    let mut ids = Ids::Map {
+        map,
+        held: &live.closures,
+    };
+    heap(&access, &record.heap, &mut ids)?;
     let mut out = root.clone();
-    let mut ids = Ids::Map(map);
     ids.link(&mut out.link)?;
-    check(&live, map)?;
     ids.run(&mut record)?;
-    record.heap = heap(&access, &record.heap, &mut ids)?;
     out.heap = continuation::write(&access, &record)?;
     Ok(out)
 }
 
-/// The session `session` names, its code ids rewritten by `map`.
+/// An effect identity of the run whose code is `live`, rewritten by `map`
+/// as the run's own requests are: one a held closure's body issued keeps
+/// its sites.
 ///
 /// # Errors
 ///
-/// As [`rewrite`]; [`HeapFault::Corrupt`] for a session not in the
-/// bytecode core's form.
-pub fn rewrite_session(
-    pages: &mut dyn PageSource,
-    session: &SessionRoot,
+/// [`RewriteFault::Unmapped`] for an id `map` has no image for.
+pub fn rewrite_effect(
+    effect: &mut EffectIdentity,
     map: &RunCorrespondence,
-) -> Result<SessionRoot, RewriteFault> {
-    let page = session.run_page().ok_or_else(|| {
-        HeapFault::Malformed("the session is not in the bytecode core's form".into())
-    })?;
-    let access = Access::borrowed(pages);
-    let mut carried = session::read(&access, page)?;
-    let mut live = LiveCode::default();
-    heap(&access, &carried.heap, &mut Ids::Collect(&mut live))?;
-    check(&live, map)?;
-    carried.heap = heap(&access, &carried.heap, &mut Ids::Map(map))?;
-    Ok(SessionRoot::run(session::write(&access, &carried)?))
-}
-
-/// Refuses `live` an id `map` has no consistent image for.
-fn check(live: &LiveCode, map: &RunCorrespondence) -> Result<(), RewriteFault> {
-    let mut ids = Ids::Map(map);
-    for link in &live.links {
-        ids.link(&mut link.clone())?;
+    live: &LiveCode,
+) -> Result<(), RewriteFault> {
+    Ids::Map {
+        map,
+        held: &live.closures,
     }
-    for callable in &live.callables {
-        ids.callable(&mut callable.clone())?;
-    }
-    for function in &live.functions {
-        ids.function(&mut function.clone())?;
-    }
-    for site in &live.sites {
-        ids.site(&mut site.clone())?;
-    }
-    Ok(())
+    .effect(effect)
 }
 
 /// The code the run sealed under `root` names.

@@ -1,33 +1,37 @@
-//! The run-format id rewrite (cutover contract §6): succession onto
-//! another document or helper library.
+//! The run-format id rewrite (cutover contract §6, `K-VER-005`):
+//! succession onto another document or helper library.
 //!
-//! - A rewrite leaves no old code id in any page the new root reaches:
-//!   every id-bearing record a run holds is rewritten.
-//! - A rewrite whose correspondence misses an id the run names refuses
-//!   with that id, before it writes a page.
-//! - A rewrite whose site correspondence drops a site of the run's own
-//!   code that the run stands at or names refuses with that site, before
-//!   it writes a page: a node that did not survive is never carried onto
-//!   whatever node the successor has at its path.
+//! - A rewrite moves the run's active code: no old id of it is left in
+//!   any page the new root reaches, and its frames run the images.
+//! - Code the run holds keeps its exact defining Link and code, a held
+//!   closure's body's frames and sites too, against Links the
+//!   correspondence declares retained; a held callable of another Link
+//!   refuses with it, before it writes a page.
+//! - A rewrite whose correspondence misses an id active code names
+//!   refuses with it, and one whose site correspondence drops a site of
+//!   the run's own active code refuses with that site, before it writes
+//!   a page: a node that did not survive is never carried onto whatever
+//!   node the successor has at its path. A held closure's body's site
+//!   carries by identity whatever the site correspondence says.
 
 use std::collections::BTreeSet;
 
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::PageId;
 use lash_kernel_state::paged::run::rewrite::{
-    RewriteFault, RunCorrespondence, SiteMap, Unmapped, live_code, rewrite,
+    RewriteFault, RunCorrespondence, SiteMap, live_code, rewrite,
 };
 use lash_kernel_value::LinkId;
 use lash_kernel_value::names::{CallableId, FunctionId, Name};
-use lash_kernel_value::sites::Unit;
+use lash_kernel_value::sites::{Site, Unit};
 
 use super::embedder::{ROOMY, Setup, Source, World, core_program};
 use crate::{CellStart, CoreMachine, Machine, Step};
 
-/// A run parked on a `perform` whose argument, a slot, a list's row and a
-/// large list's last chunk each hold a host function of another link,
-/// beside a closure of its own.
-const TEXT: &str = "main {\n  let f = fn() { return 1 }\n  let g = [h]\n  let big = []\n  let i = 0\n  while num.lt(i, 300) {\n    set big[list.len(big)] = i\n    set i = num.add(i, 1)\n  }\n  set big[list.len(big)] = h\n  let v = perform 0(h) as Any\n  return [f, g, big, v]\n}";
+/// A run parked on a `perform` inside a closure it holds, `p`, whose
+/// argument, a slot, a list's row and a large list's last chunk each hold
+/// a host function of another link, beside another closure of its own.
+const TEXT: &str = "main {\n  let f = fn() { return 1 }\n  let g = [h]\n  let big = []\n  let i = 0\n  while num.lt(i, 300) {\n    set big[list.len(big)] = i\n    set i = num.add(i, 1)\n  }\n  set big[list.len(big)] = h\n  let p = fn() { let w = perform 0(h) as Any return w }\n  let v = apply p()\n  return [f, g, big, v]\n}";
 
 fn flipped(bytes: &[u8; 32]) -> [u8; 32] {
     bytes.map(|byte| !byte)
@@ -62,13 +66,15 @@ fn held(source: &Source, from: PageId, digests: &BTreeSet<[u8; 32]>) -> BTreeSet
         .collect()
 }
 
-/// A rewrite to images that share no byte with the ids they replace
-/// leaves none of the old ids in the pages its root reaches, though the
-/// old root's pages hold the host function's and the run's own; a
-/// correspondence missing the host function refuses with it and writes
-/// nothing.
+/// A rewrite to images that share no byte with the ids they replace moves
+/// main's frame to the new link and keeps the held closure's frame, every
+/// held callable and nothing else of the old ids in the pages its root
+/// reaches; a correspondence that does not retain the host function's
+/// link refuses with it and writes nothing; one that drops main's site
+/// refuses with it, and one that drops only the held closure's body's
+/// sites carries them.
 #[test]
-fn a_rewrite_leaves_no_old_code_id_and_refuses_an_unmapped_one_before_writing() {
+fn a_rewrite_moves_active_code_keeps_held_code_and_refuses_before_writing() {
     let foreign = CallableId {
         link: LinkId::from_bytes([4; 32]),
         function: FunctionId::from_bytes([5; 32]),
@@ -99,6 +105,24 @@ fn a_rewrite_leaves_no_old_code_id_and_refuses_an_unmapped_one_before_writing() 
 
     let mut pages = source.clone();
     let live = live_code(&mut pages, &root).unwrap();
+    let image = LinkId::from_bytes(flipped(root.link.as_bytes()));
+    let running = live
+        .closures
+        .iter()
+        .find(|closure| {
+            live.frames
+                .contains(&(root.link, Unit::Library(closure.function)))
+        })
+        .copied()
+        .expect("the parked run stands in a closure it holds");
+    assert_eq!(
+        live.frames,
+        BTreeSet::from([
+            (root.link, Unit::Main),
+            (root.link, Unit::Library(running.function))
+        ]),
+        "main and the held closure it applies run the run's own link"
+    );
     let mut map = RunCorrespondence::default();
     let mut old = BTreeSet::new();
     for link in &live.links {
@@ -106,26 +130,47 @@ fn a_rewrite_leaves_no_old_code_id_and_refuses_an_unmapped_one_before_writing() 
             .insert(*link, LinkId::from_bytes(flipped(link.as_bytes())));
         old.insert(*link.as_bytes());
     }
-    for function in live
-        .functions
-        .iter()
-        .chain(live.callables.iter().map(|callable| &callable.function))
-    {
+    for function in &live.functions {
         map.functions.insert(
             *function,
             FunctionId::from_bytes(flipped(function.as_bytes())),
         );
         old.insert(*function.as_bytes());
     }
+    let mut kept = BTreeSet::new();
     for callable in &live.callables {
-        map.callables.insert(
-            *callable,
-            CallableId {
-                link: map.links[&callable.link],
-                function: map.functions[&callable.function],
-            },
-        );
+        map.retained.insert(callable.link);
+        kept.extend([*callable.link.as_bytes(), *callable.function.as_bytes()]);
+        old.insert(*callable.function.as_bytes());
     }
+    assert!(
+        map.retained.contains(&root.link) && map.retained.contains(&foreign.link),
+        "the run holds closures of its own link and the host function"
+    );
+    let in_held = |site: &Site| {
+        live.closures
+            .iter()
+            .any(|closure| site.unit == Unit::Library(closure.function))
+    };
+    let body: Vec<Site> = live
+        .sites
+        .iter()
+        .filter(|site| in_held(site))
+        .cloned()
+        .collect();
+    assert!(
+        !body.is_empty(),
+        "the held closure's frame stands in its body"
+    );
+    let identity = |without: &dyn Fn(&Site) -> bool| {
+        Some(SiteMap::new(
+            lash_kernel_doc::Correspondence::identity(
+                root.document,
+                live.sites.iter().filter(|site| !without(site)).cloned(),
+            )
+            .unwrap(),
+        ))
+    };
     let before = held(&source, root.heap.id, &old);
     assert!(
         [
@@ -135,18 +180,15 @@ fn a_rewrite_leaves_no_old_code_id_and_refuses_an_unmapped_one_before_writing() 
         ]
         .iter()
         .all(|digest| before.contains(digest)),
-        "the old run holds the ids the rewrite must replace"
+        "the old run holds the ids the rewrite must replace or keep"
     );
 
-    let mut missing = map.clone();
-    missing.callables.remove(&foreign);
     let written = source.0.borrow().len();
+    let mut missing = map.clone();
+    missing.retained.remove(&foreign.link);
     let refused = rewrite(&mut pages, &root, &missing);
     assert!(
-        matches!(
-            refused,
-            Err(RewriteFault::Unmapped(Unmapped::Callable(callable))) if callable == foreign
-        ),
+        matches!(&refused, Err(RewriteFault::NotRetained(callable)) if *callable == foreign),
         "{refused:?}"
     );
     assert_eq!(source.0.borrow().len(), written, "a refusal wrote a page");
@@ -154,30 +196,38 @@ fn a_rewrite_leaves_no_old_code_id_and_refuses_an_unmapped_one_before_writing() 
     let dropped = live
         .sites
         .iter()
-        .filter(|site| site.unit == Unit::Main)
+        .filter(|site| site.unit == Unit::Main && !in_held(site))
         .max()
         .cloned()
         .expect("the parked run stands in its main");
     let mut moved = map.clone();
-    moved.sites = Some(SiteMap::new(
-        lash_kernel_doc::Correspondence::identity(
-            root.document,
-            live.sites.iter().filter(|site| **site != dropped).cloned(),
-        )
-        .unwrap(),
-    ));
+    moved.sites = identity(&|site| *site == dropped);
     let refused = rewrite(&mut pages, &root, &moved);
     assert!(
         matches!(
             &refused,
-            Err(RewriteFault::Unmapped(Unmapped::Site(site))) if *site == dropped
+            Err(RewriteFault::Unmapped(lash_kernel_state::paged::run::rewrite::Unmapped::Site(site))) if *site == dropped
         ),
         "{refused:?}"
     );
     assert_eq!(source.0.borrow().len(), written, "a refusal wrote a page");
 
+    map.sites = identity(&|site| in_held(site));
     let rewritten = rewrite(&mut pages, &root, &map).unwrap();
-    assert_eq!(rewritten.link, map.links[&root.link]);
-    let after = held(&source, rewritten.heap.id, &old);
-    assert!(after.is_empty(), "old ids left: {}", after.len());
+    assert_eq!(rewritten.link, image);
+    let after = live_code(&mut pages, &rewritten).unwrap();
+    assert_eq!(
+        after.frames,
+        BTreeSet::from([
+            (image, Unit::Main),
+            (root.link, Unit::Library(running.function))
+        ]),
+        "main runs the new link, the held closure its own"
+    );
+    assert_eq!(after.callables, live.callables, "held callables are kept");
+    assert!(
+        body.iter().all(|site| after.sites.contains(site)),
+        "the held closure's body's sites carry by identity"
+    );
+    assert_eq!(held(&source, rewritten.heap.id, &old), kept, "old ids left");
 }
