@@ -321,6 +321,19 @@ pub struct Fused {
     pub call: u32,
     /// What takes the call's answer.
     pub then: Then,
+    /// The call's answer and fee over two word ints, where the native
+    /// answers them in place: `None` sends every pair through the
+    /// native's ordinary answer.
+    pub words: Option<Words>,
+}
+
+/// A fused call's word-int form: its operation, and its fee by which of
+/// the two operands and the answer are of size two (as
+/// [`Charge::pair`] indexes it), `None` for an uncharged call.
+#[derive(Clone, Copy, Debug)]
+pub struct Words {
+    pub operation: lash_kernel_doc::scalar::ScalarOp,
+    pub fee: Option<[u64; 8]>,
 }
 
 /// An operand a fused run pushes.

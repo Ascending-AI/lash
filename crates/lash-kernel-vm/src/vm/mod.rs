@@ -1267,7 +1267,7 @@ impl<H: Heap> Vm<H> {
                         continue 'frames;
                     }
                     Op::Fused(n) => {
-                        let fused = unit.fused[n as usize];
+                        let fused = &unit.fused[n as usize];
                         let call = &unit.calls[fused.site as usize];
                         enter!(call, fused.call as usize + 1, rerun);
                         let Callee::Native { native, charged } =
@@ -1288,7 +1288,30 @@ impl<H: Heap> Vm<H> {
                             _ => [self.cx.stack[len - 2], self.cx.stack[len - 1]],
                         };
                         pc = fused.call as usize + 1;
-                        let Some(answer) = self.answer(&program, native, charged, &args) else {
+                        // Two word ints: the answer and its fee in place, as
+                        // the native's ordinary answer gives them.
+                        let words = match (fused.words, args) {
+                            (Some(words), [Value::Int(a), Value::Int(b)]) => {
+                                lash_kernel_doc::scalar::ints(words.operation, a, b).and_then(
+                                    |value| match words.fee {
+                                        Some(_) if self.off => Some((value, None)),
+                                        Some(table) => {
+                                            let index = usize::from(a != 0)
+                                                | usize::from(b != 0) << 1
+                                                | usize::from(crate::data::size_two(&value)?) << 2;
+                                            Some((value, Some(table[index])))
+                                        }
+                                        None => Some((value, None)),
+                                    },
+                                )
+                            }
+                            _ => None,
+                        };
+                        let answer = match words {
+                            Some(answered) => Some(Ok(answered)),
+                            None => self.answer(&program, native, charged, &args),
+                        };
+                        let Some(answer) = answer else {
                             // No inline answer: the pushes, then the call.
                             for &pushed in &fused.operands[..usize::from(fused.pushes)] {
                                 self.push(operand(self, pushed));
@@ -1300,7 +1323,9 @@ impl<H: Heap> Vm<H> {
                         let (value, fee) = check!(answer);
                         self.cx.stack.truncate(len + usize::from(fused.pushes) - 2);
                         self.push(value);
-                        if let Some(units) = fee {
+                        if let Some(units) = fee
+                            && (self.watch.is_some() || !self.meter.prepay(units))
+                        {
                             sync!(pc);
                             self.fee(units)?;
                         }

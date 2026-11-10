@@ -220,6 +220,13 @@ impl Charge {
         Some(table[index])
     }
 
+    /// The fee of each [`Self::pair`] index, where the formula has one
+    /// for every pair of leaves.
+    #[inline]
+    pub fn pairs(&self) -> Option<[u64; 8]> {
+        self.pairs.or(self.constant.map(|units| [units; 8]))
+    }
+
     /// Whether the formula measures an argument.
     #[inline]
     pub fn reads_args(&self) -> bool {

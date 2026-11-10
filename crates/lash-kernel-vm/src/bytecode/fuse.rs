@@ -12,10 +12,10 @@
 //!
 //! It runs after validation, on validated code.
 
-use lash_kernel_doc::arena::native::InlineOperation;
+use lash_kernel_doc::arena::native::{InlineOperation, ScalarDomain};
 
 use super::op::Op;
-use super::program::{Callee, Fused, Operand, Program, Then, Unit};
+use super::program::{Callee, Fused, Operand, Program, Then, Unit, Words};
 
 /// Fuses the runs of every unit of `program`.
 pub(crate) fn fuse(program: &mut Program) {
@@ -29,11 +29,32 @@ pub(crate) fn fuse(program: &mut Program) {
             && entry.params == 2
             && matches!(entry.scalar, Some(InlineOperation::Scalar { .. }))
     };
+    // A native with no body is answered at its call with no frame, so
+    // two word ints it accepts are answered and billed in place.
+    let words = |site: u32, unit: &Unit| {
+        let Callee::Native { native, charged } = unit.calls[site as usize].callee else {
+            return None;
+        };
+        let entry = program.native(native);
+        let Some(InlineOperation::Scalar { operation, domain }) = entry.scalar else {
+            return None;
+        };
+        let fee = match charged {
+            true => Some(program.charge(entry.charge).pairs()?),
+            false => None,
+        };
+        (entry.body.is_none()
+            && matches!(domain, ScalarDomain::Words | ScalarDomain::WordsOrFloats))
+        .then_some(Words { operation, fee })
+    };
     let mut runs = Vec::new();
     for (at, unit) in program.units.iter().enumerate() {
         let mut pc = 0;
         while pc < unit.ops.len() {
-            match run(unit, pc, &scalar) {
+            match run(unit, pc, &scalar).map(|(mut fused, end)| {
+                fused.words = words(fused.site, unit);
+                (fused, end)
+            }) {
                 Some((fused, end)) => {
                     runs.push((at, pc, fused));
                     pc = end;
@@ -94,6 +115,7 @@ fn run(unit: &Unit, pc: usize, scalar: &impl Fn(u32, &Unit) -> bool) -> Option<(
         site,
         call: call as u32,
         then,
+        words: None,
     };
     Some((fused, end))
 }
