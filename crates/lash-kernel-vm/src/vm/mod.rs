@@ -15,6 +15,7 @@ pub(crate) mod calls;
 pub(crate) mod charge;
 pub(crate) mod datum;
 mod digests;
+mod exceeded;
 mod fits;
 pub(crate) mod frames;
 pub(crate) mod inline;
@@ -42,7 +43,7 @@ use crate::bytecode::op::Op;
 use crate::bytecode::program::{
     Callee, Constant, LIB, Operand, Program, Then, Unit, UnitId, UnitKind,
 };
-use crate::heap::{Heap, LoadError, MemoryRefused};
+use crate::heap::{Heap, LoadError};
 use crate::observe::Weight;
 use crate::{Bound, ChargeLimiter, Host, LimitDecision};
 use charge::{Meter, Refused, Rest};
@@ -89,9 +90,25 @@ impl Stop {
 pub(crate) struct Exceeded {
     pub bound: Bound,
     pub limit: u64,
-    /// The library function whose guard refused, or the unit running.
+    /// The library call that passed the bound, or the authored function
+    /// containing a charge, memory or call-depth stop.
     pub function: Option<Arc<str>>,
+    /// The nearest authored statement for a charge, memory or call-depth
+    /// stop.
     pub site: Option<Site>,
+}
+
+impl Exceeded {
+    /// A run-wide bound, passed by no function and at no site: a park's
+    /// requests, the live tasks, a join's members.
+    pub(crate) fn run(bound: Bound, limit: u64) -> Self {
+        Self {
+            bound,
+            limit,
+            function: None,
+            site: None,
+        }
+    }
 }
 
 /// How an op leaves the straight line.
@@ -272,7 +289,7 @@ impl<H: Heap> Vm<H> {
         let unadmitted = heap
             .admit(crate::heap::meter::code(&document))
             .err()
-            .map(memory);
+            .map(|refused| Exceeded::run(Bound::Memory, refused.bound));
         let mut constants = Vec::with_capacity(program.constants.len());
         for constant in &program.constants {
             let object = match constant {
@@ -376,12 +393,28 @@ impl<H: Heap> Vm<H> {
         args: &[Value],
         closure: Option<ArenaHandle>,
     ) -> Run<()> {
-        if self.unadmitted.is_some() {
-            return Ok(());
+        if self.unadmitted.is_none() {
+            self.cx.stack.extend_from_slice(args);
+            let entered = self.enter(unit, args.len(), closure, None, 0);
+            self.admitted(entered, ())?;
         }
-        self.cx.stack.extend_from_slice(args);
-        let entered = self.enter(unit, args.len(), closure, None, 0);
-        self.admitted(entered, ())
+        // A run refused before it began stops at its first step: the
+        // root's first statement, where an authored root has one.
+        let root = self.program.unit(unit);
+        if let Some(refused) = self.unadmitted.as_mut()
+            && refused.site.is_none()
+            && root.authored
+        {
+            refused.function = Some(Arc::clone(&root.name));
+            refused.site = Some(
+                root.step
+                    .iter()
+                    .position(|&step| step)
+                    .and_then(|pc| root.statement(pc))
+                    .unwrap_or_else(|| root.site.clone()),
+            );
+        }
+        Ok(())
     }
 
     /// What starting the run built, or `refused` once something it is
@@ -484,57 +517,6 @@ impl<H: Heap> Vm<H> {
                     ))));
                 }
             }
-        }
-    }
-
-    /// A bound passed by the running op, its frame standing past it.
-    fn exceeded(&self, bound: Bound, limit: u64) -> Exceeded {
-        self.exceeded_at(bound, limit, true)
-    }
-
-    /// A bound names the nearest authored function and the statement it
-    /// stands in: a library helper the guest called is not where the guest
-    /// stands. A frame below the top stands past its call, the top past the
-    /// op that passed the bound or, not `past`, at it.
-    fn exceeded_at(&self, bound: Bound, limit: u64, past: bool) -> Exceeded {
-        let top = self.cx.frames.len();
-        let authored = self
-            .cx
-            .frames
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(at, frame)| {
-                let unit = self.program.unit(frame.unit);
-                let pc = match at + 1 == top && !past {
-                    true => Some(frame.pc as usize),
-                    false => (frame.pc as usize).checked_sub(1),
-                };
-                unit.authored.then_some(unit).map(|unit| {
-                    let site = pc.and_then(|pc| unit.statement(pc));
-                    (unit, site.unwrap_or_else(|| unit.site.clone()))
-                })
-            });
-        let (function, site) = match authored {
-            Some((unit, site)) => (Some(unit.name.clone()), Some(site)),
-            None => {
-                let unit = self
-                    .cx
-                    .inline
-                    .map(|activation| activation.callee)
-                    .or_else(|| self.cx.frames.last().map(|frame| frame.unit))
-                    .map(|unit| self.program.unit(unit));
-                (
-                    unit.map(|unit| unit.name.clone()),
-                    unit.map(|unit| unit.site.clone()),
-                )
-            }
-        };
-        Exceeded {
-            bound,
-            limit,
-            function,
-            site,
         }
     }
 
@@ -734,7 +716,11 @@ impl<H: Heap> Vm<H> {
             };
             match decision {
                 LimitDecision::Grow(more) if more > 0 => self.heap.grow(more),
-                _ => return Err(Flow::from(Stop::bound(memory(refused)))),
+                _ => {
+                    return Err(Flow::from(Stop::bound(
+                        self.exceeded(Bound::Memory, refused.bound),
+                    )));
+                }
             }
         }
     }
@@ -828,7 +814,9 @@ impl<H: Heap> Vm<H> {
             Ok(()) => Ok(()),
             // The faulting op's reservation is unbilled once, as at any
             // stop, and the run refuses at the memory bound.
-            Err(LoadError::Memory(refused)) => Err(Stop::bound(memory(refused))),
+            Err(LoadError::Memory(refused)) => {
+                Err(Stop::bound(self.exceeded(Bound::Memory, refused.bound)))
+            }
             // The store failed: infrastructure, never a guest raise or a
             // retry; the last committed root stands.
             Err(LoadError::Store(error)) => {
@@ -1798,14 +1786,5 @@ impl<H: Heap> Vm<H> {
             ));
         }
         self.place(n, NewObject::Tuple(values))
-    }
-}
-
-pub(crate) fn memory(refused: MemoryRefused) -> Exceeded {
-    Exceeded {
-        bound: Bound::Memory,
-        limit: refused.bound,
-        function: None,
-        site: None,
     }
 }

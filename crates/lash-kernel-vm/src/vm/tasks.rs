@@ -21,7 +21,7 @@ use lash_kernel_value::sites::{
 use lash_kernel_value::types::Type;
 
 use super::frames::Context;
-use super::{Flow, Run, Stop, Vm, fault};
+use super::{Exceeded, Flow, Run, Stop, Vm, fault};
 use crate::Bound;
 use crate::bytecode::op::Op;
 use crate::bytecode::program::{ActionSite, Callee, Mark, Unit, UnitId};
@@ -664,9 +664,10 @@ impl<H: Heap> Vm<H> {
                 }
                 let limit = self.tasks.requests_limit;
                 if self.tasks.issued.len() as u64 >= u64::from(limit) {
-                    return Err(Flow::from(Stop::bound(
-                        self.exceeded(Bound::RequestsPerPark, u64::from(limit)),
-                    )));
+                    return Err(Flow::from(Stop::bound(Exceeded::run(
+                        Bound::RequestsPerPark,
+                        u64::from(limit),
+                    ))));
                 }
                 let link = self.running_link();
                 let occurrence = self.running().advance(&mark, link);
@@ -837,9 +838,10 @@ impl<H: Heap> Vm<H> {
     ) -> Run<Option<Stop>> {
         let limit = self.tasks.live_limit;
         if self.tasks.live >= limit {
-            return Err(Flow::from(Stop::bound(
-                self.exceeded(Bound::LiveTasks, u64::from(limit)),
-            )));
+            return Err(Flow::from(Stop::bound(Exceeded::run(
+                Bound::LiveTasks,
+                u64::from(limit),
+            ))));
         }
         // The callee is read before the occurrence advances: a cold read
         // runs the spawn again with nothing advanced.
@@ -913,9 +915,10 @@ impl<H: Heap> Vm<H> {
             .map_err(|error| self.native(error))?;
         let limit = u64::from(self.tasks.join_limit);
         if len > limit {
-            return Err(Flow::from(Stop::bound(
-                self.exceeded(Bound::JoinMembers, limit),
-            )));
+            return Err(Flow::from(Stop::bound(Exceeded::run(
+                Bound::JoinMembers,
+                limit,
+            ))));
         }
         let mut members = Vec::with_capacity(len as usize);
         for at in 0..len {

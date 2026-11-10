@@ -231,15 +231,11 @@ impl<H: Heap> Vm<H> {
                         self.heap.grow(more);
                         continue;
                     }
-                    // The native that would have exceeded the bound is
-                    // named, as a guard that ends the run is.
+                    // The library call that would have exceeded the bound
+                    // is named, as a guard that ends the run is.
                     return Err(Flow::from(Stop::bound(Exceeded {
-                        function: Some(entry.name.clone()),
-                        ..super::memory(crate::heap::MemoryRefused {
-                            held,
-                            wanted: self.heap.bound().saturating_sub(held).saturating_add(1),
-                            bound: self.heap.bound(),
-                        })
+                        function: Some(self.library_call(&entry.name)),
+                        ..self.exceeded(Bound::Memory, bound)
                     })));
                 }
             }
