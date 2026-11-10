@@ -890,7 +890,41 @@ pub struct PreparedInstance {
 /// Source-owned coordinates used only when callables cross a boundary.
 #[derive(Clone, Debug, Default)]
 pub struct FunctionOrigins {
+    /// The written facts of a function the running cell creates, by the
+    /// site that creates it.
     pub sites: BTreeMap<(LinkId, lash_kernel_value::sites::Site), lash_kernel_dialect::Written>,
+    /// The written facts of a saved function, by its identity: a closure
+    /// an earlier cell made keeps that cell's link and creation site, which
+    /// the running cell's facts do not name.
+    pub functions: BTreeMap<FunctionId, lash_kernel_dialect::Written>,
+}
+
+impl FunctionOrigins {
+    /// The facts a dialect wrote for the cell linked as `link`: one at a
+    /// library site with no path is a saved function's, and is kept by
+    /// the function.
+    pub fn of<'a>(
+        link: LinkId,
+        written: impl IntoIterator<
+            Item = (
+                &'a lash_kernel_value::sites::Site,
+                &'a lash_kernel_dialect::Written,
+            ),
+        >,
+    ) -> Self {
+        let mut origins = Self::default();
+        for (site, written) in written {
+            match &site.unit {
+                lash_kernel_value::sites::Unit::Library(function) if site.path.is_empty() => {
+                    origins.functions.insert(*function, written.clone());
+                }
+                _ => {
+                    origins.sites.insert((link, site.clone()), written.clone());
+                }
+            }
+        }
+        origins
+    }
 }
 
 impl PreparedInstance {

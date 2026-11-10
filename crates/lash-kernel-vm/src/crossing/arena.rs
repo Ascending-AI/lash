@@ -355,10 +355,11 @@ impl Graph {
             let (identity, cells, _) = arena.closure(handle)?;
             let site = &identity.site.site;
             creation = Some(site.clone());
-            if let Some(written) = run
-                .function_origins
+            let origins = run.function_origins;
+            if let Some(written) = origins
                 .sites
                 .get(&(callable.link, site.clone()))
+                .or_else(|| origins.functions.get(&callable.function))
                 .cloned()
             {
                 written_signature = Some(lash_kernel_doc::WrittenSignature {

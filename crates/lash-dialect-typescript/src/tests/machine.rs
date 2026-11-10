@@ -339,13 +339,8 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
     }
     let program =
         crate::tests::linked::program(Arc::clone(lowered.document.shared()), prepared().clone());
-    let function_origins = lash_kernel_vm::interface::FunctionOrigins {
-        sites: lowered
-            .written
-            .iter()
-            .map(|(site, written)| ((program.link, site.clone()), written.clone()))
-            .collect(),
-    };
+    let function_origins =
+        lash_kernel_vm::interface::FunctionOrigins::of(program.link, &lowered.written);
     let start = CellStart {
         target: Target::Main,
         args: Vec::new(),
@@ -835,13 +830,7 @@ fn cells_keep_javascript_text_semantics_and_ship_conversion_facts() {
     )
     .expect("start the cell");
     machine.set_options(MachineOptions {
-        function_origins: FunctionOrigins {
-            sites: lowered
-                .written
-                .iter()
-                .map(|(site, written)| ((program.link, site.clone()), written.clone()))
-                .collect(),
-        },
+        function_origins: FunctionOrigins::of(program.link, &lowered.written),
         ..Default::default()
     });
     let Step::Parked(park) = machine

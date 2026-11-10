@@ -610,13 +610,7 @@ impl<'embedding> Server<'embedding> {
             .transpose()?;
         let function_origins = save
             .as_ref()
-            .map(|save| lash_kernel_vm::interface::FunctionOrigins {
-                sites: save
-                    .written
-                    .iter()
-                    .map(|(site, written)| ((program.link, site.clone()), written.clone()))
-                    .collect(),
-            })
+            .map(|save| lash_kernel_vm::interface::FunctionOrigins::of(program.link, &save.written))
             .unwrap_or_default();
         let captions = save
             .as_ref()
