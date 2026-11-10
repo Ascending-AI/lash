@@ -217,7 +217,7 @@ fn expand(
     // The region's ops stand for the call's expression, where the
     // unit's origin table covers its ops.
     let origin = (caller.origin.len() == caller.ops.len())
-        .then(|| caller.origin.get(pc).cloned())
+        .then(|| Some((caller.origin.get(pc).cloned()?, *caller.stated.get(pc)?)))
         .flatten();
     // Where each reached block of the body starts in the region.
     let mut starts = vec![None; body.blocks.len()];
@@ -282,8 +282,9 @@ fn expand(
         });
     }
     caller.step.extend(std::iter::repeat_n(false, ops.len()));
-    if let Some(origin) = origin {
+    if let Some((origin, stated)) = origin {
         caller.origin.extend(std::iter::repeat_n(origin, ops.len()));
+        caller.stated.extend(std::iter::repeat_n(stated, ops.len()));
     }
     caller.ops.extend(ops);
     caller.event.extend(event);

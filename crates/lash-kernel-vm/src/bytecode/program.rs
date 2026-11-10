@@ -159,6 +159,9 @@ pub struct Unit {
     /// The expression each op lowers, by its path under `site`. Ops added
     /// after sealing have none, and stand for the unit's root.
     pub origin: Vec<super::site_tables::Path>,
+    /// How much of each op's origin is the statement it runs in: where a
+    /// bound refused there stands.
+    pub stated: Vec<u16>,
     /// Where each slot was declared, and the variable it holds if any.
     pub declared: Vec<(super::site_tables::Path, Option<Name>)>,
     /// Every point a frame of the unit can be saved at (contract §5).
@@ -183,6 +186,13 @@ impl Unit {
     /// by falling off its body. The resume table saves a point at each.
     pub fn slices(&self, pc: usize) -> bool {
         self.step[pc] || (matches!(self.ops[pc], Op::Fall) && !self.covered)
+    }
+
+    /// The statement op `pc` runs in, where the origin table covers it.
+    pub fn statement(&self, pc: usize) -> Option<Site> {
+        let origin = self.origin.get(pc)?;
+        let stated = usize::from(*self.stated.get(pc)?).min(origin.len());
+        Some(Site::new(self.site.unit.clone(), origin[..stated].to_vec()))
     }
 
     /// The op compiled at `pc`, before inlining or fusion replaced it.

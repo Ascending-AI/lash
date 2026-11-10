@@ -792,6 +792,7 @@ mod tests {
                 inlines: Vec::new(),
                 folds: Vec::new(),
                 origin: Vec::new(),
+                stated: Vec::new(),
                 declared: Vec::new(),
                 sites: Default::default(),
                 cleanup: None,

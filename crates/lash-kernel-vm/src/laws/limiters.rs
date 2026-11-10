@@ -1102,36 +1102,40 @@ fn huge_charges(
 /// loop test shares its block with one-unit events, so the block's fixed
 /// sum passes `u64::MAX` and the block runs event by event: at every limit
 /// it refuses where the exact path does, and at `u64::MAX` it refuses the
-/// test with only what preceded it charged. `law.wide("abc")`'s formula
-/// saturates to `u64::MAX` (a wrapping one is `2^63 - 3`, which fits), so
-/// it too refuses at every limit with only what preceded it charged.
+/// test. `law.wide("abc")`'s formula saturates to `u64::MAX` (a wrapping
+/// one is `2^63 - 3`, which fits), so it too refuses at every limit. A run
+/// ends at the charge that passed its bound (`K-CHG-008`): one past the
+/// limit at a one-unit event, the saturated `u64::MAX` at either wide
+/// one. Each refusal stands in its statement: the loop, main's second,
+/// and the `do`, its first.
 #[test]
 fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
-    let refused = |limit: u64| {
+    let refused = |limit: u64, at: u32| {
         format!(
-            "Error(Bound(BoundExceeded {{ bound: Charge, limit: {limit}, function: Some(FunctionName(\"main\")), site: Some(Site {{ unit: Main, path: [] }}) }}))"
+            "Error(Bound(BoundExceeded {{ bound: Charge, limit: {limit}, function: Some(FunctionName(\"main\")), site: Some(Site {{ unit: Main, path: [{at}] }}) }}))"
         )
     };
     let documents = [
-        "main {\n  let n = 0\n  while num.lt(n, 2) metered 18446744073709551615 {\n    set n = num.add(n, 1)\n  }\n  return n\n}",
-        "main {\n  do invoke law.wide(\"abc\")\n  return 4\n}",
+        (
+            "main {\n  let n = 0\n  while num.lt(n, 2) metered 18446744073709551615 {\n    set n = num.add(n, 1)\n  }\n  return n\n}",
+            1,
+        ),
+        ("main {\n  do invoke law.wide(\"abc\")\n  return 4\n}", 0),
     ];
-    for text in documents {
-        let before = core_run(text, 1_000, u64::MAX, true, None);
-        let pre = before.1.unwrap();
-        assert!(pre < 10, "{before:?}");
+    for (text, at) in documents {
+        // The charge that precedes the wide event: the least limit it
+        // refuses at.
+        let pre = (0..10)
+            .find(|&limit| core_run(text, limit, u64::MAX, true, None).1 == Some(u64::MAX))
+            .expect("the wide event follows a few one-unit events");
         for limit in (0..=pre + 1).chain([1_000, 1 << 63, u64::MAX - 1, u64::MAX]) {
             let exact = core_run(text, limit, u64::MAX, true, None);
-            let end = if limit < pre {
-                exact.0.clone()
+            let (end, charged) = if limit < pre {
+                (exact.0.clone(), limit + 1)
             } else {
-                refused(limit)
+                (refused(limit, at), u64::MAX)
             };
-            assert_eq!(
-                exact,
-                (end, Some(pre.min(limit)), Vec::new()),
-                "limit {limit}"
-            );
+            assert_eq!(exact, (end, Some(charged), Vec::new()), "limit {limit}");
             assert_eq!(
                 core_run(text, limit, u64::MAX, false, None),
                 exact,

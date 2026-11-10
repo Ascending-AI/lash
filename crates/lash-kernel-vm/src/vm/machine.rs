@@ -859,7 +859,9 @@ impl Machine for CoreMachine {
 
     fn meters(&self) -> Meters {
         Meters {
-            charged: (!self.vm.off()).then(|| self.vm.charged()),
+            // A refused run reports the charge its refused event would
+            // have made.
+            charged: (!self.vm.off()).then(|| self.vm.refused.unwrap_or(self.vm.charged())),
             memory: self.vm.heap.held(),
             live_tasks: self.vm.tasks.live,
         }

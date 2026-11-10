@@ -196,6 +196,8 @@ pub(crate) struct Fun {
     pub path: Vec<u32>,
     /// The expression each op lowers, by path (`site_tables`).
     pub origin: Vec<Path>,
+    /// How much of each op's origin is the statement it runs in.
+    pub stated: Vec<u16>,
     /// Where each slot was declared, and the variable it holds if any
     /// (`site_tables`).
     pub declared: Vec<(Path, Option<Name>)>,
@@ -237,6 +239,7 @@ impl Fun {
             site,
             path: Vec::new(),
             origin: Vec::new(),
+            stated: Vec::new(),
             declared: Vec::new(),
         }
     }
@@ -314,6 +317,12 @@ impl Fun {
             _ => Path::from(self.path.as_slice()),
         };
         self.origin.push(path);
+        let stated = if self.path.starts_with(&self.statement.path) {
+            self.statement.path.len()
+        } else {
+            0
+        };
+        self.stated.push(stated as u16);
     }
 
     /// A block starts here; events still pending are billed before it.
@@ -1445,6 +1454,7 @@ impl<'a> Compiler<'a> {
             site,
             mut points,
             origin,
+            stated,
             declared,
             owner,
             capture_names,
@@ -1527,6 +1537,7 @@ impl<'a> Compiler<'a> {
             inlines: Vec::new(),
             folds: Vec::new(),
             origin,
+            stated,
             declared,
             sites: Default::default(),
             cleanup: None,

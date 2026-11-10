@@ -428,7 +428,10 @@ impl<H: Heap> Vm<H> {
 
     /// Asks the limiter about a refusal, retrying what it left unbilled
     /// while the limiter grows the limit.
-    fn refusal(&mut self, mut refused: Refused) -> Run<()> {
+    ///
+    /// `past` when the refused charge is the running op's own, its frame
+    /// standing past it; else it is the op's fixed event, at the op.
+    fn refusal(&mut self, mut refused: Refused, past: bool) -> Run<()> {
         loop {
             let decision = match self.limiter.as_mut() {
                 Some(limiter) => limiter.limit_reached(refused.total, self.meter.limit()),
@@ -457,33 +460,64 @@ impl<H: Heap> Vm<H> {
                 }
                 _ => {
                     self.refused = Some(refused.total);
-                    return Err(Flow::from(Stop::bound(
-                        self.exceeded(Bound::Charge, self.meter.limit()),
-                    )));
+                    return Err(Flow::from(Stop::bound(self.exceeded_at(
+                        Bound::Charge,
+                        self.meter.limit(),
+                        past,
+                    ))));
                 }
             }
         }
     }
 
-    /// A bound passed in the running frame, or in the body whose inline
-    /// region it runs.
+    /// A bound passed by the running op, its frame standing past it.
     fn exceeded(&self, bound: Bound, limit: u64) -> Exceeded {
-        // A bound names the nearest authored function: a library helper
-        // the guest called is not where the guest stands.
-        let units = self
+        self.exceeded_at(bound, limit, true)
+    }
+
+    /// A bound names the nearest authored function and the statement it
+    /// stands in: a library helper the guest called is not where the guest
+    /// stands. A frame below the top stands past its call, the top past the
+    /// op that passed the bound or, not `past`, at it.
+    fn exceeded_at(&self, bound: Bound, limit: u64, past: bool) -> Exceeded {
+        let top = self.cx.frames.len();
+        let authored = self
             .cx
-            .inline
-            .map(|activation| activation.callee)
-            .into_iter()
-            .chain(self.cx.frames.iter().rev().map(|frame| frame.unit))
-            .map(|unit| &self.program.units[unit as usize]);
-        let innermost = units.clone().next();
-        let unit = units.clone().find(|unit| unit.authored).or(innermost);
+            .frames
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(at, frame)| {
+                let unit = &self.program.units[frame.unit as usize];
+                let pc = match at + 1 == top && !past {
+                    true => Some(frame.pc as usize),
+                    false => (frame.pc as usize).checked_sub(1),
+                };
+                unit.authored.then_some(unit).map(|unit| {
+                    let site = pc.and_then(|pc| unit.statement(pc));
+                    (unit, site.unwrap_or_else(|| unit.site.clone()))
+                })
+            });
+        let (function, site) = match authored {
+            Some((unit, site)) => (Some(unit.name.clone()), Some(site)),
+            None => {
+                let unit = self
+                    .cx
+                    .inline
+                    .map(|activation| activation.callee)
+                    .or_else(|| self.cx.frames.last().map(|frame| frame.unit))
+                    .map(|unit| &self.program.units[unit as usize]);
+                (
+                    unit.map(|unit| unit.name.clone()),
+                    unit.map(|unit| unit.site.clone()),
+                )
+            }
+        };
         Exceeded {
             bound,
             limit,
-            function: unit.map(|unit| unit.name.clone()),
-            site: unit.map(|unit| unit.site.clone()),
+            function,
+            site,
         }
     }
 
@@ -497,12 +531,12 @@ impl<H: Heap> Vm<H> {
         if event.units != 0
             && let Err(refused) = self.meter.units(event.units)
         {
-            self.refusal(refused)?;
+            self.refusal(refused, false)?;
         }
         if event.atomic != 0
             && let Err(refused) = self.meter.atomic(event.atomic)
         {
-            self.refusal(refused)?;
+            self.refusal(refused, false)?;
         }
         Ok(())
     }
@@ -525,14 +559,14 @@ impl<H: Heap> Vm<H> {
                     if let Rest::Units(rest) = refused.rest {
                         tape(self, Weight::Units(event.units - rest + 1));
                     }
-                    self.refusal(refused)?;
+                    self.refusal(refused, false)?;
                 }
             }
         }
         if event.atomic != 0 {
             tape(self, Weight::Atomic(event.atomic));
             if let Err(refused) = self.meter.atomic(event.atomic) {
-                self.refusal(refused)?;
+                self.refusal(refused, false)?;
             }
         }
         Ok(())
@@ -555,7 +589,7 @@ impl<H: Heap> Vm<H> {
         let through = self.through();
         self.exact = true;
         if let Err(refused) = self.meter.fee(units, through) {
-            self.refusal(refused)?;
+            self.refusal(refused, true)?;
         }
         Ok(())
     }
