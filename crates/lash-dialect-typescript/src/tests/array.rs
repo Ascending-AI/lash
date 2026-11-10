@@ -610,7 +610,8 @@ body {{
     let end = drive_document(document, &[], &text);
     assert!(
         matches!(&end, End::Finished(finished) if finished.result == Datum::List(vec![
-            Datum::Text(format!("{}{}{}", "[".repeat(63), r#"{"n":2.0}"#, "]".repeat(63))),
+            // ECMAScript `Number::toString` spells the float 2.0 as `2`.
+            Datum::Text(format!("{}{}{}", "[".repeat(63), r#"{"n":2}"#, "]".repeat(63))),
             Datum::Text("json_depth".into()),
             Datum::Text("cycle".into()),
         ])),
