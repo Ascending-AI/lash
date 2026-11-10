@@ -112,7 +112,7 @@ fn build(
     let registry = program.library.registry().clone();
     // Every Link the build loads: a function value of one calls that
     // Link's own body.
-    let others: Vec<(lash_kernel_value::LinkId, &Document)> = program
+    let others = program
         .instances
         .iter()
         .filter(|(link, _)| **link != program.link)
@@ -121,11 +121,27 @@ fn build(
             Some((*link, &**document))
         })
         .collect();
+    let imports = program
+        .instances
+        .iter()
+        .flat_map(|(link, instance)| {
+            instance
+                .slots
+                .iter()
+                .filter_map(|(slot, prepared)| match prepared {
+                    crate::interface::PreparedSlot::Function { callable, .. } => {
+                        Some(((*link, *slot), *callable))
+                    }
+                    _ => None,
+                })
+        })
+        .collect();
+    let loaded = crate::bytecode::compile::Linked { others, imports };
     let mut code = crate::bytecode::conventions::compile_selected(
         document,
         &registry,
         program.link,
-        &others,
+        &loaded,
         export.map(|export| export.function),
         convention.as_ref(),
         available,

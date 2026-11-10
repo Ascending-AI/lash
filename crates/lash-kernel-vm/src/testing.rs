@@ -158,7 +158,7 @@ pub fn compile_document(
         document,
         registry,
         link,
-        &[],
+        &Default::default(),
         entry.map(|export| export.function),
         entry.map(|export| &export.convention),
         None,
@@ -212,7 +212,7 @@ pub fn library_inventory(
                         &empty,
                         registry,
                         link,
-                        &[],
+                        &Default::default(),
                         Some(*function),
                         None,
                     )

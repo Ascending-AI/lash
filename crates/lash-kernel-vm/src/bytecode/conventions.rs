@@ -21,7 +21,7 @@ pub(crate) fn compile_selected(
     document: &Document,
     registry: &lash_kernel_doc::FunctionRegistry,
     link: lash_kernel_value::LinkId,
-    others: &[(lash_kernel_value::LinkId, &Document)],
+    linked: &super::compile::Linked<'_>,
     entry: Option<FunctionId>,
     convention: Option<&StartConvention>,
     available: Option<&lash_kernel_doc::BuildHelpers>,
@@ -36,7 +36,7 @@ pub(crate) fn compile_selected(
             !matches!(export, Export::Function(export) if export.function == entry && &export.convention != convention)
         });
     }
-    super::compile::compile(&selected, registry, link, others, entry, available)
+    super::compile::compile(&selected, registry, link, linked, entry, available)
 }
 
 /// Selects an entry's unit, retaining the existing path for other conventions.

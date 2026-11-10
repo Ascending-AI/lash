@@ -14,7 +14,7 @@ use lash_kernel_doc::{
     ActKind, Action, AssignOrder, Atom, Callee as DocCallee, Expr, FunctionTarget, Literal, Member,
     Place, Protocol, Rhs, Stmt, TryStmt,
 };
-use lash_kernel_value::names::{FunctionId, ImportSlot, Name};
+use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot, Name};
 use lash_kernel_value::sites::Site;
 use lash_kernel_value::types::Type;
 
@@ -736,7 +736,10 @@ impl Compiler<'_> {
         let target = match callee {
             DocCallee::Value(_) => Callee::Value,
             DocCallee::Local(id) => self.callee(f, *id)?,
-            DocCallee::Import(_) => return unsupported("a call of an imported function"),
+            DocCallee::Import(slot) => {
+                let callable = self.imported(*slot)?;
+                self.callee_at(f, callable)?
+            }
         };
         f.point(f.here(), Point::Action(site.clone()));
         self.call(f, target, argc as u8, site);
@@ -768,8 +771,11 @@ impl Compiler<'_> {
     fn spawn(&mut self, f: &mut Fun, callee: &DocCallee, argc: usize, site: Site) -> Result<()> {
         let target = match callee {
             DocCallee::Value(_) => None,
-            DocCallee::Local(id) => Some(*id),
-            DocCallee::Import(_) => return unsupported("a spawn of an imported function"),
+            DocCallee::Local(id) => Some(CallableId {
+                link: self.link,
+                function: *id,
+            }),
+            DocCallee::Import(slot) => Some(self.imported(*slot)?),
         };
         let unit = self.stub(f, target, argc as u8)?;
         let values = argc as u8 + u8::from(target.is_none());

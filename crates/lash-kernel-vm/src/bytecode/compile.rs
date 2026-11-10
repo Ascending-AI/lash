@@ -21,7 +21,7 @@ use lash_kernel_doc::{
     BuildHelpers, Document, FunctionDefinition, FunctionRegistry, Literal, Stmt, Value,
 };
 use lash_kernel_value::content_ids::LinkId;
-use lash_kernel_value::names::{CallableId, FunctionId, Name};
+use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot, Name};
 use lash_kernel_value::sites::{Site, Unit as SiteUnit};
 
 use super::charge_tables::{self, Charge};
@@ -48,8 +48,8 @@ pub(crate) fn unsupported<T>(what: impl Into<String>) -> Result<T> {
 
 /// Compiles `document`, whose library functions `registry` holds, as
 /// instance `link`: its `main`, or the declared function `entry`, is the
-/// unit a start runs. `others` are the other Links the run's build loads,
-/// each with its own document.
+/// unit a start runs. `linked` holds the other Links the run's build loads
+/// and what their function imports resolve to.
 ///
 /// An open under another build image passes that image as `available`: a
 /// build helper it lacks compiles to a unit that refuses when it runs
@@ -58,24 +58,42 @@ pub fn compile(
     document: &Document,
     registry: &FunctionRegistry,
     link: LinkId,
-    others: &[(LinkId, &Document)],
+    linked: &Linked<'_>,
     entry: Option<FunctionId>,
     available: Option<&BuildHelpers>,
 ) -> Result<Program> {
-    let mut compiler = Compiler::new(document, registry, link);
+    let mut compiler = Compiler::new(document, registry, link, &linked.imports);
     compiler.available = available;
+    compiler.links.extend(
+        linked
+            .others
+            .iter()
+            .map(|(other, document)| (*other, *document)),
+    );
     let main = match entry {
         Some(entry) => super::conventions::entry(&mut compiler, entry)?,
         None => compiler.main()?,
     };
     compiler.declare_all(false);
-    for (other, document) in others {
+    for (other, document) in &linked.others {
         if *other != link {
-            compiler.enter_link(*other, document);
+            compiler.links.insert(*other, document);
+            compiler.enter_link(*other)?;
             compiler.declare_all(true);
         }
     }
     compiler.finish(main)
+}
+
+/// The function each Link's function import slot resolves to.
+pub type Imports = BTreeMap<(LinkId, ImportSlot), CallableId>;
+
+/// The Links a run's build loads besides the one compiled, each with its
+/// own document, and what every Link's function imports resolve to.
+#[derive(Default)]
+pub struct Linked<'a> {
+    pub others: Vec<(LinkId, &'a Document)>,
+    pub imports: Imports,
 }
 
 /// Where a read or write of a name goes.
@@ -321,7 +339,7 @@ struct LinkCode {
     native_ids: HashMap<FunctionId, u32>,
     charge_ids: HashMap<FunctionId, u32>,
     bodies: HashMap<(FunctionId, bool), UnitId>,
-    stubs: HashMap<(Option<FunctionId>, u8), UnitId>,
+    stubs: HashMap<(Option<CallableId>, u8), UnitId>,
     free: HashMap<FunctionId, BTreeSet<Name>>,
     /// The unit each unavailable helper compiled to.
     missing: HashMap<FunctionId, UnitId>,
@@ -337,6 +355,11 @@ pub(crate) struct Compiler<'a> {
     /// The run's root Link: main's and the entry's.
     root: LinkId,
     scope: LinkCode,
+    /// Every loaded Link's document.
+    links: HashMap<LinkId, &'a Document>,
+    /// What the compiler made for each Link other than the one it is in.
+    parked: HashMap<LinkId, LinkCode>,
+    imports: &'a Imports,
     pub units: Vec<Option<Unit>>,
     pub constants: Vec<Constant>,
     pub natives: Vec<NativeEntry>,
@@ -354,13 +377,21 @@ pub(crate) struct Compiler<'a> {
 }
 
 impl<'a> Compiler<'a> {
-    fn new(document: &'a Document, registry: &'a FunctionRegistry, link: LinkId) -> Self {
+    fn new(
+        document: &'a Document,
+        registry: &'a FunctionRegistry,
+        link: LinkId,
+        imports: &'a Imports,
+    ) -> Self {
         Self {
             document,
             registry,
             link,
             root: link,
             scope: LinkCode::default(),
+            links: HashMap::from([(link, document)]),
+            parked: HashMap::new(),
+            imports,
             units: Vec::new(),
             constants: Vec::new(),
             natives: Vec::new(),
@@ -374,11 +405,38 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Compiles Link `link`, whose document is `document`, from here on.
-    fn enter_link(&mut self, link: LinkId, document: &'a Document) {
+    /// Compiles Link `link` from here on, finding again what was already
+    /// made for it.
+    fn enter_link(&mut self, link: LinkId) -> Result<()> {
+        if link == self.link {
+            return Ok(());
+        }
+        let Some(document) = self.links.get(&link).copied() else {
+            return unsupported(format!("Link {link:?} is not loaded"));
+        };
+        let scope = self.parked.remove(&link).unwrap_or_default();
+        let left = std::mem::replace(&mut self.scope, scope);
+        self.parked.insert(self.link, left);
         self.document = document;
         self.link = link;
-        self.scope = LinkCode::default();
+        Ok(())
+    }
+
+    /// The function import `slot` of the Link being compiled resolves to.
+    pub(crate) fn imported(&self, slot: ImportSlot) -> Result<CallableId> {
+        match self.imports.get(&(self.link, slot)) {
+            Some(callable) => Ok(*callable),
+            None => unsupported(format!("import {slot:?} names no function")),
+        }
+    }
+
+    /// The callee `callable` is from `f`: its own Link's code.
+    pub(crate) fn callee_at(&mut self, f: &Fun, callable: CallableId) -> Result<Callee> {
+        let home = self.link;
+        self.enter_link(callable.link)?;
+        let callee = self.callee(f, callable.function);
+        self.enter_link(home)?;
+        callee
     }
 
     /// Records the functions the Link being compiled declares and, when
@@ -891,7 +949,7 @@ impl<'a> Compiler<'a> {
     /// `spawn`'s stub: its parameters are the call's arguments (a value
     /// callee first), and it makes the call. A task is no part of its
     /// spawner's call, so a covered spawner's cover does not reach it.
-    pub(crate) fn stub(&mut self, f: &Fun, callee: Option<FunctionId>, argc: u8) -> Result<UnitId> {
+    pub(crate) fn stub(&mut self, f: &Fun, callee: Option<CallableId>, argc: u8) -> Result<UnitId> {
         if let Some(unit) = self.scope.stubs.get(&(callee, argc)) {
             return Ok(*unit);
         }
@@ -908,7 +966,7 @@ impl<'a> Compiler<'a> {
         let site = f.site();
         let target = match callee {
             None => Callee::Value,
-            Some(id) => self.callee(&g, id)?,
+            Some(callable) => self.callee_at(&g, callable)?,
         };
         self.call(&mut g, target, argc, site);
         g.emit(Op::Return);
