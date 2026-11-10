@@ -843,6 +843,29 @@ where
         .send(lash::TurnInput::text("a send no node serves"))
         .await
         .map(|_| ());
+    // The admin lane's writes, a session command and a turn injection,
+    // admit through other queues than a send.
+    let admin = session(&refusing, session_actor.id()).await.admin();
+    let submitted = admin
+        .commands()
+        .submit(
+            lash::SessionCommand::CompactContext { instructions: None },
+            "a command no node applies",
+        )
+        .await
+        .map(|_| ());
+    let injected = admin
+        .injection()
+        .inject_turn_input(
+            &lash::TurnId::parse("a-turn-no-node-runs").expect("a turn id"),
+            None,
+            lash_core::PluginMessage::text(
+                lash_core::MessageRole::User,
+                "an injection no node delivers",
+            ),
+        )
+        .await;
+    drop(admin);
     drop(refusing);
     let after = dump().await;
     let changed: Vec<_> = before
@@ -853,21 +876,27 @@ where
         .collect();
     assert!(
         changed.is_empty(),
-        "the refused start and send changed rows of {changed:?}"
+        "the refused start, send, command and injection changed rows of {changed:?}"
     );
-    match sent {
-        Err(lash::EmbedError::Durable(lash::durable::DurableError::RetiredStateRemains {
-            remaining: 1,
-            found,
-            ..
-        })) => assert_eq!(
-            found
-                .iter()
-                .map(|found| (&found.actor, &found.formats))
-                .collect::<Vec<_>>(),
-            [(session_actor, &written)]
-        ),
-        other => panic!("the stopped core admitted a send to a retired session: {other:?}"),
+    for (write, result) in [
+        ("send", sent),
+        ("command", submitted),
+        ("injection", injected),
+    ] {
+        match result {
+            Err(lash::EmbedError::Durable(lash::durable::DurableError::RetiredStateRemains {
+                remaining: 1,
+                found,
+                ..
+            })) => assert_eq!(
+                found
+                    .iter()
+                    .map(|found| (&found.actor, &found.formats))
+                    .collect::<Vec<_>>(),
+                [(session_actor, &written)]
+            ),
+            other => panic!("the stopped core admitted a {write} to a retired session: {other:?}"),
+        }
     }
     match stopped {
         Some(Err(lash::durable::DurableError::RetiredStateRemains {

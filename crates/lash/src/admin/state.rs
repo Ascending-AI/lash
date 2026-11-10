@@ -66,6 +66,7 @@ impl SessionStateAdmin {
         let receipt = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
+                self.context.refuse_retired().await?;
                 Box::pin(runtime.submit_session_command(
                     lash_core::facade_support::SessionCommand::AppendSessionNodes {
                         request: Box::new(request),
@@ -110,6 +111,7 @@ impl SessionStateAdmin {
         let receipt = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
+                self.context.refuse_retired().await?;
                 Box::pin(runtime.submit_session_command(
                     lash_core::facade_support::SessionCommand::OpenAgentFrame {
                         request: Box::new(request),
@@ -224,6 +226,7 @@ impl SessionStateAdmin {
         let receipt = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
+                self.context.refuse_retired().await?;
                 Box::pin(runtime.submit_session_command(
                     lash_core::facade_support::SessionCommand::CompactContext { instructions },
                     idempotency_key,
