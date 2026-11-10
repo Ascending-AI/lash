@@ -88,7 +88,10 @@ impl PageSource for SharedPages {
 #[derive(Debug, PartialEq)]
 struct Ran {
     end: End,
-    carry: Option<lash_kernel_state::semantic::Checkpoint>,
+    /// The carried session's bindings, read back by name.
+    carry: Option<
+        std::collections::BTreeMap<lash_kernel_value::names::Name, lash_kernel_vm::SessionValue>,
+    >,
     prints: Vec<Datum>,
     charged: u64,
     parks: usize,
@@ -248,8 +251,23 @@ fn run_scripted(
             Step::Ended(mut end) => {
                 let carry = match &mut end {
                     End::Finished(finished) => finished.carry.take().map(|root| {
-                        lash_kernel_state::semantic::session(&root, Box::new(pages.clone()))
-                            .expect("the carried session projects")
+                        let mut editor = lash_kernel_vm::SessionEditor::open(
+                            Some(&root),
+                            Box::new(pages.clone()),
+                        )
+                        .expect("the carried session opens");
+                        editor
+                            .names()
+                            .expect("the carried session names its bindings")
+                            .into_iter()
+                            .map(|name| {
+                                let value = editor
+                                    .get(&name)
+                                    .expect("the binding reads")
+                                    .expect("a named binding is bound");
+                                (name, value)
+                            })
+                            .collect()
                     }),
                     _ => None,
                 };
