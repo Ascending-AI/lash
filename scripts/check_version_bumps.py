@@ -2253,12 +2253,60 @@ def _guard_signature(
     return tuple(sorted(set(signature)))
 
 
+RUST_ANY_IMPL = re.compile(
+    r"(?m)^[ \t]*impl\b(?:\s*<[^{}]*?>)?\s+"
+    r"(?:(?P<trait>[\w:]+)(?:\s*<[^{}]*?>)?\s+for\s+)?(?P<target>[\w:]+)"
+)
+RUST_ERROR_DERIVE = re.compile(r"#\[\s*derive\s*\([^\]]*\bError\b")
+RUST_SERDE_DERIVE = re.compile(r"#\[\s*derive\s*\([^\]]*\b(?:Serialize|Deserialize)\b")
+ENCODING_TRAITS = {"TokenCodec", "CodecVariant", "Serialize", "Deserialize", "DurableSerialize"}
+
+
+def without_unencoded_error_types(text: str) -> str:
+    """``text`` without its error types and their impls, when none is encoded.
+
+    A codec reports a refusal through an error type; the type's variants and
+    messages are not bytes any codec writes or reads. An error type that is
+    itself encoded or serialized in this file stays, as does everything else
+    a codec file holds (tags, writers, readers, constants, helpers).
+    """
+    attributes = rust_outer_attribute_ranges(text)
+    impls = [(m, m["trait"].split("::")[-1] if m["trait"] else None, m["target"].split("::")[-1])
+             for m in RUST_ANY_IMPL.finditer(text)]
+    errors, encoded = set(), set()
+    spans: dict[str, list[tuple[int, int]]] = {}
+    for match in RUST_SERDE_SHAPE.finditer(text):
+        start = rust_item_start_with_attributes(text, match.start(), attributes)
+        header = text[start:match.start()]
+        spans.setdefault(match[1], []).append((start, rust_item_end(text, match.start())))
+        if RUST_ERROR_DERIVE.search(header):
+            errors.add(match[1])
+        if RUST_SERDE_DERIVE.search(header):
+            encoded.add(match[1])
+    for _, trait, target in impls:
+        if trait == "Error":
+            errors.add(target)
+        if trait in ENCODING_TRAITS:
+            encoded.add(target)
+    dropped = errors - encoded
+    if not dropped:
+        return text
+    ranges = [span for name in dropped for span in spans.get(name, [])]
+    ranges += [(rust_item_start_with_attributes(text, m.start(), attributes), rust_item_end(text, m.start()))
+               for m, _, target in impls if target in dropped]
+    for start, end in sorted(ranges, reverse=True):
+        text = text[:start] + text[end:]
+    return text
+
+
 @lru_cache(maxsize=None)
 def production_codec_source(text: str) -> str | None:
     """Codec implementation, helpers and macro calls, excluding test-only code.
 
     Hash the production file conservatively: a codec can call a local helper
     or expand a macro, so hashing just its impl body misses encoding changes.
+    Only unencoded error types leave the projection
+    (``without_unencoded_error_types``).
     """
     if "TokenCodec" not in text and "CodecVariant" not in text:
         return None
@@ -2275,6 +2323,7 @@ def production_codec_source(text: str) -> str | None:
             merged.append((start, end))
     for start, end in reversed(merged):
         text = text[:start] + text[end:]
+    text = without_unencoded_error_types(text)
     tokens = rust_tokens(text)
     # Includes generic/qualified impls and macro-generated codecs ($ty).
     if not (any(kind == "ident" and name == "impl" for kind, name in tokens)

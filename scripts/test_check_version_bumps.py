@@ -585,6 +585,74 @@ record_codec!(Record, 7);
             self.assertFalse(result.errors, result)
 
 
+    def test_primitive_codec_errors_are_not_bytes_but_its_encoding_is(self) -> None:
+        # A primitive codec file binds every guarded shape that reaches a
+        # codec. A refusal variant changes no stored byte and must not move
+        # the witness (FIG-7695: a new TokenError variant moved both store
+        # schema stamps); a tag, writer or container codec change must.
+        primitives = """
+pub const TAG_SEQ: u8 = 7;
+pub trait TokenCodec: Sized {
+    fn encode(&self, out: &mut TokenWriter);
+    fn decode(input: &mut TokenReader) -> Result<Self, TokenError>;
+}
+#[derive(Debug, thiserror::Error)]
+pub enum TokenError {
+    #[error("truncated")]
+    Truncated,
+}
+impl From<std::fmt::Error> for TokenError {
+    fn from(_: std::fmt::Error) -> Self { Self::Truncated }
+}
+pub struct TokenWriter { out: Vec<u8> }
+impl TokenWriter {
+    pub fn seq(&mut self, count: u64) { self.out.push(TAG_SEQ); self.out.push(count as u8); }
+}
+impl<T: TokenCodec> TokenCodec for Vec<T> {
+    fn encode(&self, out: &mut TokenWriter) { out.seq(self.len() as u64); }
+    fn decode(input: &mut TokenReader) -> Result<Self, TokenError> { input.seq() }
+}
+"""
+        self.write("crates/demo/src/tokens.rs", primitives)
+        self.write("crates/demo/src/codec.rs", """
+impl TokenCodec for Record {
+    fn encode(&self, out: &mut TokenWriter) { out.seq(1); }
+}
+""")
+        base = self.commit("a primitive codec file")
+        key = "crates/demo/src/lib.rs:WIRE_VERSION"
+
+        def moves(text: str) -> bool:
+            self.write("crates/demo/src/tokens.rs", text)
+            result = gate.check_views(gate.RevisionView(self.repo, base), gate.WorktreeView(self.repo),
+                                      only=frozenset({key}), strict=False)
+            self.assertFalse(result.errors, result)
+            return bool(result.failures)
+
+        refusal = primitives.replace("    Truncated,\n}", """    Truncated,
+    #[error("{0} was retired")]
+    Retired(RetiredState),
+}
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+pub enum RetiredState {
+    #[error("the session")]
+    Session,
+}
+impl RetiredState {
+    pub const fn format(self) -> &'static str { "session" }
+}""")
+        self.assertNotEqual(refusal, primitives)
+        self.assertFalse(moves(refusal))
+        for old, new in [("TAG_SEQ: u8 = 7", "TAG_SEQ: u8 = 8"),
+                         ("self.out.push(count as u8)", "self.out.push(count as u8); self.out.push(0)"),
+                         ("out.seq(self.len() as u64)", "out.seq(self.len() as u64 + 1)")]:
+            with self.subTest(change=new):
+                self.assertTrue(moves(primitives.replace(old, new)))
+        encoded = primitives.replace("impl TokenWriter {", "impl TokenCodec for TokenError {}\nimpl TokenWriter {")
+        self.write("crates/demo/src/tokens.rs", encoded)
+        base = self.commit("an encoded error type")
+        self.assertTrue(moves(encoded.replace("    Truncated,\n}", "    Truncated,\n    Retired,\n}")))
+
 class CutVerdicts(Harness):
     """The four machine verdicts FIG-4494 records."""
 
