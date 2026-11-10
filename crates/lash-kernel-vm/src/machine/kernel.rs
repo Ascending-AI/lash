@@ -162,11 +162,7 @@ impl crate::perf_witness::Profiling for KernelMachine {
         drop(context);
     }
     fn guest_symbols(&self) -> crate::observe::GuestSymbols {
-        crate::observe::GuestSymbols {
-            codes: Vec::new(),
-            libs: Vec::new(),
-            statements: Vec::new(),
-        }
+        self.core.guest_symbols()
     }
 }
 

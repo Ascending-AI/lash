@@ -3,7 +3,9 @@
 //! site. Resolved after the fact, never while a run is observed.
 
 use lash_kernel_value::names::FunctionId;
-use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::{Site, Unit};
+
+use crate::bytecode::program::{Program, UnitKind};
 
 use super::work::{CodeCounts, NativeCounts};
 
@@ -85,6 +87,42 @@ pub struct GuestSymbols {
 }
 
 impl GuestSymbols {
+    /// The codes of `program`, its own units and then the library's, each
+    /// named by its unit and sited at its body. A spawn's stub is no code.
+    /// The core counts no work and publishes no context, so its libraries
+    /// and statements name nothing yet.
+    pub(crate) fn of(program: &Program) -> Self {
+        let units = program
+            .units
+            .iter()
+            .chain(program.lib.units.iter().map(|unit| &**unit));
+        let codes = units
+            .filter_map(|unit| {
+                let (kind, function) = match unit.kind {
+                    UnitKind::Main => (CodeKind::Main, None),
+                    UnitKind::Declared(function) => (CodeKind::Function, Some(function)),
+                    UnitKind::Body(function) => (CodeKind::LibraryBody, Some(function)),
+                    UnitKind::Closure(function) => (CodeKind::Closure, Some(function)),
+                    UnitKind::Spawn => return None,
+                };
+                Some((kind, function, unit.name.to_string()))
+            })
+            .enumerate()
+            .map(|(token, (kind, function, name))| CodeSymbol {
+                token: token as u32,
+                kind,
+                name,
+                function,
+                site: Site::new(function.map_or(Unit::Main, Unit::Library), Vec::new()),
+            })
+            .collect();
+        Self {
+            codes,
+            libs: Vec::new(),
+            statements: Vec::new(),
+        }
+    }
+
     pub fn code(&self, token: u32) -> Option<&CodeSymbol> {
         self.codes.get(token as usize)
     }

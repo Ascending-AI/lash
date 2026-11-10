@@ -305,6 +305,12 @@ fn linked(problem: impl ToString) -> StartError {
 }
 
 impl CoreMachine {
+    /// What the tokens of this run's counts and context name.
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub(crate) fn guest_symbols(&self) -> crate::observe::GuestSymbols {
+        crate::observe::GuestSymbols::of(&self.vm.program)
+    }
+
     /// Seals the heap and makes the run record.
     fn seal_heap(&mut self) -> Result<continuation::RunRecord, SealError> {
         let mut reads: Vec<_> = self
