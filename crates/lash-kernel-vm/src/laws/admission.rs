@@ -327,10 +327,7 @@ fn cases() -> Vec<(&'static str, String, At, Break)> {
                 let task = &mut record.tasks[0];
                 let at = task.frames.len() - 1;
                 let past = task.billed.len() as u32 + 1;
-                task.frames[at].bill = Some(RunBill {
-                    charge: 0,
-                    from: past,
-                });
+                task.frames[at].bill = Some(RunBill { from: past });
                 Inadmissible::Bill {
                     task: 0,
                     frame: at as u32,

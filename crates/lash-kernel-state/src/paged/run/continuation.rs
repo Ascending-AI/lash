@@ -245,10 +245,9 @@ record! {
 }
 
 record! {
-    /// A completion formula a frame owes: the formula's number and where
+    /// The completion formula a frame owes, its unit's function's: where
     /// its arguments start among the task's billed values.
     pub struct RunBill {
-        pub charge: u32,
         pub from: u32,
     }
 }

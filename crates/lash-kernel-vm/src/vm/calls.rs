@@ -59,7 +59,8 @@ impl<H: Heap> Vm<H> {
                 let bill = self.owed(charge, argc);
                 self.meter.leave();
                 self.exact = true;
-                self.enter(callee, argc, None, bill)
+                let link = self.running_link();
+                self.enter(callee, argc, None, bill, link)
             }
             Callee::Value => self.call_value(argc),
             Callee::Native { native, charged } => self.call_native(program, native, argc, charged),
@@ -82,25 +83,23 @@ impl<H: Heap> Vm<H> {
     fn call_value(&mut self, argc: usize) -> Run<()> {
         let at = self.cx.stack.len() - argc - 1;
         let callee = self.cx.stack[at];
-        let (unit, closure) = match callee {
+        let (unit, closure, callable) = match callee {
             Value::Closure(handle) => {
                 let callable = {
                     let (identity, _, _) = self.heap.arena().closure(handle).map_err(read)?;
                     identity.callable
                 };
-                let unit = *self
-                    .closures
-                    .get(&callable)
+                let unit = self
+                    .closure_unit(&callable)
                     .ok_or_else(|| fault("a closure of a body the program lacks"))?;
-                (unit, Some(handle))
+                (unit, Some(handle), callable)
             }
             Value::Function(handle) => {
                 let callable = self.heap.arena().callable(handle).map_err(read)?;
-                let unit = *self
-                    .functions
-                    .get(&callable)
+                let unit = self
+                    .function_unit(&callable)
                     .ok_or_else(|| fault("a function value the program cannot call"))?;
-                (unit, None)
+                (unit, None, callable)
             }
             _ => {
                 return Err(self.error(
@@ -110,7 +109,7 @@ impl<H: Heap> Vm<H> {
             }
         };
         self.cx.stack.remove(at);
-        let params = usize::from(self.program.units[unit as usize].params);
+        let params = usize::from(self.program.unit(unit).params);
         if argc > params {
             return Err(self.error(
                 "arity",
@@ -119,7 +118,8 @@ impl<H: Heap> Vm<H> {
         }
         self.meter.leave();
         self.exact = true;
-        self.enter(unit, argc, closure, None)
+        let link = self.link_index(&callable.link).unwrap_or(0);
+        self.enter(unit, argc, closure, None, link)
     }
 
     /// Calls native `native` over its top `argc` operands; `charged` when
@@ -141,7 +141,14 @@ impl<H: Heap> Vm<H> {
             }
             return Ok(());
         }
-        let entry: &NativeEntry = &program.natives[native as usize];
+        let entry: &NativeEntry = program.native(native);
+        let implementation = match self.implementation(native) {
+            Ok(implementation) => implementation,
+            Err(flow) => {
+                self.cx.stack.truncate(len);
+                return Err(flow);
+            }
+        };
         let params = usize::from(entry.params);
         // The missing parameters are padded absent, and the padding is
         // taken back when a cold read runs the call again.
@@ -174,7 +181,7 @@ impl<H: Heap> Vm<H> {
                 let room = self.heap.bound().saturating_sub(self.heap.held());
                 let mut nursery = Nursery::new(objects, LogicalBytes(room));
                 let mut counter = WorkCounter::new(limit);
-                let answer = entry.native.call(NativeCall {
+                let answer = implementation.call(NativeCall {
                     args: Args::new(&self.cx.stack[from..], objects, &semantics),
                     new: &mut nursery,
                     counter: &mut counter,
@@ -291,7 +298,8 @@ impl<H: Heap> Vm<H> {
                 // The body is a frame: the caller's block is left at the
                 // call, and the caller continues event by event.
                 self.cancel();
-                self.enter(body, argc, None, bill)
+                let link = self.running_link();
+                self.enter(body, argc, None, bill, link)
             }
             // It read a cold chunk and did nothing a run sees: the call
             // runs again, unpadded, once the chunk is loaded.
@@ -323,7 +331,7 @@ impl<H: Heap> Vm<H> {
         charged: bool,
         args: &[Value],
     ) -> Option<Run<(Value, Option<u64>)>> {
-        let entry = &program.natives[native as usize];
+        let entry = program.native(native);
         if entry.body.is_some() && self.cx.frames.len() >= self.call_depth as usize {
             return Some(Err(Flow::from(Stop::bound(
                 self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
@@ -343,7 +351,10 @@ impl<H: Heap> Vm<H> {
             | InlineOperation::Length(_)
             | InlineOperation::Membership(_)
             | InlineOperation::IntegerText(_) => self.formula(entry.charge, args, Some(&value)),
-            _ => match program.charges[entry.charge as usize].pair([&args[0], &args[1], &value]) {
+            _ => match program
+                .charge(entry.charge)
+                .pair([&args[0], &args[1], &value])
+            {
                 Some(units) => Ok(units),
                 None => self.formula(entry.charge, args, Some(&value)),
             },

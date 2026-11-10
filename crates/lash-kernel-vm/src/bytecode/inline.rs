@@ -34,10 +34,19 @@
 //! function's name.
 //!
 //! It runs after compilation and before validation, which checks each
-//! region against its body.
+//! region against its body. A document expands a library body as the
+//! library published it, each fused run read as the op it fused, and
+//! takes each constant the region reads into its own pool, a function
+//! value's in the caller's Link: the region is the document's code.
+
+use std::collections::HashMap;
+
+use lash_kernel_value::names::CallableId;
 
 use super::op::Op;
-use super::program::{Block, CallSite, Callee, InlineSite, Program, Unit, UnitId, UnitKind};
+use super::program::{
+    Block, CallSite, Callee, Constant, InlineSite, LIB, Program, Unit, UnitId, UnitKind,
+};
 
 /// The most ops a body may hold to be expanded.
 const BUDGET: usize = 64;
@@ -76,8 +85,9 @@ pub(crate) fn inline(program: &mut Program) {
     if DISABLED.with(std::cell::Cell::get) {
         return;
     }
+    let mut taken = HashMap::new();
     for at in 0..program.units.len() {
-        let caller = at as UnitId;
+        let caller = program.own_unit(at);
         let sites: Vec<(usize, u32, UnitId)> = program.units[at]
             .ops
             .iter()
@@ -96,7 +106,7 @@ pub(crate) fn inline(program: &mut Program) {
             .collect();
         for (pc, site, callee) in sites {
             if let Some(region) = Region::of(program, callee) {
-                expand(program, at, pc, site, callee, &region);
+                expand(program, at, pc, site, callee, &region, &mut taken);
             }
         }
     }
@@ -106,14 +116,25 @@ pub(crate) fn inline(program: &mut Program) {
 /// library body, not the caller itself, small, sharing no local with a
 /// closure and seen by no observer.
 fn admissible(program: &Program, caller: UnitId, callee: UnitId) -> bool {
-    let body = &program.units[callee as usize];
-    callee != caller
-        && body.covered
+    callee != caller && expandable(program.unit(callee))
+}
+
+/// Whether `body` is one the pass may expand into another unit.
+pub(crate) fn expandable(body: &Unit) -> bool {
+    body.covered
         && matches!(body.kind, UnitKind::Body(_) | UnitKind::Declared(_))
         && body.boxed.is_empty()
         && body.closures.is_empty()
         && body.points.is_empty()
         && body.ops.len() <= BUDGET
+}
+
+/// `body`'s op at `pc`, a fused run's first op as it was.
+fn op_at(body: &Unit, pc: usize) -> Op {
+    match body.ops[pc] {
+        Op::Fused(n) => body.fused[n as usize].first,
+        op => op,
+    }
 }
 
 /// What a body's region holds: each block reached from its entry, in the
@@ -126,11 +147,11 @@ impl Region {
     /// The region of `callee`, `None` when its entry block is off the
     /// guard path or a jump of the path enters no block at its head.
     fn of(program: &Program, callee: UnitId) -> Option<Self> {
-        let body = &program.units[callee as usize];
+        let body = program.unit(callee);
         let block_at = |pc: u32| body.blocks.iter().position(|block| block.start == pc);
         let hot = |block: &Block| {
             (block.start as usize + 1..block.end as usize)
-                .all(|pc| local(program, body, body.ops[pc], block.end as usize))
+                .all(|pc| local(program, body, op_at(body, pc), block.end as usize))
         };
         let mut reached = vec![None; body.blocks.len()];
         let mut work = vec![0usize];
@@ -145,11 +166,11 @@ impl Region {
                 continue;
             }
             for pc in block.start as usize..block.end as usize {
-                if let Op::Jump(to) | Op::JumpIfFalse(to) = body.ops[pc] {
+                if let Op::Jump(to) | Op::JumpIfFalse(to) = op_at(body, pc) {
                     work.push(block_at(to)?);
                 }
             }
-            let last = body.ops[block.end as usize - 1];
+            let last = op_at(body, block.end as usize - 1);
             if !matches!(last, Op::Jump(_) | Op::Return | Op::Raise) && k + 1 < body.blocks.len() {
                 work.push(k + 1);
             }
@@ -188,7 +209,7 @@ fn local(program: &Program, body: &Unit, op: Op, end: usize) -> bool {
             let site = &body.calls[site as usize];
             match site.callee {
                 Callee::Native { native, .. } => {
-                    let entry = &program.natives[native as usize];
+                    let entry = program.native(native);
                     entry.body.is_none() && entry.guard.is_none() && site.mark.loops.is_empty()
                 }
                 _ => false,
@@ -207,8 +228,9 @@ fn expand(
     site: u32,
     callee: UnitId,
     region: &Region,
+    taken: &mut HashMap<(u32, u32), u32>,
 ) -> Option<()> {
-    let body = &program.units[callee as usize];
+    let body = program.unit(callee);
     let caller = &program.units[at];
     let index = caller.inlines.len() as u32;
     let entry = caller.ops.len() as u32;
@@ -240,7 +262,7 @@ fn expand(
         event.push(Default::default());
         if on {
             for from in block.start as usize + 1..block.end as usize {
-                let op = match body.ops[from] {
+                let op = match op_at(body, from) {
                     Op::Jump(to) => Op::Jump(target(to)?),
                     Op::JumpIfFalse(to) => Op::JumpIfFalse(target(to)?),
                     Op::Return => Op::Leave(index),
@@ -258,6 +280,19 @@ fn expand(
             event.push(Default::default());
         }
         blocks.push(start);
+    }
+    // A library body's constants become the document's own, read as the
+    // caller's Link.
+    if program.tag == 0 && callee & LIB != 0 {
+        let link = program.units[at].link;
+        let index = program.link_index(&link).unwrap_or(0);
+        for op in &mut ops {
+            if let Op::Const(n) | Op::Field(n) = op
+                && *n & LIB != 0
+            {
+                *n = take(program, taken, index, *n);
+            }
+        }
     }
     let end = entry + ops.len() as u32;
     #[cfg(test)]
@@ -298,4 +333,23 @@ fn expand(
         folds: (0, 0),
     });
     Some(())
+}
+
+/// Library constant `n` as the document's own constant, a function value
+/// naming the Link of index `link`.
+fn take(program: &mut Program, taken: &mut HashMap<(u32, u32), u32>, link: u32, n: u32) -> u32 {
+    if let Some(own) = taken.get(&(link, n)) {
+        return *own;
+    }
+    let constant = match program.constant(n) {
+        Constant::Function(callable) => Constant::Function(CallableId {
+            link: program.links[link as usize],
+            function: callable.function,
+        }),
+        other => other.clone(),
+    };
+    let own = program.constants.len() as u32;
+    program.constants.push(constant);
+    taken.insert((link, n), own);
+    own
 }

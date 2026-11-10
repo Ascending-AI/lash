@@ -39,17 +39,39 @@ type Checked = Result<(), Malformed>;
 /// most operands its frames hold above their locals, which the memory
 /// schedule admits at frame entry (contract §2).
 pub fn validate(program: &Program) -> Result<Vec<u32>, Malformed> {
-    let units = program.units.len();
+    Ok(checked(program)?
+        .into_iter()
+        .map(|(height, _)| height)
+        .collect())
+}
+
+/// A checked unit's operand height and each of its ops' operand depth.
+pub(crate) type Depths = (u32, Vec<Option<u32>>);
+
+/// Checks `program`'s own units, giving each one's operand height and
+/// each of its ops' operand depth. The library's units it names were
+/// checked when the library published them.
+pub(crate) fn checked(program: &Program) -> Result<Vec<Depths>, Malformed> {
     let whole = |problem: String| Malformed {
         unit: program.main,
         pc: None,
         problem,
     };
-    if program.main as usize >= units {
-        return Err(whole(format!("main is unit {} of {units}", program.main)));
+    let unit = |id: UnitId| program.get_unit(id).is_some();
+    let charge = |id: u32| program.get_charge(id).is_some();
+    if program.tag == 0
+        && program
+            .own_index(program.main)
+            .is_none_or(|at| at >= program.units.len())
+    {
+        return Err(whole(format!(
+            "main is unit {} of {}",
+            program.main,
+            program.units.len()
+        )));
     }
     for entry in &program.functions {
-        if entry.unit as usize >= units {
+        if !unit(entry.unit) {
             return Err(whole(format!(
                 "function {:?} names no unit",
                 entry.callable
@@ -57,10 +79,9 @@ pub fn validate(program: &Program) -> Result<Vec<u32>, Malformed> {
         }
     }
     for native in &program.natives {
-        let charges = program.charges.len();
-        if native.charge as usize >= charges
-            || native.guard.is_some_and(|guard| guard as usize >= charges)
-            || native.body.is_some_and(|body| body as usize >= units)
+        if !charge(native.charge)
+            || native.guard.is_some_and(|guard| !charge(guard))
+            || native.body.is_some_and(|body| !unit(body))
         {
             return Err(whole(format!(
                 "native {} names a missing table entry",
@@ -70,15 +91,15 @@ pub fn validate(program: &Program) -> Result<Vec<u32>, Malformed> {
     }
     captures(program)?;
     let mut checked = Vec::with_capacity(program.units.len());
-    for (id, unit) in program.units.iter().enumerate() {
-        checked.push(Unit::check(unit, program, id as UnitId)?);
+    for (at, unit) in program.units.iter().enumerate() {
+        checked.push(Unit::check(unit, program, program.own_unit(at))?);
     }
-    for (id, unit) in program.units.iter().enumerate() {
+    for (at, unit) in program.units.iter().enumerate() {
         for n in 0..unit.inlines.len() {
-            unit.check_region(program, id as UnitId, n, &checked)?;
+            unit.check_region(program, program.own_unit(at), n, &checked)?;
         }
     }
-    Ok(checked.into_iter().map(|(height, _)| height).collect())
+    Ok(checked)
 }
 
 /// Every closure site captures as many cells as the unit it makes says.
@@ -86,11 +107,11 @@ fn captures(program: &Program) -> Result<(), Malformed> {
     for (maker, unit) in program.units.iter().enumerate() {
         for site in &unit.closures {
             let problem = |problem: String| Malformed {
-                unit: maker as UnitId,
+                unit: program.own_unit(maker),
                 pc: None,
                 problem,
             };
-            let Some(made) = program.units.get(site.unit as usize) else {
+            let Some(made) = program.get_unit(site.unit) else {
                 return Err(problem(format!("a closure of missing unit {}", site.unit)));
             };
             if usize::from(made.captures) != site.captures.len() {
@@ -152,14 +173,14 @@ impl Unit {
         let marked = |mark: &Mark| mark.loops.iter().all(|lp| local(lp.started));
         for site in &self.calls {
             let fits = match site.callee {
-                Callee::Native { native, .. } => (native as usize) < program.natives.len(),
+                Callee::Native { native, .. } => program.get_native(native).is_some(),
                 Callee::Unit { unit, charge } => {
-                    (unit as usize) < program.units.len()
-                        && charge.is_none_or(|c| (c as usize) < program.charges.len())
+                    program.get_unit(unit).is_some()
+                        && charge.is_none_or(|c| program.get_charge(c).is_some())
                 }
                 Callee::Value => true,
                 Callee::Machine { charge, .. } => {
-                    charge.is_none_or(|c| (c as usize) < program.charges.len())
+                    charge.is_none_or(|c| program.get_charge(c).is_some())
                 }
             };
             if !fits || !marked(&site.mark) {
@@ -171,7 +192,7 @@ impl Unit {
         }
         for (action, mark) in self.actions.iter().zip(&self.action_marks) {
             if let ActionSite::Spawn { unit, .. } = action
-                && *unit as usize >= program.units.len()
+                && program.get_unit(*unit).is_none()
             {
                 return Err(whole(format!("a spawn of missing unit {unit}")));
             }
@@ -197,7 +218,7 @@ impl Unit {
         }
         let text = |n: u32| {
             matches!(
-                program.constants.get(n as usize),
+                program.get_constant(n),
                 Some(Constant::Text(_) | Constant::Immediate(lash_kernel_doc::Value::Text(_)))
             )
         };
@@ -243,7 +264,7 @@ impl Unit {
         for (pc, op) in self.ops.iter().enumerate() {
             // A region's ops address its body's locals.
             let local = |n: u16| match region(pc as u32) {
-                Some(k) => n < program.units[self.inlines[k].callee as usize].locals,
+                Some(k) => n < program.unit(self.inlines[k].callee).locals,
                 None => local(n),
             };
             let fits = match *op {
@@ -251,7 +272,7 @@ impl Unit {
                 Op::SetIndexPlaceFirst | Op::RemoveIndex | Op::Return | Op::Fall => true,
                 Op::Raise | Op::TryExit | Op::Print | Op::Finish | Op::Fail => true,
                 Op::MakeTuple(_) | Op::MakeList(_) | Op::MakeMap(_) | Op::MakeSet(_) => true,
-                Op::Const(n) => (n as usize) < program.constants.len(),
+                Op::Const(n) => program.get_constant(n).is_some(),
                 Op::Local(n) | Op::SetLocal(n) | Op::CellGet(n) | Op::CellSet(n) | Op::Box(n) => {
                     local(n)
                 }
@@ -332,7 +353,7 @@ impl Unit {
             let named = matches!(
                 calls,
                 Some(Callee::Unit { unit, .. }) if unit == site.callee
-            ) && (site.callee as usize) < program.units.len()
+            ) && program.get_unit(site.callee).is_some()
                 && site.callee != id;
             if !named
                 || (site.at as usize) >= own
@@ -372,8 +393,20 @@ impl Unit {
         checked: &[(u32, Vec<Option<u32>>)],
     ) -> Checked {
         let site = self.inlines[n];
-        let body = &program.units[site.callee as usize];
-        let (admitted, ref body_depth) = checked[site.callee as usize];
+        let body = program.unit(site.callee);
+        let (admitted, body_depth): (u32, &[Option<u32>]) = match program.own_index(site.callee) {
+            Some(at) => (checked[at].0, &checked[at].1),
+            None => match program.lib.regions.get(&site.callee) {
+                Some((height, depth)) => (*height, depth),
+                None => {
+                    return Err(Malformed {
+                        unit: id,
+                        pc: None,
+                        problem: format!("inline site {n} expands a library unit it cannot"),
+                    });
+                }
+            },
+        };
         let (entry, end) = (site.entry as usize, site.end as usize);
         let mut depth: Vec<Option<u32>> = vec![None; end - entry];
         let mut work = vec![(entry, 0u32)];
@@ -802,7 +835,10 @@ mod tests {
             constants: vec![Constant::Immediate(Value::Bool(true))],
             natives: Vec::new(),
             charges: Vec::new(),
+            tag: 0,
+            lib: Default::default(),
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
+            links: vec![lash_kernel_value::LinkId::from_bytes([1; 32])],
             functions: Vec::new(),
             declared: Default::default(),
             globals: Vec::new(),

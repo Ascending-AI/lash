@@ -16,6 +16,8 @@ pub(crate) mod session;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use lash_kernel_value::names::FunctionId;
+
 use lash_kernel_doc::{Datum, JoinMode, Value};
 use lash_kernel_state::paged::run::continuation::{
     self, JoinKind, PointPhase, RunBill, RunFrame, RunHandler, RunJoin, RunJoiner, RunOccurrence,
@@ -26,6 +28,7 @@ use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::OperationUse;
 use lash_kernel_value::sites::Site;
 
+use crate::bytecode::library::LIB;
 use crate::bytecode::op::Op;
 use crate::bytecode::program::{Program, Unit, UnitId, UnitKind};
 use crate::bytecode::site_tables::{Entry, Phase, SlotRole};
@@ -174,10 +177,7 @@ fn number(at: usize) -> Result<u32, SealError> {
     u32::try_from(at).map_err(|_| fault("a number past u32"))
 }
 
-/// Each action and call site's occurrence counter, by its index.
-///
-/// Only the root Link's: a saved site names no Link, so another Link's
-/// counter is refused where it is saved, never read as the root's.
+/// Each own action and call site's occurrence counter, by its index.
 fn occurrence_sites(program: &Program) -> HashMap<u32, (LinkId, Site)> {
     let mut sites = HashMap::new();
     for unit in &program.units {
@@ -234,13 +234,22 @@ fn save_task(
         State::Ended(Err(value)) => RunTaskState::Raised(values.put(*value)),
     };
     let mut counts = Vec::with_capacity(task.occurrences.len());
-    for (occurrence, count) in &task.occurrences {
-        let (link, site) = occurrences
-            .get(occurrence)
-            .ok_or_else(|| fault("an occurrence counter names no site"))?;
+    for (key, count) in &task.occurrences {
+        // A library counter is the Link's that ran it.
+        let (link, occurrence) = ((key >> 32) as usize, *key as u32);
+        let (link, site) = if occurrence & LIB == 0 {
+            occurrences.get(&occurrence).cloned()
+        } else {
+            program
+                .links
+                .get(link)
+                .zip(program.lib.occurrences.get((occurrence & !LIB) as usize))
+                .map(|(link, site)| (*link, site.clone()))
+        }
+        .ok_or_else(|| fault("an occurrence counter names no site"))?;
         counts.push(RunOccurrence {
-            link: *link,
-            site: site.clone(),
+            link,
+            site,
             count: *count,
         });
     }
@@ -290,7 +299,7 @@ fn save_frame(
     phases: &[Phase],
     values: &mut Values,
 ) -> Result<RunFrame, SealError> {
-    let unit = &program.units[frame.unit as usize];
+    let unit = program.unit(frame.unit);
     let base = frame.base as usize;
     let size = end
         .checked_sub(base)
@@ -330,7 +339,7 @@ fn save_frame(
         .collect();
     Ok(RunFrame {
         unit: RunUnit {
-            link: unit.link,
+            link: program.links[frame.link as usize],
             kind: save_kind(&unit.kind),
             site: unit.site.clone(),
             covered: unit.covered,
@@ -343,10 +352,19 @@ fn save_frame(
         closure: frame
             .closure
             .map(|closure| values.put(Value::Closure(closure))),
-        bill: frame.bill.map(|bill| RunBill {
-            charge: bill.charge,
-            from: bill.from,
-        }),
+        bill: match frame.bill {
+            None => None,
+            Some(bill) => {
+                let owed = program.charge(bill.charge).function;
+                if owed.is_none() || owed != function_of(unit) {
+                    return Err(fault(format!(
+                        "a frame of {} owes another function's formula",
+                        unit.name
+                    )));
+                }
+                Some(RunBill { from: bill.from })
+            }
+        },
     })
 }
 
@@ -389,7 +407,7 @@ fn save_handler(
         .frames
         .get(handler.frame as usize)
         .ok_or_else(|| fault("a handler names no frame"))?;
-    let unit = &program.units[frame.unit as usize];
+    let unit = program.unit(frame.unit);
     let at = unit
         .ops
         .iter()
@@ -462,7 +480,16 @@ fn save_join(number: u64, join: &ListJoin) -> Result<RunJoin, SealError> {
     })
 }
 
-fn save_kind(kind: &UnitKind) -> SavedKind {
+/// The function whose completion formula a frame of `unit` owes when its
+/// call bills one.
+fn function_of(unit: &Unit) -> Option<FunctionId> {
+    match &unit.kind {
+        UnitKind::Declared(function) | UnitKind::Body(function) => Some(*function),
+        _ => None,
+    }
+}
+
+pub(crate) fn save_kind(kind: &UnitKind) -> SavedKind {
     match kind {
         UnitKind::Main => SavedKind::Main,
         UnitKind::Declared(_) => SavedKind::Declared,
@@ -568,12 +595,7 @@ pub(crate) fn open(
         .iter()
         .map(|at| value(*at))
         .collect::<Result<_, _>>()?;
-    let units: HashMap<UnitKey<'_>, UnitId> = program
-        .units
-        .iter()
-        .enumerate()
-        .map(|(at, unit)| (unit_key(unit), at as UnitId))
-        .collect();
+    let units = Units::new(&program);
     let occurrences: HashMap<(LinkId, Site), u32> = occurrence_sites(&program)
         .into_iter()
         .map(|(at, site)| (site, at))
@@ -620,10 +642,16 @@ pub(crate) fn open(
         };
         task.turn = saved.turn;
         for occurrence in &saved.occurrences {
-            let at = occurrences
-                .get(&(occurrence.link, occurrence.site.clone()))
-                .ok_or_else(|| format!("no action stands at {:?}", occurrence.site))?;
-            task.occurrences.insert(*at, occurrence.count);
+            let key = (occurrence.link, occurrence.site.clone());
+            let at = match occurrences.get(&key) {
+                Some(at) => Some(u64::from(*at)),
+                None => program
+                    .link_index(&occurrence.link)
+                    .zip(program.lib.sites.get(&occurrence.site))
+                    .map(|(link, at)| Program::counter(link, *at)),
+            }
+            .ok_or_else(|| format!("no action stands at {:?}", occurrence.site))?;
+            task.occurrences.insert(at, occurrence.count);
         }
         task.passed = saved.passed;
         task.observed = saved.observed;
@@ -705,6 +733,35 @@ pub(crate) fn open(
 /// whether it is a body's covered compile.
 pub(super) type UnitKey<'a> = (LinkId, SavedKind, &'a Site, bool);
 
+/// The units a saved frame may name: the program's own by their Link, and
+/// the library's in any loaded Link, the Link the frame ran as.
+pub(super) struct Units<'p> {
+    pub(super) program: &'p Program,
+    own: HashMap<UnitKey<'p>, UnitId>,
+}
+
+impl<'p> Units<'p> {
+    pub(super) fn new(program: &'p Program) -> Self {
+        let own = program
+            .units
+            .iter()
+            .enumerate()
+            .map(|(at, unit)| (unit_key(unit), at as UnitId))
+            .collect();
+        Self { program, own }
+    }
+
+    /// The unit `saved` names, and the index of the Link it runs as.
+    pub(super) fn get(&self, saved: &RunUnit) -> Option<(UnitId, u32)> {
+        let link = self.program.link_index(&saved.link)?;
+        if let Some(id) = self.own.get(&saved_key(saved)) {
+            return Some((*id, link));
+        }
+        let key = (saved.kind, saved.site.clone(), saved.covered);
+        self.program.lib.keys.get(&key).map(|id| (*id, link))
+    }
+}
+
 /// The key a compiled unit is saved under.
 pub(super) fn unit_key(unit: &Unit) -> UnitKey<'_> {
     (unit.link, save_kind(&unit.kind), &unit.site, unit.covered)
@@ -718,15 +775,15 @@ pub(super) fn saved_key(unit: &RunUnit) -> UnitKey<'_> {
 fn open_frame(
     vm: &mut Vm<SlotHeap>,
     program: &Program,
-    units: &HashMap<UnitKey<'_>, UnitId>,
+    units: &Units<'_>,
     cx: &mut Context,
     saved: &RunFrame,
     value: &dyn Fn(u32) -> Result<Value, String>,
 ) -> Result<(), String> {
-    let id = *units
-        .get(&saved_key(&saved.unit))
+    let (id, link) = units
+        .get(&saved.unit)
         .ok_or_else(|| format!("the program has no unit {:?}", saved.unit))?;
-    let unit = &program.units[id as usize];
+    let unit = program.unit(id);
     let entry = unit
         .sites
         .resume(&saved.site, open_phase(saved.phase), saved.copy)
@@ -752,8 +809,10 @@ fn open_frame(
         ));
     }
     vm.heap
-        .admit(vm.frames[id as usize])
+        .admit(vm.frame_cost(id))
         .map_err(|refused| format!("the memory bound does not admit a frame: {refused:?}"))?;
+    vm.prepare(id, link)
+        .map_err(|_| String::from("the memory bound does not admit a library constant"))?;
     let base = cx.stack.len();
     cx.stack
         .resize(base + usize::from(unit.locals), Value::Absent);
@@ -779,15 +838,22 @@ fn open_frame(
             _ => return Err("a frame's closure is not a closure".into()),
         },
     };
+    let bill = match &saved.bill {
+        None => None,
+        Some(bill) => Some(Bill {
+            charge: function_of(unit)
+                .and_then(|function| program.charge_of(&function))
+                .ok_or_else(|| format!("a frame of {} owes no formula", unit.name))?,
+            from: bill.from,
+        }),
+    };
     cx.frames.push(Frame {
         unit: id,
         pc: entry.resume.pc,
         base: base as u32,
         closure,
-        bill: saved.bill.as_ref().map(|bill| Bill {
-            charge: bill.charge,
-            from: bill.from,
-        }),
+        bill,
+        link,
     });
     Ok(())
 }
@@ -797,7 +863,7 @@ fn open_handler(program: &Program, cx: &Context, saved: &RunHandler) -> Result<H
         .frames
         .get(saved.frame as usize)
         .ok_or("a handler names no frame")?;
-    let unit = &program.units[frame.unit as usize];
+    let unit = program.unit(frame.unit);
     let pc = unit
         .ops
         .iter()

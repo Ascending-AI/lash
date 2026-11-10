@@ -26,6 +26,9 @@ pub struct Charge {
     /// Whether the formula measures an argument: a call keeps its
     /// arguments for the bill only then.
     reads_args: bool,
+    /// The function whose completion formula it is; `None` for a guard
+    /// limit. A saved bill names its formula by it.
+    pub(crate) function: Option<lash_kernel_value::names::FunctionId>,
 }
 
 /// A formula that adds a constant to the sizes, shallow or deep, of the
@@ -198,6 +201,7 @@ impl Charge {
             linear: Linear::of(&term),
             term,
             pairs,
+            function: None,
         }
     }
 

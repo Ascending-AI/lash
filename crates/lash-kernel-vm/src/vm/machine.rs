@@ -916,7 +916,7 @@ impl CoreMachine {
         end: impl FnOnce(Datum) -> End,
         result: Datum,
     ) -> Result<Step, MachineError> {
-        match self.vm.tasks.outstanding(ender, &self.vm.program.units) {
+        match self.vm.tasks.outstanding(ender, &self.vm.program) {
             Some(error) => self.ended(End::Error(error)),
             None => self.ended(end(result)),
         }
@@ -930,7 +930,7 @@ impl CoreMachine {
         finish: bool,
         result: Datum,
     ) -> Result<Step, MachineError> {
-        if let Some(error) = self.vm.tasks.outstanding(ender, &self.vm.program.units) {
+        if let Some(error) = self.vm.tasks.outstanding(ender, &self.vm.program) {
             return self.ended(End::Error(error));
         }
         let (carry, not_carried) = match self.header.start {
@@ -990,48 +990,57 @@ fn operations(
             reads.insert(use_);
         }
     }
-    let mut operations = HashMap::new();
+    // A perform is filled in the Link whose code runs it: an own unit's
+    // Link, and for library code every Link that may call it.
+    let mut performs = Vec::new();
     for unit in &code.units {
-        // A perform is filled in the Link whose code it is.
-        let link = unit.link;
         for action in &unit.actions {
-            let ActionSite::Perform { owner, slot, .. } = action else {
-                continue;
-            };
-            operations.entry((link, *owner, *slot)).or_insert_with(|| {
-                let instance = program
-                    .instances
-                    .get(&link)
-                    .ok_or("the perform's Link is not loaded")?;
-                let document = program
-                    .documents
-                    .get(&instance.document)
-                    .ok_or("the perform's document is not loaded")?;
-                let key = match owner {
-                    Some(function) if !document.functions.contains_key(function) => {
-                        let registered = program
-                            .helpers()
-                            .registered(function)
-                            .or_else(|| program.library.registry().get(function))
-                            .ok_or("helper operation body is not loaded")?;
-                        let import = registered
-                            .imports()
-                            .get(slot)
-                            .ok_or("helper does not declare this operation")?;
-                        OperationSlot::Helper(HelperOperationId::of_import(import))
-                    }
-                    _ => (*slot).into(),
-                };
-                let use_ = instance
-                    .operation(key)
-                    .filter(|use_| use_.link == link && use_.slot == key)
-                    .ok_or("perform has no explicit operation fill in its defining Link")?;
-                Ok(Operation {
-                    read: reads.contains(&use_),
-                    use_,
-                })
-            });
+            if let ActionSite::Perform { owner, slot, .. } = action {
+                performs.push((unit.link, *owner, *slot));
+            }
         }
+    }
+    for &(owner, slot) in &code.lib.performs {
+        for &link in &code.links {
+            performs.push((link, owner, slot));
+        }
+    }
+    let mut operations = HashMap::new();
+    for (link, owner, slot) in performs {
+        let (owner, slot) = (&owner, &slot);
+        operations.entry((link, *owner, *slot)).or_insert_with(|| {
+            let instance = program
+                .instances
+                .get(&link)
+                .ok_or("the perform's Link is not loaded")?;
+            let document = program
+                .documents
+                .get(&instance.document)
+                .ok_or("the perform's document is not loaded")?;
+            let key = match owner {
+                Some(function) if !document.functions.contains_key(function) => {
+                    let registered = program
+                        .helpers()
+                        .registered(function)
+                        .or_else(|| program.library.registry().get(function))
+                        .ok_or("helper operation body is not loaded")?;
+                    let import = registered
+                        .imports()
+                        .get(slot)
+                        .ok_or("helper does not declare this operation")?;
+                    OperationSlot::Helper(HelperOperationId::of_import(import))
+                }
+                _ => (*slot).into(),
+            };
+            let use_ = instance
+                .operation(key)
+                .filter(|use_| use_.link == link && use_.slot == key)
+                .ok_or("perform has no explicit operation fill in its defining Link")?;
+            Ok(Operation {
+                read: reads.contains(&use_),
+                use_,
+            })
+        });
     }
     Ok(operations)
 }

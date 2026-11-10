@@ -57,28 +57,26 @@ pub(crate) fn held(program: &Program, code: &BTreeSet<FunctionId>) -> BTreeSet<F
     let closures: HashMap<FunctionId, UnitId> = closure_units(program);
     code.iter()
         .filter_map(|function| match closures.get(function) {
-            Some(unit) => program.units[*unit as usize].owner,
+            Some(unit) => program.unit(*unit).owner,
             None => (!program.declares(function)).then_some(*function),
         })
         .collect()
 }
 
 fn closure_units(program: &Program) -> HashMap<FunctionId, UnitId> {
-    program
-        .units
-        .iter()
-        .enumerate()
-        .filter_map(|(at, unit)| match unit.kind {
-            UnitKind::Closure(function) => Some((function, at as UnitId)),
-            _ => None,
-        })
-        .collect()
+    let mut closures = program.lib.closures.clone();
+    for (at, unit) in program.units.iter().enumerate() {
+        if let UnitKind::Closure(function) = unit.kind {
+            closures.insert(function, program.own_unit(at));
+        }
+    }
+    closures
 }
 
 /// A forward walk over ops, each visited once.
 struct Walk<'p> {
     program: &'p Program,
-    seen: Vec<Vec<bool>>,
+    seen: HashMap<UnitId, Vec<bool>>,
     work: Vec<(UnitId, u32)>,
     pins: BTreeSet<FunctionId>,
 }
@@ -87,11 +85,7 @@ impl<'p> Walk<'p> {
     fn new(program: &'p Program) -> Self {
         Self {
             program,
-            seen: program
-                .units
-                .iter()
-                .map(|unit| vec![false; unit.ops.len()])
-                .collect(),
+            seen: HashMap::new(),
             work: Vec::new(),
             pins: BTreeSet::new(),
         }
@@ -111,8 +105,12 @@ impl<'p> Walk<'p> {
     fn run(&mut self) -> Result<(), FunctionId> {
         let program = self.program;
         while let Some((id, pc)) = self.work.pop() {
-            let unit = &program.units[id as usize];
-            let Some(seen) = self.seen[id as usize].get_mut(pc as usize) else {
+            let unit = program.unit(id);
+            let seen = self
+                .seen
+                .entry(id)
+                .or_insert_with(|| vec![false; unit.ops.len()]);
+            let Some(seen) = seen.get_mut(pc as usize) else {
                 continue;
             };
             if std::mem::replace(seen, true) {
@@ -159,7 +157,7 @@ impl<'p> Walk<'p> {
                     match unit.calls[n as usize].callee {
                         Callee::Unit { unit, .. } => self.enter(unit, 0),
                         Callee::Native { native, .. } => {
-                            let native = &program.natives[native as usize];
+                            let native = program.native(native);
                             self.pin(native.function);
                             if let Some(body) = native.body {
                                 self.enter(body, 0);
@@ -175,14 +173,16 @@ impl<'p> Walk<'p> {
                     self.enter(id, next);
                 }
                 Op::Const(n) => {
-                    if let Constant::Function(callable) = &program.constants[n as usize] {
+                    if let Constant::Function(callable) = program.constant(n) {
                         self.pin(callable.function);
-                        if let Some(entry) = program
+                        let trampoline = program
                             .functions
                             .iter()
                             .find(|entry| entry.callable == *callable)
-                        {
-                            self.enter(entry.unit, 0);
+                            .map(|entry| entry.unit)
+                            .or_else(|| program.lib.trampolines.get(&callable.function).copied());
+                        if let Some(trampoline) = trampoline {
+                            self.enter(trampoline, 0);
                         }
                     }
                     self.enter(id, next);

@@ -60,7 +60,7 @@ pub fn compile_document(
         &Default::default(),
         entry.as_ref(),
         None,
-        &crate::bytecode::library::Library::default(),
+        &crate::bytecode::library::shared(registry, None),
     )
     .map_err(|problem| StartError::Linked {
         problem: problem.to_string(),
@@ -99,7 +99,7 @@ pub fn library_inventory(
 )> {
     let empty = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
     let link = lash_kernel_value::LinkId::from_bytes([0; 32]);
-    let library = crate::bytecode::library::Library::default();
+    let library = crate::bytecode::library::shared(registry, None);
     registry
         .iter()
         .map(|(function, registered)| {

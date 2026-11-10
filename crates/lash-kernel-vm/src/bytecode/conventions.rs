@@ -25,7 +25,7 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<Un
         StartConvention::PyDirect { cleanup } => return clean_up(compiler, entry, cleanup),
         StartConvention::Direct | StartConvention::PyArgsList { .. } => {
             return match entry.captures {
-                None => compiler.body(id, false),
+                None => compiler.entry_body(id),
                 Some(_) => root(compiler, entry),
             };
         }
@@ -39,7 +39,7 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<Un
     let callee = compiler.callee(&site, await_fn)?;
     let mark = compiler.mark(&site, &site.statement);
     let null = compiler.constant(&Literal::Null);
-    let Some(mut unit) = compiler.units[at as usize].take() else {
+    let Some(mut unit) = compiler.take(at) else {
         return unsupported("a TypeScript entry has no compiled body");
     };
     let returns = unit.ops.len();
@@ -73,7 +73,7 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<Un
         }
     }
     // The fall block continues into settlement with its implicit null.
-    compiler.units[at as usize] = Some(unit);
+    compiler.put(at, unit);
     Ok(at)
 }
 
@@ -111,7 +111,7 @@ fn clean_up(
     let site = Fun::new(SiteUnit::Library(id), false, false, None);
     let callee = compiler.callee(&site, cleanup)?;
     let mark = compiler.mark(&site, &site.statement);
-    let Some(mut unit) = compiler.units[at as usize].take() else {
+    let Some(mut unit) = compiler.take(at) else {
         return unsupported("an entry with a run-root cleanup has no compiled body");
     };
     let body = unit.ops.len();
@@ -152,7 +152,7 @@ fn clean_up(
         body: body as u32,
         raised,
     });
-    compiler.units[at as usize] = Some(unit);
+    compiler.put(at, unit);
     Ok(at)
 }
 

@@ -87,7 +87,7 @@ impl<H: Heap> Vm<H> {
             None => None,
         };
         let callee = unit.inlines[n as usize].callee;
-        self.heap.release(self.frames[callee as usize]);
+        self.heap.release(self.frame_cost(callee));
         self.cx.stack.truncate(base);
         self.push(value);
         if let Some(units) = units {
@@ -112,7 +112,7 @@ impl<H: Heap> Vm<H> {
                 self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
             )));
         }
-        self.admit(self.frames[site.callee as usize])?;
+        self.admit(self.frame_cost(site.callee))?;
         Ok((charge, usize::from(call.argc)))
     }
 
@@ -122,7 +122,7 @@ impl<H: Heap> Vm<H> {
     fn lay_out(&mut self, unit: &Unit, n: u32, charge: Option<u32>, argc: usize) -> usize {
         let site = unit.inlines[n as usize];
         let bill = self.owed(charge, argc);
-        let locals = self.program.units[site.callee as usize].locals;
+        let locals = self.program.unit(site.callee).locals;
         let base = self.cx.stack.len() - argc;
         self.cx
             .stack
@@ -147,7 +147,7 @@ impl<H: Heap> Vm<H> {
         let mut count = 0;
         let read = |made: &[Value; FOLD_STEPS], slot: Slot| match slot {
             Slot::Local(n) => self.cx.stack[base + usize::from(n)],
-            Slot::Const(n) => self.constants[n as usize],
+            Slot::Const(n) => self.konst(n),
             Slot::Made(n) => made[usize::from(n)],
         };
         for &step in &fold.steps[..usize::from(fold.len)] {
@@ -157,8 +157,12 @@ impl<H: Heap> Vm<H> {
                     args,
                     argc,
                 } => {
-                    let args = [read(&made, args[0]), read(&made, args[1])];
-                    self.immediate(operation, &args[..usize::from(argc)])?
+                    let argc = usize::from(argc);
+                    let mut values = [Value::Absent; 2];
+                    for (value, slot) in values.iter_mut().zip(args).take(argc) {
+                        *value = read(&made, slot);
+                    }
+                    self.immediate(operation, &values[..argc])?
                 }
                 Step::Guard { value, holds } => {
                     if !matches!(read(&made, value), Value::Bool(found) if found == holds) {
@@ -197,7 +201,7 @@ impl<H: Heap> Vm<H> {
         let [value] = self.operands();
         let completion = self.completion(activation.bill, Some(&value))?;
         self.cx.inline = None;
-        self.heap.release(self.frames[activation.callee as usize]);
+        self.heap.release(self.frame_cost(activation.callee));
         self.settle(completion)?;
         self.cx.stack.truncate(activation.base as usize);
         self.push(value);
@@ -214,12 +218,15 @@ impl<H: Heap> Vm<H> {
         };
         let resume = unit.inlines[activation.site as usize].at + 1;
         self.jump(resume);
+        let link = self.link_of(activation.callee, self.running_link());
+        self.prepare(activation.callee, link)?;
         self.cx.frames.push(Frame {
             unit: activation.callee,
             pc: to,
             base: activation.base,
             closure: None,
             bill: activation.bill,
+            link,
         });
         Ok(())
     }
@@ -243,10 +250,10 @@ impl<H: Heap> Vm<H> {
         let Some(frame) = self.cx.frames.last() else {
             return Err(fault("an inline region with no frame"));
         };
-        let unit = &self.program.units[frame.unit as usize];
+        let unit = self.program.unit(frame.unit);
         let resume = unit.inlines[activation.site as usize].at + 1;
         self.jump(resume);
-        self.heap.release(self.frames[activation.callee as usize]);
+        self.heap.release(self.frame_cost(activation.callee));
         self.settle(completion)?;
         self.cx.stack.truncate(activation.base as usize);
         Ok(())

@@ -1,11 +1,17 @@
 //! A compiled document (cutover contract §1): one [`Program`] per machine
-//! instance, never shared across instances; the library bodies in it are
-//! instantiated from templates its prepared library keeps
-//! ([`library`](super::library)). It holds code for each unit
-//! (main, every declared function of every Link the run's build loads,
-//! every kernel-code body reached, every closure body and spawn stub), the
-//! constant pool, each block's charge tables (§3) and each unit's
-//! side tables. Each unit is compiled as the Link it belongs to.
+//! instance, never shared across instances, linked to the process's
+//! compiled library ([`library`](super::library)). Its own units are the
+//! document's code (main, every declared function of every Link the run's
+//! build loads, every closure body, trampoline and spawn stub the
+//! document's code makes); every library body, native and completion
+//! formula it reaches is the library's, named by an id tagged [`LIB`].
+//! It holds its own constant pool, charge tables (§3) and side tables.
+//! Each own unit is compiled as the Link it belongs to; library code
+//! belongs to no Link and runs as the Link of the frame that calls it.
+//!
+//! The library being compiled is a `Program` too: its own units are the
+//! library's new ones, tagged, over the library compiled before them, so
+//! one inliner, validator, folder and fuser serve both.
 //!
 //! A `Program` is built by the compiler and checked once by the validator;
 //! nothing at run time re-checks its structure.
@@ -13,7 +19,7 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ClosureIdentity;
-use lash_kernel_doc::arena::native::{InlineOperation, NativeFunction};
+use lash_kernel_doc::arena::native::InlineOperation;
 use lash_kernel_doc::{Integer, JoinMode, Value};
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot, Name};
@@ -23,18 +29,32 @@ use lash_kernel_value::types::Type;
 use super::charge_tables::Charge;
 use super::op::Op;
 
-/// Index of a unit in [`Program::units`].
+/// A unit: an index in [`Program::units`], or tagged [`LIB`], the
+/// library's.
 pub type UnitId = u32;
 
-/// One compiled document.
+pub use super::library::LIB;
+
+/// One compiled document, or the library's code being added.
 pub struct Program {
+    /// The own units: the document's, or the library's new ones.
     pub units: Vec<Unit>,
     pub constants: Vec<Constant>,
+    /// The natives this program declares: the library's new ones, or a
+    /// document's own.
     pub natives: Vec<NativeEntry>,
     /// Completion formulas and guard limits, by index.
     pub charges: Vec<Charge>,
+    /// `LIB` when the own code is the library's, else 0: the tag its own
+    /// unit, constant and charge ids carry.
+    pub tag: u32,
+    /// The library compiled so far, which the own code links to.
+    pub lib: Arc<super::library::LibCode>,
     /// The run's root Link: the one main and the entry belong to.
     pub link: LinkId,
+    /// Every Link the program's code runs as, the root first: a frame
+    /// runs as one of them, by index.
+    pub links: Vec<LinkId>,
     /// What a function value calls, by Link and function: each the root
     /// Link's code names, and every function another loaded Link declares.
     pub functions: Vec<FunctionEntry>,
@@ -62,7 +82,7 @@ pub enum Constant {
 }
 
 /// What a unit is, for frames and diagnostics.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum UnitKind {
     Main,
     /// A declared function of the document.
@@ -500,13 +520,14 @@ impl ActionSite {
     }
 }
 
-/// A native a call site names: the implementation, its argument count and
-/// the definition's formulas, resolved once at compile.
+/// A native a call site names: its argument count and the definition's
+/// formulas, resolved once at compile. The implementation is the
+/// instance's registry's ([`Program::native`]).
+#[derive(Clone)]
 pub struct NativeEntry {
     pub function: FunctionId,
     pub name: Arc<str>,
     pub params: u8,
-    pub native: Arc<dyn NativeFunction>,
     /// The completion formula.
     pub charge: u32,
     /// The guard's limit, if the definition states one (`K-LIB-008`).
@@ -520,6 +541,141 @@ pub struct NativeEntry {
 }
 
 impl Program {
+    /// Where own id `id` stands in the own tables whose library part
+    /// holds `before` entries, `None` for the library's.
+    #[inline(always)]
+    fn own(&self, id: u32, before: usize) -> Option<usize> {
+        let at = (id & !LIB) as usize;
+        let base = if self.tag == LIB { before } else { 0 };
+        (id & LIB == self.tag && at >= base).then(|| at - base)
+    }
+
+    /// The id own unit `at` has.
+    #[inline]
+    pub fn own_unit(&self, at: usize) -> UnitId {
+        let base = if self.tag == LIB {
+            self.lib.units.len()
+        } else {
+            0
+        };
+        self.tag | (base + at) as UnitId
+    }
+
+    /// Own unit `id`'s index in [`Self::units`], `None` for the library's.
+    #[inline]
+    pub fn own_index(&self, id: UnitId) -> Option<usize> {
+        self.own(id, self.lib.units.len())
+    }
+
+    /// Unit `id`, the program's own or the library's.
+    #[inline(always)]
+    pub fn unit(&self, id: UnitId) -> &Unit {
+        match self.own(id, self.lib.units.len()) {
+            Some(at) => &self.units[at],
+            None => &self.lib.units[(id & !LIB) as usize],
+        }
+    }
+
+    /// Unit `id`, if the program or the library has it.
+    pub fn get_unit(&self, id: UnitId) -> Option<&Unit> {
+        match self.own(id, self.lib.units.len()) {
+            Some(at) => self.units.get(at),
+            None if id & LIB != 0 => self.lib.units.get((id & !LIB) as usize).map(|unit| &**unit),
+            None => None,
+        }
+    }
+
+    /// Constant `id`, the program's own or the library's.
+    #[inline(always)]
+    pub fn constant(&self, id: u32) -> &Constant {
+        match self.own(id, self.lib.constants.len()) {
+            Some(at) => &self.constants[at],
+            None => &self.lib.constants[(id & !LIB) as usize],
+        }
+    }
+
+    /// Constant `id`, if the program or the library has it.
+    pub fn get_constant(&self, id: u32) -> Option<&Constant> {
+        match self.own(id, self.lib.constants.len()) {
+            Some(at) => self.constants.get(at),
+            None if id & LIB != 0 => self.lib.constants.get((id & !LIB) as usize),
+            None => None,
+        }
+    }
+
+    /// Completion formula or guard limit `id`.
+    #[inline(always)]
+    pub fn charge(&self, id: u32) -> &Charge {
+        match self.own(id, self.lib.charges.len()) {
+            Some(at) => &self.charges[at],
+            None => &self.lib.charges[(id & !LIB) as usize],
+        }
+    }
+
+    /// Completion formula or guard limit `id`, if there is one.
+    pub fn get_charge(&self, id: u32) -> Option<&Charge> {
+        match self.own(id, self.lib.charges.len()) {
+            Some(at) => self.charges.get(at),
+            None if id & LIB != 0 => self.lib.charges.get((id & !LIB) as usize),
+            None => None,
+        }
+    }
+
+    /// Native `n`, the program's own or the library's.
+    #[inline(always)]
+    pub fn native(&self, n: u32) -> &NativeEntry {
+        match self.own(n, self.lib.natives.len()) {
+            Some(at) => &self.natives[at],
+            None => &self.lib.natives[(n & !LIB) as usize],
+        }
+    }
+
+    /// Native `n`, if the program or the library has it.
+    pub fn get_native(&self, n: u32) -> Option<&NativeEntry> {
+        match self.own(n, self.lib.natives.len()) {
+            Some(at) => self.natives.get(at),
+            None if n & LIB != 0 => self.lib.natives.get((n & !LIB) as usize),
+            None => None,
+        }
+    }
+
+    /// The key of the occurrence counter `occurrence` a frame running as
+    /// Link `link` advances: a library counter is each Link's own.
+    #[inline]
+    pub fn counter(link: u32, occurrence: u32) -> u64 {
+        if occurrence & LIB == 0 {
+            u64::from(occurrence)
+        } else {
+            u64::from(link) << 32 | u64::from(occurrence)
+        }
+    }
+
+    /// The charge that is `function`'s completion formula.
+    pub fn charge_of(&self, function: &FunctionId) -> Option<u32> {
+        if let Some(at) = self
+            .charges
+            .iter()
+            .position(|charge| charge.function.as_ref() == Some(function))
+        {
+            let base = if self.tag == LIB {
+                self.lib.charges.len()
+            } else {
+                0
+            };
+            return Some(self.tag | (base + at) as u32);
+        }
+        self.lib.charge_ids.get(function).copied()
+    }
+
+    /// The index of Link `link` in [`Self::links`].
+    #[inline]
+    pub fn link_index(&self, link: &LinkId) -> Option<u32> {
+        self.links
+            .iter()
+            .position(|held| held == link)
+            .map(|at| at as u32)
+    }
+
     /// Whether a function value naming `callable` can enter a run of the
     /// program: its Link is loaded and declares it.
     pub fn callable(&self, callable: &CallableId) -> bool {
@@ -541,4 +697,24 @@ impl Program {
 pub struct FunctionEntry {
     pub callable: CallableId,
     pub unit: UnitId,
+}
+
+/// Every constant `unit`'s code reads, once each.
+pub(crate) fn reads(unit: &Unit) -> Box<[u32]> {
+    let mut read: Vec<u32> = unit
+        .ops
+        .iter()
+        .filter_map(|op| match *op {
+            super::op::Op::Const(n)
+            | super::op::Op::Field(n)
+            | super::op::Op::SetField(n)
+            | super::op::Op::SetFieldPlaceFirst(n)
+            | super::op::Op::RemoveField(n) => Some(n),
+            _ => None,
+        })
+        .chain(unit.records.iter().flat_map(|shape| shape.iter().copied()))
+        .collect();
+    read.sort_unstable();
+    read.dedup();
+    read.into_boxed_slice()
 }

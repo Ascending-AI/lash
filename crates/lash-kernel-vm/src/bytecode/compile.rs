@@ -7,9 +7,11 @@
 //! before its body compiles, so recursion resolves. Then every function
 //! each other loaded Link declares gets its trampoline, compiled as that
 //! Link: a function value names a Link and a function, and calls that
-//! Link's body or nothing. A library body is laid out from the template
-//! its prepared library holds ([`library`](super::library)), compiled once
-//! for every run that reaches it. [`lower`](super::lower)
+//! Link's body or nothing. A library body, native, completion formula or
+//! trampoline is the process's compiled library's
+//! ([`library`](super::library)): the same compiler, in library mode,
+//! compiles it there once for every run that reaches it, and the document
+//! names it by its library id. [`lower`](super::lower)
 //! emits each unit's statements; [`Compiler::seal`] cuts its blocks and
 //! derives the charge and step tables.
 
@@ -27,7 +29,7 @@ use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot, Name};
 use lash_kernel_value::sites::{Site, Unit as SiteUnit};
 
 use super::charge_tables::{self, Charge};
-use super::library::{Library, OUTSIDE, Template};
+use super::library::{LIB, LibCode, SharedLibrary};
 use super::names::Names;
 use super::op::Op;
 use super::program::{
@@ -57,7 +59,7 @@ pub(crate) fn unsupported<T>(what: impl Into<String>) -> Result<T> {
 /// An open under another build image passes that image as `available`: a
 /// build helper it lacks compiles to a unit that refuses when it runs
 /// (contract §7), and open proves no resume point reaches one. `library`
-/// holds the library bodies compiled for `registry` under that image.
+/// is the compiled library of `registry` under that image.
 pub(crate) fn compile(
     document: &Document,
     registry: &FunctionRegistry,
@@ -65,7 +67,7 @@ pub(crate) fn compile(
     linked: &Linked<'_>,
     entry: Option<&Entry<'_>>,
     available: Option<&BuildHelpers>,
-    library: &Library,
+    library: &SharedLibrary,
 ) -> Result<Program> {
     let mut compiler = Compiler::new(document, registry, link, &linked.imports);
     compiler.available = available;
@@ -392,19 +394,85 @@ struct LinkCode {
     missing: HashMap<FunctionId, UnitId>,
 }
 
-/// What a template's code names outside it, each by its index there.
-struct Outside {
-    /// The body the template is.
-    root: (FunctionId, bool),
-    bodies: Vec<(FunctionId, bool)>,
-    body_ids: HashMap<(FunctionId, bool), u32>,
-    natives: Vec<FunctionId>,
-    charges: Vec<FunctionId>,
-    functions: BTreeSet<FunctionId>,
+/// The Link library code is compiled in: no loaded Link's.
+const NO_LINK: [u8; 32] = [0; 32];
+
+/// What the library compiler keeps between requests: what it has made,
+/// found again by what made it, and its code since the library last
+/// published.
+#[derive(Default)]
+pub(crate) struct Tables {
+    scope: LinkCode,
+    functions: BTreeMap<CallableId, UnitId>,
+    occurrences: HashMap<(LinkId, Site), u32>,
+    units: Vec<Option<Unit>>,
+    constants: Vec<Constant>,
+    natives: Vec<NativeEntry>,
+    charges: Vec<Charge>,
+    /// Each body and trampoline the library cannot compile, and why.
+    failed: HashMap<(FunctionId, bool), Unsupported>,
+    failed_functions: HashMap<FunctionId, Unsupported>,
+    fresh_sites: Vec<(Site, u32)>,
+    fresh_trampolines: Vec<(FunctionId, UnitId)>,
 }
 
-/// The Link a template's code is compiled in: no loaded Link's.
-const NO_LINK: [u8; 32] = [0; 32];
+/// The library code compiled since the library last published.
+pub(crate) struct Fresh {
+    pub units: Vec<Unit>,
+    pub constants: Vec<Constant>,
+    pub natives: Vec<NativeEntry>,
+    pub charges: Vec<Charge>,
+    pub occurrences: Vec<(Site, u32)>,
+    pub trampolines: Vec<(FunctionId, UnitId)>,
+}
+
+impl Tables {
+    /// Whether everything compiled is published.
+    pub(crate) fn is_published(&self) -> bool {
+        self.units.is_empty()
+            && self.constants.is_empty()
+            && self.natives.is_empty()
+            && self.charges.is_empty()
+            && self.fresh_sites.is_empty()
+            && self.fresh_trampolines.is_empty()
+    }
+
+    /// What was compiled since the last publication, taken to publish.
+    pub(crate) fn take_fresh(&mut self) -> Result<Fresh> {
+        Ok(Fresh {
+            units: std::mem::take(&mut self.units)
+                .into_iter()
+                .map(|unit| {
+                    unit.ok_or_else(|| {
+                        Unsupported("a library unit was reserved and never compiled".into())
+                    })
+                })
+                .collect::<Result<_>>()?,
+            constants: std::mem::take(&mut self.constants),
+            natives: std::mem::take(&mut self.natives),
+            charges: std::mem::take(&mut self.charges),
+            occurrences: std::mem::take(&mut self.fresh_sites),
+            trampolines: std::mem::take(&mut self.fresh_trampolines),
+        })
+    }
+}
+
+/// Where the code a compiler makes is numbered from: past what the
+/// library has published, in library mode; from 0 in a document.
+#[derive(Clone, Copy, Default)]
+struct Base {
+    units: usize,
+    constants: usize,
+    natives: usize,
+    charges: usize,
+}
+
+/// The document library code is compiled as: none.
+static NO_DOCUMENT: std::sync::LazyLock<Document> =
+    std::sync::LazyLock::new(|| Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new()));
+
+/// The imports library code resolves: none.
+static NO_IMPORTS: Imports = BTreeMap::new();
 
 /// The compiler's program-wide state.
 pub(crate) struct Compiler<'a> {
@@ -438,12 +506,17 @@ pub(crate) struct Compiler<'a> {
     /// The build image an open compiles under, when it is not the one the
     /// run sealed under: the helpers it lacks are unavailable.
     available: Option<&'a BuildHelpers>,
-    /// The library bodies already compiled; `None` while compiling one.
-    library: Option<&'a Library>,
-    /// Compiling a template: what its code names outside it.
-    outside: Option<Outside>,
-    /// Each unit whose site tables are built: a laid-out template's.
-    built: Vec<bool>,
+    /// Compiling a document: the library its library code is in. `None`
+    /// while compiling the library.
+    library: Option<&'a SharedLibrary>,
+    /// [`LIB`] while compiling the library, else 0: the tag of the ids of
+    /// the units, constants, charges and occurrences made.
+    tag: u32,
+    base: Base,
+    failed: HashMap<(FunctionId, bool), Unsupported>,
+    failed_functions: HashMap<FunctionId, Unsupported>,
+    fresh_sites: Vec<(Site, u32)>,
+    fresh_trampolines: Vec<(FunctionId, UnitId)>,
 }
 
 impl<'a> Compiler<'a> {
@@ -474,220 +547,113 @@ impl<'a> Compiler<'a> {
             occurrences: HashMap::new(),
             available: None,
             library: None,
-            outside: None,
-            built: Vec::new(),
+            tag: 0,
+            base: Base::default(),
+            failed: HashMap::new(),
+            failed_functions: HashMap::new(),
+            fresh_sites: Vec::new(),
+            fresh_trampolines: Vec::new(),
         }
     }
 
-    /// Compiles library function `id`'s body, `covered` or not, as a
-    /// template under build image `available`.
-    pub(crate) fn template(
-        registry: &FunctionRegistry,
-        available: Option<&BuildHelpers>,
-        id: FunctionId,
-        covered: bool,
-    ) -> Result<Template> {
-        let document = Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
-        let imports = Imports::new();
-        let mut compiler =
-            Compiler::new(&document, registry, LinkId::from_bytes(NO_LINK), &imports);
+    /// The library's compiler under build image `available`, over `held`,
+    /// the code it has published, and `tables`, what it has made.
+    pub(crate) fn library(
+        registry: &'a FunctionRegistry,
+        available: Option<&'a BuildHelpers>,
+        held: &LibCode,
+        tables: Tables,
+    ) -> Self {
+        let mut compiler = Self::new(
+            &NO_DOCUMENT,
+            registry,
+            LinkId::from_bytes(NO_LINK),
+            &NO_IMPORTS,
+        );
         compiler.available = available;
-        compiler.outside = Some(Outside {
-            root: (id, covered),
-            bodies: Vec::new(),
-            body_ids: HashMap::new(),
-            natives: Vec::new(),
-            charges: Vec::new(),
-            functions: BTreeSet::new(),
-        });
-        let at = compiler.body(id, covered)?;
-        debug_assert_eq!(at, 0, "a template's body is its first unit");
-        let reads = !compiler.free_names(id)?.is_empty();
-        let mut units = Vec::with_capacity(compiler.units.len());
-        for (at, unit) in compiler.units.into_iter().enumerate() {
-            match unit {
-                Some(mut unit) => {
-                    unit.sites = super::site_tables::build(&unit);
-                    units.push(unit);
-                }
-                None => return unsupported(format!("unit {at} was reserved and never compiled")),
-            }
-        }
-        let Some(outside) = compiler.outside else {
-            return unsupported("a template lost what it names");
+        compiler.tag = LIB;
+        compiler.base = Base {
+            units: held.units.len(),
+            constants: held.constants.len(),
+            natives: held.natives.len(),
+            charges: held.charges.len(),
         };
-        Ok(Template {
+        let Tables {
+            scope,
+            functions,
+            occurrences,
             units,
-            constants: compiler.constants,
-            globals: compiler.globals,
-            bodies: outside.bodies,
-            natives: outside.natives,
-            charges: outside.charges,
-            functions: outside.functions.into_iter().collect(),
-            reads,
-        })
+            constants,
+            natives,
+            charges,
+            failed,
+            failed_functions,
+            fresh_sites,
+            fresh_trampolines,
+        } = tables;
+        compiler.scope = scope;
+        compiler.functions = functions;
+        compiler.occurrences = occurrences;
+        compiler.units = units;
+        compiler.constants = constants;
+        compiler.natives = natives;
+        compiler.charges = charges;
+        compiler.failed = failed;
+        compiler.failed_functions = failed_functions;
+        compiler.fresh_sites = fresh_sites;
+        compiler.fresh_trampolines = fresh_trampolines;
+        compiler
     }
 
-    /// Lays out `template`, library function `id`'s body `covered` or not,
-    /// in the Link being compiled: the program compiling it here makes, up
-    /// to the numbering of units and constants.
-    fn instantiate(
-        &mut self,
-        id: FunctionId,
-        covered: bool,
-        template: &Template,
-    ) -> Result<UnitId> {
-        let base = self.units.len() as UnitId;
-        for _ in &template.units {
-            self.reserve();
-        }
-        self.scope.bodies.insert((id, covered), base);
-        match self.lay_out(base, template) {
-            Ok(()) => Ok(base),
-            Err(error) => {
-                self.scope.bodies.remove(&(id, covered));
-                for at in base as usize..base as usize + template.units.len() {
-                    if self.units[at].is_none() {
-                        self.units[at] = Some(self.unavailable(&error.0));
-                    }
-                }
-                Err(error)
-            }
-        }
-    }
-
-    fn lay_out(&mut self, base: UnitId, template: &Template) -> Result<()> {
-        let constants: Vec<u32> = template
-            .constants
-            .iter()
-            .map(|constant| {
-                let constant = match constant {
-                    Constant::Function(callable) => Constant::Function(CallableId {
-                        link: self.link,
-                        function: callable.function,
-                    }),
-                    other => other.clone(),
-                };
-                self.constants.push(constant);
-                (self.constants.len() - 1) as u32
-            })
-            .collect();
-        let globals: Vec<u16> = template
-            .globals
-            .iter()
-            .map(|name| self.global(name))
-            .collect();
-        for function in &template.functions {
-            self.trampoline(*function)?;
-        }
-        for (at, unit) in template.units.iter().enumerate() {
-            let mut unit = unit.clone();
-            unit.link = self.link;
-            for op in &mut unit.ops {
-                match op {
-                    Op::Const(constant)
-                    | Op::Field(constant)
-                    | Op::SetField(constant)
-                    | Op::SetFieldPlaceFirst(constant)
-                    | Op::RemoveField(constant)
-                    | Op::Unavailable(constant) => *constant = constants[*constant as usize],
-                    Op::Global(global) | Op::SetGlobal(global) => {
-                        *global = globals[*global as usize];
-                    }
-                    _ => {}
-                }
-            }
-            for record in &mut unit.records {
-                *record = record
-                    .iter()
-                    .map(|field| constants[*field as usize])
-                    .collect();
-            }
-            for closure in &mut unit.closures {
-                closure.unit += base;
-                closure.identity = Arc::new(ClosureIdentity {
-                    capture_names: closure.identity.capture_names.clone(),
-                    callable: CallableId {
-                        link: self.link,
-                        function: closure.identity.callable.function,
-                    },
-                    site: LinkedSite {
-                        link: self.link,
-                        site: closure.identity.site.site.clone(),
-                    },
-                });
-            }
-            for call in &mut unit.calls {
-                call.callee = match call.callee {
-                    Callee::Unit { unit, charge } => Callee::Unit {
-                        unit: self.laid_out(base, template, unit)?,
-                        charge: self.charge_of(template, charge)?,
-                    },
-                    Callee::Native { native, charged } => Callee::Native {
-                        native: self.native_of(template.natives[native as usize])?,
-                        charged,
-                    },
-                    Callee::Machine {
-                        function,
-                        id,
-                        charge,
-                    } => Callee::Machine {
-                        function,
-                        id,
-                        charge: self.charge_of(template, charge)?,
-                    },
-                    Callee::Value => Callee::Value,
-                };
-                call.mark = self.remark(&call.mark, &call.site);
-            }
-            for action in &mut unit.actions {
-                if let ActionSite::Spawn { unit, .. } = action {
-                    *unit += base;
-                }
-            }
-            for (mark, action) in unit.action_marks.iter_mut().zip(&unit.actions) {
-                *mark = self.remark(mark, action.site());
-            }
-            let at = base as usize + at;
-            self.units[at] = Some(unit);
-            self.built[at] = true;
-        }
-        Ok(())
-    }
-
-    /// The unit template unit `unit` is once laid out at `base`.
-    fn laid_out(&mut self, base: UnitId, template: &Template, unit: UnitId) -> Result<UnitId> {
-        if unit & OUTSIDE == 0 {
-            return Ok(base + unit);
-        }
-        let (id, covered) = template.bodies[(unit & !OUTSIDE) as usize];
-        self.body(id, covered)
-    }
-
-    /// A template's completion formula, by its index there, in the program.
-    fn charge_of(&mut self, template: &Template, charge: Option<u32>) -> Result<Option<u32>> {
-        let Some(charge) = charge else {
-            return Ok(None);
-        };
-        let id = template.charges[charge as usize];
-        let definition = self.def(&id)?;
-        match self.charge(id, definition) {
-            Some(at) => Ok(Some(at)),
-            None => unsupported(format!("function {id} has no completion formula")),
+    /// What the library's compiler keeps for its next request. A unit a
+    /// failed compile reserved and left refuses when it runs.
+    pub(crate) fn into_tables(mut self) -> Tables {
+        self.refuse_from(
+            0,
+            &Unsupported("the library left this unit uncompiled".into()),
+        );
+        Tables {
+            scope: self.scope,
+            functions: self.functions,
+            occurrences: self.occurrences,
+            units: self.units,
+            constants: self.constants,
+            natives: self.natives,
+            charges: self.charges,
+            failed: self.failed,
+            failed_functions: self.failed_functions,
+            fresh_sites: self.fresh_sites,
+            fresh_trampolines: self.fresh_trampolines,
         }
     }
 
-    /// Library function `id`'s native, by its index in the program.
-    fn native_of(&mut self, id: FunctionId) -> Result<u32> {
-        let definition = self.def(&id)?;
-        let Some(native) = self
-            .registry
-            .get(&id)
-            .and_then(|registered| registered.native().cloned())
-        else {
-            return unsupported(format!("native {id} is not linked in this build"));
-        };
-        self.native(id, definition, native)
+    /// Whether the compiler is compiling the library.
+    fn in_library(&self) -> bool {
+        self.tag == LIB
+    }
+
+    /// The library the document's library code is in, while compiling a
+    /// document's code that names `id` as library code.
+    fn library_of(&self, id: &FunctionId) -> Option<&'a SharedLibrary> {
+        self.library
+            .filter(|_| !self.document.functions.contains_key(id))
+    }
+
+    /// Where unit `at` is in [`Self::units`].
+    fn local(&self, at: UnitId) -> usize {
+        (at & !LIB) as usize - self.base.units
+    }
+
+    /// Stores `unit` at `at`.
+    pub(crate) fn put(&mut self, at: UnitId, unit: Unit) {
+        let local = self.local(at);
+        self.units[local] = Some(unit);
+    }
+
+    /// Takes unit `at` out to change it.
+    pub(crate) fn take(&mut self, at: UnitId) -> Option<Unit> {
+        let local = self.local(at);
+        self.units[local].take()
     }
 
     /// Compiles Link `link` from here on, finding again what was already
@@ -769,26 +735,38 @@ impl<'a> Compiler<'a> {
     }
 
     fn finish(self, main: UnitId) -> Result<Program> {
+        let Some(library) = self.library else {
+            return unsupported("a document compiled with no library");
+        };
         let mut units = Vec::with_capacity(self.units.len());
-        for (at, (unit, built)) in self.units.into_iter().zip(self.built).enumerate() {
+        for (at, unit) in self.units.into_iter().enumerate() {
             match unit {
                 // A unit's tables are built from its final code: a
-                // convention may add to a unit after it was sealed. A
-                // laid-out template's were built with it.
+                // convention may add to a unit after it was sealed.
                 Some(mut unit) => {
-                    if !built {
-                        unit.sites = super::site_tables::build(&unit);
-                    }
+                    unit.sites = super::site_tables::build(&unit);
                     units.push(unit);
                 }
                 None => return unsupported(format!("unit {at} was reserved and never compiled")),
             }
         }
+        let mut others: Vec<LinkId> = self
+            .links
+            .keys()
+            .filter(|link| **link != self.root)
+            .copied()
+            .collect();
+        others.sort_unstable_by_key(|link| *link.as_bytes());
+        let mut links = vec![self.root];
+        links.extend(others);
         Ok(Program {
             units,
             constants: self.constants,
             natives: self.natives,
             charges: self.charges,
+            tag: 0,
+            lib: library.code()?,
+            links,
             functions: self
                 .functions
                 .into_iter()
@@ -803,8 +781,7 @@ impl<'a> Compiler<'a> {
 
     pub(crate) fn reserve(&mut self) -> UnitId {
         self.units.push(None);
-        self.built.push(false);
-        (self.units.len() - 1) as UnitId
+        self.tag | (self.base.units + self.units.len() - 1) as UnitId
     }
 
     /// A function's definition: the document's own, else the library's.
@@ -845,7 +822,7 @@ impl<'a> Compiler<'a> {
                 function: *function,
             }),
         };
-        let at = self.constants.len() as u32;
+        let at = self.tag | (self.base.constants + self.constants.len()) as u32;
         self.constants.push(constant);
         self.scope.immediates.insert(literal.clone(), at);
         at
@@ -1002,22 +979,38 @@ impl<'a> Compiler<'a> {
         if let Some(unit) = self.scope.bodies.get(&(id, covered)) {
             return Ok(*unit);
         }
-        if let Some(outside) = &mut self.outside {
-            if outside.root != (id, covered) {
-                let next = outside.bodies.len() as u32;
-                let at = *outside.body_ids.entry((id, covered)).or_insert(next);
-                if at == next {
-                    outside.bodies.push((id, covered));
-                }
-                return Ok(OUTSIDE | at);
+        if let Some(library) = self.library_of(&id) {
+            return library.request(self.registry, self.available, |library| {
+                library.body(id, covered)
+            });
+        }
+        self.own_body(id, covered)
+    }
+
+    /// The unit a start runs for function `id`'s uncovered body: the
+    /// program's own, whichever code `id` is.
+    pub(crate) fn entry_body(&mut self, id: FunctionId) -> Result<UnitId> {
+        match self.scope.bodies.get(&(id, false)) {
+            Some(unit) if *unit & LIB == self.tag => Ok(*unit),
+            _ => self.own_body(id, false),
+        }
+    }
+
+    /// Compiles `id`'s body, `covered` or not, as the compiler's own.
+    fn own_body(&mut self, id: FunctionId, covered: bool) -> Result<UnitId> {
+        if self.in_library() {
+            if let Some(error) = self.failed.get(&(id, covered)) {
+                return Err(error.clone());
             }
-        } else if let Some(library) = self.library
-            && !self.document.functions.contains_key(&id)
-            // A template another Link cannot run compiles here, to say why.
-            && let Ok(template) = library.template(self.registry, self.available, id, covered)
-            && (self.link == self.root || !template.reads)
-        {
-            return self.instantiate(id, covered, &template);
+            // Library code is no Link's: a body that reads names a Link
+            // binds is not library code.
+            if !self.free_names(id)?.is_empty() {
+                let error = Unsupported(format!(
+                    "library function {id} reads names its own Link binds"
+                ));
+                self.failed.insert((id, covered), error.clone());
+                return Err(error);
+            }
         }
         let at = self.reserve();
         self.scope.bodies.insert((id, covered), at);
@@ -1031,7 +1024,11 @@ impl<'a> Compiler<'a> {
             Err(error) => {
                 self.scope.bodies.remove(&(id, covered));
                 // The reserved index keeps a unit that says why it cannot run.
-                self.units[at as usize] = Some(self.unavailable(&error.0));
+                let unit = self.unavailable(&error.0);
+                self.put(at, unit);
+                if self.in_library() {
+                    self.failed.insert((id, covered), error.clone());
+                }
                 Err(error)
             }
         }
@@ -1041,8 +1038,7 @@ impl<'a> Compiler<'a> {
     /// lacks it: an `Unavailable` op owned by `id` (contract §7). `None`
     /// for a function the document declares or the image holds.
     fn missing(&mut self, id: FunctionId) -> Option<UnitId> {
-        let available = self.available?;
-        if self.document.functions.contains_key(&id) || available.contains(&id) {
+        if !self.lacks(&id) {
             return None;
         }
         if let Some(unit) = self.scope.missing.get(&id) {
@@ -1051,9 +1047,16 @@ impl<'a> Compiler<'a> {
         let at = self.reserve();
         let mut unit = self.unavailable(&format!("build helper {id} is unavailable"));
         unit.owner = Some(id);
-        self.units[at as usize] = Some(unit);
+        self.put(at, unit);
         self.scope.missing.insert(id, at);
         Some(at)
+    }
+
+    /// Whether `id` is a build helper the opening build image lacks.
+    fn lacks(&self, id: &FunctionId) -> bool {
+        self.available.is_some_and(|available| {
+            !self.document.functions.contains_key(id) && !available.contains(id)
+        })
     }
 
     /// A unit that refuses when it runs: a body the core cannot compile,
@@ -1076,13 +1079,10 @@ impl<'a> Compiler<'a> {
             return Some(*at);
         }
         let formula = charge_tables::completion(definition, false)?;
-        let at = match &mut self.outside {
-            Some(outside) => {
-                outside.charges.push(id);
-                (outside.charges.len() - 1) as u32
-            }
-            None => self.formula(formula, definition),
-        };
+        let at = self.formula(formula, definition);
+        if let Some(charge) = self.charges.last_mut() {
+            charge.function = Some(id);
+        }
         self.scope.charge_ids.insert(id, at);
         Some(at)
     }
@@ -1099,16 +1099,26 @@ impl<'a> Compiler<'a> {
             .map(|param| param.name.clone())
             .collect();
         self.charges.push(Charge::new(formula, params));
-        (self.charges.len() - 1) as u32
+        self.tag | (self.base.charges + self.charges.len() - 1) as u32
     }
 
     /// What a call of library or declared function `id` from `f` calls.
     pub(crate) fn callee(&mut self, f: &Fun, id: FunctionId) -> Result<Callee> {
+        let covered = f.covered;
+        match self.library_of(&id) {
+            Some(library) => library.request(self.registry, self.available, |library| {
+                library.called(id, covered)
+            }),
+            None => self.called(id, covered),
+        }
+    }
+
+    /// What a call of `id` from code `covered` or not calls.
+    fn called(&mut self, id: FunctionId, covered: bool) -> Result<Callee> {
         if let Some(unit) = self.missing(id) {
             return Ok(Callee::Unit { unit, charge: None });
         }
         let definition = self.def(&id)?;
-        let covered = f.covered;
         if let Some(function) = machine_function(definition) {
             let charge = if covered {
                 None
@@ -1168,7 +1178,7 @@ impl<'a> Compiler<'a> {
         let at = self.reserve();
         let mut unit = self.unavailable(&format!("native {id} is not linked in this build"));
         unit.owner = Some(id);
-        self.units[at as usize] = Some(unit);
+        self.put(at, unit);
         self.scope.missing.insert(id, at);
         at
     }
@@ -1185,12 +1195,6 @@ impl<'a> Compiler<'a> {
         let Some(charge) = self.charge(id, definition) else {
             return unsupported(format!("native {id} has no completion formula"));
         };
-        if let Some(outside) = &mut self.outside {
-            outside.natives.push(id);
-            let at = (outside.natives.len() - 1) as u32;
-            self.scope.native_ids.insert(id, at);
-            return Ok(at);
-        }
         let guard = definition
             .guard
             .as_ref()
@@ -1212,12 +1216,11 @@ impl<'a> Compiler<'a> {
             ) if guard.is_none() => scalar,
             _ => None,
         };
-        let at = self.natives.len() as u32;
+        let at = self.tag | (self.base.natives + self.natives.len()) as u32;
         self.natives.push(NativeEntry {
             function: id,
             name: Arc::from(definition.name.as_str()),
             params: definition.signature.params.len() as u8,
-            native,
             charge,
             guard,
             body: None,
@@ -1230,7 +1233,8 @@ impl<'a> Compiler<'a> {
         if definition.body().is_some()
             && let Ok(body) = self.body(id, true)
         {
-            self.natives[at as usize].body = Some(body);
+            let local = (at & !LIB) as usize - self.base.natives;
+            self.natives[local].body = Some(body);
         }
         Ok(at)
     }
@@ -1245,17 +1249,63 @@ impl<'a> Compiler<'a> {
         if self.functions.contains_key(&callable) {
             return Ok(());
         }
-        if let Some(outside) = &mut self.outside {
-            outside.functions.insert(id);
+        // A function value of library function `id` in any Link applies
+        // the library's trampoline.
+        if let Some(library) = self.library_of(&id) {
+            let unit = library.request(self.registry, self.available, |library| {
+                library.trampoline_unit(id)
+            })?;
+            self.functions.insert(callable, unit);
             return Ok(());
+        }
+        if let Some(error) = self.failed_functions.get(&id) {
+            return Err(error.clone());
         }
         if let Some(unit) = self.missing(id) {
             self.functions.insert(callable, unit);
+            self.fresh(id, unit);
             return Ok(());
         }
         let definition = self.def(&id)?;
         let at = self.reserve();
         self.functions.insert(callable, at);
+        self.fresh(id, at);
+        if let Err(error) = self.trampoline_body(id, definition, at) {
+            if self.in_library() {
+                self.failed_functions.insert(id, error.clone());
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// The library's trampoline for library function `id`.
+    fn trampoline_unit(&mut self, id: FunctionId) -> Result<UnitId> {
+        self.trampoline(id)?;
+        let callable = CallableId {
+            link: self.link,
+            function: id,
+        };
+        match self.functions.get(&callable) {
+            Some(unit) => Ok(*unit),
+            None => unsupported(format!("function {id} has no trampoline")),
+        }
+    }
+
+    /// Records the library's new trampoline for `id`.
+    fn fresh(&mut self, id: FunctionId, unit: UnitId) {
+        if self.in_library() {
+            self.fresh_trampolines.push((id, unit));
+        }
+    }
+
+    /// Compiles the trampoline of `id` at `at`.
+    fn trampoline_body(
+        &mut self,
+        id: FunctionId,
+        definition: &FunctionDefinition,
+        at: UnitId,
+    ) -> Result<()> {
         let argc = definition.signature.params.len();
         let mut f = Fun::new(SiteUnit::Library(id), false, false, None);
         f.locals = argc as u16;
@@ -1277,7 +1327,7 @@ impl<'a> Compiler<'a> {
     /// helper body whose signature types something (`K-FN-004`). A
     /// native's own arguments are its formula's to bound.
     pub(crate) fn checked(&self, f: &Fun, id: FunctionId, callee: &Callee) -> Option<Arc<Checked>> {
-        let authored = self.outside.is_none()
+        let authored = !self.in_library()
             && !f.covered
             && match &f.site {
                 SiteUnit::Main | SiteUnit::Function(_) => true,
@@ -1334,22 +1384,27 @@ impl<'a> Compiler<'a> {
         })
     }
 
-    /// `mark`, of a laid-out template's call or action at `site`, among
-    /// the Link being compiled's occurrence counters.
-    fn remark(&mut self, mark: &Mark, site: &Site) -> Arc<Mark> {
-        Arc::new(Mark {
-            statement: mark.statement.clone(),
-            loops: Arc::clone(&mark.loops),
-            occurrence: self.occurrence(site),
-        })
-    }
-
+    /// The occurrence counter of the call or action at `site`: the
+    /// library's for a site in library code, whichever Link counts it.
     fn occurrence(&mut self, site: &Site) -> u32 {
-        let next = self.occurrences.len() as u32;
-        *self
+        if let SiteUnit::Library(id) = &site.unit
+            && let Some(library) = self.library_of(id)
+        {
+            return library
+                .request(self.registry, self.available, |library| {
+                    Ok(library.occurrence(site))
+                })
+                .unwrap_or(self.occurrences.len() as u32);
+        }
+        let next = self.tag | self.occurrences.len() as u32;
+        let at = *self
             .occurrences
             .entry((self.link, site.clone()))
-            .or_insert(next)
+            .or_insert(next);
+        if at == next && self.in_library() {
+            self.fresh_sites.push((site.clone(), at));
+        }
+        at
     }
 
     /// `spawn`'s stub: its parameters are the call's arguments (a value
@@ -1389,7 +1444,8 @@ impl<'a> Compiler<'a> {
             match self.function(id, Some(f), None, at, false, UnitKind::Closure(id)) {
                 Ok(found) => found,
                 Err(error) => {
-                    self.units[at as usize] = Some(self.unavailable(&error.0));
+                    let unit = self.unavailable(&error.0);
+                    self.put(at, unit);
                     return Err(error);
                 }
             };
@@ -1426,7 +1482,8 @@ impl<'a> Compiler<'a> {
         let kind = UnitKind::Closure(callable.function);
         let saved = Some(identity.capture_names.as_slice());
         if let Err(error) = self.function(callable.function, None, saved, at, false, kind) {
-            self.units[at as usize] = Some(self.unavailable(&error.0));
+            let unit = self.unavailable(&error.0);
+            self.put(at, unit);
         }
         Ok(())
     }
@@ -1436,7 +1493,7 @@ impl<'a> Compiler<'a> {
     /// Cuts `f` into blocks and stores it at `at`.
     pub(crate) fn seal(&mut self, f: Fun, at: UnitId, kind: UnitKind, params: u16, name: Arc<str>) {
         let unit = self.sealed(f, kind, params, name);
-        self.units[at as usize] = Some(unit);
+        self.put(at, unit);
     }
 
     fn sealed(&mut self, f: Fun, kind: UnitKind, params: u16, name: Arc<str>) -> Unit {
@@ -1551,7 +1608,7 @@ impl<'a> Compiler<'a> {
     /// A function call's machine identity, for `brand.built` answered
     /// where it is written.
     pub(crate) fn brand_built(&mut self, f: &Fun, id: FunctionId) -> Result<Option<u32>> {
-        if self.missing(id).is_some() {
+        if self.lacks(&id) {
             return Ok(None);
         }
         let definition = self.def(&id)?;

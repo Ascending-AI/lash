@@ -41,8 +41,9 @@ pub(crate) struct Task {
     /// A delivered `then yield` wait owes one more turn before it resumes
     /// (`K-TASK-005`).
     pub turn: bool,
-    /// How many times the task has run each action site, by its index.
-    pub occurrences: HashMap<u32, u64>,
+    /// How many times the task has run each action site, by
+    /// [`crate::bytecode::program::Program::counter`].
+    pub occurrences: HashMap<u64, u64>,
     /// Where its spawner stood, when none of its own frames is document
     /// code (`K-EFF-008`).
     pub spawn_origin: Option<Site>,
@@ -222,7 +223,11 @@ impl Tasks {
 
     /// The tasks other than `main` and `ender` that make the run's end an
     /// error (`K-TASK-018`), with where each came from.
-    pub(crate) fn outstanding(&self, ender: Option<usize>, units: &[Unit]) -> Option<RunError> {
+    pub(crate) fn outstanding(
+        &self,
+        ender: Option<usize>,
+        program: &crate::bytecode::program::Program,
+    ) -> Option<RunError> {
         let mut unfinished = Vec::new();
         let mut unobserved = Vec::new();
         let mut sources = Vec::new();
@@ -239,7 +244,7 @@ impl Tasks {
                 .cx
                 .frames
                 .iter()
-                .map(|frame| &units[frame.unit as usize])
+                .map(|frame| program.unit(frame.unit))
                 .find(|unit| unit.authored)
                 .map(|unit| unit.site.clone());
             if let Some(site) = body.or_else(|| task.spawn_origin.clone()) {
@@ -323,9 +328,11 @@ impl Task {
         }
     }
 
-    /// Counts a run of the site of `mark`, giving how many came before.
-    fn advance(&mut self, mark: &Mark) -> u64 {
-        let count = self.occurrences.entry(mark.occurrence).or_insert(0);
+    /// Counts a run of the site of `mark` by a frame running as Link
+    /// `link`, giving how many came before.
+    fn advance(&mut self, mark: &Mark, link: u32) -> u64 {
+        let key = crate::bytecode::program::Program::counter(link, mark.occurrence);
+        let count = self.occurrences.entry(key).or_insert(0);
         let before = *count;
         *count += 1;
         before
@@ -341,7 +348,7 @@ impl<H: Heap> Vm<H> {
     /// action the top frame runs.
     fn standing<'p>(&'p self, cx: &Context, at: usize) -> Option<&'p Mark> {
         let frame = cx.frames.get(at)?;
-        let unit = &self.program.units[frame.unit as usize];
+        let unit = self.program.unit(frame.unit);
         match unit.original((frame.pc as usize).checked_sub(1)?)? {
             Op::Call(call) => Some(&unit.calls[call as usize].mark),
             Op::Action(action) => Some(&unit.action_marks[action as usize]),
@@ -378,7 +385,7 @@ impl<H: Heap> Vm<H> {
     fn task_origin(&self) -> Site {
         let frames = self.cx.frames.len();
         for at in (0..frames).rev() {
-            let unit = &self.program.units[self.cx.frames[at].unit as usize];
+            let unit = self.program.unit(self.cx.frames[at].unit);
             if unit.authored
                 && let Some(mark) = self.standing(&self.cx, at)
             {
@@ -395,7 +402,7 @@ impl<H: Heap> Vm<H> {
                 .cx
                 .frames
                 .first()
-                .map(|frame| self.program.units[frame.unit as usize].site.clone())
+                .map(|frame| self.program.unit(frame.unit).site.clone())
                 .unwrap_or_else(|| Site::new(lash_kernel_value::sites::Unit::Main, Vec::new())),
         }
     }
@@ -627,7 +634,8 @@ impl<H: Heap> Vm<H> {
                 then_yield,
                 site,
             } => {
-                let operation = match self.tasks.operations.get(&(unit.link, *owner, *slot)) {
+                let link = self.program.links[self.running_link() as usize];
+                let operation = match self.tasks.operations.get(&(link, *owner, *slot)) {
                     Some(Ok(operation)) => operation.clone(),
                     Some(Err(problem)) => return Err(fault(problem.clone())),
                     None => return Err(fault("a perform whose operation was never resolved")),
@@ -660,7 +668,8 @@ impl<H: Heap> Vm<H> {
                         self.exceeded(Bound::RequestsPerPark, u64::from(limit)),
                     )));
                 }
-                let occurrence = self.running().advance(&mark);
+                let link = self.running_link();
+                let occurrence = self.running().advance(&mark, link);
                 let wait = self.tasks.next_wait;
                 self.tasks.next_wait += 1;
                 let identity = EffectIdentity {
@@ -836,7 +845,8 @@ impl<H: Heap> Vm<H> {
         // runs the spawn again with nothing advanced.
         let from = self.cx.stack.len() - argc;
         let rooted_in_document = self.callee_authored(stub, self.cx.stack.get(from).copied())?;
-        let occurrence = self.running().advance(mark);
+        let link = self.running_link();
+        let occurrence = self.running().advance(mark, link);
         let spawn_origin = (!unit.authored || !rooted_in_document).then(|| self.task_origin());
         let parent = Arc::clone(&self.tasks.all[self.tasks.running].identity);
         let identity = Arc::new(TaskIdentity::Spawned(SpawnIdentity {
@@ -856,25 +866,24 @@ impl<H: Heap> Vm<H> {
         self.tasks.running = child;
         self.tasks.installed = true;
         self.cx.stack.extend_from_slice(&values);
-        self.enter(stub, argc, None, None)?;
+        self.enter(stub, argc, None, None, link)?;
         Ok(None)
     }
 
     /// Whether the code a spawn stub calls is document code.
     fn callee_authored(&self, stub: UnitId, value: Option<Value>) -> Run<bool> {
-        let units = &self.program.units;
-        let Some(call) = units[stub as usize].calls.first() else {
+        let program = &self.program;
+        let Some(call) = program.unit(stub).calls.first() else {
             return Ok(false);
         };
         let unit = match call.callee {
             Callee::Unit { unit, .. } => Some(unit),
             Callee::Value => match value {
                 Some(Value::Closure(handle)) => found(self.heap.arena().closure(handle))?
-                    .and_then(|(identity, _, _)| self.closures.get(&identity.callable))
-                    .copied(),
+                    .and_then(|(identity, _, _)| self.closure_unit(&identity.callable)),
                 Some(Value::Function(handle)) => found(self.heap.arena().callable(handle))?
-                    .and_then(|callable| self.functions.get(&callable))
-                    .and_then(|trampoline| units[*trampoline as usize].calls.first())
+                    .and_then(|callable| self.function_unit(&callable))
+                    .and_then(|trampoline| program.unit(trampoline).calls.first())
                     .and_then(|call| match call.callee {
                         Callee::Unit { unit, .. } => Some(unit),
                         _ => None,
@@ -883,7 +892,7 @@ impl<H: Heap> Vm<H> {
             },
             Callee::Native { .. } | Callee::Machine { .. } => None,
         };
-        Ok(unit.is_some_and(|unit| units[unit as usize].authored))
+        Ok(unit.is_some_and(|unit| program.unit(unit).authored))
     }
 
     /// A list `join` in `mode` (`K-TASK-010` … `K-TASK-015`).

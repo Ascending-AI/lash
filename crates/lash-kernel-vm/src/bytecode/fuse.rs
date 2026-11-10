@@ -24,7 +24,7 @@ pub(crate) fn fuse(program: &mut Program) {
         let Callee::Native { native, .. } = call.callee else {
             return false;
         };
-        let entry = &program.natives[native as usize];
+        let entry = program.native(native);
         call.argc == 2
             && entry.params == 2
             && matches!(entry.scalar, Some(InlineOperation::Scalar { .. }))

@@ -395,7 +395,7 @@ fn sealed_function(vm: &mut Vm<SlotHeap>, kind: ObjectKind, id: ObjectId) -> Val
 /// A later declaration of a name stands over an earlier one once it ran.
 fn top_level(vm: &mut Vm<SlotHeap>) -> Result<Vec<(Name, Value)>, MachineError> {
     let program = std::sync::Arc::clone(&vm.program);
-    let unit = &program.units[program.main as usize];
+    let unit = program.unit(program.main);
     let slots = match &vm.top {
         Some(top) => top.clone(),
         None => {

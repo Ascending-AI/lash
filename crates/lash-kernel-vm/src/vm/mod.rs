@@ -18,6 +18,7 @@ mod digests;
 mod fits;
 pub(crate) mod frames;
 pub(crate) mod inline;
+mod library;
 pub(crate) mod loops;
 pub(crate) mod machine;
 pub(crate) mod members;
@@ -35,9 +36,12 @@ use lash_kernel_value::names::CallableId;
 use lash_kernel_value::sites::Site;
 
 use self::digests::Digests;
+use self::library::LibraryPlaced;
 use crate::bytecode::charge_tables::RESULT;
 use crate::bytecode::op::Op;
-use crate::bytecode::program::{Callee, Constant, Operand, Program, Then, Unit, UnitId, UnitKind};
+use crate::bytecode::program::{
+    Callee, Constant, LIB, Operand, Program, Then, Unit, UnitId, UnitKind,
+};
 use crate::heap::{Heap, LoadError, MemoryRefused};
 use crate::observe::Weight;
 use crate::{Bound, ChargeLimiter, Host, LimitDecision};
@@ -169,6 +173,19 @@ pub(crate) struct Vm<H: Heap> {
     pub heap: H,
     /// The program's constants, materialized in this instance's heap.
     constants: Vec<Value>,
+    /// What each Link's frames of library code read, by the Link's index:
+    /// the library's constants, each placed in this instance's heap
+    /// before the first frame that reads it runs as the Link.
+    library: Vec<LibraryPlaced>,
+    /// The Link each own unit runs as, by its index in the program's.
+    links: Vec<u32>,
+    /// Each native's implementation, by its tag, in this instance's registry,
+    /// found when the run first calls it.
+    implementations: [Vec<Option<Arc<dyn lash_kernel_doc::NativeFunction>>>; 2],
+    /// The identity of each closure library code makes, by the Link it
+    /// runs as, the making unit and its closure site.
+    identities:
+        std::collections::HashMap<(u32, UnitId, u32), Arc<lash_kernel_doc::arena::ClosureIdentity>>,
     /// The host bindings main's free names use, then the session's bindings it
     /// names nowhere, then its saved functions' objects ([`Self::session`]).
     pub globals: Vec<Value>,
@@ -234,12 +251,6 @@ pub(crate) struct Vm<H: Heap> {
 }
 
 impl<H: Heap> Vm<H> {
-    /// Whether a function value naming `callable` can enter the run: the
-    /// Link it names is loaded and declares it.
-    pub(crate) fn callable(&self, callable: &CallableId) -> bool {
-        self.program.callable(callable)
-    }
-
     /// An instance of `program` over `heap`, its constants placed and
     /// admitted. `limit` is the charge limit under `Charge::Exact`;
     /// `off` selects `Charge::Off`.
@@ -290,13 +301,15 @@ impl<H: Heap> Vm<H> {
             .map(|(unit, height)| crate::heap::meter::frame(unit, *height))
             .collect();
         let mut closures = Digests::default();
+        let mut links = Vec::with_capacity(program.units.len());
         for (at, unit) in program.units.iter().enumerate() {
+            links.push(program.link_index(&unit.link).unwrap_or(0));
             if let UnitKind::Closure(function) = unit.kind {
                 let callable = CallableId {
                     link: unit.link,
                     function,
                 };
-                closures.insert(callable, at as UnitId);
+                closures.insert(callable, program.own_unit(at));
             }
         }
         let functions = program
@@ -309,6 +322,10 @@ impl<H: Heap> Vm<H> {
             program,
             heap,
             constants,
+            library: Vec::new(),
+            links,
+            implementations: [Vec::new(), Vec::new()],
+            identities: Default::default(),
             globals,
             session: Default::default(),
             top: None,
@@ -363,7 +380,7 @@ impl<H: Heap> Vm<H> {
             return Ok(());
         }
         self.cx.stack.extend_from_slice(args);
-        let entered = self.enter(unit, args.len(), closure, None);
+        let entered = self.enter(unit, args.len(), closure, None, 0);
         self.admitted(entered, ())
     }
 
@@ -413,7 +430,7 @@ impl<H: Heap> Vm<H> {
         let Some(frame) = self.cx.frames.last() else {
             return 0;
         };
-        let unit = &self.program.units[frame.unit as usize];
+        let unit = self.program.unit(frame.unit);
         let at = (frame.pc as usize).saturating_sub(1);
         unit.through.get(at).copied().unwrap_or(0)
     }
@@ -488,7 +505,7 @@ impl<H: Heap> Vm<H> {
             .enumerate()
             .rev()
             .find_map(|(at, frame)| {
-                let unit = &self.program.units[frame.unit as usize];
+                let unit = self.program.unit(frame.unit);
                 let pc = match at + 1 == top && !past {
                     true => Some(frame.pc as usize),
                     false => (frame.pc as usize).checked_sub(1),
@@ -506,7 +523,7 @@ impl<H: Heap> Vm<H> {
                     .inline
                     .map(|activation| activation.callee)
                     .or_else(|| self.cx.frames.last().map(|frame| frame.unit))
-                    .map(|unit| &self.program.units[unit as usize]);
+                    .map(|unit| self.program.unit(unit));
                 (
                     unit.map(|unit| unit.name.clone()),
                     unit.map(|unit| unit.site.clone()),
@@ -598,7 +615,7 @@ impl<H: Heap> Vm<H> {
     /// operands, which it keeps when the formula measures them.
     pub(super) fn owe(&mut self, charge: u32, argc: usize) -> Bill {
         let from = self.cx.billed.len() as u32;
-        if self.program.charges[charge as usize].reads_args() {
+        if self.program.charge(charge).reads_args() {
             let at = self.cx.stack.len() - argc;
             self.cx.billed.extend_from_slice(&self.cx.stack[at..]);
         }
@@ -638,7 +655,7 @@ impl<H: Heap> Vm<H> {
 
     /// Evaluates formula `charge` over `args` and `result`.
     fn formula(&self, charge: u32, args: &[Value], result: Option<&Value>) -> Run<u64> {
-        let formula = &self.program.charges[charge as usize];
+        let formula = self.program.charge(charge);
         if let Some(units) = formula.constant() {
             return Ok(units);
         }
@@ -887,21 +904,26 @@ impl<H: Heap> Vm<H> {
 
     /// Pushes a frame of `unit` whose `argc` arguments are the top of the
     /// stack: missing parameters are absent (`K-FN-004`), and each local a
-    /// closure shares is boxed into a cell (`K-CLO-001`).
-    fn enter(
+    /// closure shares is boxed into a cell (`K-CLO-001`). Library code
+    /// runs as Link `caller`; an own unit as its own Link.
+    pub(crate) fn enter(
         &mut self,
         unit: UnitId,
         argc: usize,
         closure: Option<ArenaHandle>,
         bill: Option<Bill>,
+        caller: u32,
     ) -> Run<()> {
         if self.cx.frames.len() >= self.call_depth as usize {
             return Err(Flow::from(Stop::bound(
                 self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
             )));
         }
-        self.admit(self.frames[unit as usize])?;
-        let code = &self.program.units[unit as usize];
+        self.admit(self.frame_cost(unit))?;
+        let link = self.link_of(unit, caller);
+        self.prepare(unit, link)?;
+        let program = Arc::clone(&self.program);
+        let code = program.unit(unit);
         let base = self.cx.stack.len() - argc;
         let boxes = !code.boxed.is_empty();
         self.cx.stack.resize(
@@ -917,6 +939,7 @@ impl<H: Heap> Vm<H> {
             base: base as u32,
             closure,
             bill,
+            link,
         });
         Ok(())
     }
@@ -925,7 +948,7 @@ impl<H: Heap> Vm<H> {
     /// shares into a cell (`K-CLO-001`).
     fn box_locals(&mut self, unit: UnitId, base: usize) -> Run<()> {
         let program = Arc::clone(&self.program);
-        for &slot in &program.units[unit as usize].boxed {
+        for &slot in &program.unit(unit).boxed {
             let at = base + usize::from(slot);
             let value = self.cx.stack[at];
             let cell = self.cell(value)?;
@@ -1018,7 +1041,7 @@ impl<H: Heap> Vm<H> {
             let Some(frame) = self.cx.frames.pop() else {
                 return Err(Flow::from(Stop::Uncaught(value)));
             };
-            self.heap.release(self.frames[frame.unit as usize]);
+            self.heap.release(self.frame_cost(frame.unit));
             self.drop_handlers();
             self.settle(completion)?;
             self.cx.stack.truncate(frame.base as usize);
@@ -1035,7 +1058,7 @@ impl<H: Heap> Vm<H> {
         let Some(frame) = self.cx.frames.first_mut() else {
             return false;
         };
-        let unit = &self.program.units[frame.unit as usize];
+        let unit = self.program.unit(frame.unit);
         let Some(cleanup) = unit.cleanup.filter(|cleanup| frame.pc <= cleanup.body) else {
             return false;
         };
@@ -1129,7 +1152,7 @@ impl<H: Heap> Vm<H> {
             if retrying {
                 pc -= 1;
             }
-            let unit = &program.units[id as usize];
+            let unit = program.unit(id);
             let ops = &unit.ops[..];
             // Writes the local `pc` back to the running frame.
             macro_rules! sync {
@@ -1182,7 +1205,7 @@ impl<H: Heap> Vm<H> {
                         self.exact = self.watch.is_some() || !self.meter.enter(block.charge);
                     }
                     Op::Nop => {}
-                    Op::Const(n) => self.push(self.constants[n as usize]),
+                    Op::Const(n) => self.push(self.konst(n)),
                     Op::Local(n) => self.push(self.cx.stack[base + usize::from(n)]),
                     Op::SetLocal(n) => {
                         let value = self.pop();
@@ -1291,7 +1314,7 @@ impl<H: Heap> Vm<H> {
                         };
                         let operand = |vm: &Self, operand: Operand| match operand {
                             Operand::Local(n) => vm.cx.stack[base + usize::from(n)],
-                            Operand::Const(n) => vm.constants[n as usize],
+                            Operand::Const(n) => vm.konst(n),
                         };
                         let len = self.cx.stack.len();
                         let [first, second] = fused.operands;
@@ -1464,7 +1487,7 @@ impl<H: Heap> Vm<H> {
                 let shape = Arc::clone(&unit.records[shape as usize]);
                 let pairs = shape
                     .iter()
-                    .map(|field| self.constants[*field as usize])
+                    .map(|field| self.konst(*field))
                     .zip(self.top(shape.len()).iter().copied())
                     .collect();
                 self.place(shape.len(), NewObject::Record(pairs))?;
@@ -1479,7 +1502,14 @@ impl<H: Heap> Vm<H> {
                     });
                 }
                 self.admit(crate::heap::meter::closure(captures.len()))?;
-                let closure = self.heap.closure(Arc::clone(&site.identity), captures);
+                let identity = match self.cx.frames.last() {
+                    Some(frame) if frame.unit & LIB != 0 => {
+                        let (made, link) = (frame.unit, frame.link);
+                        self.identity(made, n, link)
+                    }
+                    _ => Arc::clone(&site.identity),
+                };
+                let closure = self.heap.closure(identity, captures);
                 self.push(Value::Closure(closure));
             }
             // A member op reads its operands where they stand and pops
@@ -1492,7 +1522,7 @@ impl<H: Heap> Vm<H> {
             }
             Op::Field(field) => {
                 let [target] = self.operands();
-                let name = self.constants[field as usize];
+                let name = self.konst(field);
                 let value = self.field(target, name)?;
                 self.popped(1);
                 self.push(value);
@@ -1509,12 +1539,12 @@ impl<H: Heap> Vm<H> {
             }
             Op::SetField(field) => {
                 let [value, target] = self.operands();
-                self.set_field(target, self.constants[field as usize], value)?;
+                self.set_field(target, self.konst(field), value)?;
                 self.popped(2);
             }
             Op::SetFieldPlaceFirst(field) => {
                 let [target, value] = self.operands();
-                self.set_field(target, self.constants[field as usize], value)?;
+                self.set_field(target, self.konst(field), value)?;
                 self.popped(2);
             }
             Op::RemoveIndex => {
@@ -1524,7 +1554,7 @@ impl<H: Heap> Vm<H> {
             }
             Op::RemoveField(field) => {
                 let [target] = self.operands();
-                self.remove_field(target, self.constants[field as usize])?;
+                self.remove_field(target, self.konst(field))?;
                 self.popped(1);
             }
             Op::Call(site) => self.call(program, unit, site)?,
@@ -1589,7 +1619,7 @@ impl<H: Heap> Vm<H> {
                 return Ok(Some(Stop::Fail(datum)));
             }
             Op::Unavailable(reason) => {
-                let reason = match &program.constants[reason as usize] {
+                let reason = match program.constant(reason) {
                     Constant::Text(text) => text.to_string(),
                     Constant::Immediate(Value::Text(text)) => text.as_str().to_owned(),
                     _ => String::from("a body the core cannot run"),
@@ -1676,14 +1706,14 @@ impl<H: Heap> Vm<H> {
         };
         if bottom && main {
             let base = frame.base as usize;
-            let locals = usize::from(self.program.units[frame.unit as usize].locals);
+            let locals = usize::from(self.program.unit(frame.unit).locals);
             self.top = self
                 .cx
                 .stack
                 .get(base..base + locals)
                 .map(<[Value]>::to_vec);
         }
-        self.heap.release(self.frames[frame.unit as usize]);
+        self.heap.release(self.frame_cost(frame.unit));
         self.drop_handlers();
         self.settle(completion)?;
         self.cx.stack.truncate(frame.base as usize);

@@ -235,7 +235,7 @@ fn quiet(unit: &Unit, pc: usize) -> bool {
 /// arguments: the operation its version declares, where the core
 /// answers it.
 fn answers(program: &Program, native: u32, argc: usize) -> Option<InlineOperation> {
-    let entry = &program.natives[native as usize];
+    let entry = program.native(native);
     let operation = entry.scalar.filter(|_| usize::from(entry.params) == argc)?;
     let arity = match operation {
         InlineOperation::Scalar { .. } | InlineOperation::Same | InlineOperation::Membership(_) => {

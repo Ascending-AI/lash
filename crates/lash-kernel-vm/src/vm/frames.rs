@@ -14,6 +14,9 @@ use crate::bytecode::program::UnitId;
 #[derive(Clone, Debug)]
 pub(crate) struct Frame {
     pub unit: UnitId,
+    /// The Link the frame runs as, by its index in the program's Links:
+    /// its unit's own, or for library code, its caller's.
+    pub link: u32,
     /// The next op to run.
     pub pc: u32,
     /// Where the frame's locals start on the stack.

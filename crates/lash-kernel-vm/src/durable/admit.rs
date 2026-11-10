@@ -18,8 +18,8 @@ use lash_kernel_state::paged::run::continuation::{
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::sites::{Site, TaskIdentity};
 
-use super::{UnitKey, saved_key, unit_key};
-use crate::bytecode::program::{ActionSite, Program, Unit};
+use super::Units;
+use crate::bytecode::program::{ActionSite, Program};
 use crate::paged::Inadmissible;
 use crate::vm::tasks::Operations;
 
@@ -34,11 +34,7 @@ pub(crate) fn admit(
     operations: &Operations,
     record: &RunRecord,
 ) -> Result<(), Inadmissible> {
-    let units: HashMap<UnitKey<'_>, &Unit> = program
-        .units
-        .iter()
-        .map(|unit| (unit_key(unit), unit))
-        .collect();
+    let units = Units::new(program);
     let tasks = &record.tasks;
     tasks_in_order(program, &units, tasks)?;
     running(record)?;
@@ -55,11 +51,7 @@ pub(crate) fn admit(
 /// Only a delivered `then yield` takes a turn before it resumes (contract
 /// §5.1, `K-TASK-005`): a task that holds one is ready, its top frame at a
 /// `perform` that yields after it.
-fn turn(
-    units: &HashMap<UnitKey<'_>, &Unit>,
-    number: u32,
-    task: &RunTask,
-) -> Result<(), Inadmissible> {
+fn turn(units: &Units<'_>, number: u32, task: &RunTask) -> Result<(), Inadmissible> {
     if !task.turn {
         return Ok(());
     }
@@ -84,10 +76,9 @@ fn turn(
 /// Spawn order, roots, ended tasks and the counters spawning minted.
 fn tasks_in_order(
     program: &Program,
-    units: &HashMap<UnitKey<'_>, &Unit>,
+    units: &Units<'_>,
     tasks: &[RunTask],
 ) -> Result<(), Inadmissible> {
-    let main = &program.units[program.main as usize];
     for (number, task) in tasks.iter().enumerate() {
         let at = number as u32;
         match (&task.identity, number) {
@@ -122,9 +113,9 @@ fn tasks_in_order(
             return Err(Inadmissible::Ended { task: at });
         }
         if let Some(root) = task.frames.first() {
-            let unit = units.get(&saved_key(&root.unit));
+            let unit = units.get(&root.unit);
             let starts = match number {
-                0 => unit.is_some_and(|unit| std::ptr::eq(*unit, main)),
+                0 => unit.is_some_and(|(unit, _)| unit == program.main),
                 _ => root.unit.kind == UnitKind::Spawn,
             };
             if !starts {
@@ -208,7 +199,7 @@ fn queue(record: &RunRecord) -> Result<(), Inadmissible> {
 /// delivered with its raw outcome while the task is ready to resume with
 /// it. No wait performs a read.
 fn waits(
-    units: &HashMap<UnitKey<'_>, &Unit>,
+    units: &Units<'_>,
     operations: &Operations,
     record: &RunRecord,
 ) -> Result<(), Inadmissible> {
@@ -298,9 +289,11 @@ fn waits(
 }
 
 /// The action a frame stands at, by its point's site.
-fn perform<'u>(units: &HashMap<UnitKey<'_>, &'u Unit>, frame: &RunFrame) -> Option<&'u ActionSite> {
+fn perform<'u>(units: &Units<'u>, frame: &RunFrame) -> Option<&'u ActionSite> {
+    let (unit, _) = units.get(&frame.unit)?;
     units
-        .get(&saved_key(&frame.unit))?
+        .program
+        .unit(unit)
         .actions
         .iter()
         .find(|action| matches!(action, ActionSite::Perform { site, .. } if *site == frame.site))

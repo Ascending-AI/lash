@@ -35,9 +35,9 @@ struct Prepared {
     registry: Arc<FunctionRegistry>,
     /// Each live document's identity, by its allocation.
     documents: Mutex<BTreeMap<usize, Arc<ImmutableIdentity>>>,
-    /// The core's compiled library bodies, by the build image a run opens
-    /// under.
-    core: crate::bytecode::library::Libraries,
+    /// The digest of the registry the core's compiled library is keyed
+    /// by, taken once.
+    core: OnceLock<[u8; 32]>,
 }
 
 struct ImmutableIdentity {
@@ -83,7 +83,7 @@ impl PreparedLibrary {
                 alternative: OnceLock::new(),
                 registry,
                 documents: Mutex::default(),
-                core: crate::bytecode::library::Libraries::default(),
+                core: OnceLock::new(),
             }),
             doc::BuildHelpers::empty(),
         )
@@ -109,13 +109,17 @@ impl PreparedLibrary {
         &self.0.registry
     }
 
-    /// The core's library bodies compiled under build image `available`
-    /// (`None`: the registry's own).
+    /// The process's compiled library of this registry under build image
+    /// `available` (`None`: the registry's own).
     pub(crate) fn core(
         &self,
         available: Option<&doc::BuildHelpers>,
-    ) -> Arc<crate::bytecode::library::Library> {
-        self.0.core.under(available)
+    ) -> Arc<crate::bytecode::library::SharedLibrary> {
+        let digest = self
+            .0
+            .core
+            .get_or_init(|| crate::bytecode::library::digest(&self.0.registry));
+        crate::bytecode::library::held(crate::bytecode::library::key(digest, available))
     }
 
     pub(crate) fn note_identified_document(&self, document: &doc::IdentifiedDocument) {
