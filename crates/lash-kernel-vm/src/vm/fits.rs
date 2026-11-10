@@ -62,14 +62,18 @@ impl<H: Heap> Vm<H> {
             .checked_sub(1)
             .and_then(|pc| unit.ops.get(pc))
         {
-            Some(Op::Call(site)) => unit.calls[*site as usize].checked.clone(),
+            Some(Op::Call(site)) => unit.calls[*site as usize].checked.as_ref(),
             Some(Op::Inline(n)) => unit.calls[unit.inlines[*n as usize].call as usize]
                 .checked
-                .clone(),
+                .as_ref(),
             _ => None,
         };
-        match checked {
-            Some(checked) => self.result_unfit(&checked, value),
+        // Most returns hold to no typed result, or plainly fit it.
+        match checked.filter(|checked| !plainly_fits(value, &checked.signature.result)) {
+            Some(checked) => {
+                let checked = std::sync::Arc::clone(checked);
+                self.result_unfit(&checked, value)
+            }
             None => Ok(None),
         }
     }
@@ -238,12 +242,7 @@ impl<H: Heap> Vm<H> {
         match (ty, value) {
             // An inline scalar of the kind the type names is the decoder's
             // own admission of its copy, so it fits without one.
-            (Type::Null, Value::Null)
-            | (Type::Absent, Value::Absent)
-            | (Type::Bool, Value::Bool(_))
-            | (Type::Text, Value::Text(_))
-            | (Type::Int | Type::Number, Value::Int(_))
-            | (Type::Float | Type::Number, Value::Float(_)) => return Ok(None),
+            _ if plainly_fits(value, ty) => return Ok(None),
             (Type::Task(_), Value::Task(_) | Value::TaskRef(_)) => return Ok(None),
             (Type::Task(_), _) => return mismatch(self),
             (Type::Function(expected), _) => {
@@ -476,4 +475,20 @@ impl<H: Heap> Vm<H> {
             _ => Err(fault("an error names another body")),
         }
     }
+}
+
+/// Whether `value` is an inline scalar of the kind `ty` names, which the
+/// decoder admits as its own copy: a fit read with no copy and no heap.
+#[inline]
+pub(super) fn plainly_fits(value: Value, ty: &Type) -> bool {
+    matches!(
+        (ty, value),
+        (Type::Any, _)
+            | (Type::Null, Value::Null)
+            | (Type::Absent, Value::Absent)
+            | (Type::Bool, Value::Bool(_))
+            | (Type::Text, Value::Text(_))
+            | (Type::Int | Type::Number, Value::Int(_))
+            | (Type::Float | Type::Number, Value::Float(_))
+    )
 }

@@ -65,6 +65,15 @@ impl<H: Heap> Vm<H> {
                 break;
             }
         }
+        // A call held to a typed result takes a fold's value only where
+        // it plainly fits; otherwise the region runs to its leave, which
+        // checks it.
+        let held = held.filter(|(_, value)| {
+            let call = &unit.calls[unit.inlines[n as usize].call as usize];
+            call.checked
+                .as_ref()
+                .is_none_or(|checked| super::fits::plainly_fits(*value, &checked.signature.result))
+        });
         let Some((fold, value)) = held else {
             return Ok(Some(self.lay_out(unit, n, charge, argc)));
         };
