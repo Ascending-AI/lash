@@ -61,8 +61,16 @@ pub fn same_checkpoint(a: &Checkpoint, b: &Checkpoint) -> bool {
 /// Any fault reading a reachable page.
 pub fn checkpoint(
     root: &CheckpointRoot,
-    source: Box<dyn PageSource>,
+    mut source: Box<dyn PageSource>,
 ) -> Result<Checkpoint, HeapFault> {
+    let kind = source
+        .read(&[root.heap])?
+        .pop()
+        .ok_or_else(|| HeapFault::Malformed("the page port answered nothing".into()))??
+        .kind;
+    if kind == PageKind::RUN_ROOT {
+        return run::checkpoint(root, source);
+    }
     let mut heap = PagedHeap::open_header(root.heap, source, EditEpoch(0))?;
     heap.set_family_base(Box::new(
         crate::kernel_internals::family_impl::FrozenBase::default(),
@@ -521,12 +529,12 @@ mod run {
     use lash_kernel_value::tokens::{TokenCodec, encode_body};
 
     use super::Checkpoint;
-    use crate::paged::PageSource;
     use crate::paged::run::chunked::{Members, each_members};
     use crate::paged::run::directory::Directory;
     use crate::paged::run::ids::ObjectId;
     use crate::paged::run::objects::{ObjectKind, Record, RunValue};
     use crate::paged::tree::Access;
+    use crate::paged::{CheckpointRoot, PageSource};
 
     pub(super) fn session(
         page: PageRef,
@@ -553,6 +561,63 @@ mod run {
         }
         Ok(Checkpoint {
             continuation: Vec::new(),
+            graph: reader.graph,
+            ids: reader.ids,
+        })
+    }
+
+    /// A run the core sealed under `root`: the root's own fields and the
+    /// run's state beside its heap, whose values name the heap's roots by
+    /// position, as the continuation; then every root value, objects
+    /// numbered by first reach, as the graph. The directory and the ids
+    /// minted stay out, as allocator history.
+    pub(super) fn checkpoint(
+        root: &CheckpointRoot,
+        source: Box<dyn PageSource>,
+    ) -> Result<Checkpoint, HeapFault> {
+        let (record, directory) = crate::paged::run::continuation::open(source, root.heap)?;
+        let mut reader = Reader {
+            directory,
+            graph: Vec::new(),
+            seen: BTreeMap::new(),
+            ids: Vec::new(),
+        };
+        reader.put(&root.kernel);
+        reader.put(&root.document);
+        reader.put(&root.link);
+        reader.put(&root.closure);
+        reader.put(&root.helper_library);
+        reader.put(&root.owner);
+        reader.put(&root.target);
+        reader.put(&root.status);
+        reader.put(&root.host);
+        reader.put(&root.meters);
+        reader.put(&record.entry);
+        reader.put(&record.reads);
+        reader.put(&record.charged);
+        reader.put(&record.refused);
+        reader.put(&record.globals);
+        reader.put(&record.session);
+        reader.put(&record.functions);
+        reader.put(&record.held);
+        reader.put(&record.running);
+        reader.put(&record.installed);
+        reader.put(&record.live);
+        reader.put(&record.tasks);
+        reader.put(&record.ready);
+        reader.put(&record.waits);
+        reader.put(&record.withdrawn);
+        reader.put(&record.next_wait);
+        reader.put(&record.issued);
+        reader.put(&record.cancellations);
+        reader.put(&record.joins);
+        reader.put(&record.next_join);
+        reader.put(&record.pins);
+        reader.put(&record.held_code);
+        let continuation = std::mem::take(&mut reader.graph);
+        reader.values(record.heap.roots.iter())?;
+        Ok(Checkpoint {
+            continuation,
             graph: reader.graph,
             ids: reader.ids,
         })
