@@ -1,5 +1,7 @@
 //! A compiled document (cutover contract §1): one [`Program`] per machine
-//! instance, never cached across instances. It holds code for each unit
+//! instance, never shared across instances; the library bodies in it are
+//! instantiated from templates its prepared library keeps
+//! ([`library`](super::library)). It holds code for each unit
 //! (main, every declared function of every Link the run's build loads,
 //! every kernel-code body reached, every closure body and spawn stub), the
 //! constant pool, each block's charge tables (§3) and each unit's
@@ -96,6 +98,7 @@ impl Event {
 }
 
 /// One unit's code and tables.
+#[derive(Clone)]
 pub struct Unit {
     pub kind: UnitKind,
     /// The Link whose code this is: its function values, closures and

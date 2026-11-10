@@ -7,7 +7,9 @@
 //! before its body compiles, so recursion resolves. Then every function
 //! each other loaded Link declares gets its trampoline, compiled as that
 //! Link: a function value names a Link and a function, and calls that
-//! Link's body or nothing. [`lower`](super::lower)
+//! Link's body or nothing. A library body is laid out from the template
+//! its prepared library holds ([`library`](super::library)), compiled once
+//! for every run that reaches it. [`lower`](super::lower)
 //! emits each unit's statements; [`Compiler::seal`] cuts its blocks and
 //! derives the charge and step tables.
 
@@ -25,6 +27,7 @@ use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot, Name};
 use lash_kernel_value::sites::{Site, Unit as SiteUnit};
 
 use super::charge_tables::{self, Charge};
+use super::library::{Library, OUTSIDE, Template};
 use super::names::Names;
 use super::op::Op;
 use super::program::{
@@ -53,17 +56,20 @@ pub(crate) fn unsupported<T>(what: impl Into<String>) -> Result<T> {
 ///
 /// An open under another build image passes that image as `available`: a
 /// build helper it lacks compiles to a unit that refuses when it runs
-/// (contract §7), and open proves no resume point reaches one.
-pub fn compile(
+/// (contract §7), and open proves no resume point reaches one. `library`
+/// holds the library bodies compiled for `registry` under that image.
+pub(crate) fn compile(
     document: &Document,
     registry: &FunctionRegistry,
     link: LinkId,
     linked: &Linked<'_>,
     entry: Option<FunctionId>,
     available: Option<&BuildHelpers>,
+    library: &Library,
 ) -> Result<Program> {
     let mut compiler = Compiler::new(document, registry, link, &linked.imports);
     compiler.available = available;
+    compiler.library = Some(library);
     compiler.links.extend(
         linked
             .others
@@ -352,6 +358,20 @@ struct LinkCode {
     missing: HashMap<FunctionId, UnitId>,
 }
 
+/// What a template's code names outside it, each by its index there.
+struct Outside {
+    /// The body the template is.
+    root: (FunctionId, bool),
+    bodies: Vec<(FunctionId, bool)>,
+    body_ids: HashMap<(FunctionId, bool), u32>,
+    natives: Vec<FunctionId>,
+    charges: Vec<FunctionId>,
+    functions: BTreeSet<FunctionId>,
+}
+
+/// The Link a template's code is compiled in: no loaded Link's.
+const NO_LINK: [u8; 32] = [0; 32];
+
 /// The compiler's program-wide state.
 pub(crate) struct Compiler<'a> {
     /// The document of the Link being compiled.
@@ -381,6 +401,12 @@ pub(crate) struct Compiler<'a> {
     /// The build image an open compiles under, when it is not the one the
     /// run sealed under: the helpers it lacks are unavailable.
     available: Option<&'a BuildHelpers>,
+    /// The library bodies already compiled; `None` while compiling one.
+    library: Option<&'a Library>,
+    /// Compiling a template: what its code names outside it.
+    outside: Option<Outside>,
+    /// Each unit whose site tables are built: a laid-out template's.
+    built: Vec<bool>,
 }
 
 impl<'a> Compiler<'a> {
@@ -409,7 +435,221 @@ impl<'a> Compiler<'a> {
             global_ids: HashMap::new(),
             occurrences: HashMap::new(),
             available: None,
+            library: None,
+            outside: None,
+            built: Vec::new(),
         }
+    }
+
+    /// Compiles library function `id`'s body, `covered` or not, as a
+    /// template under build image `available`.
+    pub(crate) fn template(
+        registry: &FunctionRegistry,
+        available: Option<&BuildHelpers>,
+        id: FunctionId,
+        covered: bool,
+    ) -> Result<Template> {
+        let document = Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
+        let imports = Imports::new();
+        let mut compiler =
+            Compiler::new(&document, registry, LinkId::from_bytes(NO_LINK), &imports);
+        compiler.available = available;
+        compiler.outside = Some(Outside {
+            root: (id, covered),
+            bodies: Vec::new(),
+            body_ids: HashMap::new(),
+            natives: Vec::new(),
+            charges: Vec::new(),
+            functions: BTreeSet::new(),
+        });
+        let at = compiler.body(id, covered)?;
+        debug_assert_eq!(at, 0, "a template's body is its first unit");
+        let reads = !compiler.free_names(id)?.is_empty();
+        let mut units = Vec::with_capacity(compiler.units.len());
+        for (at, unit) in compiler.units.into_iter().enumerate() {
+            match unit {
+                Some(mut unit) => {
+                    unit.sites = super::site_tables::build(&unit);
+                    units.push(unit);
+                }
+                None => return unsupported(format!("unit {at} was reserved and never compiled")),
+            }
+        }
+        let Some(outside) = compiler.outside else {
+            return unsupported("a template lost what it names");
+        };
+        Ok(Template {
+            units,
+            constants: compiler.constants,
+            globals: compiler.globals,
+            bodies: outside.bodies,
+            natives: outside.natives,
+            charges: outside.charges,
+            functions: outside.functions.into_iter().collect(),
+            reads,
+        })
+    }
+
+    /// Lays out `template`, library function `id`'s body `covered` or not,
+    /// in the Link being compiled: the program compiling it here makes, up
+    /// to the numbering of units and constants.
+    fn instantiate(
+        &mut self,
+        id: FunctionId,
+        covered: bool,
+        template: &Template,
+    ) -> Result<UnitId> {
+        let base = self.units.len() as UnitId;
+        for _ in &template.units {
+            self.reserve();
+        }
+        self.scope.bodies.insert((id, covered), base);
+        match self.lay_out(base, template) {
+            Ok(()) => Ok(base),
+            Err(error) => {
+                self.scope.bodies.remove(&(id, covered));
+                for at in base as usize..base as usize + template.units.len() {
+                    if self.units[at].is_none() {
+                        self.units[at] = Some(self.unavailable(&error.0));
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn lay_out(&mut self, base: UnitId, template: &Template) -> Result<()> {
+        let constants: Vec<u32> = template
+            .constants
+            .iter()
+            .map(|constant| {
+                let constant = match constant {
+                    Constant::Function(callable) => Constant::Function(CallableId {
+                        link: self.link,
+                        function: callable.function,
+                    }),
+                    other => other.clone(),
+                };
+                self.constants.push(constant);
+                (self.constants.len() - 1) as u32
+            })
+            .collect();
+        let globals: Vec<u16> = template
+            .globals
+            .iter()
+            .map(|name| self.global(name))
+            .collect();
+        for function in &template.functions {
+            self.trampoline(*function)?;
+        }
+        for (at, unit) in template.units.iter().enumerate() {
+            let mut unit = unit.clone();
+            unit.link = self.link;
+            for op in &mut unit.ops {
+                match op {
+                    Op::Const(constant)
+                    | Op::Field(constant)
+                    | Op::SetField(constant)
+                    | Op::SetFieldPlaceFirst(constant)
+                    | Op::RemoveField(constant)
+                    | Op::Unavailable(constant) => *constant = constants[*constant as usize],
+                    Op::Global(global) | Op::SetGlobal(global) => {
+                        *global = globals[*global as usize];
+                    }
+                    _ => {}
+                }
+            }
+            for record in &mut unit.records {
+                *record = record
+                    .iter()
+                    .map(|field| constants[*field as usize])
+                    .collect();
+            }
+            for closure in &mut unit.closures {
+                closure.unit += base;
+                closure.identity = Arc::new(ClosureIdentity {
+                    capture_names: closure.identity.capture_names.clone(),
+                    callable: CallableId {
+                        link: self.link,
+                        function: closure.identity.callable.function,
+                    },
+                    site: LinkedSite {
+                        link: self.link,
+                        site: closure.identity.site.site.clone(),
+                    },
+                });
+            }
+            for call in &mut unit.calls {
+                call.callee = match call.callee {
+                    Callee::Unit { unit, charge } => Callee::Unit {
+                        unit: self.laid_out(base, template, unit)?,
+                        charge: self.charge_of(template, charge)?,
+                    },
+                    Callee::Native { native, charged } => Callee::Native {
+                        native: self.native_of(template.natives[native as usize])?,
+                        charged,
+                    },
+                    Callee::Machine {
+                        function,
+                        id,
+                        charge,
+                    } => Callee::Machine {
+                        function,
+                        id,
+                        charge: self.charge_of(template, charge)?,
+                    },
+                    Callee::Value => Callee::Value,
+                };
+                call.mark = self.remark(&call.mark, &call.site);
+            }
+            for action in &mut unit.actions {
+                if let ActionSite::Spawn { unit, .. } = action {
+                    *unit += base;
+                }
+            }
+            for (mark, action) in unit.action_marks.iter_mut().zip(&unit.actions) {
+                *mark = self.remark(mark, action.site());
+            }
+            let at = base as usize + at;
+            self.units[at] = Some(unit);
+            self.built[at] = true;
+        }
+        Ok(())
+    }
+
+    /// The unit template unit `unit` is once laid out at `base`.
+    fn laid_out(&mut self, base: UnitId, template: &Template, unit: UnitId) -> Result<UnitId> {
+        if unit & OUTSIDE == 0 {
+            return Ok(base + unit);
+        }
+        let (id, covered) = template.bodies[(unit & !OUTSIDE) as usize];
+        self.body(id, covered)
+    }
+
+    /// A template's completion formula, by its index there, in the program.
+    fn charge_of(&mut self, template: &Template, charge: Option<u32>) -> Result<Option<u32>> {
+        let Some(charge) = charge else {
+            return Ok(None);
+        };
+        let id = template.charges[charge as usize];
+        let definition = self.def(&id)?;
+        match self.charge(id, definition) {
+            Some(at) => Ok(Some(at)),
+            None => unsupported(format!("function {id} has no completion formula")),
+        }
+    }
+
+    /// Library function `id`'s native, by its index in the program.
+    fn native_of(&mut self, id: FunctionId) -> Result<u32> {
+        let definition = self.def(&id)?;
+        let Some(native) = self
+            .registry
+            .get(&id)
+            .and_then(|registered| registered.native().cloned())
+        else {
+            return unsupported(format!("native {id} is not linked in this build"));
+        };
+        self.native(id, definition, native)
     }
 
     /// Compiles Link `link` from here on, finding again what was already
@@ -486,16 +726,19 @@ impl<'a> Compiler<'a> {
 
     fn finish(self, main: UnitId) -> Result<Program> {
         let mut units = Vec::with_capacity(self.units.len());
-        for (at, unit) in self.units.into_iter().enumerate() {
+        for (at, (unit, built)) in self.units.into_iter().zip(self.built).enumerate() {
             match unit {
-                Some(unit) => units.push(unit),
+                // A unit's tables are built from its final code: a
+                // convention may add to a unit after it was sealed. A
+                // laid-out template's were built with it.
+                Some(mut unit) => {
+                    if !built {
+                        unit.sites = super::site_tables::build(&unit);
+                    }
+                    units.push(unit);
+                }
                 None => return unsupported(format!("unit {at} was reserved and never compiled")),
             }
-        }
-        // A unit's tables are built from its final code: a convention may
-        // add to a unit after it was sealed.
-        for unit in &mut units {
-            unit.sites = super::site_tables::build(unit);
         }
         Ok(Program {
             units,
@@ -516,6 +759,7 @@ impl<'a> Compiler<'a> {
 
     pub(crate) fn reserve(&mut self) -> UnitId {
         self.units.push(None);
+        self.built.push(false);
         (self.units.len() - 1) as UnitId
     }
 
@@ -714,6 +958,23 @@ impl<'a> Compiler<'a> {
         if let Some(unit) = self.scope.bodies.get(&(id, covered)) {
             return Ok(*unit);
         }
+        if let Some(outside) = &mut self.outside {
+            if outside.root != (id, covered) {
+                let next = outside.bodies.len() as u32;
+                let at = *outside.body_ids.entry((id, covered)).or_insert(next);
+                if at == next {
+                    outside.bodies.push((id, covered));
+                }
+                return Ok(OUTSIDE | at);
+            }
+        } else if let Some(library) = self.library
+            && !self.document.functions.contains_key(&id)
+            // A template another Link cannot run compiles here, to say why.
+            && let Ok(template) = library.template(self.registry, self.available, id, covered)
+            && (self.link == self.root || !template.reads)
+        {
+            return self.instantiate(id, covered, &template);
+        }
         let at = self.reserve();
         self.scope.bodies.insert((id, covered), at);
         let kind = if self.document.functions.contains_key(&id) {
@@ -771,7 +1032,13 @@ impl<'a> Compiler<'a> {
             return Some(*at);
         }
         let formula = charge_tables::completion(definition, false)?;
-        let at = self.formula(formula, definition);
+        let at = match &mut self.outside {
+            Some(outside) => {
+                outside.charges.push(id);
+                (outside.charges.len() - 1) as u32
+            }
+            None => self.formula(formula, definition),
+        };
         self.scope.charge_ids.insert(id, at);
         Some(at)
     }
@@ -874,6 +1141,12 @@ impl<'a> Compiler<'a> {
         let Some(charge) = self.charge(id, definition) else {
             return unsupported(format!("native {id} has no completion formula"));
         };
+        if let Some(outside) = &mut self.outside {
+            outside.natives.push(id);
+            let at = (outside.natives.len() - 1) as u32;
+            self.scope.native_ids.insert(id, at);
+            return Ok(at);
+        }
         let guard = definition
             .guard
             .as_ref()
@@ -928,6 +1201,10 @@ impl<'a> Compiler<'a> {
         if self.functions.contains_key(&callable) {
             return Ok(());
         }
+        if let Some(outside) = &mut self.outside {
+            outside.functions.insert(id);
+            return Ok(());
+        }
         if let Some(unit) = self.missing(id) {
             self.functions.insert(callable, unit);
             return Ok(());
@@ -970,16 +1247,29 @@ impl<'a> Compiler<'a> {
 
     /// Where `f` stands at the call or action at `site`.
     pub(crate) fn mark(&mut self, f: &Fun, site: &Site) -> Arc<Mark> {
-        let next = self.occurrences.len() as u32;
-        let occurrence = *self
-            .occurrences
-            .entry((self.link, site.clone()))
-            .or_insert(next);
         Arc::new(Mark {
             statement: f.statement.clone(),
             loops: f.enclosing.iter().cloned().collect(),
-            occurrence,
+            occurrence: self.occurrence(site),
         })
+    }
+
+    /// `mark`, of a laid-out template's call or action at `site`, among
+    /// the Link being compiled's occurrence counters.
+    fn remark(&mut self, mark: &Mark, site: &Site) -> Arc<Mark> {
+        Arc::new(Mark {
+            statement: mark.statement.clone(),
+            loops: Arc::clone(&mark.loops),
+            occurrence: self.occurrence(site),
+        })
+    }
+
+    fn occurrence(&mut self, site: &Site) -> u32 {
+        let next = self.occurrences.len() as u32;
+        *self
+            .occurrences
+            .entry((self.link, site.clone()))
+            .or_insert(next)
     }
 
     /// `spawn`'s stub: its parameters are the call's arguments (a value

@@ -211,9 +211,9 @@ fn build(
         &registry,
         program.link,
         &loaded,
-        export.map(|export| export.function),
-        convention.as_ref(),
+        export,
         available,
+        &program.library.core(available),
     )
     .map_err(linked)?;
     crate::bytecode::inline::inline(&mut code);

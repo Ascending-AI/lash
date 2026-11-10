@@ -249,6 +249,9 @@ struct Prepared {
     sites: u32,
     documents: std::sync::Mutex<preparation::Documents>,
     frame_index: Option<&'static [u8]>,
+    /// The core's compiled library bodies, by the build image a run opens
+    /// under.
+    core: crate::bytecode::library::Libraries,
 }
 
 impl fmt::Debug for PreparedLibrary {
@@ -331,6 +334,15 @@ impl PreparedLibrary {
     /// The registry the library was prepared from.
     pub fn registry(&self) -> &Arc<FunctionRegistry> {
         &self.0.registry
+    }
+
+    /// The core's library bodies compiled under build image `available`
+    /// (`None`: the registry's own).
+    pub(crate) fn core(
+        &self,
+        available: Option<&doc::BuildHelpers>,
+    ) -> Arc<crate::bytecode::library::Library> {
+        self.0.core.under(available)
     }
 
     /// This library laid out as `layout` says: itself, or for a test's

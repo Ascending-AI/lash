@@ -67,9 +67,9 @@ pub fn compile_document(
         registry,
         link,
         &Default::default(),
-        entry.map(|export| export.function),
-        entry.map(|export| &export.convention),
+        entry,
         None,
+        &crate::bytecode::library::Library::default(),
     )
     .map_err(|problem| StartError::Linked {
         problem: problem.to_string(),
@@ -108,6 +108,7 @@ pub fn library_inventory(
 )> {
     let empty = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
     let link = lash_kernel_value::LinkId::from_bytes([0; 32]);
+    let library = crate::bytecode::library::Library::default();
     registry
         .iter()
         .map(|(function, registered)| {
@@ -123,6 +124,7 @@ pub fn library_inventory(
                         &Default::default(),
                         Some(*function),
                         None,
+                        &library,
                     )
                     .map(drop)
                     .map_err(|problem| StartError::Linked {

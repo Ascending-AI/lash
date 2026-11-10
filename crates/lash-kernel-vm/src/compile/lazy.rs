@@ -406,6 +406,7 @@ impl PreparedLibrary {
                 missing,
                 sites,
                 documents: Default::default(),
+                core: Default::default(),
                 runs: runs.into(),
                 frame_index: None,
             }),

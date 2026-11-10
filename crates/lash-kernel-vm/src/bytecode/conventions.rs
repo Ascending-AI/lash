@@ -22,21 +22,26 @@ pub(crate) fn compile_selected(
     registry: &lash_kernel_doc::FunctionRegistry,
     link: lash_kernel_value::LinkId,
     linked: &super::compile::Linked<'_>,
-    entry: Option<FunctionId>,
-    convention: Option<&StartConvention>,
+    export: Option<&lash_kernel_doc::FunctionExport>,
     available: Option<&lash_kernel_doc::BuildHelpers>,
+    library: &super::library::Library,
 ) -> Result<super::program::Program> {
     let mut selected = std::borrow::Cow::Borrowed(document);
-    if let (Some(entry), Some(convention)) = (entry, convention)
+    let entry = export.map(|export| export.function);
+    if let Some(lash_kernel_doc::FunctionExport {
+        function: entry,
+        convention,
+        ..
+    }) = export
         && document.exports.values().any(|export| {
-            matches!(export, Export::Function(export) if export.function == entry && &export.convention != convention)
+            matches!(export, Export::Function(export) if export.function == *entry && export.convention != *convention)
         })
     {
         selected.to_mut().exports.retain(|_, export| {
-            !matches!(export, Export::Function(export) if export.function == entry && &export.convention != convention)
+            !matches!(export, Export::Function(export) if export.function == *entry && export.convention != *convention)
         });
     }
-    super::compile::compile(&selected, registry, link, linked, entry, available)
+    super::compile::compile(&selected, registry, link, linked, entry, available, library)
 }
 
 /// Selects an entry's unit, retaining the existing path for other conventions.

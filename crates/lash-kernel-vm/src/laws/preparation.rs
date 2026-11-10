@@ -1,7 +1,9 @@
 //! A library prepares each function when a run first uses it (FIG-6843):
 //! what was prepared before a run changes nothing the run observes, and a
 //! body that reaches a function the registry lacks is refused as it was
-//! when preparation walked the whole registry.
+//! when preparation walked the whole registry. The core compiles each
+//! library body once for all the documents a library runs, and only for
+//! that library's registry.
 
 use std::sync::Arc;
 
@@ -24,8 +26,23 @@ main {
 }
 "#;
 
+/// Other closures over the same library functions, with other constants
+/// and another Link.
+const OTHER: &str = r#"
+main {
+  print "first"
+  let joined = text.concat("c", "d")
+  let tripled = invoke each.map(fn(y) { return num.add(num.add(y, y), y) }, [7, 8])
+  return (pair.twice(list.len(tripled)), joined)
+}
+"#;
+
 fn observe(prepared: &PreparedLibrary) -> (End, Vec<Datum>, u64) {
-    let mut embedder = Embedder::try_over(PROGRAM, Setup::default(), Some(prepared.clone()))
+    observe_text(PROGRAM, prepared)
+}
+
+fn observe_text(text: &str, prepared: &PreparedLibrary) -> (End, Vec<Datum>, u64) {
+    let mut embedder = Embedder::try_over(text, Setup::default(), Some(prepared.clone()))
         .unwrap_or_else(|error| panic!("{error}"));
     let end = loop {
         match embedder.run() {
@@ -42,9 +59,10 @@ fn observe(prepared: &PreparedLibrary) -> (End, Vec<Datum>, u64) {
 }
 
 /// PLAN-INDEP, FIG-6843: a run over a library that prepared nothing before
-/// it, over one that prepared and compiled every function first, and over
-/// the first library again once it has run, ends with the same values,
-/// output and charge. The first run prepares only what it uses.
+/// it, over one that prepared and compiled every function first, over
+/// one whose core code another document's run compiled, and over the
+/// first library again once it has run, ends with the same values, output
+/// and charge. The first run prepares only what it uses.
 #[test]
 fn a_run_answers_and_charges_alike_whatever_its_library_prepared_before() {
     let fresh = PreparedLibrary::new(Arc::clone(&library_with(true, None).registry));
@@ -61,8 +79,11 @@ fn a_run_answers_and_charges_alike_whatever_its_library_prepared_before() {
         .expect("every library body verifies");
     assert_eq!(everything.prepared(), everything.registry().len());
     let warm = observe(&everything);
+    let shared = PreparedLibrary::new(Arc::clone(&library_with(true, None).registry));
+    assert!(matches!(observe_text(OTHER, &shared).0, End::Finished(_)));
+    let after_other = observe(&shared);
     let again = observe(&fresh);
-    for other in [warm, again] {
+    for other in [warm, after_other, again] {
         assert_eq!(format!("{:?}", other.0), format!("{:?}", cold.0));
         assert_eq!(other.1, cold.1);
         assert_eq!(other.2, cold.2);
@@ -264,4 +285,41 @@ body {
         super::embedder::result(embedder.run_to_end(&[])),
         super::embedder::int(3)
     );
+}
+
+/// The core's code for a library body is its own registry's: a body
+/// compiled where a function it calls has a native calls that native, and
+/// the same body over the registry of bodies only (`testing::bodies`, the
+/// same functions by identity) runs that function's body, before and
+/// after the first library ran it, with the same answer (`K-LIB-006`).
+#[test]
+fn a_library_body_compiled_for_one_registry_never_runs_for_another() {
+    let mut registry = library_with(true, None).registry.as_ref().clone();
+    let mut names = lash_kernel_dialect::NamedLibrary::from_registry(&registry).unwrap();
+    let source = r#"
+use pair.twice
+function law.via(x: Any) -> Any
+kernel 1
+charge 1
+body {
+  let y = invoke pair.twice(x)
+  return y
+}
+"#;
+    for definition in lash_kernel_dialect::define_functions(source, &mut names, &[]).unwrap() {
+        registry.register(definition, None).unwrap();
+    }
+    let via = lash_kernel_dialect::Library::resolve(&names, "law.via").unwrap();
+    let helpers = Arc::new(lash_kernel_doc::BuildHelpers::new(registry.clone(), [via]).unwrap());
+    let natives = PreparedLibrary::with_helpers(Arc::new(registry), helpers);
+    let bodies = crate::testing::bodies(&natives);
+    let program = format!("library @{via}\nmain {{ let y = invoke @{via}(3) return y }}");
+    for prepared in [&natives, &bodies, &natives, &bodies] {
+        let mut embedder = Embedder::try_over(&program, Setup::default(), Some(prepared.clone()))
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            super::embedder::result(embedder.run_to_end(&[])),
+            super::embedder::int(6)
+        );
+    }
 }
