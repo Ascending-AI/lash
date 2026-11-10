@@ -50,16 +50,10 @@ impl SessionEditor {
 }
 
 fn extent(arena: &Arena, value: &Value) -> Result<(&'static str, u64), NativeError> {
-    let semantics = arena.semantics();
     Ok(match value {
-        Value::Text(_) | Value::LongText(_) => ("text", semantics.text(value)?.len() as u64),
-        Value::Bytes(handle) => ("bytes", semantics.bytes(*handle)?.len() as u64),
-        Value::BigInt(_) => (
-            "integer",
-            semantics
-                .integer(value)?
-                .map_or(0, |integer| integer.bits()),
-        ),
+        Value::Text(_) | Value::LongText(_) => ("text", size(arena, value)?),
+        Value::Bytes(_) => ("bytes", size(arena, value)?),
+        Value::BigInt(handle) => ("integer", bits(arena, *handle)?),
         Value::Tuple(handle)
         | Value::List(handle)
         | Value::Map(handle)
@@ -86,6 +80,37 @@ fn take(remaining: &mut u64, bytes: u64) -> bool {
             true
         }
         None => false,
+    }
+}
+
+/// The UTF-8 length of a text, or the length of bytes, from its summary:
+/// a cold text or bytes object opens with its head's lengths, so sizing it
+/// reads no payload.
+fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+    match value {
+        Value::Text(short) => Ok(short.as_str().len() as u64),
+        Value::LongText(handle) => match arena.body(*handle)? {
+            Body::LongText(text) => Ok(text.summary.utf8_bytes),
+            _ => Err(NativeError::Malformed("a text names another body")),
+        },
+        Value::Bytes(handle) => match arena.body(*handle)? {
+            Body::Bytes(bytes) => Ok(bytes.len),
+            _ => Err(NativeError::Malformed("bytes name another body")),
+        },
+        _ => Err(NativeError::Malformed("a size of no text or bytes")),
+    }
+}
+
+/// The magnitude bits of a big integer or timestamp object, from its
+/// summary when it is cold.
+fn bits(arena: &Arena, handle: lash_kernel_doc::arena::ArenaHandle) -> Result<u64, NativeError> {
+    use lash_kernel_doc::arena::ColdImmutable;
+    match arena.body(handle)? {
+        Body::BigInt(int) | Body::Timestamp(int) => Ok(int.bits()),
+        Body::Cold(ColdImmutable::BigInt(summary) | ColdImmutable::Timestamp(summary)) => {
+            Ok(summary.bits)
+        }
+        _ => Err(NativeError::Malformed("an integer names another body")),
     }
 }
 
@@ -121,28 +146,32 @@ fn fits(
     }
     let semantics = arena.semantics();
     Ok(match value {
-        Value::Text(_) | Value::LongText(_) => take(remaining, semantics.text(value)?.len() as u64),
-        Value::Bytes(handle) => take(remaining, semantics.bytes(*handle)?.len() as u64),
-        Value::Int(_) | Value::BigInt(_) => take(
+        Value::Text(_) | Value::LongText(_) | Value::Bytes(_) => {
+            take(remaining, size(arena, value)?)
+        }
+        Value::Int(_) => take(
             remaining,
             semantics
                 .integer(value)?
                 .map_or(0, |integer| integer.bits().div_ceil(8)),
         ),
-        Value::Timestamp(_) | Value::BigTimestamp(_) => take(
+        Value::Timestamp(_) => take(
             remaining,
             semantics
                 .nanoseconds(value)?
                 .map_or(0, |nanoseconds| nanoseconds.bits().div_ceil(8)),
         ),
+        Value::BigInt(handle) | Value::BigTimestamp(handle) => {
+            take(remaining, bits(arena, *handle)?.div_ceil(8))
+        }
         Value::Handle(handle) => match resident(arena, *handle)? {
             Body::Handle(handle) => take(remaining, (handle.kind.len() + handle.id.len()) as u64),
             _ => true,
         },
         Value::Error(error) => match resident(arena, *error)? {
             Body::Error(error) => {
-                take(remaining, semantics.text(&error.kind)?.len() as u64)
-                    && take(remaining, semantics.text(&error.message)?.len() as u64)
+                take(remaining, size(arena, &error.kind)?)
+                    && take(remaining, size(arena, &error.message)?)
                     && fits(arena, &error.data, remaining, path, depth + 1, limit)?
             }
             _ => true,
@@ -190,7 +219,7 @@ fn fits(
                 ),
                 _ => (|| {
                     for pair in arena.entries(*handle)?.as_chunks::<2>().0 {
-                        if !(take(remaining, semantics.text(&pair[0])?.len() as u64)
+                        if !(take(remaining, size(arena, &pair[0])?)
                             && fits(arena, &pair[1], remaining, path, depth + 1, limit)?)
                         {
                             return Ok(false);
