@@ -615,19 +615,21 @@ pub fn kernel_actor_state_surfaces(kernel: u32) -> Vec<lash_core::durable_port::
     ]
 }
 
-/// Each durable format the actors of the last deployed build before this
-/// one held, with the version that build wrote: main at `fc9f8f4f3c`, the
-/// build before the bytecode core. A node of this build retires each of its
+/// Each durable format the actors of the build this one replaces held, with
+/// the version that build wrote. A node of this build retires each of its
 /// own format sets spelled at these versions that is not one of its own
 /// (ADR 0115 §8): it neither decodes nor carries one forward, and does not
 /// start while an unfinished actor is in one. A set that comes out as one of
-/// this build's own retires nothing, so the fence opens on that build's
-/// state only once `scripts/land` advances a witness whose guarded shapes
-/// changed.
+/// this build's own retires nothing.
 ///
-/// These are the predecessor's versions, written down once when it was
-/// deployed; they are not this build's witnesses and never advance with
-/// them. They change only when a later build declares a later predecessor.
+/// These are the predecessor's versions, not this build's witnesses.
+/// `scripts/land` writes them: when its witness advance moves the stamp of
+/// any of these formats, it records the stamps of the land's base, the build
+/// being replaced, and names that base below. Nobody edits this table by
+/// hand; `scripts/check_format_registry.py` holds it to the named build's
+/// stamps and refuses a stamp moved since without it.
+///
+/// Replaced build: `fc9f8f4f3cea2e7b4ebbb28b3d54769c254f9e9e`.
 const RETIRED_BUILD: &[(&str, u32)] = &[
     ("codemode-snapshot", 16),
     ("engine/lashvm", 1),

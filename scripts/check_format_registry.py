@@ -105,6 +105,114 @@ GUARDED_LAWS = (
 )
 
 
+# ADR 0115 §8: the format sets of the build this one replaces, spelled by each
+# set's surface id at the stamp of the witness that versions it. `scripts/land`
+# rewrites RETIRED_BUILD in crates/lash/src/formats.rs from this table when it
+# advances any of these witnesses; the check below holds the table to the
+# stamps of the build it names.
+RETIRED_SURFACES: dict[str, tuple[str, str]] = {
+    "codemode-snapshot": ("crates/lash-protocol-rlm/src/executor/snapshot.rs", "CODEMODE_SNAPSHOT_VERSION"),
+    "engine/lashvm": ("crates/lash-vm-runtime/src/formats.rs", "LASH_KERNEL_VERSION"),
+    "kernel-parked-state": ("crates/lash-vm-runtime/src/formats.rs", "KERNEL_PARKED_STATE_VERSION"),
+    "kernel-saved-function": ("crates/lash-vm-runtime/src/formats.rs", "KERNEL_SAVED_FUNCTION_VERSION"),
+    "outcome-material": ("crates/lash-core-store/src/tool_run/material.rs", "OUTCOME_MATERIAL_FORMAT_VERSION"),
+    "run-record": ("crates/lash-execution-contracts/src/formats.rs", "RUN_RECORD_FORMAT_VERSION"),
+    "session-state": ("crates/lash-core-store/src/store/state_version.rs", "CURRENT_SESSION_STATE_VERSION"),
+    "turn-journal": ("crates/lash-protocol-types/src/lib.rs", "TURN_JOURNAL_SCHEMA_VERSION"),
+    "wait-row": ("crates/lash-durable/src/domain/waits.rs", "WAIT_ROW_FORMAT_VERSION"),
+}
+RETIRED_TABLE = re.compile(
+    r"(?P<head>/// Replaced build: `(?P<revision>[0-9a-f]{40})`\.\n"
+    r"const RETIRED_BUILD: &\[\(&str, u32\)\] = &\[\n)(?P<body>(?:    \(\"[^\"]+\", \d+\),\n)*)\];"
+)
+RETIRED_ROW = re.compile(r'    \("(?P<id>[^"]+)", (?P<version>\d+)\),\n')
+
+
+class _Witness:
+    """What `check_version_bumps.version_at` reads of a surface."""
+
+    def __init__(self, constant_path: str, constant: str) -> None:
+        self.constant_path, self.constant = constant_path, constant
+
+
+def retired_stamps(view: "check_version_bumps.TreeView") -> dict[str, int]:
+    """Each RETIRED_SURFACES id at the stamp ``view``'s default build writes."""
+    return {
+        surface: check_version_bumps.version_at(view, _Witness(path, constant))
+        for surface, (path, constant) in RETIRED_SURFACES.items()
+    }
+
+
+def retired_build(text: str) -> tuple[str, dict[str, int]] | None:
+    """The replaced build's revision and stamps RETIRED_BUILD records, if present."""
+    if "const RETIRED_BUILD" not in text:
+        return None
+    match = RETIRED_TABLE.search(text)
+    if match is None:
+        raise RegistryError(
+            f"{MANIFEST}: RETIRED_BUILD must follow `/// Replaced build: `<full sha>`.` "
+            "and hold one (\"id\", version) row per line"
+        )
+    rows = {row["id"]: int(row["version"]) for row in RETIRED_ROW.finditer(match["body"])}
+    return match["revision"], rows
+
+
+def with_retired_build(text: str, revision: str, stamps: dict[str, int]) -> str:
+    """``text`` with RETIRED_BUILD naming ``revision`` at ``stamps``."""
+    match = RETIRED_TABLE.search(text)
+    if match is None:
+        raise RegistryError(f"{MANIFEST}: cannot locate RETIRED_BUILD")
+    head = match["head"].replace(match["revision"], revision)
+    body = "".join(f'    ("{surface}", {version}),\n' for surface, version in sorted(stamps.items()))
+    return text[:match.start()] + head + body + "];" + text[match.end():]
+
+
+def retired_build_problems(repo: Path, manifest_text: str) -> list[str]:
+    """RETIRED_BUILD records the stamps of the build the last advance replaced.
+
+    The table equals the stamps at the revision it names, and no commit since
+    the one that named it moved a stamp: such a move replaced a build the
+    table does not record.
+    """
+    recorded = retired_build(manifest_text)
+    if recorded is None:
+        return []
+    revision, rows = recorded
+    gate = check_version_bumps
+    if set(rows) != set(RETIRED_SURFACES):
+        return [f"{MANIFEST}: RETIRED_BUILD holds {sorted(rows)}, not the retired "
+                f"surfaces {sorted(RETIRED_SURFACES)}"]
+    if gate.git(repo, "merge-base", "--is-ancestor", revision, "HEAD", check=False).returncode:
+        return [f"{MANIFEST}: RETIRED_BUILD names {revision[:12]}, which is not an "
+                "ancestor of HEAD"]
+    problems = []
+    expected = retired_stamps(gate.RevisionView(repo, revision))
+    if rows != expected:
+        problems.append(
+            f"{MANIFEST}: RETIRED_BUILD disagrees with the stamps of {revision[:12]}: "
+            f"records {rows}, that build wrote {expected}; scripts/land writes this "
+            "table, never edit it by hand"
+        )
+    named = gate.git(repo, "log", "-1", "--format=%H", "-G", r"^/// Replaced build: ",
+                     "--", str(MANIFEST)).stdout.strip()
+    paths = sorted({path for path, _ in RETIRED_SURFACES.values()})
+    later = gate.git(repo, "log", "--format=%H %P", f"{named}..HEAD", "--", *paths)
+    for line in later.stdout.splitlines():
+        commit, *parents = line.split()
+        if not parents:
+            continue
+        before = retired_stamps(gate.RevisionView(repo, parents[0]))
+        after = retired_stamps(gate.RevisionView(repo, commit))
+        if before != after:
+            moved = sorted(s for s in after if before[s] != after[s])
+            problems.append(
+                f"{commit[:12]} moved the stamps of {moved} after {named[:12]} "
+                "recorded the replaced build; land through scripts/land, whose "
+                "witness advance rewrites RETIRED_BUILD"
+            )
+    return problems
+
+
 class RegistryError(Exception):
     """The registry or manifest cannot be read."""
 
@@ -514,6 +622,7 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
             )
     problems.extend(guarded_problems(repo, registry))
     problems.extend(guard_marker_problems(repo, registry))
+    problems.extend(retired_build_problems(repo, manifest_text))
     return problems
 
 

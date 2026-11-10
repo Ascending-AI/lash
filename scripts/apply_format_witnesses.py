@@ -183,6 +183,29 @@ def check_artifacts(repo: Path) -> list[str]:
             if view.content(path) != text]
 
 
+def retire_replaced_build(base_view: gate.TreeView, view: gate.TreeView) -> dict[str, str]:
+    """RETIRED_BUILD rewritten to the base's stamps when this land moves one.
+
+    The base is the build the landed one replaces (ADR 0115 §8). A land that
+    moves no stamp of a retired surface keeps the recorded predecessor: its
+    sets are the base's, so the base's state is its own.
+    """
+    import check_format_registry as registry
+
+    path = str(registry.MANIFEST)
+    text = view.content(path)
+    try:
+        if text is None or registry.retired_build(text) is None:
+            return {}
+        before, after = registry.retired_stamps(base_view), registry.retired_stamps(view)
+        if before == after:
+            return {}
+        updated = registry.with_retired_build(text, base_view.revision, before)
+    except registry.RegistryError as error:
+        raise gate.CheckError(str(error)) from error
+    return {path: updated} if updated != text else {}
+
+
 def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
     strict = gate.STRICT_VERSION_BUMPS if strict is None else strict
     base_view = gate.RevisionView(repo, gate.resolve_revision(repo, base))
@@ -237,6 +260,7 @@ def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
     # artifacts follow these witnesses after materialization below.
     if result.errors or result.failures:
         raise gate.CheckError("automatic format witnesses left unresolved obligations")
+    files.update(retire_replaced_build(base_view, PlannedView(repo, files)))
     if changed:
         subject = gate.git(repo, "log", "-1", "--format=%s").stdout.strip()
         ticket = re.search(r"FIG-\d+", subject)
