@@ -286,43 +286,27 @@ struct DialectSave {
     program: crate::Program,
 }
 
-impl crate::durable::session::Save for DialectSave {
+impl crate::CellSave for DialectSave {
     fn save(
         &mut self,
-        cell: crate::durable::session::SaveCell<'_>,
-    ) -> Result<crate::durable::session::SavedCell, lash_kernel_doc::heap::HeapFault> {
-        let held = cell
-            .held
-            .iter()
-            .map(|(_, function)| function.name.clone())
-            .collect();
-        let saved = lash_kernel_dialect::kernel_internals::save_run(
-            cell.directory,
-            lash_kernel_dialect::kernel_internals::RunLeft {
-                document: &self.program.document,
-                link: self.program.link,
-                documents: &std::collections::BTreeMap::new(),
-                bindings: cell.bindings,
-                not_carried: cell.dropped,
-                controls: &std::collections::BTreeMap::new(),
-                written: &std::collections::BTreeMap::new(),
-                values: &lash_kernel_doc::FunctionRepresentation::Bare,
-                catalog: self.program.library.registry().as_ref(),
-            },
-            &held,
-        )?;
-        Ok(crate::durable::session::SavedCell {
+        cell: crate::SaveCell<'_>,
+    ) -> Result<crate::SavedCell, lash_kernel_doc::heap::HeapFault> {
+        let saved = cell.save(crate::SaveRules {
+            document: &self.program.document,
+            link: self.program.link,
+            documents: &std::collections::BTreeMap::new(),
+            controls: &std::collections::BTreeMap::new(),
+            written: &std::collections::BTreeMap::new(),
+            values: &lash_kernel_doc::FunctionRepresentation::Bare,
+            catalog: self.program.library.registry().as_ref(),
+        })?;
+        Ok(crate::SavedCell {
             functions: saved
                 .functions
-                .into_values()
+                .into_iter()
                 .map(|function| {
-                    (
-                        function.object,
-                        RunFunction {
-                            description: function.name.as_str().as_bytes().to_vec(),
-                            name: function.name,
-                        },
-                    )
+                    let description = function.name.as_str().as_bytes().to_vec();
+                    (function, description)
                 })
                 .collect(),
             carried: saved.carried.into_iter().collect(),
@@ -352,7 +336,10 @@ main {\n  let k = 1\n  let f = fn() { return k }\n  let fs = [f]\n  let t = spaw
         Box::new(source.clone()),
     )
     .unwrap();
-    machine.saving(Box::new(DialectSave { program }));
+    machine.set_options(crate::MachineOptions {
+        cell_save: Some(Box::new(DialectSave { program })),
+        ..crate::MachineOptions::default()
+    });
     let end = drive(&mut machine);
     let needs_t = lash_kernel_dialect::NotSaved::Capture {
         name: Name::new("t"),

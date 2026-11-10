@@ -275,8 +275,6 @@ impl SnapshotHeap for Saving<'_, '_> {
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Unusable {
-    #[error("saved function `{function}` refers to unavailable callable {needs:?}")]
-    Missing { function: Name, needs: EntityId },
     #[error("saved function `{function}` calls `{callee}`, which {gap}")]
     Relink {
         function: Name,
@@ -286,33 +284,6 @@ pub enum Unusable {
     #[error("saved function `{function}` has inconsistent defining Link")]
     Link { function: Name },
 }
-pub fn closure_of<'a>(
-    functions: &'a BTreeMap<Name, SavedFunction>,
-    roots: &BTreeSet<Name>,
-) -> Result<BTreeMap<Name, &'a SavedFunction>, Unusable> {
-    let mut held = BTreeMap::new();
-    let mut pending = roots
-        .iter()
-        .filter_map(|name| functions.get(name))
-        .collect::<Vec<_>>();
-    while let Some(function) = pending.pop() {
-        if held.insert(function.name.clone(), function).is_some() {
-            continue;
-        }
-        for needed in &function.references {
-            let next = functions
-                .values()
-                .find(|candidate| candidate.environment == *needed)
-                .ok_or_else(|| Unusable::Missing {
-                    function: function.label(),
-                    needs: *needed,
-                })?;
-            pending.push(next);
-        }
-    }
-    Ok(held)
-}
-
 /// A closure cannot end a cell through a known control operation. Follow
 /// immutable local identities; diagnostic spellings do not select controls.
 fn check_controls(

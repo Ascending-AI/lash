@@ -49,8 +49,9 @@ pub(crate) struct Carried {
 /// What a session cell's end saves of the functions the bindings its
 /// carry would drop reach (`K-SES-004`): the dialect's rules over the
 /// sealed heap. The embedder that knows the cell's dialect supplies it.
-pub(crate) trait Save {
-    /// Saves what it can of `cell.dropped`.
+pub trait CellSave {
+    /// Saves what it can of `cell`'s dropped bindings, each saved
+    /// function with the bytes its dialect describes it in.
     ///
     /// # Errors
     ///
@@ -58,28 +59,136 @@ pub(crate) trait Save {
     fn save(&mut self, cell: SaveCell<'_>) -> Result<SavedCell, HeapFault>;
 }
 
-/// A cell's end as its save reads it.
-pub(crate) struct SaveCell<'a> {
-    /// The sealed heap of every binding, the dropped ones included.
-    pub(crate) directory: &'a Directory,
-    /// Every binding the cell leaves, by name.
-    pub(crate) bindings: &'a BTreeMap<Name, RunValue>,
-    /// The bindings the carry drops, in name order.
-    pub(crate) dropped: &'a [Name],
-    /// The functions the session holds, with their objects.
-    pub(crate) held: &'a [(ObjectId, session::RunFunction)],
+/// A cell's end as its save reads it: the sealed heap of every binding,
+/// the dropped ones included, and the functions the session holds.
+pub struct SaveCell<'a> {
+    directory: &'a Directory,
+    bindings: &'a BTreeMap<Name, RunValue>,
+    dropped: &'a [Name],
+    held: &'a [(ObjectId, session::RunFunction)],
+}
+
+/// The dialect's rules a cell's end saves under, beside what the cell
+/// itself leaves.
+pub struct SaveRules<'a> {
+    /// The cell's document and the Link it ran under.
+    pub document: &'a lash_kernel_doc::Document,
+    pub link: lash_kernel_value::content_ids::LinkId,
+    /// Every other document the cell's code reached, by its Link.
+    pub documents: &'a BTreeMap<lash_kernel_value::content_ids::LinkId, lash_kernel_doc::Document>,
+    pub controls: &'a BTreeMap<
+        lash_kernel_value::names::OperationUse,
+        BTreeSet<lash_kernel_dialect::EffectControl>,
+    >,
+    /// What the cell's source wrote of each function its document makes,
+    /// by the site of its closure.
+    pub written: &'a BTreeMap<lash_kernel_value::sites::Site, lash_kernel_dialect::Written>,
+    /// The dialect's function values.
+    pub values: &'a lash_kernel_doc::FunctionRepresentation,
+    /// The library the cell ran against.
+    pub catalog: &'a dyn lash_kernel_doc::FunctionCatalog,
+}
+
+/// A function a cell's end saved: its code and what it requires, and
+/// the session root it is saved as.
+#[derive(Clone, Debug)]
+pub struct SavedFunction {
+    pub name: Name,
+    pub link: lash_kernel_value::content_ids::LinkId,
+    pub callable: lash_kernel_value::names::CallableId,
+    pub document: lash_kernel_doc::IdentifiedDocument,
+    /// The session bindings its code reads by name.
+    pub references: BTreeSet<Name>,
+    pub written: Option<lash_kernel_dialect::Written>,
+    /// The tag of the token a binding holds it in, when one does.
+    pub token: Option<String>,
+    pub held: Option<lash_kernel_dialect::HeldAt>,
+    object: ObjectId,
+}
+
+/// What the dialect's rules save of a cell's end.
+#[derive(Debug, Default)]
+pub struct Saving {
+    pub functions: Vec<SavedFunction>,
+    /// The dropped bindings that carry as they are.
+    pub carried: BTreeSet<Name>,
+    /// Each dropped binding not carried, with why.
+    pub refused: BTreeMap<Name, lash_kernel_dialect::NotSaved>,
 }
 
 /// What a cell's end saved.
 #[derive(Debug, Default)]
-pub(crate) struct SavedCell {
-    /// Each function saved, with its object; one of a held function's
-    /// name replaces it.
-    pub(crate) functions: Vec<(ObjectId, session::RunFunction)>,
+pub struct SavedCell {
+    /// Each function saved, with its description; one of a held
+    /// function's name replaces it.
+    pub functions: Vec<(SavedFunction, Vec<u8>)>,
     /// The dropped bindings that carry after all.
-    pub(crate) carried: Vec<Name>,
+    pub carried: Vec<Name>,
     /// Each dropped binding not carried, with why.
-    pub(crate) refused: Vec<(Name, String)>,
+    pub refused: Vec<(Name, String)>,
+}
+
+impl SaveCell<'_> {
+    /// The bindings the carry drops, in name order.
+    #[must_use]
+    pub fn dropped(&self) -> &[Name] {
+        self.dropped
+    }
+
+    /// Whether the cell leaves a binding `name`.
+    #[must_use]
+    pub fn binds(&self, name: &Name) -> bool {
+        self.bindings.contains_key(name)
+    }
+
+    /// Every closure the dropped bindings reach, saved once under
+    /// `rules`, the dropped bindings that carry as they are, and why each
+    /// other one does not (`K-SES-004`).
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults.
+    pub fn save(&self, rules: SaveRules<'_>) -> Result<Saving, HeapFault> {
+        let held = self
+            .held
+            .iter()
+            .map(|(_, function)| function.name.clone())
+            .collect();
+        let saved = lash_kernel_dialect::kernel_internals::save_run(
+            self.directory,
+            lash_kernel_dialect::kernel_internals::RunLeft {
+                document: rules.document,
+                link: rules.link,
+                documents: rules.documents,
+                bindings: self.bindings,
+                not_carried: self.dropped,
+                controls: rules.controls,
+                written: rules.written,
+                values: rules.values,
+                catalog: rules.catalog,
+            },
+            &held,
+        )?;
+        Ok(Saving {
+            functions: saved
+                .functions
+                .into_values()
+                .map(|function| SavedFunction {
+                    name: function.name,
+                    link: function.link,
+                    callable: function.callable,
+                    document: function.document,
+                    references: function.references,
+                    written: function.written,
+                    token: function.token,
+                    held: function.held,
+                    object: function.object,
+                })
+                .collect(),
+            carried: saved.carried,
+            refused: saved.refused,
+        })
+    }
 }
 
 /// Why a binding that reaches a closure, a function or a task is not
@@ -115,7 +224,7 @@ pub(crate) fn bind(vm: &mut Vm<SlotHeap>, session: &RunSession, values: Vec<Valu
 pub(crate) fn carry(
     vm: &mut Vm<SlotHeap>,
     host: &[Name],
-    save: Option<&mut (dyn Save + 'static)>,
+    save: Option<&mut (dyn CellSave + 'static)>,
 ) -> Result<(SessionRoot, Vec<(Name, String)>), MachineError> {
     let mut bindings = BTreeMap::new();
     let program = std::sync::Arc::clone(&vm.program);
@@ -185,7 +294,14 @@ pub(crate) fn carry(
             .map_err(MachineError::Heap)?;
         let new = std::mem::take(&mut saved.functions)
             .into_iter()
-            .map(|(id, function)| Ok((directory_kind(directory, id)?, id, function)))
+            .map(|(function, description)| {
+                let id = function.object;
+                let function = session::RunFunction {
+                    name: function.name,
+                    description,
+                };
+                Ok((directory_kind(directory, id)?, id, function))
+            })
             .collect::<Result<Vec<_>, MachineError>>()?;
         for (kind, id, function) in new {
             let value = sealed_function(vm, kind, id);

@@ -46,7 +46,7 @@ pub struct CoreMachine {
     /// takes from it, until the run moves.
     partial: Option<Partial>,
     /// What saves the functions a session cell's end drops (`K-SES-004`).
-    save: Option<Box<dyn crate::durable::session::Save>>,
+    save: Option<Box<dyn crate::CellSave>>,
 }
 
 /// The run record a budgeted seal wrote before its budget ran out.
@@ -510,6 +510,7 @@ impl Machine for CoreMachine {
         self.vm.limiter = options.charge_limiter;
         self.vm.memory_limiter = options.memory_limiter;
         self.watch(!options.observation.is_off(), options.trace_path);
+        self.save = options.cell_save;
     }
 
     fn take_counts(&mut self) -> SiteCounts {
@@ -693,12 +694,6 @@ impl Machine for CoreMachine {
 }
 
 impl CoreMachine {
-    /// Saves the functions this cell's end drops through `save`.
-    #[cfg(test)]
-    pub(crate) fn saving(&mut self, save: Box<dyn crate::durable::session::Save>) {
-        self.save = Some(save);
-    }
-
     /// The run reached its end: an error when tasks other than `main` and
     /// `ender` are outstanding (`K-TASK-018`), else `end` of `result`.
     fn concluded(

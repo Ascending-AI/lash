@@ -371,16 +371,6 @@ pub(super) async fn link_cell(
         }
     }
     let envelope = CellEnvelope {
-        saved_written: state
-            .lowering_functions()
-            .values()
-            .filter_map(|function| {
-                function
-                    .written
-                    .clone()
-                    .map(|origin| (function.environment, origin))
-            })
-            .collect(),
         code: CellEnvelope::code_digest(source),
         dialect: state.dialect().to_owned(),
         link: fulfilled.inspection.link,

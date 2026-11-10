@@ -612,7 +612,19 @@ impl<'embedding> Server<'embedding> {
                 let save: wire::SaveWire = wire::decode(PayloadKind::Start, payload)
                     .map_err(|error| undecodable(RunInput::Start, &error))?;
                 Ok::<_, PoolError>(crate::save::DialectSave {
-                    saved_written: save.saved_written,
+                    document: Arc::clone(&program.document),
+                    link: program.link,
+                    documents: program
+                        .instances
+                        .iter()
+                        .filter_map(|(link, instance)| {
+                            program
+                                .documents
+                                .get(&instance.document)
+                                .map(|document| (*link, document.as_ref().clone()))
+                        })
+                        .collect(),
+                    catalog: Arc::clone(program.library.registry()),
                     values: self
                         .embedding
                         .dialects
@@ -631,7 +643,6 @@ impl<'embedding> Server<'embedding> {
                     .iter()
                     .map(|(site, written)| ((program.link, site.clone()), written.clone()))
                     .collect(),
-                environments: save.saved_written.clone(),
             })
             .unwrap_or_default();
         let captions = save

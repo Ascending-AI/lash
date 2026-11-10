@@ -119,13 +119,8 @@ impl Graph {
             creation = Some(site.as_ref().clone());
             let written = run
                 .function_origins
-                .environments
-                .get(id)
-                .or_else(|| {
-                    run.function_origins
-                        .sites
-                        .get(&(callable.link, site.as_ref().clone()))
-                })
+                .sites
+                .get(&(callable.link, site.as_ref().clone()))
                 .cloned();
             if let Some(written) = written {
                 written_signature = Some(lash_kernel_doc::WrittenSignature {

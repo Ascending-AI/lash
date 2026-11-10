@@ -8,9 +8,9 @@
 //! reaches; a binding the host sets is built from data in the same heap,
 //! and the session it seals keeps every row it did not touch as it was.
 //!
-//! A session is a run session ([`run::session`]); a binding never reaches
-//! a function or a task (`K-SES-003`), so a session holds no saved
-//! function the editor could list, relink or drop.
+//! A session is a run session ([`run::session`]). Its saved functions
+//! (`K-SES-004`) are roots past its bindings, each described by its
+//! dialect; the editor lists them, relinks one in place, and drops one.
 //!
 //! [`run::session`]: lash_kernel_state::paged::run::session
 
@@ -21,7 +21,7 @@ use lash_kernel_doc::{Datum, Value};
 use lash_kernel_state::arena::Arena;
 use lash_kernel_state::paged::run::directory::Directory;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
-use lash_kernel_state::paged::run::objects::RunValue;
+use lash_kernel_state::paged::run::objects::{Record, RunValue};
 use lash_kernel_state::paged::run::session::{self, RunFunction, RunSession};
 use lash_kernel_state::paged::{PageSource, SessionRoot};
 use lash_kernel_value::names::Name;
@@ -56,13 +56,24 @@ fn run_page(session: &SessionRoot) -> Result<lash_kernel_doc::heap::PageRef, Hea
     })
 }
 
+/// A saved function the session holds: its record, its object, and the
+/// callable a relink gives it.
+struct Saved {
+    function: RunFunction,
+    value: Value,
+    object: ObjectId,
+    relinked: Option<lash_kernel_value::CallableId>,
+}
+
 /// A carried session opened for its host.
 pub struct SessionEditor {
     heap: SlotHeap,
     bindings: BTreeMap<Name, Value>,
-    /// The session's saved functions and their objects, sealed as they
-    /// came (`K-SES-004`).
-    saved: Vec<(RunFunction, Value)>,
+    /// Each binding's sealed value as the session came, while the host
+    /// has not set or removed it.
+    sealed: BTreeMap<Name, RunValue>,
+    /// The session's saved functions (`K-SES-004`).
+    saved: Vec<Saved>,
     /// The deepest value a copy out reads (`K-VAL-034`).
     depth: usize,
     changed: bool,
@@ -80,7 +91,7 @@ impl SessionEditor {
         session: Option<&SessionRoot>,
         source: Box<dyn PageSource>,
     ) -> Result<Self, HeapFault> {
-        let (heap, bindings, saved) = match session {
+        let (heap, bindings, sealed, saved) = match session {
             None => (
                 SlotHeap::durable(
                     u64::MAX,
@@ -90,24 +101,45 @@ impl SessionEditor {
                     },
                 ),
                 BTreeMap::new(),
+                BTreeMap::new(),
                 Vec::new(),
             ),
             Some(session) => {
                 let (session, directory) = session::open(source, run_page(session)?)?;
                 let (heap, values) =
                     SlotHeap::open(u64::MAX, &session.heap, directory).map_err(loaded)?;
+                let bound = session.names.len();
                 let mut values = values.into_iter();
-                let bindings = session.names.into_iter().zip(&mut values).collect();
-                (
-                    heap,
-                    bindings,
-                    session.functions.into_iter().zip(values).collect(),
-                )
+                let bindings = session.names.iter().cloned().zip(&mut values).collect();
+                let sealed = session
+                    .names
+                    .iter()
+                    .cloned()
+                    .zip(session.heap.roots.iter().cloned())
+                    .collect();
+                let saved = session
+                    .functions
+                    .into_iter()
+                    .zip(values)
+                    .zip(session.heap.roots.get(bound..).unwrap_or_default())
+                    .map(|((function, value), root)| {
+                        Ok(Saved {
+                            function,
+                            value,
+                            object: root.id().ok_or_else(|| {
+                                HeapFault::Malformed("a saved function's root is no object".into())
+                            })?,
+                            relinked: None,
+                        })
+                    })
+                    .collect::<Result<_, HeapFault>>()?;
+                (heap, bindings, sealed, saved)
             }
         };
         Ok(Self {
             heap,
             bindings,
+            sealed,
             saved,
             depth: lash_kernel_value::data_limits::KernelDataLimits::standard().value_depth(),
             changed: false,
@@ -201,21 +233,37 @@ impl SessionEditor {
     }
 
     /// The saved functions whose records differ between `older` and
-    /// `newer`, by declared name: a session holds none (`K-SES-003`).
+    /// `newer`, by declared name, each with its description in `newer`, or
+    /// none where `newer` holds no function of that name.
     ///
     /// # Errors
     ///
-    /// A session in a retired form.
+    /// The heap's faults reading either root; a session in a retired form.
     pub fn changed_functions(
         &self,
         older: Option<&SessionRoot>,
         newer: &SessionRoot,
     ) -> Result<BTreeMap<Name, Option<Vec<u8>>>, HeapFault> {
-        if let Some(older) = older {
-            run_page(older)?;
+        let described = |session: RunSession| -> BTreeMap<Name, Vec<u8>> {
+            session
+                .functions
+                .into_iter()
+                .map(|function| (function.name, function.description))
+                .collect()
+        };
+        let old = older
+            .map(|older| self.read(older))
+            .transpose()?
+            .map(described)
+            .unwrap_or_default();
+        let new = described(self.read(newer)?);
+        let mut changed = BTreeMap::new();
+        for name in old.keys().chain(new.keys()) {
+            if old.get(name) != new.get(name) {
+                changed.insert(name.clone(), new.get(name).cloned());
+            }
         }
-        run_page(newer)?;
-        Ok(BTreeMap::new())
+        Ok(changed)
     }
 
     /// The binding `name`'s value, copied out as data.
@@ -261,18 +309,25 @@ impl SessionEditor {
         }
     }
 
-    /// Whether the value bound to `binding` refers to the saved function
-    /// `function`: a session's binding never reaches one (`K-SES-003`).
+    /// Whether the value bound to `binding` reaches the saved function
+    /// `function`'s object. A value the host set is data and reaches none.
     ///
     /// # Errors
     ///
-    /// None.
-    pub fn refers(
-        &self,
-        _binding: &Name,
-        _environment: &lash_kernel_doc::heap::EntityId,
-    ) -> Result<bool, HeapFault> {
-        Ok(false)
+    /// The heap's faults reading a row.
+    pub fn refers(&self, binding: &Name, function: &Name) -> Result<bool, HeapFault> {
+        let (Some(value), Some(saved)) = (
+            self.sealed.get(binding),
+            self.saved
+                .iter()
+                .find(|saved| saved.function.name == *function),
+        ) else {
+            return Ok(false);
+        };
+        Ok(match value.id() {
+            Some(id) => self.directory()?.reached([id])?.contains(&saved.object),
+            None => false,
+        })
     }
 
     /// Binds `name` to `value`.
@@ -287,6 +342,7 @@ impl SessionEditor {
         };
         let value = crate::vm::datum::copy_in(&mut host, value).map_err(refused)?;
         self.bindings.insert(name.clone(), value);
+        self.sealed.remove(name);
         self.changed = true;
         Ok(())
     }
@@ -298,64 +354,91 @@ impl SessionEditor {
     /// None.
     pub fn remove(&mut self, name: &Name) -> Result<bool, HeapFault> {
         let removed = self.bindings.remove(name).is_some();
+        self.sealed.remove(name);
         self.changed |= removed;
         Ok(removed)
     }
 
     /// Every saved function the session holds, by its declared name, with
-    /// the bytes its dialect described it in: none (`K-SES-003`).
+    /// the bytes its dialect described it in.
     ///
     /// # Errors
     ///
     /// None.
     pub fn functions(&self) -> Result<BTreeMap<Name, Vec<u8>>, HeapFault> {
-        Ok(BTreeMap::new())
+        Ok(self
+            .saved
+            .iter()
+            .map(|saved| {
+                (
+                    saved.function.name.clone(),
+                    saved.function.description.clone(),
+                )
+            })
+            .collect())
     }
 
     /// Rewrites the saved function `name` as relinked against its next
-    /// cell's Namespaces (K-LIB-009). Answers whether the session held it:
-    /// a session holds none (`K-SES-003`).
+    /// cell's Namespaces (K-LIB-009): `callable` under its new Link, the
+    /// same object, described by `description`. Answers whether the
+    /// session held it.
     ///
     /// # Errors
     ///
     /// None.
     pub fn relink_function(
         &mut self,
-        _name: &Name,
-        _description: &[u8],
-        _closure: lash_kernel_doc::heap::PageRef,
-        _callable: lash_kernel_value::CallableId,
+        name: &Name,
+        description: &[u8],
+        callable: lash_kernel_value::CallableId,
     ) -> Result<bool, HeapFault> {
-        Ok(false)
+        let Some(saved) = self
+            .saved
+            .iter_mut()
+            .find(|saved| saved.function.name == *name)
+        else {
+            return Ok(false);
+        };
+        saved.function.description = description.to_vec();
+        saved.relinked = Some(callable);
+        self.changed = true;
+        Ok(true)
     }
 
     /// Carries the saved function `name` through a proved kernel rewrite.
-    /// Answers whether the session held it: a session holds none
-    /// (`K-SES-003`).
     ///
     /// # Errors
     ///
-    /// None.
+    /// [`HeapFault::Malformed`] when the session holds `name`: a saved
+    /// function's succession on the bytecode core waits on the run
+    /// rewrite's session form.
     pub fn succeed_function(
         &mut self,
-        _name: &Name,
+        name: &Name,
         _description: &[u8],
-        _closure: lash_kernel_doc::heap::PageRef,
         _callable: lash_kernel_value::CallableId,
         _correspondence: &lash_kernel_doc::Correspondence,
     ) -> Result<bool, HeapFault> {
+        if self.saved.iter().any(|saved| saved.function.name == *name) {
+            return Err(HeapFault::Malformed(format!(
+                "the saved function `{name}` has no succession on the bytecode core"
+            )));
+        }
         Ok(false)
     }
 
-    /// Drops the saved function `name` and the binding of its name
-    /// (RELINK-CLOSURE). Answers whether the session held it: a session
-    /// holds none (`K-SES-003`).
+    /// Drops the saved function `name` (RELINK-CLOSURE). Answers whether
+    /// the session held it.
     ///
     /// # Errors
     ///
     /// None.
-    pub fn drop_function(&mut self, _name: &Name) -> Result<bool, HeapFault> {
-        Ok(false)
+    pub fn drop_function(&mut self, name: &Name) -> Result<bool, HeapFault> {
+        let before = self.saved.len();
+        self.saved.retain(|saved| saved.function.name != *name);
+        let dropped = self.saved.len() != before;
+        self.changed |= dropped;
+        Ok(dropped)
     }
 
     /// Whether an edit changed the session.
@@ -372,13 +455,41 @@ impl SessionEditor {
     pub fn seal(mut self) -> Result<SessionRoot, HeapFault> {
         let (names, mut values): (Vec<Name>, Vec<Value>) =
             std::mem::take(&mut self.bindings).into_iter().unzip();
-        let (functions, saved): (Vec<RunFunction>, Vec<Value>) =
-            std::mem::take(&mut self.saved).into_iter().unzip();
-        values.extend(saved);
-        let heap = self.heap.seal(&values).map_err(|error| match error {
+        let saved = std::mem::take(&mut self.saved);
+        values.extend(saved.iter().map(|saved| saved.value));
+        let mut heap = self.heap.seal(&values).map_err(|error| match error {
             crate::paged::SealError::Heap(fault) => fault,
             other => HeapFault::Malformed(other.to_string()),
         })?;
+        let relinked: Vec<(ObjectId, lash_kernel_value::CallableId)> = heap.roots[names.len()..]
+            .iter()
+            .zip(&saved)
+            .filter_map(|(root, saved)| Some((root.id()?, saved.relinked?)))
+            .collect();
+        if !relinked.is_empty() {
+            let mut rows = Directory::over(heap.directory, self.directory()?.access().clone());
+            for (id, callable) in relinked {
+                let mut row = rows
+                    .get(id)?
+                    .ok_or_else(|| HeapFault::Malformed(format!("object {} has no row", id.0)))?;
+                match &mut row.record {
+                    Record::Closure { code, .. } => {
+                        code.callable = callable;
+                        code.link = callable.link;
+                    }
+                    Record::Function(held) => *held = callable,
+                    _ => {
+                        return Err(HeapFault::Malformed(format!(
+                            "saved object {} is no function",
+                            id.0
+                        )));
+                    }
+                }
+                rows.put(id, row)?;
+            }
+            heap.directory = rows.seal()?;
+        }
+        let functions = saved.into_iter().map(|saved| saved.function).collect();
         let page = session::write(
             self.directory()?.access(),
             &RunSession {

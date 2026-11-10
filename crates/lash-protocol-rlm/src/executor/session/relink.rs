@@ -4,8 +4,8 @@ use super::*;
 
 impl CodeModeExecutionState {
     /// Relinks every carried saved function by name to `packages`, the
-    /// package surface the cell runs on (K-LIB-009, RELINK-CLOSURE). Each relinked function is re-saved with its new
-    /// execution closure, which the capture that names it stages. One the
+    /// package surface the cell runs on (K-LIB-009, RELINK-CLOSURE). Each relinked function's object
+    /// takes its new Link in place, under the same identity. One the
     /// set does not serve is dropped with its binding and listed as not
     /// carried, naming it and the callee. The session then records
     /// `packages` as the set its functions are linked to: a cell of the
@@ -25,7 +25,10 @@ impl CodeModeExecutionState {
         let mut rewritten = Vec::new();
         let mut dropped = Vec::new();
         for (name, function) in &mut functions {
-            let saved = function.clone().into_saved();
+            let label = function
+                .held
+                .as_ref()
+                .map_or_else(|| name.clone(), lash_kernel_dialect::HeldAt::label);
             let fulfilled = documents
                 .fulfil_cell(
                     &function.document,
@@ -41,13 +44,18 @@ impl CodeModeExecutionState {
                 )
                 .await
                 .map_err(RelinkError::Package)?;
-            match lash_kernel_dialect::relink_saved(&saved, &fulfilled.content) {
-                Ok(relinked) if relinked.callable == function.callable => {
+            match lash_kernel_dialect::relink_saved(
+                &label,
+                &function.document,
+                function.callable,
+                &fulfilled.content,
+            ) {
+                Ok(callable) if callable == function.callable => {
                     code.retain_link(function.link);
                 }
-                Ok(relinked) => {
-                    function.callable = relinked.callable;
-                    function.link = relinked.callable.link;
+                Ok(callable) => {
+                    function.callable = callable;
+                    function.link = callable.link;
                     let reach = documents
                         .inspect(
                             &code.content,
@@ -59,7 +67,9 @@ impl CodeModeExecutionState {
                         .kernel
                         .library()
                         .map_err(|error| RelinkError::Library(error.to_string()))?;
-                    let loaded = lash_vm_broker::kernel::loader::declare_reach(
+                    // The relinked reach must declare under the held
+                    // library, as a fresh cell's does.
+                    lash_vm_broker::kernel::loader::declare_reach(
                         &function.document,
                         &code
                             .content
@@ -74,22 +84,16 @@ impl CodeModeExecutionState {
                         &lash_kernel_doc::Selection::Fresh,
                     )
                     .map_err(|error| RelinkError::Library(error.to_string()))?;
-                    rewritten.push((
-                        name.clone(),
-                        function.description(),
-                        loaded.closure,
-                        function.callable,
-                    ));
+                    rewritten.push((name.clone(), function.description(), function.callable));
                 }
                 Err(unusable) => dropped.push((
                     name.clone(),
                     function.held.as_ref().map(|held| held.binding.clone()),
                     unusable.to_string(),
-                    saved.environment,
                 )),
             }
         }
-        for (name, _, _, _) in &dropped {
+        for (name, _, _) in &dropped {
             functions.remove(name);
         }
         let roots: BTreeSet<_> = functions.values().map(|function| function.link).collect();
@@ -99,22 +103,7 @@ impl CodeModeExecutionState {
                 .await
                 .map_err(RelinkError::Package)?;
         }
-        // A relinked record names its new closure, which the cell's run
-        // then names unread: it is staged in the turn's spool beside the
-        // pages that name it, and published with them.
-        let mut spool = self.turn_spool()?;
-        for (_, _, closure, _) in &rewritten {
-            for node in closure.nodes().values() {
-                let node = lash_core_store::checkpoint_graph::node::VerifiedNode::check(
-                    node.clone(),
-                    &lash_core_store::checkpoint_graph::DecodeLimits::within_total(u64::MAX),
-                )
-                .map_err(|refusal| RelinkError::Library(refusal.to_string()))?;
-                spool
-                    .seal(node, &|_| true)
-                    .map_err(|fault| RelinkError::Pages(PageAccessError::Staging(fault)))?;
-            }
-        }
+        let spool = self.turn_spool()?;
         let mut next = self.current.clone();
         next.pins = functions
             .values()
@@ -125,40 +114,25 @@ impl CodeModeExecutionState {
         if let Some(session) = self.current.session
             && (!rewritten.is_empty() || !dropped.is_empty())
         {
-            let edits: Vec<_> = rewritten
+            let edits = rewritten;
+            let drops: Vec<(Name, Option<Name>)> = dropped
                 .iter()
-                .map(|(name, description, closure, callable)| {
-                    (
-                        name.clone(),
-                        description.clone(),
-                        PageRef {
-                            id: PageId(closure.reference().0),
-                            grant: PageGrant::NONE,
-                        },
-                        *callable,
-                    )
-                })
-                .collect();
-            let drops: Vec<(Name, Option<Name>, lash_kernel_doc::heap::EntityId)> = dropped
-                .iter()
-                .map(|(name, holder, _, environment)| (name.clone(), holder.clone(), *environment))
+                .map(|(name, holder, _)| (name.clone(), holder.clone()))
                 .collect();
             let (session, removed) = self
                 .pages
                 .read(move |source| {
                     let mut editor = SessionEditor::open(Some(&session), source)?;
-                    for (name, description, closure, callable) in &edits {
-                        editor.relink_function(name, description, *closure, *callable)?;
+                    for (name, description, callable) in &edits {
+                        editor.relink_function(name, description, *callable)?;
                     }
                     // A function's binding goes with it. One saved under a
                     // generated name takes the binding that held it, while
                     // that binding still refers to it.
                     let mut removed = Vec::new();
-                    for (name, holder, environment) in &drops {
+                    for (name, holder) in &drops {
                         let holder = match holder {
-                            Some(holder) if editor.refers(holder, environment)? => {
-                                Some(holder.clone())
-                            }
+                            Some(holder) if editor.refers(holder, name)? => Some(holder.clone()),
                             Some(_) => None,
                             None => Some(name.clone()),
                         };
@@ -174,14 +148,14 @@ impl CodeModeExecutionState {
             next.session = Some(session);
             unbound = removed;
             let root = self.current.notes;
-            let functions: Vec<Name> = dropped.iter().map(|(name, _, _, _)| name.clone()).collect();
+            let functions: Vec<Name> = dropped.iter().map(|(name, _, _)| name.clone()).collect();
             let notes: Vec<(Name, String)> = unbound
                 .iter()
                 .filter_map(|(function, binding)| {
                     dropped
                         .iter()
-                        .find(|(name, _, _, _)| name == function)
-                        .map(|(_, _, why, _)| (binding.clone(), why.clone()))
+                        .find(|(name, _, _)| name == function)
+                        .map(|(_, _, why)| (binding.clone(), why.clone()))
                 })
                 .collect();
             next.notes = self
@@ -200,7 +174,7 @@ impl CodeModeExecutionState {
                 .await?;
         }
         if let Some(notes) = &mut self.view.notes {
-            for (name, _, _, _) in &dropped {
+            for (name, _, _) in &dropped {
                 if let Some(note) = notes.get_mut(name) {
                     note.saved = None;
                     if note.not_carried.is_none() {
@@ -214,9 +188,9 @@ impl CodeModeExecutionState {
                 names.remove(binding);
             }
             self.view.values.remove(binding);
-            if let (Some(notes), Some((_, _, why, _))) = (
+            if let (Some(notes), Some((_, _, why))) = (
                 &mut self.view.notes,
-                dropped.iter().find(|(name, _, _, _)| name == function),
+                dropped.iter().find(|(name, _, _)| name == function),
             ) {
                 let note = notes.entry(binding.clone()).or_default();
                 note.not_carried = Some(why.clone());

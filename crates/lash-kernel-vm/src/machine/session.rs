@@ -129,7 +129,6 @@ pub(crate) fn start(
         modes: Tree::new(false),
         functions,
         host: Vec::new(),
-        save: None,
         captions: Vec::new(),
         function_origins: Default::default(),
         limiters: Limiters::default(),
@@ -744,122 +743,20 @@ struct Resident {
 const NOT_CARRIED: &str = "it holds a function or a task, which ends with its cell";
 
 impl KernelMachine {
-    /// Saves the functions among `dropped` through the cell's saving, if it
-    /// has one (`K-SES-004`): each saved function's record goes into the
-    /// session's functions, and each binding that held one is bound to its
-    /// value in `carried`. Answers the carried bindings, the functions and
-    /// every binding left behind, with why.
+    /// The old machine saves no function (`K-SES-003`): every binding
+    /// among `dropped` is left behind. Answers the carried bindings, the
+    /// functions and every binding left behind, with why.
     #[expect(clippy::type_complexity, reason = "the carry's three parts")]
     fn save_dropped(
         &mut self,
         carried: KeyedRoot,
         dropped: &[Name],
     ) -> Result<(KeyedRoot, KeyedRoot, Vec<(Name, String)>), Halt> {
-        let unsaved = || {
-            dropped
-                .iter()
-                .map(|name| (name.clone(), NOT_CARRIED.to_owned()))
-                .collect::<Vec<_>>()
-        };
-        if dropped.is_empty() {
-            return Ok((carried, self.functions, Vec::new()));
-        }
-        let Some(mut save) = self.save.take() else {
-            return Ok((carried, self.functions, unsaved()));
-        };
-        let functions: Tree<lash_kernel_state::paged::FunctionRecord> = open_tree(self.functions);
-        let mut names = Vec::new();
-        functions.visit(self.heap.pages(), &mut |_, record| {
-            names.push(record.name.clone());
-            true
-        })?;
-        let held = names
+        let unsaved = dropped
             .iter()
-            .map(|name| name.resolve(self.heap.pages()))
-            .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
-        let mut bindings = std::collections::BTreeMap::new();
-        for name in dropped.iter().chain(&held) {
-            if let Some(value) = self.heap.session_binding(name)? {
-                bindings.insert(name.clone(), value);
-            }
-        }
-        let document = Arc::clone(&self.program.document);
-        let closure = lash_kernel_doc::heap::PageRef {
-            id: self.closure,
-            grant: lash_kernel_doc::heap::PageGrant::NONE,
-        };
-        let documents = self
-            .program
-            .instances
-            .iter()
-            .filter_map(|(link, instance)| {
-                self.program
-                    .documents
-                    .get(&instance.document)
-                    .map(|doc| (*link, doc.as_ref().clone()))
-            })
+            .map(|name| (name.clone(), NOT_CARRIED.to_owned()))
             .collect();
-        let saved = save.save(
-            &mut crate::CellSaveContext::new(&mut self.heap, self.functions),
-            crate::paged::SaveCell {
-                link: self.program.link,
-                documents: &documents,
-                document: &document,
-                closure,
-                bindings: &bindings,
-                dropped,
-                held: &held,
-                catalog: self.program.library.registry().as_ref(),
-            },
-        );
-        self.save = Some(save);
-        let saved = saved?;
-        let mut functions = functions;
-        for (name, record) in saved.functions {
-            let key = lash_kernel_state::kernel_internals::metadata::metadata_key(&name);
-            if functions.get(&key, self.heap.pages())?.is_some_and(|held| {
-                held.environment == record.environment && held.callable == record.callable
-            }) {
-                continue;
-            }
-            functions.write(
-                lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
-                record,
-                self.heap.pages(),
-            )?;
-        }
-        let mut bindings: Tree<BindingRecord> = open_tree(carried);
-        let mut kept = std::collections::BTreeSet::new();
-        for (name, value) in saved.rebound {
-            let record = self.binding_record(&name, value)?;
-            bindings.write(
-                lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
-                record,
-                self.heap.pages(),
-            )?;
-            kept.insert(name);
-        }
-        let mut refused: std::collections::BTreeMap<Name, String> =
-            saved.refused.into_iter().collect();
-        let not_carried = dropped
-            .iter()
-            .filter(|name| !kept.contains(*name))
-            .map(|name| {
-                let why = refused
-                    .remove(name)
-                    .unwrap_or_else(|| NOT_CARRIED.to_owned());
-                (name.clone(), why)
-            })
-            .collect();
-        let mut work = lash_kernel_state::kernel_internals::tree::SealWork::new(
-            lash_kernel_state::paged::SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            },
-        );
-        functions.seal(self.heap.pages(), &mut work)?;
-        bindings.seal(self.heap.pages(), &mut work)?;
-        Ok((keyed(&bindings)?, keyed(&functions)?, not_carried))
+        Ok((carried, self.functions, unsaved))
     }
 
     /// The record of the session binding `name` holding `value`, declared at

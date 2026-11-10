@@ -9,16 +9,12 @@
 //! touch; a park seals the changed pages and execution records into a new
 //! root. Neither direction converts the whole state.
 
-use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::heap::{HeapFault, PageRef};
 use lash_kernel_doc::{Datum, Invalid};
 
-use lash_kernel_state::paged::{
-    Checkpoint, CheckpointRoot, FunctionRecord, PageSource, SealBudget, SessionRoot,
-};
+use lash_kernel_state::paged::{Checkpoint, CheckpointRoot, PageSource, SealBudget, SessionRoot};
 use lash_kernel_value::names::DocumentId;
 use lash_kernel_value::names::Name;
-use std::collections::{BTreeMap, BTreeSet};
 
 use crate::interface::{
     Bounds, DeliverError, Delivered, EffectModes, Host, Meters, Outcome, Program, StartError, Step,
@@ -61,53 +57,6 @@ impl CellStart {
         }
         Ok(())
     }
-}
-
-/// What a session cell's end makes of the bindings its carry would drop
-/// (`K-SES-003`): the functions among them its dialect saves
-/// (`K-SES-004`). The embedder that knows the cell's dialect supplies it.
-pub trait CellSave {
-    /// Saves what it can of `cell.dropped` through `saving`.
-    ///
-    /// # Errors
-    ///
-    /// The heap's faults.
-    fn save(
-        &mut self,
-        saving: &mut crate::CellSaveContext<'_>,
-        cell: SaveCell<'_>,
-    ) -> Result<SavedCell, HeapFault>;
-}
-
-/// A cell's end as its saving reads it.
-pub struct SaveCell<'a> {
-    pub link: lash_kernel_value::content_ids::LinkId,
-    pub documents: &'a BTreeMap<lash_kernel_value::content_ids::LinkId, lash_kernel_doc::Document>,
-    pub document: &'a lash_kernel_doc::Document,
-    /// The execution closure the cell's code calls into.
-    pub closure: PageRef,
-    /// The bindings the carry drops, and the session's bindings of the
-    /// functions it already holds, by name.
-    pub bindings: &'a BTreeMap<Name, PageValue>,
-    /// The bindings the carry drops, in name order.
-    pub dropped: &'a [Name],
-    /// The declared names of the functions the session already holds.
-    pub held: &'a BTreeSet<Name>,
-    /// The library the cell ran against.
-    pub catalog: &'a dyn lash_kernel_doc::FunctionCatalog,
-}
-
-/// What a cell's end saved.
-#[derive(Default)]
-pub struct SavedCell {
-    /// Each saved function's record, by its declared name.
-    pub functions: Vec<(Name, FunctionRecord)>,
-    /// Each binding that reached a saved function, bound to its value
-    /// with every closure in it a reference to its saved function: data,
-    /// which carries.
-    pub rebound: Vec<(Name, PageValue)>,
-    /// Each dropped binding not saved, with why.
-    pub refused: Vec<(Name, String)>,
 }
 
 /// A root a seal produced.

@@ -428,9 +428,6 @@ pub struct KernelMachine {
     /// The bindings the host projected into the cell, which its carry
     /// leaves out.
     host: Vec<Name>,
-    /// How the cell's end saves the functions its carry would drop; none
-    /// drops them.
-    save: Option<Box<dyn crate::interface::CellSave>>,
     captions: Vec<lash_kernel_doc::CaptionEntry>,
     function_origins: crate::interface::FunctionOrigins,
     /// What decides at the run's bounds (FIG-6768); none refuses.

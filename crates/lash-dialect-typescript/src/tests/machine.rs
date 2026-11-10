@@ -345,7 +345,6 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
             .iter()
             .map(|(site, written)| ((program.link, site.clone()), written.clone()))
             .collect(),
-        ..Default::default()
     };
     let start = CellStart {
         target: Target::Main,
@@ -842,7 +841,6 @@ fn cells_keep_javascript_text_semantics_and_ship_conversion_facts() {
                 .iter()
                 .map(|(site, written)| ((program.link, site.clone()), written.clone()))
                 .collect(),
-            environments: Default::default(),
         },
         ..Default::default()
     });

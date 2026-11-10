@@ -900,9 +900,11 @@ pub enum StartError {
     Heap(#[from] lash_kernel_doc::heap::HeapFault),
 }
 
+pub use crate::durable::session::{
+    CellSave, SaveCell, SaveRules, SavedCell, SavedFunction, Saving,
+};
 pub use crate::paged::{
-    CellSave, CellStart, Finished, Inadmissible, Machine, MachineError, OpenError, SaveCell,
-    SavedCell, SealError,
+    CellStart, Finished, Inadmissible, Machine, MachineError, OpenError, SealError,
 };
 
 /// A slot resolved under its owning Link. Code/type lookup never calls the host.
@@ -941,7 +943,6 @@ pub struct PreparedInstance {
 #[derive(Clone, Debug, Default)]
 pub struct FunctionOrigins {
     pub sites: BTreeMap<(LinkId, lash_kernel_value::sites::Site), lash_kernel_dialect::Written>,
-    pub environments: BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
 }
 
 impl PreparedInstance {

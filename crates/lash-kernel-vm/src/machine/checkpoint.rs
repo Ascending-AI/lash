@@ -40,7 +40,6 @@ impl Machine for KernelMachine {
         } else if let Some(observer) = self.observer.as_deref_mut() {
             observer.path = None;
         }
-        self.save = options.cell_save;
         self.captions = options.captions;
         self.function_origins = options.function_origins;
         self.limiters = Limiters {
@@ -438,7 +437,6 @@ impl KernelMachine {
             boundary: None,
             #[cfg(test)]
             boundaries: 0,
-            save: None,
             captions: Vec::new(),
             function_origins: Default::default(),
             limiters: Limiters::default(),

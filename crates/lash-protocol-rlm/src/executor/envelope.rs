@@ -46,7 +46,6 @@ pub struct CellEnvelope {
     /// site of its closure: what the cell saves a function it leaves with
     /// ([`lash_kernel_dialect::Lowered::written`]).
     pub written: BTreeMap<Site, Written>,
-    pub saved_written: BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
     /// What the dialect's function values are, where its sessions keep the
     /// functions a cell binds ([`lash_kernel_dialect::Dialect::function_values`]).
     pub function_values: Option<lash_kernel_doc::FunctionRepresentation>,
@@ -489,6 +488,9 @@ struct EnvelopeBody {
     link: LinkId,
     source_map: Option<NodeId>,
     written: NodeId,
+    /// The written facts of the old heap's saved functions, by their
+    /// environment: none since a session's functions are saved by name on
+    /// the core. The slot stays until the envelope's format next changes.
     saved_written: BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
     function_values: Option<lash_kernel_doc::FunctionRepresentation>,
     effects: NodeId,
@@ -561,7 +563,7 @@ impl CellEnvelope {
                 .map(|map| staging.encode_value(NodeKind::SOURCE_MAP, map))
                 .transpose()?,
             written: staging.encode_value(NodeKind::WRITTEN_TABLE, &self.written)?,
-            saved_written: self.saved_written.clone(),
+            saved_written: BTreeMap::new(),
             function_values: self.function_values.clone(),
             effects: staging.encode_value(
                 NodeKind::EFFECT_TABLE,
@@ -618,7 +620,6 @@ impl CellEnvelope {
             link: body.link,
             source_map,
             written,
-            saved_written: body.saved_written,
             function_values: body.function_values,
             environment: table.environment,
             inspection: table.inspection,

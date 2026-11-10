@@ -147,7 +147,6 @@ mod observe;
 mod paged;
 #[cfg(any(test, feature = "perf-witness"))]
 pub mod perf_witness;
-mod save;
 mod session_editor;
 /// The bytecode core's dispatcher (FIG-7688 cutover).
 #[allow(dead_code)]
@@ -163,7 +162,6 @@ pub use functions::{MachineFunctions, implement_machine_functions, register_mach
 pub use machine::kernel::KernelMachine;
 pub use observe::{ChargeTape, ObservationMode};
 pub use paged::{SealedRoot, validate_foreign_checkpoint};
-pub use save::CellSaveContext;
 pub use session_editor::{SessionEditor, SessionValue};
 pub use vm::machine::CoreMachine;
 pub use {
@@ -182,7 +180,8 @@ pub use interface::{
     Delivered, EffectModes, EffectRequest, End, Finished, FunctionOrigins, Host, HostFault,
     Inadmissible, LimitDecision, Machine, MachineError, MachineOptions, MemoryLimiter, MemoryMeter,
     Meters, OpenError, Outcome, Park, PreparedInstance, PreparedSlot, Program, Request, RunError,
-    RunObserver, SaveCell, SavedCell, SealError, StartError, Step, Target, WaitId,
+    RunObserver, SaveCell, SaveRules, SavedCell, SavedFunction, Saving, SealError, StartError,
+    Step, Target, WaitId,
 };
 
 pub use functions::machine_native;
