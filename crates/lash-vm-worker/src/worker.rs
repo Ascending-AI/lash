@@ -574,9 +574,8 @@ impl<'embedding> Server<'embedding> {
                 Some(root)
             }
         };
-        let selection = lash_kernel_doc::Selection::Fresh;
         let source: Box<dyn PageSource> = Box::new(source);
-        let program = self.program(&start, fresh, content, selection)?;
+        let program = self.program(&start, fresh, content)?;
         let path = start.observe_path.then(|| program.document.site_ordinals());
         let save = start
             .save
@@ -821,7 +820,6 @@ impl<'embedding> Server<'embedding> {
         start: &lash_vm_protocol::message::Start,
         fresh: bool,
         content: WorkerContent,
-        selection: lash_kernel_doc::Selection,
     ) -> Result<Program, PoolError> {
         let WorkerContent {
             document,
@@ -847,7 +845,6 @@ impl<'embedding> Server<'embedding> {
             &[(link, functions.clone())].into(),
             &supplied,
             self.bootstrap.tuning.kernel_data,
-            &selection,
         )
         .map_err(|error| {
             PoolError::breach(ProtocolBreach::Machine {
@@ -880,7 +877,6 @@ impl<'embedding> Server<'embedding> {
             executable
         };
         let program = Program {
-            selection,
             functions: executable,
             closure: PageId(closure.reference().0),
             document: Arc::clone(document.shared()),

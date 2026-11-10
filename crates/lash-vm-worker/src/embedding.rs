@@ -151,7 +151,6 @@ pub fn library_for(
     document: &lash_kernel_doc::Document,
     definitions: &[(FunctionId, &[u8])],
     limits: lash_kernel_value::data_limits::KernelDataLimits,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<
     Result<
         (PreparedLibrary, lash_vm_broker::kernel::closure::Closure),
@@ -186,7 +185,6 @@ pub fn library_for(
         frame.registry(),
         &stored,
         embedding.library_image().helpers(),
-        selection,
     ) {
         Ok(assembled) => assembled,
         Err(refusal) => return Ok(Err(refusal)),
@@ -196,10 +194,9 @@ pub fn library_for(
     }
     let library = embedding
         .loaded
-        .get_or_try_selected::<std::convert::Infallible>(
+        .get_or_try::<std::convert::Infallible>(
             assembled.closure.reference(),
             embedding.library_image().helpers().identity(),
-            selection,
             || {
                 Ok(PreparedLibrary::with_charge(
                     Arc::clone(&assembled.registry),
@@ -221,7 +218,6 @@ pub(crate) fn linked_library_for(
     functions: &BTreeMap<lash_kernel_value::LinkId, std::collections::BTreeSet<FunctionId>>,
     definitions: &[(FunctionId, &[u8])],
     limits: lash_kernel_value::KernelDataLimits,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<
     Result<
         (PreparedLibrary, lash_vm_broker::kernel::closure::Closure),
@@ -258,7 +254,6 @@ pub(crate) fn linked_library_for(
         &root.requires,
         frame.registry(),
         embedding.library_image().helpers(),
-        selection,
     ) {
         Ok(prepared) => prepared,
         Err(refusal) => return Ok(Err(refusal)),
@@ -267,10 +262,9 @@ pub(crate) fn linked_library_for(
     if prepared.is_held() {
         return Ok(Ok((frame.clone(), closure)));
     }
-    let library = match embedding.loaded.get_or_try_selected::<LoadRefusal>(
+    let library = match embedding.loaded.get_or_try::<LoadRefusal>(
         closure.reference(),
         embedding.library_image().helpers().identity(),
-        selection,
         || {
             let assembled = prepared.assemble()?;
             Ok(
@@ -638,7 +632,6 @@ pub(crate) mod tests {
                 &document,
                 &[],
                 lash_kernel_value::KernelDataLimits::standard(),
-                &lash_kernel_doc::Selection::Fresh,
             )
             .unwrap()
             .unwrap();
@@ -819,7 +812,6 @@ pub(crate) mod tests {
             &document(id),
             &[],
             lash_kernel_value::KernelDataLimits::standard(),
-            &lash_kernel_doc::Selection::Fresh,
         )
         .unwrap()
         .unwrap();
@@ -829,7 +821,6 @@ pub(crate) mod tests {
             &document(&current_id),
             &[],
             lash_kernel_value::KernelDataLimits::standard(),
-            &lash_kernel_doc::Selection::Fresh,
         )
         .unwrap()
         .unwrap();
@@ -928,7 +919,6 @@ pub(crate) mod tests {
             &links,
             lash_kernel_doc::heap::PageId([0; 32]),
             library,
-            lash_kernel_doc::Selection::Fresh,
         )
         .expect("linked law document");
         let closure = lash_vm_broker::kernel::closure::derive(

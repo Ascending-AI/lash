@@ -123,7 +123,6 @@ impl CodeModeExecutionState {
                 &reach.machine,
                 &held,
                 documents.helpers().as_ref(),
-                &lash_kernel_doc::Selection::Fresh,
             )
             .map_err(|error| refuse(error.to_string()))?;
             let id = plan

@@ -5,8 +5,6 @@ use super::*;
 pub(super) struct LinkedCatalog<'a> {
     pub(super) document: &'a lash_kernel_doc::Document,
     pub(super) helpers: &'a lash_kernel_doc::BuildHelpers,
-    pub(super) selection: &'a lash_kernel_doc::Selection,
-    pub(super) link: LinkId,
 }
 
 impl FunctionCatalog for LinkedCatalog<'_> {
@@ -15,15 +13,8 @@ impl FunctionCatalog for LinkedCatalog<'_> {
         function: &lash_kernel_value::FunctionId,
     ) -> Option<&lash_kernel_doc::FunctionDefinition> {
         self.document.functions.get(function).or_else(|| {
-            self.selection
-                .admits_helper(
-                    &CallableId {
-                        link: self.link,
-                        function: *function,
-                    },
-                    &self.document.library,
-                    self.helpers,
-                )
+            self.helpers
+                .admits(&self.document.library, function)
                 .then(|| self.helpers.definition(function))
                 .flatten()
         })

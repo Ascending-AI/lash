@@ -346,9 +346,7 @@ fn saved_handle(
             let closure = lash_kernel_doc::snapshot::closure_at(
                 &lowered.document,
                 site,
-                lash_kernel_value::LinkId::from_bytes([1; 32]),
                 machine::installed().prepared.helpers(),
-                &lash_kernel_doc::Selection::Fresh,
             )?;
             (lowered.written[site]
                 .signature_origin
@@ -426,11 +424,7 @@ fn entry_promotion_requires_written_annotations_at_the_missing_position() {
         );
         let (document, value) = saved_handle(source);
         let lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source: saved } = value
-            .entry_export(
-                &document,
-                machine::installed().prepared.helpers(),
-                &lash_kernel_doc::Selection::Fresh,
-            )
+            .entry_export(&document, machine::installed().prepared.helpers())
             .expect_err("saved promotion needs annotations")
         else {
             panic!("typed saved refusal")
@@ -524,11 +518,7 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
     let (document, value) = saved_handle(source);
     assert_eq!(
         value
-            .entry_export(
-                &document,
-                machine::installed().prepared.helpers(),
-                &lash_kernel_doc::Selection::Fresh
-            )
+            .entry_export(&document, machine::installed().prepared.helpers(),)
             .unwrap()
             .signature,
         expected
@@ -597,11 +587,7 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
         );
         let (document, value) = saved_handle(source);
         let lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source: saved } = value
-            .entry_export(
-                &document,
-                machine::installed().prepared.helpers(),
-                &lash_kernel_doc::Selection::Fresh,
-            )
+            .entry_export(&document, machine::installed().prepared.helpers())
             .expect_err("same saved refusal")
         else {
             panic!("typed saved resolution fact")
@@ -705,11 +691,7 @@ fn entry_record_modes_survive_source_and_saved_function_promotion() {
         let (document, value) = saved_handle(&source);
         assert_eq!(
             value
-                .entry_export(
-                    &document,
-                    machine::installed().prepared.helpers(),
-                    &lash_kernel_doc::Selection::Fresh
-                )
+                .entry_export(&document, machine::installed().prepared.helpers(),)
                 .unwrap()
                 .signature,
             signature

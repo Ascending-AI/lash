@@ -46,7 +46,6 @@ pub(super) fn prepare(
     held: &Arc<FunctionRegistry>,
     authored: &std::collections::BTreeSet<lash_kernel_value::LinkId>,
     documents: &lash_vm_runtime::KernelDocuments,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<PreparedExecution, String> {
     let helpers = documents.helpers().as_ref();
     let LoadedCode {
@@ -104,7 +103,6 @@ pub(super) fn prepare(
         &reach.machine,
         held,
         helpers,
-        selection,
     )
     .map_err(|error| error.to_string())?;
     Ok(PreparedExecution {
@@ -362,15 +360,7 @@ mod work_laws {
         for _ in 0..2 {
             reads.store(0, Ordering::Relaxed);
             let loaded = load(&documents, &start, &Default::default()).await.unwrap();
-            let prepared = prepare(
-                loaded,
-                &start,
-                &held,
-                &Default::default(),
-                &documents,
-                &lash_kernel_doc::Selection::Fresh,
-            )
-            .unwrap();
+            let prepared = prepare(loaded, &start, &held, &Default::default(), &documents).unwrap();
             assert_eq!(
                 reads.load(Ordering::Relaxed),
                 prepared.documents.len(),

@@ -637,11 +637,7 @@ impl KernelProcessEngine {
                     documents::refused(lash_kernel_package::LinkRefusal::DocumentValidation(e))
                 })?;
                 let exported = function
-                    .entry_export(
-                        &document,
-                        self.helpers.as_ref(),
-                        &lash_kernel_doc::Selection::Fresh,
-                    )
+                    .entry_export(&document, self.helpers.as_ref())
                     .map_err(|error| {
                         use lash_execution_contracts::process::linking::{
                             AdmissionRefusal, EnginePortError,

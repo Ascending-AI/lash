@@ -197,7 +197,6 @@ fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
             .prepared_library()
             .expect("the linked worker fixture is valid")
             .clone(),
-        lash_kernel_doc::Selection::Fresh,
     )
     .expect("the linked worker fixture is valid")
 }

@@ -495,7 +495,6 @@ fn run_selected(
             Arc::new(release.functions.clone()),
             Arc::clone(&release.helpers),
         ),
-        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap();
     let mut machine = lash_kernel_vm::KernelMachine::start(
@@ -919,7 +918,6 @@ fn an_iterator_next_closure_refuses_upgrade_and_completes_on_its_old_body() {
                     Arc::new(registry.clone()),
                     Arc::clone(&helpers),
                 ),
-                lash_kernel_doc::Selection::Fresh,
             )
             .unwrap()
         };

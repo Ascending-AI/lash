@@ -352,9 +352,7 @@ fn no_constant_kind(value: &PageValue) -> ValueKind {
 pub fn closure_at<'a>(
     document: &'a Document,
     site: &Site,
-    link: lash_kernel_value::LinkId,
     helpers: &'a crate::BuildHelpers,
-    selection: &crate::Selection,
 ) -> Option<&'a Closure> {
     let body: &[Stmt] = match &site.unit {
         Unit::Main => document.main.as_deref()?,
@@ -363,15 +361,8 @@ pub fn closure_at<'a>(
                 .functions
                 .get(id)
                 .or_else(|| {
-                    selection
-                        .admits_helper(
-                            &lash_kernel_value::CallableId {
-                                link,
-                                function: *id,
-                            },
-                            &document.library,
-                            helpers,
-                        )
+                    helpers
+                        .admits(&document.library, id)
                         .then(|| {
                             helpers
                                 .registered(id)

@@ -251,7 +251,6 @@ pub fn assemble(
     held: &Arc<FunctionRegistry>,
     stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
     helpers: &lash_kernel_doc::BuildHelpers,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<Assembled, LoadRefusal> {
     let admitted = admit(
         document.functions.keys().copied().collect(),
@@ -261,30 +260,20 @@ pub fn assemble(
         helpers,
         &document.library,
     )?;
-    assemble_admitted(admitted, held, &document.library, selection)
+    assemble_admitted(admitted, held, &document.library)
 }
 
 fn assemble_admitted(
     admitted: Admitted,
     held: &Arc<FunctionRegistry>,
     library: &lash_kernel_doc::LibraryDependencies,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<Assembled, LoadRefusal> {
-    check_selected_natives(&admitted.closure, held, selection)?;
-    assemble_checked_admitted(admitted, held, library, selection)
+    check_selected_natives(&admitted.closure, held)?;
+    assemble_checked_admitted(admitted, held, library)
 }
 
-fn check_selected_natives(
-    closure: &Closure,
-    held: &FunctionRegistry,
-    selection: &lash_kernel_doc::Selection,
-) -> Result<(), LoadRefusal> {
-    for member in closure
-        .body()
-        .functions()
-        .iter()
-        .filter(|member| selected(member.function, selection))
-    {
+fn check_selected_natives(closure: &Closure, held: &FunctionRegistry) -> Result<(), LoadRefusal> {
+    for member in closure.body().functions().iter() {
         if member.native_only
             && held
                 .get(&member.function)
@@ -302,7 +291,6 @@ fn assemble_checked_admitted(
     admitted: Admitted,
     held: &Arc<FunctionRegistry>,
     library: &lash_kernel_doc::LibraryDependencies,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<Assembled, LoadRefusal> {
     let closure = admitted.closure;
     if closure.stored().is_empty() {
@@ -313,7 +301,7 @@ fn assemble_checked_admitted(
         });
     }
     let mut registry = held.as_ref().clone();
-    for function in dependency_order(&closure, held, &admitted.stored, library, selection)? {
+    for function in dependency_order(&closure, held, &admitted.stored, library)? {
         if registry.get(&function).is_none() {
             register(
                 &mut registry,
@@ -350,7 +338,6 @@ pub fn declare(
     stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
     helpers: &lash_kernel_doc::BuildHelpers,
     library: &lash_kernel_doc::LibraryDependencies,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<FunctionRegistry, LoadRefusal> {
     let admitted = admit(
         listed.into_iter().collect(),
@@ -360,23 +347,16 @@ pub fn declare(
         helpers,
         library,
     )?;
-    declare_admitted(admitted, held, library, selection)
+    declare_admitted(admitted, held, library)
 }
 
 fn declare_admitted(
     admitted: Admitted,
     held: &FunctionRegistry,
     library: &lash_kernel_doc::LibraryDependencies,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<FunctionRegistry, LoadRefusal> {
     let mut registry = held.as_declarations();
-    for function in dependency_order(
-        &admitted.closure,
-        held,
-        &admitted.stored,
-        library,
-        selection,
-    )? {
+    for function in dependency_order(&admitted.closure, held, &admitted.stored, library)? {
         if registry.get(&function).is_some() {
             continue;
         }
@@ -506,7 +486,6 @@ fn dependency_order(
     held: &FunctionRegistry,
     stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
     library: &lash_kernel_doc::LibraryDependencies,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<Vec<FunctionId>, LoadRefusal> {
     let callees = |function: &FunctionId| -> BTreeSet<FunctionId> {
         let mut callees: BTreeSet<FunctionId> = match held.get(function) {
@@ -528,7 +507,6 @@ fn dependency_order(
     let mut waiting: BTreeMap<FunctionId, BTreeSet<FunctionId>> = closure
         .body()
         .identities()
-        .filter(|function| selected(*function, selection))
         .map(|function| (function, callees(&function)))
         .collect();
     let mut order = Vec::with_capacity(waiting.len());
@@ -570,7 +548,6 @@ pub struct Libraries<L> {
 type LibraryKey = (
     lash_core_store::checkpoint_graph::NodeId,
     lash_kernel_value::HelperLibraryId,
-    lash_kernel_doc::Selection,
 );
 
 impl<L: Clone> Libraries<L> {
@@ -594,18 +571,7 @@ impl<L: Clone> Libraries<L> {
         helpers: lash_kernel_value::HelperLibraryId,
         make: impl FnOnce() -> Result<L, E>,
     ) -> Result<L, E> {
-        self.get_or_try_selected(closure, helpers, &lash_kernel_doc::Selection::Fresh, make)
-    }
-
-    /// Cache derived execution only for this exact restored permission set.
-    pub fn get_or_try_selected<E>(
-        &self,
-        closure: lash_core_store::checkpoint_graph::NodeId,
-        helpers: lash_kernel_value::HelperLibraryId,
-        selection: &lash_kernel_doc::Selection,
-        make: impl FnOnce() -> Result<L, E>,
-    ) -> Result<L, E> {
-        let closure = (closure, helpers, selection.clone());
+        let closure = (closure, helpers);
         {
             let mut held = self
                 .held
@@ -644,11 +610,10 @@ pub fn declare_reach(
     machine: &lash_kernel_value::claims::NodeRequirements,
     held: &Arc<FunctionRegistry>,
     helpers: &lash_kernel_doc::BuildHelpers,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<Assembled, LoadRefusal> {
     let (admitted, library) = admit_reach(root, documents, functions, machine, held, helpers)?;
     let closure = admitted.closure.clone();
-    let registry = declare_admitted(admitted, held, &library, selection)?;
+    let registry = declare_admitted(admitted, held, &library)?;
     Ok(Assembled {
         registry: Arc::new(registry),
         closure,
@@ -657,12 +622,11 @@ pub fn declare_reach(
 }
 
 /// Linked source and selected native availability, checked before any cache hit.
-/// The token owns the exact registry and selection its assembly may use.
+/// The token owns the exact registry its assembly may use.
 pub struct PreparedReach {
     admitted: Admitted,
     library: lash_kernel_doc::LibraryDependencies,
     held: Arc<FunctionRegistry>,
-    selection: lash_kernel_doc::Selection,
 }
 
 impl PreparedReach {
@@ -676,7 +640,7 @@ impl PreparedReach {
 
     /// Derive the registry only when the caller's bounded cache misses.
     pub fn assemble(self) -> Result<Assembled, LoadRefusal> {
-        assemble_checked_admitted(self.admitted, &self.held, &self.library, &self.selection)
+        assemble_checked_admitted(self.admitted, &self.held, &self.library)
     }
 }
 
@@ -688,15 +652,13 @@ pub fn prepare_reach(
     machine: &lash_kernel_value::claims::NodeRequirements,
     held: &Arc<FunctionRegistry>,
     helpers: &lash_kernel_doc::BuildHelpers,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<PreparedReach, LoadRefusal> {
     let (admitted, library) = admit_reach(root, documents, functions, machine, held, helpers)?;
-    check_selected_natives(&admitted.closure, held, selection)?;
+    check_selected_natives(&admitted.closure, held)?;
     Ok(PreparedReach {
         admitted,
         library,
         held: Arc::clone(held),
-        selection: selection.clone(),
     })
 }
 
@@ -712,10 +674,9 @@ pub fn assemble_reach(
     machine: &lash_kernel_value::claims::NodeRequirements,
     held: &Arc<FunctionRegistry>,
     helpers: &lash_kernel_doc::BuildHelpers,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<Assembled, LoadRefusal> {
     let (admitted, library) = admit_reach(root, documents, functions, machine, held, helpers)?;
-    assemble_admitted(admitted, held, &library, selection)
+    assemble_admitted(admitted, held, &library)
 }
 
 fn admit_reach(
@@ -775,13 +736,6 @@ fn admit_reach(
     Ok((admitted, library))
 }
 
-/// Whether `selection` admits `function` to execution.
-fn selected(_function: FunctionId, selection: &lash_kernel_doc::Selection) -> bool {
-    match selection {
-        lash_kernel_doc::Selection::Fresh => true,
-    }
-}
-
 #[cfg(test)]
 mod laws {
     use super::*;
@@ -820,7 +774,6 @@ mod laws {
             &BTreeMap::from([(stored_id, Arc::new(stored))]),
             &helpers,
             &lash_kernel_doc::LibraryDependencies::default(),
-            &lash_kernel_doc::Selection::Fresh,
         )
         .unwrap();
         assert!(declared.get(&ordinary).is_some());

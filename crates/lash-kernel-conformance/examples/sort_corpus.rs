@@ -260,7 +260,6 @@ fn linked_program(
         &std::collections::BTreeMap::from([(link.identity(), link)]),
         lash_kernel_doc::heap::PageId([7; 32]),
         library.clone(),
-        lash_kernel_doc::Selection::Fresh,
     )
     .map_err(|error| error.to_string())
 }

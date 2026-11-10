@@ -360,11 +360,10 @@ async fn kernel_run(
         .load_execution_content(&process_input.code, &run.environment.retained_code)
         .await
         .map_err(|error| RunFault(error.to_string()))?;
-    let selection = lash_kernel_doc::Selection::Fresh;
 
     let loaded_execution = engine
         .documents
-        .admit_execution(loaded_execution, &selection)
+        .admit_execution(loaded_execution)
         .map_err(|error| RunFault(error.to_string()))?;
     let ordinary = loaded_execution.ordinary;
     let content = loaded_execution.content;
@@ -382,7 +381,7 @@ async fn kernel_run(
         .get(&root.document)
         .ok_or_else(|| RunFault("process Document is absent".into()))?
         .clone();
-    let args = match entry_args(&document, &process_input, &engine.helpers, &selection) {
+    let args = match entry_args(&document, &process_input, &engine.helpers) {
         Ok(args) => args,
         Err(error) => {
             let cause = match &error {
@@ -426,7 +425,6 @@ async fn kernel_run(
         &reach.machine,
         &engine.functions,
         &engine.helpers,
-        &selection,
     )
     .map_err(|error| RunFault(error.to_string()))?;
     let closure = loaded.closure;
@@ -445,7 +443,6 @@ async fn kernel_run(
         lash_kernel_doc::heap::PageId(closure.reference().0),
         lash_kernel_vm::PreparedLibrary::with_charge(loaded.registry, settings.charge)
             .with_helper_handle(Arc::clone(&engine.helpers)),
-        selection.clone(),
     )
     .map_err(|error| RunFault(error.to_string()))?;
     program.functions = closure.body().identities().collect();
@@ -1083,7 +1080,6 @@ pub(super) fn entry_args(
     document: &Document,
     input: &KernelProcessInput,
     helpers: &lash_kernel_doc::BuildHelpers,
-    selection: &lash_kernel_doc::Selection,
 ) -> Result<Vec<Datum>, EntryArgumentsError> {
     use lash_kernel_value::names::StartSelector;
     let mut supplied = std::collections::BTreeMap::new();
@@ -1117,7 +1113,7 @@ pub(super) fn entry_args(
             }
         }
         super::InlineRequest::Callable { function, .. } => {
-            function.entry_export(document, helpers, selection)?;
+            function.entry_export(document, helpers)?;
             function.callable
         }
         _ => unreachable!("unlinked input returned above"),

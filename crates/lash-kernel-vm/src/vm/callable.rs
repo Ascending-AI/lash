@@ -97,7 +97,7 @@ pub(crate) fn export(
     // Starting an exported callable is not workflow promotion: workflow
     // hosts apply its entry export before the machine sees it.
     let defining = function
-        .check_definition(&program.document, program.helpers(), &program.selection)
+        .check_definition(&program.document, program.helpers())
         .map_err(StartError::FunctionValue)?;
     Ok(FunctionExport {
         function: id,

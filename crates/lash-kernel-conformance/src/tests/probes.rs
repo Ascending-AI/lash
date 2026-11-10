@@ -163,7 +163,6 @@ pub(super) fn linked(library: &PreparedLibrary, text: &str) -> Result<Program, S
         &std::collections::BTreeMap::from([(link.identity(), link)]),
         lash_kernel_doc::heap::PageId([7; 32]),
         library.clone(),
-        lash_kernel_doc::Selection::Fresh,
     )
     .map_err(|error| error.to_string())
 }

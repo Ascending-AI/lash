@@ -257,9 +257,7 @@ impl KernelProcessEngine {
                     .documents
                     .load_execution_content(code, &Default::default())
                     .await?;
-                let loaded = self
-                    .documents
-                    .admit_execution(loaded, &lash_kernel_doc::Selection::Fresh)?;
+                let loaded = self.documents.admit_execution(loaded)?;
                 let document = loaded
                     .content
                     .document(

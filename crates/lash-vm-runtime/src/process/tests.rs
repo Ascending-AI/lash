@@ -663,7 +663,6 @@ fn a_helper_called_from_another_link_keeps_its_defining_fills() {
         &BTreeMap::from([(a_id, a_link), (b_id, b_link)]),
         PageId([8; 32]),
         library,
-        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap();
     let use_a = OperationUse {

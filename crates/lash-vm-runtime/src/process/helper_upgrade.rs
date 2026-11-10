@@ -172,8 +172,7 @@ pub(super) fn check_arguments(
     let document = content
         .document(content.link(link).map_err(invalid)?.document)
         .map_err(invalid)?;
-    let args = super::run::entry_args(document, input, helpers, &lash_kernel_doc::Selection::Fresh)
-        .map_err(invalid)?;
+    let args = super::run::entry_args(document, input, helpers).map_err(invalid)?;
     for value in &args {
         lash_kernel_migrate::check_upgrade_data(value, upgrade)?;
     }

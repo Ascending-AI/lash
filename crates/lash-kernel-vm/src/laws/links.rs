@@ -49,7 +49,6 @@ fn applied(pick: Pick) -> String {
         ]),
         PageId([8; 32]),
         PreparedLibrary::new(Arc::clone(&library.registry)),
-        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap();
     let mut machine = <CoreMachine as Machine>::start(

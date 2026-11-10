@@ -244,7 +244,6 @@ impl Fixture {
                 .unwrap()
                 .functions,
             links: self.content.links.clone(),
-            selection: lash_kernel_doc::Selection::Fresh,
             retained: Default::default(),
             uses: self
                 .content
@@ -296,7 +295,6 @@ impl Fixture {
             &selected.machine,
             &functions,
             &lash_kernel_doc::BuildHelpers::empty(),
-            &lash_kernel_doc::Selection::Fresh,
         )
         .unwrap();
         program(

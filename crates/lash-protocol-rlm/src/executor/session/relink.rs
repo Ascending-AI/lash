@@ -81,7 +81,6 @@ impl CodeModeExecutionState {
                         &reach.machine,
                         &held,
                         documents.helpers().as_ref(),
-                        &lash_kernel_doc::Selection::Fresh,
                     )
                     .map_err(|error| RelinkError::Library(error.to_string()))?;
                     rewritten.push((name.clone(), function.description(), function.callable));

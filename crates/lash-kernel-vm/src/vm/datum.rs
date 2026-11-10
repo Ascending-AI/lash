@@ -135,7 +135,6 @@ impl<H: Heap> Vm<H> {
             instances: &program.instances,
             catalog: program.library.registry().as_ref(),
             helpers: program.library.helpers(),
-            selection: &program.selection,
             data: crossing.data,
         };
         let param = program

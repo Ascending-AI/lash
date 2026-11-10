@@ -120,27 +120,6 @@ pub struct Ordinals {
     pub conditions: BTreeMap<Site, u32>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum Selection {
-    #[default]
-    Fresh,
-}
-
-impl Selection {
-    /// One owner of helper provenance for frames, captures and public callables.
-    pub fn admits_helper(
-        &self,
-        callable: &CallableId,
-        manifest: &LibraryDependencies,
-        helpers: &crate::BuildHelpers,
-    ) -> bool {
-        match self {
-            Self::Fresh => helpers.admits(manifest, &callable.function),
-        }
-    }
-}
-
 /// A document's admitted code origins: local definitions first, then only its
 /// explicit build-library references. Ambient registry membership grants nothing.
 pub struct DocumentCatalog<'a> {

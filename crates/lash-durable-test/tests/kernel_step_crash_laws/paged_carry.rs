@@ -159,7 +159,6 @@ pub(super) fn program(
         &content.links,
         closure,
         lash_kernel_vm::PreparedLibrary::new(functions),
-        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap()
 }
@@ -556,7 +555,6 @@ async fn atomic_carry(tier: super::served::Tier) {
             closure: PageId(closure_a.reference().0),
             code: [(link_a, document_a.functions.keys().copied().collect())].into(),
             links: content.links.clone(),
-            selection: lash_kernel_doc::Selection::Fresh,
             retained: Default::default(),
             uses: BTreeMap::new(),
         },

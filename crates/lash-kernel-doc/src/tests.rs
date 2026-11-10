@@ -538,14 +538,7 @@ fn saved_helper_callable_preserves_its_exact_creation_origin() {
     let mut document = Document::new(NumberPolicy::BySpelling, vec![]);
     document.library.insert(owner_id);
     let creation = Site::new(Unit::Library(owner_id), [0, 0]);
-    let closure = crate::snapshot::closure_at(
-        &document,
-        &creation,
-        LinkId::from_bytes([3; 32]),
-        &helpers,
-        &crate::Selection::Fresh,
-    )
-    .unwrap();
+    let closure = crate::snapshot::closure_at(&document, &creation, &helpers).unwrap();
     let value = FunctionValue {
         written_signature: None,
         callable: CallableId {
@@ -567,12 +560,10 @@ fn saved_helper_callable_preserves_its_exact_creation_origin() {
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
     };
-    value
-        .check_definition(&document, &helpers, &crate::Selection::Fresh)
-        .unwrap();
+    value.check_definition(&document, &helpers).unwrap();
     document.library.0.clear();
     assert_eq!(
-        value.check_definition(&document, &helpers, &crate::Selection::Fresh),
+        value.check_definition(&document, &helpers),
         Err(crate::FunctionValueRefusal::Identity)
     );
 }

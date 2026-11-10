@@ -218,7 +218,6 @@ fn program(map: bool) -> Result<Program> {
         &BTreeMap::from([(link.identity(), link)]),
         PageId([7; 32]),
         PreparedLibrary::new(registry),
-        lash_kernel_doc::Selection::Fresh,
     )?)
 }
 

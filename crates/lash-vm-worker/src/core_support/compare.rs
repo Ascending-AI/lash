@@ -250,7 +250,6 @@ impl Kernel {
             &BTreeMap::from([(link.identity(), link)]),
             PageId([7; 32]),
             self.library.clone(),
-            lash_kernel_doc::Selection::Fresh,
         )
         .map_err(failure)?;
         drop(_scope);

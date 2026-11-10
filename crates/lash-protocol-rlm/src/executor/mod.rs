@@ -693,7 +693,6 @@ async fn run_linked_cell(
         link: host.envelope.link,
         selector: lash_kernel_value::names::StartSelector::Main,
     };
-    let selection = lash_kernel_doc::Selection::Fresh;
     let retained_code = loaded.clone();
     let prepared = match (services.kernel.library(), state.documents.as_ref()) {
         (Ok(functions), Some(documents)) => processes::prepare(
@@ -702,7 +701,6 @@ async fn run_linked_cell(
             &functions,
             &host.envelope.environment.authored,
             documents,
-            &selection,
         ),
         (Err(error), _) => Err(error.to_string()),
         (Ok(_), None) => Err("the cell has no document owner".into()),

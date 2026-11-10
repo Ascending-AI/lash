@@ -159,7 +159,6 @@ impl Fixture {
             &BTreeMap::from([(root.identity(), root)]),
             PageId([7; 32]),
             PreparedLibrary::with_helpers(Arc::clone(&self.registry), Arc::clone(&self.helpers)),
-            lash_kernel_doc::Selection::Fresh,
         )
         .expect("prepared linked program")
     }

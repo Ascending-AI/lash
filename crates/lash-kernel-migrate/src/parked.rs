@@ -24,7 +24,6 @@ pub struct CarryContext {
     >,
     pub links:
         std::collections::BTreeMap<lash_kernel_value::LinkId, lash_kernel_value::package::Link>,
-    pub selection: lash_kernel_doc::Selection,
     /// Live function values keep their defining code and occurrence history.
     pub retained: std::collections::BTreeSet<lash_kernel_value::CallableId>,
     /// Producer-validated live/held operation uses; no resolution occurs here.

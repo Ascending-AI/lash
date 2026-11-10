@@ -89,9 +89,7 @@ impl Walk<'_, '_> {
             if let Some(start) = lash_kernel_doc::snapshot::closure_at(
                 document,
                 &identity.site.site,
-                identity.callable.link,
                 self.run.helpers,
-                self.run.selection,
             )
             .and_then(|closure| closure.presentation.as_ref())
                 && let FunctionRepresentation::Token { tag, callable } = &start.representation
@@ -341,8 +339,6 @@ impl Graph {
         let catalog = LinkedCatalog {
             document,
             helpers: run.helpers,
-            selection: run.selection,
-            link: callable.link,
         };
         let definition = lash_kernel_doc::FunctionCatalog::definition(&catalog, &callable.function)
             .ok_or_else(|| raised("not_data", "callable definition is not loaded"))?;
@@ -372,15 +368,9 @@ impl Graph {
                 signature_origin = written.signature_origin;
                 implicit_text_conversions = written.implicit_text_conversions;
             }
-            let start = lash_kernel_doc::snapshot::closure_at(
-                document,
-                site,
-                callable.link,
-                run.helpers,
-                run.selection,
-            )
-            .and_then(|closure| closure.presentation.as_ref())
-            .ok_or_else(|| raised("not_data", "the function states no start signature"))?;
+            let start = lash_kernel_doc::snapshot::closure_at(document, site, run.helpers)
+                .and_then(|closure| closure.presentation.as_ref())
+                .ok_or_else(|| raised("not_data", "the function states no start signature"))?;
             signature = start.signature.clone();
             convention = start.convention.clone();
             representation = start.representation.clone();

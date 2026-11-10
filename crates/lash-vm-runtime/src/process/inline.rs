@@ -77,7 +77,7 @@ impl super::KernelDocuments {
         retained: &BTreeSet<CallableId>,
     ) -> Result<LoadedExecution, EnginePortError> {
         let content = self.load_execution_content(code, retained).await?;
-        self.admit_execution(content, &lash_kernel_doc::Selection::Fresh)
+        self.admit_execution(content)
     }
 
     /// Load every captured defining instance, then derive the exact code and helper reach.
@@ -169,7 +169,6 @@ impl super::KernelDocuments {
     pub(super) fn admit_execution(
         &self,
         loaded: ExecutionContent,
-        selection: &lash_kernel_doc::Selection,
     ) -> Result<LoadedExecution, EnginePortError> {
         let ExecutionContent {
             content,
@@ -193,7 +192,7 @@ impl super::KernelDocuments {
                 )
                 .map_err(super::map_link_refusal)?;
             callable
-                .check_definition(document, self.helpers(), selection)
+                .check_definition(document, self.helpers())
                 .map_err(|_| {
                     EnginePortError::Refused(AdmissionRefusal::CallableIdentity {
                         callable: callable.callable,
@@ -204,8 +203,8 @@ impl super::KernelDocuments {
                 .get(&callable.callable.function)
                 .map(|definition| definition.signature.clone())
                 .or_else(|| {
-                    selection
-                        .admits_helper(&callable.callable, &document.library, self.helpers())
+                    self.helpers()
+                        .admits(&document.library, &callable.callable.function)
                         .then(|| {
                             self.helpers()
                                 .registered(&callable.callable.function)
@@ -287,7 +286,7 @@ impl super::KernelDocuments {
                 )
                 .map_err(super::map_link_refusal)?;
             function
-                .entry_export(document, self.helpers(), selection)
+                .entry_export(document, self.helpers())
                 .map_err(|error| match error {
                     lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source } => {
                         EnginePortError::Refused(AdmissionRefusal::EntryAnnotation { source })

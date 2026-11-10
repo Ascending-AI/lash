@@ -236,7 +236,6 @@ fn main() -> Outcome<()> {
             &document,
             &definitions,
             lash_kernel_value::KernelDataLimits::standard(),
-            &lash_kernel_doc::Selection::Fresh,
         )?
         .map_err(|refusal| refusal.to_string())?;
         let link = lash_kernel_value::Link {
@@ -251,7 +250,6 @@ fn main() -> Outcome<()> {
             &BTreeMap::from([(id, link)]),
             PageId(closure.reference().0),
             library,
-            lash_kernel_doc::Selection::Fresh,
         )?;
         let start = lash_kernel_vm::CellStart {
             owner: PageId([9; 32]),
@@ -400,7 +398,6 @@ fn archived(mode: &str) -> Outcome<()> {
             &document,
             &[],
             lash_kernel_value::KernelDataLimits::standard(),
-            &lash_kernel_doc::Selection::Fresh,
         )?
         .map_err(|error| error.to_string())?;
         let link = lash_kernel_value::Link {
@@ -414,7 +411,6 @@ fn archived(mode: &str) -> Outcome<()> {
             &[(link.identity(), link)].into(),
             PageId(closure.reference().0),
             library,
-            lash_kernel_doc::Selection::Fresh,
         )?;
         let mut machine = lash_kernel_vm::KernelMachine::start(
             program,

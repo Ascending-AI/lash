@@ -468,11 +468,10 @@ impl KernelProcessEngine {
             .load_execution_content(&input.code, &recorded_start.retained_code)
             .await
             .map_err(|error| ReplayFault(error.to_string()))?;
-        let selection = lash_kernel_doc::Selection::Fresh;
 
         let loaded_execution = self
             .documents
-            .admit_execution(loaded_execution, &selection)
+            .admit_execution(loaded_execution)
             .map_err(|error| ReplayFault(error.to_string()))?;
         let ordinary = loaded_execution.ordinary;
         let content = loaded_execution.content;
@@ -490,7 +489,7 @@ impl KernelProcessEngine {
             .get(&root.document)
             .ok_or_else(|| ReplayFault("root Document is absent".into()))?
             .clone();
-        let Ok(args) = entry_args(&document, &input, &self.helpers, &selection) else {
+        let Ok(args) = entry_args(&document, &input, &self.helpers) else {
             return unreplayable(Unreplayable::NoTape);
         };
         let loaded = lash_vm_broker::kernel::loader::declare_reach(
@@ -504,7 +503,6 @@ impl KernelProcessEngine {
             &reach.machine,
             &self.functions,
             &self.helpers,
-            &selection,
         )
         .map_err(|error| ReplayFault(error.to_string()))?;
         let closure = loaded.closure;
@@ -519,7 +517,6 @@ impl KernelProcessEngine {
             lash_kernel_doc::heap::PageId(closure.reference().0),
             lash_kernel_vm::PreparedLibrary::with_charge(loaded.registry, settings.charge)
                 .with_helper_handle(Arc::clone(&self.helpers)),
-            selection.clone(),
         )
         .map_err(|error| ReplayFault(error.to_string()))?;
         let host = Arc::new(ReplayHost::of(reads));

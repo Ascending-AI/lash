@@ -96,7 +96,7 @@ impl WorkflowDocument {
             lash_kernel_doc::FunctionValueLimits::standard(),
             lash_kernel_value::data_limits::KernelDataLimits::standard(),
         )?;
-        function.entry_export(&document, helpers, &lash_kernel_doc::Selection::Fresh)?;
+        function.entry_export(&document, helpers)?;
         let definition = document
             .functions
             .get(&function.callable.function)

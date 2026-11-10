@@ -139,7 +139,6 @@ fn a_host_native_library_binds_exact_declarations_and_runs_complete_documents() 
         &BTreeMap::from([(id, link)]),
         lash_kernel_doc::heap::PageId([8; 32]),
         lash_kernel_vm::PreparedLibrary::new(worker),
-        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap();
     let mut machine = lash_kernel_vm::KernelMachine::start(
@@ -436,15 +435,9 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         .collect();
     let limits = lash_kernel_value::KernelDataLimits::standard();
     let library = |embedding: &lash_vm_worker::Embedding, definitions| {
-        lash_vm_worker::core_support::library_for(
-            embedding,
-            &document,
-            definitions,
-            limits,
-            &lash_kernel_doc::Selection::Fresh,
-        )
-        .expect("a prepared frame")
-        .expect("the run's library assembles")
+        lash_vm_worker::core_support::library_for(embedding, &document, definitions, limits)
+            .expect("a prepared frame")
+            .expect("the run's library assembles")
     };
 
     let run = |(library, closure): (
@@ -470,7 +463,6 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
             &BTreeMap::from([(id, link)]),
             lash_kernel_doc::heap::PageId(closure.reference().0),
             library,
-            lash_kernel_doc::Selection::Fresh,
         )
         .unwrap();
         let start = lash_kernel_vm::CellStart {

@@ -72,7 +72,6 @@ pub struct Program {
     pub closure: lash_kernel_doc::heap::PageId,
     pub document: Arc<Document>,
     pub library: PreparedLibrary,
-    pub selection: lash_kernel_doc::Selection,
     /// The root instance of this execution.
     pub link: LinkId,
     /// Reached instances, loaded before the first instruction.
@@ -137,7 +136,6 @@ impl Program {
         links: &BTreeMap<LinkId, lash_kernel_value::package::Link>,
         closure: lash_kernel_doc::heap::PageId,
         library: PreparedLibrary,
-        selection: lash_kernel_doc::Selection,
     ) -> Result<Self, StartError> {
         for document in documents.values() {
             library.note_identified_document(document);
@@ -151,7 +149,6 @@ impl Program {
             links,
             closure,
             library,
-            selection,
         )
     }
 
@@ -279,7 +276,6 @@ impl Program {
         links: &BTreeMap<LinkId, lash_kernel_value::package::Link>,
         closure: lash_kernel_doc::heap::PageId,
         library: PreparedLibrary,
-        selection: lash_kernel_doc::Selection,
     ) -> Result<Self, StartError> {
         let instances = Self::prepare_instances(&documents, links)?;
         let invalid = |problem: &str| StartError::Linked {
@@ -302,7 +298,6 @@ impl Program {
             document: root,
             closure,
             library,
-            selection,
         };
         program.validate_links()?;
         let content = lash_kernel_package::LinkedContent {

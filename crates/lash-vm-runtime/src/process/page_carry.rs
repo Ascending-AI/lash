@@ -209,10 +209,9 @@ impl KernelProcessEngine {
             .await
             .map_err(|error| HeapFault::Transport(error.to_string()))?
             .ok_or_else(|| refused("the process has no execution root"))?;
-        let selection = lash_kernel_doc::Selection::Fresh;
         let prior = self
             .documents
-            .admit_execution(prior_content, &selection)
+            .admit_execution(prior_content)
             .map_err(|error| refused(error.to_string()))?;
         let pinned_document = prior
             .content
@@ -236,7 +235,6 @@ impl KernelProcessEngine {
             &prior.reach.machine,
             &self.functions,
             &self.helpers,
-            &selection,
         )
         .map_err(|error| refused(error.to_string()))?;
         let pinned_closure = PageId(old.closure.reference().0);
@@ -346,7 +344,6 @@ impl KernelProcessEngine {
             &selected.machine,
             &self.functions,
             &self.helpers,
-            &selection,
         )
         .map_err(|error| refused(error.to_string()))?;
         let closure = assembled.closure;
@@ -363,7 +360,6 @@ impl KernelProcessEngine {
                 assembled.registry,
                 Arc::clone(&self.helpers),
             ),
-            lash_kernel_doc::Selection::Fresh,
         )
         .map_err(|e| refused(e.to_string()))?;
         program.functions = closure.body().identities().collect();
@@ -384,7 +380,6 @@ impl KernelProcessEngine {
                 closure: pinned_closure,
                 code: prior.ordinary.clone(),
                 links: next_content.links.clone(),
-                selection,
                 retained: Default::default(),
                 uses: uses.uses.clone(),
             },
@@ -630,11 +625,7 @@ fn check_origin(
     {
         return Ok(());
     }
-    let callable = lash_kernel_value::CallableId { link, function };
-    if context
-        .selection
-        .admits_helper(&callable, &document.library, program.helpers())
-    {
+    if program.helpers().admits(&document.library, &function) {
         return Ok(());
     }
     Err(lash_kernel_migrate::ParkedRefusal::FunctionNotCarried { function }.into())

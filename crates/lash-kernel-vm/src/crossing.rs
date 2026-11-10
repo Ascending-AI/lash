@@ -34,7 +34,6 @@ pub(crate) struct CrossingRun<'a> {
     pub instances: &'a BTreeMap<LinkId, crate::interface::PreparedInstance>,
     pub catalog: &'a dyn FunctionCatalog,
     pub helpers: &'a lash_kernel_doc::BuildHelpers,
-    pub selection: &'a lash_kernel_doc::Selection,
     pub data: KernelDataLimits,
 }
 

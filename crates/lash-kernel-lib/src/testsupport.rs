@@ -254,7 +254,6 @@ pub(crate) fn program(
         &BTreeMap::from([(link.identity(), link)]),
         PageId([8; 32]),
         library,
-        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap()
 }

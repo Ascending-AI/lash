@@ -848,7 +848,6 @@ fn entry_annotations_distinguish_written_any_from_missing() {
                 .entry_export(
                     &lowered.document,
                     &lash_kernel_releases::helper_release().unwrap().helpers,
-                    &lash_kernel_doc::Selection::Fresh,
                 )
                 .unwrap_err()
         else {
@@ -951,7 +950,6 @@ fn entry_annotations_distinguish_written_any_from_missing() {
             .entry_export(
                 &lowered.document,
                 &lash_kernel_releases::helper_release().unwrap().helpers,
-                &lash_kernel_doc::Selection::Fresh,
             )
             .unwrap_err()
         else {
@@ -1153,7 +1151,6 @@ fn entry_record_modes_survive_source_and_saved_function_promotion() {
                 .entry_export(
                     &lowered.document,
                     &lash_kernel_releases::helper_release().unwrap().helpers,
-                    &lash_kernel_doc::Selection::Fresh
                 )
                 .unwrap()
                 .signature,
