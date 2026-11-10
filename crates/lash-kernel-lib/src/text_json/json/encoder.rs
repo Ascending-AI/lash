@@ -670,8 +670,8 @@ impl<'k, A: Source<'k>, S: Output> Encoder<'_, '_, '_, '_, 'k, A, S> {
                     false
                 } else if self.legacy_markers {
                     fields.iter().any(|(key, _)| key == "__lash_brand")
-                } else if source.javascript()
-                    && let Some((_, brand)) = fields.iter().find(|(key, _)| key == "__lash_brand")
+                } else if let Some((_, brand)) =
+                    fields.iter().find(|(key, _)| key == "__lash_brand")
                     && let View::Sequence(parts, "tuple") =
                         source.view(brand, &mut self.out.output)?
                     && parts.len() == 2
