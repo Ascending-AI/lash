@@ -48,20 +48,45 @@ pub struct RunCorrespondence {
     /// its exact defining Link and code.
     pub retained: BTreeSet<LinkId>,
     /// Where each node of the predecessor's own code went, when the
-    /// succession moved or rewrote nodes: a site of its main or a declared
-    /// function is carried to its successor or refused; a library unit's
-    /// site keeps its path, its function id mapped by `functions`.
+    /// succession moved or rewrote nodes: a site of its main, or of a
+    /// library function whose body the correspondence lists, is carried to
+    /// its successor or refused; a site of any other library function keeps
+    /// its path, its function id mapped by `functions`.
     pub sites: Option<SiteMap>,
 }
 
-/// A document correspondence: where each node of its base went.
+/// A document correspondence and the library functions whose bodies it
+/// vouches for: a migration lists a library body's nodes only when it
+/// vouches for where the redeclared body put them.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SiteMap(Correspondence);
+pub struct SiteMap {
+    correspondence: Correspondence,
+    libraries: BTreeSet<FunctionId>,
+}
 
 impl SiteMap {
     /// The site map `correspondence` states.
     pub fn new(correspondence: Correspondence) -> Self {
-        Self(correspondence)
+        let libraries = correspondence
+            .entries()
+            .iter()
+            .filter_map(|entry| match entry.from.unit {
+                Unit::Library(function) => Some(function),
+                Unit::Main | Unit::Function(_) => None,
+            })
+            .collect();
+        Self {
+            correspondence,
+            libraries,
+        }
+    }
+
+    /// Whether a site of `unit` is carried by the correspondence.
+    fn covers(&self, unit: &Unit) -> bool {
+        match unit {
+            Unit::Library(function) => self.libraries.contains(function),
+            Unit::Main | Unit::Function(_) => true,
+        }
     }
 }
 
@@ -209,14 +234,12 @@ impl Ids<'_> {
                 live.sites.insert(site.clone());
             }
             Self::Map {
-                map:
-                    RunCorrespondence {
-                        sites: Some(SiteMap(map)),
-                        ..
-                    },
+                map: RunCorrespondence {
+                    sites: Some(map), ..
+                },
                 ..
-            } if !matches!(site.unit, Unit::Library(_)) => {
-                *site = map.successor(site).cloned().ok_or_else(|| {
+            } if map.covers(&site.unit) => {
+                *site = map.correspondence.successor(site).cloned().ok_or_else(|| {
                     RewriteFault::Unmapped(Unmapped::Site {
                         site: site.clone(),
                         held,

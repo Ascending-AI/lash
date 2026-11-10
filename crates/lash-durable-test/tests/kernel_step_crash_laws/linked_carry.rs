@@ -94,17 +94,13 @@ impl Fixture {
         );
         leaf.functions.insert(entry.identity(), entry);
         let (mut content, leaf) = publish(&stores, &leaf, "exact-A").await;
-        let wrapper = lash_kernel_doc::parse_definition("function pkg.wrapper() -> Any\nkernel 1\nmetering statements\nimport 0 code pkg.run() -> Any direct\nbody { let answer = invoke import 0() return answer }").unwrap();
-        let header = format!(
-            "kernel 1\nnumbers float\nimport 0 code pkg.run() -> Any direct\ndefinition {}\n",
-            serde_json::to_string(&lash_kernel_doc::print_definition(&wrapper)).unwrap()
-        );
+        let header = "kernel 1\nnumbers float\nimport 0 code pkg.run() -> Any direct\n";
         let before = lash_kernel_doc::parse_document(&format!(
-            "{header}main {{ let answer = invoke pkg.wrapper() return answer }}"
+            "{header}main {{ let task = spawn invoke import 0() let answer = join task return answer }}"
         ))
         .unwrap();
         let after = lash_kernel_doc::parse_document(&format!(
-            "{header}main {{ let answer = invoke pkg.wrapper() let successor = 1 return answer }}"
+            "{header}main {{ let task = spawn invoke import 0() let answer = join task let successor = 1 return answer }}"
         ))
         .unwrap();
         let mut add = |document: Document| {

@@ -13,6 +13,9 @@
 //!   a page: a node that did not survive is never carried onto whatever
 //!   node the successor has at its path. A held closure's body's site
 //!   carries by identity whatever the site correspondence says.
+//! - A site of a document function whose body the site correspondence
+//!   lists is carried or refused like main's; one whose body it does not
+//!   list keeps its path.
 
 use std::collections::BTreeSet;
 
@@ -232,4 +235,87 @@ fn a_rewrite_moves_active_code_keeps_held_code_and_refuses_before_writing() {
         "the held closure's body's sites carry by identity"
     );
     assert_eq!(held(&source, rewritten.heap.id, &old), kept, "old ids left");
+}
+
+/// A run parked inside a function its document declares.
+const DECLARED: &str = "definition \"function inner() -> Any\\nkernel 1\\nmetering statements\\nbody { let w = perform 0(1) as Any return w }\"\nmain {\n  let v = call inner()\n  return v\n}";
+
+/// A site correspondence that lists the declared function's body but drops
+/// the site its frame stands at refuses with that site and writes nothing;
+/// one that lists none of its body carries its sites at their paths.
+#[test]
+fn a_listed_declared_function_site_is_carried_or_refused_and_an_unlisted_one_keeps_its_path() {
+    let source = Source::default();
+    let mut machine = <CoreMachine as Machine>::start(
+        core_program(DECLARED, None),
+        ROOMY,
+        Setup::default().start,
+        Box::new(source.clone()),
+    )
+    .unwrap();
+    let Step::Parked(_) = machine.run(&mut World::default(), u64::MAX).unwrap() else {
+        panic!("the run never parks");
+    };
+    let sealed = machine
+        .seal(lash_kernel_state::paged::SealBudget {
+            pages: u64::MAX,
+            bytes: u64::MAX,
+        })
+        .unwrap()
+        .unwrap();
+    let root = crate::kernel_internals::sealed_root(&sealed).clone();
+    drop(machine);
+    let mut pages = source.clone();
+    let live = live_code(&mut pages, &root).unwrap();
+    let inner = live
+        .frames
+        .iter()
+        .find_map(|(_, unit)| matches!(unit, Unit::Library(_)).then(|| unit.clone()))
+        .expect("the run stands in the declared function");
+    let mut map = RunCorrespondence::default();
+    map.links
+        .extend(live.links.iter().map(|link| (*link, *link)));
+    map.functions
+        .extend(live.functions.iter().map(|function| (*function, *function)));
+    map.retained
+        .extend(live.callables.iter().map(|callable| callable.link));
+    let identity = |keep: &dyn Fn(&Site) -> bool| {
+        Some(SiteMap::new(
+            lash_kernel_doc::Correspondence::identity(
+                root.document,
+                live.sites.iter().filter(|site| keep(site)).cloned(),
+            )
+            .unwrap(),
+        ))
+    };
+    let body: Vec<Site> = live
+        .sites
+        .iter()
+        .filter(|site| site.unit == inner)
+        .cloned()
+        .collect();
+    let dropped = body.iter().max().cloned().expect("its frame stands in it");
+
+    let written = source.0.borrow().len();
+    let mut listed = map.clone();
+    listed.sites = identity(&|site| *site != dropped);
+    let refused = rewrite(&mut pages, &root, &listed);
+    assert!(
+        matches!(
+            &refused,
+            Err(RewriteFault::Unmapped(
+                lash_kernel_state::paged::run::rewrite::Unmapped::Site { site, .. }
+            )) if *site == dropped
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(source.0.borrow().len(), written, "a refusal wrote a page");
+
+    map.sites = identity(&|site| site.unit != inner);
+    let rewritten = rewrite(&mut pages, &root, &map).unwrap();
+    let after = live_code(&mut pages, &rewritten).unwrap();
+    assert!(
+        body.iter().all(|site| after.sites.contains(site)),
+        "an unlisted body's sites keep their paths"
+    );
 }
