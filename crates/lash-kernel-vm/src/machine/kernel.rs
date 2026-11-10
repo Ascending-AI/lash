@@ -286,8 +286,31 @@ impl KernelMachine {
     )> {
         retired("pending_roles")
     }
+    /// The tasks holding a delivered wait they have not yet run with, read
+    /// from an unbudgeted seal's run record.
     pub(crate) fn delivered_tasks(&mut self) -> Vec<lash_kernel_doc::TaskId> {
-        retired("delivered_tasks")
+        use lash_kernel_state::paged::run::continuation::{self, WaitPhase};
+        let sealed = self
+            .core
+            .seal(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            })
+            .expect("the run seals")
+            .expect("an unbudgeted seal completes");
+        let access = self
+            .core
+            .page_access()
+            .expect("a sealed run has a page port");
+        let record = continuation::read(access, sealed.root.heap).expect("the seal reads back");
+        let mut tasks: Vec<_> = record
+            .waits
+            .iter()
+            .filter(|wait| matches!(wait.phase, WaitPhase::Completed(_) | WaitPhase::Failed(_)))
+            .map(|wait| lash_kernel_doc::TaskId(u64::from(wait.task)))
+            .collect();
+        tasks.dedup();
+        tasks
     }
     pub(crate) fn loop_headers(&mut self) -> Vec<lash_kernel_state::paged::HeaderRecord> {
         retired("loop_headers")

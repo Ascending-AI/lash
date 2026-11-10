@@ -389,19 +389,21 @@ fn session_binding_keys_survive_cold_reopens() {
     };
     assert_eq!(finished.result, int(7));
     let carry = finished.carry.expect("a session cell carries bindings");
-    let mut heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
-        lash_kernel_state::kernel_internals::session_heap(&carry),
+    let (session, _) = lash_kernel_state::paged::run::session::open(
         Box::new(embedder.source.clone()),
-        lash_kernel_state::paged::EditEpoch(2),
+        lash_kernel_state::kernel_internals::session_heap(&carry),
     )
     .unwrap();
-    lash_kernel_state::paged::HeapLifecycle::adopt(&mut heap, &carry).unwrap();
     for name in ["v0", "v69", long.as_str()] {
-        assert!(
-            heap.session_binding(&lash_kernel_value::names::Name::new(name))
-                .unwrap()
-                .is_some(),
-            "the prepared key must equal the canonical key for {name}"
+        let at = session
+            .names
+            .iter()
+            .position(|bound| bound.as_str() == name)
+            .unwrap_or_else(|| panic!("the carried session names {name}"));
+        assert_eq!(
+            session.binding(at),
+            Some(&lash_kernel_state::paged::run::objects::RunValue::Int(7)),
+            "{name} carries the value it was last set to"
         );
     }
 }
