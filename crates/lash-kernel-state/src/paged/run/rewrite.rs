@@ -48,32 +48,20 @@ pub struct RunCorrespondence {
     /// its exact defining Link and code.
     pub retained: BTreeSet<LinkId>,
     /// Where each node of the predecessor's own code went, when the
-    /// succession moved or rewrote nodes: a site in one of its units is
-    /// carried to its successor or refused; any other site keeps its path,
-    /// its unit's function id mapped by `functions`.
+    /// succession moved or rewrote nodes: a site of its main or a declared
+    /// function is carried to its successor or refused; a library unit's
+    /// site keeps its path, its function id mapped by `functions`.
     pub sites: Option<SiteMap>,
 }
 
-/// A document correspondence and the units of its base it covers.
+/// A document correspondence: where each node of its base went.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SiteMap {
-    correspondence: Correspondence,
-    units: BTreeSet<Unit>,
-}
+pub struct SiteMap(Correspondence);
 
 impl SiteMap {
-    /// The site map `correspondence` states: its base's units are the
-    /// units its entries leave from.
+    /// The site map `correspondence` states.
     pub fn new(correspondence: Correspondence) -> Self {
-        let units = correspondence
-            .entries()
-            .iter()
-            .map(|entry| entry.from.unit.clone())
-            .collect();
-        Self {
-            correspondence,
-            units,
-        }
+        Self(correspondence)
     }
 }
 
@@ -82,8 +70,12 @@ impl SiteMap {
 pub enum Unmapped {
     Link(LinkId),
     Function(FunctionId),
-    /// A site of the predecessor's code whose node did not survive.
-    Site(Site),
+    /// A site of the predecessor's code whose node did not survive, and
+    /// what of the run holds it.
+    Site {
+        site: Site,
+        held: &'static str,
+    },
 }
 
 /// Why a run was not rewritten. Nothing was written when the fault is
@@ -197,12 +189,18 @@ impl Ids<'_> {
         }
     }
 
-    fn site(&mut self, site: &mut Site) -> Result<(), RewriteFault> {
-        self.site_of(None, site)
+    /// `site`, which `held` names the holder of.
+    fn site(&mut self, site: &mut Site, held: &'static str) -> Result<(), RewriteFault> {
+        self.site_of(None, site, held)
     }
 
     /// `site`, of code of `link` when that is known.
-    fn site_of(&mut self, link: Option<LinkId>, site: &mut Site) -> Result<(), RewriteFault> {
+    fn site_of(
+        &mut self,
+        link: Option<LinkId>,
+        site: &mut Site,
+        held: &'static str,
+    ) -> Result<(), RewriteFault> {
         if self.held(link, site) {
             return Ok(());
         }
@@ -211,16 +209,19 @@ impl Ids<'_> {
                 live.sites.insert(site.clone());
             }
             Self::Map {
-                map: RunCorrespondence {
-                    sites: Some(map), ..
-                },
+                map:
+                    RunCorrespondence {
+                        sites: Some(SiteMap(map)),
+                        ..
+                    },
                 ..
-            } if map.units.contains(&site.unit) => {
-                *site = map
-                    .correspondence
-                    .successor(site)
-                    .cloned()
-                    .ok_or_else(|| RewriteFault::Unmapped(Unmapped::Site(site.clone())))?;
+            } if !matches!(site.unit, Unit::Library(_)) => {
+                *site = map.successor(site).cloned().ok_or_else(|| {
+                    RewriteFault::Unmapped(Unmapped::Site {
+                        site: site.clone(),
+                        held,
+                    })
+                })?;
                 return Ok(());
             }
             Self::Map { .. } => {}
@@ -234,16 +235,16 @@ impl Ids<'_> {
     fn task(&mut self, task: &mut TaskIdentity) -> Result<(), RewriteFault> {
         if let TaskIdentity::Spawned(spawned) = task {
             self.task(Arc::make_mut(&mut spawned.parent))?;
-            self.site(&mut spawned.site)?;
+            self.site(&mut spawned.site, "task spawn")?;
         }
         Ok(())
     }
 
     fn effect(&mut self, effect: &mut EffectIdentity) -> Result<(), RewriteFault> {
         self.task(&mut effect.task)?;
-        self.site(&mut effect.site)?;
+        self.site(&mut effect.site, "wait")?;
         for each in &mut effect.loops {
-            self.site(&mut each.site)?;
+            self.site(&mut each.site, "wait loop")?;
         }
         Ok(())
     }
@@ -375,24 +376,48 @@ impl Ids<'_> {
         for read in &mut record.reads {
             self.link(&mut read.link)?;
         }
+        // Every task's spawn origin answers before any frame does.
+        for origin in record
+            .tasks
+            .iter_mut()
+            .filter_map(|task| task.spawn_origin.as_mut())
+        {
+            self.site(origin, "spawn origin")?;
+        }
         for task in &mut record.tasks {
             self.task(&mut task.identity)?;
             for frame in &mut task.frames {
                 // A frame running a held closure runs its retained code.
                 if frame.closure.is_none() || matches!(self, Self::Collect(_)) {
                     self.link(&mut frame.unit.link)?;
-                    self.site(&mut frame.unit.site)?;
-                    self.site(&mut frame.site)?;
+                    self.site(&mut frame.unit.site, "frame compilation origin")?;
+                    let unit = frame.site.unit.clone();
+                    self.site(&mut frame.site, "frame point")?;
+                    // A slot is named by the path of its declaring site in
+                    // the frame's unit; it moves with the unit's sites.
+                    for slot in &mut frame.slots {
+                        let old = Site::new(unit.clone(), std::mem::take(&mut slot.site));
+                        let mut site = old.clone();
+                        self.site(&mut site, "variable declaration")?;
+                        if site.unit != frame.site.unit {
+                            return Err(RewriteFault::Unmapped(Unmapped::Site {
+                                site: old,
+                                held: "variable declaration",
+                            }));
+                        }
+                        slot.site = site.path;
+                    }
                 }
             }
             for occurrence in &mut task.occurrences {
                 if !self.held(Some(occurrence.link), &occurrence.site) {
                     self.link(&mut occurrence.link)?;
                 }
-                self.site_of(Some(occurrence.link), &mut occurrence.site)?;
-            }
-            if let Some(origin) = &mut task.spawn_origin {
-                self.site(origin)?;
+                self.site_of(
+                    Some(occurrence.link),
+                    &mut occurrence.site,
+                    "action occurrence",
+                )?;
             }
         }
         for request in record
@@ -405,7 +430,7 @@ impl Ids<'_> {
             for arg in &mut request.args {
                 self.datum(arg)?;
             }
-            self.site(&mut request.origin)?;
+            self.site(&mut request.origin, "request origin")?;
         }
         for function in record.pins.iter_mut().chain(&mut record.held_code) {
             self.function(function)?;

@@ -206,7 +206,9 @@ fn a_rewrite_moves_active_code_keeps_held_code_and_refuses_before_writing() {
     assert!(
         matches!(
             &refused,
-            Err(RewriteFault::Unmapped(lash_kernel_state::paged::run::rewrite::Unmapped::Site(site))) if *site == dropped
+            Err(RewriteFault::Unmapped(
+                lash_kernel_state::paged::run::rewrite::Unmapped::Site { site, .. }
+            )) if *site == dropped
         ),
         "{refused:?}"
     );

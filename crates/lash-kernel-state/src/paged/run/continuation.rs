@@ -166,7 +166,9 @@ record! {
         pub site: Site,
         pub phase: PointPhase,
         pub copy: u32,
-        /// Every slot, in the unit's slot order.
+        /// Its slots, each named by its declaring site in the unit; a slot
+        /// the opening build's unit declares and the frame does not hold, as
+        /// a succession's new local, opens absent.
         pub slots: Vec<RunSlot>,
         /// The operands above its slots, in the resume table's order.
         pub operands: Vec<u32>,

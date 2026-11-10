@@ -41,6 +41,11 @@ fn carry_fault(fault: RewriteFault) -> CarryFault {
         RewriteFault::Unmapped(Unmapped::Function(function)) => {
             ParkedRefusal::FunctionNotCarried { function }.into()
         }
+        RewriteFault::Unmapped(Unmapped::Site { site, held }) => ParkedRefusal::SiteNotCarried {
+            site,
+            held: held.into(),
+        }
+        .into(),
         other => refused(other.to_string()),
     }
 }
