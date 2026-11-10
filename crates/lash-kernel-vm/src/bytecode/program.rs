@@ -413,7 +413,7 @@ pub enum Callee {
 #[derive(Clone, Debug)]
 pub struct CallSite {
     pub callee: Callee,
-    pub argc: u8,
+    pub argc: u16,
     pub site: Site,
     /// Where the calling frame stands while the callee runs.
     pub mark: Arc<Mark>,
@@ -482,7 +482,7 @@ pub enum ActionSite {
         /// code: the slot is in that body's imports.
         owner: Option<FunctionId>,
         slot: ImportSlot,
-        argc: u8,
+        argc: u16,
         result: Type,
         then_yield: bool,
         site: Site,
@@ -491,7 +491,7 @@ pub enum ActionSite {
     /// included) on the stack.
     Spawn {
         unit: UnitId,
-        argc: u8,
+        argc: u16,
         site: Site,
     },
     Join {
@@ -533,7 +533,7 @@ impl ActionSite {
 pub struct NativeEntry {
     pub function: FunctionId,
     pub name: Arc<str>,
-    pub params: u8,
+    pub params: u16,
     /// The completion formula.
     pub charge: u32,
     /// The guard's limit, if the definition states one (`K-LIB-008`).

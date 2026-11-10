@@ -746,7 +746,7 @@ impl Compiler<'_> {
             }
         };
         f.point(f.here(), Point::Action(site.clone()));
-        self.entered_call(f, target, argc as u8, site);
+        self.entered_call(f, target, argc as u16, site);
         if let Some(call) = f.calls.last_mut() {
             call.checked = checked;
         }
@@ -767,7 +767,7 @@ impl Compiler<'_> {
             ActionSite::Perform {
                 owner: f.owner,
                 slot: *slot,
-                argc: argc as u8,
+                argc: argc as u16,
                 result: result.clone(),
                 then_yield,
                 site,
@@ -784,8 +784,8 @@ impl Compiler<'_> {
             }),
             DocCallee::Import(slot) => Some(self.imported(*slot)?),
         };
-        let unit = self.stub(f, target, argc as u8)?;
-        let values = argc as u8 + u8::from(target.is_none());
+        let unit = self.stub(f, target, argc as u16)?;
+        let values = argc as u16 + u16::from(target.is_none());
         self.task_action(
             f,
             ActionSite::Spawn {
@@ -879,7 +879,7 @@ impl Compiler<'_> {
                 }
                 let site = f.site();
                 let callee = self.callee(f, *function)?;
-                self.call(f, callee, args.len() as u8, site);
+                self.call(f, callee, args.len() as u16, site);
             }
             Expr::If { cond, then, r#else } => {
                 self.child(f, 0, cond)?;

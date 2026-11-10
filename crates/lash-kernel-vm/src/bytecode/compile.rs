@@ -392,7 +392,7 @@ struct LinkCode {
     bodies: HashMap<(FunctionId, bool), UnitId>,
     /// By the spawn's site, which roots the stub: a saved task names its
     /// stub by that site.
-    stubs: HashMap<(Site, Option<CallableId>, u8), UnitId>,
+    stubs: HashMap<(Site, Option<CallableId>, u16), UnitId>,
     free: HashMap<FunctionId, BTreeSet<Name>>,
     /// The unit each unavailable helper compiled to.
     missing: HashMap<FunctionId, UnitId>,
@@ -1224,7 +1224,7 @@ impl<'a> Compiler<'a> {
         self.natives.push(NativeEntry {
             function: id,
             name: Arc::from(definition.name.as_str()),
-            params: definition.signature.params.len() as u8,
+            params: definition.signature.params.len() as u16,
             charge,
             guard,
             body: None,
@@ -1319,7 +1319,7 @@ impl<'a> Compiler<'a> {
         }
         let site = f.site();
         let callee = self.callee(&f, id)?;
-        self.call(&mut f, callee, argc as u8, site);
+        self.call(&mut f, callee, argc as u16, site);
         f.emit(Op::Return);
         let name = Arc::from(format!("&{}", definition.name.as_str()));
         self.seal(f, at, UnitKind::Body(id), argc as u16, name);
@@ -1364,7 +1364,7 @@ impl<'a> Compiler<'a> {
 
     /// Emits a call through `callee` with `argc` arguments on the stack. A
     /// call that pushes a frame ends its block.
-    pub(crate) fn call(&mut self, f: &mut Fun, callee: Callee, argc: u8, site: Site) {
+    pub(crate) fn call(&mut self, f: &mut Fun, callee: Callee, argc: u16, site: Site) {
         let at = f.calls.len() as u32;
         let mark = self.mark(f, &site);
         f.calls.push(CallSite {
@@ -1383,7 +1383,7 @@ impl<'a> Compiler<'a> {
 
     /// A call action at `site`: [`Self::call`], its entries counted
     /// (`K-EFF-008`).
-    pub(crate) fn entered_call(&mut self, f: &mut Fun, callee: Callee, argc: u8, site: Site) {
+    pub(crate) fn entered_call(&mut self, f: &mut Fun, callee: Callee, argc: u16, site: Site) {
         self.call(f, callee, argc, site);
         if let Some(call) = f.calls.last_mut() {
             call.entry = Some(call.mark.occurrence);
@@ -1425,7 +1425,12 @@ impl<'a> Compiler<'a> {
     /// `spawn`'s stub: its parameters are the call's arguments (a value
     /// callee first), and it makes the call. A task is no part of its
     /// spawner's call, so a covered spawner's cover does not reach it.
-    pub(crate) fn stub(&mut self, f: &Fun, callee: Option<CallableId>, argc: u8) -> Result<UnitId> {
+    pub(crate) fn stub(
+        &mut self,
+        f: &Fun,
+        callee: Option<CallableId>,
+        argc: u16,
+    ) -> Result<UnitId> {
         let site = f.site();
         let key = (site.clone(), callee, argc);
         if let Some(unit) = self.scope.stubs.get(&key) {
@@ -1433,7 +1438,7 @@ impl<'a> Compiler<'a> {
         }
         let at = self.reserve();
         self.scope.stubs.insert(key, at);
-        let values = u16::from(argc) + u16::from(callee.is_none());
+        let values = argc + u16::from(callee.is_none());
         let mut g = Fun::new(site.unit.clone(), false, false, f.owner);
         g.path.clone_from(&site.path);
         g.locals = values;

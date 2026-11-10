@@ -114,7 +114,7 @@ fn follow(
     program: &Program,
     unit: &Unit,
     n: u32,
-    argc: u8,
+    argc: u16,
     pc: usize,
     path: Path,
     folds: &mut Vec<Fold>,
@@ -133,7 +133,7 @@ fn walk(
     program: &Program,
     unit: &Unit,
     n: u32,
-    argc: u8,
+    argc: u16,
     mut pc: usize,
     mut path: Path,
     folds: &mut Vec<Fold>,
@@ -149,7 +149,7 @@ fn walk(
             Op::Local(local) => {
                 let slot = match path.set.iter().rev().find(|(set, _)| *set == local) {
                     Some(&(_, slot)) => slot,
-                    None if local < u16::from(argc) => Slot::Local(local),
+                    None if local < argc => Slot::Local(local),
                     None => return None,
                 };
                 path.stack.push(slot);
@@ -201,7 +201,7 @@ fn walk(
                 let made = path.make(Step::Answer {
                     operation,
                     args,
-                    argc: call.argc,
+                    argc: u8::try_from(call.argc).ok()?,
                 })?;
                 path.stack.push(made);
             }
