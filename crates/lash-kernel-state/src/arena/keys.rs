@@ -15,13 +15,14 @@ use std::hash::BuildHasher;
 
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Objects, Sequence, ShortText, Table};
 use lash_kernel_doc::heap::{Identity, NormalKey};
-use lash_kernel_doc::heap_values::{integral_float, key_digest};
+use lash_kernel_doc::heap_values::integral_float;
 use lash_kernel_doc::{Integer, NativeError, Retry, Semantics, Timestamp, Value};
 
 use lash_kernel_value::data_limits::KernelDataLimits;
 use {lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenWriter};
 
 use super::Facts;
+use crate::paged::identity;
 
 /// Bounded, process-local normalized short keys. Colliding cache slots compare
 /// the complete short text; a miss replaces the slot, never aliases its key.
@@ -191,9 +192,9 @@ fn certified<'a>(
 }
 
 /// The tokens a tuple's member contributes to the tuple's normal form: an
-/// immutable object's own normal form, its tokens when they are held whole
-/// and its digest otherwise, so a tuple's normal form needs no member's
-/// body once the member has a head (`D-KEY`).
+/// immutable object's own normal form, embedded by
+/// [`identity::embed`](crate::paged::identity::embed), so a tuple's normal
+/// form needs no member's body once the member has a head (`D-KEY`).
 fn nested(
     objects: &(impl super::Bodies + ?Sized),
     facts: &(impl super::FactTable + ?Sized),
@@ -207,13 +208,8 @@ fn nested(
         | Value::BigTimestamp(_)
         | Value::Bytes(_) => match normal_key(objects, facts, member)? {
             None => Ok(false),
-            Some(NormalKey::Inline(tokens)) => {
-                out.raw(&tokens);
-                Ok(true)
-            }
-            Some(NormalKey::Digest(digest)) => {
-                out.sum(11, 1);
-                out.bytes(&digest);
+            Some(key) => {
+                identity::embed(&key, out);
                 Ok(true)
             }
         },
@@ -352,24 +348,52 @@ pub(crate) fn normal_key(
     if let Some(normal) = certified(facts, value) {
         return Ok(normal.cloned());
     }
+    if let Value::LongText(handle) | Value::Bytes(handle) = value {
+        return long_key(Some(*handle), body(objects, *handle)?).map(Some);
+    }
     let mut out = TokenWriter::new();
     if !tokens(objects, facts, value, &mut out)? {
         return Ok(None);
     }
-    Ok(Some(finish(out)))
+    Ok(Some(identity::flat(out)))
+}
+
+/// The key of a held text or bytes `body`, of `object` when the arena
+/// holds it, by its content's length ([`identity`]).
+fn long_key(object: Option<ArenaHandle>, body: &Body) -> Result<NormalKey, NativeError> {
+    let unread = |chunk: u32| match object {
+        Some(object) => NativeError::from(Retry::Cold { object, chunk }),
+        None => NativeError::Malformed("a detached body holds a cold chunk"),
+    };
+    fn held<T>(chunks: &[Chunk<T>]) -> Result<Option<&T>, u32> {
+        match chunks {
+            [] => Ok(None),
+            [Chunk::Resident(whole)] => Ok(Some(whole)),
+            chunks => Err(super::first_cold(chunks).unwrap_or(0)),
+        }
+    }
+    match body {
+        Body::LongText(text) if text.moved() => Err(NativeError::Malformed(
+            "a text whose storage moved was read",
+        )),
+        Body::LongText(text) => Ok(identity::text_key(
+            held(&text.chunks).map_err(unread)?.map_or("", |text| text),
+        )),
+        Body::Bytes(bytes) => Ok(identity::bytes_key(
+            held(&bytes.chunks)
+                .map_err(unread)?
+                .map_or(&[], |bytes| bytes),
+        )),
+        Body::Cold(_) => Err(unread(0)),
+        _ => Err(NativeError::Malformed(
+            "a text or bytes handle names another body",
+        )),
+    }
 }
 
 /// The normal form of a text key: what a record field name is keyed by.
 pub fn text_key(text: &str) -> NormalKey {
-    let mut out = TokenWriter::new();
-    out.sum(4, 1);
-    out.text(text);
-    let bytes = out.into_bytes();
-    if bytes.len() <= NormalKey::INLINE_MAX {
-        NormalKey::Inline(bytes)
-    } else {
-        NormalKey::Digest(key_digest(&bytes))
-    }
+    identity::text_key(text)
 }
 
 pub(super) fn tokens(
@@ -434,9 +458,14 @@ pub(super) fn tokens(
                 }
             }
         }
+        // A text or bytes object is keyed by its identity, which a token
+        // stream holds only embedded ([`nested`]).
+        Value::LongText(_) | Value::Bytes(_) => {
+            return Err(NativeError::Malformed(
+                "a text or bytes object is keyed by its identity, not its tokens",
+            ));
+        }
         Value::BigInt(handle)
-        | Value::LongText(handle)
-        | Value::Bytes(handle)
         | Value::BigTimestamp(handle)
         | Value::Function(handle)
         | Value::Tuple(handle) => {
@@ -461,34 +490,10 @@ fn body_tokens(
         Some(object) => NativeError::from(Retry::Cold { object, chunk }),
         None => NativeError::Malformed("a detached body holds a cold chunk"),
     };
-    fn held<T>(chunks: &[Chunk<T>]) -> Result<Option<&T>, u32> {
-        match chunks {
-            [] => Ok(None),
-            [Chunk::Resident(whole)] => Ok(Some(whole)),
-            chunks => Err(super::first_cold(chunks).unwrap_or(0)),
-        }
-    }
     match body {
         Body::BigInt(int) => {
             out.sum(2, 1);
             int.encode(out);
-        }
-        Body::LongText(text) if text.moved() => {
-            return Err(NativeError::Malformed(
-                "a text whose storage moved was read",
-            ));
-        }
-        Body::LongText(text) => {
-            out.sum(4, 1);
-            out.text(held(&text.chunks).map_err(unread)?.map_or("", |text| text));
-        }
-        Body::Bytes(bytes) => {
-            out.sum(5, 1);
-            out.bytes(
-                held(&bytes.chunks)
-                    .map_err(unread)?
-                    .map_or(&[], |bytes| bytes),
-            );
         }
         Body::Timestamp(nanoseconds) => {
             out.sum(6, 1);
@@ -527,20 +532,14 @@ pub(crate) fn detached_normal(
     facts: &(impl super::FactTable + ?Sized),
     body: &Body,
 ) -> Result<Option<NormalKey>, NativeError> {
+    if let Body::LongText(_) | Body::Bytes(_) = body {
+        return long_key(None, body).map(Some);
+    }
     let mut out = TokenWriter::new();
     if !body_tokens(objects, facts, None, body, &mut out)? {
         return Ok(None);
     }
-    Ok(Some(finish(out)))
-}
-
-fn finish(out: TokenWriter) -> NormalKey {
-    let bytes = out.into_bytes();
-    if bytes.len() <= NormalKey::INLINE_MAX {
-        NormalKey::Inline(bytes)
-    } else {
-        NormalKey::Digest(key_digest(&bytes))
-    }
+    Ok(Some(identity::flat(out)))
 }
 
 enum Step<'a> {

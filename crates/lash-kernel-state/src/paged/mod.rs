@@ -65,6 +65,7 @@ pub(crate) mod tree;
 
 pub(crate) mod directory;
 pub(crate) mod heap_impl;
+pub mod identity;
 pub(crate) mod metadata;
 pub use metadata::{NameRef, SiteRef, TaskIdentityRef};
 pub(crate) mod payload;
@@ -81,6 +82,7 @@ pub use directory::execution::{
 #[cfg(test)]
 mod laws {
     pub mod heap;
+    mod identity;
     #[path = "../family_impl/laws.rs"]
     mod lifecycle;
     #[path = "../logical/laws.rs"]

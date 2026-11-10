@@ -4,6 +4,7 @@ use super::PageKind;
 use super::directory::Body;
 use super::directory::tuple_tree;
 use super::heap_impl::{PagedHeap, binary_summary, value_depth};
+use super::identity;
 use super::tree::{Access, grant};
 use super::{HeapWriteError, ObjectKind, SemanticHeap};
 use lash_kernel_doc::Integer;
@@ -37,17 +38,11 @@ impl TokenCodec for Part {
     }
 }
 pub fn build(access: &Access<'_>, bytes: &[u8], text: bool) -> Result<PageRef, HeapFault> {
+    let kind = identity::Kind::of(text);
     let mut parts = Vec::new();
-    let mut start = 0;
-    while start < bytes.len() {
-        let mut end = (start + PAYLOAD_LEAF_BYTES as usize).min(bytes.len());
-        if text {
-            while end < bytes.len() && (bytes[end] & 0xc0) == 0x80 {
-                end -= 1;
-            }
-        }
-        let chunk = &bytes[start..end];
-        let summary = summary(chunk, text)?;
+    for span in identity::cuts(bytes, kind) {
+        let chunk = &bytes[span];
+        let summary = identity::counts(chunk, kind)?;
         let mut out = TokenWriter::new();
         out.seq(3);
         text.encode(&mut out);
@@ -59,14 +54,13 @@ pub fn build(access: &Access<'_>, bytes: &[u8], text: bool) -> Result<PageRef, H
         }
         let page = access.seal(PageKind::PAYLOAD_LEAF, out.into_bytes(), Vec::new())?;
         parts.push(Part { summary, page });
-        start = end;
     }
     if parts.is_empty() {
         return Err(HeapFault::Malformed("empty payload must be inline".into()));
     }
     while parts.len() > 1 {
         let mut next = Vec::new();
-        for children in parts.chunks(32) {
+        for children in parts.chunks(identity::FANOUT) {
             let summary = add(children.iter().map(|p| p.summary))?;
             let page = access.seal(
                 PageKind::PAYLOAD_INDEX,
@@ -78,17 +72,6 @@ pub fn build(access: &Access<'_>, bytes: &[u8], text: bool) -> Result<PageRef, H
         parts = next;
     }
     Ok(parts[0].page)
-}
-fn summary(bytes: &[u8], text: bool) -> Result<TextSummary, HeapFault> {
-    Ok(if text {
-        text_summary(std::str::from_utf8(bytes).map_err(|e| HeapFault::Malformed(e.to_string()))?)
-    } else {
-        TextSummary {
-            utf8_bytes: bytes.len() as u64,
-            chars: 0,
-            utf16_units: 0,
-        }
-    })
 }
 fn add(parts: impl Iterator<Item = TextSummary>) -> Result<TextSummary, HeapFault> {
     let mut sum = TextSummary {
@@ -355,7 +338,7 @@ fn decode(part: &Part, text: bool, answer: super::PageAnswer) -> Result<Node, He
         if bytes.is_empty()
             || bytes.len() > PAYLOAD_LEAF_BYTES as usize
             || declared != part.summary
-            || summary(bytes, text)? != declared
+            || identity::counts(bytes, identity::Kind::of(text))? != declared
         {
             return Err(bad("payload leaf summary mismatch".into()));
         }

@@ -911,6 +911,15 @@ pub mod heap_values {
         hash.update(tokens);
         hash.finalize().into()
     }
+    /// SHA-256 of `parts` in order, with no framing of its own: the long
+    /// text and bytes identity grammar frames its preimages itself.
+    pub fn sha256(parts: &[&[u8]]) -> [u8; 32] {
+        let mut hash = Sha256::new();
+        for part in parts {
+            hash.update(part);
+        }
+        hash.finalize().into()
+    }
     pub fn integral_float(float: f64) -> Option<Integer> {
         (float.is_finite() && float.fract() == 0.0)
             .then(|| BigInt::from_f64(float).map(Integer::new))

@@ -112,6 +112,7 @@ pub const KERNEL_PARKED_STATE_VERSION: u32 = 16;
 ///         DOCUMENT_NODE_KIND, FUNCTION_BUNDLE_NODE_KIND, BundleBody, MemberBody, encode,
 ///         decode,
 ///     ),
+///     items(path = "crates/lash-kernel-state/src/paged/source.rs", PAGE_FORMAT),
 /// )
 /// format_manifest = "KernelSavedFunction"
 /// version_unguarded = "saved-function bundles are unversioned graph nodes; their document encoding and kernel admission govern compatibility, not record upcasters"

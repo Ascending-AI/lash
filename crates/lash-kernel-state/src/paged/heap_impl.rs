@@ -5,7 +5,7 @@ use super::tree::{Access, Cell, SealWork, Tree};
 use super::*;
 use lash_kernel_doc::Integer;
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::heap_values::{integral_float, key_digest};
+use lash_kernel_doc::heap_values::integral_float;
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
@@ -1225,18 +1225,6 @@ impl PagedHeap {
                         f.encode(out);
                     }
                 }
-                PageValue::Text(t) => {
-                    out.sum(4, 1);
-                    if let Some(text) = t.body.resident() {
-                        out.text(text);
-                    } else {
-                        out.text(&heap.copy_text(t)?);
-                    }
-                }
-                PageValue::Bytes(b) => {
-                    out.sum(5, 1);
-                    out.bytes(&heap.copy_bytes(b)?);
-                }
                 PageValue::Timestamp(t) => {
                     out.sum(6, 1);
                     t.encode(out);
@@ -1256,9 +1244,12 @@ impl PagedHeap {
                         let v = heap.tuple_get(t, i)?.ok_or_else(|| {
                             HeapFault::Malformed("tuple key element missing".into())
                         })?;
-                        if !tokens(heap, &v, out)? {
+                        // A member embeds its own key, as an arena tuple's
+                        // does (`identity::embed`).
+                        let Some(key) = heap.normalize_value(&v)? else {
                             return Ok(false);
-                        }
+                        };
+                        super::identity::embed(&key, out);
                     }
                 }
                 _ => return Ok(false),
@@ -1282,23 +1273,21 @@ impl PagedHeap {
         }) {
             return Ok(key.clone());
         }
-        let mut out = TokenWriter::new();
-        if !tokens(self, value, &mut out)? {
-            if let Some(cache) = cache {
-                if function {
-                    cache.set_function(None);
+        let key = match value {
+            PageValue::Text(text) => Some(match text.body.resident() {
+                Some(resident) => super::identity::text_key(resident),
+                None => super::identity::text_key(&self.copy_text(text)?),
+            }),
+            PageValue::Bytes(bytes) => Some(super::identity::bytes_key(&self.copy_bytes(bytes)?)),
+            _ => {
+                let mut out = TokenWriter::new();
+                if tokens(self, value, &mut out)? {
+                    Some(super::identity::flat(out))
                 } else {
-                    cache.set(None);
+                    None
                 }
             }
-            return Ok(None);
-        }
-        let bytes = out.into_bytes();
-        let key = Some(if bytes.len() <= NormalKey::INLINE_MAX {
-            NormalKey::Inline(bytes)
-        } else {
-            NormalKey::Digest(key_digest(&bytes))
-        });
+        };
         if let Some(cache) = cache {
             if function {
                 cache.set_function(key.clone());

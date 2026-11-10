@@ -56,6 +56,12 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     items(path = "crates/lash-kernel-state/src/paged/tree/inline.rs", inline_node, seal_nested, encode, decode),
 ///     items(path = "crates/lash-kernel-state/src/paged/payload.rs", Part, build, read, encode, decode),
 ///     items(
+///         path = "crates/lash-kernel-state/src/paged/identity.rs",
+///         FLAT_MAX, LEAF, FANOUT, Kind, Node, counts, cuts, leaf, index, of, text_key, bytes_key, long,
+///         embed, flat, encode,
+///     ),
+///     items(path = "crates/lash-kernel-state/src/arena/keys.rs", nested, normal_key, long_key, tokens, body_tokens, detached_normal),
+///     items(
 ///         path = "crates/lash-kernel-state/src/paged/metadata.rs",
 ///         NameRef, UnitRef, SiteRef, TaskIdentityRef, SpawnNode, encode, decode,
 ///     ),
@@ -76,7 +82,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///         cover("impl TokenCodec for Row", "impl TokenCodec for DirectoryRoot"),
 ///     ),
 ///     file(path = "crates/lash-kernel-state/src/paged/run/root.rs", cover("impl TokenCodec for HeapRoot")),
-///     items(path = "crates/lash-kernel-doc/src/graph_codec.rs", encode, decode),
+///     items(path = "crates/lash-kernel-doc/src/graph_codec.rs", encode, decode, key_digest, sha256, text_summary),
 ///     file(path = "crates/lash-checkpoint-encoder/src/registry.rs", cover("SEMANTIC_REGISTRY")),
 /// )
 /// version_surface = "coexist"
