@@ -608,9 +608,20 @@ fn collection_region_preparations_preserve_source_and_storage() {
         };
 
         let finished = matches!(&end, End::Finished(_));
+        // Reopen changes allocation history and tree packing: the carry is
+        // compared as its graph, in the PLAN-INDEP equality domain.
+        let mut end = end;
+        let session = if let End::Finished(finished) = &mut end {
+            finished.carry.take().map(|carry| {
+                lash_kernel_state::semantic::session(&carry, Box::new(runtime.source.clone()))
+                    .unwrap()
+            })
+        } else {
+            None
+        };
         (
             (
-                format!("{end:?}"),
+                format!("{end:?} {session:?}"),
                 runtime.machine.meters(),
                 crate::Weight::expand(tape.steps()),
                 stops,

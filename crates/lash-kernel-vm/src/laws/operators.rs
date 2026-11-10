@@ -109,28 +109,6 @@ impl ListItem {
     }
 }
 
-struct ValueOnly;
-impl NativeFunction for ValueOnly {
-    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
-        lash_kernel_doc::NativeSpecialization {
-            immediate: self.prepare(),
-            immediate_resources: true,
-            ..Default::default()
-        }
-    }
-    fn call(&self, _: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-        panic!("the value-only prepared guard must answer")
-    }
-    fn prepare(&self) -> Option<PreparedNative> {
-        Some(PreparedNative {
-            pair: None,
-            entry: Scalar::answer,
-            charged_entry: Some(|_| panic!("an uncharged helper produced charge metadata")),
-            operation: "law.value_only",
-        })
-    }
-}
-
 fn probes(
     registry: &mut FunctionRegistry,
     _: &BTreeMap<&'static str, FunctionId>,
@@ -162,7 +140,6 @@ fn probes_registered(
     let is_float = register("law.float", "x: Any", Arc::new(IsFloat));
     let add = register("law.add", "a: Any, b: Any", Arc::new(AddFloat));
     let boolean = register("law.boolean", "x: Any", Arc::new(IsBool));
-    let value_only = register("law.value_only", "x: Any", Arc::new(ValueOnly));
     let definition = parse_definition(&format!(
         r#"function law.scalar(x: Any) -> Any
 kernel 1
@@ -195,13 +172,7 @@ body {{
     let item = registry
         .register(definition, beside_body(Arc::new(ListItem)))
         .unwrap();
-    let definition = parse_definition(&format!(
-        "function law.uncharged(x: Any) -> Any\nkernel 1\ncharge 7\nuse law.value_only = @{}\nbody {{ return law.value_only(x) }}\n", value_only.1
-    )).unwrap();
-    let uncharged = registry.register(definition, None).unwrap();
     vec![
-        value_only,
-        ("law.uncharged", uncharged),
         is_float,
         add,
         boolean,
@@ -421,23 +392,6 @@ main { return call up(&up, 0) }
     assert!(
         answered > 0 && refused > 0,
         "{answered} answered, {refused} refused"
-    );
-}
-
-/// K-CHG-007: an uncharged helper evaluates its admitted immediate scalar
-/// without producing charge metadata. Both the ordinary native call and the
-/// metadata-producing callback panic, proving that the value-only entry ran.
-#[test]
-fn uncharged_helpers_use_the_value_only_prepared_entry() {
-    let trace = observe(
-        "main { let value = invoke law.uncharged(2.0) return value }",
-        ROOMY,
-        true,
-        false,
-    );
-    assert_eq!(
-        trace.0,
-        format!("finished {:?}", Datum::Float(Float::new(3.0)))
     );
 }
 

@@ -109,7 +109,7 @@ fn observe(cold: bool, source: bool) -> (EndState, Vec<Datum>, u64, usize, usize
     };
     // Reopen may change allocator history and tree packing. Compare the
     // complete carry graph through the kernel's PLAN-INDEP equality domain.
-    let session = if !source && let End::Finished(finished) = &mut end {
+    let session = if let End::Finished(finished) = &mut end {
         finished.carry.take().map(|carry| {
             lash_kernel_state::semantic::session(&carry, Box::new(embedder.source.clone())).unwrap()
         })
@@ -138,10 +138,11 @@ fn a_native_that_reads_every_chunk_cold_runs_as_it_runs_warm() {
         assert_eq!(cold_printed, printed);
         assert_eq!(cold_charged, charged);
         if source {
-            // Each of the eleven reading calls reads back at least one
-            // chunk the warm run holds resident.
+            // Forced cold, the run reads back from its pages what the warm
+            // run holds resident; a loaded object stays resident for the
+            // reads after it, so the count is not one per reading call.
             assert!(
-                pages >= warm_reads + 11,
+                pages > warm_reads,
                 "{pages} cold page reads, {warm_reads} warm"
             );
         } else {
