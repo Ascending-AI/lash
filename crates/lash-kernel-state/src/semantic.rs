@@ -289,10 +289,8 @@ pub fn checkpoint(
 /// # Errors
 /// Any fault reading a reachable page.
 pub fn session(root: &SessionRoot, source: Box<dyn PageSource>) -> Result<Checkpoint, HeapFault> {
-    if root.run_page().is_some() {
-        return Err(HeapFault::Malformed(
-            crate::paged::RUN_SESSION_REFUSED.into(),
-        ));
+    if let Some(page) = root.run_page() {
+        return run::session(page, source);
     }
     let mut heap = PagedHeap::open_header(
         crate::kernel_internals::session_heap(root),
@@ -509,5 +507,176 @@ impl Reader {
             }
         }
         Ok(())
+    }
+}
+
+/// The bytecode core's carried session in the same equality domain: each
+/// binding by name, then each saved function by name, every object it
+/// reaches numbered by first reach. A text or bytes is its content and a
+/// large list or table its members in order, whatever pages hold them.
+mod run {
+    use std::collections::BTreeMap;
+
+    use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, PageRef};
+    use lash_kernel_value::tokens::{TokenCodec, encode_body};
+
+    use super::Checkpoint;
+    use crate::paged::PageSource;
+    use crate::paged::run::chunked::{Members, each_members};
+    use crate::paged::run::directory::Directory;
+    use crate::paged::run::ids::ObjectId;
+    use crate::paged::run::objects::{ObjectKind, Record, RunValue};
+    use crate::paged::tree::Access;
+
+    pub(super) fn session(
+        page: PageRef,
+        source: Box<dyn PageSource>,
+    ) -> Result<Checkpoint, HeapFault> {
+        let access = Access::new(source);
+        let carried = crate::paged::run::session::read(&access, page)?;
+        let mut reader = Reader {
+            directory: Directory::over(carried.heap.directory, access),
+            graph: Vec::new(),
+            seen: BTreeMap::new(),
+            ids: Vec::new(),
+        };
+        reader.put(&(carried.names.len() as u64));
+        for (at, name) in carried.names.iter().enumerate() {
+            reader.put(name);
+            reader.value(carried.binding(at).ok_or_else(missing)?)?;
+        }
+        reader.put(&(carried.functions.len() as u64));
+        for (at, function) in carried.functions.iter().enumerate() {
+            reader.put(&function.name);
+            reader.graph.push(function.description.clone());
+            reader.value(carried.function(at).ok_or_else(missing)?)?;
+        }
+        Ok(Checkpoint {
+            continuation: Vec::new(),
+            graph: reader.graph,
+            ids: reader.ids,
+        })
+    }
+
+    fn missing() -> HeapFault {
+        HeapFault::Malformed("a carried session misses a value".into())
+    }
+
+    struct Reader {
+        directory: Directory,
+        graph: Vec<Vec<u8>>,
+        seen: BTreeMap<ObjectId, u64>,
+        ids: Vec<EntityId>,
+    }
+
+    impl Reader {
+        fn put<T: TokenCodec>(&mut self, value: &T) {
+            self.graph.push(encode_body(value));
+        }
+
+        fn value(&mut self, value: &RunValue) -> Result<(), HeapFault> {
+            match value {
+                RunValue::Object(kind, id) => {
+                    self.put(&0u64);
+                    self.put(kind);
+                    self.object(*id)
+                }
+                RunValue::Ref(id) => {
+                    self.put(&1u64);
+                    self.object(*id)
+                }
+                other => {
+                    self.put(&2u64);
+                    self.put(other);
+                    Ok(())
+                }
+            }
+        }
+
+        fn values<'a>(
+            &mut self,
+            values: impl ExactSizeIterator<Item = &'a RunValue>,
+        ) -> Result<(), HeapFault> {
+            self.put(&(values.len() as u64));
+            values.into_iter().try_for_each(|value| self.value(value))
+        }
+
+        fn object(&mut self, id: ObjectId) -> Result<(), HeapFault> {
+            let next = self.seen.len() as u64;
+            let known = self.seen.get(&id).copied();
+            self.put(&known.unwrap_or(next));
+            self.put(&known.is_none());
+            if known.is_some() {
+                return Ok(());
+            }
+            self.seen.insert(id, next);
+            self.ids.push(EntityId {
+                family: FamilyId::PRIMARY,
+                ordinal: id.0,
+            });
+            let row = self.directory.get(id)?.ok_or_else(|| {
+                HeapFault::Malformed(format!("reachable object {} has no row", id.0))
+            })?;
+            match row.record {
+                Record::List(values) | Record::Tuple(values) | Record::Set(values) => {
+                    self.values(values.iter())?;
+                }
+                Record::Map(pairs) | Record::Record(pairs) => {
+                    let flat: Vec<&RunValue> =
+                        pairs.iter().flat_map(|(key, value)| [key, value]).collect();
+                    self.values(flat.into_iter())?;
+                }
+                Record::Closure { code, captures } => {
+                    self.put(&code);
+                    self.put(&(captures.len() as u64));
+                    for cell in captures {
+                        self.object(cell)?;
+                    }
+                }
+                Record::Cell(value) => self.value(&value)?,
+                Record::Error {
+                    kind,
+                    message,
+                    data,
+                } => {
+                    self.value(&kind)?;
+                    self.value(&message)?;
+                    self.value(&data)?;
+                }
+                Record::BigInt(int) | Record::Timestamp(int) => self.put(&int),
+                Record::LongText(text) => self.graph.push(text.as_bytes().to_vec()),
+                Record::Bytes(bytes) => self.graph.push(bytes.to_vec()),
+                Record::Paged(paged) => {
+                    let whole = paged.read(self.directory.access())?;
+                    self.graph.push(whole);
+                }
+                Record::Function(callable) => self.put(&callable),
+                Record::Handle(handle) => self.put(&handle),
+                Record::Chunked(chunked) => {
+                    let mut items = Vec::new();
+                    let mut entries = Vec::new();
+                    each_members(
+                        self.directory.access(),
+                        &chunked,
+                        &mut |members| match members {
+                            Members::List(values) => items.extend(values.iter().cloned()),
+                            Members::Table(found) => entries.extend(found.iter().cloned()),
+                        },
+                    )?;
+                    entries.sort_by_key(|entry| entry.seq);
+                    if chunked.kind == ObjectKind::Set {
+                        items.extend(entries.into_iter().map(|entry| entry.key));
+                    } else {
+                        items.extend(
+                            entries
+                                .into_iter()
+                                .flat_map(|entry| [entry.key, entry.value]),
+                        );
+                    }
+                    self.values(items.iter())?;
+                }
+            }
+            Ok(())
+        }
     }
 }
