@@ -15,7 +15,9 @@
 //! - after an action that completed at once, its value pushed, where the
 //!   slice ended or a cancel forced a park ([`Phase::Went`]);
 //! - at a step, where the slice is tested: a statement start
-//!   ([`Phase::Statement`]) or a loop's back edge ([`Phase::Back`]).
+//!   ([`Phase::Statement`]) or a loop's back edge ([`Phase::Back`]);
+//!   and at the unit's head, before it has begun ([`Phase::Statement`]
+//!   at the unit's root site).
 //!
 //! A frame's slots are named the same way: each by the site that declared
 //! it and what it holds there (a variable, a value held while cleanup
@@ -282,12 +284,12 @@ pub(crate) fn build(unit: &Unit) -> SiteTable {
         let Some(stack) = &stacks[pc] else {
             continue;
         };
-        if !unit.slices(pc) && !matches!(op, Op::Call(_) | Op::Action(_)) {
+        if !unit.stands(pc) && !matches!(op, Op::Call(_) | Op::Action(_)) {
             continue;
         }
         let stack = stack.to_vec();
         let next = pc as u32 + 1;
-        if unit.slices(pc) {
+        if unit.stands(pc) {
             let phase = match op {
                 Op::Jump(to) if (*to as usize) < pc => Phase::Back,
                 _ => Phase::Statement,

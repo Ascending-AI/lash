@@ -384,7 +384,9 @@ struct LinkCode {
     native_ids: HashMap<FunctionId, u32>,
     charge_ids: HashMap<FunctionId, u32>,
     bodies: HashMap<(FunctionId, bool), UnitId>,
-    stubs: HashMap<(Option<CallableId>, u8), UnitId>,
+    /// By the spawn's site, which roots the stub: a saved task names its
+    /// stub by that site.
+    stubs: HashMap<(Site, Option<CallableId>, u8), UnitId>,
     free: HashMap<FunctionId, BTreeSet<Name>>,
     /// The unit each unavailable helper compiled to.
     missing: HashMap<FunctionId, UnitId>,
@@ -1354,20 +1356,21 @@ impl<'a> Compiler<'a> {
     /// callee first), and it makes the call. A task is no part of its
     /// spawner's call, so a covered spawner's cover does not reach it.
     pub(crate) fn stub(&mut self, f: &Fun, callee: Option<CallableId>, argc: u8) -> Result<UnitId> {
-        if let Some(unit) = self.scope.stubs.get(&(callee, argc)) {
+        let site = f.site();
+        let key = (site.clone(), callee, argc);
+        if let Some(unit) = self.scope.stubs.get(&key) {
             return Ok(*unit);
         }
         let at = self.reserve();
-        self.scope.stubs.insert((callee, argc), at);
+        self.scope.stubs.insert(key, at);
         let values = u16::from(argc) + u16::from(callee.is_none());
-        let site_unit = f.site.clone();
-        let mut g = Fun::new(site_unit, false, false, f.owner);
+        let mut g = Fun::new(site.unit.clone(), false, false, f.owner);
+        g.path.clone_from(&site.path);
         g.locals = values;
         g.leader();
         for value in 0..values {
             g.emit(Op::Local(value));
         }
-        let site = f.site();
         let target = match callee {
             None => Callee::Value,
             Some(callable) => self.callee_at(&g, callable)?,
@@ -1452,6 +1455,7 @@ impl<'a> Compiler<'a> {
             actions,
             action_marks,
             site,
+            path,
             mut points,
             origin,
             stated,
@@ -1531,7 +1535,7 @@ impl<'a> Compiler<'a> {
             authored,
             name,
             owner,
-            site: Site::new(site, Vec::new()),
+            site: Site::new(site, path),
             points,
             fused: Vec::new(),
             inlines: Vec::new(),

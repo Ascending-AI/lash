@@ -188,6 +188,12 @@ impl Unit {
         self.step[pc] || (matches!(self.ops[pc], Op::Fall) && !self.covered)
     }
 
+    /// Whether a frame is saved standing before `pc`'s op: at a step, or
+    /// at the unit's head, before it has begun (a fresh run or task).
+    pub fn stands(&self, pc: usize) -> bool {
+        pc == 0 || self.slices(pc)
+    }
+
     /// The statement op `pc` runs in, where the origin table covers it.
     pub fn statement(&self, pc: usize) -> Option<Site> {
         let origin = self.origin.get(pc)?;

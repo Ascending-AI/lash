@@ -409,6 +409,7 @@ impl CoreMachine {
         limits: lash_kernel_value::data_limits::KernelDataLimits,
         source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
+        CellStart::admit_host_metadata(start.host.iter().map(|(name, _)| name.as_str()))?;
         let document = program.document.clone();
         let (entry, callable) = match &start.target {
             Target::Main => (None, None),
