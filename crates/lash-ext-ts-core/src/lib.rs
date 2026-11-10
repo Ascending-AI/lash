@@ -65,7 +65,7 @@ pub use plans::PLANS;
 /// definition carries. Closed kernel callee plans are installed as
 /// dependencies, sharing an already installed kernel plan across dialects.
 /// The registry must hold the kernel library already: the natives call
-/// its `num.sub`, `num.lt` and `text.utf16_compare`.
+/// its `num.add`, `text.concat`, `num.sub`, `num.lt` and `text.utf16_compare`.
 ///
 /// # Errors
 ///
@@ -90,7 +90,13 @@ pub fn implement(
         })
         .collect();
     registry.install_plans(&plans)?;
-    for name in ["num.sub", "num.lt", "text.utf16_compare"] {
+    for name in [
+        "num.add",
+        "text.concat",
+        "num.sub",
+        "num.lt",
+        "text.utf16_compare",
+    ] {
         registry
             .native_named(name)
             .ok_or(ImplementError::Missing(name))?;
@@ -139,6 +145,10 @@ natives!(name, kernel;
         "ts.string.toUpperCase" => Arc::new(strings::Uppercase),
         "ts.spread" => Arc::new(arrays::Spread),
         "ts.builtin_name" => Arc::new(BuiltinName),
+        "ts.add" => Arc::new(Add {
+            add: kernel("num.add")?,
+            concat: kernel("text.concat")?,
+        }),
         "ts.sub" => Arc::new(Subtract {
             native: kernel("num.sub")?,
         }),
@@ -311,6 +321,41 @@ impl NativeFunction for ToNumber {
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         match call.args.values() {
             [value @ Value::Float(_)] => Ok(*value),
+            _ => Err(NativeError::Decline),
+        }
+    }
+}
+
+/// `ts.add`, `a + b`, where neither operand needs ToPrimitive, as the
+/// body's first branch: two floats add and two texts join. Every other pair
+/// declines to the body.
+struct Add {
+    add: Arc<dyn NativeFunction>,
+    concat: Arc<dyn NativeFunction>,
+}
+
+impl NativeFunction for Add {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            inline: Some(lash_kernel_doc::arena::native::InlineNative {
+                // The helper's definition states `native 2`.
+                native_version: 2,
+                operation: lash_kernel_doc::arena::native::InlineOperation::Scalar {
+                    operation: lash_kernel_doc::scalar::ScalarOp::Add,
+                    domain: lash_kernel_doc::arena::native::ScalarDomain::Floats,
+                },
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        // The call's two arguments are the kernel function's.
+        match pair(&call) {
+            (Value::Float(_), Value::Float(_)) => self.add.call(call),
+            (Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)) => {
+                self.concat.call(call)
+            }
             _ => Err(NativeError::Decline),
         }
     }

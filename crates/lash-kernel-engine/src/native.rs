@@ -52,7 +52,7 @@ pub(crate) fn implementation(
         #[cfg(feature = "dialect-typescript")]
         ("typescript", version)
             if version
-                == if matches!(name, "ts.lt" | "ts.le" | "ts.gt" | "ts.ge") {
+                == if matches!(name, "ts.add" | "ts.lt" | "ts.le" | "ts.gt" | "ts.ge") {
                     2
                 } else {
                     1
