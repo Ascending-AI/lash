@@ -180,11 +180,14 @@ record! {
 }
 
 record! {
-    /// A unit, by its Link, kind and site.
+    /// A unit, by its Link, kind and site, and whether it is the compile
+    /// that runs inside a covered library extent (`K-CHG-007`): a library
+    /// body has one compile of each, with its own resume and charge tables.
     pub struct RunUnit {
         pub link: LinkId,
         pub kind: UnitKind,
         pub site: Site,
+        pub covered: bool,
     }
 }
 

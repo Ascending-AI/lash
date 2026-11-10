@@ -318,6 +318,7 @@ fn save_frame(
             link: unit.link,
             kind: save_kind(&unit.kind),
             site: unit.site.clone(),
+            covered: unit.covered,
         },
         site: entry.site.clone(),
         phase: save_phase(entry.phase),
@@ -523,11 +524,11 @@ pub(crate) fn open(
         .iter()
         .map(|at| value(*at))
         .collect::<Result<_, _>>()?;
-    let units: HashMap<(LinkId, SavedKind, &Site), UnitId> = program
+    let units: HashMap<UnitKey<'_>, UnitId> = program
         .units
         .iter()
         .enumerate()
-        .map(|(at, unit)| ((unit.link, save_kind(&unit.kind), &unit.site), at as UnitId))
+        .map(|(at, unit)| (unit_key(unit), at as UnitId))
         .collect();
     let occurrences: HashMap<(LinkId, Site), u32> = occurrence_sites(&program)
         .into_iter()
@@ -656,16 +657,30 @@ pub(crate) fn open(
     Ok(())
 }
 
+/// What names one compiled unit in a run: its Link, kind and site, and
+/// whether it is a body's covered compile.
+pub(super) type UnitKey<'a> = (LinkId, SavedKind, &'a Site, bool);
+
+/// The key a compiled unit is saved under.
+pub(super) fn unit_key(unit: &Unit) -> UnitKey<'_> {
+    (unit.link, save_kind(&unit.kind), &unit.site, unit.covered)
+}
+
+/// The key a saved unit names.
+pub(super) fn saved_key(unit: &RunUnit) -> UnitKey<'_> {
+    (unit.link, unit.kind, &unit.site, unit.covered)
+}
+
 fn open_frame(
     vm: &mut Vm<SlotHeap>,
     program: &Program,
-    units: &HashMap<(LinkId, SavedKind, &Site), UnitId>,
+    units: &HashMap<UnitKey<'_>, UnitId>,
     cx: &mut Context,
     saved: &RunFrame,
     value: &dyn Fn(u32) -> Result<Value, String>,
 ) -> Result<(), String> {
     let id = *units
-        .get(&(saved.unit.link, saved.unit.kind, &saved.unit.site))
+        .get(&saved_key(&saved.unit))
         .ok_or_else(|| format!("the program has no unit {:?}", saved.unit))?;
     let unit = &program.units[id as usize];
     let entry = unit

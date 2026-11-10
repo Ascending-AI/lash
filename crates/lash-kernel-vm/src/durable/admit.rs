@@ -18,7 +18,7 @@ use lash_kernel_state::paged::run::continuation::{
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::sites::{Site, TaskIdentity};
 
-use super::save_kind;
+use super::{UnitKey, saved_key, unit_key};
 use crate::bytecode::program::{ActionSite, Program, Unit};
 use crate::paged::Inadmissible;
 use crate::vm::tasks::Operations;
@@ -34,10 +34,10 @@ pub(crate) fn admit(
     operations: &Operations,
     record: &RunRecord,
 ) -> Result<(), Inadmissible> {
-    let units: HashMap<(LinkId, UnitKind, &Site), &Unit> = program
+    let units: HashMap<UnitKey<'_>, &Unit> = program
         .units
         .iter()
-        .map(|unit| ((unit.link, save_kind(&unit.kind), &unit.site), unit))
+        .map(|unit| (unit_key(unit), unit))
         .collect();
     let tasks = &record.tasks;
     tasks_in_order(program, &units, tasks)?;
@@ -54,7 +54,7 @@ pub(crate) fn admit(
 /// Spawn order, roots, ended tasks and the counters spawning minted.
 fn tasks_in_order(
     program: &Program,
-    units: &HashMap<(LinkId, UnitKind, &Site), &Unit>,
+    units: &HashMap<UnitKey<'_>, &Unit>,
     tasks: &[RunTask],
 ) -> Result<(), Inadmissible> {
     let main = &program.units[program.main as usize];
@@ -92,7 +92,7 @@ fn tasks_in_order(
             return Err(Inadmissible::Ended { task: at });
         }
         if let Some(root) = task.frames.first() {
-            let unit = units.get(&(root.unit.link, root.unit.kind, &root.unit.site));
+            let unit = units.get(&saved_key(&root.unit));
             let starts = match number {
                 0 => unit.is_some_and(|unit| std::ptr::eq(*unit, main)),
                 _ => root.unit.kind == UnitKind::Spawn,
@@ -178,7 +178,7 @@ fn queue(record: &RunRecord) -> Result<(), Inadmissible> {
 /// delivered with its raw outcome while the task is ready to resume with
 /// it. No wait performs a read.
 fn waits(
-    units: &HashMap<(LinkId, UnitKind, &Site), &Unit>,
+    units: &HashMap<UnitKey<'_>, &Unit>,
     operations: &Operations,
     record: &RunRecord,
 ) -> Result<(), Inadmissible> {
@@ -268,12 +268,9 @@ fn waits(
 }
 
 /// The action a frame stands at, by its point's site.
-fn perform<'u>(
-    units: &HashMap<(LinkId, UnitKind, &Site), &'u Unit>,
-    frame: &RunFrame,
-) -> Option<&'u ActionSite> {
+fn perform<'u>(units: &HashMap<UnitKey<'_>, &'u Unit>, frame: &RunFrame) -> Option<&'u ActionSite> {
     units
-        .get(&(frame.unit.link, frame.unit.kind, &frame.unit.site))?
+        .get(&saved_key(&frame.unit))?
         .actions
         .iter()
         .find(|action| matches!(action, ActionSite::Perform { site, .. } if *site == frame.site))
