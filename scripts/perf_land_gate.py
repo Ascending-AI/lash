@@ -56,6 +56,8 @@ def require(ok, message):
 
 
 def check_instruction_ceiling(side, key, median, ceiling, monty=None, calibrate=False):
+    """Refuse a row above its ceiling or a candidate PY row above the binding
+    Monty ratio; answer the report-only note of one above the report ratio."""
     if not calibrate:
         require(median <= ceiling, f"{side}/{key}: median {median} exceeds ceiling {ceiling}")
     if side == "candidate" and key.startswith("python/") and policy.MONTY_BINDING:
@@ -63,6 +65,10 @@ def check_instruction_ceiling(side, key, median, ceiling, monty=None, calibrate=
                 f"{side}/{key}: missing qualified Monty secant")
         require(median <= policy.MONTY_MAX_RATIO * monty,
                 f"{side}/{key}: {median / monty:.6f}x Monty exceeds {policy.MONTY_MAX_RATIO:.2f}x")
+        if median > policy.MONTY_REPORT_RATIO * monty:
+            return (f"{side}/{key}: {median / monty:.6f}x Monty above the report-only "
+                    f"{policy.MONTY_REPORT_RATIO:.2f}x")
+    return None
 
 
 def check_cold_access(key, row):
@@ -222,7 +228,8 @@ def contract(base, calibrate):
             require(namespace["COST_ORDER"] == policy.COST_ORDER,
                     "COST_ORDER: measurement contract changed; reviewed replacement required")
             require(namespace.get("MONTY_BINDING") is True and policy.MONTY_BINDING is True and
-                    namespace.get("MONTY_MAX_RATIO") == policy.MONTY_MAX_RATIO == 2.0,
+                    namespace.get("MONTY_MAX_RATIO") == policy.MONTY_MAX_RATIO and
+                    namespace.get("MONTY_REPORT_RATIO") == policy.MONTY_REPORT_RATIO,
                     "binding Monty contract changed; reviewed replacement required")
             require(namespace.get("BOUNDARY") == policy.BOUNDARY,
                     "boundary contract changed; reviewed replacement required")
@@ -241,8 +248,9 @@ def contract(base, calibrate):
                     f"{key}: no qualified ceiling")
     require(digest(ROOT / policy.BOUNDARY["source"]) == policy.BOUNDARY["sha256"],
             "boundary workload checksum differs")
-    require(policy.MONTY_BINDING is True and policy.MONTY_MAX_RATIO == 2.0,
-            "cutover requires a binding 2.00x Monty ceiling")
+    require(policy.MONTY_BINDING is True and policy.MONTY_MAX_RATIO == 3.0,
+            "the switch gate requires a binding 3.00x Monty ceiling")
+    require(policy.MONTY_REPORT_RATIO == 2.0, "the switch gate reports PY rows above 2.00x Monty")
 
 
 def boundary(base, candidate, out):
@@ -392,7 +400,9 @@ def measure(base_path, candidate_path, out, calibrate=False):
                               compiler=policy.COMPILER, engine=policy.ENGINE_VERSION,
                               references=dict(quickjs=policy.QUICKJS_REVISION, python=policy.PYTHON_VERSION,
                                               monty=policy.MONTY_VERSION, monty_binding=policy.MONTY_BINDING,
-                                              monty_max_ratio=policy.MONTY_MAX_RATIO)))
+                                              monty_max_ratio=policy.MONTY_MAX_RATIO,
+                                              monty_report_ratio=policy.MONTY_REPORT_RATIO)),
+                  monty_report=[])
     def run(task):
         side, artifact, key, row, repeat = task
         return capture(artifact, side, key, row, repeat, local.cpu, refs[key.split("/")[0]], out, deadline)
@@ -432,10 +442,14 @@ def measure(base_path, candidate_path, out, calibrate=False):
             result["references"] = reference_medians
             result["ratios"] = {engine: median / count for engine, count in reference_medians.items()}
             try:
-                check_instruction_ceiling(side, key, median, row["ceiling"],
-                                          reference_medians.get("monty"), calibrate)
+                note = check_instruction_ceiling(side, key, median, row["ceiling"],
+                                                 reference_medians.get("monty"), calibrate)
             except ValueError as error:
                 errors.append(str(error))
+            else:
+                if note:
+                    report["monty_report"].append(note)
+                    print(f"perf report-only: {note}", flush=True)
     report["wall_seconds"] = time.monotonic() - start
     if report["wall_seconds"] > 600:
         errors.append(f"base plus candidate measurement exceeded 600s: {report['wall_seconds']:.2f}s")

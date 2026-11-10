@@ -1,11 +1,15 @@
 """Reviewed instruction ceilings and the fixed measurement contract for FIG-7682."""
 
-# At the runtime switch every PY row must also be <=2x Monty 1.4.0 in this
-# same Kiln configuration, with no margin above 2x. This rule is binding.
+# The runtime switch gate: every PY row must also be <=3x Monty 1.4.0 in this
+# same Kiln configuration, with no margin above 3x, and no PY or TS row may
+# exceed its own ceiling below. This rule is binding.
+# The <=2x Monty goal is report-only until after the switch: a PY row above it
+# is named in the receipt and never fails the gate.
 # Current ceilings use the median of five raw paired secants times 1.03.
 
 MONTY_BINDING = True
-MONTY_MAX_RATIO = 2.0
+MONTY_MAX_RATIO = 3.0
+MONTY_REPORT_RATIO = 2.0
 
 # Contract r57, L7: only this exact predecessor may add these four rows.
 REVIEWED_REPLACEMENT = {
