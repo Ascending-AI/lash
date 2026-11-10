@@ -267,6 +267,7 @@ pub(crate) fn carry(
         .map(|(name, _)| name.clone())
         .collect();
     let mut saved = SavedCell::default();
+    let mut resave = false;
     if let Some(save) = save
         && !dropped.is_empty()
     {
@@ -305,21 +306,22 @@ pub(crate) fn carry(
             .collect::<Result<Vec<_>, MachineError>>()?;
         for (kind, id, function) in new {
             let value = sealed_function(vm, kind, id);
+            // The session holds its functions in name order.
             match vm
                 .session
                 .saved
-                .iter()
-                .position(|held| held.name == function.name)
+                .binary_search_by(|held| held.name.cmp(&function.name))
             {
-                Some(at) => {
+                Ok(at) => {
                     functions[at] = value;
                     vm.session.saved[at] = function;
                 }
-                None => {
-                    functions.push(value);
-                    vm.session.saved.push(function);
+                Err(at) => {
+                    functions.insert(at, value);
+                    vm.session.saved.insert(at, function);
                 }
             }
+            resave = true;
         }
     }
     let mut refused: BTreeMap<Name, String> = saved.refused.into_iter().collect();
@@ -336,7 +338,7 @@ pub(crate) fn carry(
             kept.1.push(value);
         }
     }
-    if kept.0.len() != bound || functions.len() != heap.roots.len() - bound {
+    if resave || kept.0.len() != bound {
         kept.1.extend_from_slice(&functions);
         heap = vm.heap.seal(&kept.1).map_err(sealing)?;
     }
