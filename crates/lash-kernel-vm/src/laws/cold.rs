@@ -50,7 +50,7 @@ struct EndState {
     session: Option<lash_kernel_state::semantic::Checkpoint>,
 }
 
-fn observe(cold: bool, source: bool) -> (EndState, Vec<Datum>, u64, u64, usize, usize) {
+fn observe(cold: bool, source: bool) -> (EndState, Vec<Datum>, u64, usize, usize) {
     let mut embedder = Embedder::with(
         PROGRAM,
         Setup {
@@ -58,10 +58,31 @@ fn observe(cold: bool, source: bool) -> (EndState, Vec<Datum>, u64, u64, usize, 
             ..Setup::default()
         },
     );
-    if cold && source {
-        embedder.machine.force_cold();
-    }
     let reads = Rc::new(Cell::new(0));
+    if source {
+        // Both runs read through the counting port, so the cold run's
+        // extra reads are the chunks its natives read back. The run is
+        // sealed at its first slice, a safe point of a started run.
+        embedder.slice = 1;
+        assert!(matches!(embedder.run(), Step::Slice));
+        embedder.slice = u64::MAX;
+        let root = embedder.checkpoint();
+        let (program, library) = embedder.program(true);
+        embedder.machine = crate::KernelMachine::open_in(
+            program,
+            embedder.bounds,
+            &root,
+            Box::new(ColdPages {
+                source: embedder.source.clone(),
+                reads: Rc::clone(&reads),
+            }),
+        )
+        .unwrap();
+        embedder.library = library;
+        if cold {
+            embedder.machine.force_cold();
+        }
+    }
     let mut reopens = 0;
     let mut end = loop {
         match embedder.run() {
@@ -99,7 +120,6 @@ fn observe(cold: bool, source: bool) -> (EndState, Vec<Datum>, u64, u64, usize, 
         EndState { end, session },
         embedder.world.printed,
         embedder.machine.meters().charged.expect("exact charge"),
-        embedder.machine.cold_reads(),
         reads.get(),
         reopens,
     )
@@ -111,17 +131,19 @@ fn observe(cold: bool, source: bool) -> (EndState, Vec<Datum>, u64, u64, usize, 
 #[test]
 fn a_native_that_reads_every_chunk_cold_runs_as_it_runs_warm() {
     for source in [true, false] {
-        let (end, printed, charged, warm_reads, _, _) = observe(false, source);
+        let (end, printed, charged, warm_reads, _) = observe(false, source);
         assert!(matches!(&end.end, End::Finished(_)), "{end:?}");
-        let (cold_end, cold_printed, cold_charged, cold_reads, pages, reopens) =
-            observe(true, source);
+        let (cold_end, cold_printed, cold_charged, pages, reopens) = observe(true, source);
         assert_eq!(cold_end, end, "source={source}");
         assert_eq!(cold_printed, printed);
         assert_eq!(cold_charged, charged);
         if source {
-            assert_eq!(warm_reads, 0);
-            // Each of the eleven reading calls reads at least one chunk.
-            assert!(cold_reads >= 11, "{cold_reads} cold reads");
+            // Each of the eleven reading calls reads back at least one
+            // chunk the warm run holds resident.
+            assert!(
+                pages >= warm_reads + 11,
+                "{pages} cold page reads, {warm_reads} warm"
+            );
         } else {
             assert!(reopens > 0, "regions must actually reopen cold");
             assert!(pages > 0, "reopen must read actual backing pages");

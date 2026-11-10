@@ -435,7 +435,7 @@ fn a_slice_lands_inside_an_expression_callee_and_changes_nothing() {
     for slice in [0, 1, 17, 129] {
         let mut inside = 0;
         let (sliced, _) = observe(&straight, slice, |embedder| {
-            inside += usize::from(embedder.machine.pending_phases().len() >= 2);
+            inside += usize::from(embedder.run_record().tasks[0].frames.len() >= 2);
         });
         assert_eq!(sliced, whole, "straight-line slice {slice}");
         assert!(inside > 0, "a finite slice must reach the nested callee");

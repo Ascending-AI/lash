@@ -47,8 +47,38 @@ pub(crate) fn admit(
     joins(record)?;
     for (number, task) in tasks.iter().enumerate() {
         frames(number as u32, task)?;
+        turn(&units, number as u32, task)?;
     }
     Ok(())
+}
+
+/// Only a delivered `then yield` takes a turn before it resumes (contract
+/// §5.1, `K-TASK-005`): a task that holds one is ready, its top frame at a
+/// `perform` that yields after it.
+fn turn(
+    units: &HashMap<UnitKey<'_>, &Unit>,
+    number: u32,
+    task: &RunTask,
+) -> Result<(), Inadmissible> {
+    if !task.turn {
+        return Ok(());
+    }
+    let yields = matches!(task.state, RunTaskState::Ready(_))
+        && task.frames.last().is_some_and(|top| {
+            top.phase == PointPhase::Issued
+                && matches!(
+                    perform(units, top),
+                    Some(ActionSite::Perform {
+                        then_yield: true,
+                        ..
+                    })
+                )
+        });
+    if yields {
+        Ok(())
+    } else {
+        Err(Inadmissible::Turn { task: number })
+    }
 }
 
 /// Spawn order, roots, ended tasks and the counters spawning minted.

@@ -170,33 +170,6 @@ impl crate::perf_witness::Profiling for KernelMachine {
     }
 }
 
-/// The action coordinate the retired restore probes report (L2 retargets their laws).
-#[cfg(test)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct SitePath(pub Box<[u32]>);
-
-/// The refusal the retired restore probes report (L2 retargets their laws).
-#[cfg(test)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum RestoreRefusal {
-    /// The task's state disagrees with the action.
-    TaskState { action: SitePath },
-}
-
-#[cfg(test)]
-impl std::fmt::Display for RestoreRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TaskState { action } => {
-                write!(
-                    f,
-                    "the task's state disagrees with the action at {action:?}"
-                )
-            }
-        }
-    }
-}
-
 /// A law reached a probe of the frozen engine the core replaced. Its owner
 /// retargets the law to the core after the flip (FIG-7688 phase 2); until
 /// then it fails here, by name.
@@ -284,35 +257,6 @@ impl KernelMachine {
         lash_kernel_state::semantic::run_checkpoint(&sealed.root, access)
             .expect("a semantic checkpoint reads its own seal")
     }
-    pub(crate) fn logical_balance(
-        &self,
-    ) -> Result<
-        lash_kernel_state::kernel_internals::logical::Balance,
-        lash_kernel_doc::heap::HeapFault,
-    > {
-        retired("logical_balance")
-    }
-    pub(crate) fn cold_reads(&self) -> u64 {
-        retired("cold_reads")
-    }
-    pub(crate) fn pending_phases(
-        &mut self,
-    ) -> Vec<(
-        lash_kernel_doc::TaskId,
-        usize,
-        lash_kernel_state::paged::ContinuationPhase,
-    )> {
-        retired("pending_phases")
-    }
-    pub(crate) fn pending_roles(
-        &mut self,
-    ) -> Vec<(
-        lash_kernel_doc::TaskId,
-        usize,
-        Vec<lash_kernel_state::paged::RoleCoordinate>,
-    )> {
-        retired("pending_roles")
-    }
     /// The tasks holding a delivered wait they have not yet run with, read
     /// from an unbudgeted seal's run record.
     pub(crate) fn delivered_tasks(&mut self) -> Vec<lash_kernel_doc::TaskId> {
@@ -338,58 +282,6 @@ impl KernelMachine {
             .collect();
         tasks.dedup();
         tasks
-    }
-    pub(crate) fn tamper_task_state(
-        &mut self,
-        _task: lash_kernel_doc::TaskId,
-        _state: lash_kernel_state::paged::TaskStateRecord,
-    ) -> Result<(), String> {
-        retired("tamper_task_state")
-    }
-    pub(crate) fn tamper_pending(
-        &mut self,
-        _task: lash_kernel_doc::TaskId,
-        _index: usize,
-        _edit: impl FnOnce(
-            &mut Option<lash_kernel_state::paged::ContinuationRecord>,
-            &lash_kernel_state::kernel_internals::tree::Access<'_>,
-        ),
-    ) -> Result<(), String> {
-        retired("tamper_pending")
-    }
-    pub(crate) fn tamper_loop(
-        &mut self,
-        _task: lash_kernel_doc::TaskId,
-        _at: u64,
-        _edit: impl FnOnce(
-            &mut lash_kernel_state::paged::LoopRecord,
-            &lash_kernel_state::kernel_internals::tree::Access<'_>,
-        ),
-    ) -> Result<SitePath, String> {
-        retired("tamper_loop")
-    }
-    pub(crate) fn restore_refusal(
-        &mut self,
-        _task: lash_kernel_doc::TaskId,
-        _index: u64,
-    ) -> Result<Option<RestoreRefusal>, String> {
-        retired("restore_refusal")
-    }
-    pub(crate) fn source_call_phase(
-        &self,
-        _at: &lash_kernel_value::sites::Site,
-    ) -> lash_kernel_state::paged::ContinuationPhase {
-        retired("source_call_phase")
-    }
-    pub(crate) fn source_action_site(&mut self) -> Option<Vec<u32>> {
-        retired("source_action_site")
-    }
-    pub(crate) fn source_pending(
-        &mut self,
-        _task: lash_kernel_doc::TaskId,
-        _index: u64,
-    ) -> Option<lash_kernel_state::paged::ContinuationRecord> {
-        retired("source_pending")
     }
     pub(crate) fn assert_abandoned_native_slots(&self, _id: lash_kernel_value::FunctionId) {
         retired("assert_abandoned_native_slots")

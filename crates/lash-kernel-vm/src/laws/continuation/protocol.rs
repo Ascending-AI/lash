@@ -9,10 +9,9 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::{Datum, FunctionRegistry, parse_definition};
 
-use lash_kernel_state::paged::HeaderRecord;
 use lash_kernel_value::names::FunctionId;
 
-use super::{Drive, bodies, exact, int, list, text, tuple};
+use super::{Drive, Stand, bodies, exact, int, list, text, tuple};
 
 /// The hooks the cases' protocols name, each with only a kernel body:
 /// `proto.open` gives its value, `proto.next` applies the driver's `step`,
@@ -49,22 +48,23 @@ fn hooks(
     out
 }
 
-fn run(text: &str, order: &[&str], expected: &Datum, printed: &[Datum], want: &[HeaderRecord]) {
+/// CONT-EXACT of a protocol loop, whose reopens saw each stand of `want`.
+fn run(text: &str, order: &[&str], expected: &Datum, printed: &[Datum], want: &[Stand]) {
     let base = Drive {
         probes: hooks,
         ..Drive::new(u64::MAX, false)
     };
-    let headers = exact(base, text, order, expected, printed).headers;
-    for header in want {
+    let stood = exact(base, text, order, expected, printed).stood;
+    for stand in want {
         assert!(
-            headers.contains(header),
-            "the reopens saw {headers:?}: {text}"
+            stood.iter().any(|at| stand.holds(at)),
+            "the reopens saw no {stand:?} in {stood:?}: {text}"
         );
     }
 }
 
 /// A driver whose `step` waits on an effect for each item: the loop stands
-/// at `Pull` with the step's frames above its own, binds each item through
+/// called at its `next` hook with the step's frames above its own, binds each item through
 /// `item`, and runs its `else` when `next` gives the empty tuple.
 #[test]
 fn a_driver_steps_through_next_and_binds_through_item() {
@@ -74,12 +74,7 @@ fn a_driver_steps_through_next_and_binds_through_item() {
         &[],
         &list(&[list(&[int(0)]), list(&[int(1)]), list(&[int(2)])]),
         &[text("exhausted")],
-        &[
-            HeaderRecord::Open,
-            HeaderRecord::Pull,
-            HeaderRecord::Item,
-            HeaderRecord::Body,
-        ],
+        &[Stand::MainCalled],
     );
 }
 
@@ -95,7 +90,7 @@ fn a_checked_map_spends_its_budget_across_parks() {
         &[],
         &tuple(&[list(&[text("a"), text("b")]), text("budget")]),
         &[],
-        &[HeaderRecord::Check, HeaderRecord::Body],
+        &[Stand::MainWaits],
     );
 }
 
@@ -118,7 +113,7 @@ fn exhaustion_checks_then_runs_else_and_break_skips_it() {
         &[],
         &list(&[int(1), int(2), int(1)]),
         &[text("exhausted")],
-        &[HeaderRecord::Check, HeaderRecord::Exhausted],
+        &[],
     );
 }
 
@@ -146,7 +141,7 @@ fn a_text_walks_code_points_and_loops_take_continue_break_and_else() {
         &[],
         &list(&[text("\u{e9}"), text("\u{1f600}"), text("z"), int(1), int(2)]),
         &[int(2), text("listed")],
-        &[HeaderRecord::Body],
+        &[Stand::MainWaits],
     );
 }
 

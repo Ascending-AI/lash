@@ -563,7 +563,7 @@ pub(crate) struct Embedder {
     /// The requests handed out and not yet answered.
     pub(crate) pending: Vec<Request>,
     pub(crate) cancel_requests: Vec<WaitId>,
-    slice: u64,
+    pub(crate) slice: u64,
     pub(crate) bounds: Bounds,
     probes: Option<Probes>,
     pub(crate) source: Source,
@@ -786,6 +786,40 @@ impl Embedder {
             .try_checkpoint()
             .map_err(|error| format!("{error:?}"))?;
         let (program, library) = self.program(native_twice);
+        self.machine = crate::KernelMachine::open_in(
+            program,
+            self.bounds,
+            &root,
+            Box::new(self.source.clone()),
+        )
+        .map_err(|error| format!("{error:?}"))?;
+        self.library = library;
+        Ok(())
+    }
+
+    /// The run record a whole seal of this run commits, leaving it running.
+    pub(crate) fn run_record(&mut self) -> lash_kernel_state::paged::run::continuation::RunRecord {
+        let root = self.checkpoint();
+        let access =
+            lash_kernel_state::kernel_internals::tree::Access::new(Box::new(self.source.clone()));
+        lash_kernel_state::paged::run::continuation::read(&access, root.heap).unwrap()
+    }
+
+    /// Seals the run, edits its saved record as a store holding it could,
+    /// and opens the edited root cold in a new machine; why the open
+    /// refused, if it did.
+    pub(crate) fn reopen_edited(
+        &mut self,
+        edit: impl FnOnce(&mut lash_kernel_state::paged::run::continuation::RunRecord),
+    ) -> Result<(), String> {
+        use lash_kernel_state::paged::run::continuation;
+        let mut root = self.checkpoint();
+        let access =
+            lash_kernel_state::kernel_internals::tree::Access::new(Box::new(self.source.clone()));
+        let mut record = continuation::read(&access, root.heap).unwrap();
+        edit(&mut record);
+        root.heap = continuation::write(&access, &record).unwrap();
+        let (program, library) = self.program(true);
         self.machine = crate::KernelMachine::open_in(
             program,
             self.bounds,

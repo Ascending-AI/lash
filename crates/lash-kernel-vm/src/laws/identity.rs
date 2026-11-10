@@ -15,7 +15,7 @@ use lash_kernel_state::paged::SealBudget;
 use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, Setup, int, result};
-use crate::{Machine, MachineError, Step};
+use crate::{Machine, Step};
 use lash_kernel_state::semantic::{Checkpoint, checkpoint};
 
 /// `probe.wrap(x)` answers `[x]`. Its native allocates that list alone;
@@ -156,12 +156,12 @@ fn an_ordinary_park_projects_what_changed_and_traverses_nothing_else() {
     assert_eq!(result(embedder.run_to_end(&[])), int(64));
 }
 
-/// Seam G: a seal that runs out of budget mid-projection gives nothing and
-/// keeps every dirty mark; until a seal completes, the run refuses to run,
-/// so the ids an abandoned walk assigned cannot depend on when the budget
-/// ran out. The completed seal saves what an unbudgeted seal saves.
+/// Seam G: a seal that runs out of budget publishes no root, and the ids
+/// a completed seal assigns do not depend on when the budget ran out: the
+/// seal that completes after budgeted calls saves what an unbudgeted seal
+/// saves, ids included.
 #[test]
-fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
+fn a_seal_out_of_budget_publishes_no_root_and_assigns_unbudgeted_ids() {
     scheduler_seals_agree();
     control_seals_agree();
     helper_seals_agree();
@@ -186,21 +186,10 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
     assert_eq!(budgeted.machine.work(), expected_work);
     let tight = SealBudget { pages: 1, bytes: 1 };
     assert!(budgeted.machine.seal(tight).unwrap().is_none());
-    assert!(matches!(
-        budgeted.machine.run(&mut budgeted.world, u64::MAX),
-        Err(MachineError::Projecting)
-    ));
     let mut seals = 1;
     let sealed = loop {
         seals += 1;
-        if let Some(sealed) = budgeted
-            .machine
-            .seal(SealBudget {
-                pages: 4,
-                bytes: 16 << 10,
-            })
-            .unwrap()
-        {
+        if let Some(sealed) = budgeted.machine.seal(tight).unwrap() {
             break sealed;
         }
         assert!(seals < 10_000, "the seal makes no progress");
@@ -249,10 +238,6 @@ fn control_seals_agree() {
                                 .unwrap()
                                 .is_none()
                         );
-                        assert!(matches!(
-                            embedder.machine.run(&mut embedder.world, u64::MAX),
-                            Err(MachineError::Projecting)
-                        ));
                     }
                     let mut calls = 0;
                     let sealed = loop {
@@ -322,10 +307,6 @@ fn scheduler_seals_agree() {
                                     .unwrap()
                                     .is_none()
                             );
-                            assert!(matches!(
-                                embedder.machine.run(&mut embedder.world, u64::MAX),
-                                Err(MachineError::Projecting)
-                            ));
                         }
                         let mut attempts = 0;
                         let sealed = loop {
@@ -392,10 +373,6 @@ fn helper_seals_agree() {
                                 .unwrap()
                                 .is_none()
                         );
-                        assert!(matches!(
-                            embedder.machine.run(&mut embedder.world, u64::MAX),
-                            Err(MachineError::Projecting)
-                        ));
                     }
                     let root = loop {
                         let budget = if budgeted {

@@ -105,7 +105,7 @@ fn guarded_probes(
 type Guarded = (
     String,
     Vec<Datum>,
-    Vec<(&'static str, crate::Meters, [u64; 3])>,
+    Vec<(&'static str, crate::Meters)>,
     Vec<lash_kernel_state::semantic::Checkpoint>,
     Vec<Request>,
 );
@@ -144,19 +144,7 @@ fn guarded_sealing(source: &str, record: bool, slice: u64, bounds: Bounds, cold:
             Step::Slice => "slice",
             Step::Parked(_) => "parked",
         };
-        let balance = embedder
-            .machine
-            .logical_balance()
-            .expect("source owner balance");
-        stops.push((
-            kind,
-            embedder.machine.meters(),
-            [
-                balance.entity_local_bytes,
-                balance.root_and_control_bytes,
-                balance.entities,
-            ],
-        ));
+        stops.push((kind, embedder.machine.meters()));
         match step {
             Step::Ended(End::Finished(finished)) => {
                 break format!("finished {:?}", finished.result);
@@ -592,7 +580,6 @@ fn collection_region_preparations_preserve_source_and_storage() {
         let end = loop {
             let step = runtime.run();
 
-            let balance = runtime.machine.logical_balance().unwrap();
             stops.push((
                 match &step {
                     Step::Ended(_) => "ended",
@@ -600,11 +587,6 @@ fn collection_region_preparations_preserve_source_and_storage() {
                     Step::Parked(_) => "parked",
                 },
                 runtime.machine.meters(),
-                [
-                    balance.entity_local_bytes,
-                    balance.root_and_control_bytes,
-                    balance.entities,
-                ],
                 (!matches!(&step, Step::Ended(_))).then(|| runtime.machine.semantic_checkpoint()),
             ));
             match step {

@@ -47,7 +47,7 @@ struct Observed {
     end: String,
     printed: Vec<Datum>,
     requests: Vec<Request>,
-    stops: Vec<(&'static str, crate::Meters, [u64; 3])>,
+    stops: Vec<(&'static str, crate::Meters)>,
     checkpoints: Vec<lash_kernel_state::semantic::Checkpoint>,
     events: Vec<crate::Weight>,
 }
@@ -112,7 +112,6 @@ fn observe_reopening(
                 Step::Parked(_) => "parked",
             },
             embedder.machine.meters(),
-            crate::testing::owner_balance(&embedder.machine).unwrap(),
         ));
         match step {
             Step::Ended(End::Finished(finished)) => {

@@ -234,8 +234,8 @@ fn an_issued_request_survives_a_slice_and_is_reported_once() {
         }
         assert!(matches!(step, Step::Slice));
     }
-    let root = reopen(&mut embedder);
-    assert_eq!(root.waits.len(), 1);
+    reopen(&mut embedder);
+    assert_eq!(embedder.run_record().waits.len(), 1);
     assert!(embedder.requests.is_empty());
     loop {
         match embedder.run() {
@@ -262,8 +262,8 @@ fn a_committed_outcome_survives_seal_before_semantic_resume() {
         Embedder::new("main { let xs = [1, 2] let v = perform 0(xs) as Any return v }");
     assert!(matches!(embedder.run(), Step::Parked(_)));
     embedder.deliver("echo");
-    let root = reopen(&mut embedder);
-    assert_eq!(root.waits.len(), 1);
+    reopen(&mut embedder);
+    assert_eq!(embedder.run_record().waits.len(), 1);
     assert_eq!(
         result(embedder.run_to_end(&[])),
         lash_kernel_doc::Datum::List(vec![int(1), int(2)])
@@ -286,31 +286,12 @@ fn a_committed_delivery_waits_behind_other_ready_work() {
             embedder.machine.run(&mut embedder.world, 1).unwrap(),
             Step::Slice
         ));
-        let sealed = embedder
-            .machine
-            .seal(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            })
-            .unwrap()
-            .unwrap();
-        assert_eq!(sealed.root.waits.len(), 1);
-        let heap = PagedHeap::open_header(
-            sealed.root.heap,
-            Box::new(embedder.source.clone()),
-            EditEpoch(2),
-        )
-        .unwrap();
-        let waits = tree::Tree::<WaitRecord>::of_keyed(&sealed.root.waits);
-        waits
-            .visit(heap.pages(), &mut |_, wait| {
-                assert!(matches!(
-                    wait.phase,
-                    WaitPhase::Committed(CommittedOutcomeRecord::Completed(_))
-                ));
-                true
-            })
-            .unwrap();
+        let waits = embedder.run_record().waits;
+        assert_eq!(waits.len(), 1);
+        assert!(matches!(
+            waits[0].phase,
+            lash_kernel_state::paged::run::continuation::WaitPhase::Completed(_)
+        ));
         if cold {
             reopen(&mut embedder);
         }
@@ -443,45 +424,38 @@ fn a_megabyte_native_error_survives_a_parked_finally() {
 /// document derives, with every binding it carried and their aliases, a
 /// closure dropped with its typed diagnostic, and that cell's root pins
 /// its own closure.
+///
+/// The run's one held total (`K-MEM`) holds a carried alias once, so
+/// carrying `ys = xs` holds less than carrying a copy. A cold session body
+/// counts once read (contract §2), so no cold-start hold is pinned here.
 #[test]
 fn a_session_carried_under_one_closure_is_adopted_under_another() {
-    let mut first = Embedder::new(
-        "main { let xs = [1, 2] let ys = xs let n = num.add(40, 2) let f = fn(k) { return num.add(k, 1) } return null }",
-    );
-    let crate::End::Finished(finished) = first.run_to_end(&[]) else {
-        panic!("the first cell finishes")
+    let carried = |ys: &str| {
+        let mut first = Embedder::new(&format!(
+            "main {{ let xs = [1, 2] let ys = {ys} let n = num.add(40, 2) let f = fn(k) {{ return num.add(k, 1) }} return null }}"
+        ));
+        let crate::End::Finished(finished) = first.run_to_end(&[]) else {
+            panic!("the first cell finishes")
+        };
+        (first.machine.meters().memory, finished, first.source)
     };
-    let held = first.machine.logical_balance().unwrap();
-    assert_eq!(held.entities, 1, "carried aliases share one ledger entity");
-    assert_eq!(held.entity_local_bytes, 66);
-    assert_eq!(
-        held.root_and_control_bytes, 65,
-        "two aliases, computed n and the terminal null own their occurrences"
-    );
+    let (aliased, finished, first_source) = carried("xs");
+    let (copied, _, _) = carried("[1, 2]");
+    assert!(aliased < copied, "carried aliases share one object");
     let dropped: Vec<&str> = finished
         .not_carried
         .iter()
         .map(|(name, _)| name.as_str())
         .collect();
     assert_eq!(dropped, ["f"], "a closure ends with its cell");
-    let session = finished.carry.expect("a main cell carries its session");
-    let mut source = first.source.clone();
-    let certificate = heap_accounting(
-        &mut source,
-        lash_kernel_state::kernel_internals::session_heap(&session),
-    )
-    .unwrap();
-    for closure in [
-        lash_kernel_doc::heap::PageId([8; 32]),
-        lash_kernel_doc::heap::PageId([7; 32]),
-    ] {
+    let start = |session: SessionRoot, source: &super::embedder::Source, closure| {
         let mut next = Embedder::new(
             "main { set ys[0] = 5 let got = num.add(num.add(n, xs[1]), xs[0]) let r = perform 0(1) as Any return got }",
         );
         let (mut program, _) = next.program(true);
         program.closure = closure;
-        next.source = first.source.clone();
-        next.machine = crate::KernelMachine::start_with_census(
+        next.source = source.clone();
+        next.machine = crate::KernelMachine::start(
             program,
             Setup::default().bounds,
             crate::CellStart {
@@ -493,18 +467,16 @@ fn a_session_carried_under_one_closure_is_adopted_under_another() {
                 host: Vec::new(),
             },
             Box::new(next.source.clone()),
-            Box::new(Census::restore(certificate).unwrap()),
         )
         .unwrap();
-        let cold = next.machine.logical_balance().unwrap();
-        assert_eq!(
-            cold.entity_local_bytes, 66,
-            "unread cold session bodies have their complete cost"
-        );
-        assert_eq!(
-            cold.root_and_control_bytes, 113,
-            "the old result retires and the new frame enters without rereading session values"
-        );
+        next
+    };
+    let session = finished.carry.expect("a main cell carries its session");
+    for closure in [
+        lash_kernel_doc::heap::PageId([8; 32]),
+        lash_kernel_doc::heap::PageId([7; 32]),
+    ] {
+        let mut next = start(session, &first_source, closure);
         assert!(matches!(next.run(), Step::Parked(_)));
         let sealed = next
             .machine
@@ -683,15 +655,15 @@ main {
 }"#,
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let root = embedder.checkpoint();
-    assert_eq!(root.meters.next_join, 1);
-    assert_eq!(root.joins.len(), 1);
-    embedder.open_at(&root, true);
+    let record = embedder.run_record();
+    assert_eq!(record.next_join, 1);
+    assert_eq!(record.joins.len(), 1);
+    embedder.reopen(true);
     embedder.deliver("gate");
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let root = embedder.checkpoint();
-    assert_eq!(root.meters.next_join, 2);
-    assert_eq!(root.joins.len(), 2, "both live join identities survive");
+    let record = embedder.run_record();
+    assert_eq!(record.next_join, 2);
+    assert_eq!(record.joins.len(), 2, "both live join identities survive");
     assert_eq!(
         result(embedder.run_to_end(&["b", "a"])),
         List(vec![List(vec![text("a")]), List(vec![text("b")])])

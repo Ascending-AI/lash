@@ -198,6 +198,9 @@ pub enum Inadmissible {
     /// A frame under another stands somewhere other than its call.
     #[error("frame {frame} of task {task} is suspended but not at a call")]
     SuspendedCall { task: u32, frame: u32 },
+    /// A task takes a turn that no delivered `then yield` gave it.
+    #[error("task {task} takes a turn at no then-yield wait")]
+    Turn { task: u32 },
     /// A frame's bill reaches outside its task's billed values, or below
     /// the bill of a frame it called.
     #[error("frame {frame} of task {task} owes a bill outside its task's billed values")]

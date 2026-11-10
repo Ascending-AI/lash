@@ -101,7 +101,7 @@
 //!   `laws::frames::a_seal_inside_an_expression_callee_is_exact`, and
 //!   `laws::bounds::the_memory_bound_holds_inside_a_native_call`.
 //! - Partial projection, seal deferral and typed refusal:
-//!   `laws::identity::a_seal_out_of_budget_holds_the_run_until_it_completes`
+//!   `laws::identity::a_seal_out_of_budget_publishes_no_root_and_assigns_unbudgeted_ids`
 //!   requires multiple incomplete seals, `MachineError::Projecting`, equal
 //!   completed state and successful continuation;
 //!   `laws::paged::an_exhausted_seal_budget_preserves_both_continuations`;

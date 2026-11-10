@@ -3,20 +3,6 @@
 //! effects and exact charge.
 use crate::{KernelMachine, PreparedLibrary, StartError};
 
-/// The source ledger's entity bytes, root/control bytes and entity count.
-/// The bytecode core keeps no source ledger, so this always refuses.
-///
-/// # Errors
-/// Always: [`HeapFault::Malformed`] naming the missing ledger.
-pub fn owner_balance(
-    machine: &KernelMachine,
-) -> Result<[u64; 3], lash_kernel_doc::heap::HeapFault> {
-    let _ = machine;
-    Err(lash_kernel_doc::heap::HeapFault::Malformed(
-        "the bytecode core keeps no source ledger".into(),
-    ))
-}
-
 /// Seals and reads the canonical cold equality domain at a legal boundary.
 /// The bytecode core seals site-keyed run records, which this reader does
 /// not read, so this always refuses.

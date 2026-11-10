@@ -915,7 +915,6 @@ fn helper_frames_agree() {
                     Step::Ended(_) => "ended",
                 },
                 embedder.machine.meters(),
-                crate::testing::owner_balance(&embedder.machine).unwrap(),
             ));
             match step {
                 Step::Ended(end) => {
@@ -1015,7 +1014,7 @@ main { return call rooted() }
         Option<u64>,
         Vec<crate::Weight>,
         Vec<lash_kernel_state::semantic::Checkpoint>,
-        Vec<(&'static str, crate::Meters, [u64; 3])>,
+        Vec<(&'static str, crate::Meters)>,
     );
     let outcome = |run: &Run| {
         (
@@ -1222,17 +1221,9 @@ fn native_boundaries_agree() {
             let step = run.run();
 
             if matches!(step, Step::Parked(_)) {
-                let balance = run
-                    .machine
-                    .logical_balance()
-                    .expect("native source owner balance");
                 boundaries.push((
                     run.machine.semantic_checkpoint(),
-                    [
-                        balance.entity_local_bytes,
-                        balance.root_and_control_bytes,
-                        balance.entities,
-                    ],
+                    run.machine.meters().memory,
                 ));
             }
             match step {
@@ -1257,21 +1248,13 @@ fn native_boundaries_agree() {
                 }
             }
         };
-        let balance = run
-            .machine
-            .logical_balance()
-            .expect("native final owner balance");
         (
             end,
             run.machine.meters().charged,
             crate::Weight::expand(tape.steps()),
             boundaries,
             run.requests,
-            [
-                balance.entity_local_bytes,
-                balance.root_and_control_bytes,
-                balance.entities,
-            ],
+            run.machine.meters().memory,
         )
     };
     let roomy = super::super::embedder::ROOMY;

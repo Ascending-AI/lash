@@ -39,9 +39,9 @@ type Observation = (
     End,
     Option<u64>,
     Vec<crate::Weight>,
-    Vec<(lash_kernel_state::semantic::Checkpoint, [u64; 3])>,
+    Vec<(lash_kernel_state::semantic::Checkpoint, u64)>,
     Vec<Request>,
-    [u64; 3],
+    u64,
 );
 
 fn same(actual: &Observation, expected: &Observation, context: &str) {
@@ -64,7 +64,7 @@ fn same(actual: &Observation, expected: &Observation, context: &str) {
     assert_eq!(actual.2, expected.2, "canonical charge tape: {context}");
     assert_eq!(
         actual.3, expected.3,
-        "semantic continuation, graph and balance: {context}"
+        "semantic continuation, graph and held bytes: {context}"
     );
     assert_eq!(
         actual.4, expected.4,

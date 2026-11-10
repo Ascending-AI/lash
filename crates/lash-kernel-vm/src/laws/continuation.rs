@@ -20,15 +20,13 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Datum, FunctionRegistry, TaskId, parse_definition};
+use lash_kernel_doc::{Datum, FunctionRegistry, parse_definition};
 
-use lash_kernel_state::paged::{
-    ContinuationPhase, ContinuationRecord, HeaderRecord, IncomingRecord, RoleRecord, RolesRecord,
-    TaskStateRecord,
+use lash_kernel_state::paged::run::continuation::{
+    PointPhase, RunRecord, RunResume, RunTaskState, UnitKind,
 };
 use lash_kernel_value::names::FunctionId;
 
-use crate::machine::kernel::{RestoreRefusal, SitePath};
 use lash_kernel_value::sites::Site;
 
 use super::embedder::{self, Embedder, Setup, label};
@@ -146,13 +144,11 @@ impl Drive {
     }
 }
 
-/// Where a run's frames stood at its reopens: the phases of nested
-/// actions and the headers of protocol loops; and how many `perform`s its
-/// generated plans made.
+/// Where a run's frames stood at its reopens, and how many parks and
+/// reopens it made.
 #[derive(Default)]
 struct Seen {
-    phases: Vec<ContinuationPhase>,
-    headers: Vec<HeaderRecord>,
+    stood: Vec<Stood>,
     parks: usize,
     reopens: u64,
 }
@@ -218,6 +214,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         }
         if drive.reopens {
             hops += 1;
+            seen.stood.extend(stood(&embedder.run_record()));
             if let Err(error) = embedder.try_reopen(native_twice(hops)) {
                 break format!("reopen refused: {error}");
             }
@@ -280,16 +277,95 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
 /// CONT-EXACT and CONT-ONCE of one case: the uninterrupted run gives
 /// `expected` and prints `printed`; every sliced and reopened run leaves
 /// its trace; the reopened runs see each phase of `want`.
-fn case(
-    text: &str,
-    order: &[&str],
-    expected: &Datum,
-    printed: &[Datum],
-    want: &[ContinuationPhase],
-) {
-    let phases = exact(Drive::new(u64::MAX, false), text, order, expected, printed).phases;
-    for phase in want {
-        assert!(phases.contains(phase), "the reopens saw {phases:?}: {text}");
+fn case(text: &str, order: &[&str], expected: &Datum, printed: &[Datum], want: &[Stand]) {
+    let stood = exact(Drive::new(u64::MAX, false), text, order, expected, printed).stood;
+    for stand in want {
+        assert!(
+            stood.iter().any(|at| stand.holds(at)),
+            "the reopens saw no {stand:?} in {stood:?}: {text}"
+        );
+    }
+}
+
+/// One frame of a sealed run: its unit's kind, the site and phase of its
+/// point, how many operands it holds there, and whether a frame stands
+/// above it.
+#[derive(Clone, Debug)]
+struct Stood {
+    kind: UnitKind,
+    site: Site,
+    phase: PointPhase,
+    operands: usize,
+    under: bool,
+}
+
+/// Every frame of every task in `record`.
+fn stood(record: &RunRecord) -> Vec<Stood> {
+    record
+        .tasks
+        .iter()
+        .flat_map(|task| {
+            let top = task.frames.len().saturating_sub(1);
+            task.frames
+                .iter()
+                .enumerate()
+                .map(move |(at, frame)| Stood {
+                    kind: frame.unit.kind,
+                    site: frame.site.clone(),
+                    phase: frame.phase,
+                    operands: frame.operands.len(),
+                    under: at < top,
+                })
+        })
+        .collect()
+}
+
+/// Where a reopen must have found a frame standing (`K-EVAL-008`).
+#[derive(Clone, Copy, Debug)]
+enum Stand {
+    /// At a call nested in its statement's expression, its callee's frame
+    /// above.
+    Called,
+    /// `main`'s frame at the call at this site of `main`, its callee above.
+    CalledAt(&'static [u32]),
+    /// Suspended inside its statement's expression, at an action of its
+    /// own or under a callee, holding the operands the statement evaluated
+    /// before it.
+    Holding,
+    /// A function body's frame at a call, its callee's frame above.
+    BodyCalled,
+    /// `main`'s frame at a call, its callee's frame above: a loop calling
+    /// its protocol's hook.
+    MainCalled,
+    /// `main`'s top frame waiting at an action of its own.
+    MainWaits,
+}
+
+impl Stand {
+    fn holds(self, at: &Stood) -> bool {
+        match self {
+            Self::Called => at.phase == PointPhase::Call && at.under,
+            Self::CalledAt(path) => {
+                at.kind == UnitKind::Main
+                    && at.site == Site::new(lash_kernel_value::sites::Unit::Main, path.to_vec())
+                    && at.phase == PointPhase::Call
+                    && at.under
+            }
+            Self::Holding => {
+                at.operands > 0
+                    && ((at.phase == PointPhase::Issued && !at.under)
+                        || (at.phase == PointPhase::Call && at.under))
+            }
+            Self::MainCalled => {
+                at.kind == UnitKind::Main && at.phase == PointPhase::Call && at.under
+            }
+            Self::MainWaits => {
+                at.kind == UnitKind::Main && at.phase == PointPhase::Issued && !at.under
+            }
+            Self::BodyCalled => {
+                at.kind != UnitKind::Main && at.phase == PointPhase::Call && at.under
+            }
+        }
     }
 }
 
@@ -320,8 +396,7 @@ fn everywhere(base: Drive, text: &str, order: &[&str]) -> (Trace, Seen) {
         assert_eq!(sliced, reference, "slice {slice}: {text}");
         let (reopened, at_reopens) = drive(text, order, at(slice, true));
         assert_eq!(reopened, reference, "reopened at slice {slice}: {text}");
-        seen.phases.extend(at_reopens.phases);
-        seen.headers.extend(at_reopens.headers);
+        seen.stood.extend(at_reopens.stood);
     }
     (reference, seen)
 }
@@ -361,7 +436,7 @@ fn nested_await_resumes_exactly() {
         &["tool", "c"],
         &expected,
         &printed,
-        &[ContinuationPhase::Call { phase: 0 }, STANDING],
+        &[Stand::Called, Stand::Holding],
     );
     let (_, crossed) = drive(NESTED_AWAIT, &["tool", "c"], Drive::new(u64::MAX, true));
     assert!(
@@ -387,7 +462,13 @@ const MUTATED_RECEIVER_HOISTED: &str = "definition \"function writer(o: Any) -> 
 #[test]
 fn parked_role_keeps_the_evaluated_value() {
     let expected = tuple(&[list(&[int(1), text("m")]), int(2)]);
-    case(MUTATED_RECEIVER, &["w", "m"], &expected, &[], &[STANDING]);
+    case(
+        MUTATED_RECEIVER,
+        &["w", "m"],
+        &expected,
+        &[],
+        &[Stand::Holding],
+    );
     case(MUTATED_RECEIVER_HOISTED, &["w", "m"], &expected, &[], &[]);
 }
 
@@ -405,7 +486,7 @@ fn callback_inside_expression_resumes_exactly() {
         &["echo", "echo"],
         &expected,
         &[text("a"), text("b")],
-        &[ContinuationPhase::Call { phase: 0 }, STANDING],
+        &[Stand::Called, Stand::Holding],
     );
     case(
         CALLBACK_HOISTED,
@@ -432,12 +513,7 @@ fn a_spawn_inside_an_expression_resumes_exactly() {
         &["child"],
         &expected,
         &printed,
-        &[
-            STANDING,
-            Embedder::with(SPAWNED, setup(0))
-                .machine
-                .source_call_phase(&embedder::main_site([1, 0, 0])),
-        ],
+        &[Stand::Holding, Stand::CalledAt(&[1, 0, 0])],
     );
     case(SPAWNED_HOISTED, &["child"], &expected, &printed, &[]);
 }
@@ -460,18 +536,7 @@ fn library_bodies_inside_expressions_resume_exactly() {
         int(4),
         list(&[int(3), text("w")]),
     ]);
-    case(
-        BODIES,
-        &["w"],
-        &expected,
-        &[int(1)],
-        &[
-            Embedder::with(BODIES, setup(0))
-                .machine
-                .source_call_phase(&embedder::main_site([2, 0, 0])),
-            STANDING,
-        ],
-    );
+    case(BODIES, &["w"], &expected, &[int(1)], &[Stand::Holding]);
 }
 
 /// A `while` whose condition holds a library body, a wait and a call that
@@ -491,7 +556,7 @@ fn while_condition_actions_resume_exactly() {
         &[],
         &expected,
         &printed,
-        &[ContinuationPhase::Call { phase: 0 }, STANDING],
+        &[Stand::Called, Stand::Holding],
     );
     case(WHILE_CONDITION_HOISTED, &[], &expected, &printed, &[]);
 }
@@ -523,7 +588,7 @@ fn assignment_place_actions_resume_exactly() {
         &[],
         &expected,
         &printed,
-        &[ContinuationPhase::Call { phase: 0 }, STANDING],
+        &[Stand::Called, Stand::Holding],
     );
     case(PLACES_HOISTED, &[], &expected, &printed, &[]);
 }
@@ -553,39 +618,30 @@ fn an_assignments_order_decides_what_its_place_reads() {
         &[],
         &tuple(&[written, untouched]),
         &[],
-        &[ContinuationPhase::Call { phase: 0 }],
+        &[Stand::Called],
     );
 }
 
 /// CONT-GRAMMAR at the new sites: a frame parked in a `while` condition,
-/// or in a place-first assignment's value with its target and index as
-/// roles, refuses a restore that drops a role.
+/// or in a place-first assignment's value with its target and index held,
+/// refuses an open that drops an evaluated operand: a frame holds exactly
+/// the stack its point's resume entry names.
 #[test]
 fn a_missing_role_at_a_condition_or_a_place_is_refused() {
     for source in [
         "main { let i = 0\nwhile [i, perform 0(false) as Any][1] { set i = 1 }\nreturn i }\n",
         "main { let t = [0]\nset t[0] = [1, perform 0(\"w\") as Any][1] place first\nreturn t }\n",
     ] {
-        let mut embedder = park_where(source, |embedder, _| {
-            embedder.machine.source_action_site().is_some()
-        });
-        edit_roles(&mut embedder, |roles| {
-            assert!(!roles.is_empty(), "{source}");
-            let index = roles
-                .iter()
-                .position(|role| {
-                    matches!(
-                        role.coordinate,
-                        lash_kernel_state::paged::RoleCoordinate::Source {
-                            kind: lash_kernel_state::kernel_internals::logical::SlotKind::Operand,
-                            ..
-                        }
-                    )
-                })
-                .expect("an evaluated operand role");
-            roles.remove(index);
-        });
-        refused(&mut embedder, "canonical source roles differ");
+        let mut embedder = park_where(source, waits_in_main);
+        refused(
+            &mut embedder,
+            |record| {
+                let top = main_top(record);
+                assert!(!top.operands.is_empty(), "{source}");
+                top.operands.pop();
+            },
+            "another stack",
+        );
     }
 }
 
@@ -596,13 +652,7 @@ fn a_missing_role_at_a_condition_or_a_place_is_refused() {
 fn a_nested_call_reads_its_callee_before_its_arguments() {
     const SOURCE: &str = "definition \"function g(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return [\\\"g\\\", x]  }\"\n\ndefinition \"function h(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return [\\\"h\\\", x]  }\"\n\nmain { let f = &g\nlet swap = fn() { set f = &h let w = perform 0(\"w\") as Any return w }\nlet r = [apply f(apply swap()), apply f(2)]\nreturn r }\n";
     let expected = list(&[list(&[text("g"), text("w")]), list(&[text("h"), int(2)])]);
-    case(
-        SOURCE,
-        &["w"],
-        &expected,
-        &[],
-        &[ContinuationPhase::Call { phase: 0 }],
-    );
+    case(SOURCE, &["w"], &expected, &[], &[Stand::Called]);
 }
 
 /// A task cancelled while it waits at a nested `perform` resumes at its
@@ -610,7 +660,7 @@ fn a_nested_call_reads_its_callee_before_its_arguments() {
 #[test]
 fn cancel_at_a_nested_wait_resumes_exactly() {
     const SOURCE: &str = "definition \"function work(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = [perform 0(x) as Any] return v[0]  }\"\n\nmain { let h = spawn call work(0)\ndo cancel h\nlet r = \"none\"\ntry { let v = join h\nset r = v } catch e { set r = e.kind }\nreturn r }\n";
-    case(SOURCE, &[], &text("cancelled"), &[], &[STANDING]);
+    case(SOURCE, &[], &text("cancelled"), &[], &[Stand::MainWaits]);
 }
 
 /// SITE-NESTED (`K-EFF-008`, `K-SITE-002`): each wait of a statement that
@@ -782,26 +832,18 @@ fn a_wait_in_a_while_condition_is_named_inside_its_loop() {
     );
 }
 
-/// Runs `source` at slice 0 until `want` accepts the phases its frames
-/// stand at, and leaves the run there.
-fn park_where(
-    source: &str,
-    want: impl Fn(&mut Embedder, &[(TaskId, usize, ContinuationPhase)]) -> bool,
-) -> Embedder {
+/// Runs `source` at slice 0 until `want` accepts its sealed record, and
+/// leaves the run there, reopened cold.
+fn park_where(source: &str, want: impl Fn(&RunRecord) -> bool) -> Embedder {
     let mut embedder = Embedder::with(source, setup(0));
     for _ in 0..200 {
         let step = embedder.run();
-        let phases = embedder.machine.pending_phases();
-        if want(&mut embedder, &phases) {
+        if !matches!(step, Step::Ended(_)) && want(&embedder.run_record()) {
             embedder.reopen(true);
-            assert_eq!(
-                embedder.machine.restore_refusal(TaskId::MAIN, 0).unwrap(),
-                None
-            );
             return embedder;
         }
         match step {
-            Step::Ended(_) => panic!("the run ended before {phases:?} matched"),
+            Step::Ended(end) => panic!("the run ended at {end:?} before it stood as wanted"),
             Step::Slice => {}
             Step::Parked(_) => embedder.deliver_next(),
         }
@@ -809,21 +851,23 @@ fn park_where(
     panic!("the run never stood where it was wanted")
 }
 
-/// A frame standing at an action whose Enter is accepted and whose result
-/// is not yet delivered: a spawn, a wait, a join or a yield.
-const STANDING: ContinuationPhase = ContinuationPhase::Source {
-    phase: 0,
-    progress: 2,
-};
+/// `main`'s top frame.
+fn main_top(record: &mut RunRecord) -> &mut lash_kernel_state::paged::run::continuation::RunFrame {
+    record.tasks[0].frames.last_mut().expect("main has a frame")
+}
 
-fn only(phase: ContinuationPhase) -> Vec<(TaskId, usize, ContinuationPhase)> {
-    vec![(TaskId::MAIN, 0, phase)]
+/// `main`'s top frame waits at an action of `main`.
+fn waits_in_main(record: &RunRecord) -> bool {
+    record.tasks[0]
+        .frames
+        .last()
+        .is_some_and(|top| top.unit.kind == UnitKind::Main && top.phase == PointPhase::Issued)
 }
 
 /// `main` parked at the nested `perform` of [`NESTED_AWAIT`].
 fn waiting() -> Embedder {
-    park_where(NESTED_AWAIT, |embedder, _| {
-        embedder.machine.source_action_site() == Some(vec![1, 0, 1])
+    park_where(NESTED_AWAIT, |record| {
+        waits_in_main(record) && record.tasks[0].frames[0].site == embedder::main_site([1, 0, 1])
     })
 }
 
@@ -842,90 +886,20 @@ fn parked() -> Embedder {
 
 /// `main` standing at the nested `call a()`, its callee's frame above.
 fn called() -> Embedder {
-    let phase = Embedder::with(NESTED_AWAIT, setup(0))
-        .machine
-        .source_call_phase(&embedder::main_site([1, 0, 0]));
-    park_where(NESTED_AWAIT, |embedder, _| {
-        embedder
-            .machine
-            .source_pending(TaskId::MAIN, 0)
-            .is_some_and(|pending| pending.site == [1, 0, 0] && pending.phase == phase)
+    park_where(NESTED_AWAIT, |record| {
+        stood(record)
+            .iter()
+            .any(|at| Stand::CalledAt(&[1, 0, 0]).holds(at))
     })
 }
 
-/// The cold row is edited after sealing, so the independent frame decoder
-/// reads the forged continuation before any publication can reject its ledger.
-fn refused(embedder: &mut Embedder, named: &str) {
-    let refusal = match embedder.machine.restore_refusal(TaskId::MAIN, 0) {
-        Ok(Some(refusal)) => format!("continuation refused: {refusal}"),
-        Err(fault) => fault,
-        Ok(None) => panic!("the grammar accepted the corrupted continuation"),
-    };
-    assert!(refusal.contains(named), "{refusal} names no {named}");
-    let problem = run_out(embedder);
-    assert!(problem.contains(named), "{problem} names no {named}");
-}
-
-/// The refusal the grammar gives `main`'s bottom frame as `embedder`
-/// stands, cold: the run, run on and answered oldest first, ends with that
-/// refusal once it reaches the frame.
-fn refused_here(embedder: &mut Embedder) -> RestoreRefusal {
+/// CONT-GRAMMAR: `embedder`'s run, sealed with `edit` made to its saved
+/// record, refuses to open, naming `named`.
+fn refused(embedder: &mut Embedder, edit: impl FnOnce(&mut RunRecord), named: &str) {
     let refusal = embedder
-        .machine
-        .restore_refusal(TaskId::MAIN, 0)
-        .expect("the frame row reads")
-        .expect("the grammar refuses the frame");
-    let problem = run_out(embedder);
-    let named = format!("continuation refused: {refusal}");
-    assert!(problem.contains(&named), "{problem} names no {named}");
-    refusal
-}
-
-/// How the run ends as `embedder` stands, run on and answered oldest first.
-fn run_out(embedder: &mut Embedder) -> String {
-    loop {
-        let step = match embedder.machine.run(&mut embedder.world, 0) {
-            Ok(step) => step,
-            Err(error) => break format!("{error:?}"),
-        };
-        if let Step::Parked(park) = &step {
-            embedder.pending.extend(park.requests.iter().cloned());
-        }
-        match step {
-            Step::Ended(end) => break format!("{end:?}"),
-            Step::Slice => {}
-            Step::Parked(_) => {
-                let request = embedder.pending.remove(0);
-                if let Err(error) = embedder
-                    .machine
-                    .deliver(embedder::wait_of(&request), embedder::answer(&request))
-                {
-                    break format!("{error:?}");
-                }
-            }
-        }
-    }
-}
-
-fn path<const N: usize>(path: [u32; N]) -> SitePath {
-    SitePath(path.into())
-}
-
-/// Edits the roles of `main`'s saved continuation.
-fn edit_roles(embedder: &mut Embedder, edit: impl FnOnce(&mut Vec<RoleRecord>)) {
-    embedder
-        .machine
-        .tamper_pending(TaskId::MAIN, 0, |pending, access| {
-            let pending = pending.as_mut().expect("a saved continuation");
-            let mut roles = pending.roles(access).unwrap();
-            edit(&mut roles);
-            // Only the roles change; the rest of the continuation stands.
-            pending.roles =
-                ContinuationRecord::new(pending.site.clone(), pending.phase, roles, access)
-                    .unwrap()
-                    .roles;
-        })
-        .unwrap();
+        .reopen_edited(edit)
+        .expect_err("the edited record opened");
+    assert!(refusal.contains(named), "{refusal} names no {named}");
 }
 
 /// A page source the open must not touch.
@@ -1056,169 +1030,81 @@ fn the_paged_engines_state_is_refused_as_retired() {
 /// CONT-GRAMMAR: an action site the statement does not hold.
 #[test]
 fn an_unknown_site_is_refused() {
-    let mut embedder = waiting();
-    embedder
-        .machine
-        .tamper_pending(TaskId::MAIN, 0, |pending, _| {
-            pending.as_mut().unwrap().site = vec![9, 9];
-        })
-        .unwrap();
+    // The frame under the callee: a site at a wait is refused earlier, by
+    // admission, as no wait point.
+    let mut embedder = called();
     refused(
         &mut embedder,
-        "canonical source continuation is not admitted",
+        |record| record.tasks[0].frames[0].site = embedder::main_site([9, 9]),
+        "saves no point",
     );
 }
 
-/// CONT-GRAMMAR: a call's phase saved at a wait.
+/// CONT-GRAMMAR: a call's phase saved at a wait: a wait's task stands
+/// issued at its perform.
 #[test]
 fn a_called_phase_at_a_wait_is_refused() {
     let mut embedder = waiting();
-    embedder
-        .machine
-        .tamper_pending(TaskId::MAIN, 0, |pending, _| {
-            let pending = pending.as_mut().unwrap();
-            let ContinuationPhase::Source { phase, .. } = pending.phase else {
-                panic!("a standing region wait")
-            };
-            pending.phase = ContinuationPhase::Call { phase };
-        })
-        .unwrap();
     refused(
         &mut embedder,
-        "canonical source continuation is not admitted",
+        |record| main_top(record).phase = PointPhase::Call,
+        "WaitPoint",
     );
 }
 
-/// CONT-GRAMMAR: a wait's phase saved at a call.
+/// CONT-GRAMMAR: a wait's phase saved at a call: a frame under another
+/// stands at its call.
 #[test]
 fn a_waiting_phase_at_a_call_is_refused() {
     let mut embedder = called();
-    embedder
-        .machine
-        .tamper_pending(TaskId::MAIN, 0, |pending, _| {
-            let pending = pending.as_mut().unwrap();
-            let ContinuationPhase::Call { phase } = pending.phase else {
-                panic!("a suspended region call")
-            };
-            pending.phase = ContinuationPhase::Source { phase, progress: 2 };
-        })
-        .unwrap();
     refused(
         &mut embedder,
-        "canonical source continuation is not admitted",
+        |record| record.tasks[0].frames[0].phase = PointPhase::Issued,
+        "SuspendedCall",
     );
 }
 
-/// CONT-GRAMMAR: a continuation saved on a frame nothing resumes.
-#[test]
-fn a_continuation_on_a_fresh_frame_is_refused() {
-    let mut saved = None;
-    called()
-        .machine
-        .tamper_pending(TaskId::MAIN, 0, |pending, _| {
-            saved = pending.clone();
-        })
-        .unwrap();
-    // The same root invocation, before it has entered that call.
-    let mut embedder = park_where(NESTED_AWAIT, |embedder, _| {
-        embedder
-            .machine
-            .source_pending(TaskId::MAIN, 0)
-            .is_some_and(|pending| pending.site == [0] && pending.unpaid.is_some())
-    });
-    embedder
-        .machine
-        .tamper_pending(TaskId::MAIN, 0, |pending, _| *pending = saved)
-        .unwrap();
-    refused(&mut embedder, "cannot stand at Called");
-}
-
-/// CONT-GRAMMAR: a saved role the action does not keep.
+/// CONT-GRAMMAR: an operand the point does not hold.
 #[test]
 fn an_extra_role_is_refused() {
     let mut embedder = waiting();
-    edit_roles(&mut embedder, |roles| {
-        roles.push(RoleRecord {
-            coordinate: lash_kernel_state::paged::RoleCoordinate::Source {
-                kind: lash_kernel_state::kernel_internals::logical::SlotKind::Operand,
-                role: lash_kernel_state::kernel_internals::logical::SourceRole::Operand(
-                    embedder::main_site([0, 0]),
-                ),
-            },
-            value: lash_kernel_doc::heap::PageValue::Null,
-        });
-    });
-    refused(&mut embedder, "canonical source roles differ");
+    refused(
+        &mut embedder,
+        |record| {
+            let top = main_top(record);
+            let first = top.operands[0];
+            top.operands.push(first);
+        },
+        "another stack",
+    );
 }
 
-/// CONT-GRAMMAR: a role the action keeps, saved twice.
+/// CONT-GRAMMAR: a slot the frame holds, saved twice.
 #[test]
 fn a_role_saved_twice_is_refused() {
     let mut embedder = waiting();
-    edit_roles(&mut embedder, |roles| roles.push(roles[0].clone()));
-    refused(&mut embedder, "source continuation duplicates a frame role");
+    refused(
+        &mut embedder,
+        |record| {
+            let top = main_top(record);
+            assert!(top.slots.len() > 1, "main holds two slots");
+            top.slots[1] = top.slots[0].clone();
+        },
+        "twice",
+    );
 }
 
-/// Q4: a saved region role names one slot of its body by kind and full
-/// source discriminator. Two saved roles under one slot, which is what a
-/// non-injective RoleKey table would write, and a role its body does not
-/// key under that kind, refuse the reopen as malformed.
+/// Q4: a saved slot names one slot of its unit by its declaring site and
+/// role; a slot its unit does not declare refuses the open (two saved
+/// under one: [`a_role_saved_twice_is_refused`]).
 #[test]
 fn a_slot_two_saved_roles_share_or_its_body_does_not_key_is_refused() {
-    use lash_kernel_state::kernel_internals::logical::SlotKind;
-    use lash_kernel_state::paged::RoleCoordinate;
-    type Edit = fn(&mut Vec<RoleRecord>);
-    let cases: [(&str, Edit); 2] = [
-        ("source continuation duplicates a frame role", |roles| {
-            let twice = roles
-                .iter()
-                .find(|role| matches!(role.coordinate, RoleCoordinate::Source { .. }))
-                .expect("a saved source role")
-                .clone();
-            roles.push(twice);
-        }),
-        (
-            "source continuation role is not a role of its body",
-            |roles| {
-                let RoleCoordinate::Source { kind, .. } = &mut roles
-                    .iter_mut()
-                    .find(|role| matches!(role.coordinate, RoleCoordinate::Source { .. }))
-                    .expect("a saved source role")
-                    .coordinate
-                else {
-                    unreachable!()
-                };
-                *kind = match kind {
-                    SlotKind::Control => SlotKind::Departure,
-                    _ => SlotKind::Control,
-                };
-            },
-        ),
-    ];
-    for (named, edit) in cases {
-        // `main` parked at the nested `perform`, keeping the operands it
-        // evaluated; cold, so the edit reaches its saved row.
-        let mut embedder = Embedder::with(NESTED_AWAIT, setup(0));
-        loop {
-            let step = embedder.run();
-            let saved = embedder.machine.pending_roles();
-            if let [(TaskId::MAIN, 0, roles)] = &saved[..]
-                && roles.len() > 1
-                && embedder.machine.pending_phases() == only(STANDING)
-            {
-                break;
-            }
-            match step {
-                Step::Ended(end) => panic!("the run ended at {end:?} before it parked"),
-                Step::Slice => {}
-                Step::Parked(_) => embedder.deliver_next(),
-            }
-        }
-        embedder.try_reopen(true).expect("the run reopens");
-        edit_roles(&mut embedder, edit);
-        let problem = run_out(&mut embedder);
-        assert!(problem.contains(named), "{problem} names no {named}");
-    }
+    let mut embedder = waiting();
+    refused(
+        &mut embedder,
+        |record| main_top(record).slots[0].site = vec![9, 9],
+        "declares no slot",
+    );
 }
 
 /// CONT-GRAMMAR: a saved wait on a task that a value, not its request,
@@ -1226,96 +1112,54 @@ fn a_slot_two_saved_roles_share_or_its_body_does_not_key_is_refused() {
 #[test]
 fn a_task_state_that_disagrees_is_refused() {
     let mut embedder = waiting();
-    embedder
-        .machine
-        .tamper_task_state(
-            TaskId::MAIN,
-            TaskStateRecord::Resuming {
-                incoming: IncomingRecord::Value(lash_kernel_doc::heap::PageValue::Null),
-                requeue: false,
-            },
-        )
-        .unwrap();
-    embedder.reopen(true);
-    assert_eq!(
-        refused_here(&mut embedder),
-        RestoreRefusal::TaskState {
-            action: path([1, 0, 1])
-        }
+    refused(
+        &mut embedder,
+        |record| {
+            record.tasks[0].state = RunTaskState::Ready(RunResume::Value(0));
+            record.ready.push(0);
+        },
+        "OrphanWait",
     );
 }
 
 /// CONT-GRAMMAR: a frame waiting in the body of a `for` over a list,
-/// opened cold, refuses a saved loop header moved past its cursor (to a
-/// check, which only a guarded table walk holds) and a saved loop moved
-/// to a site no loop of the frame's statement stands at.
+/// opened cold, refuses its loop's walk and cursor moved to a site no
+/// loop of the frame's statement stands at.
 #[test]
-fn a_loop_moved_past_its_cursor_or_off_its_site_is_refused() {
+fn a_loop_moved_off_its_site_is_refused() {
     const IN_LOOP: &str = "main { let out = []\nfor x in [1, 2, 3] { let v = perform 0(x) as Any set out[list.len(out)] = v }\nreturn out }";
-    let parked = || {
-        let mut embedder = Embedder::with(IN_LOOP, setup(u64::MAX));
-        assert!(matches!(embedder.run(), Step::Parked(_)));
-        embedder.reopen(true);
-        embedder
-    };
-    let mut embedder = parked();
-    embedder
-        .machine
-        .tamper_loop(TaskId::MAIN, 0, |record, _| {
-            record.header = HeaderRecord::Check;
-        })
-        .unwrap();
+    let mut embedder = Embedder::with(IN_LOOP, setup(u64::MAX));
+    assert!(matches!(embedder.run(), Step::Parked(_)));
+    embedder.reopen(true);
     refused(
         &mut embedder,
-        "canonical source continuation is not admitted",
-    );
-    let mut embedder = parked();
-    embedder
-        .machine
-        .tamper_loop(TaskId::MAIN, 0, |record, access| {
-            let moved = Site::new(lash_kernel_value::sites::Unit::Main, [9, 9]);
-            record.site = lash_kernel_state::paged::SiteRef::new(&moved, access).unwrap();
-        })
-        .unwrap();
-    refused(
-        &mut embedder,
-        "canonical source continuation is not admitted",
+        |record| {
+            for slot in &mut main_top(record).slots {
+                if matches!(
+                    slot.role,
+                    lash_kernel_state::paged::run::continuation::SlotRole::Loop(_)
+                ) {
+                    slot.site = vec![9, 9];
+                }
+            }
+        },
+        "declares no slot",
     );
 }
 
-/// A continuation keeps up to `ROLE_FLAT` roles flat in its frame's row
-/// and spills a longer list to a sequence of `ROLE_CHUNK`-role cells; a
-/// statement that evaluated 16, 17 or 40 operands before its wait keeps
-/// every one, and resumes exactly from a cold open at every slice.
+/// A statement that evaluated 15, 16, 17 or 40 operands before its wait
+/// keeps every one, and resumes exactly from a cold open at every slice.
 #[test]
-fn a_continuation_keeps_its_roles_flat_and_spills_a_long_list() {
+fn a_continuation_keeps_every_operand_a_long_statement_evaluated() {
     for count in [15usize, 16, 17, 40] {
-        // The wait's argument is live beside the list's evaluated operands.
-        let roles = count + 1;
-        let cells = (roles > lash_kernel_state::paged::ROLE_FLAT)
-            .then_some(roles.div_ceil(lash_kernel_state::paged::ROLE_CHUNK) as u64);
         let operands: String = (0..count).map(|i| format!("{i}, ")).collect();
         let source =
             format!("main {{ let r = [{operands}perform 0(\"w\") as Any]\nreturn list.len(r) }}\n");
-        let mut embedder = park_where(&source, |embedder, _| {
-            embedder.machine.source_action_site().is_some()
-        });
-        let mut saved = None;
-        embedder
-            .machine
-            .tamper_pending(TaskId::MAIN, 0, |pending, access| {
-                let pending = pending.as_ref().unwrap();
-                let shape = match &pending.roles {
-                    RolesRecord::Flat(_) => None,
-                    RolesRecord::Spilled(tree) => Some(tree.len()),
-                };
-                saved = Some((shape, pending.roles(access).unwrap().len()));
-            })
-            .unwrap();
+        let mut embedder = park_where(&source, waits_in_main);
         assert_eq!(
-            saved,
-            Some((cells, roles)),
-            "{count} operands and the wait argument"
+            main_top(&mut embedder.run_record()).operands.len(),
+            count,
+            "{count} operands"
         );
         let (reference, _) = drive(&source, &["w"], Drive::new(u64::MAX, false));
         assert_eq!(
@@ -1337,7 +1181,7 @@ const NESTED_JOIN_HOISTED: &str = "definition \"function w(x: Any) -> Any\\nkern
 #[test]
 fn nested_join_resumes_exactly() {
     let expected = list(&[int(1), text("a"), list(&[text("a"), text("b")])]);
-    case(NESTED_JOIN, &["b", "a"], &expected, &[], &[STANDING]);
+    case(NESTED_JOIN, &["b", "a"], &expected, &[], &[Stand::Holding]);
     case(NESTED_JOIN_HOISTED, &["b", "a"], &expected, &[], &[]);
 }
 
@@ -1364,7 +1208,7 @@ main {
         &["child", "x"],
         &text("done"),
         &[list(&[Datum::Null])],
-        &[ContinuationPhase::Call { phase: 0 }, STANDING],
+        &[Stand::Called, Stand::Holding],
     );
 }
 
@@ -1405,9 +1249,9 @@ main { let value = call work() return value }
     // Some reopen stood inside the waiting policy, its frame at the policy
     // call.
     assert!(
-        seen.phases.contains(&ContinuationPhase::Call { phase: 13 }),
+        seen.stood.iter().any(|at| Stand::BodyCalled.holds(at)),
         "the reopens saw {:?}",
-        seen.phases
+        seen.stood
     );
 }
 

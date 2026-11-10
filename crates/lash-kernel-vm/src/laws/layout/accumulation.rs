@@ -87,7 +87,7 @@ fn native_probes(
 type Observation = (
     String,
     Vec<Datum>,
-    Vec<(&'static str, crate::Meters, [u64; 3])>,
+    Vec<(&'static str, crate::Meters)>,
     Vec<lash_kernel_state::semantic::Checkpoint>,
     Vec<Request>,
     Vec<crate::Weight>,
@@ -136,19 +136,7 @@ fn run_selected(
             Step::Slice => "slice",
             Step::Parked(_) => "parked",
         };
-        let balance = embedder
-            .machine
-            .logical_balance()
-            .expect("source owner balance");
-        stops.push((
-            kind,
-            embedder.machine.meters(),
-            [
-                balance.entity_local_bytes,
-                balance.root_and_control_bytes,
-                balance.entities,
-            ],
-        ));
+        stops.push((kind, embedder.machine.meters()));
         if cold && !matches!(step, Step::Ended(_)) {
             checkpoints.push(embedder.machine.semantic_checkpoint());
             embedder.reopen(true);

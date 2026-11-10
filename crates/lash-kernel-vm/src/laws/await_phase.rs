@@ -12,9 +12,9 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Datum, FunctionRegistry, TaskId, parse_definition};
+use lash_kernel_doc::{Datum, FunctionRegistry, parse_definition};
 
-use lash_kernel_state::paged::{ContinuationPhase, IncomingRecord, TaskStateRecord};
+use lash_kernel_state::paged::run::continuation::PointPhase;
 use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, Setup, answer, label, wait_of};
@@ -191,28 +191,19 @@ fn a_delivered_state_at_a_wait_without_its_turn_is_refused() {
             .machine
             .deliver(wait_of(&request), answer(&request))
             .unwrap();
-        let wait = wait_of(&request);
-        embedder
-            .machine
-            .tamper_task_state(
-                TaskId::MAIN,
-                TaskStateRecord::Resuming {
-                    incoming: IncomingRecord::Outcome(wait),
-                    requeue: true,
-                },
-            )
-            .unwrap();
-        let refused = match embedder.try_reopen(true) {
-            Err(refused) => refused,
-            Ok(()) => format!(
-                "{:?}",
-                embedder
-                    .machine
-                    .run(&mut embedder.world, u64::MAX)
-                    .expect_err("a delivered state at a plain wait is refused")
-            ),
-        };
-        assert!(refused.contains("disagrees"), "{text}: {refused}");
+        let refused = embedder
+            .reopen_edited(|record| record.tasks[0].turn = true)
+            .err()
+            .unwrap_or_else(|| {
+                format!(
+                    "{:?}",
+                    embedder
+                        .machine
+                        .run(&mut embedder.world, u64::MAX)
+                        .expect_err("a delivered state at a plain wait is refused")
+                )
+            });
+        assert!(refused.contains("Turn"), "{text}: {refused}");
     }
 }
 
@@ -233,11 +224,11 @@ fn an_await_waits_where_its_policy_waits() {
     );
     let mut embedder = Embedder::with(AWAITED, setup(u64::MAX));
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let phases: Vec<ContinuationPhase> = embedder
-        .machine
-        .pending_phases()
-        .into_iter()
-        .filter_map(|(task, frame, phase)| (task == TaskId::MAIN && frame == 0).then_some(phase))
-        .collect();
-    assert_eq!(phases, [ContinuationPhase::Call { phase: 0 }]);
+    // `main` stands called at the policy, the policy's frame above.
+    let record = embedder.run_record();
+    let main = &record.tasks[0].frames;
+    assert!(
+        main.len() >= 2 && main[0].phase == PointPhase::Call,
+        "{main:?}"
+    );
 }
