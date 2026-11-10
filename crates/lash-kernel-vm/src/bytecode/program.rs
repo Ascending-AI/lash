@@ -157,6 +157,18 @@ pub struct Unit {
     pub declared: Vec<(super::site_tables::Path, Option<Name>)>,
     /// Every point a frame of the unit can be saved at (contract §5).
     pub sites: super::site_tables::SiteTable,
+    /// The entry's run-root cleanup, when its convention declares one.
+    pub cleanup: Option<RootCleanup>,
+}
+
+/// Where an entry's unit calls its run-root cleanup (`K-TASK-019`). Ops
+/// before `body` are the entry's body; a raise that leaves the root frame
+/// from there goes on at `raised` with the raised value pushed, where the
+/// cleanup is called and the value raised again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RootCleanup {
+    pub body: u32,
+    pub raised: u32,
 }
 
 impl Unit {

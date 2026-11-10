@@ -511,6 +511,9 @@ impl Unit {
         let mut height = 0u32;
         let mut depth: Vec<Option<u32>> = vec![None; len];
         let mut work = vec![(0usize, 0u32)];
+        // A raise leaving the root body goes on at the cleanup's raise
+        // path with the raised value.
+        work.extend(self.cleanup.map(|cleanup| (cleanup.raised as usize, 1)));
         while let Some((pc, d)) = work.pop() {
             let at = |problem: String| Malformed {
                 unit: id,
@@ -799,6 +802,7 @@ mod tests {
                 origin: Vec::new(),
                 declared: Vec::new(),
                 sites: Default::default(),
+                cleanup: None,
             }],
             constants: vec![Constant::Immediate(Value::Bool(true))],
             natives: Vec::new(),

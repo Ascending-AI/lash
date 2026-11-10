@@ -961,6 +961,9 @@ impl<H: Heap> Vm<H> {
                 }
                 return Ok(());
             }
+            if top == 0 && self.clean_up_raise(value) {
+                return Ok(());
+            }
             let bill = self.cx.frames[top].bill;
             let completion = match self.completion(bill, None) {
                 Ok(completion) => completion,
@@ -982,6 +985,24 @@ impl<H: Heap> Vm<H> {
                 return Err(Flow::from(Stop::Uncaught(value)));
             }
         }
+    }
+
+    /// A raise leaving an entry's body from its root frame goes on at the
+    /// unit's run-root cleanup, the frame holding only the raised value
+    /// (`K-TASK-019`). A raise of the cleanup itself leaves the run.
+    fn clean_up_raise(&mut self, value: Value) -> bool {
+        let Some(frame) = self.cx.frames.first_mut() else {
+            return false;
+        };
+        let unit = &self.program.units[frame.unit as usize];
+        let Some(cleanup) = unit.cleanup.filter(|cleanup| frame.pc <= cleanup.body) else {
+            return false;
+        };
+        frame.pc = cleanup.raised;
+        let held = frame.base as usize + usize::from(unit.locals);
+        self.cx.stack.truncate(held);
+        self.cx.stack.push(value);
+        true
     }
 
     /// Drops the handlers of frames that are gone: a `return` inside a

@@ -1,6 +1,6 @@
-//! TypeScript entry adaptation (`K-DOC-003`, `K-EFF-006`).
+//! Entry adaptation (`K-DOC-003`, `K-EFF-006`, `K-TASK-019`).
 //!
-//! Settlement is an epilogue of the entry's own unit, so it adds neither
+//! TypeScript settlement and a run-root cleanup are epilogues of the entry's own unit, so it adds neither
 //! a frame around the body nor a synthetic statement or charge. Ordinary
 //! calls of the same function still use its unadapted body.
 
@@ -10,7 +10,7 @@ use lash_kernel_value::{FunctionId, Type};
 
 use super::compile::{Compiler, Fun, Result, unsupported};
 use super::op::Op;
-use super::program::{Block, CallSite, Event, Unit, UnitId, UnitKind};
+use super::program::{Block, CallSite, Event, RootCleanup, Unit, UnitId, UnitKind};
 use crate::StartError;
 
 /// Compiles the convention of the selected export. Several exports may name
@@ -49,10 +49,12 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, id: FunctionId) -> Result<UnitI
             Export::Function(export) if export.function == id => Some(&export.convention),
             _ => None,
         });
-    let Some(StartConvention::TsDirect { await_fn } | StartConvention::TsArgsList { await_fn, .. }) =
-        convention
-    else {
-        return compiler.body(id, false);
+    let await_fn = match convention {
+        Some(
+            StartConvention::TsDirect { await_fn } | StartConvention::TsArgsList { await_fn, .. },
+        ) => await_fn,
+        Some(StartConvention::PyDirect { cleanup }) => return clean_up(compiler, id, cleanup),
+        _ => return compiler.body(id, false),
     };
     let FunctionTarget::Local(await_fn) = await_fn else {
         return unsupported("a TypeScript entry settlement through an imported function");
@@ -97,6 +99,71 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, id: FunctionId) -> Result<UnitI
         }
     }
     // The fall block continues into settlement with its implicit null.
+    compiler.units[at as usize] = Some(unit);
+    Ok(at)
+}
+
+/// An entry whose convention declares a run-root cleanup (`K-TASK-019`):
+/// once the body has left the root frame by its return, by falling off
+/// its end or by its raise, its `finally` blocks run, the cleanup is
+/// called with no arguments and its result dropped, and the body's
+/// departure goes on, unless the cleanup raised. The body's handlers are
+/// gone by then, so a raise of the cleanup leaves the run. The frame holds
+/// only the body's return or raise while the cleanup runs.
+fn clean_up(
+    compiler: &mut Compiler<'_>,
+    id: FunctionId,
+    cleanup: &FunctionTarget,
+) -> Result<UnitId> {
+    let FunctionTarget::Local(cleanup) = cleanup else {
+        return unsupported("a run-root cleanup through an imported function");
+    };
+    let cleanup = *cleanup;
+    let at = compiler.reserve();
+    compiler.function(id, None, at, false, UnitKind::Declared(id))?;
+    let site = Fun::new(SiteUnit::Library(id), false, false, None);
+    let callee = compiler.callee(&site, cleanup)?;
+    let mark = compiler.mark(&site, &site.statement);
+    let Some(mut unit) = compiler.units[at as usize].take() else {
+        return unsupported("an entry with a run-root cleanup has no compiled body");
+    };
+    let body = unit.ops.len();
+    let handlers = unit.ops[..body]
+        .iter()
+        .filter(|op| matches!(op, Op::TryEnter(_)))
+        .count();
+    let call = unit.calls.len() as u32;
+    unit.calls.push(CallSite {
+        callee,
+        argc: 0,
+        site: site.statement.clone(),
+        mark,
+    });
+    let mut paths = [0u32; 3];
+    for (path, departure) in paths.iter_mut().zip([Op::Return, Op::Fall, Op::Raise]) {
+        *path = unit.ops.len() as u32;
+        // A return or a fall leaves the body's handlers behind; a raise
+        // reaches the cleanup only once none is left.
+        let mut call_ops = vec![Op::Block(0)];
+        if departure != Op::Raise {
+            call_ops.extend(std::iter::repeat_n(Op::TryExit, handlers));
+        }
+        call_ops.push(Op::Call(call));
+        append(&mut unit, &call_ops);
+        append(&mut unit, &[Op::Block(0), Op::Pop, departure]);
+    }
+    let [returned, fell, raised] = paths;
+    for op in &mut unit.ops[..body] {
+        match op {
+            Op::Return => *op = Op::Jump(returned),
+            Op::Fall => *op = Op::Jump(fell),
+            _ => {}
+        }
+    }
+    unit.cleanup = Some(RootCleanup {
+        body: body as u32,
+        raised,
+    });
     compiler.units[at as usize] = Some(unit);
     Ok(at)
 }

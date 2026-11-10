@@ -493,6 +493,10 @@ fn stacks(unit: &Unit, origin: &impl Fn(usize) -> Path) -> Option<Vec<Option<Vec
     let len = unit.ops.len();
     let mut seen: Vec<Option<Vec<Path>>> = vec![None; len];
     let mut work = vec![(0usize, Vec::<Path>::new())];
+    if let Some(cleanup) = unit.cleanup {
+        let raised = cleanup.raised as usize;
+        work.push((raised, vec![origin(raised)]));
+    }
     while let Some((pc, stack)) = work.pop() {
         let known = seen.get_mut(pc)?;
         let stack = match known {

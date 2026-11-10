@@ -1056,6 +1056,7 @@ impl<'a> Compiler<'a> {
             origin,
             declared,
             sites: Default::default(),
+            cleanup: None,
         }
     }
 

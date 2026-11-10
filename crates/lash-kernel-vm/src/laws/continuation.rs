@@ -70,7 +70,8 @@ fn setup(slice: u64) -> Setup {
 /// origin, and its charge.
 #[derive(Debug, PartialEq)]
 struct Trace {
-    checkpoints: Vec<lash_kernel_state::semantic::Checkpoint>,
+    /// The run sealed at each park, and the carry it ended with, encoded.
+    checkpoints: Vec<Vec<u8>>,
     end: String,
     printed: Vec<String>,
     requests: Vec<String>,
@@ -213,7 +214,9 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             Err(error) => break format!("machine refused: {error:?}"),
         };
         if let Step::Parked(park) = &step {
-            checkpoints.push(embedder.machine.semantic_checkpoint());
+            checkpoints.push(lash_kernel_value::tokens::encode_body(
+                &embedder.checkpoint(),
+            ));
             embedder.requests.extend(park.requests.iter().cloned());
             embedder.pending.extend(park.requests.iter().cloned());
         }
@@ -221,23 +224,12 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             if let End::Finished(finished) = end
                 && let Some(carry) = &finished.carry
             {
-                checkpoints.push(
-                    lash_kernel_state::semantic::session(carry, Box::new(embedder.source.clone()))
-                        .unwrap(),
-                );
+                checkpoints.push(lash_kernel_value::tokens::encode_body(carry));
             }
             break end_of(end);
         }
         if drive.reopens {
             hops += 1;
-            seen.phases.extend(
-                embedder
-                    .machine
-                    .pending_phases()
-                    .into_iter()
-                    .map(|(_, _, phase)| phase),
-            );
-            seen.headers.extend(embedder.machine.loop_headers());
             let (layout, native_twice) = drive.hop(hops);
             if let Err(error) = embedder.try_reopen(layout, native_twice) {
                 break format!("reopen refused: {error}");
