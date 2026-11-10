@@ -580,57 +580,85 @@ async fn a_parked_callable_start_keeps_its_frozen_captures_across_a_release_on_s
         .unwrap();
     let pin = lash_core::HostArtifactPin::mint();
     let (packages, namespace) = super::kernel_process::namespace(&core, &pin, &base).await;
-    let (payload, _) = super::callback_carry::publish(&core,
-        "kernel 1\nnumbers float\nprivate captured\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nmain { let captured = [7] let f = fn() presentation () -> Int bare direct { do perform 0(3000) as Null return captured[0] } return f }", &base, &pin, &packages, &namespace).await;
-    let input: lash_vm_runtime::KernelProcessInput = serde_json::from_value(payload).unwrap();
-    let (link, _) = input.code.linked().unwrap();
-    let workers = lash_vm_client::service::Service::default();
-    let image = workers.config().worker_library().unwrap();
-    let documents = lash_vm_runtime::KernelDocuments::new(
-        stores.module_artifacts(),
-        stores.package_store(),
-        Arc::clone(image.helpers()),
-    );
-    let content = documents.load_linked(link).await.unwrap();
-    let document = &content.documents[&content.links[&link].document];
-    let mut pending = vec![(
-        lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, []),
-        lash_kernel_doc::Node::Block(document.main.as_ref().unwrap()),
-    )];
-    let (creation, callable, presentation) = loop {
-        let (site, node) = pending.pop().unwrap();
-        if let lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node {
-            break (
-                site,
-                closure.function,
-                closure.presentation.clone().unwrap(),
-            );
-        }
-        for (index, child) in (0u32..).zip(node.children()) {
-            let mut at = site.clone();
-            at.path.push(index);
-            pending.push((at, child));
-        }
+    // The callable is written in TypeScript, as an authored callable is published.
+    let release = lash_kernel_releases::helper_release().unwrap();
+    let roots = release.resolver_roots();
+    let library =
+        lash::dialect::NamedLibrary::resolving(&release.functions, |id| roots.contains(id))
+            .unwrap();
+    let checked = core
+        .host_artifacts()
+        .workflow_environment(&namespace)
+        .await
+        .unwrap()
+        .unwrap();
+    let bound = lash::dialect::Environment::new(&library, checked.namespaces());
+    let lowered = lash::typescript::lower(
+        "const captured = 7; const f = async (): Promise<number> => { await sleep(3000); return captured; };",
+        &bound,
+        lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
+    )
+    .unwrap();
+    let start = core
+        .host_artifacts()
+        .publish_workflow(
+            &pin,
+            &lowered.document.clone().into(),
+            &lash::package::StartSelector::Main,
+            &namespace,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let link = start.link;
+    let (creation, written) = lowered
+        .written
+        .iter()
+        .find(|(_, written)| {
+            written
+                .signature_origin
+                .as_ref()
+                .is_some_and(|origin| origin.name.as_deref() == Some("f"))
+        })
+        .unwrap();
+    let lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Closure(closure)) =
+        lowered.document.node(creation).unwrap()
+    else {
+        panic!("the written closure")
     };
+    let presentation = closure.presentation.clone().unwrap();
     let function = Box::new(lash_kernel_doc::FunctionValue {
-        written_signature: None,
-        signature_origin: None,
-        implicit_text_conversions: Vec::new(),
+        written_signature: Some(lash_kernel_doc::WrittenSignature {
+            language: written.language,
+            signature: written.signature.clone(),
+        }),
+        signature_origin: written.signature_origin.clone(),
+        implicit_text_conversions: written.implicit_text_conversions.clone(),
         callable: lash_kernel_value::CallableId {
             link,
-            function: callable,
+            function: closure.function,
         },
+        // The frozen capture differs from the source's `7`: the run must
+        // read the capture, not re-evaluate the cell.
         captures: [(
             Name::new("captured"),
-            lash_kernel_doc::CaptureValue::Data(Datum::List(vec![Datum::Int(7.into())])),
+            lash_kernel_doc::CaptureValue::Data(Datum::Float(lash_kernel_doc::Float::new(11.0))),
         )]
         .into(),
         signature: presentation.signature,
-        convention: StartConvention::Direct,
-        captions: lash_kernel_doc::Captions::empty(document.identity()),
-        representation: lash_kernel_doc::FunctionRepresentation::Bare,
-        creation: Some(creation),
-        token: None,
+        convention: presentation.convention,
+        captions: lowered.captions.clone(),
+        representation: presentation.representation,
+        creation: Some(creation.clone()),
+        token: Some(vec![
+            Datum::Text("ts.function".into()),
+            Datum::Text(String::new()),
+            Datum::Text("f".into()),
+            Datum::Float(lash_kernel_doc::Float::new(0.0)),
+            Datum::Null,
+            Datum::Record(Vec::new()),
+        ]),
     });
     let origin = CallableOrigin {
         authored: [link].into(),
@@ -765,6 +793,6 @@ async fn a_parked_callable_start_keeps_its_frozen_captures_across_a_release_on_s
         panic!("the carried callable settles")
     };
     assert!(output.is_success(), "{output:?}");
-    assert_eq!(output.value_for_projection(), serde_json::json!(7));
+    assert_eq!(output.value_for_projection(), serde_json::json!(11));
     core.shutdown().await.unwrap();
 }
