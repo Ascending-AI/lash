@@ -25,6 +25,10 @@
 //! Another parks at the same places inside a `while` condition, which
 //! resumes in the evaluation it stood in.
 //!
+//! A race withdraws its loser's sleep before that sleep's deadline and
+//! the entry sleeps past it: every cut ends as the uncut run, the late
+//! outcome never delivered.
+//!
 //! A third parks at the same places on `then yield` waits: each step that
 //! delivers an outcome leaves its task delivered, owing one more turn
 //! (`K-TASK-005`), and every cut of that step ends as the uncut run.
@@ -104,6 +108,26 @@ main {
   let n = true
   while if(n, [perform 0(5) as Null, apply inner(true)][1], false) { set n = false }
   return ["b", n]
+}
+"#;
+
+/// A race whose loser's wait is withdrawn while its deadline is still
+/// ahead: the fast task wins at 5 ms, the slow task's 20 ms sleep is
+/// cancelled, and the entry then sleeps to 30 ms, past the withdrawn
+/// deadline. The withdrawn wait's late outcome is never delivered: it
+/// neither wakes the entry's sleep nor changes the race's value.
+const WITHDRAWN: &str = r#"kernel 1
+numbers float
+import 0 operation typescript.sleep(milliseconds: Int) -> Null
+main {
+  let fast = fn() { do perform 0(5) as Null return "fast" }
+  let slow = fn() { do perform 0(20) as Null return "slow" }
+  let w = spawn apply fast()
+  let l = spawn apply slow()
+  let hs = [w, l]
+  let first = join race hs
+  do perform 0(30) as Null
+  return first
 }
 "#;
 
@@ -606,6 +630,32 @@ async fn a_run_parked_in_a_while_condition_resumes_exactly_across_a_cut() {
     let ended = uncut.iter().find(|(source, _)| *source == WHILE_CONDITION);
     assert!(
         ended.is_some_and(|(_, output)| output.contains(r#""b""#)),
+        "{ended:?}"
+    );
+}
+
+/// A race's withdrawn wait, cut at every step outcome, never delivers its
+/// late outcome to the process: every cut ends as the uncut run, whose
+/// value is the winner's.
+#[tokio::test]
+async fn a_withdrawn_race_wait_never_delivers_its_late_outcome_across_a_cut() {
+    let report = Matrix::new()
+        .labels(&[CommitLabel::STEP_OUTCOME])
+        .faults(&[
+            Fault::FailBefore,
+            Fault::Abort,
+            Fault::AckHidden,
+            Fault::CommitThenAbort,
+        ])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| KernelSteps::new(WITHDRAWN))
+        .await;
+    eprintln!("withdrawn race kernel steps: {} cells", report.cells.len());
+    report.assert_held();
+    let uncut = UNCUT.lock_recover();
+    let ended = uncut.iter().find(|(source, _)| *source == WITHDRAWN);
+    assert!(
+        ended.is_some_and(|(_, output)| output.contains(r#""fast""#)),
         "{ended:?}"
     );
 }
