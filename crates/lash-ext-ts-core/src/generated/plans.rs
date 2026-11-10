@@ -156,7 +156,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_GETUTCFULLYEAR_PLAN,
     &TS_ARRAY_SEARCH_PLAN,
     &TS_REGEXP_NATIVE_SPLIT_PLAN,
-    &TS_BOUNDARY_PLAN,
     &TS_URL_CANPARSE_PLAN,
     &TS_MEMBER_FILTER_PLAN,
     &TS_SPREAD_PLAN,
@@ -217,6 +216,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ABORT_ABORTED_PLAN,
     &TS_URL_SEARCH_PARAMS_FOREACH_PLAN,
     &TS_OBJECT_VALUES_PLAN,
+    &TS_ENTRY_RESULT_PLAN,
     &TS_NUMBER_VALUEOF_PLAN,
     &TS_MEMBER_IGNORECASE_PLAN,
     &TS_ERROR_IS_URIERROR_PLAN,
@@ -384,7 +384,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_LOG2_PLAN,
     &TS_MEMBER_JSON_PLAN,
     &TS_BIT_NOT_PLAN,
-    &TS_COPY_BOUNDARY_PLAN,
     &TS_STRING_LASTINDEXOF_PLAN,
     &TS_HAS_OWN_PLAN,
     &TS_ABORT_RUN_PLAN,
@@ -428,6 +427,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ARRAY_ENTRIES_PLAN,
     &TS_DATE_SETUTCMILLISECONDS_PLAN,
     &TS_MEMBER_GETOWNPROPERTYDESCRIPTOR_PLAN,
+    &TS_COPY_BOUNDARY_PLAN,
     &TS_URL_SEARCH_PARAMS_IS_PLAN,
     &TS_ARRAY_VALUES_PLAN,
     &TS_MEMBER_SQRT_PLAN,
@@ -451,6 +451,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_ENCODEURI_PLAN,
     &TS_ARRAY_GENERIC_LASTINDEXOF_PLAN,
     &TS_PROPERTY_ABORTED_PLAN,
+    &TS_BOUNDARY_PLAN,
     &TS_MEMBER_REFERENCEERROR_PLAN,
     &TS_MEMBER_SIGN_PLAN,
     &TS_MEMBER_ASSIGN_PLAN,
@@ -609,7 +610,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_MEMBER_TOLOCALEDATESTRING_PLAN,
     &TS_MEMBER_RAW_PLAN,
     &TS_MEMBER_TOUPPERCASE_PLAN,
-    &TS_ENTRY_RESULT_PLAN,
     &TS_MEMBER_DEBUG_PLAN,
     &TS_MEMBER_TOSPLICED_PLAN,
     &TS_MEMBER_ISSUPERSETOF_PLAN,
@@ -14852,7 +14852,7 @@ fn ts_object_rest(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_COPY_BOUNDARY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.copy_boundary",
-    function: p::function("710a4140d2bb8e8142bb4e86ff2231c7922aba277b8c026541f8904fa4a0be9c"),
+    function: p::function("7e3ace0d3d0473cdad08cc218f189817922abeb015ef508eb4eef8e9b2702f00"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -15264,9 +15264,9 @@ fn ts_copy_boundary(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const TS_BOUNDARY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.boundary",
-    function: p::function("289878c2f70eec8f140006e558d28de421f687b707b70fe65f4ea6d75022c7a0"),
+    function: p::function("832759fab1b21d47d158da8d5e66587181174c1e6a5f47decf599d7f5dd0059a"),
     callees: &[
-        p::function("710a4140d2bb8e8142bb4e86ff2231c7922aba277b8c026541f8904fa4a0be9c"),
+        p::function("7e3ace0d3d0473cdad08cc218f189817922abeb015ef508eb4eef8e9b2702f00"),
         p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"),
         p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"),
         p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"),
@@ -53275,10 +53275,10 @@ fn ts_promise_any(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const TS_ENTRY_RESULT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.entry_result",
-    function: p::function("af03a480908bac4a14d2a41e374eec1e0f7cb71c7a563de542b8ef10cb7c0805"),
+    function: p::function("3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501"),
     callees: &[
         p::function("d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e"),
-        p::function("289878c2f70eec8f140006e558d28de421f687b707b70fe65f4ea6d75022c7a0"),
+        p::function("832759fab1b21d47d158da8d5e66587181174c1e6a5f47decf599d7f5dd0059a"),
     ],
     literals: &[],
     fields: &[],
@@ -53310,7 +53310,7 @@ const TS_ENTRY_RESULT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_entry_result,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e"), p::function("289878c2f70eec8f140006e558d28de421f687b707b70fe65f4ea6d75022c7a0"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e"), p::function("832759fab1b21d47d158da8d5e66587181174c1e6a5f47decf599d7f5dd0059a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `ts.entry_result`.

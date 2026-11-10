@@ -1985,9 +1985,10 @@ body {
 }
 
 # Copy guest values without making JSON decisions. Undefined object members,
-# absent array slots, numeric tags and package records keep their semantics.
-# A source-owned factory turns builtin callables into equivalent durable
-# closures; the JSON encoder alone decides what can be serialized.
+# absent array slots and package records keep their semantics. A BigInt
+# crosses as its exact kernel Int at every depth: no tool or host sees the
+# guest tag. A source-owned factory turns builtin callables into equivalent
+# durable closures; the JSON encoder alone decides what can be serialized.
 function ts.copy_boundary(value: Any, forward: Any) -> Any
 kernel 1
 projection argument_copy
@@ -1997,6 +1998,7 @@ body {
   let convert = fn(child) {
     if same(kind(child), "tuple") {
       if same(child, ()) { return child }
+      if same(child[0], "ts.bigint") { return child[1] }
       if same(child[0], "ts.function") {
         if same(child[1], "") { return child }
         if same(kind(forward), "closure") { return apply forward(child) }
@@ -2049,18 +2051,14 @@ body {
   return copied
 }
 
-# Public entry results expose kernel Ints and arrays rather than guest tokens.
-# Argument copying remains faithful until a JSON transport encodes it.
+# Public entry results expose kernel Ints and arrays rather than guest tokens;
+# the argument copy already gives each BigInt as its Int.
 function ts.boundary(value: Any) -> Any
 kernel 1
 errors "cyclic_value", "too_deep", "type_error", "not_data"
 charge sum(4, deep(value))
 body {
   let convert = fn(child) {
-    if same(kind(child), "tuple") {
-      if same(child, ()) { return child }
-      if same(child[0], "ts.bigint") { return child[1] }
-    }
     if same(kind(child), "record") {
       if same(child.__lash_brand, ("typescript", "template")) { return child.items }
     }

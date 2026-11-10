@@ -422,7 +422,12 @@ fn normalize<'k, A: Source<'k>>(
         }
     }
     if policy.target.is_some() && source.javascript() {
-        if let View::Number(Numeric::Int(integer)) = &view {
+        // A guest reads a kernel Int as a Number, so guest JSON text spells
+        // it through binary64. Copied-out data sent to a host (a tool's
+        // arguments, `encode_datum`) keeps the exact kernel value: an Int
+        // crosses as its digits and is never rounded.
+        let host_transport = policy.json_number && policy.target == Some(JsonTarget::Host);
+        if !host_transport && let View::Number(Numeric::Int(integer)) = &view {
             view = View::Number(Numeric::Float(Float::new(integer.to_f64().unwrap_or(
                 if integer.is_negative() {
                     f64::NEG_INFINITY
@@ -783,8 +788,9 @@ impl Output for StringOutput {
 /// function transport, as documented on [`JsonTarget`]. A finite float is
 /// spelled as [`Float::json_number`] does, the one spelling of every host
 /// reading (a tool's arguments, a cell's values): a whole float below 2^53 is
-/// a JSON integer, and `2**53` stays `9007199254740992.0`. No guest value is
-/// mutated.
+/// a JSON integer, and `2**53` stays `9007199254740992.0`. At the host target
+/// a kernel Int is its exact digits under either model; a TypeScript BigInt
+/// reaches here as that Int. No guest value is mutated.
 pub fn encode_datum(
     value: &Datum,
     model: JsonModel,

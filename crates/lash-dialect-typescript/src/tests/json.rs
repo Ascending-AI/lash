@@ -866,7 +866,8 @@ console.log(echoed);
 console.log(value);
 console.log("missing" in value, "missing" in value.nested, "missing" in value.items[3], 0 in value.items, value.items[0] === undefined, 2 in value.items);
 try { console.log({title: 1n}); } catch (error) { console.log(error.message); }
-try { await host.echo({after: 1n}); } catch (error) { console.log(error.message); }
+const after = await host.echo({after: 9007199254740993n});
+console.log(typeof after.after, after.after === 9007199254740992);
 const f = (x: number): number => x + 1;
 console.log({f, items: [f, undefined]});
 console.log(JSON.stringify({f, items: [f, undefined]}));
@@ -888,7 +889,10 @@ try { console.warn({title: 1n}); } catch (error) { console.log(error.message); }
             );
             let outcome = match json {
                 Ok(json) => {
-                    if host.is_empty() {
+                    if json.starts_with(r#"{"after""#) {
+                        // A BigInt crosses to a host as its exact Int.
+                        assert_eq!(json, r#"{"after":9007199254740993}"#);
+                    } else if host.is_empty() {
                         let Datum::Record(fields) = value else {
                             panic!("request object")
                         };
@@ -950,7 +954,7 @@ try { console.warn({title: 1n}); } catch (error) { console.log(error.message); }
     );
     assert_eq!(&lines[1..3], &[json, "true true true true true false"]);
     assert!(lines[3].contains("console.log $[0].title"), "{lines:?}");
-    assert!(lines[4].contains("host.echo $.after"), "{lines:?}");
+    assert_eq!(lines[4], "number true");
     assert_eq!(
         &lines[5..7],
         &[r#"{"items":[null,null]}"#, r#"{"items":[null,null]}"#]
@@ -958,6 +962,6 @@ try { console.warn({title: 1n}); } catch (error) { console.log(error.message); }
     assert_eq!(lines[7], "{\n  \"b\": 2\n}");
     assert_eq!(lines[8], r#"{"2":"two","1":"one"}"#);
     assert!(lines[9].contains("console.warn $[0].title"));
-    assert_eq!(host.len(), 2);
+    assert_eq!(host.len(), 3);
     assert_eq!(host[0], json);
 }

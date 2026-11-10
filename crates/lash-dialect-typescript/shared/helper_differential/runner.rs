@@ -381,9 +381,9 @@ impl Runner {
                             continue;
                         }
                         if operation.as_str() == "host.echo" {
-                            let value = effect.args.first().cloned().ok_or("echo needs a value")?;
+                            let value = effect.args.first().ok_or("echo needs a value")?;
                             machine
-                                .deliver(effect.wait, Outcome::Completed(value))
+                                .deliver(effect.wait, json_echo(value)?)
                                 .map_err(|e| e.to_string())?;
                             continue;
                         }
@@ -520,4 +520,31 @@ pub fn tag(value: &Datum) -> Value {
         }
         other => json!({"type":"unsupported", "value":format!("{other:?}")}),
     }
+}
+
+/// `host.echo` as a JSON tool answers: the arguments are written by the
+/// TypeScript host transport's encoder (`encode_datum`, JavaScript model,
+/// host target) and the tool's JSON reply is read back. A value the
+/// transport refuses fails as a tool would.
+fn json_echo(value: &Datum) -> Result<Outcome, String> {
+    let text = match lash_kernel_lib::encode_datum(
+        value,
+        lash_kernel_lib::JsonModel::JavaScript,
+        lash_kernel_lib::JsonTarget::Host,
+        "host.echo",
+        128,
+    ) {
+        Ok(text) => text,
+        Err(error) => {
+            return Ok(Outcome::Failed(ErrorDatum::new(
+                "not_data".into(),
+                error.to_string(),
+                Datum::Null,
+            )));
+        }
+    };
+    let reply: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    lash_kernel_doc::diagnostic_datum(&reply)
+        .map(Outcome::Completed)
+        .map_err(|e| e.to_string())
 }

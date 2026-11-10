@@ -87,8 +87,8 @@ ts.has	7ad5ebc465054ecd4ede2cd85b6367bd85b44e63b675d082b8e83dc82dd2a44d	callback
 ts.keys	d710e300e5ea7f94f32e27ce4ba4ea88c049745028e9c1b7620d511f72aac41e	callback	invoke ts.list_index	true	0	false	sum(4, product(size(target), size(target)))	segment of 1 sites
 ts.assign	5bcb47ee789d6c06a86a3cc8dacb07ae6b549088db86edac7ec24020caf3bde2	callback	invoke ts.get; invoke ts.keys	true	0	false	sum(4, product(size(source), size(source)))	segment of 2 sites
 ts.object_rest	abe16b2c32c842dec93775310e6beafba73ff105cf3a97c41efb893e285fae26	callback	invoke ts.get; invoke ts.keys	true	0	false	sum(4, product(size(source), size(source)), size(taken))	segment of 2 sites
-ts.copy_boundary	710a4140d2bb8e8142bb4e86ff2231c7922aba277b8c026541f8904fa4a0be9c	callback	apply convert; apply convert	true	1	true	sum(4, deep_size(value))	segment of 2 sites
-ts.boundary	289878c2f70eec8f140006e558d28de421f687b707b70fe65f4ea6d75022c7a0	callback	apply convert; apply convert; invoke ts.copy_boundary	true	1	true	sum(4, deep_size(value))	segment of 3 sites
+ts.copy_boundary	7e3ace0d3d0473cdad08cc218f189817922abeb015ef508eb4eef8e9b2702f00	callback	apply convert; apply convert	true	1	true	sum(4, deep_size(value))	segment of 2 sites
+ts.boundary	832759fab1b21d47d158da8d5e66587181174c1e6a5f47decf599d7f5dd0059a	callback	apply convert; apply convert; invoke ts.copy_boundary	true	1	true	sum(4, deep_size(value))	segment of 3 sites
 ts.arguments	8e39e92decfd7fa245a37b992d0503e8c7cd7bc44cf423c14a8081c3a78538a9	closed	-	true	0	false	sum(8, size(items))	generated
 ts.sleep_duration	ed7e1df186c1c990614358425e96e242a365f3698c014c4f0a08a59c17741fc0	closed	-	false	0	false	1024	generated
 ts.locale_arguments	d3f41a68c5375a935bc3f2b4f708343480375c113726db222ceb6d7d21f25b65	closed	-	false	0	false	sum(12, size(method), size(result))	generated
@@ -456,7 +456,7 @@ ts.promise.all_settled	34f2b091e695dc4caa426c75d7ab8a7e1c188c86282a7a377003a51e4
 ts.promise.reactions	cc401c1f75dbe610c369aa40cd0e921137a2739e2e12e56bd364df45d3b9a0ea	callback	apply react; spawn; invoke ts.promise.settled; invoke ts.iterate	true	1	true	sum(8, size(items), size(result))	acts other than by a library call
 ts.promise.race	b76f7dc87363efe716162e97527677186257bf6502476a1027e544f03fd68429	callback	invoke ts.promise.start; invoke ts.promise.reactions	true	1	false	sum(48, deep_size(args))	segment of 2 sites
 ts.promise.any	c14980c83311f25bef40c74cf381ff10ef4a8e1f17a88f103f80a5cbc30c26aa	callback	invoke ts.promise.start; invoke ts.promise.reactions	true	1	false	sum(48, deep_size(args))	segment of 2 sites
-ts.entry_result	af03a480908bac4a14d2a41e374eec1e0f7cb71c7a563de542b8ef10cb7c0805	callback	invoke ts.boundary; invoke ts.await	true	0	false	sum(6, deep_size(value))	segment of 2 sites
+ts.entry_result	3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501	callback	invoke ts.boundary; invoke ts.await	true	0	false	sum(6, deep_size(value))	segment of 2 sites
 ts.abort.is_controller	623103aa80869daff0d9f84331eb55709e6636ec9b518c552170eed88cc16b5c	closed	-	false	0	false	6	generated
 ts.abort.is_signal	a43c2f81245dbf07f3e6bb12d8af46eaf33e5c2e40c25975ac18655870333c2a	closed	-	false	0	false	6	generated
 ts.abort.local_error	1f1528bbeca6f35a5e038e474f11c46055fb3ecb1cb2add7383997849234ff50	closed	-	false	0	false	8	generated
