@@ -163,6 +163,10 @@ pub(crate) fn record(record: &Record) -> u64 {
 /// each cold chunk.
 fn split(chunks: &lash_kernel_doc::arena::Chunks, per: u64) -> u64 {
     let cold = match chunks {
+        // One cold chunk standing for every member is a whole object on
+        // its page, a proxy: it holds [`OBJECT`] alone. A large object
+        // opened by its chunks has one per at most a chunk of members.
+        lash_kernel_doc::arena::Chunks::Split(chunks) if chunks.len() == 1 => 0,
         lash_kernel_doc::arena::Chunks::Split(chunks) => chunks
             .iter()
             .filter(|chunk| matches!(chunk, Chunk::Cold { .. }))

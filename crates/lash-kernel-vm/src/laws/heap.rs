@@ -787,10 +787,11 @@ fn shared_immutable_reopens_as_one_slot_and_one_holding() {
     assert_eq!(first.handle(), tuple.handle());
     assert_eq!(third.handle(), tuple.handle());
     assert_eq!(nested.handle(), tuple.handle());
-    // Root (three values), inner (one), and one cold tuple of no
-    // resident values; the text no loaded row names is collected.
+    // Root (three values), inner (one), one cold tuple of no resident
+    // values and the text's proxy, which the cold tuple's row still names:
+    // a collection traces a cold object by its row's edges.
     heap.collect(&mut |visit| visit(&root));
-    assert_eq!(heap.held(), (24 + 3 * 16) + (24 + 16) + 24);
+    assert_eq!(heap.held(), (24 + 3 * 16) + (24 + 16) + 24 + 24);
 }
 
 /// A map keyed by a tuple holding a ref to `list`, which it also holds as
