@@ -37,7 +37,7 @@ use super::chunked::{ChunkPage, IndexPage};
 use super::continuation::{self, RunRecord};
 use super::directory::{DirectoryRoot, Row, whole};
 use super::ids::ObjectId;
-use super::objects::{Head, Heads, Record, RunValue};
+use super::objects::{Head, Heads, Record};
 use super::root::HeapRoot;
 use super::session;
 
@@ -105,10 +105,9 @@ pub enum RewriteFault {
 /// callable and function id a rewrite needs an image for.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LiveCode {
-    /// The code each live frame runs: the link, the run's own for its
-    /// declared code and a closure's for a frame running it, and the unit
-    /// its site stands in, a helper's body as that helper's
-    /// [`Unit::Library`].
+    /// The code each live frame runs: its unit's link, the defining link
+    /// of the code it runs, and the unit its site stands in, a helper's
+    /// body as that helper's [`Unit::Library`].
     pub frames: BTreeSet<(LinkId, Unit)>,
     pub links: BTreeSet<LinkId>,
     pub callables: BTreeSet<CallableId>,
@@ -353,10 +352,12 @@ impl Ids<'_> {
         for task in &mut record.tasks {
             self.task(&mut task.identity)?;
             for frame in &mut task.frames {
+                self.link(&mut frame.unit.link)?;
                 self.site(&mut frame.unit.site)?;
                 self.site(&mut frame.site)?;
             }
             for occurrence in &mut task.occurrences {
+                self.link(&mut occurrence.link)?;
                 self.site(&mut occurrence.site)?;
             }
             if let Some(origin) = &mut task.spawn_origin {
@@ -581,28 +582,9 @@ pub fn live_code(pages: &mut dyn PageSource, root: &CheckpointRoot) -> Result<Li
     };
     collect.run(&mut record.clone()).map_err(fault)?;
     heap(&access, &record.heap, &mut collect).map_err(fault)?;
-    let directory = tree(record.heap.directory);
     for frame in record.tasks.iter().flat_map(|task| &task.frames) {
-        let closure = frame
-            .closure
-            .and_then(|at| record.heap.roots.get(at as usize))
-            .and_then(RunValue::id);
-        let link = match closure {
-            None => root.link,
-            Some(id) => match directory.get(&id.key(), &access)? {
-                Some(Row {
-                    record: Record::Closure { code, .. },
-                    ..
-                }) => code.link,
-                _ => {
-                    return Err(HeapFault::Malformed(format!(
-                        "a frame runs object {}, which is no closure",
-                        id.0
-                    )));
-                }
-            },
-        };
-        live.frames.insert((link, frame.unit.site.unit.clone()));
+        live.frames
+            .insert((frame.unit.link, frame.unit.site.unit.clone()));
     }
     live.pins = record.pins.iter().copied().collect();
     live.held_code = record.held_code.iter().copied().collect();
