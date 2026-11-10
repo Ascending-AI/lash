@@ -196,6 +196,7 @@ fn build(
         imports,
         closures,
         functions: root.map_or_else(Vec::new, |root| root.functions.clone()),
+        helpers: Some(available.unwrap_or(program.helpers())),
     };
     let mut code = crate::bytecode::compile::compile(
         document,

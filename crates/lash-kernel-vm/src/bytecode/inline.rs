@@ -37,7 +37,7 @@
 //! region against its body.
 
 use super::op::Op;
-use super::program::{Block, Callee, InlineSite, Program, Unit, UnitId, UnitKind};
+use super::program::{Block, CallSite, Callee, InlineSite, Program, Unit, UnitId, UnitKind};
 
 /// The most ops a body may hold to be expanded.
 const BUDGET: usize = 64;
@@ -83,10 +83,12 @@ pub(crate) fn inline(program: &mut Program) {
             .iter()
             .enumerate()
             .filter_map(|(pc, op)| match *op {
-                Op::Call(site) => match program.units[at].calls[site as usize].callee {
-                    Callee::Unit { unit, .. } if admissible(program, caller, unit) => {
-                        Some((pc, site, unit))
-                    }
+                Op::Call(site) => match &program.units[at].calls[site as usize] {
+                    CallSite {
+                        callee: Callee::Unit { unit, .. },
+                        checked: None,
+                        ..
+                    } if admissible(program, caller, *unit) => Some((pc, site, *unit)),
                     _ => None,
                 },
                 _ => None,

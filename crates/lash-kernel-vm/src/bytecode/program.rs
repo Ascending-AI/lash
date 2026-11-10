@@ -381,6 +381,16 @@ pub struct CallSite {
     pub site: Site,
     /// Where the calling frame stands while the callee runs.
     pub mark: Arc<Mark>,
+    /// The contract an authored call of a typed build helper's body
+    /// holds its arguments to (`function_argument`), as an export's are.
+    pub checked: Option<Arc<Checked>>,
+}
+
+/// A build helper's public contract, checked at an authored call.
+#[derive(Debug)]
+pub struct Checked {
+    pub callable: CallableId,
+    pub signature: lash_kernel_value::Signature,
 }
 
 /// Where a frame stands at a call or an action (`K-EVAL-008`,

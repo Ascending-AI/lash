@@ -52,6 +52,7 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<Un
         argc: 1,
         site: site.statement.clone(),
         mark,
+        checked: None,
     });
     // Settlement runs after the body's handlers have left, like its return.
     // This is the root unit: there are no caller handlers beneath its own.
@@ -124,6 +125,7 @@ fn clean_up(
         argc: 0,
         site: site.statement.clone(),
         mark,
+        checked: None,
     });
     let mut paths = [0u32; 3];
     for (path, departure) in paths.iter_mut().zip([Op::Return, Op::Fall, Op::Raise]) {

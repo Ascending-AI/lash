@@ -137,7 +137,7 @@ impl<H: Heap> Vm<H> {
     }
 
     /// The text a field-name constant spells.
-    fn text_of(&mut self, name: &Value) -> Run<String> {
+    pub(super) fn text_of(&mut self, name: &Value) -> Run<String> {
         let text = self.heap.semantics().text(name).map(str::to_owned);
         text.map_err(|e| self.native(e))
     }

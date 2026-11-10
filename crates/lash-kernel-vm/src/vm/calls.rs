@@ -53,6 +53,9 @@ impl<H: Heap> Vm<H> {
                 unit: callee,
                 charge,
             } => {
+                if let Some(checked) = &site.checked {
+                    self.check_arguments(checked, argc)?;
+                }
                 let bill = self.owed(charge, argc);
                 self.meter.leave();
                 self.exact = true;

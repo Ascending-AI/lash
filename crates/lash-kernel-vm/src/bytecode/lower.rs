@@ -733,16 +733,23 @@ impl Compiler<'_> {
         argc: usize,
         site: Site,
     ) -> Result<()> {
-        let target = match callee {
-            DocCallee::Value(_) => Callee::Value,
-            DocCallee::Local(id) => self.callee(f, *id)?,
+        let (target, checked) = match callee {
+            DocCallee::Value(_) => (Callee::Value, None),
+            DocCallee::Local(id) => {
+                let target = self.callee(f, *id)?;
+                let checked = self.checked(f, *id, &target);
+                (target, checked)
+            }
             DocCallee::Import(slot) => {
                 let callable = self.imported(*slot)?;
-                self.callee_at(f, callable)?
+                (self.callee_at(f, callable)?, None)
             }
         };
         f.point(f.here(), Point::Action(site.clone()));
         self.call(f, target, argc as u8, site);
+        if let Some(call) = f.calls.last_mut() {
+            call.checked = checked;
+        }
         Ok(())
     }
 

@@ -31,8 +31,8 @@ use super::library::{Library, OUTSIDE, Template};
 use super::names::Names;
 use super::op::Op;
 use super::program::{
-    ActionSite, Block, CallSite, Callee, Capture, ClosureSite, Constant, Event, FunctionEntry,
-    LoopMark, LoopSite, Mark, NativeEntry, Point, Program, Unit, UnitId, UnitKind,
+    ActionSite, Block, CallSite, Callee, Capture, Checked, ClosureSite, Constant, Event,
+    FunctionEntry, LoopMark, LoopSite, Mark, NativeEntry, Point, Program, Unit, UnitId, UnitKind,
 };
 use super::site_tables::Path;
 use crate::functions::{MachineFunction, machine_function};
@@ -70,6 +70,7 @@ pub(crate) fn compile(
     let mut compiler = Compiler::new(document, registry, link, &linked.imports);
     compiler.available = available;
     compiler.library = Some(library);
+    compiler.helpers = linked.helpers;
     compiler.links.extend(
         linked
             .others
@@ -127,6 +128,8 @@ pub struct Linked<'a> {
     /// The function values a callable start's frozen captures hold: each
     /// needs its Link's trampoline.
     pub functions: Vec<CallableId>,
+    /// The program's build helpers.
+    pub helpers: Option<&'a BuildHelpers>,
 }
 
 /// Where a read or write of a name goes.
@@ -414,6 +417,9 @@ pub(crate) struct Compiler<'a> {
     pub functions: BTreeMap<CallableId, UnitId>,
     /// The functions each compiled Link declares.
     declares: BTreeSet<CallableId>,
+    /// The program's build helpers: an authored call of one's typed body
+    /// checks its arguments.
+    helpers: Option<&'a BuildHelpers>,
     pub globals: Vec<Name>,
     global_ids: HashMap<Name, u16>,
     /// Each action site's occurrence counter index (`K-EFF-008`).
@@ -451,6 +457,7 @@ impl<'a> Compiler<'a> {
             charges: Vec::new(),
             functions: BTreeMap::new(),
             declares: BTreeSet::new(),
+            helpers: None,
             globals: Vec::new(),
             global_ids: HashMap::new(),
             occurrences: HashMap::new(),
@@ -1254,6 +1261,41 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
+    /// The contract a call from `f` of build helper `id` through `callee`
+    /// is checked against: an authored, uncovered caller's call of a
+    /// helper body whose signature types something (`K-FN-004`). A
+    /// native's own arguments are its formula's to bound.
+    pub(crate) fn checked(&self, f: &Fun, id: FunctionId, callee: &Callee) -> Option<Arc<Checked>> {
+        let authored = self.outside.is_none()
+            && !f.covered
+            && match &f.site {
+                SiteUnit::Main | SiteUnit::Function(_) => true,
+                SiteUnit::Library(owner) => self.document.functions.contains_key(owner),
+            };
+        if !authored
+            || !matches!(callee, Callee::Unit { .. })
+            || self.document.functions.contains_key(&id)
+            || !self.helpers.is_some_and(|helpers| helpers.contains(&id))
+        {
+            return None;
+        }
+        let signature = &self.registry.get(&id)?.definition().signature;
+        let typed = signature.result != lash_kernel_value::Type::Any
+            || signature
+                .params
+                .iter()
+                .any(|param| param.ty != lash_kernel_value::Type::Any);
+        typed.then(|| {
+            Arc::new(Checked {
+                callable: CallableId {
+                    link: self.link,
+                    function: id,
+                },
+                signature: signature.clone(),
+            })
+        })
+    }
+
     /// Emits a call through `callee` with `argc` arguments on the stack. A
     /// call that pushes a frame ends its block.
     pub(crate) fn call(&mut self, f: &mut Fun, callee: Callee, argc: u8, site: Site) {
@@ -1264,6 +1306,7 @@ impl<'a> Compiler<'a> {
             argc,
             site,
             mark,
+            checked: None,
         });
         f.emit(Op::Call(at));
         if !matches!(callee, Callee::Native { .. } | Callee::Machine { .. }) {

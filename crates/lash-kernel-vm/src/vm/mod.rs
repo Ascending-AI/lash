@@ -15,6 +15,7 @@ pub(crate) mod calls;
 pub(crate) mod charge;
 pub(crate) mod datum;
 mod digests;
+mod fits;
 pub(crate) mod frames;
 pub(crate) mod inline;
 pub(crate) mod loops;
