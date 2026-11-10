@@ -4,9 +4,11 @@
 //! anything is requested.
 
 use lash_kernel_doc::Datum;
+use lash_kernel_value::content_ids::LinkId;
+use lash_kernel_value::names::{CallableId, FunctionId, Name};
 
-use super::embedder::{ROOMY, World, core_machine};
-use crate::{End, Machine, Request, RunError, Step};
+use super::embedder::{ROOMY, Setup, Source, World, core_program};
+use crate::{CellStart, CoreMachine, End, Machine, Request, RunError, Step};
 
 /// A closure that states how a host starts it, so it can cross.
 const STARTABLE: &str = "let f = fn(a) presentation (a: Any) -> Any bare direct { return a }";
@@ -14,13 +16,25 @@ const STARTABLE: &str = "let f = fn(a) presentation (a: Any) -> Any bare direct 
 /// Performs `take(arg)` on the bytecode core, `take` declared to take one
 /// `input` of type `ty`: the arguments it requested, or the kind and
 /// message of the error it raised instead, when it requested nothing.
+/// The host binds `h` to a function of a Link the run has not loaded.
 fn perform(ty: &str, arg: &str) -> Result<Vec<Datum>, (String, String)> {
-    let mut machine = core_machine(
-        &format!(
-            "import 4 operation host.take(input: {ty}) -> Any\nmain {{ {STARTABLE} do perform 4({arg}) as Any }}"
+    let foreign = CallableId {
+        link: LinkId::from_bytes([4; 32]),
+        function: FunctionId::from_bytes([5; 32]),
+    };
+    let mut machine = <CoreMachine as Machine>::start(
+        core_program(
+            &format!(
+                "import 4 operation host.take(input: {ty}) -> Any\nmain {{ {STARTABLE} do perform 4({arg}) as Any }}"
+            ),
+            None,
         ),
         ROOMY,
-        None,
+        CellStart {
+            host: vec![(Name::new("h"), Datum::Function(foreign))],
+            ..Setup::default().start
+        },
+        Box::new(Source::default()),
     )
     .unwrap_or_else(|error| panic!("{ty}: the law's document starts: {error:?}"));
     loop {
@@ -87,6 +101,8 @@ fn a_function_crosses_where_its_declared_type_admits_one() {
 /// CROSS-PATH: a function where the declared type is concrete data (a typed
 /// record field, a text, a closed record, `Json` data and everything in
 /// it) raises `not_data` naming the argument path, and nothing is requested.
+/// So does a function of a Link the run has not loaded, where a function
+/// may cross: it has no defining document to cross against.
 #[test]
 fn a_function_in_a_concretely_typed_slot_raises_not_data_naming_its_path() {
     let cases = [
@@ -110,6 +126,8 @@ fn a_function_in_a_concretely_typed_slot_raises_not_data_naming_its_path() {
         ),
         // A union admits a function only through a member that does.
         ("Union(Text, List(Int))", "[f]", "input[0]"),
+        ("Any", "h", "input"),
+        ("Record{run: Any}", "{run: h}", "input.run"),
     ];
     for (ty, arg, path) in cases {
         let (kind, message) = perform(ty, arg).expect_err(ty);

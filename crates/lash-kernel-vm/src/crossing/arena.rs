@@ -113,13 +113,14 @@ impl Walk<'_, '_> {
         budget: usize,
         path: &mut Vec<ArenaHandle>,
     ) -> Result<Datum, CopyError> {
-        let child = slot.child(&step);
-        let typed = matches!(child, Slot::Typed(_));
-        if typed {
+        // A path names the steps the declared type describes, the step
+        // into an open slot among them, and none inside an open value.
+        let named = matches!(slot, Slot::Typed(_));
+        if named {
             at.steps.push(step_text(&step));
         }
-        let copied = self.copy(value, &child, at, budget, path);
-        if typed {
+        let copied = self.copy(value, &slot.child(&step), at, budget, path);
+        if named {
             at.steps.pop();
         }
         copied
@@ -156,7 +157,11 @@ impl Walk<'_, '_> {
             }
             let function = self.extract(value, budget).map_err(|error| match error {
                 CopyError::Raised(mut raised) => {
-                    raised.message = format!("a function cannot leave the run: {}", raised.message);
+                    raised.message = format!(
+                        "a function cannot leave the run: `{}`: {}",
+                        at.render(),
+                        raised.message
+                    );
                     CopyError::Raised(raised)
                 }
                 other => other,

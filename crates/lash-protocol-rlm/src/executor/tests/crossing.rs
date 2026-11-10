@@ -674,7 +674,7 @@ async fn callable_wrapper_crossing_preserves_its_declared_contract() {
     let (raised, received) = slots_raised(&dialect, "{ definition: Math.abs.bind(null) }").await;
     assert_eq!(
         raised,
-        "a function cannot leave the run: the function states no start signature"
+        "a function cannot leave the run: `input.definition`: the function states no start signature"
     );
     assert!(received.is_empty());
     let (raised, received) = slots_raised(&dialect, "{ args: { function: Math.abs } }").await;

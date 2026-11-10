@@ -12,14 +12,14 @@
 //! not in it. Anywhere else, a concretely typed slot such as a record field
 //! or JSON data, it raises `not_data` naming its path
 //! (`input.plan.steps[2].map`). A task, a ref, a cycle, a function no
-//! adapter says how to start, one whose exact library origin is unavailable, and a value past its
+//! adapter says how to start, one whose exact library origin is unavailable, one of a Link the run
+//! has not loaded, and a value past its
 //! bound still raise. Every refusal comes before anything is requested.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::data::CopyError;
-use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::{Datum, FunctionCatalog};
 
 use lash_kernel_value::content_ids::LinkId;
@@ -45,7 +45,7 @@ fn defining_document<'a>(
         .get(&callable.link)
         .and_then(|instance| run.documents.get(&instance.document))
         .map(Arc::as_ref)
-        .ok_or_else(|| CopyError::Heap(HeapFault::Malformed("callable Link is not loaded".into())))
+        .ok_or_else(|| crate::data::raised("not_data", "callable Link is not loaded").into())
 }
 
 #[path = "crossing/captures.rs"]
