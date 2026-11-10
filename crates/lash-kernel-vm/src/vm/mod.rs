@@ -467,11 +467,17 @@ impl<H: Heap> Vm<H> {
     /// A bound passed in the running frame, or in the body whose inline
     /// region it runs.
     fn exceeded(&self, bound: Bound, limit: u64) -> Exceeded {
-        let unit = match self.cx.inline {
-            Some(activation) => Some(activation.callee),
-            None => self.cx.frames.last().map(|frame| frame.unit),
-        }
-        .map(|unit| &self.program.units[unit as usize]);
+        // A bound names the nearest authored function: a library helper
+        // the guest called is not where the guest stands.
+        let units = self
+            .cx
+            .inline
+            .map(|activation| activation.callee)
+            .into_iter()
+            .chain(self.cx.frames.iter().rev().map(|frame| frame.unit))
+            .map(|unit| &self.program.units[unit as usize]);
+        let innermost = units.clone().next();
+        let unit = units.clone().find(|unit| unit.authored).or(innermost);
         Exceeded {
             bound,
             limit,
