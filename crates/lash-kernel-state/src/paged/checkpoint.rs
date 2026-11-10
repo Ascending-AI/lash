@@ -61,11 +61,6 @@ impl Checkpoint {
             .as_ref()
             .filter(|format| format.observed != format.expected)
     }
-    /// Whether both checkpoints retain the same authenticated pending-wait set.
-    /// This compares the saved set without exposing its storage coordinates.
-    pub fn same_pending_waits(&self, other: &Self) -> bool {
-        self.0.waits == other.0.waits
-    }
     pub fn header(&self) -> CheckpointHeader {
         header(&self.0)
     }
@@ -86,7 +81,6 @@ pub struct CheckpointHeader {
     pub parked: bool,
     pub charged: Option<u64>,
     pub live_tasks: u32,
-    pub pending_waits: u64,
 }
 
 fn header(root: &CheckpointRoot) -> CheckpointHeader {
@@ -101,7 +95,6 @@ fn header(root: &CheckpointRoot) -> CheckpointHeader {
         parked: matches!(root.status, RootStatus::Parked),
         charged: root.meters.charged,
         live_tasks: root.meters.live_tasks,
-        pending_waits: root.waits.len(),
     }
 }
 
