@@ -710,19 +710,7 @@ impl KernelProcessEngine {
         .await
         .map_err(|e| unavailable(e.to_string()))?
         .map_err(|e| unavailable(e.to_string()))?;
-        if let Some(function) = live.held_code.intersection(&upgrade.changed).next() {
-            return Err(super::succession::typed_refusal(
-                lash_kernel_doc::HelperUpgradeRefusal::RetainedCallable {
-                    function: *function,
-                },
-            ));
-        }
-        let functions: std::collections::BTreeSet<_> =
-            live.pins.intersection(&upgrade.changed).copied().collect();
-        Ok(if functions.is_empty() {
-            lash_kernel_doc::HelperUpgradeSafety::Safe
-        } else {
-            lash_kernel_doc::HelperUpgradeSafety::Deferred { functions }
-        })
+        lash_kernel_migrate::check_run_upgrade(&live, upgrade)
+            .map_err(super::succession::typed_refusal)
     }
 }

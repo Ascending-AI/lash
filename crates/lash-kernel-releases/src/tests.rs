@@ -397,6 +397,76 @@ fn an_orphan_document_keeps_its_identity_and_archived_body() {
     );
 }
 
+/// A shared in-memory page store: a machine and the image reopened from
+/// its checkpoint read the same pages.
+#[derive(Clone, Default)]
+struct Pages(
+    std::rc::Rc<
+        std::cell::RefCell<
+            BTreeMap<lash_kernel_doc::heap::PageId, lash_kernel_state::paged::PageAnswer>,
+        >,
+    >,
+);
+impl lash_kernel_state::paged::PageSource for Pages {
+    fn read(
+        &mut self,
+        pages: &[lash_kernel_doc::heap::PageRef],
+    ) -> Result<
+        Vec<Result<lash_kernel_state::paged::PageAnswer, lash_kernel_doc::heap::HeapFault>>,
+        lash_kernel_doc::heap::HeapFault,
+    > {
+        let held = self.0.borrow();
+        Ok(pages
+            .iter()
+            .map(|page| {
+                held.get(&page.id)
+                    .cloned()
+                    .ok_or(lash_kernel_doc::heap::HeapFault::Missing { page: page.id })
+            })
+            .collect())
+    }
+    fn seal(
+        &mut self,
+        body: lash_kernel_state::paged::PageBody,
+    ) -> Result<lash_kernel_doc::heap::PageRef, lash_kernel_doc::heap::HeapFault> {
+        let mut bytes = body.kind.0.to_be_bytes().to_vec();
+        bytes.extend_from_slice(&body.tokens);
+        let page = lash_kernel_doc::heap::PageRef {
+            id: lash_kernel_doc::heap::PageId(lash_kernel_doc::heap_values::key_digest(&bytes)),
+            grant: lash_kernel_doc::heap::PageGrant::NONE,
+        };
+        self.0.borrow_mut().insert(
+            page.id,
+            lash_kernel_state::paged::PageAnswer {
+                page,
+                kind: body.kind,
+                tokens: body.tokens.into(),
+                children: body.children,
+            },
+        );
+        Ok(page)
+    }
+}
+struct Host;
+impl lash_kernel_vm::Host for Host {
+    fn print(&mut self, _: &lash_kernel_doc::Datum) {
+        panic!("no prints")
+    }
+    fn cancel_requested(&mut self) -> bool {
+        false
+    }
+}
+const BOUNDS: lash_kernel_vm::Bounds = lash_kernel_vm::Bounds {
+    memory_meter: lash_kernel_vm::MemoryMeter::On,
+    charge: lash_kernel_vm::Charge::Exact,
+    charge_limit: 1_000_000,
+    memory: 64 << 20,
+    call_depth: 100,
+    live_tasks: 100,
+    requests_per_park: 100,
+    join_members: 100,
+};
+
 fn run_document(
     document: lash_kernel_doc::Document,
     release: &HelperRelease,
@@ -409,54 +479,8 @@ fn run_selected(
     callable: Option<lash_kernel_doc::FunctionValue>,
     args: Vec<lash_kernel_doc::Datum>,
 ) -> lash_kernel_doc::Datum {
-    use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-    use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
+    use lash_kernel_doc::heap::PageId;
     use lash_kernel_vm::{Machine as _, Step};
-    #[derive(Default)]
-    struct Pages(BTreeMap<PageId, PageAnswer>);
-    impl PageSource for Pages {
-        fn read(
-            &mut self,
-            pages: &[PageRef],
-        ) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
-            Ok(pages
-                .iter()
-                .map(|page| {
-                    self.0
-                        .get(&page.id)
-                        .cloned()
-                        .ok_or(HeapFault::Missing { page: page.id })
-                })
-                .collect())
-        }
-        fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
-            let mut bytes = body.kind.0.to_be_bytes().to_vec();
-            bytes.extend_from_slice(&body.tokens);
-            let page = PageRef {
-                id: PageId(lash_kernel_doc::heap_values::key_digest(&bytes)),
-                grant: PageGrant::NONE,
-            };
-            self.0.insert(
-                page.id,
-                PageAnswer {
-                    page,
-                    kind: body.kind,
-                    tokens: body.tokens.into(),
-                    children: body.children,
-                },
-            );
-            Ok(page)
-        }
-    }
-    struct Host;
-    impl lash_kernel_vm::Host for Host {
-        fn print(&mut self, _: &lash_kernel_doc::Datum) {
-            panic!("no prints")
-        }
-        fn cancel_requested(&mut self) -> bool {
-            false
-        }
-    }
     let link = lash_kernel_value::Link {
         helper_fills: Default::default(),
         document: document.identity(),
@@ -476,16 +500,7 @@ fn run_selected(
     .unwrap();
     let mut machine = lash_kernel_vm::KernelMachine::start(
         program,
-        lash_kernel_vm::Bounds {
-            memory_meter: lash_kernel_vm::MemoryMeter::On,
-            charge: lash_kernel_vm::Charge::Exact,
-            charge_limit: 1_000_000,
-            memory: 64 << 20,
-            call_depth: 100,
-            live_tasks: 100,
-            requests_per_park: 100,
-            join_members: 100,
-        },
+        BOUNDS,
         lash_kernel_vm::CellStart {
             owner: PageId([9; 32]),
             target: callable.map_or(lash_kernel_vm::Target::Main, |value| {
@@ -799,4 +814,164 @@ fn explicit_helper_upgrade_runs_new_body_and_refuses_a_changed_contract() {
     assert!(
         matches!(changed_archive.upgrade(&[old_id].into()), Err(lash_kernel_doc::HelperUpgradeRefusal::HelperContractChanged { helper, from, to }) if helper == HelperId("fixture:helper".into()) && from == old_revision && to == target_revision)
     );
+}
+
+/// FIG-7523 law 4, on the bytecode core: a run parked holding the `next`
+/// closure a helper returned (and, branded, a package value that helper
+/// built) refuses an upgrade of that helper, exactly, and still finishes
+/// on the old body.
+#[test]
+fn an_iterator_next_closure_refuses_upgrade_and_completes_on_its_old_body() {
+    use lash_kernel_vm::{Machine as _, Step};
+    let old_text = "function law.iterator() -> Any\nkernel 1\ncharge 1\nbody { let next = fn() { return 7 } return {next: next} }";
+    let new_text = old_text.replace("return 7", "return 99");
+    let (owner, locals) = lash_kernel_doc::parse_definition_with_locals(old_text).unwrap();
+    let (next_owner, next_locals) =
+        lash_kernel_doc::parse_definition_with_locals(&new_text).unwrap();
+    let old_next = locals[0].identity();
+    assert_ne!(old_next, next_locals[0].identity());
+    let old_owner = owner.identity();
+    let current_owner = next_owner.identity();
+    let current_next = next_locals[0].identity();
+    let mut registry = FunctionRegistry::declarations();
+    for definition in locals
+        .into_iter()
+        .chain([owner])
+        .chain(next_locals)
+        .chain([next_owner])
+    {
+        registry.register(definition, None).unwrap();
+    }
+    let helpers = Arc::new(BuildHelpers::new(registry.clone(), [old_owner]).unwrap());
+    let release = |root: FunctionId, child: FunctionId| {
+        let definitions: BTreeMap<_, _> = [root, child]
+            .into_iter()
+            .map(|id| (id, registry.get(&id).unwrap().definition().as_ref().clone()))
+            .collect();
+        let contract = archive::contract(root, &definitions, &BTreeMap::new()).unwrap();
+        let library = Library {
+            identity: lash_kernel_value::HelperLibraryId::of_members([root, child]),
+            members: [root, child].into(),
+            roots: [root].into(),
+        };
+        Release {
+            library: library.clone(),
+            definitions,
+            libraries: [("fixture".into(), library)].into(),
+            bindings: [(
+                HelperId("fixture:law.iterator".into()),
+                Binding {
+                    revision: contract.revision(),
+                    function: root,
+                },
+            )]
+            .into(),
+            ..Default::default()
+        }
+    };
+    let upgrade = Archive::default()
+        .append(release(old_owner, old_next))
+        .unwrap()
+        .append(release(current_owner, current_next))
+        .unwrap()
+        .upgrade(&[old_owner].into())
+        .unwrap();
+
+    for branded in [false, true] {
+        let brand = if branded {
+            ", __lash_brand: (\"fixture\", \"iterator\")"
+        } else {
+            ""
+        };
+        let mut document = lash_kernel_doc::parse_document(&format!(
+            "kernel 1\nnumbers by_spelling\nimport 0 operation host.pause() -> Any\nlibrary @{old_owner}\nmain {{ let stamp = {{__lash_built: b\"{old_owner}\"{brand}}} let iterator = invoke @{old_owner}() let next = iterator.next let pause = perform 0() as Any let answer = apply next() return answer }}",
+        ))
+        .unwrap();
+        document.functions.retain(|id, _| !helpers.contains(id));
+        document.library = lash_kernel_doc::LibraryDependencies([old_owner].into());
+        let lash_kernel_value::ImportKind::Operation { signature } =
+            &document.imports[&lash_kernel_value::ImportSlot(0)].kind
+        else {
+            unreachable!()
+        };
+        let link = lash_kernel_value::Link {
+            document: document.identity(),
+            helper_fills: Default::default(),
+            fills: [(
+                lash_kernel_value::ImportSlot(0),
+                lash_kernel_value::package::Fill::Operation(
+                    lash_kernel_value::operations::OperationRequirement::new(
+                        signature.clone(),
+                        lash_kernel_value::ContractId::new("1"),
+                    ),
+                ),
+            )]
+            .into(),
+        };
+        let document = Arc::new(document);
+        let program = || {
+            lash_kernel_vm::Program::prepare(
+                link.identity(),
+                [(document.identity(), Arc::clone(&document))].into(),
+                &[(link.identity(), link.clone())].into(),
+                lash_kernel_doc::heap::PageId([8; 32]),
+                lash_kernel_vm::PreparedLibrary::with_helpers(
+                    Arc::new(registry.clone()),
+                    Arc::clone(&helpers),
+                ),
+                lash_kernel_doc::Selection::Fresh,
+            )
+            .unwrap()
+        };
+        let pages = Pages::default();
+        let mut machine = lash_kernel_vm::KernelMachine::start(
+            program(),
+            BOUNDS,
+            lash_kernel_vm::CellStart {
+                owner: lash_kernel_doc::heap::PageId([9; 32]),
+                target: lash_kernel_vm::Target::Main,
+                args: vec![],
+                session: None,
+                modes: Default::default(),
+                host: vec![],
+            },
+            Box::new(pages.clone()),
+        )
+        .unwrap();
+        let Step::Parked(park) = machine.run(&mut Host, u64::MAX).unwrap() else {
+            panic!("the iterator is held at a genuine park")
+        };
+        let lash_kernel_vm::Request::Effect(effect) = &park.requests[0];
+        let checkpoint = machine.checkpoint().unwrap().checkpoint();
+        drop(machine);
+        let live = lash_kernel_migrate::run_code(&mut pages.clone(), &checkpoint).unwrap();
+        match lash_kernel_migrate::check_run_upgrade(&live, &upgrade) {
+            Err(lash_kernel_doc::HelperUpgradeRefusal::RetainedCallable { function })
+                if !branded =>
+            {
+                assert_eq!(function, old_next)
+            }
+            Err(lash_kernel_doc::HelperUpgradeRefusal::BrandedData { function }) if branded => {
+                assert_eq!(function, old_owner)
+            }
+            other => {
+                panic!("the upgrade must refuse its exact held state, branded={branded}: {other:?}")
+            }
+        }
+        let mut resumed =
+            lash_kernel_vm::KernelMachine::open(program(), BOUNDS, &checkpoint, Box::new(pages))
+                .unwrap();
+        resumed
+            .deliver(
+                effect.wait,
+                lash_kernel_vm::Outcome::Completed(lash_kernel_doc::Datum::Null),
+            )
+            .unwrap();
+        let Step::Ended(lash_kernel_vm::End::Finished(done)) =
+            resumed.run(&mut Host, u64::MAX).unwrap()
+        else {
+            panic!("the held iterator finishes")
+        };
+        assert_eq!(done.result, lash_kernel_doc::Datum::Int(7.into()));
+    }
 }

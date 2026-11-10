@@ -29,10 +29,11 @@ use lash_kernel_value::tokens::decode_body;
 use super::super::source::grant;
 use super::super::tree::{Access, Tree};
 use super::super::{CheckpointRoot, PageKind, PageSource};
-use super::chunked::{ChunkPage, IndexPage};
+use super::chunked::{ChunkPage, IndexPage, Members};
 use super::continuation::{self, RunRecord};
 use super::directory::{DirectoryRoot, Row};
-use super::objects::{Head, Heads, Record};
+use super::ids::ObjectId;
+use super::objects::{Head, Heads, ObjectKind, Record, RunValue};
 use super::root::HeapRoot;
 
 /// The image of each code id a run's active code names, identity entries
@@ -121,6 +122,9 @@ pub struct LiveCode {
     /// The helpers code the run holds as a value may call, as it recorded
     /// them.
     pub held_code: BTreeSet<FunctionId>,
+    /// The helper that built each package value the run's heap holds: the
+    /// `__lash_built` of every record with a well-formed `__lash_brand`.
+    pub built: BTreeSet<FunctionId>,
 }
 
 /// Either the ids met, or the images they are rewritten to, with the
@@ -553,5 +557,59 @@ pub fn live_code(pages: &mut dyn PageSource, root: &CheckpointRoot) -> Result<Li
     }
     live.pins = record.pins.iter().copied().collect();
     live.held_code = record.held_code.iter().copied().collect();
+    live.built = built(&access, &record.heap).map_err(fault)?;
     Ok(live)
+}
+
+/// The helper that built each package value the heap `heap` holds: the
+/// 32-byte `__lash_built` of every record, inline or large, whose
+/// `__lash_brand` is a tuple of two texts.
+fn built(access: &Access<'_>, heap: &HeapRoot) -> Result<BTreeSet<FunctionId>, RewriteFault> {
+    let mut objects = BTreeMap::new();
+    tree(heap.directory).visit(access, &mut |key, row| {
+        if let Some(id) = ObjectId::of_key(key) {
+            objects.insert(id, row.record.clone());
+        }
+        true
+    })?;
+    let field = |key: &RunValue, name: &str| matches!(key, RunValue::Text(text) if &**text == name);
+    let text = |value: &RunValue| {
+        matches!(
+            value,
+            RunValue::Text(_) | RunValue::Object(ObjectKind::LongText, _)
+        )
+    };
+    let object = |value: &RunValue| value.id().and_then(|id| objects.get(&id));
+    let mut built = BTreeSet::new();
+    for record in objects.values() {
+        let mut fields = Vec::new();
+        match record {
+            Record::Record(pairs) => fields.extend(pairs.iter().cloned()),
+            Record::Chunked(chunked) if chunked.kind == ObjectKind::Record => {
+                chunks(access, &chunked.parts, &mut |chunk| {
+                    if let Members::Table(entries) = chunk.members {
+                        fields.extend(entries.into_iter().map(|entry| (entry.key, entry.value)));
+                    }
+                    Ok(())
+                })?;
+            }
+            _ => continue,
+        }
+        let branded = fields.iter().any(|(key, value)| {
+            field(key, "__lash_brand")
+                && matches!(object(value), Some(Record::Tuple(parts)) if parts.len() == 2 && parts.iter().all(text))
+        });
+        if !branded {
+            continue;
+        }
+        for (key, value) in &fields {
+            if field(key, "__lash_built")
+                && let Some(Record::Bytes(bytes)) = object(value)
+                && let Ok(digest) = <[u8; 32]>::try_from(&bytes[..])
+            {
+                built.insert(FunctionId::from_bytes(digest));
+            }
+        }
+    }
+    Ok(built)
 }
