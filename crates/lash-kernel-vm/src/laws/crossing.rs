@@ -5,35 +5,37 @@
 
 use lash_kernel_doc::Datum;
 
-use super::embedder::Embedder;
-use crate::{End, Request, RunError, Step};
+use super::embedder::{ROOMY, World, core_machine};
+use crate::{End, Machine, Request, RunError, Step};
 
 /// A closure that states how a host starts it, so it can cross.
 const STARTABLE: &str = "let f = fn(a) presentation (a: Any) -> Any bare direct { return a }";
 
-/// Performs `take(arg)`, `take` declared to take one `input` of type `ty`:
-/// the arguments it requested, or the kind and message of the error it
-/// raised instead, when it requested nothing.
+/// Performs `take(arg)` on the bytecode core, `take` declared to take one
+/// `input` of type `ty`: the arguments it requested, or the kind and
+/// message of the error it raised instead, when it requested nothing.
 fn perform(ty: &str, arg: &str) -> Result<Vec<Datum>, (String, String)> {
-    let mut embedder = Embedder::new(&format!(
-        "import 4 operation host.take(input: {ty}) -> Any\nmain {{ {STARTABLE} do perform 4({arg}) as Any }}"
-    ));
+    let mut machine = core_machine(
+        &format!(
+            "import 4 operation host.take(input: {ty}) -> Any\nmain {{ {STARTABLE} do perform 4({arg}) as Any }}"
+        ),
+        ROOMY,
+        None,
+    )
+    .unwrap_or_else(|error| panic!("{ty}: the law's document starts: {error:?}"));
     loop {
-        match embedder.run() {
+        match machine.run(&mut World::default(), u64::MAX).unwrap() {
             Step::Slice => {}
-            Step::Parked(_) => {
-                let [Request::Effect(effect)] = embedder.requests.as_slice() else {
-                    panic!("{ty}: one effect request: {:?}", embedder.requests);
+            Step::Parked(park) => {
+                let [Request::Effect(effect)] = park.requests.as_slice() else {
+                    panic!("{ty}: one effect request: {:?}", park.requests);
                 };
                 return Ok(effect.args.clone());
             }
             Step::Ended(End::Error(RunError::Uncaught {
                 error: Datum::Error(error),
                 ..
-            })) => {
-                assert!(embedder.requests.is_empty(), "{ty}: nothing was requested");
-                return Err((error.kind, error.message));
-            }
+            })) => return Err((error.kind, error.message)),
             Step::Ended(other) => panic!("{ty}: the run ended without a request: {other:?}"),
         }
     }

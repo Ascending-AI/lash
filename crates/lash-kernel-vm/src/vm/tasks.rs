@@ -638,7 +638,7 @@ impl<H: Heap> Vm<H> {
                 let from = self.cx.stack.len() - usize::from(*argc);
                 let mut copies = Vec::with_capacity(usize::from(*argc));
                 for at in from..self.cx.stack.len() {
-                    let copied = self.copied(&self.cx.stack[at])?;
+                    let copied = self.crossed(&operation.use_, at - from, &self.cx.stack[at])?;
                     let raises = copied.raises();
                     copies.push(copied);
                     if raises {

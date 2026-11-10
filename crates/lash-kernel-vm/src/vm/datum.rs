@@ -11,8 +11,24 @@
 use lash_kernel_doc::arena::native::NewObject;
 use lash_kernel_doc::{Datum, Value};
 
+use lash_kernel_value::data_limits::KernelDataLimits;
+use lash_kernel_value::names::{Name, OperationUse};
+
 use super::{Flow, Run, Vm, fault, read};
 use crate::heap::Heap;
+
+/// What a function crossing to a tool reads besides the heap
+/// (`K-CLO-004`): the admitted program its code comes from, how each
+/// function was written and captioned, and which globals are the host's
+/// rather than the session's.
+pub(crate) struct Crossing {
+    pub program: crate::interface::Program,
+    pub function_origins: crate::interface::FunctionOrigins,
+    pub captions: Vec<lash_kernel_doc::CaptionEntry>,
+    /// The host's bindings: globals no closure reads from the session.
+    pub host: Vec<Name>,
+    pub data: KernelDataLimits,
+}
 
 /// What a datum is built in: a heap that admits, places and holds the
 /// values a build has made so far.
@@ -97,6 +113,96 @@ impl<H: Heap> Vm<H> {
             Err(crate::data::CopyError::Heap(error)) => return Err(fault(error.to_string())),
         };
         Ok(Copied { size, datum })
+    }
+
+    /// Every read the copy of argument `index` of a perform of `effect`
+    /// makes, walked with the type the effect's signature declares for it:
+    /// a function in it crosses as a function value where that type admits
+    /// one (`K-EFF-002`, `K-CLO-004`). An argument past the parameters is
+    /// data. Each function value's canonical bytes add to its charge.
+    pub(crate) fn crossed(
+        &self,
+        effect: &OperationUse,
+        index: usize,
+        value: &Value,
+    ) -> Run<Copied> {
+        let crossing = &self.crossing;
+        let program = &crossing.program;
+        let run = crate::crossing::CrossingRun {
+            function_origins: &crossing.function_origins,
+            captions: &crossing.captions,
+            documents: &program.documents,
+            instances: &program.instances,
+            catalog: program.library.registry().as_ref(),
+            helpers: program.library.helpers(),
+            selection: &program.selection,
+            data: crossing.data,
+        };
+        let param = program
+            .operation_import(effect)
+            .and_then(|import| match &import.kind {
+                lash_kernel_value::names::ImportKind::Operation { signature } => {
+                    signature.params.get(index)
+                }
+                _ => None,
+            });
+        let (name, ty) = match param {
+            Some(param) => (param.name.as_str().to_owned(), &param.ty),
+            None => (
+                format!("args[{index}]"),
+                &lash_kernel_value::types::Type::Json,
+            ),
+        };
+        let session = |name: &Name| self.session_binding(name);
+        let datum = match crate::crossing::arena::copy_out_tool_arg(
+            self.heap.arena(),
+            &run,
+            &session,
+            self.value_depth,
+            value,
+            &name,
+            ty,
+        ) {
+            Ok(datum) => Ok(datum),
+            Err(crate::data::CopyError::Raised(raised)) => Err(raised),
+            Err(crate::data::CopyError::Cold { object, chunk }) => {
+                return Err(Flow::Cold { object, chunk });
+            }
+            Err(crate::data::CopyError::Heap(error)) => return Err(fault(error.to_string())),
+        };
+        let size = if self.off {
+            None
+        } else {
+            let deep = crate::data::deep_size(self.heap.arena(), value).map_err(read)?;
+            let functions = datum.as_ref().map_or(0, crate::crossing::crossed_bytes);
+            Some(deep.saturating_add(functions))
+        };
+        Ok(Copied { size, datum })
+    }
+
+    /// The session's binding `name`, as a closure `main` made reads it
+    /// where it captures none (`K-SES-001`): a global the host did not
+    /// give.
+    fn session_binding(&self, name: &Name) -> Option<Value> {
+        if self.crossing.host.contains(name) {
+            return None;
+        }
+        let at = match self
+            .program
+            .globals
+            .iter()
+            .position(|global| global == name)
+        {
+            Some(at) => at,
+            None => {
+                self.program.globals.len()
+                    + self.session.names.iter().position(|bound| bound == name)?
+            }
+        };
+        self.globals
+            .get(at)
+            .copied()
+            .filter(|value| !matches!(value, Value::Absent))
     }
 
     /// Bills a copy's deep size, then gives the copy or raises its error.

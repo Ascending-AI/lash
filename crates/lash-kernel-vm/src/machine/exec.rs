@@ -679,7 +679,7 @@ impl KernelMachine {
         if self.task(task)?.frames.is_empty() {
             self.end_task(task, result)?;
             if spelled_as_json && let Some(super::End::Finished(finished)) = &mut self.end {
-                undefined_as_json(&mut finished.result);
+                crate::bytecode::conventions::undefined_as_json(&mut finished.result);
             }
             return Ok(None);
         }
@@ -1371,7 +1371,7 @@ impl KernelMachine {
                 &lash_kernel_value::types::Type::Json,
             )?,
         };
-        self.charge_boundary(crossed_bytes(&datum))?;
+        self.charge_boundary(crate::crossing::crossed_bytes(&datum))?;
         Ok(datum)
     }
 
@@ -1591,50 +1591,5 @@ impl KernelMachine {
             self.charge(charge)?;
         }
         Ok(value)
-    }
-}
-
-/// The canonical bytes of the function values in `datum`: what a crossing
-/// writes beyond a data copy.
-fn crossed_bytes(datum: &lash_kernel_doc::Datum) -> u64 {
-    use lash_kernel_doc::Datum;
-    match datum {
-        Datum::FunctionValue(value) => value
-            .canonical_tagged_bytes()
-            .map_or(0, |bytes| bytes.len() as u64),
-        Datum::Tuple(items) | Datum::List(items) | Datum::Set(items) => {
-            items.iter().map(crossed_bytes).sum()
-        }
-        Datum::Map(entries) => entries
-            .iter()
-            .map(|(key, value)| crossed_bytes(key) + crossed_bytes(value))
-            .sum(),
-        Datum::Record(fields) => fields.iter().map(|(_, value)| crossed_bytes(value)).sum(),
-        Datum::Error(error) => crossed_bytes(error.data()),
-        _ => 0,
-    }
-}
-
-/// `value` with each `undefined` spelled as `JSON.stringify` spells it: a
-/// record or map member that holds it is left out, and anywhere else,
-/// the value itself or a list or tuple element, it is `null`.
-fn undefined_as_json(value: &mut lash_kernel_doc::Datum) {
-    use lash_kernel_doc::Datum;
-    match value {
-        Datum::Absent => *value = Datum::Null,
-        Datum::List(items) | Datum::Tuple(items) => items.iter_mut().for_each(undefined_as_json),
-        Datum::Record(fields) => {
-            fields.retain(|(_, field)| !matches!(field, Datum::Absent));
-            for (_, field) in fields {
-                undefined_as_json(field);
-            }
-        }
-        Datum::Map(entries) => {
-            entries.retain(|(_, entry)| !matches!(entry, Datum::Absent));
-            for (_, entry) in entries {
-                undefined_as_json(entry);
-            }
-        }
-        _ => {}
     }
 }

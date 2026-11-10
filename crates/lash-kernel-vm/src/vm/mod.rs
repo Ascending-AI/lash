@@ -212,6 +212,8 @@ pub(crate) struct Vm<H: Heap> {
     /// What a frame of each unit holds (contract §2): admitted when the
     /// frame is entered, returned when it leaves.
     pub(crate) frames: Vec<u64>,
+    /// What a function crossing to a tool reads besides the heap.
+    pub(crate) crossing: datum::Crossing,
     /// What the run is started with (its program, constants, inputs and
     /// first frame) did not fit the memory bound: the run starts, and its
     /// first step ends with the memory bound before it runs anything
@@ -250,6 +252,7 @@ impl<H: Heap> Vm<H> {
         limit: u64,
         off: bool,
         call_depth: u32,
+        crossing: datum::Crossing,
     ) -> Result<Self, Stop> {
         // The run holds its own document's code; the program's constants
         // are code, its own or the library's, and hold nothing (contract
@@ -325,6 +328,7 @@ impl<H: Heap> Vm<H> {
             functions,
             watch: None,
             frames,
+            crossing,
             unadmitted,
             restart: None,
             retrying: false,

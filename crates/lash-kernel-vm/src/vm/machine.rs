@@ -222,6 +222,13 @@ fn build(
         bounds.charge_limit,
         off,
         bounds.call_depth,
+        super::datum::Crossing {
+            program: program.clone(),
+            function_origins: Default::default(),
+            captions: Vec::new(),
+            host: Vec::new(),
+            data: lash_kernel_value::data_limits::KernelDataLimits::standard(),
+        },
     )
     .map_err(|stop| linked(format!("{stop:?}")))?;
     vm.tasks.operations = operations;
@@ -459,11 +466,13 @@ impl CoreMachine {
             None,
         )?;
         vm.value_depth = limits.value_depth();
+        vm.crossing.data = limits;
         if let Some((session, values)) = session {
             crate::durable::session::bind(&mut vm, &session, values);
         }
         let mut header = Header::of(&program, bounds, start.owner);
         header.host = start.host.iter().map(|(name, _)| name.clone()).collect();
+        vm.crossing.host.clone_from(&header.host);
         header.entry = entry;
         let code = Arc::clone(&vm.program);
         let decoder = Decoder {
@@ -650,6 +659,7 @@ impl Machine for CoreMachine {
             changed.map(|helpers| helpers.as_ref()),
         )
         .map_err(|error| malformed(format!("the document does not compile again: {error:?}")))?;
+        vm.crossing.host.clone_from(&header.host);
         crate::durable::admit(&vm.program, &vm.tasks.operations, &record)?;
         crate::durable::open(&mut vm, &record, &values).map_err(malformed)?;
         if changed.is_some() {
@@ -671,6 +681,8 @@ impl Machine for CoreMachine {
         self.vm.memory_limiter = options.memory_limiter;
         self.watch(!options.observation.is_off(), options.trace_path);
         self.save = options.cell_save;
+        self.vm.crossing.function_origins = options.function_origins;
+        self.vm.crossing.captions = options.captions;
     }
 
     fn take_counts(&mut self) -> SiteCounts {

@@ -3,11 +3,11 @@ use super::*;
 use lash_kernel_doc::{CaptureValue, FunctionRepresentation, FunctionValue};
 
 /// Capture discovery follows authored adapter bodies as well as the library.
-struct LinkedCatalog<'a> {
-    document: &'a lash_kernel_doc::Document,
-    helpers: &'a lash_kernel_doc::BuildHelpers,
-    selection: &'a lash_kernel_doc::Selection,
-    link: LinkId,
+pub(super) struct LinkedCatalog<'a> {
+    pub(super) document: &'a lash_kernel_doc::Document,
+    pub(super) helpers: &'a lash_kernel_doc::BuildHelpers,
+    pub(super) selection: &'a lash_kernel_doc::Selection,
+    pub(super) link: LinkId,
 }
 
 impl FunctionCatalog for LinkedCatalog<'_> {

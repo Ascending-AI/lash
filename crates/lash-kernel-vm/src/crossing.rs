@@ -108,6 +108,29 @@ fn function_root(
 mod captures;
 use captures::extract_function;
 
+#[path = "crossing/arena.rs"]
+pub(crate) mod arena;
+
+/// The bytes a crossed argument's function values add to its boundary
+/// charge: each one's canonical form.
+pub(crate) fn crossed_bytes(datum: &Datum) -> u64 {
+    match datum {
+        Datum::FunctionValue(value) => value
+            .canonical_tagged_bytes()
+            .map_or(0, |bytes| bytes.len() as u64),
+        Datum::Tuple(items) | Datum::List(items) | Datum::Set(items) => {
+            items.iter().map(crossed_bytes).sum()
+        }
+        Datum::Map(entries) => entries
+            .iter()
+            .map(|(key, value)| crossed_bytes(key) + crossed_bytes(value))
+            .sum(),
+        Datum::Record(fields) => fields.iter().map(|(_, value)| crossed_bytes(value)).sum(),
+        Datum::Error(error) => crossed_bytes(error.data()),
+        _ => 0,
+    }
+}
+
 /// The declared type at one path of an effect argument: open, where every
 /// value is admitted, or the members of the union it is. No member means no
 /// type describes the path, so what stands there is data.

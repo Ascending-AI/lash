@@ -151,6 +151,9 @@ pub(crate) fn held(function: &FunctionValue) -> (Vec<ClosureIdentity>, Vec<Calla
 struct Node<'a> {
     function: &'a FunctionValue,
     cells: Vec<ArenaHandle>,
+    /// The callable itself: a closure or a function.
+    callable: Value,
+    /// What the graph holds: the callable, or the token that packs it.
     value: Value,
 }
 
@@ -212,6 +215,7 @@ pub(crate) fn restore<H: Heap>(vm: &mut Vm<H>, function: &FunctionValue) -> Run<
         nodes.push(Node {
             function: node,
             cells,
+            callable,
             value,
         });
     }
@@ -225,7 +229,8 @@ pub(crate) fn restore<H: Heap>(vm: &mut Vm<H>, function: &FunctionValue) -> Run<
                 .map_err(|error| vm.native(error))?;
         }
     }
-    let root = match nodes.first().map(|node| node.value) {
+    // A token-packed root starts as the closure it packs.
+    let root = match nodes.first().map(|node| node.callable) {
         Some(Value::Closure(root)) => root,
         _ => return Err(fault("a callable's graph has no root closure")),
     };

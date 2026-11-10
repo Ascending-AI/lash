@@ -243,11 +243,34 @@ fn typescript(convention: &StartConvention) -> bool {
     )
 }
 
-/// Only a TS entry's returned absent is projected to null, after settlement.
-pub(crate) fn result(convention: Option<&StartConvention>, result: Datum) -> Datum {
-    if convention.is_some_and(typescript) && matches!(result, Datum::Absent) {
-        Datum::Null
-    } else {
-        result
+/// A TS entry's returned value spells each `undefined` as JSON does, after
+/// settlement.
+pub(crate) fn result(convention: Option<&StartConvention>, mut result: Datum) -> Datum {
+    if convention.is_some_and(typescript) {
+        undefined_as_json(&mut result);
+    }
+    result
+}
+
+/// `value` with each `undefined` spelled as `JSON.stringify` spells it: a
+/// record or map member that holds it is left out, and anywhere else,
+/// the value itself or a list or tuple element, it is `null`.
+pub(crate) fn undefined_as_json(value: &mut Datum) {
+    match value {
+        Datum::Absent => *value = Datum::Null,
+        Datum::List(items) | Datum::Tuple(items) => items.iter_mut().for_each(undefined_as_json),
+        Datum::Record(fields) => {
+            fields.retain(|(_, field)| !matches!(field, Datum::Absent));
+            for (_, field) in fields {
+                undefined_as_json(field);
+            }
+        }
+        Datum::Map(entries) => {
+            entries.retain(|(_, entry)| !matches!(entry, Datum::Absent));
+            for (_, entry) in entries {
+                undefined_as_json(entry);
+            }
+        }
+        _ => {}
     }
 }
