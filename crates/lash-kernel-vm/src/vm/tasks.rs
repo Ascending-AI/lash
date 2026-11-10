@@ -24,7 +24,7 @@ use super::frames::Context;
 use super::{Exceeded, Flow, Run, Stop, Vm, fault};
 use crate::Bound;
 use crate::bytecode::op::Op;
-use crate::bytecode::program::{ActionSite, Callee, Mark, Unit, UnitId};
+use crate::bytecode::program::{ActionSite, CallSite, Callee, LIB, Mark, Unit, UnitId};
 use crate::heap::Heap;
 use crate::interface::{EffectRequest, Park, Request, RunError};
 use crate::{Host, HostFault};
@@ -41,9 +41,13 @@ pub(crate) struct Task {
     /// A delivered `then yield` wait owes one more turn before it resumes
     /// (`K-TASK-005`).
     pub turn: bool,
-    /// How many times the task has run each action site, by
+    /// How many times the task has entered each authored call and action
+    /// site, indexed by the site's program-wide occurrence number
+    /// (`K-EFF-008`); a site past the end has not been entered.
+    pub occurrences: Vec<u64>,
+    /// How many times the task has run each library action site, by
     /// [`crate::bytecode::program::Program::counter`].
-    pub occurrences: HashMap<u64, u64>,
+    pub library: HashMap<u64, u64>,
     /// Where its spawner stood, when none of its own frames is document
     /// code (`K-EFF-008`).
     pub spawn_origin: Option<Site>,
@@ -320,7 +324,8 @@ impl Task {
             cx: Context::default(),
             state: State::Running,
             turn: false,
-            occurrences: HashMap::new(),
+            occurrences: Vec::new(),
+            library: HashMap::new(),
             spawn_origin,
             passed: false,
             observed: false,
@@ -331,11 +336,35 @@ impl Task {
     /// Counts a run of the site of `mark` by a frame running as Link
     /// `link`, giving how many came before.
     fn advance(&mut self, mark: &Mark, link: u32) -> u64 {
+        if mark.occurrence & LIB == 0 {
+            return self.count(mark.occurrence);
+        }
         let key = crate::bytecode::program::Program::counter(link, mark.occurrence);
-        let count = self.occurrences.entry(key).or_insert(0);
+        let count = self.library.entry(key).or_insert(0);
         let before = *count;
         *count += 1;
         before
+    }
+}
+
+impl Task {
+    /// Counts an entry into document site `occurrence`, giving how many
+    /// came before.
+    #[inline]
+    fn count(&mut self, occurrence: u32) -> u64 {
+        let at = occurrence as usize;
+        match self.occurrences.get_mut(at) {
+            Some(count) => {
+                let before = *count;
+                *count = before + 1;
+                before
+            }
+            None => {
+                self.occurrences.resize(at + 1, 0);
+                self.occurrences[at] = 1;
+                0
+            }
+        }
     }
 }
 
@@ -415,6 +444,49 @@ impl<H: Heap> Vm<H> {
         } else {
             self.task_origin()
         }
+    }
+
+    /// Counts the running task's entry into the authored call or action at
+    /// `mark` and `site` of `unit` (`K-EFF-008`), and tells a host that
+    /// observes sites where it stands. Library code enters no site.
+    pub(super) fn entered(&mut self, host: &mut dyn Host, unit: &Unit, mark: &Mark, site: &Site) {
+        if !unit.authored {
+            return;
+        }
+        let link = self.running_link();
+        let occurrence = self.running().advance(mark, link);
+        if self.sites {
+            self.tell_entry(host, site, occurrence);
+        }
+    }
+
+    /// Counts the running task's entry into authored call `call`, whose
+    /// counter is `entry` (`K-EFF-008`), and tells a host that observes
+    /// sites where it stands, the frame's `pc` past the call. The call op
+    /// counts before the call reads anything, so a call its arguments
+    /// refuse is entered too.
+    #[inline]
+    pub(super) fn enter_call(&mut self, host: &mut dyn Host, entry: u32, call: &CallSite) {
+        let occurrence = self.running().count(entry);
+        if self.sites {
+            self.tell_entry(host, &call.site, occurrence);
+        }
+    }
+
+    /// Hands an observing host the running task's entry into `site`, the
+    /// `occurrence`th (`K-EFF-008`).
+    #[inline(never)]
+    fn tell_entry(&self, host: &mut dyn Host, site: &Site, occurrence: u64) {
+        let identity = EffectIdentity {
+            task: (*self.tasks.all[self.tasks.running].identity).clone(),
+            site: site.clone(),
+            occurrence,
+            loops: self.loops(),
+        };
+        host.enter_site(&lash_kernel_value::sites::EffectLocation {
+            at: lash_kernel_value::kernel_internals::effect_id(identity),
+            origin: site.clone(),
+        });
     }
 
     fn running(&mut self) -> &mut Task {
@@ -625,6 +697,14 @@ impl<H: Heap> Vm<H> {
     /// task's step ends with (`K-MACH-002`).
     pub(super) fn act(&mut self, host: &mut dyn Host, unit: &Unit, n: u32) -> Run<Option<Stop>> {
         let mark = Arc::clone(&unit.action_marks[n as usize]);
+        match &unit.actions[n as usize] {
+            ActionSite::Join { site }
+            | ActionSite::JoinMany { site, .. }
+            | ActionSite::Yield { site }
+            | ActionSite::Cancel { site }
+            | ActionSite::CancelEffect { site } => self.entered(host, unit, &mark, site),
+            ActionSite::Perform { .. } | ActionSite::Spawn { .. } => {}
+        }
         match &unit.actions[n as usize] {
             ActionSite::Perform {
                 owner,

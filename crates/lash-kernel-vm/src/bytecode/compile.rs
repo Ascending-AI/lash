@@ -1368,10 +1368,20 @@ impl<'a> Compiler<'a> {
             site,
             mark,
             checked: None,
+            entry: None,
         });
         f.emit(Op::Call(at));
         if !matches!(callee, Callee::Native { .. } | Callee::Machine { .. }) {
             f.leader();
+        }
+    }
+
+    /// A call action at `site`: [`Self::call`], its entries counted
+    /// (`K-EFF-008`).
+    pub(crate) fn entered_call(&mut self, f: &mut Fun, callee: Callee, argc: u8, site: Site) {
+        self.call(f, callee, argc, site);
+        if let Some(call) = f.calls.last_mut() {
+            call.entry = Some(call.mark.occurrence);
         }
     }
 
@@ -1530,6 +1540,11 @@ impl<'a> Compiler<'a> {
                 UnitKind::Closure(id) => self.document.functions.contains_key(id),
                 UnitKind::Body(_) | UnitKind::Spawn => false,
             };
+        // Library code enters no site.
+        let mut calls = calls;
+        if !authored {
+            calls.iter_mut().for_each(|call| call.entry = None);
+        }
         let mut blocks = Vec::new();
         let mut through = vec![0u64; ops.len()];
         let mut pc = 0;

@@ -687,7 +687,7 @@ impl Compiler<'_> {
                 self.atoms(f, std::slice::from_ref(value), false)?;
                 let policy = Self::local_target(policy, "an await policy")?;
                 let callee = self.callee(f, policy)?;
-                self.call(f, callee, 1, site);
+                self.entered_call(f, callee, 1, site);
             }
         }
         Ok(())
@@ -746,7 +746,7 @@ impl Compiler<'_> {
             }
         };
         f.point(f.here(), Point::Action(site.clone()));
-        self.call(f, target, argc as u8, site);
+        self.entered_call(f, target, argc as u8, site);
         if let Some(call) = f.calls.last_mut() {
             call.checked = checked;
         }
@@ -928,7 +928,7 @@ impl Compiler<'_> {
                         let policy = Self::local_target(policy, "an await policy")?;
                         let callee = self.callee(f, policy)?;
                         f.point(f.here(), Point::Action(site.clone()));
-                        self.call(f, callee, 1, site);
+                        self.entered_call(f, callee, 1, site);
                     }
                 }
             }

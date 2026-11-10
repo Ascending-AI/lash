@@ -183,6 +183,9 @@ fn walk(
             }
             Op::Call(call) => {
                 let call = &unit.calls[call as usize];
+                if call.entry.is_some() {
+                    return None;
+                }
                 let Callee::Native {
                     native,
                     charged: false,

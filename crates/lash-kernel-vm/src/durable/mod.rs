@@ -233,25 +233,26 @@ fn save_task(
         State::Ended(Ok(value)) => RunTaskState::Returned(values.put(*value)),
         State::Ended(Err(value)) => RunTaskState::Raised(values.put(*value)),
     };
-    let mut counts = Vec::with_capacity(task.occurrences.len());
-    for (key, count) in &task.occurrences {
-        // A library counter is the Link's that ran it.
+    let document = task
+        .occurrences
+        .iter()
+        .enumerate()
+        .filter(|(_, count)| **count != 0)
+        .map(|(occurrence, count)| (occurrences.get(&(occurrence as u32)).cloned(), *count));
+    // A library counter is the Link's that ran it.
+    let library = task.library.iter().map(|(key, count)| {
         let (link, occurrence) = ((key >> 32) as usize, *key as u32);
-        let (link, site) = if occurrence & LIB == 0 {
-            occurrences.get(&occurrence).cloned()
-        } else {
-            program
-                .links
-                .get(link)
-                .zip(program.lib.occurrences.get((occurrence & !LIB) as usize))
-                .map(|(link, site)| (*link, site.clone()))
-        }
-        .ok_or_else(|| fault("an occurrence counter names no site"))?;
-        counts.push(RunOccurrence {
-            link,
-            site,
-            count: *count,
-        });
+        let site = program
+            .links
+            .get(link)
+            .zip(program.lib.occurrences.get((occurrence & !LIB) as usize))
+            .map(|(link, site)| (*link, site.clone()));
+        (site, *count)
+    });
+    let mut counts = Vec::with_capacity(task.library.len());
+    for (site, count) in document.chain(library) {
+        let (link, site) = site.ok_or_else(|| fault("an occurrence counter names no site"))?;
+        counts.push(RunOccurrence { link, site, count });
     }
     counts.sort_by(|a, b| (a.link, &a.site).cmp(&(b.link, &b.site)));
     let joiners = task
@@ -643,15 +644,20 @@ pub(crate) fn open(
         task.turn = saved.turn;
         for occurrence in &saved.occurrences {
             let key = (occurrence.link, occurrence.site.clone());
-            let at = match occurrences.get(&key) {
-                Some(at) => Some(u64::from(*at)),
-                None => program
-                    .link_index(&occurrence.link)
-                    .zip(program.lib.sites.get(&occurrence.site))
-                    .map(|(link, at)| Program::counter(link, *at)),
+            if let Some(at) = occurrences.get(&key) {
+                let at = *at as usize;
+                if at >= task.occurrences.len() {
+                    task.occurrences.resize(at + 1, 0);
+                }
+                task.occurrences[at] = occurrence.count;
+                continue;
             }
-            .ok_or_else(|| format!("no action stands at {:?}", occurrence.site))?;
-            task.occurrences.insert(at, occurrence.count);
+            let at = program
+                .link_index(&occurrence.link)
+                .zip(program.lib.sites.get(&occurrence.site))
+                .map(|(link, at)| Program::counter(link, *at))
+                .ok_or_else(|| format!("no action stands at {:?}", occurrence.site))?;
+            task.library.insert(at, occurrence.count);
         }
         task.passed = saved.passed;
         task.observed = saved.observed;

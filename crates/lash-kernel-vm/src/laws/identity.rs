@@ -526,3 +526,136 @@ fn effects_are_named_by_task_site_occurrence_and_enclosing_loops() {
     ];
     assert_eq!(asked, [expected.clone(), expected]);
 }
+
+/// `K-EFF-008`: a task counts each call action of document code it
+/// enters, as it counts its performs. A host that observes sites sees each
+/// entry named by its task, its site, how often the task entered that site
+/// before and the loops around it. The counts are sealed with the task, so
+/// a machine opened cold from the root goes on counting where the seal
+/// left off. Observing seals the same bytes as not observing. A call its
+/// arity refuses was entered all the same, as the frozen engine counted it.
+#[test]
+fn entered_calls_are_counted_across_a_seal_and_a_cold_reopen() {
+    use lash_kernel_doc::{Datum, ErrorDatum};
+    use lash_kernel_value::kernel_internals::effect_parts;
+    use lash_kernel_value::sites::{
+        EffectIdentity, EffectLocation, LoopIteration, PositionLabel, Site, TaskIdentity,
+    };
+
+    use super::embedder::{ROOMY, Source, World, answer, core_program, main_site, wait_of};
+    use crate::{CoreMachine, HostFault, Request};
+
+    /// A host that observes sites, keeping each entry.
+    #[derive(Default)]
+    struct Observing {
+        world: World,
+        entered: Vec<EffectLocation>,
+    }
+    impl crate::Host for Observing {
+        fn perform(
+            &mut self,
+            effect: &lash_kernel_value::OperationUse,
+            args: &[Datum],
+            site: &PositionLabel,
+            origin: &Site,
+        ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
+            crate::Host::perform(&mut self.world, effect, args, site, origin)
+        }
+        fn print(&mut self, value: &Datum) {
+            crate::Host::print(&mut self.world, value);
+        }
+        fn cancel_requested(&mut self) -> bool {
+            crate::Host::cancel_requested(&mut self.world)
+        }
+        fn observes_sites(&self) -> bool {
+            true
+        }
+        fn enter_site(&mut self, at: &EffectLocation) {
+            self.entered.push(at.clone());
+        }
+    }
+
+    let text = "main {\n  let id = fn(x) { return x }\n  for x in [1, 2] {\n    let r = apply id(x)\n    try { let q = apply id(x, x) } catch e { }\n    let v = perform 0(r) as Any\n  }\n  return 0\n}";
+    let source = Source::default();
+    let start = || {
+        <CoreMachine as Machine>::start(
+            core_program(text, None),
+            ROOMY,
+            Setup::default().start,
+            Box::new(source.clone()),
+        )
+        .unwrap()
+    };
+    let parked = |step: Step| -> Request {
+        let Step::Parked(park) = step else {
+            panic!("the run parks at its perform: {step:?}");
+        };
+        let [request] = &park.requests[..] else {
+            panic!("one request at the park");
+        };
+        request.clone()
+    };
+    let seal = |machine: &mut CoreMachine| {
+        let budget = SealBudget {
+            pages: u64::MAX,
+            bytes: u64::MAX,
+        };
+        crate::kernel_internals::sealed_root(&machine.seal(budget).unwrap().unwrap()).clone()
+    };
+
+    let mut host = Observing::default();
+    let mut observed = start();
+    let request = parked(observed.run(&mut host, u64::MAX).unwrap());
+    let mut plain = start();
+    parked(plain.run(&mut World::default(), u64::MAX).unwrap());
+    let root = seal(&mut observed);
+    assert_eq!(
+        lash_kernel_value::tokens::encode_body(&root),
+        lash_kernel_value::tokens::encode_body(&seal(&mut plain)),
+        "observing seals the same bytes"
+    );
+
+    let mut reopened = <CoreMachine as Machine>::open(
+        core_program(text, None),
+        ROOMY,
+        &lash_kernel_state::kernel_internals::checkpoint(root),
+        Box::new(source.clone()),
+    )
+    .unwrap();
+    reopened
+        .deliver(wait_of(&request), answer(&request))
+        .unwrap();
+    let request = parked(reopened.run(&mut host, u64::MAX).unwrap());
+    reopened
+        .deliver(wait_of(&request), answer(&request))
+        .unwrap();
+    let Step::Ended(end) = reopened.run(&mut host, u64::MAX).unwrap() else {
+        panic!("the run ends");
+    };
+    assert_eq!(result(end), int(0));
+
+    // Each pass enters the call, then the call its arity refuses.
+    let sites = [main_site([1, 1, 0, 0]), main_site([1, 1, 1, 0, 0, 0])];
+    let expected: Vec<(EffectIdentity, Site)> = (0..2)
+        .flat_map(|visit| {
+            sites.clone().map(|site| {
+                let identity = EffectIdentity {
+                    task: TaskIdentity::Main,
+                    site: site.clone(),
+                    occurrence: visit,
+                    loops: vec![LoopIteration {
+                        site: main_site([1]),
+                        iteration: visit,
+                    }],
+                };
+                (identity, site)
+            })
+        })
+        .collect();
+    let entered: Vec<(EffectIdentity, Site)> = host
+        .entered
+        .iter()
+        .map(|at| (effect_parts(&at.at).clone(), at.origin.clone()))
+        .collect();
+    assert_eq!(entered, expected);
+}

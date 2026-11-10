@@ -420,6 +420,12 @@ pub struct CallSite {
     /// The contract an authored call of a typed build helper's body
     /// holds its arguments to (`function_argument`), as an export's are.
     pub checked: Option<Arc<Checked>>,
+    /// A call action of document code (a call or an await): the
+    /// program-wide number of the task's counter of its entries, which the
+    /// call op advances before the call reads its arguments, and which a
+    /// host that observes sites sees (`K-EFF-008`). An expression's
+    /// library call, and any call in library code, is no entry.
+    pub entry: Option<u32>,
 }
 
 /// A build helper's public contract, checked at an authored call.

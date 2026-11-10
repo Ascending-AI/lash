@@ -261,6 +261,8 @@ pub(crate) struct Vm<H: Heap> {
     /// runs again, its fixed event already billed, its slice test, step
     /// and points already passed.
     pub(crate) retrying: bool,
+    /// Whether the running slice's host observes sites (`Host::observes_sites`).
+    pub(crate) sites: bool,
     /// The laws' forced-cold runs: pages every object out at each
     /// statement boundary, the machine's values rooted.
     #[cfg(test)]
@@ -367,6 +369,7 @@ impl<H: Heap> Vm<H> {
             unadmitted,
             restart: None,
             retrying: false,
+            sites: false,
             #[cfg(test)]
             chill: None,
         })
@@ -1080,6 +1083,7 @@ impl<H: Heap> Vm<H> {
             return Stop::bound(refused.clone());
         }
         self.meter.slice(slice);
+        self.sites = host.observes_sites();
         self.fresh = true;
         let mut next = if self.tasks.installed {
             Ok(None)
@@ -1160,6 +1164,20 @@ impl<H: Heap> Vm<H> {
                     }
                 };
             }
+            // Counts authored call `$call`'s entry (`K-EFF-008`), the frame at `$at`
+            // for an observing host, unless a cold load reruns its op (`$rerun`).
+            macro_rules! enter {
+                ($call:expr, $at:expr, $rerun:expr) => {
+                    if let Some(entry) = $call.entry
+                        && !$rerun
+                    {
+                        if self.sites {
+                            sync!($at);
+                        }
+                        self.enter_call(host, entry, $call);
+                    }
+                };
+            }
             loop {
                 let mut op = ops[pc];
                 #[cfg(test)]
@@ -1180,7 +1198,8 @@ impl<H: Heap> Vm<H> {
                     }
                 }
                 fresh = false;
-                retrying = false;
+                // A call op run again after a cold load has counted its entry.
+                let rerun = std::mem::replace(&mut retrying, false);
                 pc += 1;
                 match op {
                     Op::Block(block) => {
@@ -1237,6 +1256,7 @@ impl<H: Heap> Vm<H> {
                     }
                     Op::Call(site) => {
                         let call = &unit.calls[site as usize];
+                        enter!(call, pc, rerun);
                         if let Callee::Native { native, charged } = call.callee
                             && call.argc == 2
                         {
@@ -1266,6 +1286,7 @@ impl<H: Heap> Vm<H> {
                     Op::Inline(n) => {
                         sync!(pc);
                         let site = &unit.inlines[n as usize];
+                        enter!(&unit.calls[site.call as usize], pc, rerun);
                         // A fold that holds completes the activation at
                         // the region's leave, and the caller runs on after
                         // the call; otherwise the region runs.
@@ -1294,6 +1315,8 @@ impl<H: Heap> Vm<H> {
                     }
                     Op::Fused(n) => {
                         let fused = unit.fused[n as usize];
+                        let call = &unit.calls[fused.site as usize];
+                        enter!(call, fused.call as usize + 1, rerun);
                         let Callee::Native { native, charged } =
                             unit.calls[fused.site as usize].callee
                         else {
@@ -1633,34 +1656,6 @@ impl<H: Heap> Vm<H> {
             | Op::Fused(_) => return Err(fault("a dispatched op ran out of line")),
         }
         Ok(None)
-    }
-
-    /// What op `pc` of unit `id`'s points see, before it runs.
-    #[cold]
-    #[inline(never)]
-    fn see(&mut self, id: UnitId, unit: &Unit, pc: usize) {
-        let running = self.tasks.running;
-        if let Some(watch) = self.watch.as_deref_mut() {
-            watch.see(
-                id as usize,
-                &unit.points,
-                pc,
-                &self.cx.stack,
-                running,
-                &self.tasks.all[running].identity,
-            );
-        }
-    }
-
-    /// Hands the counts so far to a host that reads them live, before it
-    /// is asked something.
-    pub(crate) fn report(&mut self, host: &mut dyn Host) {
-        if let Some(watch) = self.watch.as_deref_mut()
-            && watch.counting()
-            && let Some(observer) = host.observer()
-        {
-            observer.counts(&watch.take_counts());
-        }
     }
 
     /// Returns `value` from the running frame, billing the call's

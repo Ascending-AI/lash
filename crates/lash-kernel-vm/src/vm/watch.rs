@@ -10,9 +10,11 @@ use crate::observe::Weight;
 use lash_kernel_doc::{Document, TaskId, Value};
 use lash_kernel_value::sites::{Site, TaskIdentity};
 
-use crate::SiteCounts;
-use crate::bytecode::program::{Point, Program};
+use super::Vm;
+use crate::bytecode::program::{Point, Program, Unit, UnitId};
+use crate::heap::Heap;
 use crate::observe::{ChargeTape, PathRecorder};
+use crate::{Host, SiteCounts};
 
 /// One machine's observers.
 pub(crate) struct Watch {
@@ -162,6 +164,36 @@ impl Watch {
                 }
                 Point::Test(_) | Point::Action(_) => count(first),
             }
+        }
+    }
+}
+
+impl<H: Heap> Vm<H> {
+    /// What op `pc` of unit `id`'s points see, before it runs.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn see(&mut self, id: UnitId, unit: &Unit, pc: usize) {
+        let running = self.tasks.running;
+        if let Some(watch) = self.watch.as_deref_mut() {
+            watch.see(
+                id as usize,
+                &unit.points,
+                pc,
+                &self.cx.stack,
+                running,
+                &self.tasks.all[running].identity,
+            );
+        }
+    }
+
+    /// Hands the counts so far to a host that reads them live, before it
+    /// is asked something.
+    pub(crate) fn report(&mut self, host: &mut dyn Host) {
+        if let Some(watch) = self.watch.as_deref_mut()
+            && watch.counting()
+            && let Some(observer) = host.observer()
+        {
+            observer.counts(&watch.take_counts());
         }
     }
 }
