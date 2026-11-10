@@ -23,7 +23,7 @@
 //! | host handle | one per byte of its kind and id |
 //! | frame | [`FRAME`] `+` [`VALUE`] `× (locals + operand height)` |
 //! | raw outcome, until decoded | its deep size ([`raw`]) |
-//! | the instance's program | [`OP`] per op, [`CONSTANT`] per constant |
+//! | the run's own code | [`CODE_NODE`] per node of its document's `main` and functions |
 //! | resident directory or tree node | [`NODE`] |
 //! | a large list's or table's cold chunk | [`COLD_CHUNK`] |
 //!
@@ -55,7 +55,7 @@ use lash_kernel_doc::arena::{Body, Chunk, ErrorBody};
 use lash_kernel_doc::{Datum, Integer};
 use lash_kernel_state::paged::run::objects::Record;
 
-use crate::bytecode::program::{Program, Unit};
+use crate::bytecode::program::Unit;
 
 /// One value: an operand, a local, a member, a key.
 pub(crate) const VALUE: u64 = 16;
@@ -73,12 +73,9 @@ pub(crate) const CALLABLE: u64 = 32;
 /// A frame's fixed part: unit, position, base, closure and owed formula.
 pub(crate) const FRAME: u64 = 48;
 
-/// One op of the instance's program, with its charge, pace, step and
-/// suffix entries.
-pub(crate) const OP: u64 = 32;
-
-/// One entry of the instance's constant pool.
-pub(crate) const CONSTANT: u64 = VALUE;
+/// One node of the run's own document: what its code holds, whatever
+/// the compiler made of it.
+pub(crate) const CODE_NODE: u64 = 32;
 
 /// One resident directory or tree node.
 pub(crate) const NODE: u64 = 256;
@@ -212,11 +209,30 @@ pub(crate) fn frame(unit: &Unit, height: u32) -> u64 {
     FRAME.saturating_add(values(u64::from(unit.locals) + u64::from(height)))
 }
 
-/// The instance's own program (`K-MACH-001`).
-pub(crate) fn program(program: &Program) -> u64 {
-    let ops: u64 = program.units.iter().map(|unit| unit.ops.len() as u64).sum();
-    OP.saturating_mul(ops)
-        .saturating_add(CONSTANT.saturating_mul(program.constants.len() as u64))
+/// The run's own code (`K-MACH-001`, `K-BND-003`): a fixed unit per
+/// node of its document's `main` and functions. Library code, a body or
+/// a native, is the build's and holds nothing in the run, and no plan or
+/// compiler pass moves the count.
+pub(crate) fn code(document: &lash_kernel_doc::Document) -> u64 {
+    use lash_kernel_doc::Node;
+    let mut work: Vec<Node<'_>> = document
+        .main
+        .iter()
+        .map(|block| Node::Block(block))
+        .chain(
+            document
+                .functions
+                .values()
+                .filter_map(|function| function.body())
+                .map(|body| Node::Block(&body.block)),
+        )
+        .collect();
+    let mut nodes = 0u64;
+    while let Some(node) = work.pop() {
+        nodes += 1;
+        node.children_into(&mut work);
+    }
+    CODE_NODE.saturating_mul(nodes)
 }
 
 /// What a delivered outcome holds until its consumption decodes it: a

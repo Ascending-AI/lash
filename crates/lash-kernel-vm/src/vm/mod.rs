@@ -250,10 +250,11 @@ impl<H: Heap> Vm<H> {
         off: bool,
         call_depth: u32,
     ) -> Result<Self, Stop> {
-        // The instance holds its own program, then its materialized
-        // constants (contract §2, `K-MACH-001`).
-        let mut unadmitted = heap
-            .admit(crate::heap::meter::program(&program))
+        // The run holds its own document's code; the program's constants
+        // are code, its own or the library's, and hold nothing (contract
+        // §2, `K-MACH-001`, `K-BND-003`).
+        let unadmitted = heap
+            .admit(crate::heap::meter::code(&document))
             .err()
             .map(memory);
         let mut constants = Vec::with_capacity(program.constants.len());
@@ -268,18 +269,12 @@ impl<H: Heap> Vm<H> {
                 Constant::Bytes(bytes) => NewObject::Bytes(bytes.clone()),
                 Constant::Function(callable) => NewObject::Function(*callable),
             };
-            if unadmitted.is_none() {
-                unadmitted = heap
-                    .admit(crate::heap::slots::schedule(&object))
-                    .err()
-                    .map(memory);
-            }
             if unadmitted.is_some() {
                 constants.push(Value::Absent);
                 continue;
             }
             let value = heap
-                .create(object)
+                .constant(object)
                 .map_err(|error| Stop::Fault(error.to_string()))?;
             constants.push(value);
         }

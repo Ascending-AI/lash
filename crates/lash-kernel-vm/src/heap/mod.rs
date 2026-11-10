@@ -60,6 +60,10 @@ pub(crate) trait Heap {
     /// Places `object`, already admitted.
     fn create(&mut self, object: NewObject) -> Result<Value, NativeError>;
 
+    /// Places constant `object` of the program's code, which the run never
+    /// holds: it is admitted for nothing and frees nothing.
+    fn constant(&mut self, object: NewObject) -> Result<Value, NativeError>;
+
     /// Installs what a native call built, in reservation order.
     fn install(&mut self, built: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError>;
 

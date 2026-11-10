@@ -592,6 +592,14 @@ impl Heap for SlotHeap {
         Ok(value)
     }
 
+    fn constant(&mut self, object: NewObject) -> Result<Value, NativeError> {
+        let value = self.arena.create(object)?;
+        if let Some(handle) = value.handle() {
+            self.place(handle, 0);
+        }
+        Ok(value)
+    }
+
     fn install(&mut self, built: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
         let placed: Vec<(ArenaHandle, u64)> = built
             .iter()

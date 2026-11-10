@@ -1157,6 +1157,21 @@ fn a_run_that_does_not_fit_its_memory_bound_starts_and_refuses_at_its_first_step
     }
 }
 
+/// `K-MACH-001`, `K-BND-003`: a run holds its own code as a fixed unit
+/// per node of its document, whatever the compiler makes of it. A branch
+/// that never runs, `if false { return 1 }`, is six nodes (the `if`, its
+/// test, its block, its empty `else` block, the `return` and its value)
+/// that need no local and no deeper stack, so the least bound a start
+/// finishes under moves by six nodes exactly, though the folder drops the
+/// branch's ops.
+#[test]
+fn a_start_holds_its_document_by_its_nodes() {
+    assert_eq!(
+        threshold("  if false { return 1 }\n  return 0"),
+        threshold("  return 0") + 6 * crate::heap::meter::CODE_NODE
+    );
+}
+
 /// G012, contract §2: a native's inputs stay held while it builds, so its
 /// construction is admitted at the held inputs plus its peak, and at
 /// exactly that. Each byte of a concatenated input is held twice at the
@@ -1345,9 +1360,9 @@ main { let r = call descend(&descend, 0) return r }"#;
 /// frame's memory at its entry and releases it when it leaves, as its
 /// frame would. `law.pack` builds its list while its frame is admitted,
 /// three times, and `law.step`'s fold completes its activation sixty
-/// times, so the least bound each run finishes under is the framed run's,
-/// plus the schedule's program size for exactly the ops the
-/// expansion added (K-MACH-001).
+/// times, so the least bound each run finishes under is the framed run's:
+/// the code the expansion added is the library's, which the run never
+/// holds (K-MACH-001, K-BND-003).
 #[test]
 fn inline_frame_memory_is_admitted_at_entry() {
     const TEXT: &str = "main {\n  let xs = work.fill(100)\n  let p = 0\n  let i = 0\n  while num.lt(i, 3) {\n    set p = invoke law.pack(xs)\n    set i = num.add(i, 1)\n  }\n  return 0\n}";
@@ -1355,10 +1370,10 @@ fn inline_frame_memory_is_admitted_at_entry() {
     // there: it releases what its entry admitted, sixty times.
     const FOLDED: &str = "main {\n  let xs = work.fill(100)\n  let i = 0\n  while num.lt(i, 60) {\n    set i = invoke law.step(i)\n  }\n  return xs\n}";
     for text in [TEXT, FOLDED] {
-        let (_, added) = inline_in(text, ROOMY);
+        inline_in(text, ROOMY);
         let inline = threshold_in(text, Some(inline_probes));
         let framed = crate::bytecode::inline::disabled(|| threshold_in(text, Some(inline_probes)));
-        assert_eq!(inline, framed + crate::heap::meter::OP * added, "{text}");
+        assert_eq!(inline, framed, "{text}");
     }
 }
 

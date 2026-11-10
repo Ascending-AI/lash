@@ -1288,7 +1288,7 @@ fn a_cold_load_refused_for_memory_refuses_at_its_event_with_the_charge_before_it
 }"#;
     let (text, unread) = (BODY.replace("READ", "xs[0]"), BODY.replace("READ", "ys[0]"));
     let mut refused = 0;
-    for memory in 0..=4096 {
+    for memory in 0..=16384 {
         let how = Drive {
             memory,
             cold: true,
