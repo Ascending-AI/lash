@@ -425,3 +425,97 @@ fn two_links_over_one_library_fill_their_own_performs() {
         assert_eq!(super::embedder::result(end), super::embedder::text(tag));
     }
 }
+
+/// ADMIT-ONCE (G104): helper admission work is bounded by distinct
+/// origins. A run whose document depends on a chain of twelve helpers
+/// (eleven helper edges) crosses the chain's root to a tool as a function
+/// value 64 times; checking that the helper is the document's to present
+/// walks the chain's edges at most once for the run, not once per
+/// crossing: permission is read from what the defining Link admitted.
+#[test]
+fn helper_admission_work_is_bounded_by_distinct_origins() {
+    use lash_kernel_doc::BuildHelpers;
+    const CHAIN: usize = 12;
+    const CROSSINGS: usize = 64;
+    let mut registry = library_with(true, Some(unique)).registry.as_ref().clone();
+    let mut previous: Option<lash_kernel_value::FunctionId> = None;
+    for index in 0..CHAIN {
+        let (dependency, body) = match previous {
+            None => (String::new(), "return 1".to_owned()),
+            Some(id) => (
+                format!("use law.chain_{} = @{id}\n", index - 1),
+                format!(
+                    "let answer = invoke law.chain_{}() return answer",
+                    index - 1
+                ),
+            ),
+        };
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function law.chain_{index}() -> Int\nkernel 1\ncharge 1\n{dependency}body {{ {body} }}"
+        ))
+        .unwrap();
+        previous = Some(registry.register(definition, None).unwrap());
+    }
+    let root = previous.unwrap();
+    let helpers = Arc::new(BuildHelpers::new(registry.clone(), [root]).unwrap());
+    let prepared = PreparedLibrary::with_helpers(Arc::new(registry), helpers);
+    let header = &super::embedder::shared_library(true, None, false).header;
+    let text = format!(
+        "numbers by_spelling\n{header}library @{root}\n\
+         import 4 operation host.take(input: Fn() -> Int) -> Any\n\
+         main {{ for x in [{}] {{ do perform 4(&@{root}) as Any }} return null }}",
+        vec!["0"; CROSSINGS].join(", ")
+    );
+    let parsing = super::embedder::shared_library(true, None, false).registry;
+    let document = Arc::new(super::embedder::document(&text, &parsing));
+    let link = super::embedder::link(&document);
+    let identity = link.identity();
+    let program = crate::Program::prepare(
+        identity,
+        std::collections::BTreeMap::from([(document.identity(), Arc::clone(&document))]),
+        &std::collections::BTreeMap::from([(identity, link)]),
+        lash_kernel_doc::heap::PageId([8; 32]),
+        prepared,
+    )
+    .unwrap();
+    let mut machine = <crate::CoreMachine as crate::Machine>::start(
+        program,
+        super::embedder::ROOMY,
+        Setup::default().start,
+        Box::new(super::embedder::Source::default()),
+    )
+    .unwrap();
+    let mut world = super::embedder::World::default();
+    let mut crossed = 0;
+    BuildHelpers::take_admission_edge_visits();
+    loop {
+        match machine.run(&mut world, u64::MAX).unwrap() {
+            Step::Ended(end) => {
+                assert_eq!(super::embedder::result(end), Datum::Null);
+                break;
+            }
+            Step::Slice => {}
+            Step::Parked(park) => {
+                for request in &park.requests {
+                    let crate::Request::Effect(effect) = request;
+                    assert!(
+                        matches!(effect.args[0], Datum::FunctionValue(_)),
+                        "the helper crosses as a function value: {:?}",
+                        effect.args[0]
+                    );
+                    crossed += 1;
+                    machine
+                        .deliver(effect.wait, crate::Outcome::Completed(Datum::Null))
+                        .unwrap();
+                }
+            }
+        }
+    }
+    let edges = BuildHelpers::take_admission_edge_visits();
+    println!("ADMIT-ONCE crossings={crossed} edges={edges}");
+    assert_eq!(crossed, CROSSINGS);
+    assert!(
+        edges <= (CHAIN - 1) as u64,
+        "ADMIT-ONCE: {crossed} crossings of one origin walked {edges} helper edges"
+    );
+}
