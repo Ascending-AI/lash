@@ -31,10 +31,12 @@ use lash_kernel_value::sites::{Site, Unit};
 use super::embedder::{ROOMY, Setup, Source, World, core_program};
 use crate::{CellStart, CoreMachine, Machine, Step};
 
-/// A run parked on a `perform` inside a closure it holds, `p`, whose
-/// argument, a slot, a list's row and a large list's last chunk each hold
-/// a host function of another link, beside another closure of its own.
-const TEXT: &str = "main {\n  let f = fn() { return 1 }\n  let g = [h]\n  let big = []\n  let i = 0\n  while num.lt(i, 300) {\n    set big[list.len(big)] = i\n    set i = num.add(i, 1)\n  }\n  set big[list.len(big)] = h\n  let p = fn() { let w = perform 0(h) as Any return w }\n  let v = apply p()\n  return [f, g, big, v]\n}";
+/// A run parked on a `perform` inside a closure it holds, `p`, while a
+/// slot, a list's row and a large list's last chunk each hold a host
+/// function of another link, beside another closure of its own. The
+/// perform's argument is data: a function value crosses to a tool frozen
+/// against its defining document, which an unloaded link does not have.
+const TEXT: &str = "main {\n  let f = fn() { return 1 }\n  let g = [h]\n  let big = []\n  let i = 0\n  while num.lt(i, 300) {\n    set big[list.len(big)] = i\n    set i = num.add(i, 1)\n  }\n  set big[list.len(big)] = h\n  let p = fn() { let w = perform 0(i) as Any return w }\n  let v = apply p()\n  return [f, g, big, v]\n}";
 
 fn flipped(bytes: &[u8; 32]) -> [u8; 32] {
     bytes.map(|byte| !byte)

@@ -59,7 +59,7 @@ fn turn(units: &Units<'_>, number: u32, task: &RunTask) -> Result<(), Inadmissib
         && task.frames.last().is_some_and(|top| {
             top.phase == PointPhase::Issued
                 && matches!(
-                    perform(units, top),
+                    perform(units, top, number == 0 && task.frames.len() == 1),
                     Some(ActionSite::Perform {
                         then_yield: true,
                         ..
@@ -113,7 +113,7 @@ fn tasks_in_order(
             return Err(Inadmissible::Ended { task: at });
         }
         if let Some(root) = task.frames.first() {
-            let unit = units.get(&root.unit);
+            let unit = units.get(&root.unit, number == 0);
             let starts = match number {
                 0 => unit.is_some_and(|(unit, _)| unit == program.main),
                 _ => root.unit.kind == UnitKind::Spawn,
@@ -238,7 +238,8 @@ fn waits(
             .filter(|top| top.phase == PointPhase::Issued)
             .ok_or(Inadmissible::WaitPoint { wait: number })?;
         let link = top.unit.link;
-        let action = perform(units, top).ok_or(Inadmissible::WaitPoint { wait: number })?;
+        let root = wait.task == 0 && task.frames.len() == 1;
+        let action = perform(units, top, root).ok_or(Inadmissible::WaitPoint { wait: number })?;
         let ActionSite::Perform {
             owner,
             slot,
@@ -288,9 +289,10 @@ fn waits(
     Ok(())
 }
 
-/// The action a frame stands at, by its point's site.
-fn perform<'u>(units: &Units<'u>, frame: &RunFrame) -> Option<&'u ActionSite> {
-    let (unit, _) = units.get(&frame.unit)?;
+/// The action a frame stands at, by its point's site; `root` when it is
+/// the run's root frame.
+fn perform<'u>(units: &Units<'u>, frame: &RunFrame, root: bool) -> Option<&'u ActionSite> {
+    let (unit, _) = units.get(&frame.unit, root)?;
     units
         .program
         .unit(unit)

@@ -83,7 +83,11 @@ pub(crate) fn compile(
         Some(entry) => super::conventions::entry(&mut compiler, entry)?,
         None => compiler.main()?,
     };
-    compiler.declare_all(false);
+    // Every Link's declared functions get a trampoline, the root's too: a
+    // function value of the root Link may enter as an argument, a host
+    // binding or a delivery, or be held across a cold reopen, without its
+    // code naming it.
+    compiler.declare_all(true);
     for (other, document) in &linked.others {
         if *other != link {
             compiler.links.insert(*other, document);

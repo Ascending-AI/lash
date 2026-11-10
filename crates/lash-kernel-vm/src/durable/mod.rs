@@ -611,10 +611,11 @@ pub(crate) fn open(
         }
     };
     let mut tasks = Vec::with_capacity(count);
-    for saved in &record.tasks {
+    for (number, saved) in record.tasks.iter().enumerate() {
         let mut cx = Context::default();
-        for frame in &saved.frames {
-            open_frame(vm, &program, &units, &mut cx, frame, &value)?;
+        for (depth, frame) in saved.frames.iter().enumerate() {
+            let root = number == 0 && depth == 0;
+            open_frame(vm, &program, &units, &mut cx, frame, root, &value)?;
         }
         for handler in &saved.handlers {
             cx.handlers.push(open_handler(&program, &cx, handler)?);
@@ -747,19 +748,33 @@ pub(super) struct Units<'p> {
 }
 
 impl<'p> Units<'p> {
+    /// An adapted entry (a settlement or a run-root cleanup epilogue) saves
+    /// under the key of its function's plain body: only the run's root
+    /// frame names `program.main`, so every other frame names the body.
     pub(super) fn new(program: &'p Program) -> Self {
-        let own = program
+        let mut own: HashMap<_, _> = program
             .units
             .iter()
             .enumerate()
+            .filter(|(at, _)| *at as UnitId != program.main)
             .map(|(at, unit)| (unit_key(unit), at as UnitId))
             .collect();
+        if let Some(main) = program.units.get(program.main as usize) {
+            own.entry(unit_key(main)).or_insert(program.main);
+        }
         Self { program, own }
     }
 
-    /// The unit `saved` names, and the index of the Link it runs as.
-    pub(super) fn get(&self, saved: &RunUnit) -> Option<(UnitId, u32)> {
+    /// The unit `saved` names, and the index of the Link it runs as;
+    /// `root` when it is the run's root frame (task 0's first).
+    pub(super) fn get(&self, saved: &RunUnit, root: bool) -> Option<(UnitId, u32)> {
         let link = self.program.link_index(&saved.link)?;
+        if root
+            && let Some(main) = self.program.units.get(self.program.main as usize)
+            && unit_key(main) == saved_key(saved)
+        {
+            return Some((self.program.main, link));
+        }
         if let Some(id) = self.own.get(&saved_key(saved)) {
             return Some((*id, link));
         }
@@ -784,10 +799,11 @@ fn open_frame(
     units: &Units<'_>,
     cx: &mut Context,
     saved: &RunFrame,
+    root: bool,
     value: &dyn Fn(u32) -> Result<Value, String>,
 ) -> Result<(), String> {
     let (id, link) = units
-        .get(&saved.unit)
+        .get(&saved.unit, root)
         .ok_or_else(|| format!("the program has no unit {:?}", saved.unit))?;
     let unit = program.unit(id);
     let entry = unit
