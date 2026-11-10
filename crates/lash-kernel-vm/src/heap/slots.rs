@@ -502,6 +502,12 @@ impl SlotHeap {
             held.splice(chunk as usize..=chunk as usize, edges);
             if held.iter().all(Option::is_none) {
                 self.payloads.remove(&id);
+                // Every node is resident: join them, as a large object's
+                // chunks are, so a whole read borrows one slice. No edge
+                // is left to answer a request for the join.
+                self.arena
+                    .join_chunks(object)
+                    .map_err(|error| malformed(error.to_string()))?;
             }
         }
         // It holds what its body does.
