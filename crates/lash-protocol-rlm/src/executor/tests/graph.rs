@@ -210,9 +210,10 @@ async fn lease_host(clock: Arc<LeaseClock>) -> DurableHost {
 /// Session page authority (FIG-6193): the cells of a turn read the
 /// session's committed pages under one lease, which the first read takes
 /// and every later cell reuses before renewal is due, so N cells make one
-/// lease write. A cell that rebinds one binding commits as many pages in a
-/// session of 1,024 bindings as in one of 256: what a rebind writes does
-/// not grow with the session.
+/// lease write. Cells that only read write no row, and a cell that rebinds
+/// one binding commits as many pages in a session of 1,024 bindings as in
+/// one of 256 (both sizes keep the same tree depth): what a rebind writes
+/// does not grow with the session.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_turns_cells_share_one_lease_and_a_rebind_commits_pages_that_do_not_grow_with_the_session()
  {
@@ -234,9 +235,9 @@ async fn a_turns_cells_share_one_lease_and_a_rebind_commits_pages_that_do_not_gr
             .expect("bind the session's values");
         commit_working(&mut state, &host).await;
         for (key, code) in [
-            ("exec-code:0", "const r0 = b0.length;"),
-            ("exec-code:1", "const r1 = b1.length;"),
-            ("exec-code:2", "const r2 = b2.length;"),
+            ("exec-code:0", "b0.length;"),
+            ("exec-code:1", "b1.length;"),
+            ("exec-code:2", "b2.length;"),
             ("exec-code:3", "b7 = 'changed';"),
         ] {
             cell(&mut state, &host, key, code).await;

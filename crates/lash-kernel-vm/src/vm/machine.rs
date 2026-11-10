@@ -467,12 +467,12 @@ impl CoreMachine {
                     .map_err(|error| StartError::Bindings {
                         problem: format!("the session's heap does not open: {error:?}"),
                     })?;
-                (heap, Some((session, values)))
+                (heap, Some((session, values, page)))
             }
         };
         let roots = session
             .as_ref()
-            .map_or(&[][..], |(_, values)| values.as_slice());
+            .map_or(&[][..], |(_, values, _)| values.as_slice());
         let opened = Opened { heap, roots };
         let (mut vm, convention) = build(
             &program,
@@ -485,8 +485,8 @@ impl CoreMachine {
         )?;
         vm.value_depth = limits.value_depth();
         vm.crossing.data = limits;
-        if let Some((session, values)) = session {
-            crate::durable::session::bind(&mut vm, &session, values);
+        if let Some((session, values, page)) = session {
+            crate::durable::session::bind(&mut vm, &session, values, page);
         }
         let mut header = Header::of(&program, bounds, start.owner);
         header.host = start.host.iter().map(|(name, _)| name.clone()).collect();

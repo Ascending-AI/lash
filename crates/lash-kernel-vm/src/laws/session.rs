@@ -255,6 +255,7 @@ fn a_binding_holding_a_saved_function_carries_it_by_identity() {
             names: vec![Name::new("fs")],
             functions: vec![saved.clone()],
         },
+        None,
     )
     .unwrap();
     let end = cell(

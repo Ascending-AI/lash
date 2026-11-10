@@ -144,6 +144,7 @@ pub(crate) fn seal(
         globals,
         session: vm.session.names.clone(),
         functions: vm.session.saved.clone(),
+        carried: vm.session.page,
         held,
         running,
         installed,
@@ -584,6 +585,7 @@ pub(crate) fn open(
     );
     vm.session.names.clone_from(&record.session);
     vm.session.saved.clone_from(&record.functions);
+    vm.session.page = record.carried;
     if record.globals.len() != vm.globals.len() {
         return Err("the run holds another number of host bindings".into());
     }

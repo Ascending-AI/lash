@@ -124,8 +124,9 @@ impl PageKind {
     pub const RUN_ROOT: Self = Self(1009);
     /// One segment of a bytecode-core run's encoded state.
     pub const RUN_SEGMENT: Self = Self(1010);
-    /// A bytecode-core session's root: its directory and the segments of
-    /// its encoded bindings ([`run::session`](super::run::session)).
+    /// A bytecode-core session's root: its directory and the keyed tree
+    /// of its bindings and saved functions
+    /// ([`run::session`](super::run::session)).
     pub const RUN_SESSION: Self = Self(1011);
     /// The first number past the semantic kinds a format may add.
     pub const END: u32 = 2000;
@@ -137,9 +138,12 @@ pub const INDEX_FANOUT: u64 = 32;
 pub const SEQUENCE_LEAF_CELLS: u64 = 64;
 /// Rows per keyed leaf (start value, `D-CAP`).
 pub const KEYED_LEAF_ROWS: u64 = 64;
-/// A leaf stops packing at this many envelope bytes, whichever of its
-/// count bound comes first (start value, `D-CAP`). The format's absolute
-/// node bound, 65 536 bytes, is never exceeded.
+/// A sequence leaf stops packing at this many envelope bytes, whichever
+/// of its count bound comes first; a keyed chunk holds about this many,
+/// each item ending it in proportion to its own bytes, and never more
+/// than four times as many ([`tree::canonical`](super::tree)) (start
+/// value, `D-CAP`). The format's absolute node bound, 65 536 bytes, is
+/// never exceeded.
 pub const PAGE_TARGET_BYTES: u64 = 8_192;
 /// An object body of at most this many token bytes lives inline in its
 /// directory row; a larger one is paged under the same schema.

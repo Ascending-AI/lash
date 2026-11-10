@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::arena::native::{NativeError, Retry};
-use lash_kernel_doc::heap::HeapFault;
+use lash_kernel_doc::heap::{HeapFault, PageRef};
 use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_state::paged::run::directory::Directory;
 use lash_kernel_state::paged::run::ids::ObjectId;
@@ -40,11 +40,13 @@ use crate::vm::tasks::MAIN;
 use crate::vm::{Flow, Stop, Vm};
 
 /// The globals past the program's: the carried session's bindings `main`
-/// names nowhere, ascending, then its saved functions, in that order.
+/// names nowhere, ascending, then its saved functions, in that order; and
+/// the session page they came from, whose rows the cell's carry edits.
 #[derive(Debug, Default)]
 pub(crate) struct Carried {
     pub(crate) names: Vec<Name>,
     pub(crate) saved: Vec<session::RunFunction>,
+    pub(crate) page: Option<PageRef>,
 }
 
 /// What a session cell's end saves of the functions the bindings its
@@ -198,8 +200,9 @@ pub(crate) const NOT_CARRIED: &str = "it holds a function or a task, which ends 
 
 /// Binds `session`'s bindings, valued `values` (the heap's roots), in
 /// `vm`: a name the program reads to its global, every other one past
-/// them, then the saved functions' objects past those.
-pub(crate) fn bind(vm: &mut Vm<SlotHeap>, session: &RunSession, values: Vec<Value>) {
+/// them, then the saved functions' objects past those; `page` is the
+/// session page they came from.
+pub(crate) fn bind(vm: &mut Vm<SlotHeap>, session: &RunSession, values: Vec<Value>, page: PageRef) {
     let (bindings, functions) = values.split_at(session.names.len().min(values.len()));
     for (name, value) in session.names.iter().zip(bindings) {
         match vm.program.globals.iter().position(|global| global == name) {
@@ -212,6 +215,7 @@ pub(crate) fn bind(vm: &mut Vm<SlotHeap>, session: &RunSession, values: Vec<Valu
     }
     vm.globals.extend_from_slice(functions);
     vm.session.saved.clone_from(&session.functions);
+    vm.session.page = Some(page);
 }
 
 /// Hands on `vm`'s session at the end of its cell, `host` the host's
@@ -363,6 +367,7 @@ pub(crate) fn carry(
             names: kept.0,
             functions: vm.session.saved.clone(),
         },
+        vm.session.page,
     )
     .map_err(MachineError::Heap)?;
     Ok((SessionRoot::run(page), not_carried))

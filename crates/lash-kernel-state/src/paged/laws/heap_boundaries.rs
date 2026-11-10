@@ -90,21 +90,48 @@ fn the_boundary_hash_is_fixed() {
     assert_eq!(tree::boundary_hash(0, b"lash"), 0x1d92_f986_4f93_e9b7);
 }
 
-/// `prefix` extended by the first byte that makes a key whose leaf
-/// boundary hash is not natural.
+/// Whether a keyed row of `size` packing bytes under `key` ends its leaf by
+/// its boundary hash, stated from seam H's rule with literal constants: it
+/// ends where `H(0, key)` falls in the share `max(1/64, size/8192)` of the
+/// hash range.
+fn natural(key: &[u8], size: u64) -> bool {
+    let weight = if size * 64 <= 8192 {
+        u64::MAX / 64
+    } else {
+        (u64::MAX / 8192).saturating_mul(size)
+    };
+    tree::boundary_hash(0, key) <= weight
+}
+
+/// A keyed row's packing bytes: its encoded row tokens.
+fn row(key: &[u8]) -> u64 {
+    use {lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenWriter};
+    let mut out = TokenWriter::new();
+    out.seq(2);
+    out.bytes(key);
+    PageValue::Bool(true).encode(&mut out);
+    out.len() as u64
+}
+
+/// `prefix` extended by the first byte that makes a key whose row does not
+/// end its leaf.
 fn plain(prefix: &[u8]) -> Vec<u8> {
     (0..=255u8)
         .map(|b| [prefix, &[b]].concat())
-        .find(|key| tree::boundary_hash(0, key) & 63 != 0)
+        .find(|key| !natural(key, row(key)))
         .unwrap()
 }
 
-/// Seam H: a keyed leaf ends after a row whose `H(0, key)` has its low
-/// six bits zero, after its 128th row, or after the row that brings its
-/// encoded rows to 8192 bytes, each counted from its own start.
+/// Seam H: a keyed leaf ends after a row whose `H(0, key)` falls in the
+/// share `max(1/64, size/8192)` of the hash range, so a large row ends it
+/// more often and a leaf holds about 8192 bytes; after its 128th row; or
+/// after the row that brings its encoded rows to 32768 bytes, each counted
+/// from its own start. Where a leaf ends depends on its last row alone
+/// until a cap binds: an 8192-byte cap ended leaves by their start, so one
+/// removed row re-cut every leaf after it and a one-binding commit grew
+/// with the session.
 #[test]
 fn keyed_leaves_end_at_natural_rows_and_their_caps() {
-    use {lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenWriter};
     // The count cap: 129 rows with no natural key.
     let keys: Vec<_> = (0..129u16).map(|i| plain(&i.to_be_bytes())).collect();
     let (leaves, top) = seal_bools(&keys, false);
@@ -113,39 +140,64 @@ fn keyed_leaves_end_at_natural_rows_and_their_caps() {
     assert_eq!(sizes, [128, 1]);
 
     // A natural key ends its leaf.
-    let natural = (0..=u16::MAX)
+    let natural_key = (0..=u16::MAX)
         .map(|i| [&[5u8][..], &i.to_be_bytes()].concat())
-        .find(|key| tree::boundary_hash(0, key) & 63 == 0)
+        .find(|key| tree::boundary_hash(0, key) <= u64::MAX / 64)
         .unwrap();
-    let keys = [plain(&[1]), plain(&[2]), natural.clone(), plain(&[6]), plain(&[7])];
+    let keys = [plain(&[1]), plain(&[2]), natural_key, plain(&[6]), plain(&[7])];
     let (leaves, _) = seal_bools(&keys, false);
     let firsts: Vec<_> = leaves.iter().map(|leaf| (leaf[0].0.clone(), leaf.len())).collect();
     assert_eq!(firsts, [(keys[0].clone(), 3), (keys[3].clone(), 2)]);
 
-    // The byte cap: the leaf ends after the row that reaches 8192 bytes.
-    let row = |key: &[u8]| {
-        let mut out = TokenWriter::new();
-        out.seq(2);
-        out.bytes(key);
-        PageValue::Bool(true).encode(&mut out);
-        out.len()
+    // A large row ends its leaf by its share of 8192 bytes: a row of about
+    // 4000 bytes whose hash is past 1/64 of the range but within its share
+    // (about half) ends the leaf; one past its share does not.
+    let large = |ends: bool| {
+        (0..=u16::MAX)
+            .map(|i| {
+                let mut key = vec![5u8; 4_000];
+                key.extend(i.to_be_bytes());
+                key
+            })
+            .find(|key| {
+                let hash = tree::boundary_hash(0, key);
+                hash > u64::MAX / 64 && natural(key, row(key)) == ends
+            })
+            .unwrap()
     };
-    for (total, split) in [(8191, false), (8192, true)] {
-        let first = plain(&[0]);
-        let mut big = vec![1; 8_000];
-        big.extend(plain(&[1]));
-        while row(&first) + row(&big) < total {
-            big.insert(0, 1);
-            if tree::boundary_hash(0, &big) & 63 == 0 {
-                *big.last_mut().unwrap() ^= 0x80;
-            }
-        }
-        assert_eq!(row(&first) + row(&big), total);
-        assert!(tree::boundary_hash(0, &big) & 63 != 0);
-        let keys = [first, big, plain(&[2])];
+    for ends in [true, false] {
+        let keys = [plain(&[1]), large(ends), plain(&[6])];
         let (leaves, _) = seal_bools(&keys, false);
         let sizes: Vec<_> = leaves.iter().map(Vec::len).collect();
-        assert_eq!(sizes, if split { vec![2, 1] } else { vec![3] }, "{total} bytes");
+        assert_eq!(sizes, if ends { vec![2, 1] } else { vec![3] }, "ends {ends}");
+    }
+
+    // The byte cap: the leaf ends after the row that reaches 32768 bytes.
+    for (total, split) in [(32_767, false), (32_768, true)] {
+        let mut keys: Vec<Vec<u8>> = Vec::new();
+        for i in 1..=32u8 {
+            let mut key = vec![i; 1_000];
+            while natural(&key, row(&key)) {
+                *key.last_mut().unwrap() ^= 0x55;
+                key.push(i);
+            }
+            keys.push(key);
+        }
+        let mut last = vec![33u8; 8];
+        let filled = |keys: &[Vec<u8>], last: &[u8]| keys.iter().map(|k| row(k)).sum::<u64>() + row(last);
+        while filled(&keys, &last) < total {
+            last.insert(1, 0);
+            if natural(&last, row(&last)) {
+                *last.last_mut().unwrap() ^= 0x80;
+            }
+        }
+        assert_eq!(filled(&keys, &last), total);
+        assert!(!natural(&last, row(&last)));
+        keys.push(last);
+        keys.push(plain(&[40]));
+        let (leaves, _) = seal_bools(&keys, false);
+        let sizes: Vec<_> = leaves.iter().map(Vec::len).collect();
+        assert_eq!(sizes, if split { vec![33, 1] } else { vec![34] }, "{total} bytes");
     }
 }
 

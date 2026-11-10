@@ -85,6 +85,9 @@ record! {
         /// The carried session's saved functions, ascending by name: the
         /// globals past the session's.
         pub functions: Vec<super::session::RunFunction>,
+        /// The session page the carried session came from, whose rows the
+        /// cell's carry edits.
+        pub carried: Option<PageRef>,
         /// Values the scheduler holds outside any task.
         pub held: Vec<u32>,
         /// The task whose context the machine holds.
@@ -515,10 +518,12 @@ impl TokenCodec for WaitPhase {
 pub const SEGMENT_BYTES: usize = 60 * 1024;
 
 record! {
-    /// A run root page's body: the directory page it retains and the
-    /// segments of the run's encoded [`RunRecord`], in order.
+    /// A run root page's body: the directory and carried session pages it
+    /// retains and the segments of the run's encoded [`RunRecord`], in
+    /// order.
     pub struct RunPage {
         pub directory: Option<PageRef>,
+        pub carried: Option<PageRef>,
         pub segments: Vec<PageRef>,
         pub length: u64,
     }
@@ -531,23 +536,8 @@ record! {
 ///
 /// The page port's faults.
 pub fn write(access: &Access<'_>, record: &RunRecord) -> Result<PageRef, HeapFault> {
-    write_segmented(
-        access,
-        PageKind::RUN_ROOT,
-        &encode_body(record),
-        record.heap.directory.page,
-    )
-}
-
-/// Seals `bytes` under a root page of `kind`: the bytes in segments, the
-/// root naming them and `directory`, which the root retains, as its
-/// children.
-pub(super) fn write_segmented(
-    access: &Access<'_>,
-    kind: PageKind,
-    bytes: &[u8],
-    directory: Option<PageRef>,
-) -> Result<PageRef, HeapFault> {
+    let bytes = encode_body(record);
+    let directory = record.heap.directory.page;
     let mut segments = Vec::with_capacity(bytes.len().div_ceil(SEGMENT_BYTES));
     for chunk in bytes.chunks(SEGMENT_BYTES) {
         let mut out = TokenWriter::new();
@@ -556,16 +546,18 @@ pub(super) fn write_segmented(
     }
     let page = RunPage {
         directory,
+        carried: record.carried,
         segments,
         length: bytes.len() as u64,
     };
     let children = page
         .directory
         .iter()
+        .chain(&page.carried)
         .chain(&page.segments)
         .copied()
         .collect();
-    access.seal(kind, encode_body(&page), children)
+    access.seal(PageKind::RUN_ROOT, encode_body(&page), children)
 }
 
 /// The run sealed under run root page `page`.
@@ -576,28 +568,31 @@ pub(super) fn write_segmented(
 /// a run root, a segment that is not one, or state that does not decode
 /// or names another directory than its root retains.
 pub fn read(access: &Access<'_>, page: PageRef) -> Result<RunRecord, HeapFault> {
-    let (directory, bytes) = read_segmented(access, page, PageKind::RUN_ROOT)?;
+    let (root, bytes) = read_segmented(access, page)?;
     let mut record: RunRecord = decode_body(&bytes).map_err(|error| HeapFault::Corrupt {
         page: page.id,
         reason: error.to_string(),
     })?;
-    retain(page, &mut record.heap, directory)?;
+    retain(page, &mut record.heap, root.directory)?;
+    if record.carried.map(|page| page.id) != root.carried.map(|page| page.id) {
+        return Err(HeapFault::Corrupt {
+            page: page.id,
+            reason: "the run names another carried session than its root".into(),
+        });
+    }
+    record.carried = root.carried;
     Ok(record)
 }
 
-/// The bytes sealed under root page `page` of `kind`, and the directory
-/// page it retains, granted by the root.
-pub(super) fn read_segmented(
-    access: &Access<'_>,
-    page: PageRef,
-    kind: PageKind,
-) -> Result<(Option<PageRef>, Vec<u8>), HeapFault> {
+/// The root page `page`, the pages it retains granted, and the bytes its
+/// segments hold.
+fn read_segmented(access: &Access<'_>, page: PageRef) -> Result<(RunPage, Vec<u8>), HeapFault> {
     let corrupt = |reason: String| HeapFault::Corrupt {
         page: page.id,
         reason,
     };
     let answer = access.read(page)?;
-    if kind == PageKind::RUN_ROOT && answer.kind == PageKind::KEYED_LEAF {
+    if answer.kind == PageKind::KEYED_LEAF {
         // The paged engine parked its run under its heap's header, a keyed
         // leaf; no run of the core is rooted at one.
         return Err(HeapFault::Retired {
@@ -605,13 +600,16 @@ pub(super) fn read_segmented(
             state: lash_kernel_value::tokens::RetiredState::ParkedRun,
         });
     }
-    if answer.kind != kind {
-        return Err(corrupt(format!("not a page of kind {}", kind.0)));
+    if answer.kind != PageKind::RUN_ROOT {
+        return Err(corrupt("not a run root page".into()));
     }
     let mut root: RunPage =
         decode_body(&answer.tokens).map_err(|error| corrupt(error.to_string()))?;
-    if let Some(directory) = &mut root.directory {
-        grant(directory, &answer.children)?;
+    for held in [&mut root.directory, &mut root.carried]
+        .into_iter()
+        .flatten()
+    {
+        grant(held, &answer.children)?;
     }
     let mut bytes = Vec::with_capacity(usize::try_from(root.length).unwrap_or(0));
     for segment in &mut root.segments {
@@ -627,16 +625,12 @@ pub(super) fn read_segmented(
     if bytes.len() as u64 != root.length {
         return Err(corrupt("the run's segments hold another length".into()));
     }
-    Ok((root.directory, bytes))
+    Ok((root, bytes))
 }
 
 /// Points `heap`'s directory at the granted `directory` its root page
 /// `page` retains, refusing a heap that names another.
-pub(super) fn retain(
-    page: PageRef,
-    heap: &mut HeapRoot,
-    directory: Option<PageRef>,
-) -> Result<(), HeapFault> {
+fn retain(page: PageRef, heap: &mut HeapRoot, directory: Option<PageRef>) -> Result<(), HeapFault> {
     if heap.directory.page.map(|page| page.id) != directory.map(|page| page.id) {
         return Err(HeapFault::Corrupt {
             page: page.id,

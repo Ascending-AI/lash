@@ -82,6 +82,8 @@ pub struct SessionEditor {
     sealed: BTreeMap<Name, RunValue>,
     /// The session's saved functions (`K-SES-004`).
     saved: Vec<Saved>,
+    /// The session page the editor opened, whose rows a seal edits.
+    page: Option<lash_kernel_doc::heap::PageRef>,
     /// The deepest value a copy out reads (`K-VAL-034`).
     depth: usize,
     changed: bool,
@@ -99,6 +101,7 @@ impl SessionEditor {
         session: Option<&SessionRoot>,
         source: Box<dyn PageSource>,
     ) -> Result<Self, HeapFault> {
+        let page = session.map(run_page).transpose()?;
         let (heap, bindings, sealed, saved) = match session {
             None => (
                 SlotHeap::durable(
@@ -149,6 +152,7 @@ impl SessionEditor {
             bindings,
             sealed,
             saved,
+            page,
             depth: lash_kernel_value::data_limits::KernelDataLimits::standard().value_depth(),
             changed: false,
         })
@@ -527,6 +531,7 @@ impl SessionEditor {
                 names,
                 functions,
             },
+            self.page,
         )?;
         Ok(SessionRoot::run(page))
     }
