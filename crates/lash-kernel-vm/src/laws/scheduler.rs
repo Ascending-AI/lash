@@ -1,22 +1,16 @@
-//! Scheduler witnesses shared by layout, observation, identity and limiter laws.
+//! Scheduler witnesses shared by observation, identity and limiter laws.
 use super::embedder::{Embedder, Setup, int, result, text};
-use crate::{End, Layout, Machine, Step};
+use crate::{End, Machine, Step};
 use lash_kernel_doc::Datum;
 
 /// K-TASK / K-EVAL-008 / K-MACH-008: scheduler handoffs retain their
 /// effects, ordered operands, charge and durable continuation across a cold park.
 #[test]
-fn layouts_agree() {
+fn cold_parks_agree() {
     for cancel in [false, true] {
         let source = document(cancel);
-        let run = |layout: Layout, cold: bool| {
-            let mut embedder = Embedder::with(
-                &source,
-                Setup {
-                    layout,
-                    ..Setup::default()
-                },
-            );
+        let run = |cold: bool| {
+            let mut embedder = Embedder::with(&source, Setup::default());
 
             let tape = crate::ChargeTape::new();
             embedder.machine.record_charges(tape.clone());
@@ -33,7 +27,7 @@ fn layouts_agree() {
                     Step::Parked(_) => {
                         saved.push(embedder.machine.semantic_checkpoint());
                         if cold {
-                            embedder.reopen(layout, true);
+                            embedder.reopen(true);
                             embedder.machine.record_charges(tape.clone());
                         }
                         embedder.deliver_next();
@@ -49,7 +43,7 @@ fn layouts_agree() {
                 lash_kernel_exec::Weight::expand(tape.steps()),
             )
         };
-        let reference = run(Layout(0), false);
+        let reference = run(false);
         if cancel {
             assert!(matches!(reference.0, End::Error(_)));
             assert!(
@@ -64,10 +58,7 @@ fn layouts_agree() {
                 Datum::Tuple(vec![int(11), text("worker"), int(22)])
             );
         }
-        for layout in [Layout(0), Layout(1), Layout(0x5eed)] {
-            assert_eq!(run(layout, false), reference);
-            assert_eq!(run(layout, true), reference);
-        }
+        assert_eq!(run(true), reference);
     }
 }
 

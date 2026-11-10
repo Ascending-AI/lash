@@ -238,7 +238,7 @@ fn charged(text: &str, outcome: &Outcome, seal_delivered: bool) -> (u64, Vec<Req
                         .unwrap();
                 }
                 if seal_delivered {
-                    run.reopen(crate::Layout::default(), true);
+                    run.reopen(true);
                 }
             }
         }

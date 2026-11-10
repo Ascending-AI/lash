@@ -1,7 +1,7 @@
 //! PROTO-LOOP, in kernel text (`K-ITER-005`, `K-FORM-013`): a `for … via`
 //! opens, checks, steps and binds through its protocol's hooks, and an
 //! `else` runs when a loop ends but by `break`. Each case runs
-//! uninterrupted, sliced and reopened under alternating layouts at every
+//! uninterrupted, sliced and reopened at every
 //! slice, as CONT-EXACT runs, and its reopens see the loop stand in the
 //! header phases named.
 

@@ -3,7 +3,7 @@
 //! `K-TASK-026`).
 //!
 //! - A run sealed while a task stands delivered, its outcome in and its
-//!   turn not yet taken, and opened cold under another layout, ends as the
+//!   turn not yet taken, and opened cold, ends as the
 //!   uninterrupted run does, at every slice.
 //! - A `cancel` delivered to such a wait reaches `catch` only
 //!   after the turn.
@@ -18,7 +18,7 @@ use lash_kernel_state::paged::{ContinuationPhase, IncomingRecord, TaskStateRecor
 use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, Setup, answer, label, wait_of};
-use crate::{End, Layout, Machine, Step};
+use crate::{End, Machine, Step};
 
 /// `policy.join(t)`: awaits a task by joining it, a body with no native.
 fn policies(
@@ -88,8 +88,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Vec<usize>) {
     let mut hops = 0u64;
     let mut reopen = |embedder: &mut Embedder| {
         hops += 1;
-        let layout = Layout(hops.wrapping_mul(0x9e37_79b9) | (hops & 1));
-        embedder.reopen(layout, hops.is_multiple_of(2));
+        embedder.reopen(hops.is_multiple_of(2));
     };
     let end = loop {
         match embedder.run() {
@@ -203,7 +202,7 @@ fn a_delivered_state_at_a_wait_without_its_turn_is_refused() {
                 },
             )
             .unwrap();
-        let refused = match embedder.try_reopen(Layout(0x9e37_79b9 | 1), true) {
+        let refused = match embedder.try_reopen(true) {
             Err(refused) => refused,
             Ok(()) => format!(
                 "{:?}",

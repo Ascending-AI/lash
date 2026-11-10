@@ -116,24 +116,11 @@ fn guarded(record: bool, slice: u64, bounds: Bounds) -> Guarded {
 }
 
 fn guarded_run(source: &str, record: bool, slice: u64, bounds: Bounds) -> Guarded {
-    guarded_mode(
-        source,
-        record,
-        slice,
-        bounds,
-        super::ExecutionMode::Specialized,
-        false,
-    )
+    guarded_sealing(source, record, slice, bounds, false)
 }
 
-fn guarded_mode(
-    source: &str,
-    record: bool,
-    slice: u64,
-    bounds: Bounds,
-    mode: super::ExecutionMode,
-    cold: bool,
-) -> Guarded {
+/// A run of `source` that seals and reopens cold at every stop when `cold`.
+fn guarded_sealing(source: &str, record: bool, slice: u64, bounds: Bounds, cold: bool) -> Guarded {
     let mut embedder = Embedder::with(
         source,
         Setup {
@@ -150,11 +137,6 @@ fn guarded_mode(
     let (mut stops, mut checkpoints) = (Vec::new(), Vec::new());
 
     let end = loop {
-        match mode {
-            super::ExecutionMode::Source => embedder.machine.force_source_execution(),
-            super::ExecutionMode::Generic => embedder.machine.force_generic_regions(),
-            super::ExecutionMode::Specialized => {}
-        }
         let step = embedder.run();
 
         let kind = match &step {
@@ -183,7 +165,7 @@ fn guarded_mode(
             Step::Slice => {
                 if cold {
                     checkpoints.push(embedder.machine.semantic_checkpoint());
-                    embedder.reopen(Layout(0), true);
+                    embedder.reopen(true);
                     if record {
                         embedder.machine.record_charges(tape.clone());
                     }
@@ -192,7 +174,7 @@ fn guarded_mode(
             Step::Parked(_) => {
                 checkpoints.push(embedder.machine.semantic_checkpoint());
                 if cold {
-                    embedder.reopen(Layout(0), true);
+                    embedder.reopen(true);
                     if record {
                         embedder.machine.record_charges(tape.clone());
                     }
@@ -212,8 +194,8 @@ fn guarded_mode(
 }
 
 /// K-CHG-001 / K-MACH-008: guarded member source instructions preserve
-/// values, charges, stop points, held bytes and checkpoints across region
-/// modes, cold continuations, finite slices and interior charge limits.
+/// values, charges, stop points, held bytes and checkpoints across cold
+/// continuations, finite slices and interior charge limits.
 #[test]
 fn guarded_reads_agree() {
     let reference = guarded(true, u64::MAX, super::super::embedder::ROOMY);
@@ -240,24 +222,18 @@ fn guarded_reads_agree() {
     );
     // K-CHG-001: an inline text result uses the installed native contract;
     // it cannot restore the removed kind/fee memo or qualify by source alone.
-    for generic in [false, true] {
-        let mut run = Embedder::with(
-            "main { let value = 3 return kind(value) }",
-            Setup {
-                probes: Some(guarded_probes),
-                ..Setup::default()
-            },
-        );
-
-        if generic {
-            run.machine.force_generic_regions();
-        }
-        assert_eq!(
-            result(run.run_to_end(&[])),
-            Datum::Text("integer".into()),
-            "canonical inline native, generic={generic}"
-        );
-    }
+    let mut run = Embedder::with(
+        "main { let value = 3 return kind(value) }",
+        Setup {
+            probes: Some(guarded_probes),
+            ..Setup::default()
+        },
+    );
+    assert_eq!(
+        result(run.run_to_end(&[])),
+        Datum::Text("integer".into()),
+        "canonical inline native"
+    );
     let natural = guarded(false, u64::MAX, super::super::embedder::ROOMY);
     // The list path alone retains its length test and item read.
     let items = GUARDED
@@ -268,42 +244,13 @@ fn guarded_reads_agree() {
     let listed = guarded_run(&items, false, u64::MAX, super::super::embedder::ROOMY);
     assert_eq!(listed.0, format!("finished {:?}", int(24)));
     assert_eq!(natural, reference);
-    for mode in [super::ExecutionMode::Source, super::ExecutionMode::Generic] {
-        assert_eq!(
-            natural,
-            guarded_mode(
-                GUARDED,
-                false,
-                u64::MAX,
-                super::super::embedder::ROOMY,
-                mode,
-                false
-            )
-        );
-    }
     for slice in [1, 7, 31] {
-        let cold = guarded_mode(
-            GUARDED,
-            false,
-            slice,
-            super::super::embedder::ROOMY,
-            super::ExecutionMode::Specialized,
-            true,
+        let cold = guarded_sealing(GUARDED, false, slice, super::super::embedder::ROOMY, true);
+        assert_eq!(
+            (&cold.0, &cold.1, &cold.4),
+            (&natural.0, &natural.1, &natural.4),
+            "cold guarded reads at slice {slice}"
         );
-        for mode in [super::ExecutionMode::Source, super::ExecutionMode::Generic] {
-            assert_eq!(
-                cold,
-                guarded_mode(
-                    GUARDED,
-                    false,
-                    slice,
-                    super::super::embedder::ROOMY,
-                    mode,
-                    true
-                ),
-                "cold guarded regions at slice {slice}"
-            );
-        }
     }
     let charged = reference.2.last().unwrap().1.charged.unwrap();
     let mut comparisons = 1;
@@ -628,262 +575,187 @@ fn collection_region_preparations_preserve_source_and_storage() {
         probes
     }
     let source = "main { return invoke helper.direct([3, 7], fn(a, b) { return 0 }) }";
-    let observe =
-        |mode: super::ExecutionMode, layout: u64, bounds: Bounds, slice: u64, cold: bool| {
-            let mut runtime = Embedder::with(
-                source,
-                Setup {
-                    probes: Some(probes),
-                    layout: Layout(layout),
-                    bounds,
-                    slice,
-                    ..Setup::default()
+    let observe = |bounds: Bounds, slice: u64, cold: bool| {
+        let mut runtime = Embedder::with(
+            source,
+            Setup {
+                probes: Some(probes),
+                bounds,
+                slice,
+                ..Setup::default()
+            },
+        );
+
+        let tape = crate::ChargeTape::new();
+        runtime.machine.record_charges(tape.clone());
+        let mut stops = Vec::new();
+        let mut reopened = 0;
+        let end = loop {
+            let step = runtime.run();
+
+            let balance = runtime.machine.logical_balance().unwrap();
+            stops.push((
+                match &step {
+                    Step::Ended(_) => "ended",
+                    Step::Slice => "slice",
+                    Step::Parked(_) => "parked",
                 },
-            );
+                runtime.machine.meters(),
+                [
+                    balance.entity_local_bytes,
+                    balance.root_and_control_bytes,
+                    balance.entities,
+                ],
+                (!matches!(&step, Step::Ended(_))).then(|| runtime.machine.semantic_checkpoint()),
+            ));
+            match step {
+                Step::Ended(end) => break end,
+                Step::Slice | Step::Parked(_) => {
+                    if cold {
+                        // Only publications after the first cold reopen count
+                        // toward the cold witness, never its initial warm prefix.
 
-            let tape = crate::ChargeTape::new();
-            runtime.machine.record_charges(tape.clone());
-            let mut stops = Vec::new();
-            let mut reopened = 0;
-            let end = loop {
-                match mode {
-                    super::ExecutionMode::Source => runtime.machine.force_source_execution(),
-                    super::ExecutionMode::Generic => runtime.machine.force_generic_regions(),
-                    super::ExecutionMode::Specialized => {}
-                }
-                let step = runtime.run();
-
-                let balance = runtime.machine.logical_balance().unwrap();
-                stops.push((
-                    match &step {
-                        Step::Ended(_) => "ended",
-                        Step::Slice => "slice",
-                        Step::Parked(_) => "parked",
-                    },
-                    runtime.machine.meters(),
-                    [
-                        balance.entity_local_bytes,
-                        balance.root_and_control_bytes,
-                        balance.entities,
-                    ],
-                    (!matches!(&step, Step::Ended(_)))
-                        .then(|| runtime.machine.semantic_checkpoint()),
-                ));
-                match step {
-                    Step::Ended(end) => break end,
-                    Step::Slice | Step::Parked(_) => {
-                        if cold {
-                            // Only publications after the first cold reopen count
-                            // toward the cold witness, never its initial warm prefix.
-
-                            runtime.reopen(Layout(layout), true);
-                            runtime.machine.record_charges(tape.clone());
-                            reopened += 1;
-                        }
-                        if matches!(step, Step::Parked(_)) {
-                            runtime.deliver_next();
-                        }
+                        runtime.reopen(true);
+                        runtime.machine.record_charges(tape.clone());
+                        reopened += 1;
+                    }
+                    if matches!(step, Step::Parked(_)) {
+                        runtime.deliver_next();
                     }
                 }
-            };
-
-            let finished = matches!(&end, End::Finished(_));
-            (
-                (
-                    format!("{end:?}"),
-                    runtime.machine.meters(),
-                    tape.steps(),
-                    stops,
-                    finished,
-                ),
-                reopened,
-            )
+            }
         };
-    let run = |mode, layout| {
-        let (observed, reopened) =
-            observe(mode, layout, super::super::embedder::ROOMY, u64::MAX, false);
-        assert_eq!(reopened, 0);
-        observed
+
+        let finished = matches!(&end, End::Finished(_));
+        (
+            (
+                format!("{end:?}"),
+                runtime.machine.meters(),
+                lash_kernel_exec::Weight::expand(tape.steps()),
+                stops,
+                finished,
+            ),
+            reopened,
+        )
     };
-    let reference = run(super::ExecutionMode::Source, 0);
+    // Sealed cold at every stop, a run ends, charges and records its
+    // charge events as it does whole.
+    let outcome = |observed: &(
+        String,
+        crate::Meters,
+        Vec<lash_kernel_exec::Weight>,
+        _,
+        bool,
+    )| {
+        (
+            observed.0.clone(),
+            observed.1.charged,
+            observed.2.clone(),
+            observed.4,
+        )
+    };
+    let (reference, reopened) = observe(super::super::embedder::ROOMY, u64::MAX, false);
+    assert_eq!(reopened, 0);
     assert!(
         reference.4,
         "the collection corpus finishes under roomy bounds"
     );
-
-    for layout in [0, 1, 42] {
-        let source_run = run(super::ExecutionMode::Source, layout);
-
-        assert_eq!(source_run, reference, "source collection layout {layout}");
-        for mode in [
-            super::ExecutionMode::Specialized,
-            super::ExecutionMode::Generic,
-        ] {
-            let actual = run(mode, layout);
-            assert_eq!(
-                actual, reference,
-                "accepted collection source/tape/holding agreement {mode:?}, layout {layout}"
-            );
-        }
-    }
-    for layout in [0, 1, 42] {
-        for slice in [1, 3] {
-            let expected = observe(
-                super::ExecutionMode::Source,
-                layout,
-                super::super::embedder::ROOMY,
-                slice,
-                true,
-            );
-            assert!(expected.0.4, "cold Source collection run finishes");
-            assert!(expected.1 > 0, "the cold fixture must reopen");
-            for mode in [
-                super::ExecutionMode::Specialized,
-                super::ExecutionMode::Generic,
-            ] {
-                let actual = observe(mode, layout, super::super::embedder::ROOMY, slice, true);
-                assert_eq!(
-                    actual.0, expected.0,
-                    "cold collection source/tape/checkpoint/holding agreement {mode:?}, layout {layout}, slice {slice}"
-                );
-                assert_eq!(actual.1, expected.1);
-            }
-        }
+    for slice in [1, 3] {
+        let (cold, reopened) = observe(super::super::embedder::ROOMY, slice, true);
+        assert!(reopened > 0, "the cold fixture must reopen");
+        assert_eq!(
+            outcome(&cold),
+            outcome(&reference),
+            "cold collection run at slice {slice}"
+        );
     }
 
     let charged = reference.1.charged.unwrap();
     let mut refusals = 0;
-    for layout in [0, 42] {
-        for limit in [0, charged / 2, charged - 1] {
-            let bounds = Bounds {
-                charge_limit: limit,
-                ..super::super::embedder::ROOMY
-            };
-            let expected = observe(
-                super::ExecutionMode::Source,
-                layout,
-                bounds,
-                u64::MAX,
-                false,
-            );
-            assert!(
-                !expected.0.4,
-                "the tight charge case must refuse, limit {limit}"
-            );
-            for mode in [
-                super::ExecutionMode::Specialized,
-                super::ExecutionMode::Generic,
-            ] {
-                let actual = observe(mode, layout, bounds, u64::MAX, false);
-                assert_eq!(
-                    actual.0, expected.0,
-                    "tight collection charge prefix {mode:?}, layout {layout}, limit {limit}"
-                );
-                refusals += 1;
-            }
+    let tight = [0, charged / 2, charged - 1]
+        .map(|limit| Bounds {
+            charge_limit: limit,
+            ..super::super::embedder::ROOMY
+        })
+        .into_iter()
+        .chain([0, 4096, 24 << 10, 64 << 10].map(|memory| Bounds {
+            memory,
+            ..super::super::embedder::ROOMY
+        }));
+    for bounds in tight {
+        let (warm, _) = observe(bounds, u64::MAX, false);
+        if bounds.memory == 0 || bounds.charge_limit < charged {
+            assert!(!warm.4, "the tight case must refuse: {bounds:?}");
         }
-        for memory in [0, 4096, 24 << 10, 64 << 10] {
-            let bounds = Bounds {
-                memory,
-                ..super::super::embedder::ROOMY
-            };
-            let expected = observe(
-                super::ExecutionMode::Source,
-                layout,
-                bounds,
-                u64::MAX,
-                false,
-            );
-            if memory == 0 {
-                assert!(
-                    !expected.0.4,
-                    "zero memory must refuse the collection corpus"
-                );
-            }
-            for mode in [
-                super::ExecutionMode::Specialized,
-                super::ExecutionMode::Generic,
-            ] {
-                let actual = observe(mode, layout, bounds, u64::MAX, false);
-                assert_eq!(
-                    actual.0, expected.0,
-                    "tight collection memory prefix {mode:?}, layout {layout}, memory {memory}"
-                );
-                refusals += usize::from(!expected.0.4);
-            }
-        }
+        refusals += usize::from(!warm.4);
+        let (cold, _) = observe(bounds, 3, true);
+        assert_eq!(
+            outcome(&cold),
+            outcome(&warm),
+            "tight collection prefix, cold: {bounds:?}"
+        );
     }
     assert!(
-        refusals >= 12,
+        refusals >= 4,
         "the matrix exercises actual resource refusals"
-    );
-    println!(
-        "collection cold/tight matrix: 12 cold comparisons, 28 tight comparisons, {refusals} actual refusals"
     );
 }
 
 /// K-CHG-002: a value-first indexed write has four fixed forms: its
 /// statement, RHS literal, target read and index literal. Pin costs nothing.
 fn collection_store_closes_charge_the_rhs_once() {
-    for layout in [0, 1, 42] {
-        let run = Embedder::with(
-            "main { let values = [1, 2] set values[0] = 3 return values }",
-            Setup::default(),
-        );
-        let (mut program, library) = run.program(false);
-        program.library = crate::PreparedLibrary::with_layout(
-            std::sync::Arc::clone(&library.registry),
-            crate::Layout(layout),
-        );
-        let admitted = program
-            .library
-            .admit(&program.document, Default::default(), &program.selection)
-            .unwrap_or_else(|_| panic!("collection close source admits"));
-        let exe = admitted
-            .executable(
-                &program.document,
-                &program.library,
-                &program.documents,
-                &program.functions,
-                &program.instances,
-            )
-            .unwrap_or_else(|_| panic!("collection close source compiles"));
-        let plan = (0..exe.code_count())
-            .map(|n| crate::compile::CodeId(n as u32))
-            .find(|code| {
-                exe.code(*code).params.is_empty()
-                    && exe.block(exe.code(*code).body).stmts.len() == 3
-            })
-            .unwrap();
-        let statement = exe.block(exe.code(plan).body).stmts[1];
-        let (stream, stmt, _) = exe.statement(statement);
-        assert!(
-            stream.ops[stmt.ops.start as usize..stmt.ops.end() as usize]
-                .iter()
-                .any(|op| matches!(op, lash_kernel_exec::Op::Pin { .. })),
-            "the real value-first source span contains Pin"
-        );
-        let charges = crate::compile::room::charges::region_isa::program(&exe, plan).unwrap();
-        let fixed: u64 = charges
-            .events
+    let run = Embedder::with(
+        "main { let values = [1, 2] set values[0] = 3 return values }",
+        Setup::default(),
+    );
+    let (program, _) = run.program(false);
+    let admitted = program
+        .library
+        .admit(&program.document, Default::default(), &program.selection)
+        .unwrap_or_else(|_| panic!("collection close source admits"));
+    let exe = admitted
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.functions,
+            &program.instances,
+        )
+        .unwrap_or_else(|_| panic!("collection close source compiles"));
+    let plan = (0..exe.code_count())
+        .map(|n| crate::compile::CodeId(n as u32))
+        .find(|code| {
+            exe.code(*code).params.is_empty() && exe.block(exe.code(*code).body).stmts.len() == 3
+        })
+        .unwrap();
+    let statement = exe.block(exe.code(plan).body).stmts[1];
+    let (stream, stmt, _) = exe.statement(statement);
+    assert!(
+        stream.ops[stmt.ops.start as usize..stmt.ops.end() as usize]
             .iter()
-            .filter(|(at, _)| {
-                at.site.unit == stmt.site.unit && at.site.path.starts_with(&stmt.site.path)
-            })
-            .flat_map(|(_, closes)| closes.iter())
-            .flat_map(|close| close.tape.iter())
-            .map(|item| match item {
-                crate::compile::room::charges::region_isa::ChargeItem::Fixed { weight, .. } => {
-                    weight.units()
-                }
-                crate::compile::room::charges::region_isa::ChargeItem::Formula { .. } => {
-                    panic!("the indexed write has no formula")
-                }
-            })
-            .sum();
-        assert_eq!(
-            fixed, 4,
-            "statement + RHS literal + target read + index literal; Pin adds no fee"
-        );
-    }
+            .any(|op| matches!(op, lash_kernel_exec::Op::Pin { .. })),
+        "the real value-first source span contains Pin"
+    );
+    let charges = crate::compile::room::charges::region_isa::program(&exe, plan).unwrap();
+    let fixed: u64 = charges
+        .events
+        .iter()
+        .filter(|(at, _)| {
+            at.site.unit == stmt.site.unit && at.site.path.starts_with(&stmt.site.path)
+        })
+        .flat_map(|(_, closes)| closes.iter())
+        .flat_map(|close| close.tape.iter())
+        .map(|item| match item {
+            crate::compile::room::charges::region_isa::ChargeItem::Fixed { weight, .. } => {
+                weight.units()
+            }
+            crate::compile::room::charges::region_isa::ChargeItem::Formula { .. } => {
+                panic!("the indexed write has no formula")
+            }
+        })
+        .sum();
+    assert_eq!(
+        fixed, 4,
+        "statement + RHS literal + target read + index literal; Pin adds no fee"
+    );
 }

@@ -54,24 +54,20 @@ pub(super) fn installed() -> &'static Installed {
     })
 }
 
-/// The installed library prepared under `strategy`; the bodies-only
-/// registry is built once.
-pub(super) fn prepared(strategy: lash_kernel_vm::testing::ExecutionStrategy) -> PreparedLibrary {
-    use lash_kernel_vm::testing::ExecutionStrategy;
+/// The installed library with every native beside a body removed
+/// (`K-LIB-006`), built once.
+pub(super) fn bodies() -> PreparedLibrary {
     static BODIES: OnceLock<PreparedLibrary> = OnceLock::new();
-    match strategy {
-        ExecutionStrategy::Interpreted => BODIES
-            .get_or_init(|| {
-                // The release's definitions as built, each native beside a
-                // body removed: nothing is validated again.
-                PreparedLibrary::with_helpers(
-                    Arc::new(lash_kernel_conformance::installed_bodies().expect("bodies")),
-                    Arc::clone(installed().prepared.helpers()),
-                )
-            })
-            .clone(),
-        _ => lash_kernel_vm::testing::library(&installed().prepared, strategy),
-    }
+    BODIES
+        .get_or_init(|| {
+            // The release's definitions as built, each native beside a
+            // body removed: nothing is validated again.
+            PreparedLibrary::with_helpers(
+                Arc::new(lash_kernel_conformance::installed_bodies().expect("bodies")),
+                Arc::clone(installed().prepared.helpers()),
+            )
+        })
+        .clone()
 }
 
 pub(crate) fn library() -> &'static NamedLibrary {
@@ -958,35 +954,24 @@ pub(super) fn execution_observation(
     bounds: Bounds,
     rebuild: bool,
 ) -> ExecutionObservation {
-    execution_observation_with_layout(program, bounds, rebuild, Default::default())
-}
-
-fn execution_observation_with_layout(
-    program: Program,
-    bounds: Bounds,
-    rebuild: bool,
-    layout: lash_kernel_vm::testing::ExecutionStrategy,
-) -> ExecutionObservation {
-    execution_observation_with_memory(program, bounds, rebuild, layout).0
+    execution_observation_with_memory(program, bounds, rebuild).0
 }
 
 fn execution_observation_with_memory(
     program: Program,
     bounds: Bounds,
     rebuild: bool,
-    layout: lash_kernel_vm::testing::ExecutionStrategy,
 ) -> (ExecutionObservation, u64) {
-    execution_observation_with_meter(program, bounds, rebuild, layout, &mut |_| {})
+    execution_observation_with_meter(program, bounds, rebuild, &mut |_| {})
 }
 
 fn execution_observation_with_meter(
     program: Program,
     bounds: Bounds,
     rebuild: bool,
-    layout: lash_kernel_vm::testing::ExecutionStrategy,
     on_park: &mut dyn FnMut(u64),
 ) -> (ExecutionObservation, u64) {
-    execution_observation_with_stops(program, bounds, rebuild, layout, on_park, &mut |_, _| {})
+    execution_observation_with_stops(program, bounds, rebuild, on_park, &mut |_, _| {})
 }
 
 /// The carried session's bindings, each read as its host reads it.
@@ -1014,12 +999,11 @@ fn execution_observation_with_stops(
     program: Program,
     bounds: Bounds,
     rebuild: bool,
-    layout: lash_kernel_vm::testing::ExecutionStrategy,
     on_park: &mut dyn FnMut(u64),
     on_stop: &mut dyn FnMut(&Step, &mut KernelMachine),
 ) -> (ExecutionObservation, u64) {
     let session = Session::default();
-    let mut machine = lash_kernel_vm::testing::start(
+    let mut machine = KernelMachine::start(
         program.clone(),
         bounds,
         lash_kernel_vm::CellStart {
@@ -1030,7 +1014,6 @@ fn execution_observation_with_stops(
             modes: Default::default(),
             host: Vec::new(),
         },
-        layout,
         Box::new(session.source.clone()),
     )
     .unwrap();
@@ -1039,7 +1022,7 @@ fn execution_observation_with_stops(
     loop {
         let step = machine
             .run(&mut host, if rebuild { 1 } else { u64::MAX })
-            .unwrap_or_else(|error| panic!("the document runs in {layout:?}, rebuild={rebuild}, bounds={bounds:?}, charged={:?}: {error:?}", machine.meters().charged));
+            .unwrap_or_else(|error| panic!("the document runs with rebuild={rebuild}, bounds={bounds:?}, charged={:?}: {error:?}", machine.meters().charged));
         on_stop(&step, &mut machine);
         if let Step::Ended(mut end) = step {
             let carry = match &mut end {
@@ -1062,12 +1045,11 @@ fn execution_observation_with_stops(
         }
         if rebuild {
             let sealed = machine.checkpoint().unwrap();
-            machine = lash_kernel_vm::testing::open(
+            machine = KernelMachine::open(
                 program.clone(),
                 bounds,
                 &sealed.checkpoint(),
                 Box::new(session.source.clone()),
-                layout,
             )
             .unwrap();
         }
@@ -1955,14 +1937,13 @@ fn every_installed_definition_runs_on_the_core() {
 /// [`charge_bounds`] names, and
 /// retain what the bodies retain at each park.
 #[test]
-fn sequence_facts_agree_across_layouts_and_charge_bounds() {
+fn sequence_facts_agree_with_bodies_at_charge_bounds() {
     let started = std::time::Instant::now();
     whole_path_regions_agree();
     println!(
         "whole Python packet checkpoint comparisons completed at {:?}",
         started.elapsed()
     );
-    use lash_kernel_vm::testing::ExecutionStrategy;
     let source = r#"
 import json
 async def build():
@@ -1996,20 +1977,16 @@ async def build():
 await build()
 "#;
     let lowered = lower(source).unwrap();
-    let program = |layout| {
-        crate::tests::linked::program(Arc::clone(lowered.document.shared()), prepared(layout))
-    };
-    let on = program(ExecutionStrategy::Optimized);
-    let bodies = program(ExecutionStrategy::Interpreted);
+    let program =
+        |library| crate::tests::linked::program(Arc::clone(lowered.document.shared()), library);
+    let on = program(installed().prepared.clone());
+    let body_program = program(bodies());
     let mut reference_held = Vec::new();
-    let reference = execution_observation_with_meter(
-        bodies.clone(),
-        BOUNDS,
-        false,
-        ExecutionStrategy::Interpreted,
-        &mut |bytes| reference_held.push(bytes),
-    )
-    .0;
+    let reference =
+        execution_observation_with_meter(body_program.clone(), BOUNDS, false, &mut |bytes| {
+            reference_held.push(bytes)
+        })
+        .0;
     let mut optimized_held = Vec::new();
     println!(
         "broad Python sequence reference charge: {} at {:?}",
@@ -2017,13 +1994,8 @@ await build()
         started.elapsed()
     );
     assert_eq!(
-        execution_observation_with_meter(
-            on.clone(),
-            BOUNDS,
-            false,
-            ExecutionStrategy::Optimized,
-            &mut |bytes| optimized_held.push(bytes)
-        )
+        execution_observation_with_meter(on.clone(), BOUNDS, false, &mut |bytes| optimized_held
+            .push(bytes))
         .0,
         reference
     );
@@ -2036,10 +2008,7 @@ await build()
         retained(&reference_held),
         "retained bytes at each park"
     );
-    assert_eq!(
-        execution_observation_with_layout(on.clone(), BOUNDS, true, ExecutionStrategy::Optimized),
-        reference
-    );
+    assert_eq!(execution_observation(on.clone(), BOUNDS, true), reference);
     // FIG-7513: terminal held bytes must not depend on whether an earlier
     // memory-pressure sweep already collected unreachable cycles.
     assert_eq!(
@@ -2051,10 +2020,9 @@ await build()
                 memory: optimized_held[0] + 43_520,
                 ..BOUNDS
             },
-            false,
-            ExecutionStrategy::Optimized,
+            false
         ),
-        execution_observation_with_memory(on.clone(), BOUNDS, false, ExecutionStrategy::Optimized,),
+        execution_observation_with_memory(on.clone(), BOUNDS, false),
         "completed guest state is independent of earlier memory pressure",
     );
     for charge_limit in charge_bounds(reference.charged + 1) {
@@ -2063,18 +2031,8 @@ await build()
             ..BOUNDS
         };
         assert_eq!(
-            execution_observation_with_layout(
-                on.clone(),
-                bounds,
-                false,
-                ExecutionStrategy::Optimized
-            ),
-            execution_observation_with_layout(
-                bodies.clone(),
-                bounds,
-                false,
-                ExecutionStrategy::Interpreted
-            ),
+            execution_observation(on.clone(), bounds, false),
+            execution_observation(body_program.clone(), bounds, false),
             "bound {charge_limit}"
         );
     }
@@ -2086,23 +2044,12 @@ await build()
         "data = {'key': [()]}\nprint(data['key'][0])\nprint(await host.echo(data['key']))\nprint(data['key'][0])\n",
     ] {
         let lowered = lower(source).unwrap();
-        let program = |layout| {
-            crate::tests::linked::program(Arc::clone(lowered.document.shared()), prepared(layout))
-        };
+        let program =
+            |library| crate::tests::linked::program(Arc::clone(lowered.document.shared()), library);
         for rebuild in [false, true] {
             assert_eq!(
-                execution_observation_with_layout(
-                    program(ExecutionStrategy::Optimized),
-                    BOUNDS,
-                    rebuild,
-                    ExecutionStrategy::Optimized
-                ),
-                execution_observation_with_layout(
-                    program(ExecutionStrategy::Interpreted),
-                    BOUNDS,
-                    rebuild,
-                    ExecutionStrategy::Interpreted
-                ),
+                execution_observation(program(installed().prepared.clone()), BOUNDS, rebuild),
+                execution_observation(program(bodies()), BOUNDS, rebuild),
                 "member result and charge, rebuild {rebuild}: {source}"
             );
         }
@@ -2126,7 +2073,6 @@ fn charge_bounds(charged: u64) -> impl Iterator<Item = u64> {
 }
 
 fn whole_path_regions_agree() {
-    use lash_kernel_vm::testing::ExecutionStrategy as Mode;
     let cases = [
         (
             "member read/update",
@@ -2139,23 +2085,21 @@ fn whole_path_regions_agree() {
     ];
     let cases = cases.map(|(label, source)| {
         let lowered = lower(source).expect("the whole Python path lowers");
-        let program = |mode| {
-            crate::tests::linked::program(Arc::clone(lowered.document.shared()), prepared(mode))
-        };
+        let program =
+            |library| crate::tests::linked::program(Arc::clone(lowered.document.shared()), library);
         (
             label,
             source,
-            program(Mode::Optimized),
-            program(Mode::Interpreted),
+            program(installed().prepared.clone()),
+            program(bodies()),
         )
     });
-    let observe = |program: &Program, bounds, rebuild, mode| {
+    let observe = |program: &Program, bounds, rebuild| {
         let mut stops = Vec::new();
         let outcome = execution_observation_with_stops(
             program.clone(),
             bounds,
             rebuild,
-            mode,
             &mut |_| {},
             &mut |step, machine| {
                 stops.push((
@@ -2171,13 +2115,13 @@ fn whole_path_regions_agree() {
         (outcome.0, stops)
     };
     for (label, source, natives, bodies) in &cases {
-        let reference = observe(natives, BOUNDS, false, Mode::Optimized);
+        let reference = observe(natives, BOUNDS, false);
         assert!(matches!(reference.0.end, End::Finished(_)));
         let charged = reference.0.charged;
         for rebuild in [false, true] {
             assert_eq!(
-                observe(bodies, BOUNDS, rebuild, Mode::Interpreted),
-                observe(natives, BOUNDS, rebuild, Mode::Optimized),
+                observe(bodies, BOUNDS, rebuild),
+                observe(natives, BOUNDS, rebuild),
                 "Python {label}, cold={rebuild}: {source}"
             );
         }
@@ -2187,8 +2131,8 @@ fn whole_path_regions_agree() {
                 ..BOUNDS
             };
             assert_eq!(
-                observe(bodies, bounds, false, Mode::Interpreted),
-                observe(natives, bounds, false, Mode::Optimized),
+                observe(bodies, bounds, false),
+                observe(natives, bounds, false),
                 "Python {label}, charge={charge_limit}"
             );
         }
@@ -2303,8 +2247,6 @@ pub(super) fn stress_observation(
 /// JSON allocations and refuses at the first charge past the bound.
 #[test]
 fn json_transform_source_owns_native_results_and_refuses_at_the_charge() {
-    use lash_kernel_vm::testing::ExecutionStrategy;
-
     // crates/lash-perf/src/compare/workloads/json_transform.py, with its n=1 driver.
     let source = r#"# Match the TypeScript row: parse, update and compactly encode 128 records.
 import json
@@ -2340,7 +2282,7 @@ print(benchmark(1))
     );
     let observe = |bounds| {
         let session = Session::default();
-        let mut machine = lash_kernel_vm::testing::start(
+        let mut machine = KernelMachine::start(
             program.clone(),
             bounds,
             lash_kernel_vm::CellStart {
@@ -2351,7 +2293,6 @@ print(benchmark(1))
                 modes: Default::default(),
                 host: Vec::new(),
             },
-            ExecutionStrategy::Source,
             Box::new(session.source.clone()),
         )
         .expect("the JSON row starts");

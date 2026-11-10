@@ -12,7 +12,7 @@ use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, int, result, text};
 use crate::machine::Boundary;
-use crate::{Bound, BoundExceeded, Bounds, End, Layout, Machine, RunError, Step};
+use crate::{Bound, BoundExceeded, Bounds, End, Machine, RunError, Step};
 
 /// The probes: `probe.long(tag)` prints `[tag, i]` for `i` from 0 to 3 and
 /// gives `tag`; `probe.hold(n)` keeps `n` texts of 1 MiB, printing the
@@ -316,7 +316,7 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
     assert_eq!(refused(run(under_a_call, 101)), (Bound::CallDepth, 101));
     assert_eq!(result(run("main { return deep.hold([7]) }", 102)), int(107));
 
-    let scoped_observation = |name: &str, source_only: bool| {
+    let scoped = |name: &str| {
         let bounds = Bounds {
             call_depth: 2,
             ..ROOMY
@@ -330,21 +330,15 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             &format!("main {{ return {name}({args}) }}"),
             setup(bounds, u64::MAX),
         );
-        if source_only {
-            embedder.machine.force_source_execution();
-        }
-        let tape = crate::ChargeTape::new();
-        embedder.machine.record_charges(tape.clone());
-        let value = result(embedder.run_to_end(&[]));
         assert_eq!(
-            value,
+            result(embedder.run_to_end(&[])),
             Datum::List(if matches!(name, "deep.walk" | "deep.next") {
                 vec![int(7), int(8)]
             } else {
                 vec![int(7)]
-            })
+            }),
+            "{name} under a call depth of 2"
         );
-        (value, embedder.machine.meters(), tape.steps())
     };
     for name in [
         "deep.branch",
@@ -365,19 +359,13 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         "deep.loop",
         "deep.walk",
     ] {
-        let observation = scoped_observation(name, false);
-        assert_eq!(
-            observation,
-            scoped_observation(name, true),
-            "the accepted block suffix must preserve the source result, charge tape and terminal holdings: {name}"
-        );
+        scoped(name);
     }
     // A call inside a cleanup that holds a pending return publishes its
     // Enter at its source occurrence, like the call that reached the cleanup.
     let unwind = "definition \"function f(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  try { let saved = n return saved } finally { let kept = [call g(n)] } return 0  }\"\ndefinition \"function g(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return n  }\"\n main { let r = call f([7]) return r }";
 
     let mut embedder = Embedder::with(unwind, setup(ROOMY, u64::MAX));
-    embedder.machine.force_source_execution();
     assert_eq!(result(embedder.run_to_end(&[])), Datum::List(vec![int(7)]));
 }
 
@@ -593,19 +581,13 @@ fn entering_and_slicing_an_expression_callee_changes_no_ready_order() {
 
 /// `K-MACH-007`, `K-EVAL-008`: a run is at a safe point at every slice,
 /// one inside a callee called inside an expression included: sealed there
-/// and opened cold under alternating layouts at every slice, it ends as
+/// and opened cold at every slice, it ends as
 /// the run never sealed.
 #[test]
 fn a_seal_inside_an_expression_callee_is_exact() {
     let straight = straight_line_calls();
     let mut active = Embedder::with(&straight, setup(ROOMY, 17));
-    let mut reference = Embedder::with(
-        &straight,
-        Setup {
-            layout: Layout(0),
-            ..setup(ROOMY, 17)
-        },
-    );
+    let mut reference = Embedder::with(&straight, setup(ROOMY, 17));
     let tape = crate::ChargeTape::new();
     let reference_tape = crate::ChargeTape::new();
     active.machine.record_charges(tape.clone());
@@ -636,7 +618,7 @@ fn a_seal_inside_an_expression_callee_is_exact() {
         assert_eq!(root.waits, expected.waits);
 
         checkpoints += 1;
-        active.open_at(&root, Layout(1 + checkpoints * 2), true);
+        active.open_at(&root, true);
         active.machine.record_charges(tape.clone());
         assert_eq!(
             active.machine.semantic_checkpoint(),
@@ -663,13 +645,12 @@ fn a_seal_inside_an_expression_callee_is_exact() {
     );
     let mut embedder = Embedder::with(&program, setup(ROOMY, 0));
     let mut sealed = 0;
-    let mut layouts = [Layout(1), Layout::default()].into_iter().cycle();
     let mut end = loop {
         let step = embedder.run();
         if !matches!(step, Step::Ended(_)) {
             let root = embedder.checkpoint();
             sealed += 1;
-            embedder.open_at(&root, layouts.next().unwrap(), true);
+            embedder.open_at(&root, true);
         }
         match step {
             Step::Ended(end) => break end,
@@ -747,20 +728,14 @@ fn a_cold_branch_keeps_its_locally_shared_cell_when_the_loop_reenters() {
     let expected = Datum::Tuple(vec![int(1), int(2), int(2)]);
     for slice in [u64::MAX, 17] {
         let mut active = Embedder::with(program, setup(ROOMY, slice));
-        let mut reference = Embedder::with(
-            program,
-            Setup {
-                layout: Layout(0),
-                ..setup(ROOMY, slice)
-            },
-        );
+        let mut reference = Embedder::with(program, setup(ROOMY, slice));
         assert_eq!(result(reference.run_to_end(&[])), expected);
         let end = loop {
             match active.run() {
                 Step::Ended(end) => break end,
                 Step::Slice => {
                     let root = active.checkpoint();
-                    active.open_at(&root, Layout(0), true);
+                    active.open_at(&root, true);
                 }
                 Step::Parked(_) => panic!("this cell-sharing fixture has no effects"),
             }

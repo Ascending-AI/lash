@@ -1,12 +1,12 @@
 //! Continuation laws (`K-EVAL-008`): a frame that stands at an action
 //! nested in its statement's expression keeps the operands its statement
 //! evaluated as roles, named by their sites; a resume entry loads them
-//! under whatever layout the run is opened in; and the run leaves what a
+//! in whatever machine the run is opened in; and the run leaves what a
 //! run that never parked leaves, at every slice and every reopen.
 //!
 //! - CONT-EXACT: each case runs uninterrupted, then at slices MAX, 1 and 0,
 //!   sealed and opened cold at every slice and park under alternating
-//!   layouts and registries, and leaves the same end, prints, requests,
+//!   registries, and leaves the same end, prints, requests,
 //!   charge.
 //! - CONT-ONCE: what comes before the action is neither run nor charged
 //!   again: the charge and effects are the uninterrupted run's.
@@ -32,7 +32,7 @@ use lash_kernel_exec::coord::{RestoreRefusal, SitePath};
 use lash_kernel_value::sites::Site;
 
 use super::embedder::{self, Embedder, Setup, label};
-use crate::{Bounds, End, Layout, Machine, Request, Step};
+use crate::{Bounds, End, Machine, Request, Step};
 
 /// Library functions whose bodies run where they are called: `body.say(t)`
 /// prints `t` and gives it, and `body.inc(n)` gives `n + 1`. Each states a
@@ -90,17 +90,10 @@ fn end_of(end: &End) -> String {
     }
 }
 
-/// The layout and registry a run is opened in at hop `hop`: odd layouts
-/// most hops, an even one every other, and `pair.twice` alternating
-/// between its native and its body.
-fn hop(hop: u64) -> (Layout, bool) {
-    let mixed = hop.wrapping_mul(0x9e37_79b9);
-    let layout = if hop.is_multiple_of(2) {
-        Layout(mixed & !1)
-    } else {
-        Layout(mixed | 1)
-    };
-    (layout, hop.is_multiple_of(2))
+/// Whether `pair.twice` runs natively in the registry a run is opened in
+/// at hop `hop`: it alternates between its native and its body.
+fn native_twice(hop: u64) -> bool {
+    hop.is_multiple_of(2)
 }
 
 /// How a run is driven.
@@ -123,24 +116,9 @@ struct Drive {
     /// At its `n`th park the run is asked to cancel, and nothing more is
     /// delivered.
     cancel_at: Option<usize>,
-    /// The layout the run starts in.
-    layout: Layout,
-    /// The layouts a reopening run opens in, alternately, from the first;
-    /// [`hop`]'s when `None`.
-    alternate: Option<[Layout; 2]>,
 }
 
 impl Drive {
-    /// The layout and registry the run reopens in at hop `hops`, counted
-    /// from 1.
-    fn hop(&self, hops: u64) -> (Layout, bool) {
-        let (layout, native_twice) = hop(hops);
-        match self.alternate {
-            Some(layouts) => (layouts[((hops - 1) % 2) as usize], native_twice),
-            None => (layout, native_twice),
-        }
-    }
-
     fn new(slice: u64, reopens: bool) -> Self {
         Self {
             slice,
@@ -152,8 +130,6 @@ impl Drive {
             cleanup: false,
             reopen_delivered: false,
             cancel_at: None,
-            layout: Layout(0),
-            alternate: None,
         }
     }
 }
@@ -178,7 +154,6 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         reads: drive.reads,
         cleanup: drive.cleanup,
         probes: Some(drive.probes),
-        layout: drive.layout,
         ..setup(drive.slice)
     };
     if let Some((entry, arg)) = drive.entry {
@@ -230,8 +205,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         }
         if drive.reopens {
             hops += 1;
-            let (layout, native_twice) = drive.hop(hops);
-            if let Err(error) = embedder.try_reopen(layout, native_twice) {
+            if let Err(error) = embedder.try_reopen(native_twice(hops)) {
                 break format!("reopen refused: {error}");
             }
         }
@@ -253,8 +227,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             embedder.deliver(&next);
             if drive.reopens && drive.reopen_delivered {
                 hops += 1;
-                let (layout, native_twice) = drive.hop(hops);
-                if let Err(error) = embedder.try_reopen(layout, native_twice) {
+                if let Err(error) = embedder.try_reopen(native_twice(hops)) {
                     break format!("reopen refused after delivery: {error}");
                 }
             }
@@ -661,7 +634,7 @@ fn each_nested_wait_is_named_by_its_own_site() {
 }
 
 /// K-EFF-008: one task counts a function's effect across sequential and
-/// recursive calls, independent of frames, cold reopens and code layout.
+/// recursive calls, independent of frames and cold reopens.
 #[test]
 fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
     const SOURCE: &str = "definition \"function work(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(n) as Any\\nif num.lt(0, n) { let r = apply self(self, num.add(n, -1)) return r }\\nreturn v  }\"\n\nmain { let a = call work(&work, 2) let b = call work(&work, 1) return b }\n";
@@ -691,7 +664,7 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
         match cold.run() {
             Step::Parked(_) => {
                 checkpoints.push(cold.machine.semantic_checkpoint());
-                cold.reopen(Layout(3 + checkpoints.len() as u64 * 17), true);
+                cold.reopen(true);
                 assert_eq!(
                     cold.machine.semantic_checkpoint(),
                     *checkpoints.last().unwrap()
@@ -741,7 +714,7 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
         match cold.run() {
             Step::Parked(_) => {
                 hops += 1;
-                cold.reopen(Layout(3 + hops * 17), true);
+                cold.reopen(true);
                 cold.deliver_next();
             }
             Step::Ended(end) => {
@@ -807,7 +780,7 @@ fn park_where(
         let step = embedder.run();
         let phases = embedder.machine.pending_phases();
         if want(&mut embedder, &phases) {
-            embedder.reopen(Layout(0x9e37_79b9 | 1), true);
+            embedder.reopen(true);
             assert_eq!(
                 embedder.machine.restore_refusal(TaskId::MAIN, 0).unwrap(),
                 None
@@ -1228,9 +1201,7 @@ fn a_slot_two_saved_roles_share_or_its_body_does_not_key_is_refused() {
                 Step::Parked(_) => embedder.deliver_next(),
             }
         }
-        embedder
-            .try_reopen(Layout(0), true)
-            .expect("the run reopens");
+        embedder.try_reopen(true).expect("the run reopens");
         edit_roles(&mut embedder, edit);
         let problem = run_out(&mut embedder);
         assert!(problem.contains(named), "{problem} names no {named}");
@@ -1252,7 +1223,7 @@ fn a_task_state_that_disagrees_is_refused() {
             },
         )
         .unwrap();
-    embedder.reopen(Layout(1), true);
+    embedder.reopen(true);
     assert_eq!(
         refused_here(&mut embedder),
         RestoreRefusal::TaskState {
@@ -1271,7 +1242,7 @@ fn a_loop_moved_past_its_cursor_or_off_its_site_is_refused() {
     let parked = || {
         let mut embedder = Embedder::with(IN_LOOP, setup(u64::MAX));
         assert!(matches!(embedder.run(), Step::Parked(_)));
-        embedder.reopen(Layout(0x9e37_79b9 | 1), true);
+        embedder.reopen(true);
         embedder
     };
     let mut embedder = parked();
@@ -1609,7 +1580,7 @@ fn cleaned(n: i64) -> Drive {
 /// as the run's root frame leaves and after its `finally` blocks, never
 /// for a nested call of the entry's function; its result is discarded and
 /// the held return ends the run, across a park in the cleanup reopened
-/// cold under other layouts.
+/// cold.
 #[test]
 fn a_root_cleanup_runs_once_after_source_finalizers_and_resumes_exactly() {
     let source = r#"

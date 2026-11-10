@@ -6,17 +6,16 @@ use super::*;
 /// slots and captured cells at their semantic coordinates, including the
 /// operands of a waiting caller, every finite-slice exit and cold reopen.
 #[test]
-fn wide_windows_agree() {
+fn wide_windows_agree_warm_and_cold() {
     let definition = |name: &str, body: &str| {
         let function =
             format!("function {name} -> Any\nkernel 1\nmetering statements\nbody {{ {body} }}");
         format!("definition {}\n", serde_json::to_string(&function).unwrap())
     };
-    let run = |source: &str, layout, cold, bounds| {
+    let run = |source: &str, cold, bounds| {
         let mut embedder = Embedder::with(
             source,
             Setup {
-                layout,
                 bounds,
                 probes: Some(scalar_probes),
                 slice: if cold { 31 } else { u64::MAX },
@@ -38,7 +37,7 @@ fn wide_windows_agree() {
                 checkpoints.push(embedder.machine.semantic_checkpoint());
             }
             if cold {
-                embedder.reopen(layout, true);
+                embedder.reopen(true);
                 embedder.machine.record_charges(tape.clone());
             }
             if matches!(step, Step::Parked(_)) {
@@ -78,7 +77,7 @@ fn wide_windows_agree() {
         "{}main {{ let recur = fn(self, n) {{ if flat.lt(n, 1) {{ return 0 }} return call operands({args}, apply self(self, flat.add(n, -1))) }} let answer = apply recur(recur, 100) print answer return answer }}",
         definition(&format!("operands({params})"), "return p259"),
     );
-    let reference = run(&source, Layout(0), false, bounds);
+    let reference = run(&source, false, bounds);
     assert_eq!(result(reference.0.clone()), int(0));
     let mut comparisons = 0;
     for width in [17, 260] {
@@ -101,22 +100,13 @@ fn wide_windows_agree() {
                 &format!("return flat.add(1000, call wide({args}))")
             ),
         );
-        let natural = run(&source, Layout(0), false, super::super::embedder::ROOMY);
+        let natural = run(&source, false, super::super::embedder::ROOMY);
         assert_eq!(
             result(natural.0.clone()),
             int(1000 + width * (width - 1) / 2)
         );
-
-        for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
-            let reference = run(&source, layout, false, super::super::embedder::ROOMY);
-            for cold in [false, true] {
-                assert_eq!(
-                    run(&source, layout, cold, super::super::embedder::ROOMY),
-                    reference
-                );
-                comparisons += 1;
-            }
-        }
+        assert_eq!(run(&source, true, super::super::embedder::ROOMY), natural);
+        comparisons += 1;
     }
     for width in [17, 260] {
         let locals = (0..width)
@@ -131,7 +121,7 @@ fn wide_windows_agree() {
                 &format!("{locals} return flat.add(x, v{})", width - 1),
             )
         );
-        let natural = run(&simple, Layout(0), false, super::super::embedder::ROOMY);
+        let natural = run(&simple, false, super::super::embedder::ROOMY);
         assert_eq!(result(natural.0.clone()), int(width));
 
         let parked = format!(
@@ -165,22 +155,12 @@ fn wide_windows_agree() {
             ),
         );
         for source in [&simple, &parked, &recursive, &closure] {
-            let reference = run(source, Layout(0), false, super::super::embedder::ROOMY);
-            for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
-                assert_eq!(
-                    run(source, layout, false, super::super::embedder::ROOMY),
-                    reference
-                );
+            // Cold wide callers retain their live operands at a park.
+            // Recursive budget exits are exercised whole above.
+            if source != &recursive {
+                let reference = run(source, false, super::super::embedder::ROOMY);
+                assert_eq!(run(source, true, super::super::embedder::ROOMY), reference);
                 comparisons += 1;
-                // Cold wide callers retain their live operands at a park.
-                // Recursive budget exits are exercised whole above.
-                if source != &recursive {
-                    assert_eq!(
-                        run(source, layout, true, super::super::embedder::ROOMY),
-                        reference
-                    );
-                    comparisons += 1;
-                }
             }
         }
     }
@@ -200,7 +180,7 @@ fn wide_windows_agree() {
         memory: 256 << 10,
         ..super::super::embedder::ROOMY
     };
-    let seen = run(&source, Layout(0), false, bounds);
+    let seen = run(&source, false, bounds);
     assert!(matches!(
         seen.0,
         End::Error(crate::RunError::Bound(crate::BoundExceeded {

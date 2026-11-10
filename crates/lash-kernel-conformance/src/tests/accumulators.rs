@@ -2,15 +2,14 @@
 //! the text its variable held, in the register program. A concatenation
 //! that took the storage of a text an older version still observes, or
 //! gave it back wrong at an exit, makes a run read a moved text: its end,
-//! charge or held bytes then differ from the run's under another layout,
-//! slice or memory meter, or from the value the program states.
+//! charge or held bytes then differ from the run's under its bodies,
+//! another slice or memory meter, or from the value the program states.
 
 use lash_kernel_doc::{Datum, print_document};
-use lash_kernel_vm::kernel_internals::{Layout, in_layout};
 use lash_kernel_vm::{Machine, MemoryMeter, PreparedLibrary, Program};
 
 use crate::machine::case_program;
-use crate::projection::Plan;
+use crate::projection::Recorded;
 use crate::{Case, Environment, Expected, ExpectedEnd};
 
 /// The kernel's own accumulators, each with the value it finishes with.
@@ -68,11 +67,7 @@ fn kernel_case(name: &str, text: &str) -> Case {
 
 /// The end, charge and final held bytes of `case` under `program` at
 /// `slice`.
-fn finished<const L: u64>(
-    program: &Program,
-    case: &Case,
-    slice: u64,
-) -> (ExpectedEnd, Option<u64>, u64) {
+fn finished(program: &Program, case: &Case, slice: u64) -> (ExpectedEnd, Option<u64>, u64) {
     let start = lash_kernel_vm::CellStart {
         target: lash_kernel_vm::Target::Main,
         args: Vec::new(),
@@ -81,7 +76,7 @@ fn finished<const L: u64>(
         modes: Default::default(),
         host: Vec::new(),
     };
-    let mut machine = Plan::<L>::start(
+    let mut machine = Recorded::start(
         program.clone(),
         case.environment.bounds.into(),
         start,
@@ -107,14 +102,14 @@ const TIGHT: u64 = 96 * 1024;
 
 /// Every accumulator, in the kernel's own programs and in both dialects',
 /// keeps its observed older versions. Each makes the run its program states
-/// under every slice, memory meter and bound and layout, the natural one
-/// beside one whose natives with kernel bodies run those bodies: the same
+/// under every slice, memory meter and bound, installed and with every
+/// native that has a kernel body replaced by that body: the same
 /// end, charge and held bytes, and for the kernel's programs the value they
 /// state.
 #[test]
 fn linear_text_accumulators_keep_every_version_they_extend() {
     let registry = std::sync::Arc::new(super::corpus_registry());
-    let kernel = lash_kernel_vm::kernel_internals::prepare_with_layout(registry, Layout(0));
+    let kernel = PreparedLibrary::new(registry);
     let mut cases: Vec<(Case, PreparedLibrary, Option<Datum>)> = kernel_programs()
         .into_iter()
         .map(|(name, text, value)| (kernel_case(name, text), kernel.clone(), Some(value)))
@@ -126,13 +121,13 @@ fn linear_text_accumulators_keep_every_version_they_extend() {
     }
     let mut failures = Vec::new();
     for (case, library, value) in &cases {
-        let natural = case_program(&in_layout(library, Layout(0)), case)
-            .unwrap_or_else(|| panic!("{} is admitted", case.name));
+        let natural =
+            case_program(library, case).unwrap_or_else(|| panic!("{} is admitted", case.name));
         let bodies = Program {
-            library: in_layout(library, Layout(3)),
+            library: crate::helper_plans::bodies(library),
             ..natural.clone()
         };
-        let reference = finished::<0>(&natural, case, u64::MAX);
+        let reference = finished(&natural, case, u64::MAX);
         if let Some(value) = value
             && reference.0 != ExpectedEnd::Finished(value.clone())
         {
@@ -148,7 +143,7 @@ fn linear_text_accumulators_keep_every_version_they_extend() {
             if let Some(memory) = memory {
                 metered.environment.bounds.memory = memory;
             }
-            let unsliced = finished::<0>(&natural, &metered, u64::MAX);
+            let unsliced = finished(&natural, &metered, u64::MAX);
             if memory.is_none() && (&unsliced.0, unsliced.1) != (&reference.0, reference.1) {
                 failures.push(format!(
                     "{}, memory {memory_meter:?}: {unsliced:?}",
@@ -157,8 +152,8 @@ fn linear_text_accumulators_keep_every_version_they_extend() {
             }
             for slice in [7, 50, u64::MAX] {
                 for run in [
-                    finished::<0>(&natural, &metered, slice),
-                    finished::<3>(&bodies, &metered, slice),
+                    finished(&natural, &metered, slice),
+                    finished(&bodies, &metered, slice),
                 ] {
                     if run != unsliced {
                         failures.push(format!(
@@ -241,24 +236,24 @@ fn bulk_array_copies_keep_charge_and_held_bytes() {
         case.environment.bounds.call_depth = 200;
         case.document = print_document(&document);
         let natural = case_program(&base.library, &case).unwrap();
-        let bodies = Program { library: in_layout(&base.library, Layout(3)), ..natural.clone() };
+        let bodies = Program { library: crate::helper_plans::bodies(&base.library), ..natural.clone() };
         let mut reference_case = case.clone();
         reference_case.name.push_str(" reference");
-        let reference = finished::<3>(&bodies, &reference_case, u64::MAX);
+        let reference = finished(&bodies, &reference_case, u64::MAX);
         assert_eq!(reference.0, ExpectedEnd::Finished(expected), "{name}");
-        let actual = finished::<0>(&natural, &case, u64::MAX);
+        let actual = finished(&natural, &case, u64::MAX);
         assert_eq!(actual, reference, "{name}: value, charge and held bytes");
         if matches!(name, "concat holes and nested aliases" | "spread holes") {
             for limit in [30, reference.1.unwrap() / 2, reference.1.unwrap()] {
                 let mut bounded = case.clone();
                 bounded.environment.bounds.charge = limit;
-                assert_eq!(finished::<0>(&natural, &bounded, u64::MAX), finished::<3>(&bodies, &bounded, u64::MAX), "{name} at charge {limit}");
+                assert_eq!(finished(&natural, &bounded, u64::MAX), finished(&bodies, &bounded, u64::MAX), "{name} at charge {limit}");
             }
             for memory in [4096, 65536] {
                 let mut bounded = case.clone();
                 bounded.environment.bounds.memory = memory;
-                let actual = finished::<0>(&natural, &bounded, u64::MAX);
-                let reference = finished::<3>(&bodies, &bounded, u64::MAX);
+                let actual = finished(&natural, &bounded, u64::MAX);
+                let reference = finished(&bodies, &bounded, u64::MAX);
                 // K-MACH-008 / K-BND-003 permit the first resident-memory
                 // refusal to differ. Successful held-byte counts do not.
                 if matches!(&reference.0, ExpectedEnd::Bound { name, .. } if name == "memory") {
@@ -268,7 +263,7 @@ fn bulk_array_copies_keep_charge_and_held_bytes() {
                     assert_eq!(actual, reference, "{name} at memory {memory}");
                 }
             }
-            assert_eq!(finished::<0>(&natural, &case, 7), reference, "{name} at slice 7");
+            assert_eq!(finished(&natural, &case, 7), reference, "{name} at slice 7");
         }
     }
 }

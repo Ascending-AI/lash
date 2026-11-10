@@ -380,7 +380,6 @@ fn k_lib_009_document_corpus_names_registered_definitions() {
                     requests_per_park: 100,
                     join_members: 100,
                 },
-                lash_kernel_vm::kernel_internals::Layout::default(),
             )
             .unwrap();
             let mut world = testsupport::World::default();

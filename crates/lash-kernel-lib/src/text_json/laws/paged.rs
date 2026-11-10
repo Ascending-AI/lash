@@ -8,7 +8,6 @@ use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
 use lash_kernel_doc::{Datum, FunctionRegistry};
 
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, SealBudget};
-use lash_kernel_vm::kernel_internals::{Layout, start_with_layout};
 use lash_kernel_vm::{
     Bounds, CellStart, KernelMachine, Machine, Outcome, Program, Request, Step, Target,
     register_machine_functions,
@@ -134,7 +133,7 @@ fn a_scalar_slice_of_a_cold_paged_text_reads_only_the_pages_it_addresses() {
 fn cold_slice_reads_only_addressed_pages(operation: &str) {
     let text: String = (0..20_000).map(|i| format!("{i:05}")).collect();
     let source = Counting::default();
-    let mut machine = start_with_layout(
+    let mut machine = <lash_kernel_vm::KernelMachine as lash_kernel_vm::Machine>::start(
         program(operation),
         BOUNDS,
         CellStart {
@@ -145,7 +144,6 @@ fn cold_slice_reads_only_addressed_pages(operation: &str) {
             modes: Default::default(),
             host: Vec::new(),
         },
-        Layout::default(),
         Box::new(source.clone()),
     )
     .unwrap();

@@ -1,64 +1,14 @@
 //! The machine's implementation, for the other kernel crates only: plans
 //! that perturb how a run executes, and the step-structure checks kernel
 //! laws pin.
-use lash_kernel_doc::FunctionRegistry;
-use lash_kernel_state::paged::{CheckpointRoot, PageSource};
-use std::sync::Arc;
+use lash_kernel_state::paged::CheckpointRoot;
 
-pub use crate::compile::Layout;
-use crate::{
-    CellStart, KernelMachine, Machine as _, OpenError, PreparedLibrary, Program, StartError,
-};
-
-/// Prepares `registry` under `layout`; library bodies compile on first use.
-pub fn prepare_with_layout(registry: Arc<FunctionRegistry>, layout: Layout) -> PreparedLibrary {
-    PreparedLibrary::with_layout(registry, layout)
-}
-
-/// Reprepare an installed library under another layout, preserving its helper image.
-pub fn in_layout(library: &PreparedLibrary, layout: Layout) -> PreparedLibrary {
-    library.in_layout(layout)
-}
+use crate::{KernelMachine, PreparedLibrary};
 
 /// `library` preparing code for the `charge` policy: under Off, lowering
 /// emits no charge regions, and charged code runs paced.
 pub fn in_charge(library: &PreparedLibrary, charge: crate::Charge) -> PreparedLibrary {
     library.in_charge(charge)
-}
-
-/// Starts a run. The bytecode core compiles one program whatever the
-/// library's `layout`; the parameter stays for its callers.
-///
-/// # Errors
-///
-/// [`crate::Machine::start`]'s.
-pub fn start_with_layout(
-    program: Program,
-    bounds: crate::Bounds,
-    start: CellStart,
-    layout: Layout,
-    source: Box<dyn PageSource>,
-) -> Result<KernelMachine, StartError> {
-    let _ = layout;
-    KernelMachine::start(program, bounds, start, source)
-}
-
-/// Opens a root. The bytecode core compiles one program whatever the
-/// library's `layout`; the parameter stays for its callers.
-///
-/// # Errors
-///
-/// [`crate::Machine::open`]'s.
-pub fn open_with_layout(
-    program: Program,
-    bounds: crate::Bounds,
-    root: &CheckpointRoot,
-    source: Box<dyn PageSource>,
-    layout: Layout,
-) -> Result<KernelMachine, OpenError> {
-    let _ = layout;
-    let checkpoint = lash_kernel_state::kernel_internals::checkpoint(root.clone());
-    KernelMachine::open(program, bounds, &checkpoint, source)
 }
 
 /// The executable's own check of its statement structure.

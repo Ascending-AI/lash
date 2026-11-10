@@ -164,11 +164,8 @@ fn conf_native_helper_documents() {
         ),
         &registry,
     );
-    for (library, layout) in [
-        (&kit.installed, lash_kernel_vm::kernel_internals::Layout(0)),
-        (&kit.bodies, lash_kernel_vm::kernel_internals::Layout(3)),
-    ] {
-        let (observed, _) = super::observe(library, &empty_bytes, layout).unwrap();
+    for library in [&kit.installed, &kit.bodies] {
+        let (observed, _) = super::observe(library, &empty_bytes).unwrap();
         assert_eq!(observed.end, ExpectedEnd::Finished(Datum::Int(0.into())));
         assert_eq!(observed.charged, Some(9));
     }
@@ -260,12 +257,7 @@ fn conf_meter_performing_callback_plan_emits_the_bodys_events() {
         .collect();
     let registry = Arc::new(registry);
     let kit = Kit::new(Arc::clone(&held), registry);
-    let (reference, tape) = super::observe(
-        &kit.bodies,
-        &case,
-        lash_kernel_vm::kernel_internals::Layout(3),
-    )
-    .unwrap();
+    let (reference, tape) = super::observe(&kit.bodies, &case).unwrap();
     assert_eq!(reference.end, ExpectedEnd::Finished(Datum::Null));
     assert_eq!(reference.trace.len(), 2);
     assert_eq!(reference.parks, 2);
@@ -300,18 +292,8 @@ fn metered_events(
         case(main, format!("kernel 1\nnumbers by_spelling\n{uses}{main}")),
         registry,
     );
-    let (body, events) = super::observe(
-        &kit.bodies,
-        &case,
-        lash_kernel_vm::kernel_internals::Layout(3),
-    )
-    .unwrap();
-    let (installed, installed_events) = super::observe(
-        &kit.installed,
-        &case,
-        lash_kernel_vm::kernel_internals::Layout(0),
-    )
-    .unwrap();
+    let (body, events) = super::observe(&kit.bodies, &case).unwrap();
+    let (installed, installed_events) = super::observe(&kit.installed, &case).unwrap();
     assert_eq!(installed, body, "{main}");
     assert_eq!(installed_events, events, "{main}");
     let metered = events
@@ -564,31 +546,16 @@ fn conf_meter_bounded_traversals_stop_at_the_reference_visit() {
             ),
             &registry,
         );
-        let (whole, _) = super::observe(
-            &kit.bodies,
-            &case,
-            lash_kernel_vm::kernel_internals::Layout(3),
-        )
-        .unwrap();
+        let (whole, _) = super::observe(&kit.bodies, &case).unwrap();
         case.environment.bounds.charge = whole.charged.unwrap() / 2;
-        let (reference, events) = super::observe(
-            &kit.bodies,
-            &case,
-            lash_kernel_vm::kernel_internals::Layout(3),
-        )
-        .unwrap();
+        let (reference, events) = super::observe(&kit.bodies, &case).unwrap();
         assert!(
             matches!(reference.end, ExpectedEnd::Bound { .. })
                 && (1..63).contains(&reference.prints.len()),
             "{}: {reference:?}",
             traversal.helper
         );
-        let (installed, installed_events) = super::observe(
-            &kit.installed,
-            &case,
-            lash_kernel_vm::kernel_internals::Layout(0),
-        )
-        .unwrap();
+        let (installed, installed_events) = super::observe(&kit.installed, &case).unwrap();
         assert_eq!(installed, reference, "{}", traversal.helper);
         assert_eq!(installed_events, events, "{}", traversal.helper);
     }
@@ -672,17 +639,10 @@ fn stopping(
     );
     case.environment.bounds.charge = charge;
     let (sender, receiver) = std::sync::mpsc::channel();
-    let libraries = [(kit.bodies.clone(), 3), (kit.installed.clone(), 0)];
+    let libraries = [kit.bodies.clone(), kit.installed.clone()];
     let run = case.clone();
     std::thread::spawn(move || {
-        let observed = libraries.map(|(library, layout)| {
-            super::observe(
-                &library,
-                &run,
-                lash_kernel_vm::kernel_internals::Layout(layout),
-            )
-            .unwrap()
-        });
+        let observed = libraries.map(|library| super::observe(&library, &run).unwrap());
         sender.send(observed).ok();
     });
     let [(body, events), (installed, installed_events)] = receiver

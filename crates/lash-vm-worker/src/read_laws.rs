@@ -106,37 +106,13 @@ fn run(
     read: bool,
     answer: &Result<Datum, ErrorDatum>,
 ) -> Ran {
-    run_in(
-        program,
-        effect,
-        read,
-        answer,
-        lash_kernel_vm::testing::ExecutionStrategy::Optimized,
-    )
-}
-fn run_in(
-    program: &Program,
-    effect: &EffectName,
-    read: bool,
-    answer: &Result<Datum, ErrorDatum>,
-    strategy: lash_kernel_vm::testing::ExecutionStrategy,
-) -> Ran {
-    run_scripted(
-        program,
-        effect,
-        read,
-        answer,
-        strategy,
-        &BTreeMap::new(),
-        false,
-    )
+    run_scripted(program, effect, read, answer, &BTreeMap::new(), false)
 }
 fn run_scripted(
     program: &Program,
     effect: &EffectName,
     read: bool,
     answer: &Result<Datum, ErrorDatum>,
-    strategy: lash_kernel_vm::testing::ExecutionStrategy,
     replies: &BTreeMap<EffectName, Result<Datum, ErrorDatum>>,
     reopen: bool,
 ) -> Ran {
@@ -231,11 +207,10 @@ fn run_scripted(
         committed,
         Box::new(spools.spool(next_stage_lease()).expect("spool")),
     ))));
-    let mut machine = lash_kernel_vm::testing::start(
+    let mut machine = lash_kernel_vm::KernelMachine::start(
         program.clone(),
         bounds,
         start,
-        strategy,
         Box::new(pages.clone()),
     )
     .expect("the cell starts");
@@ -290,12 +265,11 @@ fn run_scripted(
                         })
                         .expect("the parked cell seals")
                         .expect("unbounded seal");
-                    machine = lash_kernel_vm::testing::open(
+                    machine = lash_kernel_vm::KernelMachine::open(
                         program.clone(),
                         bounds,
                         &sealed.checkpoint(),
                         Box::new(pages.clone()),
-                        strategy,
                     )
                     .expect("the discovery cell reopens");
                 }
@@ -504,18 +478,16 @@ fn cenote_parallel_discovery() {
         // A synchronous read may settle a spawned task before its join, so
         // compare exact source charges within each scheduling mode.
         let mut baselines = [None, None];
-        for strategy in [
-            lash_kernel_vm::testing::ExecutionStrategy::Optimized,
-            lash_kernel_vm::testing::ExecutionStrategy::Interpreted,
+        for (label, library) in [
+            ("natives", program.library.clone()),
+            ("bodies", lash_kernel_vm::testing::bodies(&program.library)),
         ] {
             let mut program = program.clone();
-            program.library = lash_kernel_vm::testing::library(&program.library, strategy);
+            program.library = library;
             for as_read in [true, false] {
-                let ran = run_scripted(
-                    &program, &describe, as_read, &described, strategy, &replies, true,
-                );
+                let ran = run_scripted(&program, &describe, as_read, &described, &replies, true);
                 let End::Finished(finished) = ran.end else {
-                    panic!("{strategy:?}, read={as_read}: {:?}", ran.end)
+                    panic!("{label}, read={as_read}: {:?}", ran.end)
                 };
                 assert_eq!(
                     ran.calls.len(),
@@ -536,7 +508,7 @@ fn cenote_parallel_discovery() {
                 if let Some(baseline) = baseline {
                     assert_eq!(
                         &observation, baseline,
-                        "parallel discovery preserves exact charge across execution strategies"
+                        "parallel discovery preserves exact charge with natives and with bodies"
                     );
                 } else {
                     *baseline = Some(observation);
@@ -574,18 +546,15 @@ if (pages.length > 3) await cenote.readDocument({ document: { collection: 'wiki'
         ]),
     )]));
     let mut baseline = None;
-    for strategy in [
-        lash_kernel_vm::testing::ExecutionStrategy::Optimized,
-        lash_kernel_vm::testing::ExecutionStrategy::Interpreted,
+    for (label, library) in [
+        ("natives", program.library.clone()),
+        ("bodies", lash_kernel_vm::testing::bodies(&program.library)),
     ] {
         let mut program = program.clone();
-        program.library = lash_kernel_vm::testing::library(&program.library, strategy);
-        let read = run_in(&program, &effect, true, &page, strategy);
-        let recorded = run_in(&program, &effect, false, &page, strategy);
-        assert!(
-            matches!(read.end, End::Finished(_)),
-            "{strategy:?}: {read:?}"
-        );
+        program.library = library;
+        let read = run(&program, &effect, true, &page);
+        let recorded = run(&program, &effect, false, &page);
+        assert!(matches!(read.end, End::Finished(_)), "{label}: {read:?}");
         assert_eq!(
             read.calls
                 .iter()
@@ -708,18 +677,16 @@ await control.finish("WORKFLOW_CHECK_PASSED");"#;
     )]));
     let replies = BTreeMap::from([(remove, Ok(Datum::Null)), (finish, Ok(Datum::Null))]);
     let mut baseline = None;
-    for strategy in [
-        lash_kernel_vm::testing::ExecutionStrategy::Optimized,
-        lash_kernel_vm::testing::ExecutionStrategy::Interpreted,
+    for (label, library) in [
+        ("natives", program.library.clone()),
+        ("bodies", lash_kernel_vm::testing::bodies(&program.library)),
     ] {
         let mut program = program.clone();
-        program.library = lash_kernel_vm::testing::library(&program.library, strategy);
+        program.library = library;
         for as_read in [true, false] {
-            let ran = run_scripted(
-                &program, &read, as_read, &workflow, strategy, &replies, false,
-            );
+            let ran = run_scripted(&program, &read, as_read, &workflow, &replies, false);
             let End::Finished(finished) = ran.end else {
-                panic!("{strategy:?}, read={as_read}: {:?}", ran.end)
+                panic!("{label}, read={as_read}: {:?}", ran.end)
             };
             assert_eq!(finished.result, Datum::Null);
             assert!(finished.finish);
@@ -752,7 +719,7 @@ await control.finish("WORKFLOW_CHECK_PASSED");"#;
             if let Some(baseline) = &baseline {
                 assert_eq!(
                     &observation, baseline,
-                    "workflow loop strategies and read modes agree"
+                    "workflow loop natives, bodies and read modes agree"
                 );
             } else {
                 baseline = Some(observation);

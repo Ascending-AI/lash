@@ -354,7 +354,6 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
 
     use lash_kernel_doc::parse_document;
 
-    use lash_kernel_vm::testing::ExecutionStrategy;
     use lash_vm_client::packages::WorkerLibrary;
     let release = lash_kernel_releases::helper_release().unwrap();
     let parse_int = release
@@ -452,7 +451,13 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         lash_kernel_vm::PreparedLibrary,
         lash_vm_broker::kernel::closure::Closure,
     ),
-               layout: ExecutionStrategy| {
+               bodies: bool| {
+        // The bodies arm runs each helper body in place of its native.
+        let library = if bodies {
+            lash_kernel_vm::testing::bodies(&library)
+        } else {
+            library
+        };
         let link = lash_kernel_value::Link {
             helper_fills: Default::default(),
             document: document.identity(),
@@ -476,9 +481,13 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
             modes: Default::default(),
             host: Vec::new(),
         };
-        let mut machine =
-            lash_kernel_vm::testing::start(program, BOUNDS, start, layout, Box::<Pages>::default())
-                .expect("the run starts");
+        let mut machine = <lash_kernel_vm::KernelMachine as lash_kernel_vm::Machine>::start(
+            program,
+            BOUNDS,
+            start,
+            Box::<Pages>::default(),
+        )
+        .expect("the run starts");
         let tape = lash_kernel_vm::ChargeTape::new();
         machine.record_charges(tape.clone());
         let end = loop {
@@ -505,12 +514,12 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         "the assembled library keeps the planned helper's plan"
     );
     assert_eq!(cold.1.reference(), closure.reference());
-    for layout in [ExecutionStrategy::Optimized, ExecutionStrategy::Interpreted] {
-        let all_a = run(library(&writes, &[]), layout);
+    for bodies in [false, true] {
+        let all_a = run(library(&writes, &[]), bodies);
         assert!(!all_a.1.is_empty(), "the run charges");
-        assert_eq!(run(cold.clone(), layout), all_a, "cold, layout {layout:?}");
+        assert_eq!(run(cold.clone(), bodies), all_a, "cold, bodies={bodies}");
         // Answered from the worker's cache of assembled libraries.
-        let warm = run(library(&reads, &definitions), layout);
-        assert_eq!(warm, all_a, "warm, layout {layout:?}");
+        let warm = run(library(&reads, &definitions), bodies);
+        assert_eq!(warm, all_a, "warm, bodies={bodies}");
     }
 }

@@ -12,8 +12,7 @@ use lash_kernel_doc::Document;
 use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_exec::charge::Weight;
 use lash_kernel_value::names::FunctionId;
-use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
-use lash_kernel_vm::{ChargeTape, KernelMachine, PreparedLibrary};
+use lash_kernel_vm::{ChargeTape, KernelMachine, Machine as _, PreparedLibrary};
 
 use crate::machine::{Run, run_case_in};
 use crate::{Case, ExpectedEnd, HarnessError, Observations};
@@ -59,8 +58,8 @@ impl Kit {
     pub fn new(document: Arc<Document>, registry: Arc<FunctionRegistry>) -> Self {
         Self {
             document,
-            installed: prepare_with_layout(Arc::clone(&registry), Layout(0)),
-            bodies: prepare_with_layout(registry, Layout(3)),
+            bodies: PreparedLibrary::new(Arc::new(registry.bodies())),
+            installed: PreparedLibrary::new(registry),
         }
     }
 
@@ -140,7 +139,7 @@ impl Kit {
                 "{label}: witness does not declare its function"
             )));
         }
-        let (body, body_events) = observe(&self.bodies, &witness.case, Layout(3))?;
+        let (body, body_events) = observe(&self.bodies, &witness.case)?;
         if body.end == ExpectedEnd::Refused {
             return Err(HarnessError(format!(
                 "{label}: body witness was refused before execution"
@@ -154,7 +153,7 @@ impl Kit {
                 body.end
             )));
         }
-        let (installed, installed_events) = observe(&self.installed, &witness.case, Layout(0))?;
+        let (installed, installed_events) = observe(&self.installed, &witness.case)?;
         for (what, differs) in [
             ("value or error", installed.end != body.end),
             ("prints", installed.prints != body.prints),
@@ -176,17 +175,10 @@ impl Kit {
 fn observe(
     library: &PreparedLibrary,
     case: &Case,
-    layout: Layout,
 ) -> Result<(Observations, Vec<Weight>), HarnessError> {
     let tape = ChargeTape::new();
     let mut start = |program, bounds, start, source: &crate::pages::Source| {
-        let mut machine = lash_kernel_vm::kernel_internals::start_with_layout(
-            program,
-            bounds,
-            start,
-            layout,
-            Box::new(source.clone()),
-        )?;
+        let mut machine = KernelMachine::start(program, bounds, start, Box::new(source.clone()))?;
         machine.record_charges(tape.clone());
         Ok(machine)
     };

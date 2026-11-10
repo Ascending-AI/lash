@@ -9,7 +9,7 @@ use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use std::{cell::Cell, rc::Rc};
 
 use super::embedder::{Embedder, Setup};
-use crate::{End, Layout, Machine, Step};
+use crate::{End, Machine, Step};
 
 /// Long texts, tuples, lists and maps nested in one another, each read by
 /// a native, then by the machine.
@@ -50,15 +50,10 @@ struct EndState {
     session: Option<lash_kernel_state::semantic::Checkpoint>,
 }
 
-fn observe(
-    layout: Layout,
-    cold: bool,
-    source: bool,
-) -> (EndState, Vec<Datum>, u64, u64, usize, usize) {
+fn observe(cold: bool, source: bool) -> (EndState, Vec<Datum>, u64, u64, usize, usize) {
     let mut embedder = Embedder::with(
         PROGRAM,
         Setup {
-            layout,
             slice: if cold && !source { 1 } else { u64::MAX },
             ..Setup::default()
         },
@@ -69,9 +64,6 @@ fn observe(
     let reads = Rc::new(Cell::new(0));
     let mut reopens = 0;
     let mut end = loop {
-        if source {
-            embedder.machine.force_source_execution();
-        }
         match embedder.run() {
             Step::Ended(end) => break end,
             Step::Slice if cold && !source => {
@@ -85,7 +77,6 @@ fn observe(
                         source: embedder.source.clone(),
                         reads: Rc::clone(&reads),
                     }),
-                    layout,
                 )
                 .unwrap();
                 embedder.library = library;
@@ -119,23 +110,21 @@ fn observe(
 /// checkpoints in a fresh machine at every slice and read actual backing pages.
 #[test]
 fn a_native_that_reads_every_chunk_cold_runs_as_it_runs_warm() {
-    for layout in [Layout(0), Layout(1)] {
-        for source in [true, false] {
-            let (end, printed, charged, warm_reads, _, _) = observe(layout, false, source);
-            assert!(matches!(&end.end, End::Finished(_)), "{end:?}");
-            let (cold_end, cold_printed, cold_charged, cold_reads, pages, reopens) =
-                observe(layout, true, source);
-            assert_eq!(cold_end, end, "layout {layout:?}, source={source}");
-            assert_eq!(cold_printed, printed);
-            assert_eq!(cold_charged, charged);
-            if source {
-                assert_eq!(warm_reads, 0);
-                // Each of the eleven reading calls reads at least one chunk.
-                assert!(cold_reads >= 11, "{cold_reads} cold reads");
-            } else {
-                assert!(reopens > 0, "regions must actually reopen cold");
-                assert!(pages > 0, "reopen must read actual backing pages");
-            }
+    for source in [true, false] {
+        let (end, printed, charged, warm_reads, _, _) = observe(false, source);
+        assert!(matches!(&end.end, End::Finished(_)), "{end:?}");
+        let (cold_end, cold_printed, cold_charged, cold_reads, pages, reopens) =
+            observe(true, source);
+        assert_eq!(cold_end, end, "source={source}");
+        assert_eq!(cold_printed, printed);
+        assert_eq!(cold_charged, charged);
+        if source {
+            assert_eq!(warm_reads, 0);
+            // Each of the eleven reading calls reads at least one chunk.
+            assert!(cold_reads >= 11, "{cold_reads} cold reads");
+        } else {
+            assert!(reopens > 0, "regions must actually reopen cold");
+            assert!(pages > 0, "reopen must read actual backing pages");
         }
     }
 }

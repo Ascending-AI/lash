@@ -105,9 +105,8 @@ pub(crate) fn raised(
 pub(crate) fn start(
     program: lash_kernel_vm::Program,
     bounds: lash_kernel_vm::Bounds,
-    layout: lash_kernel_vm::kernel_internals::Layout,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::StartError> {
-    lash_kernel_vm::kernel_internals::start_with_layout(
+    <lash_kernel_vm::KernelMachine as lash_kernel_vm::Machine>::start(
         program,
         bounds,
         lash_kernel_vm::CellStart {
@@ -118,7 +117,6 @@ pub(crate) fn start(
             modes: Default::default(),
             host: Vec::new(),
         },
-        layout,
         Box::<Source>::default(),
     )
 }

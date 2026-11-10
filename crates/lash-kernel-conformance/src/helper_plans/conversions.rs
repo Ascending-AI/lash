@@ -5,7 +5,7 @@ use super::*;
 use lash_kernel_value::names::Name;
 use std::sync::Arc;
 
-fn observe<const L: u64>(program: &Program, charge_limit: u64) -> Observed {
+fn observe(program: &Program, charge_limit: u64) -> Observed {
     let bounds = Bounds {
         charge_limit,
         call_depth: lash_kernel_vm::Bounds::DEFAULT_CALL_DEPTH,
@@ -31,7 +31,7 @@ fn observe<const L: u64>(program: &Program, charge_limit: u64) -> Observed {
             }),
         ),
     ]);
-    let mut machine = Plan::<L>::start(
+    let mut machine = Recorded::start(
         program.clone(),
         bounds,
         CellStart {
@@ -174,19 +174,14 @@ main {{
             library: bodies(&program.library),
             ..program.clone()
         };
-        let expected = observe::<3>(&reference, 50_000_000);
+        let expected = observe(&reference, 50_000_000);
         assert!(
             matches!(expected.end, crate::ExpectedEnd::Finished(_)),
             "{expected:?}"
         );
-        assert_eq!(observe::<0>(&program, 50_000_000), expected);
-        let general = Program {
-            library: in_layout(&program.library, Layout(1)),
-            ..program.clone()
-        };
-        assert_eq!(observe::<1>(&general, 50_000_000), expected);
+        assert_eq!(observe(&program, 50_000_000), expected);
         // Every charge event boundary, plus its interior, retains the exact
-        // prefix and refuses at the same helper in the body layout.
+        // prefix and refuses at the same helper in the bodies.
         let mut charged = 0;
         let mut bounds = std::collections::BTreeSet::from([0]);
         for event in &expected.tape {
@@ -201,8 +196,8 @@ main {{
         }
         for bound in bounds {
             assert_eq!(
-                observe::<0>(&program, bound),
-                observe::<3>(&reference, bound),
+                observe(&program, bound),
+                observe(&reference, bound),
                 "charge bound {bound}"
             );
         }
@@ -253,7 +248,7 @@ main {{
         library: bodies(&program.library),
         ..program.clone()
     };
-    let expected = observe::<3>(&reference, 50_000_000);
+    let expected = observe(&reference, 50_000_000);
     assert!(
         matches!(expected.end, crate::ExpectedEnd::Finished(_)),
         "{expected:?}"
@@ -262,7 +257,7 @@ main {{
         &expected.prints[..4],
         ["key_0", "key_0", "key_-17", "key_42"].map(|value| Datum::Text(value.into()))
     );
-    assert_eq!(observe::<0>(&program, 50_000_000), expected);
+    assert_eq!(observe(&program, 50_000_000), expected);
     let mut charged = 0;
     for event in &expected.tape {
         let units = match event {
@@ -272,8 +267,8 @@ main {{
         };
         for bound in [charged, charged + units / 2] {
             assert_eq!(
-                observe::<0>(&program, bound),
-                observe::<3>(&reference, bound),
+                observe(&program, bound),
+                observe(&reference, bound),
                 "bound {bound}"
             );
         }
@@ -320,13 +315,13 @@ result = labels
             library: bodies(&program.library),
             ..program.clone()
         };
-        let expected = run::<3>(&case, &reference, &mut Projector::default());
+        let expected = run(&case, &reference, &mut Projector::default());
         assert!(
             matches!(expected.end, crate::ExpectedEnd::Finished(_)),
             "{expected:?}"
         );
         assert_eq!(
-            run::<0>(&case, &program, &mut Projector::default()),
+            run(&case, &program, &mut Projector::default()),
             expected,
             "{dialect}"
         );

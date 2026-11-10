@@ -1,18 +1,11 @@
-//! The executable is a cache: how it is laid out, and which of a
-//! function's implementations it runs, changes nothing a run can observe
-//! (`K-CHG-001`, `K-MACH-008`).
+//! Which of a function's implementations a run calls, and whether it is
+//! sealed and reopened cold, changes nothing it can observe (`K-CHG-001`,
+//! `K-MACH-008`).
 
 use lash_kernel_doc::Datum;
 
 use super::embedder::{Embedder, Setup, int, result, text};
-use crate::{Bounds, End, Layout, Machine, Request, Step};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ExecutionMode {
-    Source,
-    Generic,
-    Specialized,
-}
+use crate::{Bounds, End, Machine, Request, Step};
 
 /// A program that uses closures over loop variables, shared variables,
 /// tasks, effects in loops, cleanup blocks, maps and library calls of
@@ -89,10 +82,10 @@ fn observe(setup: Setup) -> Observed {
     )
 }
 
-/// The same document compiled under different layouts gives the same
-/// values, effect identities and charges.
+/// The document with `pair.twice`'s native registered and with its body
+/// run in its place gives the same values, effect identities and charges.
 #[test]
-fn every_layout_runs_a_document_the_same_way() {
+fn a_document_runs_alike_with_a_native_and_its_body() {
     let natural = observe(Setup::default());
     let row = |tag: &str| Datum::Tuple(vec![text(tag), int(3)]);
     assert_eq!(
@@ -106,21 +99,19 @@ fn every_layout_runs_a_document_the_same_way() {
         ])
     );
     assert_eq!(natural.2.len(), 6);
-    for seed in [1, 2, 3, 0x5eed, u64::MAX] {
-        let shuffled = observe(Setup {
-            layout: Layout(seed),
-            ..Setup::default()
-        });
-        assert_eq!(shuffled, natural, "layout {seed}");
-    }
+    let body = observe(Setup {
+        native_twice: false,
+        ..Setup::default()
+    });
+    assert_eq!(body, natural);
 }
 
 /// PLAN-INDEP for per-site property caches: warm a read site, fail its guard
 /// on a different record, then delete, reinsert and mutate its field.
 /// Errors and effects retain their order and charge,
-/// also with every safepoint reopened under a different, cold plan.
+/// also with every safepoint reopened cold.
 #[test]
-fn property_caches_are_exact_across_guard_failures_and_cold_plans() {
+fn property_caches_are_exact_across_guard_failures_and_cold_reopens() {
     const READS: &str = r#"
 definition "function fetch(obj: Any) -> Any\nkernel 1\nmetering statements\nbody {  return obj.value  }"
 
@@ -162,21 +153,17 @@ main {
   return call fetch(b)
 }
 "#;
-    let observe = |program: &str, bounds: Bounds, layout: Layout, cold: bool| {
+    let observe = |program: &str, bounds: Bounds, cold: bool| {
         let mut embedder = Embedder::with(
             program,
             Setup {
                 bounds,
-                layout,
                 slice: if cold { 1 } else { u64::MAX },
                 ..Setup::default()
             },
         );
         let tape = crate::ChargeTape::new();
         embedder.machine.record_charges(tape.clone());
-        let mut plans = [Layout(0), Layout(2), Layout(1), Layout(0x5eed)]
-            .into_iter()
-            .cycle();
         let mut continuations = Vec::new();
         let end = loop {
             let step = embedder.run();
@@ -201,7 +188,7 @@ main {
                 continuations.push(embedder.machine.semantic_checkpoint());
             }
             if cold {
-                embedder.reopen(plans.next().unwrap(), true);
+                embedder.reopen(true);
                 embedder.machine.record_charges(tape.clone());
             }
             if matches!(step, Step::Parked(_)) {
@@ -225,7 +212,7 @@ main {
                 .collect::<Vec<_>>(),
         )
     };
-    let natural = observe(READS, super::embedder::ROOMY, Layout(0), false);
+    let natural = observe(READS, super::embedder::ROOMY, false);
     assert_eq!(natural.0, format!("finished {:?}", int(20)));
     assert_eq!(
         natural.1,
@@ -253,27 +240,8 @@ main {
             memory: 1 << 18,
             ..super::embedder::ROOMY
         };
-        let reference = observe(program, bounds, Layout(0), false);
-        for layout in [
-            Layout(0),
-            Layout(1),
-            Layout(2),
-            Layout(0x5eed),
-            Layout(u64::MAX),
-        ] {
-            if layout != Layout(0) {
-                assert_eq!(
-                    observe(program, bounds, layout, false),
-                    reference,
-                    "layout {layout:?}"
-                );
-            }
-            assert_eq!(
-                observe(program, bounds, layout, true),
-                reference,
-                "cold layout {layout:?}"
-            );
-        }
+        let reference = observe(program, bounds, false);
+        assert_eq!(observe(program, bounds, true), reference, "cold");
     }
 }
 
@@ -313,11 +281,10 @@ body {
         "definition {}\nmain {{ let answer = call accumulate() return answer }}",
         serde_json::to_string(&function).unwrap()
     );
-    let observe = |layout: Layout, cold: bool, memory| {
+    let observe = |cold: bool, memory| {
         let mut embedder = Embedder::with(
             &source,
             Setup {
-                layout,
                 slice: if cold { 1 } else { u64::MAX },
                 bounds: Bounds {
                     memory,
@@ -349,7 +316,7 @@ body {
                 saved.push(embedder.machine.semantic_checkpoint());
             }
             if cold {
-                embedder.reopen(layout, true);
+                embedder.reopen(true);
                 embedder.machine.record_charges(tape.clone());
             }
             if matches!(step, Step::Parked(_)) {
@@ -375,7 +342,7 @@ body {
             charge,
         )
     };
-    let reference = observe(Layout(1), false, 64 << 10);
+    let reference = observe(false, 64 << 10);
     let frozen = format!("{prefix}{}", "é🙂".repeat(80));
     let current = format!("{frozen}{}", part.repeat(80));
     assert_eq!(
@@ -383,30 +350,27 @@ body {
         Datum::Tuple(vec![text(&prefix), text(&frozen), text(&current)])
     );
     assert_eq!(reference.2.len(), 2);
-    for layout in [Layout(0), Layout(1)] {
-        assert_eq!(observe(layout, false, 64 << 10), reference);
-        assert_eq!(observe(layout, true, 64 << 10), reference);
-        // The capacity refusal is between the two effects, after the old
-        // aliases were observed, before a later effect can escape.
-        for cold in [false, true] {
-            let refused = observe(layout, cold, 24 << 10);
-            assert!(matches!(
-                refused.0,
-                End::Error(crate::RunError::Bound(crate::BoundExceeded {
-                    bound: crate::Bound::Memory,
-                    ..
-                }))
-            ));
-            assert_eq!(refused.1, reference.1[..1]);
-            assert_eq!(refused.2, reference.2[..1]);
-        }
+    assert_eq!(observe(true, 64 << 10), reference);
+    // The capacity refusal is between the two effects, after the old
+    // aliases were observed, before a later effect can escape.
+    for cold in [false, true] {
+        let refused = observe(cold, 24 << 10);
+        assert!(matches!(
+            refused.0,
+            End::Error(crate::RunError::Bound(crate::BoundExceeded {
+                bound: crate::Bound::Memory,
+                ..
+            }))
+        ));
+        assert_eq!(refused.1, reference.1[..1]);
+        assert_eq!(refused.2, reference.2[..1]);
     }
 }
 
 /// K-SES-001 / K-MACH-008: inline and digested binding keys name the same
-/// state under every layout, including after rebuilding cold lookup caches.
+/// state, including after rebuilding cold lookup caches.
 #[test]
-fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
+fn session_binding_keys_survive_cold_reopens() {
     let long = "binding".repeat(100);
     let declarations = (0..70)
         .map(|i| format!("let v{i} = {i}\n"))
@@ -414,57 +378,35 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
     let source = format!(
         "main {{ {declarations} let {long} = 7 set v0 = {long} set v69 = v0 let reply = perform 0(v69) as Any set {long} = reply set v0 = {long} let again = perform 0(v0) as Any set {long} = again return {long} }}"
     );
-    let observe = |layout| {
-        let mut embedder = Embedder::with(
-            &source,
-            Setup {
-                layout: Layout(layout),
-                ..Setup::default()
-            },
-        );
-        let mut images = Vec::new();
-        for hop in 0..2 {
-            assert!(matches!(embedder.run(), Step::Parked(_)));
-            embedder.reopen(Layout(layout ^ (hop + 1)), true);
-            images.push(embedder.machine.semantic_checkpoint());
-            embedder.deliver("echo");
-        }
-        let End::Finished(finished) = embedder.run_to_end(&[]) else {
-            panic!("the binding program must finish");
-        };
-        assert_eq!(finished.result, int(7));
-        let carry = finished.carry.expect("a session cell carries bindings");
-        let mut heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
-            lash_kernel_state::kernel_internals::session_heap(&carry),
-            Box::new(embedder.source.clone()),
-            lash_kernel_state::paged::EditEpoch(2),
-        )
-        .unwrap();
-        lash_kernel_state::paged::HeapLifecycle::adopt(&mut heap, &carry).unwrap();
-        for name in ["v0", "v69", long.as_str()] {
-            assert!(
-                heap.session_binding(&lash_kernel_value::names::Name::new(name))
-                    .unwrap()
-                    .is_some(),
-                "the prepared key must equal the canonical key for {name}"
-            );
-        }
-        images.push(
-            lash_kernel_state::semantic::session(&carry, Box::new(embedder.source.clone()))
-                .unwrap(),
-        );
-        (
-            images,
-            embedder.machine.meters().charged.expect("exact charge"),
-        )
+    let mut embedder = Embedder::with(&source, Setup::default());
+    for _ in 0..2 {
+        assert!(matches!(embedder.run(), Step::Parked(_)));
+        embedder.reopen(true);
+        embedder.deliver("echo");
+    }
+    let End::Finished(finished) = embedder.run_to_end(&[]) else {
+        panic!("the binding program must finish");
     };
-    let reference = observe(0);
-    for layout in [1, 42, u64::MAX] {
-        assert_eq!(observe(layout), reference, "layout {layout}");
+    assert_eq!(finished.result, int(7));
+    let carry = finished.carry.expect("a session cell carries bindings");
+    let mut heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
+        lash_kernel_state::kernel_internals::session_heap(&carry),
+        Box::new(embedder.source.clone()),
+        lash_kernel_state::paged::EditEpoch(2),
+    )
+    .unwrap();
+    lash_kernel_state::paged::HeapLifecycle::adopt(&mut heap, &carry).unwrap();
+    for name in ["v0", "v69", long.as_str()] {
+        assert!(
+            heap.session_binding(&lash_kernel_value::names::Name::new(name))
+                .unwrap()
+                .is_some(),
+            "the prepared key must equal the canonical key for {name}"
+        );
     }
 }
 
-/// Certified scalar entries shared by the layout, verifier and limiter laws.
+/// Certified scalar entries shared by the scalar, verifier and limiter laws.
 /// The general call uses the document's checked semantics as the oracle.
 pub(super) fn scalar_probes(
     registry: &mut lash_kernel_doc::FunctionRegistry,
@@ -583,53 +525,19 @@ type ScalarObserved = (
     Vec<lash_kernel_state::semantic::Checkpoint>,
 );
 
-fn observe_scalar(source: &str, layout: Layout, record: bool, cold: bool) -> ScalarObserved {
-    observe_scalar_bounded(source, layout, record, cold, super::embedder::ROOMY)
+fn observe_scalar(source: &str, record: bool, cold: bool) -> ScalarObserved {
+    observe_scalar_bounded(source, record, cold, super::embedder::ROOMY)
 }
 
+/// Runs `source` under `bounds`, recording its charge events when
+/// `record`, sealed and reopened at every slice of one unit and every park
+/// when `cold`.
 fn observe_scalar_bounded(
     source: &str,
-    layout: Layout,
     record: bool,
     cold: bool,
     bounds: Bounds,
 ) -> ScalarObserved {
-    observe_scalar_selected(
-        source,
-        layout,
-        record,
-        cold,
-        bounds,
-        ScalarSelection {
-            mode: ExecutionMode::Specialized,
-            slice: if cold { 1 } else { u64::MAX },
-            detailed: false,
-        },
-    )
-    .0
-}
-
-struct ScalarSelection {
-    mode: ExecutionMode,
-    slice: u64,
-    detailed: bool,
-}
-
-type ScalarStops = Vec<(
-    &'static str,
-    crate::Meters,
-    [u64; 3],
-    Option<lash_kernel_state::semantic::Checkpoint>,
-)>;
-
-fn observe_scalar_selected(
-    source: &str,
-    layout: Layout,
-    record: bool,
-    cold: bool,
-    bounds: Bounds,
-    selection: ScalarSelection,
-) -> (ScalarObserved, ScalarStops) {
     let mut embedder = Embedder::with(
         source,
         Setup {
@@ -639,8 +547,7 @@ fn observe_scalar_selected(
                 scalar_probes
             }),
             bounds,
-            layout,
-            slice: selection.slice,
+            slice: if cold { 1 } else { u64::MAX },
             ..Setup::default()
         },
     );
@@ -649,40 +556,9 @@ fn observe_scalar_selected(
         embedder.machine.record_charges(tape.clone());
     }
     let mut checkpoints = Vec::new();
-    let mut stops = Vec::new();
 
     let end = loop {
-        match selection.mode {
-            ExecutionMode::Source => embedder.machine.force_source_execution(),
-            ExecutionMode::Generic => embedder.machine.force_generic_regions(),
-            ExecutionMode::Specialized => {}
-        }
-        let step = embedder.run();
-        if selection.detailed {
-            let kind = match &step {
-                Step::Ended(_) => "ended",
-                Step::Slice => "slice",
-                Step::Parked(_) => "parked",
-            };
-            let image =
-                (!matches!(&step, Step::Ended(_))).then(|| embedder.machine.semantic_checkpoint());
-            let balance = embedder
-                .machine
-                .logical_balance()
-                .expect("source owner balance");
-            stops.push((
-                kind,
-                embedder.machine.meters(),
-                [
-                    balance.entity_local_bytes,
-                    balance.root_and_control_bytes,
-                    balance.entities,
-                ],
-                image,
-            ));
-        }
-
-        match step {
+        match embedder.run() {
             Step::Ended(end) => {
                 break match end {
                     End::Finished(finished) => format!("finished {:?}", finished.result),
@@ -691,7 +567,7 @@ fn observe_scalar_selected(
             }
             Step::Slice => {
                 if cold {
-                    embedder.reopen(layout, true);
+                    embedder.reopen(true);
                     if record {
                         embedder.machine.record_charges(tape.clone());
                     }
@@ -700,7 +576,7 @@ fn observe_scalar_selected(
             Step::Parked(_) => {
                 checkpoints.push(embedder.machine.semantic_checkpoint());
                 if cold {
-                    embedder.reopen(layout, true);
+                    embedder.reopen(true);
                     if record {
                         embedder.machine.record_charges(tape.clone());
                     }
@@ -720,78 +596,19 @@ fn observe_scalar_selected(
         })
         .collect();
     (
-        (
-            end,
-            embedder.world.printed,
-            embedder.requests,
-            events,
-            embedder.machine.meters().charged.unwrap(),
-            checkpoints,
-        ),
-        stops,
+        end,
+        embedder.world.printed,
+        embedder.requests,
+        events,
+        embedder.machine.meters().charged.unwrap(),
+        checkpoints,
     )
 }
 
-/// Typed scalar loops give the same values, events and charge as the
-/// source layout, with and without a tape, warm or cold.
+/// Typed scalar loops give the same values, events and charge warm and
+/// cold, with and without a tape.
 #[test]
-fn scalar_layouts_agree() {
-    // A successful prefix must use the certificate; tight windows must
-    // preserve the exact unpaid source suffix and its cold checkpoint.
-    let prefix = scalar_document(
-        "let first = 7 let second = first set first = second do perform 0(first) as Any return second",
-    );
-
-    region_modes(&prefix, super::embedder::ROOMY, u64::MAX, false, false);
-
-    let arithmetic = scalar_document(
-        "let answer = flat.add(3, flat.mul(2, 2)) do perform 0(answer) as Any return answer",
-    );
-    region_modes(&arithmetic, super::embedder::ROOMY, u64::MAX, false, false);
-
-    for slice in [1, 2, 3, 7] {
-        region_modes(&arithmetic, super::embedder::ROOMY, slice, true, true);
-    }
-    for charge_limit in 0..24 {
-        region_modes(
-            &arithmetic,
-            Bounds {
-                charge_limit,
-                ..super::embedder::ROOMY
-            },
-            u64::MAX,
-            true,
-            true,
-        );
-    }
-    for slice in [1, 2, 3, 7] {
-        region_modes(&prefix, super::embedder::ROOMY, slice, true, true);
-    }
-    for charge_limit in 0..12 {
-        region_modes(
-            &prefix,
-            Bounds {
-                charge_limit,
-                ..super::embedder::ROOMY
-            },
-            u64::MAX,
-            false,
-            true,
-        );
-    }
-    for memory in [128, 160, 192, 224, 256, 512] {
-        region_modes(
-            &prefix,
-            Bounds {
-                memory,
-                ..super::embedder::ROOMY
-            },
-            u64::MAX,
-            false,
-            true,
-        );
-    }
-
+fn scalar_loops_agree_warm_and_cold() {
     for body in [
         "let i = 0 let target = 0 let a = 0.1 let s = 0.0 while flat.lt(i, 5) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(a, a)) set a = flat.add(a, 1.1) } do perform 0((i, target, s, a)) as Any return (i, target, s, a)",
         "let i = 9223372036854775806 let target = 0 let s = -0.0 while flat.lt(i, 9223372036854775807) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(s, -0.0)) } return (i, target, s)",
@@ -816,42 +633,13 @@ fn scalar_layouts_agree() {
     ] {
         let source = scalar_document(body);
         for record in [false, true] {
-            let reference = observe_scalar(&source, Layout(0), record, false);
-            for layout in [Layout(0), Layout(1), Layout(2), Layout(0x5eed)] {
-                assert_eq!(
-                    observe_scalar(&source, layout, record, false),
-                    reference,
-                    "{body}, {layout:?}, tape={record}"
-                );
-                assert_eq!(
-                    observe_scalar(&source, layout, record, true),
-                    reference,
-                    "cold {body}, {layout:?}, tape={record}"
-                );
-            }
+            let reference = observe_scalar(&source, record, false);
+            assert_eq!(
+                observe_scalar(&source, record, true),
+                reference,
+                "cold {body}, tape={record}"
+            );
         }
-    }
-    // K-CHG-001 / PLAN-INDEP: this straight-line scalar cannot hide in a
-    // repeated graph. Every refused close retains the source operand owners.
-    let source = scalar_document(
-        "let left = 255 let right = 1 let answer = flat.add(left, right) do perform 0(answer) as Any return answer",
-    );
-    let reference = observe_scalar(&source, Layout(0), false, false);
-    region_modes(&source, super::embedder::ROOMY, u64::MAX, false, false);
-    for slice in [1, 3, 11] {
-        region_modes(&source, super::embedder::ROOMY, slice, true, false);
-    }
-    for charge_limit in 0..reference.4 {
-        region_modes(
-            &source,
-            Bounds {
-                charge_limit,
-                ..super::embedder::ROOMY
-            },
-            u64::MAX,
-            false,
-            true,
-        );
     }
 }
 
@@ -897,7 +685,7 @@ main {
 "#;
 
 /// Allocating operations give the same values, effects, charges and
-/// refusals under every layout, warm or cold.
+/// refusals warm and cold.
 #[test]
 fn allocating_operations_agree() {
     let mut witness = Embedder::with(
@@ -914,24 +702,17 @@ fn allocating_operations_agree() {
     assert!(matches!(end, End::Finished(_)), "{end:?}");
 
     for record in [false, true] {
-        let reference = observe_scalar(ALLOCATING, Layout(0), record, false);
-        for layout in [Layout(0), Layout(1), Layout(2), Layout(0x5eed)] {
-            assert_eq!(
-                observe_scalar(ALLOCATING, layout, record, false),
-                reference,
-                "allocating {layout:?}, tape={record}"
-            );
-            assert_eq!(
-                observe_scalar(ALLOCATING, layout, record, true),
-                reference,
-                "cold allocating {layout:?}, tape={record}"
-            );
-        }
+        let reference = observe_scalar(ALLOCATING, record, false);
+        assert_eq!(
+            observe_scalar(ALLOCATING, record, true),
+            reference,
+            "cold allocating, tape={record}"
+        );
     }
 }
 
 /// The same bodies and public signatures are authoritative for their
-/// prepared heap paths; source layouts run the ordinary helper plans.
+/// prepared heap paths.
 pub(super) fn allocation_probes(
     registry: &mut lash_kernel_doc::FunctionRegistry,
     _: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
@@ -1098,8 +879,7 @@ pub(super) fn control_document(body: &str) -> String {
     )
 }
 
-/// Loop exits, cleanups and wide calls continue the same under every
-/// layout, warm or cold, and refuse at every loop header charge alike.
+/// Loop exits, cleanups and wide calls continue the same warm or cold.
 #[test]
 fn control_exits_agree() {
     let mut comparisons = 0;
@@ -1116,23 +896,14 @@ fn control_exits_agree() {
         "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, false) return flat.add(one, apply bump())",
     ] {
         let source = control_document(body);
-        let natural = observe_scalar(&source, Layout(0), true, false);
-        for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
-            for cold in [false, true] {
-                assert_eq!(
-                    observe_scalar(&source, layout, true, cold),
-                    natural,
-                    "{body}, {layout:?}, cold={cold}"
-                );
-                comparisons += 1;
-            }
-        }
+        let natural = observe_scalar(&source, true, false);
+        assert_eq!(observe_scalar(&source, true, true), natural, "{body}, cold");
+        comparisons += 1;
     }
     println!("loop/wide-call continuations: {comparisons} paired runs");
 }
 
-/// A function's free cells keep their values and charge under every
-/// layout, warm or cold.
+/// A function's free cells keep their values and charge warm or cold.
 #[test]
 fn free_cells_agree() {
     use lash_kernel_doc::{
@@ -1172,9 +943,8 @@ fn free_cells_agree() {
         creation: None,
         token: None,
     };
-    let run = |layout, cold| {
+    let run = |cold| {
         let mut setup = Setup {
-            layout,
             probes: Some(scalar_probes),
             slice: if cold { 1 } else { u64::MAX },
             ..Setup::default()
@@ -1189,13 +959,13 @@ fn free_cells_agree() {
                 Step::Ended(end) => break result(end),
                 Step::Slice => {
                     if cold {
-                        embedder.reopen(layout, true);
+                        embedder.reopen(true);
                         embedder.machine.record_charges(tape.clone());
                     }
                 }
                 Step::Parked(_) => {
                     saved.push(embedder.machine.semantic_checkpoint());
-                    embedder.reopen(layout, true);
+                    embedder.reopen(true);
                     embedder.machine.record_charges(tape.clone());
                     embedder.deliver_next();
                 }
@@ -1203,17 +973,9 @@ fn free_cells_agree() {
         };
         (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
     };
-    let reference = run(Layout(0), false);
+    let reference = run(false);
     assert_eq!(reference.0, int(5));
-    for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
-        for cold in [false, true] {
-            assert_eq!(
-                run(layout, cold),
-                reference,
-                "free cells {layout:?}, cold={cold}"
-            );
-        }
-    }
+    assert_eq!(run(true), reference, "free cells cold");
 }
 
 /// K-EVAL-008 / K-MACH-008: a resolution-scope exit retains the active
@@ -1241,39 +1003,8 @@ fn capture_scopes_agree() {
         "definition {}\nmain {{ let run = call make_churn() return apply run(2200) }}",
         serde_json::to_string(&definition).unwrap()
     );
-    let reference = observe_scalar(&source, Layout(0), true, false);
+    let reference = observe_scalar(&source, true, false);
     assert_eq!(reference.0, format!("finished {:?}", int(1_211_100)));
-    for layout in [Layout(0), Layout(2)] {
-        assert_eq!(
-            observe_scalar(&source, layout, true, false),
-            reference,
-            "capture scope {layout:?}"
-        );
-    }
-}
-
-pub(super) fn region_modes(source: &str, bounds: Bounds, slice: u64, cold: bool, record: bool) {
-    let run = |mode| {
-        observe_scalar_selected(
-            source,
-            Layout(0),
-            record,
-            cold,
-            bounds,
-            ScalarSelection {
-                mode,
-                slice,
-                detailed: true,
-            },
-        )
-    };
-    let reference = run(ExecutionMode::Source);
-    assert_eq!(run(ExecutionMode::Generic), reference, "generic regions");
-    assert_eq!(
-        run(ExecutionMode::Specialized),
-        reference,
-        "specialized regions"
-    );
 }
 
 mod accumulation;

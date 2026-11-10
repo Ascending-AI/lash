@@ -16,7 +16,7 @@ use lash_kernel_value::names::FunctionId;
 use std::sync::Arc;
 
 use super::embedder::{Embedder, ROOMY, Setup, Source, int, result};
-use crate::{Layout, Step};
+use crate::Step;
 
 /// The page work a source saw.
 #[derive(Clone, Default)]
@@ -103,14 +103,8 @@ fn point_write(build: &str, length: u64) -> (u64, u64, u64) {
         ..Counting::default()
     };
     let (program, library) = embedder.program(true);
-    embedder.machine = crate::KernelMachine::open_in(
-        program,
-        ROOMY,
-        &root,
-        Box::new(counting.clone()),
-        Layout::default(),
-    )
-    .unwrap();
+    embedder.machine =
+        crate::KernelMachine::open_in(program, ROOMY, &root, Box::new(counting.clone())).unwrap();
     embedder.library = library;
     embedder.deliver_next();
     park(&mut embedder);

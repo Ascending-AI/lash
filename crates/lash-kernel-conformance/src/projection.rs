@@ -1,7 +1,7 @@
 //! Save/open exchange shared by the corpus and smith laws.
 use lash_kernel_state::paged::CheckpointRoot;
 use lash_kernel_state::semantic::{Checkpoint, checkpoint};
-use lash_kernel_vm::{Bounds, Machine, PreparedLibrary, Program};
+use lash_kernel_vm::{Bounds, Machine, Program};
 
 use crate::{HarnessError, pages};
 
@@ -20,10 +20,6 @@ pub(crate) struct Projector<'a> {
     pub(crate) terminal: Option<Checkpoint>,
     /// A's images opened by B at every projection, rather than B's own images.
     pub(crate) imports: Option<&'a [Image]>,
-    /// Lose prepared-code caches too, as a new worker does.
-    pub(crate) cold: bool,
-    pub(crate) layout: lash_kernel_vm::kernel_internals::Layout,
-    pub(crate) library: Option<PreparedLibrary>,
     /// The memory counter at the run's end.
     pub(crate) held: Option<u64>,
 }
@@ -54,23 +50,13 @@ impl Projector<'_> {
             Some(images) => images.get(self.images.len()).unwrap_or(&image),
             None => &image,
         };
-        let mut program = program.clone();
-        // Preparing another layout is expensive. The warm path retains its
-        // prepared library; cold imports deliberately compile a fresh one.
-        let library = self.library.get_or_insert_with(|| {
-            lash_kernel_vm::kernel_internals::in_layout(&program.library, self.layout)
-        });
-        program.library = library.clone();
+        let program = program.clone();
         let witness =
             pages::open::<M>(program.clone(), bounds, &image.root, source).map_err(fault)?;
         self.memory.push((warm_memory, witness.meters().memory));
         // Even the warm baseline opens a cold witness for the independent
         // accounting verdict; only importing runs replace their live machine.
         if self.imports.is_some() {
-            if self.cold {
-                program.library =
-                    lash_kernel_vm::kernel_internals::in_layout(&program.library, self.layout);
-            }
             *machine = pages::open::<M>(program, bounds, &imported.root, &imported.source)
                 .map_err(fault)?;
             self.reopens += 1;
@@ -152,9 +138,10 @@ fn recorded(machine: lash_kernel_vm::KernelMachine) -> lash_kernel_vm::KernelMac
     machine
 }
 
-/// Test plans differ only in kernel layout; no second execution engine.
-pub(crate) struct Plan<const L: u64>(lash_kernel_vm::KernelMachine);
-impl<const L: u64> Plan<L> {
+/// The kernel machine, recording its charges to the tape a law installs
+/// with [`taped`], whether it starts or opens.
+pub(crate) struct Recorded(lash_kernel_vm::KernelMachine);
+impl Recorded {
     #[cfg(test)]
     pub(crate) fn publish_context(
         &mut self,
@@ -167,21 +154,15 @@ impl<const L: u64> Plan<L> {
         self.0.record_charges(tape);
     }
 }
-impl<const L: u64> Machine for Plan<L> {
+impl Machine for Recorded {
     fn start(
         program: Program,
         bounds: Bounds,
         start: lash_kernel_vm::CellStart,
         source: Box<dyn lash_kernel_state::paged::PageSource>,
     ) -> Result<Self, lash_kernel_vm::StartError> {
-        lash_kernel_vm::kernel_internals::start_with_layout(
-            program,
-            bounds,
-            start,
-            lash_kernel_vm::kernel_internals::Layout(L),
-            source,
-        )
-        .map(|machine| Self(recorded(machine)))
+        lash_kernel_vm::KernelMachine::start(program, bounds, start, source)
+            .map(|machine| Self(recorded(machine)))
     }
     fn open(
         program: Program,
@@ -189,14 +170,8 @@ impl<const L: u64> Machine for Plan<L> {
         root: &lash_kernel_state::paged::Checkpoint,
         source: Box<dyn lash_kernel_state::paged::PageSource>,
     ) -> Result<Self, lash_kernel_vm::OpenError> {
-        lash_kernel_vm::kernel_internals::open_with_layout(
-            program,
-            bounds,
-            lash_kernel_state::kernel_internals::checkpoint_root(root),
-            source,
-            lash_kernel_vm::kernel_internals::Layout(L),
-        )
-        .map(|machine| Self(recorded(machine)))
+        lash_kernel_vm::KernelMachine::open(program, bounds, root, source)
+            .map(|machine| Self(recorded(machine)))
     }
     fn set_options(&mut self, options: lash_kernel_vm::MachineOptions) {
         self.0.set_options(options);

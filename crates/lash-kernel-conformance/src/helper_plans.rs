@@ -10,10 +10,9 @@
 mod conversions;
 mod numeric;
 
-use crate::projection::{Plan, Projector};
+use crate::projection::{Projector, Recorded};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle};
 
-use lash_kernel_vm::kernel_internals::{Layout, in_layout};
 use lash_kernel_vm::{Bounds, CellStart, Host, Machine, Outcome, Program, Request, Step, Target};
 
 /// PLAN-INDEX: a build emits each plan index in strict function identity
@@ -69,12 +68,9 @@ fn generated_plan_indexes_are_in_function_identity_order() {
 
 /// The installed definitions with every body registered without its native,
 /// so the core runs the body wherever the installed library calls the native
-/// (`K-LIB-006`). The core ignores layouts, so a layout cannot select bodies.
+/// (`K-LIB-006`).
 pub(crate) fn bodies(library: &lash_kernel_vm::PreparedLibrary) -> lash_kernel_vm::PreparedLibrary {
-    lash_kernel_vm::testing::library(
-        library,
-        lash_kernel_vm::testing::ExecutionStrategy::Interpreted,
-    )
+    lash_kernel_vm::testing::bodies(library)
 }
 
 #[allow(
@@ -136,21 +132,17 @@ struct Observed {
     tape: Vec<lash_kernel_exec::Weight>,
 }
 
-fn run<const L: u64>(
-    case: &runner::Case,
-    program: &Program,
-    projector: &mut Projector<'_>,
-) -> Observed {
-    run_bounded::<L>(case, program, projector, 50_000_000)
+fn run(case: &runner::Case, program: &Program, projector: &mut Projector<'_>) -> Observed {
+    run_bounded(case, program, projector, 50_000_000)
 }
 
-fn run_bounded<const L: u64>(
+fn run_bounded(
     case: &runner::Case,
     program: &Program,
     projector: &mut Projector<'_>,
     charge: u64,
 ) -> Observed {
-    run_with_memory::<L>(
+    run_with_memory(
         case,
         program,
         projector,
@@ -159,14 +151,14 @@ fn run_bounded<const L: u64>(
     )
 }
 
-fn run_at_depth<const L: u64>(
+fn run_at_depth(
     case: &runner::Case,
     program: &Program,
     projector: &mut Projector<'_>,
     charge: u64,
     call_depth: u32,
 ) -> Observed {
-    run_with_options::<L>(
+    run_with_options(
         case,
         program,
         projector,
@@ -177,17 +169,17 @@ fn run_at_depth<const L: u64>(
     )
 }
 
-fn run_with_memory<const L: u64>(
+fn run_with_memory(
     case: &runner::Case,
     program: &Program,
     projector: &mut Projector<'_>,
     charge: u64,
     memory_meter: lash_kernel_vm::MemoryMeter,
 ) -> Observed {
-    run_with_options::<L>(case, program, projector, charge, 200, memory_meter, true)
+    run_with_options(case, program, projector, charge, 200, memory_meter, true)
 }
 
-fn run_with_options<const L: u64>(
+fn run_with_options(
     case: &runner::Case,
     program: &Program,
     projector: &mut Projector<'_>,
@@ -211,7 +203,7 @@ fn run_with_options<const L: u64>(
         .and_then(|images| images.first())
         .map(|image| image.source.clone())
         .unwrap_or_default();
-    let mut machine = Plan::<L>::start(
+    let mut machine = Recorded::start(
         program.clone(),
         bounds,
         CellStart {
@@ -245,7 +237,7 @@ fn run_with_options<const L: u64>(
     let end = loop {
         match machine
             .run(&mut world, u64::MAX)
-            .unwrap_or_else(|error| panic!("{} in layout {L}: {error}", case.id))
+            .unwrap_or_else(|error| panic!("{}: {error}", case.id))
         {
             Step::Slice => panic!("an unbounded helper run yielded"),
             Step::Parked(park) => {
@@ -357,7 +349,6 @@ fn compare(dialect: &str, shard: Option<usize>) {
     cases.extend(depth_cases(dialect));
     let runner = runner::Runner::new(dialect).unwrap();
     let mut body = None;
-    let mut general = None;
     let mut compared = 0;
     for (index, case) in cases
         .iter()
@@ -372,46 +363,16 @@ fn compare(dialect: &str, shard: Option<usize>) {
             continue;
         };
         let mut reference = Projector::default();
-        let expected = run::<0>(case, &program, &mut reference);
+        let expected = run(case, &program, &mut reference);
         reference.check_memory().unwrap();
-        let prepared = general.get_or_insert_with(|| in_layout(&program.library, Layout(1)));
-        program.library = prepared.clone();
-        let mut warm = Projector {
-            layout: Layout(1),
-            ..Projector::default()
-        };
-        assert_eq!(
-            run::<1>(case, &program, &mut warm),
-            expected,
-            "{} general native",
-            case.id
-        );
-        assert_eq!(
-            warm.states, reference.states,
-            "{} native checkpoints",
-            case.id
-        );
-        assert_eq!(
-            crate::projection::ids(&warm.states),
-            crate::projection::ids(&reference.states),
-            "{} native ids",
-            case.id
-        );
-        assert_eq!(
-            warm.terminal, reference.terminal,
-            "{} native carry",
-            case.id
-        );
         let prepared = body.get_or_insert_with(|| bodies(&program.library));
         program.library = prepared.clone();
         let mut cold = Projector {
             imports: Some(&reference.images),
-            cold: true,
-            layout: Layout(3),
             ..Projector::default()
         };
         assert_eq!(
-            run::<3>(case, &program, &mut cold),
+            run(case, &program, &mut cold),
             expected,
             "{} cold fallback",
             case.id
@@ -613,13 +574,9 @@ fn compare_control(source: &str, charge: u64) -> Observed {
         library: bodies(&program.library),
         ..program.clone()
     };
-    let expected = run_bounded::<3>(&case, &reference, &mut Projector::default(), charge);
+    let expected = run_bounded(&case, &reference, &mut Projector::default(), charge);
     assert_eq!(
-        run_bounded::<0>(&case, &program, &mut Projector::default(), charge),
-        expected
-    );
-    assert_eq!(
-        run_bounded::<1>(&case, &program, &mut Projector::default(), charge),
+        run_bounded(&case, &program, &mut Projector::default(), charge),
         expected
     );
     expected
@@ -1017,12 +974,12 @@ fn memory_off_helper_plans_keep_the_corpus_without_census_work(shard: usize) {
             let runner::Lowered::Program(program) = runner.lower(case).unwrap() else {
                 continue;
             };
-            let expected = run::<0>(case, &program, &mut Projector::default());
+            let expected = run(case, &program, &mut Projector::default());
             if matches!(&expected.end, crate::ExpectedEnd::Bound { name, .. } if name == "memory") {
                 continue;
             }
             lash_kernel_vm::perf_witness::enable_work();
-            let observed = run_with_memory::<0>(
+            let observed = run_with_memory(
                 case,
                 &program,
                 &mut Projector::default(),
@@ -1512,9 +1469,8 @@ fn lowered(groups: &[(&str, &[(&str, &str)])]) -> Vec<(runner::Case, Program)> {
     programs
 }
 
-/// PLAN-INDEP: the lowered dialect loops observe under the natural layout
-/// what they observe where every native beside a body declines, so the
-/// body runs.
+/// K-LIB-006: the lowered dialect loops observe installed what they observe
+/// where every native beside a body is replaced by that body.
 #[test]
 fn lowered_dialect_loops_observe_what_their_bodies_observe() {
     for (case, program) in dialect_loop_programs() {
@@ -1522,10 +1478,10 @@ fn lowered_dialect_loops_observe_what_their_bodies_observe() {
             library: bodies(&program.library),
             ..program.clone()
         };
-        let planned = run::<0>(&case, &program, &mut Projector::default());
-        let mut reference = run::<3>(&case, &bodies, &mut Projector::default());
+        let planned = run(&case, &program, &mut Projector::default());
+        let mut reference = run(&case, &bodies, &mut Projector::default());
         assert_eq!(planned, reference, "{}", case.id);
-        let quiet = run_with_options::<0>(
+        let quiet = run_with_options(
             &case,
             &program,
             &mut Projector::default(),
@@ -1574,8 +1530,8 @@ fn lowered_dialect_loops_observe_what_their_bodies_observe() {
         {
             for charge in 0..=reference.charged {
                 assert_eq!(
-                    run_bounded::<0>(&case, &program, &mut Projector::default(), charge),
-                    run_bounded::<3>(&case, &bodies, &mut Projector::default(), charge),
+                    run_bounded(&case, &program, &mut Projector::default(), charge),
+                    run_bounded(&case, &bodies, &mut Projector::default(), charge),
                     "{} at charge {charge}",
                     case.id,
                 );

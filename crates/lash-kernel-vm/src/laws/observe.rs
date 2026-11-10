@@ -8,7 +8,7 @@ use lash_kernel_value::tokens::encode_body;
 
 use super::embedder::{Embedder, ROOMY, Setup};
 use crate::observe::{GuestContext, WorkReport};
-use crate::{Bounds, End, Layout, Machine, Request, Step};
+use crate::{Bounds, End, Machine, Request, Step};
 
 /// Declared functions, closures, tasks, effects in a loop, `try` with
 /// `catch` and `finally`, natives on their fast path and their general
@@ -59,10 +59,9 @@ const PRESSED: Bounds = Bounds {
     ..ROOMY
 };
 
-fn setup(layout: Layout, slice: u64) -> Setup {
+fn setup(slice: u64) -> Setup {
     Setup {
         bounds: PRESSED,
-        layout,
         slice,
         ..Setup::default()
     }
@@ -239,20 +238,12 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
 
 /// Observing a run, by counting its work or publishing its context or
 /// both, leaves its results, failures, charges, parks, prints, requests
-/// and sealed roots as they are: under the natural layout and one that
-/// takes every general native call, whole and in slices.
+/// and sealed roots as they are, whole and in slices.
 #[test]
 fn observing_a_run_changes_nothing_it_can_observe() {
     for cancel in [false, true] {
         let source = super::scheduler::document(cancel);
-        let reference = run(
-            &source,
-            Setup {
-                layout: Layout(0),
-                ..Setup::default()
-            },
-            Observing::Full,
-        );
+        let reference = run(&source, Setup::default(), Observing::Full);
         let actual = run(&source, Setup::default(), Observing::Full);
         assert_eq!(
             actual.0, reference.0,
@@ -263,37 +254,33 @@ fn observing_a_run_changes_nothing_it_can_observe() {
     let source = super::layout::control_document(
         "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, true) return flat.add(value, apply bump())",
     );
-    for layout in [Layout(0), Layout(2)] {
-        for slice in [u64::MAX, 7] {
+    for slice in [u64::MAX, 7] {
+        let setup = Setup {
+            slice,
+            probes: Some(super::layout::scalar_probes),
+            ..Setup::default()
+        };
+        let (plain, _, _) = run(&source, setup, Observing::Nothing);
+        assert!(matches!(
+            plain.steps.last(),
+            Some(Step::Ended(End::Finished(_)))
+        ));
+        for observing in [
+            Observing::Work,
+            Observing::Context,
+            Observing::Both,
+            Observing::Full,
+        ] {
             let setup = Setup {
-                layout,
                 slice,
                 probes: Some(super::layout::scalar_probes),
                 ..Setup::default()
             };
-            let (plain, _, _) = run(&source, setup, Observing::Nothing);
-            assert!(matches!(
-                plain.steps.last(),
-                Some(Step::Ended(End::Finished(_)))
-            ));
-            for observing in [
-                Observing::Work,
-                Observing::Context,
-                Observing::Both,
-                Observing::Full,
-            ] {
-                let setup = Setup {
-                    layout,
-                    slice,
-                    probes: Some(super::layout::scalar_probes),
-                    ..Setup::default()
-                };
-                assert_eq!(
-                    run(&source, setup, observing).0,
-                    plain,
-                    "control {observing:?}, {layout:?}, slice={slice}"
-                );
-            }
+            assert_eq!(
+                run(&source, setup, observing).0,
+                plain,
+                "control {observing:?}, slice={slice}"
+            );
         }
     }
     for source in [PROGRAM, super::layout::ALLOCATING, super::layout::HELPERS] {
@@ -302,66 +289,61 @@ fn observing_a_run_changes_nothing_it_can_observe() {
         } else {
             vec![ROOMY]
         } {
-            for layout in [Layout::default(), Layout(1)] {
-                for slice in [u64::MAX, 7] {
-                    let (plain, none, _) = run(
+            for slice in [u64::MAX, 7] {
+                let (plain, none, _) = run(
+                    source,
+                    Setup {
+                        bounds,
+                        ..setup(slice)
+                    },
+                    Observing::Nothing,
+                );
+                assert!(none.is_none());
+                assert!(matches!(
+                    plain.steps.last(),
+                    Some(Step::Ended(End::Finished(_)))
+                ));
+                assert!(
+                    plain.exports.len() >= if source == PROGRAM { 4 } else { 2 },
+                    "the run parks at each echo"
+                );
+                for observing in [
+                    Observing::Work,
+                    Observing::Context,
+                    Observing::Both,
+                    Observing::Full,
+                ] {
+                    let (observed, work, facts) = run(
                         source,
                         Setup {
                             bounds,
-                            ..setup(layout, slice)
+                            ..setup(slice)
                         },
-                        Observing::Nothing,
+                        observing,
                     );
-                    assert!(none.is_none());
-                    assert!(matches!(
-                        plain.steps.last(),
-                        Some(Step::Ended(End::Finished(_)))
-                    ));
-                    assert!(
-                        plain.exports.len() >= if source == PROGRAM { 4 } else { 2 },
-                        "the run parks at each echo"
-                    );
-                    for observing in [
-                        Observing::Work,
-                        Observing::Context,
-                        Observing::Both,
-                        Observing::Full,
-                    ] {
-                        let (observed, work, facts) = run(
+                    if matches!(
+                        observing,
+                        Observing::Work | Observing::Both | Observing::Full
+                    ) {
+                        let (reference, reference_work, reference_facts) = run(
                             source,
                             Setup {
                                 bounds,
-                                ..setup(layout, slice)
+                                ..setup(slice)
                             },
                             observing,
                         );
-                        if matches!(
-                            observing,
-                            Observing::Work | Observing::Both | Observing::Full
-                        ) {
-                            let (reference, reference_work, reference_facts) = run(
-                                source,
-                                Setup {
-                                    bounds,
-                                    ..setup(layout, slice)
-                                },
-                                observing,
-                            );
-                            assert_eq!(observed, reference);
-                            assert_eq!(
-                                facts, reference_facts,
-                                "passive site/count/path/context facts"
-                            );
-                            assert_eq!(
-                                work, reference_work,
-                                "work facts for {observing:?}, {layout:?}, slice {slice}"
-                            );
-                        }
+                        assert_eq!(observed, reference);
                         assert_eq!(
-                            observed, plain,
-                            "{observing:?} under layout {layout:?} in slices of {slice}"
+                            facts, reference_facts,
+                            "passive site/count/path/context facts"
+                        );
+                        assert_eq!(
+                            work, reference_work,
+                            "work facts for {observing:?}, slice {slice}"
                         );
                     }
+                    assert_eq!(observed, plain, "{observing:?} in slices of {slice}");
                 }
             }
         }

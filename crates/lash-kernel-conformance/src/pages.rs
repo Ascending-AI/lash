@@ -12,8 +12,6 @@ use lash_kernel_state::kernel_internals::{
 };
 use lash_kernel_state::paged::*;
 use lash_kernel_value::names::Name;
-#[cfg(test)]
-use lash_kernel_vm::kernel_internals::Layout;
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 #[derive(Clone, Default)]
 pub(crate) struct Source {
@@ -190,48 +188,20 @@ pub(crate) fn start(
     bounds: lash_kernel_vm::Bounds,
     start: lash_kernel_vm::CellStart,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::StartError> {
-    start_with_layout(program, bounds, start, Layout::default())
-}
-#[cfg(test)]
-pub(crate) fn start_with_layout(
-    program: lash_kernel_vm::Program,
-    bounds: lash_kernel_vm::Bounds,
-    start: lash_kernel_vm::CellStart,
-    layout: Layout,
-) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::StartError> {
-    with_source(program, bounds, start, layout, &Source::default())
+    with_source(program, bounds, start, &Source::default())
 }
 #[cfg(test)]
 pub(crate) fn with_source(
     program: lash_kernel_vm::Program,
     bounds: lash_kernel_vm::Bounds,
     start: lash_kernel_vm::CellStart,
-    layout: Layout,
     source: &Source,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::StartError> {
-    lash_kernel_vm::kernel_internals::start_with_layout(
+    <lash_kernel_vm::KernelMachine as lash_kernel_vm::Machine>::start(
         program,
         bounds,
         start,
-        layout,
         Box::new(source.clone()),
-    )
-}
-/// [`open`] under `layout`.
-#[cfg(test)]
-pub(crate) fn open_in(
-    program: lash_kernel_vm::Program,
-    bounds: lash_kernel_vm::Bounds,
-    root: &CheckpointRoot,
-    source: &Source,
-    layout: lash_kernel_vm::kernel_internals::Layout,
-) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::OpenError> {
-    lash_kernel_vm::kernel_internals::open_with_layout(
-        program,
-        bounds,
-        root,
-        Box::new(source.clone()),
-        layout,
     )
 }
 pub(crate) fn open<M: lash_kernel_vm::Machine>(

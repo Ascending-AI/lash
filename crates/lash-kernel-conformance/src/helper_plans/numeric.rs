@@ -81,7 +81,6 @@ fn generated_scalar_contracts_agree_with_their_bodies() {
             panic!("template fixture lowers")
         };
         let registry = base.library.registry();
-        let general = in_layout(&base.library, Layout(1));
         let bodies = bodies(&base.library);
         for name in names {
             let (function, registered) = registry
@@ -129,7 +128,7 @@ fn generated_scalar_contracts_agree_with_their_bodies() {
                 let mut document = lash_kernel_doc::parse_document(&source).unwrap();
                 document.library.insert(*function);
                 let mut program = crate::linked::program(Arc::new(document), base.library.clone());
-                let expected = run_at_depth::<0>(
+                let expected = run_at_depth(
                     &case,
                     &program,
                     &mut Projector::default(),
@@ -138,7 +137,7 @@ fn generated_scalar_contracts_agree_with_their_bodies() {
                 );
                 program.library = bodies.clone();
                 assert_eq!(
-                    run_at_depth::<3>(
+                    run_at_depth(
                         &case,
                         &program,
                         &mut Projector::default(),
@@ -172,17 +171,10 @@ fn generated_scalar_contracts_agree_with_their_bodies() {
                     id: format!("{name}({})", args.join(", ")),
                     ..case.clone()
                 };
-                let expected = run::<0>(&case, &program, &mut Projector::default());
-                program.library = general.clone();
-                assert_eq!(
-                    run::<1>(&case, &program, &mut Projector::default()),
-                    expected,
-                    "{} general",
-                    case.id
-                );
+                let expected = run(&case, &program, &mut Projector::default());
                 program.library = bodies.clone();
                 assert_eq!(
-                    run::<3>(&case, &program, &mut Projector::default()),
+                    run(&case, &program, &mut Projector::default()),
                     expected,
                     "{} body",
                     case.id
@@ -226,7 +218,6 @@ fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
             format!("# local definition {name} @{id}\n")
         })
         .collect::<String>();
-    let general = in_layout(&base.library, Layout(1));
     let bodies = bodies(&base.library);
     let pairs = [
         ("0", "0"),
@@ -302,21 +293,9 @@ fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
                 ));
                 let program = crate::machine::prepare_document(&base.library, document, None)
                     .expect("prepare numeric witness");
-                let expected = run::<0>(&case, &program, &mut Projector::default());
+                let expected = run(&case, &program, &mut Projector::default());
                 assert_eq!(
-                    run::<1>(
-                        &case,
-                        &Program {
-                            library: general.clone(),
-                            ..program.clone()
-                        },
-                        &mut Projector::default()
-                    ),
-                    expected,
-                    "{name}({a}, {b}) general"
-                );
-                assert_eq!(
-                    run::<3>(
+                    run(
                         &case,
                         &Program {
                             library: bodies.clone(),

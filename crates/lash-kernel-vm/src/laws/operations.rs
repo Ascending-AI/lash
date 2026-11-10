@@ -16,7 +16,7 @@ use lash_kernel_doc::{
 use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, int, text};
-use crate::{Bound, BoundExceeded, Bounds, End, Layout, RunError, Step};
+use crate::{Bound, BoundExceeded, Bounds, End, RunError, Step};
 
 /// `op.step`'s native: an integer gives the next one and a text is
 /// doubled, as the library's `text.concat` of it with itself; anything
@@ -207,13 +207,11 @@ fn ended(end: End) -> Ended {
     }
 }
 
-/// A plan: the layout the run starts in, whether `op.step`'s native is
-/// registered, and, when the run is sealed and reopened at every safe
-/// point of a one-unit slice, the layouts it is reopened in by turns.
+/// A plan: whether `op.step`'s native is registered, and whether the run
+/// is sealed and reopened at every safe point of a one-unit slice.
 struct Plan {
-    layout: Layout,
     native: bool,
-    reopen: Option<[Layout; 3]>,
+    reopen: bool,
 }
 
 fn observe(program: &str, bounds: Bounds, plan: &Plan) -> Observed {
@@ -222,26 +220,24 @@ fn observe(program: &str, bounds: Bounds, plan: &Plan) -> Observed {
         program,
         Setup {
             bounds,
-            layout: plan.layout,
-            slice: if plan.reopen.is_some() { 1 } else { u64::MAX },
+            slice: if plan.reopen { 1 } else { u64::MAX },
             probes: Some(probes),
             ..Setup::default()
         },
     );
-    let mut turns = plan.reopen.iter().flatten().copied().cycle();
     let mut checkpoints = Vec::new();
     let end = loop {
         match embedder.run() {
             Step::Ended(end) => break end,
             Step::Slice => {
-                if let Some(layout) = turns.next() {
-                    embedder.reopen(layout, true);
+                if plan.reopen {
+                    embedder.reopen(true);
                 }
             }
             Step::Parked(_) => {
                 checkpoints.push(embedder.machine.semantic_checkpoint());
-                if let Some(layout) = turns.next() {
-                    embedder.reopen(layout, true);
+                if plan.reopen {
+                    embedder.reopen(true);
                 }
                 embedder.deliver_next();
             }
@@ -266,42 +262,21 @@ fn observe(program: &str, bounds: Bounds, plan: &Plan) -> Observed {
     )
 }
 
-/// The plans every law compares: the native's fast path and its general
-/// call, every native declining, a shuffled layout, no native registered,
-/// and the run sealed and reopened at every safe point under layouts that
-/// change the path by turns.
+/// The plans every law compares: the native registered or not (its body
+/// runs in its place), each uninterrupted and sealed and reopened at every
+/// safe point.
 fn plans() -> Vec<Plan> {
-    let plan = |layout, native| Plan {
-        layout: Layout(layout),
-        native,
-        reopen: None,
-    };
-    let turns = [Layout(3), Layout(1), Layout(0x5eed)];
-    vec![
-        plan(0, true),
-        plan(1, true),
-        plan(3, true),
-        plan(0x5eed, true),
-        plan(u64::MAX, true),
-        plan(0, false),
-        Plan {
-            layout: Layout(0),
-            native: true,
-            reopen: Some(turns),
-        },
-        Plan {
-            layout: Layout(3),
-            native: true,
-            reopen: Some(turns),
-        },
-    ]
+    [(true, false), (false, false), (true, true), (false, true)]
+        .into_iter()
+        .map(|(native, reopen)| Plan { native, reopen })
+        .collect()
 }
 
 /// PLAN-INDEP (`K-LIB-004`, `K-LIB-006`, `K-CHG-007`): an operation whose
 /// native answers, declines, or is not registered gives equal values,
 /// errors, prints, effect identities and charge, inside an expression or
 /// as a statement, uninterrupted or sealed and reopened at every safe
-/// point under another path. The closure the body applies is charged as it
+/// point. The closure the body applies is charged as it
 /// runs, beside the formula.
 #[test]
 fn an_operation_runs_alike_whichever_path_answers() {

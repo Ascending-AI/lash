@@ -818,8 +818,9 @@ const LOOKALIKE_COUNTERS: &str = r#"main {
     return (copied, merged, uncertified)
 }"#;
 
-/// K-CHG-007 / K-MACH-008: helper and callback frames preserve every
-/// charge event and source continuation while entering the common loop.
+/// K-CHG-007 / K-MACH-008 / K-LIB-006: helper and callback frames preserve
+/// every charge event and source continuation, with each native or the body
+/// it implements, warm or sealed cold.
 #[test]
 fn helper_frames_agree() {
     let overflow = Embedder::with(
@@ -858,7 +859,6 @@ fn helper_frames_agree() {
         .machine
         .assert_external_native_boundary_law(external.library.ids["resident.optional"]);
     native_boundaries_agree();
-    use super::ExecutionMode as Mode;
 
     let limits = std::cell::Cell::new(super::super::embedder::ROOMY);
     let cold_slice = std::cell::Cell::new(7);
@@ -879,23 +879,24 @@ fn helper_frames_agree() {
     );
     let prepared =
         crate::PreparedLibrary::with_helpers(std::sync::Arc::clone(&fixture.registry), helpers);
-    let run = |source: &str, layout, cold, taped, mode| {
+    let bodies = crate::testing::bodies(&prepared);
+    let run = |source: &str, body: bool, cold, taped| {
         let mut embedder = Embedder::try_over(
             source,
             Setup {
                 native_twice: false,
                 probes: Some(helper_probes),
-                layout,
                 slice: if cold { cold_slice.get() } else { u64::MAX },
                 bounds: limits.get(),
                 ..Setup::default()
             },
-            Some(prepared.clone()),
+            Some(if body {
+                bodies.clone()
+            } else {
+                prepared.clone()
+            }),
         )
         .unwrap();
-        if source == SORTS && layout == Layout(1) {
-            embedder.machine.count_work();
-        }
         let tape = crate::ChargeTape::new();
         if taped {
             embedder.machine.record_charges(tape.clone());
@@ -904,13 +905,8 @@ fn helper_frames_agree() {
         let mut checkpoints = Vec::new();
         let mut stops = Vec::new();
         let end = loop {
-            match mode {
-                Mode::Source => embedder.machine.force_source_execution(),
-                Mode::Generic => embedder.machine.force_generic_regions(),
-                Mode::Specialized => {}
-            }
             let step = embedder.try_run().unwrap_or_else(|error| {
-                panic!("helper failed for layout {layout:?}, mode {mode:?}, cold={cold}, taped={taped}, charge={:?}: {error:?}; {source}", embedder.machine.meters().charged)
+                panic!("helper failed with bodies={body}, cold={cold}, taped={taped}, charge={:?}: {error:?}; {source}", embedder.machine.meters().charged)
             });
             stops.push((
                 match &step {
@@ -934,10 +930,7 @@ fn helper_frames_agree() {
                 Step::Parked(_) => {
                     checkpoints.push(embedder.machine.semantic_checkpoint());
                     if cold {
-                        embedder.reopen(layout, true);
-                        if source == SORTS && layout == Layout(1) {
-                            embedder.machine.count_work();
-                        }
+                        embedder.reopen(true);
                         if taped {
                             embedder.machine.record_charges(tape.clone());
                         }
@@ -947,10 +940,7 @@ fn helper_frames_agree() {
                 Step::Slice => {
                     if cold {
                         checkpoints.push(embedder.machine.semantic_checkpoint());
-                        embedder.reopen(layout, true);
-                        if source == SORTS && layout == Layout(1) {
-                            embedder.machine.count_work();
-                        }
+                        embedder.reopen(true);
                         if taped {
                             embedder.machine.record_charges(tape.clone());
                         }
@@ -1016,18 +1006,30 @@ main { return call rooted() }
         "main { try { return invoke helper.typed(false) } catch err { return err.kind } }",
         "main { try { return invoke helper.return_checked(\"bad\") } catch err { return err.kind } }",
     ];
-    for source in [REDUCTION, VISIT, SCAN, MERGE, LOOKALIKE_COUNTERS] {
-        for cold in [false, true] {
-            let reference = run(source, Layout(0), cold, false, Mode::Source);
-            for mode in [Mode::Generic, Mode::Specialized] {
-                assert_eq!(
-                    run(source, Layout(0), cold, false, mode),
-                    reference,
-                    "quiet collection {mode:?}, cold={cold}: {source}"
-                );
-            }
-        }
-    }
+    // What a run shows its embedder whatever its slices: result, prints,
+    // effects, charge and the charge events in order.
+    type Run = (
+        String,
+        Vec<Datum>,
+        Vec<Request>,
+        Option<u64>,
+        Vec<lash_kernel_exec::Weight>,
+        Vec<lash_kernel_state::semantic::Checkpoint>,
+        Vec<(&'static str, crate::Meters, [u64; 3])>,
+    );
+    let outcome = |run: &Run| {
+        (
+            run.0.clone(),
+            run.1.clone(),
+            run.2.clone(),
+            run.3,
+            run.4.clone(),
+        )
+    };
+    // The fixture's native raises its declared error before the body it
+    // implements could run: a native may refuse where its body would not.
+    const NATIVE_REFUSES: &str =
+        "main { try { return helper.native(-1) } catch err { return err.kind } }";
     for source in CONTRACTS.into_iter().chain([
         "main { return invoke pair.twice(21) }",
         ROOT_CALL,
@@ -1043,14 +1045,16 @@ main { return call rooted() }
         ROOT_NATIVE,
         NATIVE_EXPR,
         "main { return helper.native(0) }",
-        "main { try { return helper.native(-1) } catch err { return err.kind } }",
+        NATIVE_REFUSES,
         BODY_PARK,
         CHARGED_ROOT,
         HELPERS,
         SORTS,
     ]) {
+        let warm = run(source, false, false, true);
         for cold in [false, true] {
-            let actual = run(source, Layout(0), cold, true, Mode::Specialized);
+            let actual = run(source, false, cold, true);
+            assert_eq!(outcome(&actual), outcome(&warm), "cold={cold}: {source}");
             if source == VISIT && !cold {
                 assert_eq!(
                     actual.0,
@@ -1063,18 +1067,8 @@ main { return call rooted() }
                     )
                 );
             }
-            if source == SORTS || CONTRACTS.contains(&source) {
-                let reference = run(
-                    source,
-                    if source == SORTS {
-                        Layout(1)
-                    } else {
-                        Layout(3)
-                    },
-                    cold,
-                    true,
-                    Mode::Specialized,
-                );
+            if source != NATIVE_REFUSES {
+                let reference = run(source, true, cold, true);
                 assert_eq!(actual.0, reference.0, "helper result: {source}");
                 assert_eq!(actual.1, reference.1, "helper observations: {source}");
                 assert_eq!(actual.2, reference.2, "helper requests: {source}");
@@ -1133,49 +1127,31 @@ main { return call rooted() }
             }
         }
     }
-    for source in [SCAN, MERGE, LOOKALIKE_COUNTERS] {
-        for slice in [1, 31] {
+    for source in [REDUCTION, VISIT, SCAN, MERGE, LOOKALIKE_COUNTERS] {
+        let warm = outcome(&run(source, false, false, false));
+        for slice in [1, 7, 31] {
             cold_slice.set(slice);
-            let source_only = run(source, Layout(0), true, false, Mode::Source);
-            for mode in [Mode::Generic, Mode::Specialized] {
-                let actual = run(source, Layout(0), true, false, mode);
-                assert_eq!(
-                    (
-                        &actual.0, &actual.1, &actual.2, &actual.3, &actual.4, &actual.5
-                    ),
-                    (
-                        &source_only.0,
-                        &source_only.1,
-                        &source_only.2,
-                        &source_only.3,
-                        &source_only.4,
-                        &source_only.5
-                    ),
-                    "collection cold semantics at slice {slice}, {mode:?}: {source}"
-                );
-                assert_eq!(
-                    actual.6, source_only.6,
-                    "collection cold memory at slice {slice}, {mode:?}: {source}"
-                );
-            }
+            assert_eq!(
+                outcome(&run(source, false, true, false)),
+                warm,
+                "collection cold semantics at slice {slice}: {source}"
+            );
         }
+        cold_slice.set(7);
     }
 
     for source in [SCAN, MERGE, LOOKALIKE_COUNTERS] {
-        let reference = run(source, Layout(0), false, false, Mode::Source);
+        let reference = run(source, false, false, false);
         for charge_limit in 0..=reference.3.expect("exact charge is enabled") {
             limits.set(Bounds {
                 charge_limit,
                 ..super::super::embedder::ROOMY
             });
-            let source_only = run(source, Layout(0), false, false, Mode::Source);
-            for mode in [Mode::Generic, Mode::Specialized] {
-                assert_eq!(
-                    run(source, Layout(0), false, false, mode),
-                    source_only,
-                    "collection refusal {charge_limit}, {mode:?}: {source}"
-                );
-            }
+            assert_eq!(
+                outcome(&run(source, false, true, false)),
+                outcome(&run(source, false, false, false)),
+                "cold collection refusal {charge_limit}: {source}"
+            );
         }
         limits.set(super::super::embedder::ROOMY);
     }
@@ -1208,33 +1184,29 @@ fn collection_length_admission_uses_native_evidence() {
                 .unwrap(),
         )]
     }
-    for layout in [Layout(0), Layout(3)] {
-        let mut embedder = Embedder::with(
-            "main { return map.len(map{}) }",
-            Setup {
-                probes: Some(probe),
-                layout,
-                ..Setup::default()
-            },
-        );
-        let Step::Ended(end) = embedder.run() else {
-            panic!("a constant native finishes")
-        };
-        assert_eq!(result(end), int(17), "{layout:?}");
-    }
+    let mut embedder = Embedder::with(
+        "main { return map.len(map{}) }",
+        Setup {
+            probes: Some(probe),
+            ..Setup::default()
+        },
+    );
+    let Step::Ended(end) = embedder.run() else {
+        panic!("a constant native finishes")
+    };
+    assert_eq!(result(end), int(17));
 }
 
 /// Native exact acceptance binds real operands and preserves paid closes,
-/// optional padding, graph/scratch peaks and durable cold source handoffs.
+/// optional padding, graph/scratch peaks and durable cold source handoffs:
+/// sealed and reopened cold, a run ends and refuses as it does warm.
 fn native_boundaries_agree() {
-    use super::ExecutionMode;
     const SOURCE: &str = "main { let xs = resident.optional() let ys = resident.boundary(1) let n = list.len(xs) let value = resident.boundary(0) return (value, n, list.get(ys, 0)) }";
-    let observe = |source: &str, mode, layout, cold, taped, bounds| {
+    let observe = |source: &str, cold, taped, bounds| {
         let mut run = Embedder::with(
             source,
             Setup {
                 probes: Some(helper_probes),
-                layout,
                 bounds,
                 slice: if cold { 31 } else { u64::MAX },
                 ..Setup::default()
@@ -1247,11 +1219,6 @@ fn native_boundaries_agree() {
 
         let mut boundaries = Vec::new();
         let end = loop {
-            match mode {
-                ExecutionMode::Source => run.machine.force_source_execution(),
-                ExecutionMode::Generic => run.machine.force_generic_regions(),
-                ExecutionMode::Specialized => {}
-            }
             let step = run.run();
 
             if matches!(step, Step::Parked(_)) {
@@ -1272,7 +1239,7 @@ fn native_boundaries_agree() {
                 Step::Ended(end) => break end,
                 Step::Slice => {
                     if cold {
-                        run.reopen(layout, true);
+                        run.reopen(true);
                         if taped {
                             run.machine.record_charges(tape.clone());
                         }
@@ -1281,7 +1248,7 @@ fn native_boundaries_agree() {
                 Step::Parked(_) => {
                     assert_ne!(source, SOURCE, "native boundary fixture cannot park");
                     if cold {
-                        run.reopen(layout, true);
+                        run.reopen(true);
                         if taped {
                             run.machine.record_charges(tape.clone());
                         }
@@ -1308,81 +1275,36 @@ fn native_boundaries_agree() {
         )
     };
     let roomy = super::super::embedder::ROOMY;
-    let reference = observe(
-        SOURCE,
-        ExecutionMode::Source,
-        Layout(0),
-        false,
-        false,
-        roomy,
-    );
+    let reference = observe(SOURCE, false, false, roomy);
     assert_eq!(
         result(reference.0.clone()),
         Datum::Tuple(vec![int(7), int(2), int(7)])
     );
-
-    for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
-        for cold in [false, true] {
-            for mode in [
-                ExecutionMode::Source,
-                ExecutionMode::Generic,
-                ExecutionMode::Specialized,
-            ] {
-                let actual = observe(SOURCE, mode, layout, cold, false, roomy);
-                assert_eq!(
-                    actual, reference,
-                    "native boundary {mode:?}, {layout:?}, cold={cold}"
-                );
-            }
-            let taped = observe(SOURCE, ExecutionMode::Source, layout, cold, true, roomy);
-            for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
-                assert_eq!(
-                    observe(SOURCE, mode, layout, cold, true, roomy),
-                    taped,
-                    "native canonical cold charge tape"
-                );
-            }
-        }
-    }
+    assert_eq!(observe(SOURCE, true, false, roomy), reference, "cold");
+    assert_eq!(
+        observe(SOURCE, true, true, roomy),
+        observe(SOURCE, false, true, roomy),
+        "native canonical cold charge tape"
+    );
     let exact_charge = reference.1.unwrap();
     for charge_limit in [0, 3, 7, exact_charge - 1, exact_charge] {
         let bounds = Bounds {
             charge_limit,
             ..roomy
         };
-        let exact = observe(
-            SOURCE,
-            ExecutionMode::Source,
-            Layout(0),
-            false,
-            true,
-            bounds,
+        assert_eq!(
+            observe(SOURCE, true, true, bounds),
+            observe(SOURCE, false, true, bounds),
+            "native first charge refusal at {charge_limit}"
         );
-        for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
-            assert_eq!(
-                observe(SOURCE, mode, Layout(2), true, true, bounds),
-                exact,
-                "native first charge refusal at {charge_limit}"
-            );
-        }
     }
     for memory in [128, 229, 230, 256, 512] {
         let bounds = Bounds { memory, ..roomy };
-        let exact = observe(
-            SOURCE,
-            ExecutionMode::Source,
-            Layout(0),
-            false,
-            true,
-            bounds,
+        assert_eq!(
+            observe(SOURCE, true, true, bounds),
+            observe(SOURCE, false, true, bounds),
+            "native normalized first memory refusal at {memory}"
         );
-        for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
-            assert_eq!(
-                observe(SOURCE, mode, Layout(2), true, true, bounds),
-                exact,
-                "native normalized first memory refusal at {memory}"
-            );
-        }
     }
 
     super::native_codecs::agree(&observe);

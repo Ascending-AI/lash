@@ -1,34 +1,7 @@
-//! Differential execution controls for embedding laws. All strategies keep
-//! the same semantic result, effects and exact charge; interpreted execution
-//! exercises the stored helper bodies instead of their native shortcuts.
-use crate::{
-    Bounds, CellStart, KernelMachine, Machine as _, OpenError, PreparedLibrary, Program, StartError,
-};
-use lash_kernel_state::paged::{Checkpoint, PageSource};
-
-/// The execution paths an embedder can compare without naming VM layout.
-/// Every strategy runs the one bytecode core: a start or open takes no
-/// strategy, and [`library`] alone reprepares the helpers it selects.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ExecutionStrategy {
-    #[default]
-    Optimized,
-    /// The independent canonical source evaluator.
-    Source,
-    /// The region executor with specialized kernels disabled.
-    GenericRegions,
-    /// Helper bodies with their native shortcuts disabled.
-    Interpreted,
-}
-
-impl ExecutionStrategy {
-    fn layout(self) -> crate::compile::Layout {
-        crate::compile::Layout(match self {
-            Self::Optimized | Self::Source | Self::GenericRegions => 0,
-            Self::Interpreted => 3,
-        })
-    }
-}
+//! Differential execution controls for embedding laws: a library's helper
+//! bodies run in place of their natives keep the same semantic result,
+//! effects and exact charge.
+use crate::{KernelMachine, PreparedLibrary, StartError};
 
 /// The source ledger's entity bytes, root/control bytes and entity count.
 /// The bytecode core keeps no source ledger, so this always refuses.
@@ -59,83 +32,18 @@ pub fn semantic_checkpoint(
     })
 }
 
-/// Prepares the same installed definitions under the selected strategy.
-///
-/// Under [`ExecutionStrategy::Interpreted`] every definition that has a body
-/// is registered without its native, so the core calls the body where it
-/// would call the native (`K-LIB-006`): the two give equal values, errors
-/// and charge. A definition with no body keeps its native.
+/// The installed definitions with every native beside a body removed, so the
+/// core calls the body where it would call the native (`K-LIB-006`): the two
+/// give equal values, errors and charge. A definition with no body keeps its
+/// native.
 ///
 /// # Panics
 /// When the installed registry refuses one of its own definitions again.
-pub fn library(library: &PreparedLibrary, strategy: ExecutionStrategy) -> PreparedLibrary {
-    if strategy != ExecutionStrategy::Interpreted {
-        return library.in_layout(strategy.layout());
-    }
-    let registry = library.registry();
-    // Declarations admit a native definition the installed registry also
-    // holds without its implementation; nothing else differs.
-    let mut bodies = lash_kernel_doc::FunctionRegistry::declarations();
-    let mut placed = std::collections::BTreeSet::new();
-    for (function, _) in registry.iter() {
-        let mut pending = vec![(*function, false)];
-        while let Some((function, ready)) = pending.pop() {
-            if placed.contains(&function) {
-                continue;
-            }
-            let Some(registered) = registry.get(&function) else {
-                continue;
-            };
-            if !ready {
-                pending.push((function, true));
-                pending.extend(registered.callees().map(|callee| (callee, false)));
-                continue;
-            }
-            let definition = (**registered.definition()).clone();
-            let native = match definition.body() {
-                Some(_) => None,
-                None => registered.native().cloned(),
-            };
-            bodies
-                .register(definition, native)
-                .unwrap_or_else(|error| panic!("{function} registers without its native: {error}"));
-            placed.insert(function);
-        }
-    }
+pub fn bodies(library: &PreparedLibrary) -> PreparedLibrary {
     PreparedLibrary::with_helpers(
-        std::sync::Arc::new(bodies),
+        std::sync::Arc::new(library.registry().bodies()),
         std::sync::Arc::clone(library.helpers()),
     )
-}
-
-/// Starts a law's run under the selected strategy.
-///
-/// # Errors
-/// The embedding API's normal admission refusals.
-pub fn start(
-    program: Program,
-    bounds: Bounds,
-    start: CellStart,
-    strategy: ExecutionStrategy,
-    source: Box<dyn PageSource>,
-) -> Result<KernelMachine, StartError> {
-    let _ = strategy;
-    KernelMachine::start(program, bounds, start, source)
-}
-
-/// Reopens an opaque parked run under the selected strategy.
-///
-/// # Errors
-/// The embedding API's normal checkpoint refusals.
-pub fn open(
-    program: Program,
-    bounds: Bounds,
-    checkpoint: &Checkpoint,
-    source: Box<dyn PageSource>,
-    strategy: ExecutionStrategy,
-) -> Result<KernelMachine, OpenError> {
-    let _ = strategy;
-    KernelMachine::open(program, bounds, checkpoint, source)
 }
 
 /// A compiled and validated bytecode program, without a running machine.

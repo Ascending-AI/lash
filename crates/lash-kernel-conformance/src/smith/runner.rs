@@ -287,60 +287,32 @@ fn agree(a: &Execution<Observation>, b: &Execution<Observation>) -> bool {
     }
 }
 
-/// A's images opened by B at every slice and park, with warm and cold code
-/// caches. The public comparison excludes physical root ids and memory meters.
+/// A's images opened by B at every slice and park. The public comparison
+/// excludes physical root ids and memory meters.
 pub fn compare<A: Machine, B: Machine>(smith: &Smith) -> Result<(), HarnessError> {
-    compare_plans::<A, B>(
-        smith,
-        lash_kernel_vm::kernel_internals::Layout::default(),
-        lash_kernel_vm::kernel_internals::Layout::default(),
-    )
-}
-
-fn compare_plans<A: Machine, B: Machine>(
-    smith: &Smith,
-    a_layout: lash_kernel_vm::kernel_internals::Layout,
-    b_layout: lash_kernel_vm::kernel_internals::Layout,
-) -> Result<(), HarnessError> {
     smith.admit().map_err(fault)?;
-    let mut reference = Projector {
-        layout: a_layout,
-        ..Projector::default()
-    };
+    let mut reference = Projector::default();
     let a = observe::<A>(smith, &smith.schedule.slices, &mut reference)?;
     reference.check_memory()?;
-    for cold in [false, true] {
-        let mut imported = Projector {
-            imports: Some(&reference.images),
-            cold,
-            layout: b_layout,
-            ..Projector::default()
-        };
-        let b = observe::<B>(smith, &smith.schedule.slices, &mut imported)?;
-        imported.check_memory()?;
-        if !agree(&a, &b) || reference.terminal != imported.terminal {
-            return Err(fault(format!(
-                "cross-resume mismatch (cold={cold}):\n{a:#?}\n{b:#?}"
-            )));
-        }
+    let mut imported = Projector {
+        imports: Some(&reference.images),
+        ..Projector::default()
+    };
+    let b = observe::<B>(smith, &smith.schedule.slices, &mut imported)?;
+    imported.check_memory()?;
+    if !agree(&a, &b) || reference.terminal != imported.terminal {
+        return Err(fault(format!("cross-resume mismatch:\n{a:#?}\n{b:#?}")));
     }
     Ok(())
 }
 
 /// Cross-slice semantic agreement with a projection after every statement.
 pub fn check_interpreter(smith: &Smith) -> Result<(), HarnessError> {
-    compare_plans::<crate::projection::Plan<0>, crate::projection::Plan<3>>(
-        smith,
-        lash_kernel_vm::kernel_internals::Layout(0),
-        lash_kernel_vm::kernel_internals::Layout(3),
-    )?;
+    use crate::projection::Recorded;
+    compare::<Recorded, Recorded>(smith)?;
     let mut statements = smith.clone();
     statements.schedule.slices = vec![0];
-    compare_plans::<crate::projection::Plan<0>, crate::projection::Plan<3>>(
-        &statements,
-        lash_kernel_vm::kernel_internals::Layout(0),
-        lash_kernel_vm::kernel_internals::Layout(3),
-    )?;
+    compare::<Recorded, Recorded>(&statements)?;
     let a = without_slices(observe::<KernelMachine>(
         smith,
         &[u64::MAX],

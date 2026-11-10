@@ -12,7 +12,7 @@ use lash_kernel_doc::{
 use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, text};
-use crate::{Bounds, End, Layout, Machine, Step};
+use crate::{Bounds, End, Machine, Step};
 
 struct Scalar;
 impl NativeFunction for Scalar {
@@ -135,6 +135,22 @@ fn probes(
     registry: &mut FunctionRegistry,
     _: &BTreeMap<&'static str, FunctionId>,
 ) -> Vec<(&'static str, FunctionId)> {
+    probes_registered(registry, true)
+}
+
+/// [`probes`] with every native beside a body left out: the bodies run.
+fn body_probes(
+    registry: &mut FunctionRegistry,
+    _: &BTreeMap<&'static str, FunctionId>,
+) -> Vec<(&'static str, FunctionId)> {
+    probes_registered(registry, false)
+}
+
+fn probes_registered(
+    registry: &mut FunctionRegistry,
+    natives: bool,
+) -> Vec<(&'static str, FunctionId)> {
+    let beside_body = |native: Arc<dyn NativeFunction>| natives.then_some(native);
     let mut register = |name: &'static str, params: &str, native: Arc<dyn NativeFunction>| {
         let definition = parse_definition(&format!(
             "function {name}({params}) -> Any\nkernel 1\ncharge 1\nnative\n"
@@ -164,11 +180,11 @@ body {{
     ))
     .unwrap();
     let scalar = registry
-        .register(definition, Some(Arc::new(Scalar)))
+        .register(definition, beside_body(Arc::new(Scalar)))
         .unwrap();
     let definition = parse_definition(&format!("function law.truth(x: Any) -> Any\nkernel 1\ncharge sum(3, deep(x))\nuse law.boolean = @{}\nnative\nbody {{ if law.boolean(x) {{ return x }} let answered = apply x() return answered }}\n", boolean.1)).unwrap();
     let truth = registry
-        .register(definition, Some(Arc::new(Truth)))
+        .register(definition, beside_body(Arc::new(Truth)))
         .unwrap();
     let definition = parse_definition(
         "function law.open(x: Any) -> Any\nkernel 1\ncharge 1\nnative\nbody { return x }\n",
@@ -177,7 +193,7 @@ body {{
     let open = registry.register(definition, None).unwrap();
     let definition = parse_definition(&format!("function law.item(s: Any, raw: Any) -> Any\nkernel 1\ncharge sum(5, deep(raw))\nuse law.scalar = @{}\nnative\nbody {{ let answered = invoke law.scalar(raw) return answered }}\n", scalar)).unwrap();
     let item = registry
-        .register(definition, Some(Arc::new(ListItem)))
+        .register(definition, beside_body(Arc::new(ListItem)))
         .unwrap();
     let definition = parse_definition(&format!(
         "function law.uncharged(x: Any) -> Any\nkernel 1\ncharge 7\nuse law.value_only = @{}\nbody {{ return law.value_only(x) }}\n", value_only.1
@@ -222,21 +238,19 @@ type Trace = (
     Vec<lash_kernel_state::semantic::Checkpoint>,
 );
 
-fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> Trace {
+/// Runs `program` with the probes' natives, or with their bodies in their
+/// place, sealed and reopened at every safe point when `cold`.
+fn observe(program: &str, bounds: Bounds, natives: bool, cold: bool) -> Trace {
     let mut embedder = Embedder::with(
         program,
         Setup {
-            probes: Some(probes),
+            probes: Some(if natives { probes } else { body_probes }),
             bounds,
-            layout,
             slice: if cold { 1 } else { u64::MAX },
             ..Setup::default()
         },
     );
     let mut continuations = Vec::new();
-    let mut plans = [Layout(0), Layout(2), Layout(1), Layout(3), Layout(0x5eed)]
-        .into_iter()
-        .cycle();
     let end = loop {
         let step = embedder.run();
         if let Step::Ended(end) = step {
@@ -257,7 +271,7 @@ fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> Trace {
             continuations.push(embedder.machine.semantic_checkpoint());
         }
         if cold {
-            embedder.reopen(plans.next().unwrap(), true);
+            embedder.reopen(true);
         }
         if matches!(step, Step::Parked(_)) {
             embedder.deliver_next();
@@ -281,7 +295,7 @@ fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> Trace {
 /// refuses at the same statement.
 #[test]
 fn operators_fall_back_to_the_body_after_a_parameter_changes_kind() {
-    let reference = observe(PROGRAM, ROOMY, Layout(0), false);
+    let reference = observe(PROGRAM, ROOMY, true, false);
     assert_eq!(reference.0, format!("finished {:?}", text("park")));
     assert_eq!(
         reference.1,
@@ -301,26 +315,13 @@ fn operators_fall_back_to_the_body_after_a_parameter_changes_kind() {
             memory: 1 << 18,
             ..ROOMY
         };
-        let reference = observe(&program, bounds, Layout(0), false);
-        for layout in [
-            Layout(0),
-            Layout(1),
-            Layout(2),
-            Layout(3),
-            Layout(0x5eed),
-            Layout(u64::MAX),
-        ] {
-            if layout != Layout(0) {
-                assert_eq!(
-                    observe(&program, bounds, layout, false),
-                    reference,
-                    "{layout:?}"
-                );
-            }
+        let reference = observe(&program, bounds, true, false);
+        assert_eq!(observe(&program, bounds, false, false), reference, "bodies");
+        for natives in [true, false] {
             assert_eq!(
-                observe(&program, bounds, layout, true),
+                observe(&program, bounds, natives, true),
                 reference,
-                "cold {layout:?}"
+                "cold, natives={natives}"
             );
         }
     }
@@ -356,7 +357,7 @@ main {
 /// a tuple. Neither a decline nor a cold restore advances the cursor twice.
 #[test]
 fn fused_list_items_decline_and_resume_through_the_original_header() {
-    let reference = observe(LIST_PROGRAM, ROOMY, Layout(0), false);
+    let reference = observe(LIST_PROGRAM, ROOMY, true, false);
     let expected = Datum::Tuple(vec![
         Datum::List(vec![
             Datum::Float(Float::new(2.0)),
@@ -375,26 +376,13 @@ fn fused_list_items_decline_and_resume_through_the_original_header() {
             memory: 1 << 18,
             ..ROOMY
         };
-        let reference = observe(&program, bounds, Layout(0), false);
-        for layout in [
-            Layout(0),
-            Layout(1),
-            Layout(2),
-            Layout(3),
-            Layout(0x5eed),
-            Layout(u64::MAX),
-        ] {
-            if layout != Layout(0) {
-                assert_eq!(
-                    observe(&program, bounds, layout, false),
-                    reference,
-                    "{layout:?}"
-                );
-            }
+        let reference = observe(&program, bounds, true, false);
+        assert_eq!(observe(&program, bounds, false, false), reference, "bodies");
+        for natives in [true, false] {
             assert_eq!(
-                observe(&program, bounds, layout, true),
+                observe(&program, bounds, natives, true),
                 reference,
-                "cold {layout:?}"
+                "cold, natives={natives}"
             );
         }
     }
@@ -417,20 +405,18 @@ main { return call up(&up, 0) }
             call_depth,
             ..ROOMY
         };
-        let reference = observe(DEEP, bounds, Layout(1), false);
+        let reference = observe(DEEP, bounds, true, false);
         if reference.0.starts_with("finished") {
             answered += 1;
         } else {
             assert!(reference.0.contains("CallDepth"), "{}", reference.0);
             refused += 1;
         }
-        for layout in [Layout(0), Layout(2), Layout(3), Layout(4), Layout(0x5eed)] {
-            assert_eq!(
-                observe(DEEP, bounds, layout, false),
-                reference,
-                "call depth {call_depth}, {layout:?}"
-            );
-        }
+        assert_eq!(
+            observe(DEEP, bounds, false, false),
+            reference,
+            "call depth {call_depth}, bodies"
+        );
     }
     assert!(
         answered > 0 && refused > 0,
@@ -446,7 +432,7 @@ fn uncharged_helpers_use_the_value_only_prepared_entry() {
     let trace = observe(
         "main { let value = invoke law.uncharged(2.0) return value }",
         ROOMY,
-        Layout(0),
+        true,
         false,
     );
     assert_eq!(
@@ -645,7 +631,6 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
         source: &str,
         bounds: Bounds,
         record: bool,
-        layout: Layout,
     ) -> (
         String,
         Option<u64>,
@@ -657,7 +642,6 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
             Setup {
                 probes: Some(register::<PAIRED>),
                 bounds,
-                layout,
                 ..Setup::default()
             },
         );
@@ -705,8 +689,8 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
         for charge in [crate::Charge::Exact, crate::Charge::Off] {
             let bounds = Bounds { charge, ..ROOMY };
             for record in [false, true] {
-                let expected = run_pair::<false>(source, bounds, record, Layout(0));
-                let actual = run_pair::<true>(source, bounds, record, Layout(0));
+                let expected = run_pair::<false>(source, bounds, record);
+                let actual = run_pair::<true>(source, bounds, record);
                 assert_eq!(actual, expected, "{source}, {charge:?}, tape {record}");
                 if charge == crate::Charge::Exact {
                     let charged = expected.1.unwrap();
@@ -716,8 +700,8 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
                             ..bounds
                         };
                         assert_eq!(
-                            run_pair::<true>(source, bounds, true, Layout(0)),
-                            run_pair::<false>(source, bounds, true, Layout(0)),
+                            run_pair::<true>(source, bounds, true),
+                            run_pair::<false>(source, bounds, true),
                             "{source}, bound {charge_limit}"
                         );
                     }

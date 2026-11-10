@@ -694,6 +694,47 @@ impl FunctionRegistry {
         }
     }
 
+    /// These definitions with every body registered without its native, so
+    /// a machine runs the body wherever this registry calls the native: the
+    /// oracle side of native and body equality (`K-LIB-006`). A definition
+    /// with no body keeps its native; plans are not carried.
+    ///
+    /// # Panics
+    /// When this registry's own definitions refuse to register again.
+    #[must_use]
+    pub fn bodies(&self) -> Self {
+        // Declarations admit a native definition registered without its
+        // implementation; nothing else differs.
+        let mut bodies = Self::declarations();
+        let mut placed = BTreeSet::new();
+        for (function, _) in self.iter() {
+            let mut pending = vec![(*function, false)];
+            while let Some((function, ready)) = pending.pop() {
+                if placed.contains(&function) {
+                    continue;
+                }
+                let Some(registered) = self.get(&function) else {
+                    continue;
+                };
+                if !ready {
+                    pending.push((function, true));
+                    pending.extend(registered.callees().map(|callee| (callee, false)));
+                    continue;
+                }
+                let definition = (**registered.definition()).clone();
+                let native = match definition.body() {
+                    Some(_) => None,
+                    None => registered.native().cloned(),
+                };
+                bodies.register(definition, native).unwrap_or_else(|error| {
+                    panic!("{function} registers without its native: {error}")
+                });
+                placed.insert(function);
+            }
+        }
+        bodies
+    }
+
     /// Where `function` stands in identity order.
     fn find(&self, function: &FunctionId) -> Result<usize, usize> {
         match &self.storage {

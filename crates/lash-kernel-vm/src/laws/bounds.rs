@@ -306,18 +306,12 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
         charge_limit: 10_000,
         ..ROOMY
     };
-    for source in [true, false] {
-        let mut machine =
-            super::embedder::start_machine(program.clone(), bounds, start.clone()).unwrap();
-        if source {
-            machine.force_source_execution();
+    let mut machine = super::embedder::start_machine(program, bounds, start).unwrap();
+    match machine.run(&mut World::default(), u64::MAX).unwrap() {
+        Step::Ended(End::Error(RunError::Bound(exceeded))) => {
+            assert_eq!((exceeded.bound, exceeded.limit), (Bound::Charge, 10_000));
         }
-        match machine.run(&mut World::default(), u64::MAX).unwrap() {
-            Step::Ended(End::Error(RunError::Bound(exceeded))) => {
-                assert_eq!((exceeded.bound, exceeded.limit), (Bound::Charge, 10_000));
-            }
-            other => panic!("the escaped closure's loop was not charged: {other:?}"),
-        }
+        other => panic!("the escaped closure's loop was not charged: {other:?}"),
     }
 }
 
@@ -396,49 +390,38 @@ main {
             vec![],
         ),
     ] {
-        for mode in [
-            super::layout::ExecutionMode::Source,
-            super::layout::ExecutionMode::Generic,
-            super::layout::ExecutionMode::Specialized,
-        ] {
-            let mut run = Embedder::with(
-                &format!("main {{ {body} }}"),
-                Setup {
-                    bounds: match bound {
-                        Bound::Memory => Bounds {
-                            memory: limit,
-                            ..ROOMY
-                        },
-                        _ => Bounds {
-                            charge_limit: limit,
-                            ..ROOMY
-                        },
+        let mut run = Embedder::with(
+            &format!("main {{ {body} }}"),
+            Setup {
+                bounds: match bound {
+                    Bound::Memory => Bounds {
+                        memory: limit,
+                        ..ROOMY
                     },
-                    ..Setup::default()
+                    _ => Bounds {
+                        charge_limit: limit,
+                        ..ROOMY
+                    },
                 },
-            );
-            match mode {
-                super::layout::ExecutionMode::Source => run.machine.force_source_execution(),
-                super::layout::ExecutionMode::Generic => run.machine.force_generic_regions(),
-                super::layout::ExecutionMode::Specialized => {}
-            }
-            let end = run.run_to_end(&[]);
+                ..Setup::default()
+            },
+        );
+        let end = run.run_to_end(&[]);
 
-            assert_eq!(
-                end,
-                End::Error(RunError::Bound(BoundExceeded {
-                    bound: bound.clone(),
-                    limit,
-                    function: Some(lash_kernel_value::FunctionName::new("main").unwrap()),
-                    site: Some(Box::new(lash_kernel_value::sites::Site::new(
-                        lash_kernel_value::sites::Unit::Main,
-                        path.clone()
-                    ))),
-                })),
-                "refused source head: {body}, {bound:?}, {mode:?}"
-            );
-            assert_eq!(run.world.printed, printed);
-        }
+        assert_eq!(
+            end,
+            End::Error(RunError::Bound(BoundExceeded {
+                bound: bound.clone(),
+                limit,
+                function: Some(lash_kernel_value::FunctionName::new("main").unwrap()),
+                site: Some(Box::new(lash_kernel_value::sites::Site::new(
+                    lash_kernel_value::sites::Unit::Main,
+                    path.clone()
+                ))),
+            })),
+            "refused source head: {body}, {bound:?}"
+        );
+        assert_eq!(run.world.printed, printed);
     }
 }
 
@@ -538,7 +521,7 @@ fn charge_off_survives_a_resume_on_a_fresh_worker() {
     assert!(matches!(run.run(), Step::Parked(_)));
     let root = run.checkpoint();
     assert_eq!(root.meters.charge(), crate::Charge::Off);
-    // New preparation, another layout and deliberately opposite worker defaults.
+    // New preparation and deliberately opposite worker defaults.
     let (program, _) = run.program(false);
     let checkpoint = lash_kernel_state::kernel_internals::checkpoint(root);
     run.machine = KernelMachine::open(
@@ -584,7 +567,7 @@ fn memory_off_removes_accounting_and_survives_a_cold_resume() {
     assert!(matches!(embedder.run(), Step::Parked(_)));
     let root = embedder.checkpoint();
     assert_eq!(root.limits.memory, None);
-    embedder.open_at(&root, crate::Layout::default(), true);
+    embedder.open_at(&root, true);
     embedder.deliver("park");
     crate::perf_witness::enable_work();
     let end = embedder.run_to_end(&[]);
@@ -970,7 +953,7 @@ fn flat_charge_summaries_preserve_exact_graph_sizes() {
             })
             .collect();
         if cold {
-            embedder.reopen(crate::Layout::default(), true);
+            embedder.reopen(true);
             let rest = crate::ChargeTape::new();
             embedder.machine.record_charges(rest.clone());
             embedder.deliver_next();

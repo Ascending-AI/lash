@@ -106,21 +106,10 @@ fn sealed_and_resumed(
     which: Which,
     limiter: Option<&Scripted>,
 ) -> (Trace, Option<(u64, usize)>) {
-    sealed_in_layout(text, bounds, which, limiter, crate::Layout::default())
-}
-
-fn sealed_in_layout(
-    text: &str,
-    bounds: Bounds,
-    which: Which,
-    limiter: Option<&Scripted>,
-    layout: crate::Layout,
-) -> (Trace, Option<(u64, usize)>) {
     let mut embedder = Embedder::with(
         text,
         Setup {
             bounds,
-            layout,
             probes: Some(if text == super::layout::HELPERS {
                 super::layout::helper_probes
             } else {
@@ -136,7 +125,7 @@ fn sealed_in_layout(
             Step::Ended(end) => return (trace(&embedder, end), saved),
             Step::Slice => {}
             Step::Parked(_) => {
-                let root = embedder.reopen(layout, true);
+                let root = embedder.reopen(true);
                 let limit = match which {
                     Which::Charge => root.limits.charge,
                     Which::Memory => root.limits.memory.expect("memory is metered"),
@@ -221,8 +210,7 @@ fn grown_charge(text: &str) {
         let (expected, _) = sealed_and_resumed(text, started, Which::Charge, None);
         assert_eq!(grown, expected, "limit {limit}");
         if text.contains("flat.") {
-            let (reference, _) =
-                sealed_in_layout(text, started, Which::Charge, None, crate::Layout(0));
+            let (reference, _) = sealed_and_resumed(text, started, Which::Charge, None);
             assert_eq!(grown, reference, "typed boundary {limit}");
         }
         let asked = limiter.asked();
@@ -319,7 +307,7 @@ fn a_crash_before_a_grown_limit_is_saved_asks_again() {
     let mut attempts = Vec::new();
     for _ in 0..2 {
         let limiter = Scripted::answering([LimitDecision::Grow(GROW)]);
-        embedder.open_at(&root, crate::Layout::default(), true);
+        embedder.open_at(&root, true);
         limited(&mut embedder, Which::Charge, Some(&limiter));
         embedder.pending = pending.clone();
         embedder.world.printed.clear();
@@ -343,16 +331,6 @@ fn a_crash_before_a_grown_limit_is_saved_asks_again() {
 }
 
 fn refused(text: &str, bounds: Bounds, which: Which, limiter: Option<&Scripted>) -> (Trace, End) {
-    refused_in_layout(text, bounds, which, limiter, crate::Layout(0))
-}
-
-fn refused_in_layout(
-    text: &str,
-    bounds: Bounds,
-    which: Which,
-    limiter: Option<&Scripted>,
-    layout: crate::Layout,
-) -> (Trace, End) {
     let mut embedder = Embedder::with(
         text,
         Setup {
@@ -363,7 +341,6 @@ fn refused_in_layout(
             } else {
                 None
             },
-            layout,
             bounds,
             ..Setup::default()
         },
@@ -480,10 +457,8 @@ fn literal_return_refusals() {
 #[test]
 fn allocating_refusals() {
     let source = super::layout::ALLOCATING;
-    let source_layout = crate::Layout(0);
-    let (whole, end) = refused_in_layout(source, ROOMY, Which::Charge, None, source_layout);
+    let (whole, end) = refused(source, ROOMY, Which::Charge, None);
     assert!(matches!(end, End::Finished(_)));
-    assert_eq!(refused(source, ROOMY, Which::Charge, None).0, whole);
     for limit in 0..whole.charged.unwrap() {
         let bounds = Bounds {
             charge_limit: limit,
@@ -491,7 +466,7 @@ fn allocating_refusals() {
         };
         let limiter = Scripted::default();
         let (asked, end) = refused(source, bounds, Which::Charge, Some(&limiter));
-        let (reference, _) = refused_in_layout(source, bounds, Which::Charge, None, source_layout);
+        let (reference, _) = refused(source, bounds, Which::Charge, None);
         assert_eq!(asked, reference, "allocating bound {limit}");
         assert!(matches!(end, End::Error(RunError::Bound(_))));
         assert!(whole.asked.starts_with(&asked.asked));
@@ -501,28 +476,21 @@ fn allocating_refusals() {
 }
 
 /// K-CHG-001: a loop and closure document refused at every charge, with a
-/// limiter in the register layout, leaves what the source layout's default
-/// refusal leaves, across its park.
+/// limiter, leaves what the default refusal leaves, across its park.
 #[test]
 fn control_refusals() {
     let source = super::layout::control_document(
         "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, true) print value return flat.add(one, apply bump())",
     );
-    let (whole, _) = sealed_in_layout(&source, ROOMY, Which::Charge, None, crate::Layout(0));
+    let (whole, _) = sealed_and_resumed(&source, ROOMY, Which::Charge, None);
     for limit in 0..=whole.charged.unwrap() {
         let bounds = Bounds {
             charge_limit: limit,
             ..ROOMY
         };
         let limiter = Scripted::default();
-        let actual = sealed_in_layout(
-            &source,
-            bounds,
-            Which::Charge,
-            Some(&limiter),
-            crate::Layout(0),
-        );
-        let reference = sealed_in_layout(&source, bounds, Which::Charge, None, crate::Layout(0));
+        let actual = sealed_and_resumed(&source, bounds, Which::Charge, Some(&limiter));
+        let reference = sealed_and_resumed(&source, bounds, Which::Charge, None);
         assert_eq!(actual.0, reference.0, "control refusal {limit}");
         assert!(whole.asked.starts_with(&actual.0.asked));
         assert!(whole.printed.starts_with(&actual.0.printed));
@@ -535,11 +503,10 @@ fn control_refusals() {
 fn scheduler_refusals() {
     for cancel in [false, true] {
         let source = super::scheduler::document(cancel);
-        let run = |layout: crate::Layout, limit, ask: bool| {
+        let run = |limit, ask: bool| {
             let mut embedder = Embedder::with(
                 &source,
                 Setup {
-                    layout,
                     bounds: Bounds {
                         charge_limit: limit,
                         ..ROOMY
@@ -554,10 +521,10 @@ fn scheduler_refusals() {
 
             (trace(&embedder, end), limiter.asked())
         };
-        let (whole, _) = run(crate::Layout(0), ROOMY.charge_limit, false);
+        let (whole, _) = run(ROOMY.charge_limit, false);
         for limit in 0..=whole.charged.unwrap() + 1 {
-            let (actual, questions) = run(crate::Layout(0), limit, true);
-            let reference = run(crate::Layout(0), limit, false).0;
+            let (actual, questions) = run(limit, true);
+            let reference = run(limit, false).0;
             assert_eq!(
                 actual, reference,
                 "scheduler refusal {limit}, cancel={cancel}"
@@ -573,21 +540,15 @@ fn scheduler_refusals() {
 #[test]
 fn helper_refusals() {
     let source = super::layout::HELPERS;
-    let (whole, _) = sealed_in_layout(source, ROOMY, Which::Charge, None, crate::Layout(0));
+    let (whole, _) = sealed_and_resumed(source, ROOMY, Which::Charge, None);
     for limit in 0..=whole.charged.unwrap() {
         let bounds = Bounds {
             charge_limit: limit,
             ..ROOMY
         };
         let limiter = Scripted::default();
-        let actual = sealed_in_layout(
-            source,
-            bounds,
-            Which::Charge,
-            Some(&limiter),
-            crate::Layout(0),
-        );
-        let reference = sealed_in_layout(source, bounds, Which::Charge, None, crate::Layout(0));
+        let actual = sealed_and_resumed(source, bounds, Which::Charge, Some(&limiter));
+        let reference = sealed_and_resumed(source, bounds, Which::Charge, None);
         assert_eq!(actual.0, reference.0, "helper refusal {limit}");
         assert!(whole.asked.starts_with(&actual.0.asked));
         assert!(whole.printed.starts_with(&actual.0.printed));

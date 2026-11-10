@@ -189,29 +189,22 @@ impl KernelMachine {
         program: Program,
         bounds: Bounds,
         start: CellStart,
-        _layout: crate::compile::Layout,
         source: Box<dyn PageSource>,
         _census: Box<dyn lash_kernel_state::paged::AllocationCensus>,
     ) -> Result<Self, StartError> {
         Self::start(program, bounds, start, source)
     }
 
-    /// Opens `root` in `layout`, which the core ignores: it has one.
+    /// Opens `root`, a whole checkpoint root.
     pub(crate) fn open_in(
         program: Program,
         bounds: Bounds,
         root: &lash_kernel_state::paged::CheckpointRoot,
         source: Box<dyn PageSource>,
-        _layout: crate::compile::Layout,
     ) -> Result<Self, OpenError> {
         let checkpoint = lash_kernel_state::kernel_internals::checkpoint(root.clone());
         Self::open(program, bounds, &checkpoint, source)
     }
-
-    /// The core has one execution path.
-    pub(crate) fn force_source_execution(&mut self) {}
-    /// The core has one execution path.
-    pub(crate) fn force_generic_regions(&mut self) {}
 
     pub(crate) fn set_observe(&mut self, observe: crate::ObservationMode) {
         self.observing = !observe.is_off();

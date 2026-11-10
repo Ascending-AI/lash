@@ -8,7 +8,7 @@ use lash_kernel_state::paged::*;
 use lash_kernel_value::tokens::encode_body;
 
 fn reopen(embedder: &mut Embedder) -> CheckpointRoot {
-    embedder.reopen(crate::compile::Layout::default(), true)
+    embedder.reopen(true)
 }
 
 /// K-MACH-001/007: refusing publication must retain the page port's typed
@@ -141,7 +141,6 @@ main { let v = perform 0(7) as Any return v }"#,
                 modes: EffectModes::new(),
                 host: Vec::new(),
             },
-            crate::compile::Layout::default(),
             Box::new(embedder.source.clone()),
             Box::new(
                 Census::restore(if entry {
@@ -208,7 +207,6 @@ fn an_exhausted_seal_budget_preserves_both_continuations() {
         Setup::default().bounds,
         &prior,
         Box::new(embedder.source.clone()),
-        crate::compile::Layout::default(),
     )
     .unwrap();
     assert!(
@@ -404,14 +402,7 @@ main {}"#,
         host: Vec::new(),
     };
     assert!(matches!(
-        crate::KernelMachine::start_with_census(
-            program,
-            ROOMY,
-            start,
-            crate::compile::Layout::default(),
-            Box::new(Lost),
-            census()
-        ),
+        crate::KernelMachine::start_with_census(program, ROOMY, start, Box::new(Lost), census()),
         Err(StartError::Heap(HeapFault::LeaseLost))
     ));
 }
@@ -501,7 +492,6 @@ fn a_session_carried_under_one_closure_is_adopted_under_another() {
                 modes: crate::EffectModes::new(),
                 host: Vec::new(),
             },
-            crate::compile::Layout::default(),
             Box::new(next.source.clone()),
             Box::new(Census::restore(certificate).unwrap()),
         )
@@ -642,7 +632,6 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
                 modes: EffectModes::new(),
                 host: names.into_iter().map(|name| (name, Datum::Null)).collect(),
             },
-            crate::compile::Layout::default(),
             Box::new(embedder.source.clone()),
             census(),
         );
@@ -674,7 +663,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
 #[test]
 fn a_cold_resume_allocates_after_the_existing_list_join() {
     use super::embedder::{Embedder, result, text};
-    use crate::{Layout, Step};
+    use crate::Step;
     use lash_kernel_doc::Datum::List;
     let mut embedder = Embedder::new(
         r#"
@@ -697,7 +686,7 @@ main {
     let root = embedder.checkpoint();
     assert_eq!(root.meters.next_join, 1);
     assert_eq!(root.joins.len(), 1);
-    embedder.open_at(&root, Layout::default(), true);
+    embedder.open_at(&root, true);
     embedder.deliver("gate");
     assert!(matches!(embedder.run(), Step::Parked(_)));
     let root = embedder.checkpoint();

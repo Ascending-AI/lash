@@ -76,9 +76,9 @@ fn same(actual: &Observation, expected: &Observation, context: &str) {
     );
 }
 
-pub(super) fn agree(
-    observe: &impl Fn(&str, ExecutionMode, Layout, bool, bool, Bounds) -> Observation,
-) {
+/// Sealed and reopened cold, each codec and keyed sort ends, charges and
+/// refuses as it does warm.
+pub(super) fn agree(observe: &impl Fn(&str, bool, bool, Bounds) -> Observation) {
     let item = |id| record([("id", int(id))]);
     let examples = [
         (
@@ -107,38 +107,17 @@ pub(super) fn agree(
     let roomy = super::super::embedder::ROOMY;
     for taped in [false, true] {
         for (source, expected, _graphs) in &examples {
-            let reference = observe(
-                source,
-                ExecutionMode::Source,
-                Layout(0),
-                false,
-                taped,
-                roomy,
-            );
+            let reference = observe(source, false, taped, roomy);
             assert_eq!(
                 result(reference.0.clone()),
                 *expected,
                 "canonical native source result: {source}"
             );
-
-            for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
-                for cold in [false, true] {
-                    for mode in [
-                        ExecutionMode::Source,
-                        ExecutionMode::Generic,
-                        ExecutionMode::Specialized,
-                    ] {
-                        let actual = observe(source, mode, layout, cold, taped, roomy);
-                        same(
-                            &actual,
-                            &reference,
-                            &format!(
-                                "native codec/sort {mode:?}, {layout:?}, cold={cold}, taped={taped}: {source}"
-                            ),
-                        );
-                    }
-                }
-            }
+            same(
+                &observe(source, true, taped, roomy),
+                &reference,
+                &format!("native codec/sort cold, taped={taped}: {source}"),
+            );
             let charge = reference.1.unwrap();
             for bounds in [
                 Bounds {
@@ -158,21 +137,11 @@ pub(super) fn agree(
                     ..roomy
                 },
             ] {
-                let exact = observe(
-                    source,
-                    ExecutionMode::Source,
-                    Layout(0),
-                    false,
-                    taped,
-                    bounds,
+                same(
+                    &observe(source, true, taped, bounds),
+                    &observe(source, false, taped, bounds),
+                    &format!("native codec/sort first refusal cold, {bounds:?}: {source}"),
                 );
-                for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
-                    same(
-                        &observe(source, mode, Layout(2), true, taped, bounds),
-                        &exact,
-                        &format!("native codec/sort first refusal {mode:?}, {bounds:?}: {source}"),
-                    );
-                }
             }
         }
     }

@@ -9,10 +9,9 @@
 )]
 
 use crate::helper_plans::{World, runner};
-use crate::projection::{Image, Plan};
+use crate::projection::{Image, Recorded};
 use lash_kernel_doc::Datum;
 use lash_kernel_state::semantic::checkpoint;
-use lash_kernel_vm::kernel_internals::{Layout, in_layout};
 use lash_kernel_vm::{
     Bounds, CellStart, Machine, Outcome, PreparedLibrary, Program, Request, Step, Target,
 };
@@ -233,9 +232,9 @@ fn finish<M: Machine>(
     }
 }
 
-fn cut_all<const L: u64>(program: &Program) -> Cut {
+fn cut_all(program: &Program) -> Cut {
     let source = crate::pages::Source::default();
-    let mut machine = Plan::<L>::start(
+    let mut machine = Recorded::start(
         program.clone(),
         BOUNDS,
         CellStart {
@@ -282,22 +281,22 @@ fn cut_all<const L: u64>(program: &Program) -> Cut {
     }
 }
 
-/// Opens every image of `cut` under layout `L` with `library`: each
+/// Opens every image of `cut` with `library`: each
 /// reseals to its own checkpoint and runs on as the cut run did.
-fn reopen_all<const L: u64>(name: &str, program: &Program, library: &PreparedLibrary, cut: &Cut) {
+fn reopen_all(name: &str, program: &Program, library: &PreparedLibrary, cut: &Cut) {
     let mut program = program.clone();
     program.library = library.clone();
     for (index, point) in cut.points.iter().enumerate() {
         let image = &point.image;
         let mut machine =
-            crate::pages::open::<Plan<L>>(program.clone(), BOUNDS, &image.root, &image.source)
+            crate::pages::open::<Recorded>(program.clone(), BOUNDS, &image.root, &image.source)
                 .unwrap();
         // This is already a cold accounting witness for the saved state.
         // Check it here instead of opening a second, unused machine at the cut.
         assert_eq!(
             point.memory,
             machine.meters().memory,
-            "{name}: memory at cut {index} reopened under layout {L}"
+            "{name}: memory at cut {index} reopened"
         );
         let resealed = machine.seal(crate::pages::BUDGET).unwrap().unwrap();
         assert!(
@@ -307,7 +306,7 @@ fn reopen_all<const L: u64>(name: &str, program: &Program, library: &PreparedLib
             )
             .unwrap()
                 == checkpoint(&image.root, Box::new(image.source.clone())).unwrap(),
-            "{name}: cut {index} reopened under layout {L} to another checkpoint"
+            "{name}: cut {index} reopened to another checkpoint"
         );
         // A cut at a park still owes its delivery: the rest begins there.
         let mut world = world();
@@ -340,7 +339,7 @@ fn reopen_all<const L: u64>(name: &str, program: &Program, library: &PreparedLib
             requests: cut.whole.requests[point.requested..].to_vec(),
             charged: cut.whole.charged,
         };
-        assert_eq!(rest, expected, "{name}: cut {index} under layout {L}");
+        assert_eq!(rest, expected, "{name}: cut {index}");
     }
 }
 
@@ -364,22 +363,22 @@ fn cross(dialect: &str, programs: &[(&str, &str)]) -> Vec<Rest> {
         };
         let (plans, bodies) = libraries.get_or_insert_with(|| {
             (
-                in_layout(&program.library, Layout(0)),
-                in_layout(&program.library, Layout(3)),
+                program.library.clone(),
+                crate::helper_plans::bodies(&program.library),
             )
         });
         let mut planned = program.clone();
         planned.library = plans.clone();
         let mut bodied = program.clone();
         bodied.library = bodies.clone();
-        let by_plan = cut_all::<0>(&planned);
-        let by_body = cut_all::<3>(&bodied);
+        let by_plan = cut_all(&planned);
+        let by_body = cut_all(&bodied);
         assert_eq!(
             by_plan.whole, by_body.whole,
             "{}: plans and bodies",
             case.id
         );
-        // Shared typed packets can expose the same boundaries in both layouts.
+        // Shared typed packets can expose the same boundaries in both libraries.
         // Native plans may skip internal helper statements, never adding cuts.
         assert!(
             by_plan.points.len() <= by_body.points.len(),
@@ -388,8 +387,8 @@ fn cross(dialect: &str, programs: &[(&str, &str)]) -> Vec<Rest> {
             by_plan.points.len(),
             by_body.points.len()
         );
-        reopen_all::<3>(&case.id, &program, bodies, &by_plan);
-        reopen_all::<0>(&case.id, &program, plans, &by_body);
+        reopen_all(&case.id, &program, bodies, &by_plan);
+        reopen_all(&case.id, &program, plans, &by_body);
         println!(
             "{}: cuts plan={} body={} after {:?}",
             case.id,

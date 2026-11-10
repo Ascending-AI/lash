@@ -1,9 +1,7 @@
 //! The flat stream (`lash_kernel_exec::Op`): each statement runs as one
 //! range of decoded ops. Its expression nodes are charged at their
-//! pre-order positions by charge regions, which every layout but the
-//! natural one splits at random (`K-CHG-002`). An odd layout runs the
-//! general path: no prepared native entry or operator opcode
-//! (`K-MACH-008`).
+//! pre-order positions (`K-CHG-002`), whether `pair.twice` answers
+//! natively or runs its kernel body (`K-MACH-008`).
 
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::PageId;
@@ -11,8 +9,7 @@ use lash_kernel_value::names::Name;
 
 use super::embedder::{ROOMY, Source, World, census, library};
 use crate::{
-    Bound, Bounds, CellStart, End, Layout, Machine, PreparedLibrary, Program, RunError, Step,
-    Target,
+    Bound, Bounds, CellStart, End, Machine, PreparedLibrary, Program, RunError, Step, Target,
 };
 
 /// A generated expression over two variables, `a` (7) and `b` (`[1, 2,
@@ -273,13 +270,11 @@ fn value(node: &Node) -> u64 {
     }
 }
 
-/// Each way the laws run a tree: the stream as the natural layout runs
-/// it, in whole charge regions with operator opcodes; an odd layout's
-/// general path; and an even shuffled layout with `pair.twice` run as its
-/// kernel body. Both others split their regions at random.
-const RUNS: [(Layout, bool); 3] = [(Layout(0), true), (Layout(1), true), (Layout(2), false)];
+/// Each way the laws run a tree: with `pair.twice` answered by its native,
+/// and run as its kernel body.
+const RUNS: [bool; 2] = [true, false];
 
-fn program(expression: &str, layout: Layout, native_twice: bool) -> Program {
+fn program(expression: &str, native_twice: bool) -> Program {
     let library = library(native_twice);
     let text = format!(
         "numbers by_spelling\n{}definition \"function go() -> Any\\nkernel 1\\nmetering statements\\nbody {{  let a = 7 let b = [1, 2, 3] let x = {expression_json} return 0  }}\"\n\nmain {{}}\n",
@@ -289,13 +284,13 @@ fn program(expression: &str, layout: Layout, native_twice: bool) -> Program {
     let document = super::embedder::document(&text, &library.registry);
     crate::laws::embedder::program(
         std::sync::Arc::new(document),
-        PreparedLibrary::with_layout(library.registry, layout),
+        PreparedLibrary::new(library.registry),
     )
 }
 
 /// How the run of `program` under a charge bound of `charge` ends, and
 /// what it charged.
-fn ends(program: &Program, layout: Layout, charge: u64) -> (End, u64) {
+fn ends(program: &Program, charge: u64) -> (End, u64) {
     let start = CellStart {
         target: Target::Entry(Name::new("go")),
         args: Vec::new(),
@@ -312,7 +307,6 @@ fn ends(program: &Program, layout: Layout, charge: u64) -> (End, u64) {
         program.clone(),
         bounds,
         start,
-        layout,
         Box::new(Source::default()),
         census(),
     )
@@ -328,8 +322,8 @@ fn halted(end: &End) -> bool {
 }
 
 /// `K-CHG-002`, `K-MACH-008`: on generated expression trees, a run bound
-/// at every charge from 0 to its whole charge ends the same way in each
-/// layout, and the same as charging each event one at a time in the
+/// at every charge from 0 to its whole charge ends the same way with
+/// `pair.twice`'s native and its body, and the same as charging each event one at a time in the
 /// order the cost table states: each node before what is under it. A run
 /// that crosses its bound inside a charge region is charged exactly to the
 /// event that crosses, one that raises inside a region is charged the
@@ -348,11 +342,11 @@ fn every_charge_bound_ends_where_charging_one_event_at_a_time_ends() {
         let mut charges = before.to_vec();
         let completes = events(&tree, &mut charges);
         raising += usize::from(!completes);
-        let programs: Vec<(Program, Layout)> = RUNS
+        let programs: Vec<Program> = RUNS
             .iter()
-            .map(|(layout, native_twice)| (program(&expression, *layout, *native_twice), *layout))
+            .map(|native_twice| program(&expression, *native_twice))
             .collect();
-        let (whole, total) = ends(&programs[0].0, programs[0].1, ROOMY.charge_limit);
+        let (whole, total) = ends(&programs[0], ROOMY.charge_limit);
         match (&whole, completes) {
             (End::Finished(_), true) => {}
             (
@@ -371,12 +365,12 @@ fn every_charge_bound_ends_where_charging_one_event_at_a_time_ends() {
         for charge in 0..=total {
             let runs: Vec<(End, u64)> = programs
                 .iter()
-                .map(|(program, layout)| ends(program, *layout, charge))
+                .map(|program| ends(program, charge))
                 .collect();
-            for (run, (layout, native_twice)) in runs.iter().zip(RUNS).skip(1) {
+            for (run, native_twice) in runs.iter().zip(RUNS).skip(1) {
                 assert_eq!(
                     run, &runs[0],
-                    "{expression} at {charge}: layout {layout:?}, native twice {native_twice}"
+                    "{expression} at {charge}: native twice {native_twice}"
                 );
             }
             // One event at a time: the first whose charge passes the bound
@@ -393,7 +387,7 @@ fn every_charge_bound_ends_where_charging_one_event_at_a_time_ends() {
             }
             bounds += 1;
         }
-        assert!(halted(&ends(&programs[0].0, programs[0].1, total - 1).0));
+        assert!(halted(&ends(&programs[0], total - 1).0));
         trees += 1;
     }
     assert!(raising > 0 && raising < trees, "{raising} of {trees} raise");

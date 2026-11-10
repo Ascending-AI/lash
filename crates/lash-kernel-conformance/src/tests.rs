@@ -424,11 +424,11 @@ fn kernel_json_refuses_unknown_nested_forms() {
     ));
 }
 
-/// PLAN-INDEP / K-MACH-007/008: every corpus statement projects, and each
-/// plan resumes the other plan's images with warm and cold prepared code.
+/// K-MACH-007/008: every corpus statement projects, and a second run
+/// resumes the first run's image at every statement.
 #[test]
 fn corpus_cross_resumes_after_every_statement() {
-    use crate::projection::{Plan, Projector};
+    use crate::projection::{Projector, Recorded};
     let library = lash_kernel_vm::PreparedLibrary::new(std::sync::Arc::new(corpus_registry()));
     let shards = load_corpus(CORPUS_FILES.iter().chain(LIBRARY_CORPUS_FILES).copied()).unwrap();
     let mut executed = 0;
@@ -440,7 +440,7 @@ fn corpus_cross_resumes_after_every_statement() {
         case.environment.resume = false;
         let result = (|| -> Result<(), crate::HarnessError> {
             let mut reference = Projector::default();
-            let a = crate::machine::run_case_projected::<Plan<0>>(
+            let a = crate::machine::run_case_projected::<Recorded>(
                 &library,
                 &case,
                 &mut |at| Ok(at.machine),
@@ -448,37 +448,33 @@ fn corpus_cross_resumes_after_every_statement() {
             )?;
             case.expected.check(&a)?;
             reference.check_memory()?;
-            for cold in [false, true] {
-                let mut imported = Projector {
-                    imports: Some(&reference.images),
-                    cold,
-                    layout: lash_kernel_vm::kernel_internals::Layout(3),
-                    ..Projector::default()
-                };
-                let b = crate::machine::run_case_projected::<Plan<3>>(
-                    &library,
-                    &case,
-                    &mut |at| Ok(at.machine),
-                    Some(&mut imported),
-                )?;
-                imported.check_memory()?;
-                assert_eq!(
-                    imported.reopens,
-                    imported.images.len(),
-                    "{}: every projected statement must cross the save/open boundary (cold={cold})",
-                    case.name
-                );
-                assert!(
-                    imported.reopens >= usize::from(!reference.images.is_empty()),
-                    "{}: a nonempty reference must actually reopen (cold={cold})",
-                    case.name
-                );
-                reopens += imported.reopens;
-                if !crate::projection::corpus_agrees(&a, &b, &reference, &imported) {
-                    return Err(crate::HarnessError(format!(
-                        "cross-resume mismatch (cold={cold}): {a:?} / {b:?}"
-                    )));
-                }
+            let mut imported = Projector {
+                imports: Some(&reference.images),
+                ..Projector::default()
+            };
+            let b = crate::machine::run_case_projected::<Recorded>(
+                &library,
+                &case,
+                &mut |at| Ok(at.machine),
+                Some(&mut imported),
+            )?;
+            imported.check_memory()?;
+            assert_eq!(
+                imported.reopens,
+                imported.images.len(),
+                "{}: every projected statement must cross the save/open boundary",
+                case.name
+            );
+            assert!(
+                imported.reopens >= usize::from(!reference.images.is_empty()),
+                "{}: a nonempty reference must actually reopen",
+                case.name
+            );
+            reopens += imported.reopens;
+            if !crate::projection::corpus_agrees(&a, &b, &reference, &imported) {
+                return Err(crate::HarnessError(format!(
+                    "cross-resume mismatch: {a:?} / {b:?}"
+                )));
             }
             Ok(())
         })();
@@ -487,9 +483,7 @@ fn corpus_cross_resumes_after_every_statement() {
             failures.push(format!("{}: {error}", case.name));
         }
     }
-    println!(
-        "corpus cross-resume: executed={executed}, projection after every statement, plans=0/3, warm/cold"
-    );
+    println!("corpus cross-resume: executed={executed}, projection after every statement");
     assert!(reopens > 0, "the corpus must cross the save/open boundary");
     println!("corpus cross-resume: actual_reopens={reopens}");
     assert!(failures.is_empty(), "{}", failures.join("\n"));

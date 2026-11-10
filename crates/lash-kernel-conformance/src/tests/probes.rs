@@ -332,11 +332,10 @@ fn observing_the_bytecode_core_changes_nothing_and_sees_what_the_base_sees() {
                 ));
             }
             let mut start = |program, bounds, start, source: &crate::pages::Source| {
-                lash_kernel_vm::testing::start(
+                <KernelMachine as lash_kernel_vm::Machine>::start(
                     program,
                     bounds,
                     start,
-                    lash_kernel_vm::testing::ExecutionStrategy::Source,
                     Box::new(source.clone()),
                 )
                 .map(Watched::<KernelMachine>::watching)

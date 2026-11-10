@@ -21,8 +21,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::{
-    Bounds, CellStart, Delivered, End, Host, KernelMachine, Layout, Machine, Outcome,
-    PreparedLibrary, Program, Request, RunError, Step, Target, WaitId, register_machine_functions,
+    Bounds, CellStart, Delivered, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary,
+    Program, Request, RunError, Step, Target, WaitId, register_machine_functions,
 };
 
 /// Bounds no law reaches unless it sets one.
@@ -521,7 +521,6 @@ pub(crate) struct Setup {
     /// A document with no library functions, at this kernel version.
     pub(crate) bare_kernel: Option<lash_kernel_doc::KernelVersion>,
     pub(crate) bounds: Bounds,
-    pub(crate) layout: Layout,
     pub(crate) numbers: &'static str,
     pub(crate) native_twice: bool,
     pub(crate) start: CellStart,
@@ -536,7 +535,6 @@ impl Default for Setup {
         Self {
             bare_kernel: None,
             bounds: ROOMY,
-            layout: Layout::default(),
             numbers: "by_spelling",
             native_twice: true,
             start: CellStart {
@@ -708,7 +706,6 @@ impl Embedder {
             program,
             setup.bounds,
             start,
-            setup.layout,
             Box::new(source.clone()),
             census(),
         )?;
@@ -774,17 +771,17 @@ impl Embedder {
     }
 
     /// Seals the run whole and opens it cold in another machine, built
-    /// in `layout` against a program compiled afresh, in which `pair.twice`
+    /// against a program compiled afresh, in which `pair.twice`
     /// runs natively or not. The root it opened.
-    pub(crate) fn reopen(&mut self, layout: Layout, native_twice: bool) -> CheckpointRoot {
+    pub(crate) fn reopen(&mut self, native_twice: bool) -> CheckpointRoot {
         let root = self.checkpoint();
-        self.open_at(&root, layout, native_twice);
+        self.open_at(&root, native_twice);
         root
     }
 
     /// [`Self::reopen`], or why the seal or the open refused: a bound a
     /// law runs under can refuse at either.
-    pub(crate) fn try_reopen(&mut self, layout: Layout, native_twice: bool) -> Result<(), String> {
+    pub(crate) fn try_reopen(&mut self, native_twice: bool) -> Result<(), String> {
         let root = self
             .try_checkpoint()
             .map_err(|error| format!("{error:?}"))?;
@@ -794,7 +791,6 @@ impl Embedder {
             self.bounds,
             &root,
             Box::new(self.source.clone()),
-            layout,
         )
         .map_err(|error| format!("{error:?}"))?;
         self.library = library;
@@ -824,14 +820,13 @@ impl Embedder {
     }
 
     /// Opens `root`, a checkpoint of this run, cold in another machine.
-    pub(crate) fn open_at(&mut self, root: &CheckpointRoot, layout: Layout, native_twice: bool) {
+    pub(crate) fn open_at(&mut self, root: &CheckpointRoot, native_twice: bool) {
         let (program, library) = self.program(native_twice);
         self.machine = crate::KernelMachine::open_in(
             program,
             self.bounds,
             root,
             Box::new(self.source.clone()),
-            layout,
         )
         .unwrap();
         self.library = library;
@@ -965,7 +960,6 @@ pub(crate) fn start_machine(
         program,
         bounds,
         start,
-        crate::compile::Layout::default(),
         Box::new(Source::default()),
         census(),
     )

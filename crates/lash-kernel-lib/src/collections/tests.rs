@@ -53,12 +53,7 @@ fn program(source: &str) -> Program {
     )
 }
 fn machine(source: &str) -> KernelMachine {
-    crate::testsupport::start(
-        program(source),
-        BOUNDS,
-        lash_kernel_vm::kernel_internals::Layout::default(),
-    )
-    .unwrap()
+    crate::testsupport::start(program(source), BOUNDS).unwrap()
 }
 fn run(source: &str) -> End {
     let mut machine = machine(source);
@@ -554,7 +549,6 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
                     charge_limit: 1_000_000_000,
                     ..BOUNDS
                 },
-                lash_kernel_vm::kernel_internals::Layout::default(),
             )
             .unwrap();
             let Step::Ended(End::Finished(done)) =
@@ -670,7 +664,6 @@ fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
                 charge_limit: 1_000_000_000,
                 ..BOUNDS
             },
-            lash_kernel_vm::kernel_internals::Layout::default(),
         )
         .unwrap();
         let Step::Ended(End::Finished(done)) =
@@ -872,7 +865,7 @@ fn callback_law(source: &str, expected: Datum, expected_effects: usize) {
     let mut warm = None;
     for cold in [false, true] {
         let pages = crate::testsupport::Source::default();
-        let mut machine = lash_kernel_vm::kernel_internals::start_with_layout(
+        let mut machine = <lash_kernel_vm::KernelMachine as lash_kernel_vm::Machine>::start(
             prepare(),
             BOUNDS,
             lash_kernel_vm::CellStart {
@@ -883,7 +876,6 @@ fn callback_law(source: &str, expected: Datum, expected_effects: usize) {
                 modes: Default::default(),
                 host: Vec::new(),
             },
-            lash_kernel_vm::kernel_internals::Layout::default(),
             Box::new(pages.clone()),
         )
         .unwrap();
@@ -1295,12 +1287,7 @@ fn recorded_iteration(shard: &str) {
             Arc::new(document),
             lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
         );
-        let mut machine = crate::testsupport::start(
-            program,
-            BOUNDS,
-            lash_kernel_vm::kernel_internals::Layout::default(),
-        )
-        .unwrap();
+        let mut machine = crate::testsupport::start(program, BOUNDS).unwrap();
         let mut world = World::default();
         let Step::Ended(End::Finished(done)) = machine.run(&mut world, u64::MAX).unwrap() else {
             panic!("self-contained iteration case did not finish")
@@ -1535,12 +1522,7 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
         exercised.insert(*id);
         let program = program(&format!("main {{ return {name}({args}) }}"));
         for temperature in ["cold", "warm"] {
-            let mut machine = crate::testsupport::start(
-                program.clone(),
-                BOUNDS,
-                lash_kernel_vm::kernel_internals::Layout::default(),
-            )
-            .unwrap();
+            let mut machine = crate::testsupport::start(program.clone(), BOUNDS).unwrap();
             let Step::Ended(end) = machine.run(&mut World::default(), u64::MAX).unwrap() else {
                 panic!("{name} must end")
             };

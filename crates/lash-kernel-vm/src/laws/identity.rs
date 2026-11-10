@@ -15,11 +15,11 @@ use lash_kernel_state::paged::SealBudget;
 use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, Setup, int, result};
-use crate::{Layout, Machine, MachineError, Step};
+use crate::{Machine, MachineError, Step};
 use lash_kernel_state::semantic::{Checkpoint, checkpoint};
 
 /// `probe.wrap(x)` answers `[x]`. Its native allocates that list alone;
-/// its body, which layout 3 runs, allocates two lists before it.
+/// its body allocates two lists before it.
 struct Wrap;
 impl NativeFunction for Wrap {
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -32,6 +32,21 @@ fn wrap(
     registry: &mut FunctionRegistry,
     _: &BTreeMap<&'static str, FunctionId>,
 ) -> Vec<(&'static str, FunctionId)> {
+    wrap_registered(registry, true)
+}
+
+/// `probe.wrap` registered without its native: its body runs.
+fn wrap_body(
+    registry: &mut FunctionRegistry,
+    _: &BTreeMap<&'static str, FunctionId>,
+) -> Vec<(&'static str, FunctionId)> {
+    wrap_registered(registry, false)
+}
+
+fn wrap_registered(
+    registry: &mut FunctionRegistry,
+    native: bool,
+) -> Vec<(&'static str, FunctionId)> {
     let definition = parse_definition(
         "function probe.wrap(x: Any) -> Any\nkernel 1\ncharge 1\nnative\n\
          body { let t = [x, x] let u = [t, t] return [x] }\n",
@@ -40,7 +55,10 @@ fn wrap(
     vec![(
         "probe.wrap",
         registry
-            .register(definition, Some(std::sync::Arc::new(Wrap)))
+            .register(
+                definition,
+                native.then(|| std::sync::Arc::new(Wrap) as std::sync::Arc<dyn NativeFunction>),
+            )
             .unwrap(),
     )]
 }
@@ -57,13 +75,13 @@ main {
 }
 "#;
 
-/// The checkpoint of `WRAPPED` at its park, run under `layout`.
-fn parked(layout: Layout) -> Checkpoint {
+/// The checkpoint of `WRAPPED` at its park, with `probe.wrap`'s native
+/// registered or its body run.
+fn parked(native: bool) -> Checkpoint {
     let mut embedder = Embedder::with(
         WRAPPED,
         Setup {
-            layout,
-            probes: Some(wrap),
+            probes: Some(if native { wrap } else { wrap_body }),
             ..Setup::default()
         },
     );
@@ -72,14 +90,14 @@ fn parked(layout: Layout) -> Checkpoint {
     checkpoint(&root, Box::new(embedder.source.clone())).unwrap()
 }
 
-/// PLAN-INDEP over ids (seam C): layout 3 runs the probe's body, which
-/// allocates temporaries its native does not, and the parked checkpoint
-/// is the one layout 0 parks, ids included, in its continuation bytes and
+/// PLAN-INDEP over ids (seam C): the probe's body allocates temporaries
+/// its native does not, and the parked checkpoint is the one the native
+/// parks, ids included, in its continuation bytes and
 /// in its graph.
 #[test]
 fn a_body_s_temporaries_shift_no_durable_id() {
-    let native = parked(Layout(0));
-    let body = parked(Layout(3));
+    let native = parked(true);
+    let body = parked(false);
     assert!(native.ids().len() >= 4, "{:?}", native.ids());
     assert_eq!(native.ids(), body.ids());
     assert_eq!(native, body);
@@ -147,14 +165,8 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
     scheduler_seals_agree();
     control_seals_agree();
     helper_seals_agree();
-    let start = |layout| {
-        let mut embedder = Embedder::with(
-            RETAINED,
-            Setup {
-                layout,
-                ..Setup::default()
-            },
-        );
+    let start = || {
+        let mut embedder = Embedder::with(RETAINED, Setup::default());
         super::observe::fully_observe(&mut embedder.machine);
 
         assert!(matches!(embedder.run(), Step::Parked(_)));
@@ -163,13 +175,13 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
 
         embedder
     };
-    let mut whole = start(Layout(0));
+    let mut whole = start();
     let root = whole.checkpoint();
     let expected = checkpoint(&root, Box::new(whole.source.clone())).unwrap();
     let expected_charge = whole.machine.meters().charged;
     let expected_work = whole.machine.work();
 
-    let mut budgeted = start(Layout(0));
+    let mut budgeted = start();
     assert_eq!(budgeted.machine.meters().charged, expected_charge);
     assert_eq!(budgeted.machine.work(), expected_work);
     let tight = SealBudget { pages: 1, bytes: 1 };
@@ -198,7 +210,7 @@ fn a_seal_out_of_budget_holds_the_run_until_it_completes() {
     let saved = checkpoint(&root, Box::new(budgeted.source.clone())).unwrap();
     assert_eq!(saved.ids(), expected.ids());
     assert_eq!(saved, expected);
-    budgeted.open_at(&root, Layout(2), true);
+    budgeted.open_at(&root, true);
     assert_eq!(budgeted.machine.semantic_checkpoint(), saved);
     assert!(
         budgeted.machine.work().is_none(),
@@ -213,11 +225,10 @@ fn control_seals_agree() {
     let source = super::layout::control_document(
         "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, true) return flat.add(value, apply bump())",
     );
-    let run = |layout, budgeted| {
+    let run = |budgeted| {
         let mut embedder = Embedder::with(
             &source,
             Setup {
-                layout,
                 probes: Some(super::layout::scalar_probes),
                 ..Setup::default()
             },
@@ -264,7 +275,7 @@ fn control_seals_agree() {
                     };
                     let root = crate::kernel_internals::sealed_root(&sealed).clone();
                     let seen = checkpoint(&root, Box::new(embedder.source.clone())).unwrap();
-                    embedder.open_at(&root, layout, true);
+                    embedder.open_at(&root, true);
                     assert_eq!(embedder.machine.semantic_checkpoint(), seen);
                     saved.push(seen);
                     embedder.machine.record_charges(tape.clone());
@@ -274,14 +285,13 @@ fn control_seals_agree() {
         };
         (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
     };
-    let reference = run(Layout(0), false);
+    let reference = run(false);
     assert_eq!(
         reference.1.len(),
         3,
         "two loop parks and the wide call's operand park"
     );
-    assert_eq!(run(Layout(0), true), reference);
-    assert_eq!(run(Layout(2), true), reference);
+    assert_eq!(run(true), reference);
 }
 
 // K-EVAL-008 / K-TASK-017: a waiting or cancelling task owns the same
@@ -289,14 +299,8 @@ fn control_seals_agree() {
 fn scheduler_seals_agree() {
     for cancel in [false, true] {
         let source = super::scheduler::document(cancel);
-        let run = |layout: Layout, bounded: bool| {
-            let mut embedder = Embedder::with(
-                &source,
-                Setup {
-                    layout,
-                    ..Setup::default()
-                },
-            );
+        let run = |bounded: bool| {
+            let mut embedder = Embedder::with(&source, Setup::default());
 
             let mut saved = Vec::new();
 
@@ -340,7 +344,7 @@ fn scheduler_seals_agree() {
                         };
                         let root = crate::kernel_internals::sealed_root(&sealed).clone();
                         let seen = checkpoint(&root, Box::new(embedder.source.clone())).unwrap();
-                        embedder.open_at(&root, layout, true);
+                        embedder.open_at(&root, true);
                         assert_eq!(embedder.machine.semantic_checkpoint(), seen);
                         saved.push(seen);
 
@@ -356,18 +360,17 @@ fn scheduler_seals_agree() {
                 embedder.machine.meters().charged,
             )
         };
-        let reference = run(Layout(0), false);
+        let reference = run(false);
         assert!(!reference.1.is_empty());
-        assert_eq!(run(Layout(0), true), reference);
+        assert_eq!(run(true), reference);
     }
 }
 
 fn helper_seals_agree() {
-    let run = |layout, budgeted| {
+    let run = |budgeted| {
         let mut embedder = Embedder::with(
             super::layout::HELPERS,
             Setup {
-                layout,
                 probes: Some(super::layout::helper_probes),
                 ..Setup::default()
             },
@@ -411,7 +414,7 @@ fn helper_seals_agree() {
                         }
                     };
                     let seen = checkpoint(&root, Box::new(embedder.source.clone())).unwrap();
-                    embedder.open_at(&root, layout, true);
+                    embedder.open_at(&root, true);
                     assert_eq!(embedder.machine.semantic_checkpoint(), seen);
                     saved.push(seen);
                     embedder.machine.record_charges(tape.clone());
@@ -423,13 +426,13 @@ fn helper_seals_agree() {
 
         (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
     };
-    let reference = run(Layout(0), false);
+    let reference = run(false);
     assert_eq!(
         reference.1.len(),
         5,
         "library continuation, catch, both finally departures, captured cells"
     );
-    let actual = run(Layout(0), true);
+    let actual = run(true);
     for (actual, expected) in actual.1.iter().zip(&reference.1) {
         assert_eq!(actual.ids(), expected.ids());
     }
