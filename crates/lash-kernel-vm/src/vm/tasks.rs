@@ -716,16 +716,27 @@ impl<H: Heap> Vm<H> {
     // --- Actions.
 
     /// Action `n` of `unit`, its operands on the stack: what the running
-    /// task's step ends with (`K-MACH-002`).
-    pub(super) fn act(&mut self, host: &mut dyn Host, unit: &Unit, n: u32) -> Run<Option<Stop>> {
+    /// task's step ends with (`K-MACH-002`). An action run again after a
+    /// cold load (`rerun`) has counted its entry.
+    pub(super) fn act(
+        &mut self,
+        host: &mut dyn Host,
+        unit: &Unit,
+        n: u32,
+        rerun: bool,
+    ) -> Run<Option<Stop>> {
         let mark = Arc::clone(&unit.action_marks[n as usize]);
         match &unit.actions[n as usize] {
             ActionSite::Join { site }
             | ActionSite::JoinMany { site, .. }
             | ActionSite::Yield { site }
             | ActionSite::Cancel { site }
-            | ActionSite::CancelEffect { site } => self.entered(host, unit, &mark, site)?,
-            ActionSite::Perform { .. } | ActionSite::Spawn { .. } => {}
+            | ActionSite::CancelEffect { site }
+                if !rerun =>
+            {
+                self.entered(host, unit, &mark, site)?
+            }
+            _ => {}
         }
         match &unit.actions[n as usize] {
             ActionSite::Perform {

@@ -1383,7 +1383,7 @@ impl<H: Heap> Vm<H> {
                     }
                     _ => {
                         sync!(pc);
-                        match self.operate(host, &program, unit, op)? {
+                        match self.operate(host, &program, unit, op, rerun)? {
                             Some(stop) => return Ok(stop),
                             None => continue 'frames,
                         }
@@ -1420,6 +1420,7 @@ impl<H: Heap> Vm<H> {
         program: &Program,
         unit: &Unit,
         op: Op,
+        rerun: bool,
     ) -> Run<Option<Stop>> {
         match op {
             Op::CellGet(n) => {
@@ -1608,7 +1609,7 @@ impl<H: Heap> Vm<H> {
             Op::Action(n) => {
                 self.meter.leave();
                 self.exact = true;
-                if let Some(stop) = self.act(host, unit, n)? {
+                if let Some(stop) = self.act(host, unit, n, rerun)? {
                     return Ok(Some(stop));
                 }
             }
