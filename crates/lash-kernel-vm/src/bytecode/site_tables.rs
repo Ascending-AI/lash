@@ -282,6 +282,10 @@ pub(crate) fn build(unit: &Unit) -> SiteTable {
         let Some(stack) = &stacks[pc] else {
             continue;
         };
+        if !unit.slices(pc) && !matches!(op, Op::Call(_) | Op::Action(_)) {
+            continue;
+        }
+        let stack = stack.to_vec();
         let next = pc as u32 + 1;
         if unit.slices(pc) {
             let phase = match op {
@@ -489,47 +493,31 @@ fn slots(unit: &Unit, root: &Path) -> (Vec<Local>, Vec<u16>, Vec<LoopState>) {
 /// lowered. Where paths meet with different producers, a value is the
 /// innermost expression both are under: the conditional, `and` or `or`
 /// whose branches produced it. `None` where the stack is malformed.
-fn stacks(unit: &Unit, origin: &impl Fn(usize) -> Path) -> Option<Vec<Option<Vec<Path>>>> {
+fn stacks(unit: &Unit, origin: &impl Fn(usize) -> Path) -> Option<Vec<Option<Stack>>> {
     let len = unit.ops.len();
-    let mut seen: Vec<Option<Vec<Path>>> = vec![None; len];
-    let mut work = vec![(0usize, Vec::<Path>::new())];
+    let mut seen: Vec<Option<Stack>> = vec![None; len];
+    let mut work = vec![(0usize, Stack::default())];
     if let Some(cleanup) = unit.cleanup {
         let raised = cleanup.raised as usize;
-        work.push((raised, vec![origin(raised)]));
+        work.push((raised, Stack::default().push(origin(raised))));
     }
     while let Some((pc, stack)) = work.pop() {
         let known = seen.get_mut(pc)?;
         let stack = match known {
             None => stack,
-            Some(known) => {
-                if known.len() != stack.len() {
-                    return None;
-                }
-                let mut changed = false;
-                for (held, incoming) in known.iter_mut().zip(&stack) {
-                    let shared = held
-                        .iter()
-                        .zip(incoming.iter())
-                        .take_while(|(a, b)| a == b)
-                        .count();
-                    if shared < held.len() {
-                        *held = held[..shared].into();
-                        changed = true;
-                    }
-                }
-                if !changed {
-                    continue;
-                }
-                known.clone()
-            }
+            Some(known) => match known.meet(&stack)? {
+                None => continue,
+                Some(met) => met,
+            },
         };
         seen[pc] = Some(stack.clone());
         let op = unit.ops[pc];
         let (pops, pushes) = unit.effect(op);
-        let mut after = stack.clone();
-        after.truncate(after.len().checked_sub(pops as usize)?);
-        after.extend((0..pushes).map(|_| origin(pc)));
-        let mut go = |to: usize, stack: Vec<Path>| work.push((to, stack));
+        let mut after = stack.pop(pops as usize)?;
+        for _ in 0..pushes {
+            after = after.push(origin(pc));
+        }
+        let mut go = |to: usize, stack: Stack| work.push((to, stack));
         match op {
             Op::Return | Op::Fall | Op::Raise | Op::Finish | Op::Fail | Op::Unavailable(_) => {}
             Op::Leave(_) | Op::Deopt(_) => {}
@@ -541,9 +529,7 @@ fn stacks(unit: &Unit, origin: &impl Fn(usize) -> Path) -> Option<Vec<Option<Vec
             // A raise truncates to the depth at entry and pushes the
             // raised value, which the `try` stands for.
             Op::TryEnter(to) => {
-                let mut caught = after.clone();
-                caught.push(origin(pc));
-                go(to as usize, caught);
+                go(to as usize, after.push(origin(pc)));
                 go(pc + 1, after);
             }
             Op::ForNext(n) | Op::ProtoMore(n) => {
@@ -566,4 +552,102 @@ fn stacks(unit: &Unit, origin: &impl Fn(usize) -> Path) -> Option<Vec<Option<Vec
         }
     }
     Some(seen)
+}
+
+/// An abstract operand stack, top first, sharing what lies below a push:
+/// the walk keeps one before every op, so a copy must not cost its depth.
+#[derive(Clone, Default)]
+struct Stack(Option<Arc<Node>>);
+
+struct Node {
+    path: Path,
+    len: usize,
+    below: Stack,
+}
+
+impl Drop for Node {
+    // Iterative, so a deep stack's last owner does not recurse its depth.
+    fn drop(&mut self) {
+        let mut below = self.below.0.take();
+        while let Some(node) = below {
+            match Arc::try_unwrap(node) {
+                Ok(mut node) => below = node.below.0.take(),
+                Err(_) => break,
+            }
+        }
+    }
+}
+
+impl Stack {
+    fn len(&self) -> usize {
+        self.0.as_ref().map_or(0, |node| node.len)
+    }
+
+    fn push(&self, path: Path) -> Self {
+        Self(Some(Arc::new(Node {
+            path,
+            len: self.len() + 1,
+            below: self.clone(),
+        })))
+    }
+
+    /// The stack below its top `n`; `None` when it holds fewer.
+    fn pop(&self, n: usize) -> Option<Self> {
+        let mut at = self;
+        for _ in 0..n {
+            at = &at.0.as_ref()?.below;
+        }
+        Some(at.clone())
+    }
+
+    /// Bottom first.
+    fn to_vec(&self) -> Vec<Path> {
+        let mut paths = Vec::with_capacity(self.len());
+        let mut at = &self.0;
+        while let Some(node) = at {
+            paths.push(node.path.clone());
+            at = &node.below.0;
+        }
+        paths.reverse();
+        paths
+    }
+
+    /// Where two branches meet: each value by the longest coordinate both
+    /// give it. `None` (outer) when their depths differ; `Some(None)` when
+    /// `incoming` changes nothing.
+    fn meet(&self, incoming: &Self) -> Option<Option<Self>> {
+        if self.len() != incoming.len() {
+            return None;
+        }
+        // Down to where both share their nodes, which agree below.
+        let mut tops = Vec::new();
+        let mut changed = false;
+        let (mut held, mut other) = (self, incoming);
+        while let (Some(a), Some(b)) = (&held.0, &other.0) {
+            if Arc::ptr_eq(a, b) {
+                break;
+            }
+            let shared = a
+                .path
+                .iter()
+                .zip(b.path.iter())
+                .take_while(|(x, y)| x == y)
+                .count();
+            if shared < a.path.len() {
+                changed = true;
+                tops.push(Path::from(&a.path[..shared]));
+            } else {
+                tops.push(a.path.clone());
+            }
+            (held, other) = (&a.below, &b.below);
+        }
+        if !changed {
+            return Some(None);
+        }
+        let mut met = held.clone();
+        for path in tops.into_iter().rev() {
+            met = met.push(path);
+        }
+        Some(Some(met))
+    }
 }
