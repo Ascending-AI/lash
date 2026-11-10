@@ -980,7 +980,39 @@ fn apply_mail(tx: &FencedTx<'_>, writes: MailTx, now: DurableInstant) -> Flow<Ma
             }
         }
     }
+    let retired = retired_woken(tx, &writes, &receipt)?;
+    if !retired.is_empty() {
+        return refuse(writes.retired_refusal(retired));
+    }
     commit(receipt)
+}
+
+/// The actors `receipt` woke that are in one of `writes`' retired sets,
+/// read inside the commit that would wake them.
+fn retired_woken(
+    tx: &Connection,
+    writes: &MailTx,
+    receipt: &MailCommit,
+) -> rusqlite::Result<Vec<lash_durable::RetiredActor>> {
+    let mut found = Vec::new();
+    if writes.retired().is_empty() {
+        return Ok(found);
+    }
+    let mut statement = tx.statement(SQL.actor.formats_of.sql())?;
+    for woken in &receipt.woken {
+        let formats = statement
+            .query_row([woken.actor.as_str()], |row| row.get::<_, String>(0))
+            .optional()?;
+        if let Some(set) =
+            formats.and_then(|formats| writes.retired().iter().find(|set| set.as_str() == formats))
+        {
+            found.push(lash_durable::RetiredActor {
+                actor: woken.actor.clone(),
+                formats: set.clone(),
+            });
+        }
+    }
+    Ok(found)
 }
 
 #[async_trait::async_trait]

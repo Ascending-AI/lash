@@ -815,8 +815,9 @@ async fn dump_postgres(url: &str) -> std::collections::BTreeMap<String, Vec<Stri
 }
 
 /// Session `SESSION` idles in build N's formats over `stores`; the closing
-/// build then refuses to start, naming it, and every row `dump` reads is as
-/// it was before the refused start. Answers the set the session is in.
+/// build then refuses to start, naming it, its stopped core refuses a send
+/// to the session, and every row `dump` reads is as it was before the
+/// refused start. Answers the set the session is in.
 async fn the_closing_build_refuses_unchanged<F, D>(
     stores: &Arc<dyn StoreSet>,
     session_actor: &ActorKey,
@@ -837,6 +838,11 @@ where
     let stopped = tokio::time::timeout(Duration::from_secs(60), refusing.node_stopped())
         .await
         .expect("the closing build's node stops within a minute");
+    let sent = session(&refusing, session_actor.id())
+        .await
+        .send(lash::TurnInput::text("a send no node serves"))
+        .await
+        .map(|_| ());
     drop(refusing);
     let after = dump().await;
     let changed: Vec<_> = before
@@ -847,8 +853,22 @@ where
         .collect();
     assert!(
         changed.is_empty(),
-        "the refused start changed rows of {changed:?}"
+        "the refused start and send changed rows of {changed:?}"
     );
+    match sent {
+        Err(lash::EmbedError::Durable(lash::durable::DurableError::RetiredStateRemains {
+            remaining: 1,
+            found,
+            ..
+        })) => assert_eq!(
+            found
+                .iter()
+                .map(|found| (&found.actor, &found.formats))
+                .collect::<Vec<_>>(),
+            [(session_actor, &written)]
+        ),
+        other => panic!("the stopped core admitted a send to a retired session: {other:?}"),
+    }
     match stopped {
         Some(Err(lash::durable::DurableError::RetiredStateRemains {
             remaining,

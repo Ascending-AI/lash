@@ -1291,8 +1291,23 @@ pub(crate) async fn forsake(target: SendTarget, id: TurnId) -> Result<Forsaking>
 /// admission would refuse it. Either way nothing is created.
 async fn send_context(target: &SendTarget, ids: &[&str]) -> Result<SendContext> {
     let session_id = match target.context().await {
+        Ok(context) => {
+            // A send to a session this build retires would wait on a turn no
+            // node of it runs (ADR 0115 §8).
+            if let Ok(actor) =
+                lash_core::durable_port::ActorKey::session(target.session_id().as_str())
+            {
+                context
+                    .parts
+                    .effect_host
+                    .backend()
+                    .refuse_retired(&actor)
+                    .await?;
+            }
+            return Ok(context);
+        }
         Err(EmbedError::UnknownSession { session_id }) => session_id,
-        context => return context,
+        Err(error) => return Err(error),
     };
     let store = target.uncreated_store()?;
     for id in ids {

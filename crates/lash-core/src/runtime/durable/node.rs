@@ -164,7 +164,7 @@ async fn redrive_session_parks(backend: &Backend) {
     }));
     match backend
         .durable()
-        .commit_mail(tx, CommitLabel::MAIL_SESSION)
+        .commit_mail(backend.fence_mail(tx), CommitLabel::MAIL_SESSION)
         .await
     {
         Ok(commit) => {

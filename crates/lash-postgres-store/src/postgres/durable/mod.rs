@@ -1003,7 +1003,40 @@ async fn apply_mail(
             }
         }
     }
+    let retired = retired_woken(tx, writes, &receipt).await?;
+    if !retired.is_empty() {
+        return Err(writes.retired_refusal(retired));
+    }
     Ok(receipt)
+}
+
+/// The actors `receipt` woke that are in one of `writes`' retired sets,
+/// read inside the commit that would wake them.
+async fn retired_woken(
+    tx: &mut GuardedTx<'_>,
+    writes: &MailTx,
+    receipt: &MailCommit,
+) -> Result<Vec<lash_durable::RetiredActor>, DurableError> {
+    let mut found = Vec::new();
+    if writes.retired().is_empty() {
+        return Ok(found);
+    }
+    for woken in &receipt.woken {
+        let formats: Option<(String,)> = crate::observed_sql::query_as(SQL.actor.formats_of.sql())
+            .bind(woken.actor.as_str())
+            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(sqlx_failure)?;
+        if let Some(set) = formats
+            .and_then(|(formats,)| writes.retired().iter().find(|set| set.as_str() == formats))
+        {
+            found.push(lash_durable::RetiredActor {
+                actor: woken.actor.clone(),
+                formats: set.clone(),
+            });
+        }
+    }
+    Ok(found)
 }
 
 #[async_trait::async_trait]

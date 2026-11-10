@@ -98,7 +98,7 @@ pub async fn request_session_close(
         );
         match backend
             .durable()
-            .commit_mail(tx, CommitLabel::MAIL_SESSION)
+            .commit_mail(backend.fence_mail(tx), CommitLabel::MAIL_SESSION)
             .await
         {
             Ok(_) => return Ok(SessionCloseRequested::Requested),
@@ -133,7 +133,7 @@ pub async fn request_session_close(
             );
         match backend
             .durable()
-            .commit_mail(tx, CommitLabel::MAIL_SESSION)
+            .commit_mail(backend.fence_mail(tx), CommitLabel::MAIL_SESSION)
             .await
         {
             Ok(_) => return Ok(SessionCloseRequested::Requested),
@@ -162,7 +162,7 @@ pub async fn request_first_session_close(
     tx.append(actor, MailKind::new(SESSION_CLOSE_MAIL), String::new());
     match backend
         .durable()
-        .commit_mail(tx, CommitLabel::MAIL_SESSION)
+        .commit_mail(backend.fence_mail(tx), CommitLabel::MAIL_SESSION)
         .await
     {
         Ok(_) => Ok(SessionCloseRequested::Requested),

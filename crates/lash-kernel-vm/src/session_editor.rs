@@ -62,7 +62,15 @@ struct Saved {
     function: RunFunction,
     value: Value,
     object: ObjectId,
-    relinked: Option<lash_kernel_value::CallableId>,
+    relinked: Option<Relinked>,
+}
+
+/// What a saved function's object runs once the session is sealed: a
+/// callable under another Link and, for a succession onto a rewritten
+/// document, where its creation site went.
+struct Relinked {
+    callable: lash_kernel_value::CallableId,
+    sites: Option<lash_kernel_doc::Correspondence>,
 }
 
 /// A carried session opened for its host.
@@ -400,31 +408,44 @@ impl SessionEditor {
             return Ok(false);
         };
         saved.function.description = description.to_vec();
-        saved.relinked = Some(callable);
+        saved.relinked = Some(Relinked {
+            callable,
+            sites: None,
+        });
         self.changed = true;
         Ok(true)
     }
 
-    /// Carries the saved function `name` through a proved kernel rewrite.
+    /// Carries the saved function `name` through a proved kernel rewrite
+    /// of its document: `callable` under the successor Link, the same
+    /// object, its creation site carried by `correspondence`, described by
+    /// `description`. Answers whether the session held it.
     ///
     /// # Errors
     ///
-    /// [`HeapFault::Malformed`] when the session holds `name`: a saved
-    /// function's succession on the bytecode core waits on the run
-    /// rewrite's session form.
+    /// None here; [`seal`](Self::seal) refuses a creation site
+    /// `correspondence` does not carry.
     pub fn succeed_function(
         &mut self,
         name: &Name,
-        _description: &[u8],
-        _callable: lash_kernel_value::CallableId,
-        _correspondence: &lash_kernel_doc::Correspondence,
+        description: &[u8],
+        callable: lash_kernel_value::CallableId,
+        correspondence: &lash_kernel_doc::Correspondence,
     ) -> Result<bool, HeapFault> {
-        if self.saved.iter().any(|saved| saved.function.name == *name) {
-            return Err(HeapFault::Malformed(format!(
-                "the saved function `{name}` has no succession on the bytecode core"
-            )));
-        }
-        Ok(false)
+        let Some(saved) = self
+            .saved
+            .iter_mut()
+            .find(|saved| saved.function.name == *name)
+        else {
+            return Ok(false);
+        };
+        saved.function.description = description.to_vec();
+        saved.relinked = Some(Relinked {
+            callable,
+            sites: Some(correspondence.clone()),
+        });
+        self.changed = true;
+        Ok(true)
     }
 
     /// Drops the saved function `name` (RELINK-CLOSURE). Answers whether
@@ -461,19 +482,28 @@ impl SessionEditor {
             crate::paged::SealError::Heap(fault) => fault,
             other => HeapFault::Malformed(other.to_string()),
         })?;
-        let relinked: Vec<(ObjectId, lash_kernel_value::CallableId)> = heap.roots[names.len()..]
+        let relinked: Vec<(ObjectId, &Relinked)> = heap.roots[names.len()..]
             .iter()
             .zip(&saved)
-            .filter_map(|(root, saved)| Some((root.id()?, saved.relinked?)))
+            .filter_map(|(root, saved)| Some((root.id()?, saved.relinked.as_ref()?)))
             .collect();
         if !relinked.is_empty() {
             let mut rows = Directory::over(heap.directory, self.directory()?.access().clone());
-            for (id, callable) in relinked {
+            for (id, relinked) in relinked {
+                let callable = relinked.callable;
                 let mut row = rows
                     .get(id)?
                     .ok_or_else(|| HeapFault::Malformed(format!("object {} has no row", id.0)))?;
                 match &mut row.record {
                     Record::Closure { code, .. } => {
+                        if let Some(sites) = &relinked.sites {
+                            code.site = sites.successor(&code.site).cloned().ok_or_else(|| {
+                                HeapFault::Malformed(format!(
+                                    "the succession carries no successor of object {}'s creation site",
+                                    id.0
+                                ))
+                            })?;
+                        }
                         code.callable = callable;
                         code.link = callable.link;
                     }
