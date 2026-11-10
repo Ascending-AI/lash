@@ -90,6 +90,16 @@ pub struct PageRef {
     pub grant: PageGrant,
 }
 
+/// The root of a sealed payload tree (text, bytes or integer digits) and
+/// the logical identity its content commits to (contract §6 "Long text
+/// identity"): every reader checks each node it consumes against the id
+/// its parent committed, starting from this one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PayloadRoot {
+    pub page: PageRef,
+    pub id: [u8; 32],
+}
+
 /// Bytes as the kernel's deterministic memory metric counts them
 /// (`K-BND-003`): logical occurrence pricing, never resident, physical or
 /// encoded bytes.
@@ -111,23 +121,23 @@ pub const PAYLOAD_LEAF_BYTES: u64 = 4_096;
 /// `Arc` and shared by every copy of the value, never inlined in each
 /// [`PageValue`] (`docs/design/vm-value-layout.md`).
 #[derive(Debug)]
-pub enum Payload<T: ?Sized> {
+pub enum Payload<T: ?Sized, R = PageRef> {
     /// At most [`IMMUTABLE_INLINE_MAX`] bytes, or a value built in this
     /// activation and not yet placed in pages.
     Resident(Arc<T>),
     /// A sealed payload tree. Reading it can fault. Build one with
     /// [`Payload::paged`].
-    Paged(Arc<PageRef>),
+    Paged(Arc<R>),
 }
 
-impl<T: ?Sized> Payload<T> {
-    /// The payload of the sealed tree at `page`.
-    pub fn paged(page: PageRef) -> Self {
-        Self::Paged(Arc::new(page))
+impl<T: ?Sized, R> Payload<T, R> {
+    /// The payload of the sealed tree at `root`.
+    pub fn paged(root: R) -> Self {
+        Self::Paged(Arc::new(root))
     }
 }
 
-impl<T: ?Sized> Clone for Payload<T> {
+impl<T: ?Sized, R> Clone for Payload<T, R> {
     fn clone(&self) -> Self {
         match self {
             Self::Resident(payload) => Self::Resident(Arc::clone(payload)),
@@ -244,11 +254,11 @@ impl Drop for NormalKeyCache {
 pub enum TextPayload {
     Resident(Arc<str>),
     Borrowed(lash_kernel_value::tokens::TokenText),
-    Paged(Arc<PageRef>),
+    Paged(Arc<PayloadRoot>),
 }
 impl TextPayload {
-    pub fn paged(page: PageRef) -> Self {
-        Self::Paged(Arc::new(page))
+    pub fn paged(root: PayloadRoot) -> Self {
+        Self::Paged(Arc::new(root))
     }
     pub fn resident(&self) -> Option<&str> {
         match self {
@@ -273,7 +283,7 @@ pub struct TextRef {
 pub struct BytesRef {
     pub normal: NormalKeyCache,
     pub len: u64,
-    pub body: Payload<[u8]>,
+    pub body: Payload<[u8], PayloadRoot>,
 }
 
 /// The authenticated facts of an integer, in its descriptor.
@@ -293,7 +303,7 @@ pub enum IntRef {
     Paged {
         normal: NormalKeyCache,
         summary: IntSummary,
-        digits: Arc<PageRef>,
+        digits: Arc<PayloadRoot>,
     },
 }
 

@@ -802,6 +802,33 @@ impl Heap for SlotHeap {
             .filter(|(id, _)| self.arena.entity_handle(open::entity(*id)).is_none())
             .map(|(id, opening)| (id, super::meter::body(&opening.placeholder())))
             .collect();
+        // An immutable's row must be the object every referrer's head
+        // certifies, before the run sees a word of it. A payload's row
+        // commits its counts and root id, so it is compared before any
+        // page is read, and its read checks every edge against that id.
+        let head = self
+            .arena
+            .facts(object)
+            .map_err(|error| malformed(error.to_string()))?
+            .head()
+            .cloned();
+        macro_rules! refuse {
+            ($held:expr) => {{
+                let reason = format!(
+                    "a row disagrees with the head its referrers name it by: {:?}",
+                    $held
+                );
+                LoadError::Store(self.durable.as_ref().map_or_else(
+                    || HeapFault::Malformed(reason.clone()),
+                    |durable| durable.corrupt(reason.clone()),
+                ))
+            }};
+        }
+        if let (Some(head), Record::Paged(paged)) = (&head, &row.record)
+            && *head != paged.head()
+        {
+            return Err(refuse!(paged.head()));
+        }
         // A text or bytes past one payload leaf opens whole, read from its
         // payload tree once its growth is admitted.
         let paged = match &row.record {
@@ -835,23 +862,12 @@ impl Heap for SlotHeap {
                 self.place(handle, units);
             }
         }
-        // An immutable's row must be the object every referrer's head
-        // certifies, before the run sees a word of it.
-        let head = self
-            .arena
-            .facts(object)
-            .map_err(|error| malformed(error.to_string()))?
-            .head()
-            .cloned();
-        if let Some(head) = head {
+        if let Some(head) = head
+            && paged.is_none()
+        {
             let held = self.arena.detached_head(&body);
             if held.as_ref().ok() != Some(&head) {
-                let reason =
-                    format!("a row disagrees with the head its referrers name it by: {held:?}");
-                return Err(LoadError::Store(self.durable.as_ref().map_or_else(
-                    || HeapFault::Malformed(reason.clone()),
-                    |durable| durable.corrupt(reason.clone()),
-                )));
+                return Err(refuse!(held));
             }
         }
         self.arena

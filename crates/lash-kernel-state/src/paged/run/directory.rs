@@ -75,7 +75,7 @@ impl Cell for Row {
                 out.extend(chunked.parts.iter().map(|part| part.page));
                 out.extend(chunked.edges.iter().map(|part| part.page));
             }
-            Record::Paged(paged) => out.push(paged.page),
+            Record::Paged(paged) => out.push(paged.root.page),
             _ => {}
         }
     }
@@ -89,7 +89,7 @@ impl Cell for Row {
                     super::super::tree::grant(&mut part.page, children)?;
                 }
             }
-            Record::Paged(paged) => super::super::tree::grant(&mut paged.page, children)?,
+            Record::Paged(paged) => super::super::tree::grant(&mut paged.root.page, children)?,
             _ => {}
         }
         Ok(())

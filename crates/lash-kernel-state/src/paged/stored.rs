@@ -611,7 +611,7 @@ pub mod reads {
                 let int = integer_from_digits(summary.negative, &out);
                 if int.bits() != summary.bits || int.is_negative() != summary.negative {
                     return Err(HeapFault::Corrupt {
-                        page: digits.id,
+                        page: digits.page.id,
                         reason: "integer summary mismatch".into(),
                     });
                 }

@@ -791,9 +791,12 @@ fn logical_prices_ignore_residency_and_reject_understated_summaries() {
     use lash_kernel_value::tokens::{decode_body, encode_body};
     use std::sync::Arc;
 
-    let page = Arc::new(PageRef {
-        id: PageId([13; 32]),
-        grant: PageGrant::NONE,
+    let page = Arc::new(PayloadRoot {
+        page: PageRef {
+            id: PageId([13; 32]),
+            grant: PageGrant::NONE,
+        },
+        id: [13; 32],
     });
     let text = "a long λ payload";
     let warm = PageValue::text(text);

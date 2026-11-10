@@ -220,7 +220,7 @@ fn payload_leaf_boundaries_follow_the_frozen_4096_byte_rule() {
         assert_eq!(a.id, b.id, "canonical partitions share a root");
         let store = pages.borrow();
         assert_eq!(
-            store.pages[&a.id].kind,
+            store.pages[&a.page.id].kind,
             if len <= 4096 {
                 PageKind::PAYLOAD_LEAF
             } else {

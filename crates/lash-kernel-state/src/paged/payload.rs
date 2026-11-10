@@ -18,26 +18,56 @@ use {
     lash_kernel_value::tokens::decode_body, lash_kernel_value::tokens::encode_body,
 };
 
+/// One edge of a payload tree: the child's counts, the identity it commits
+/// to (`paged::identity`) and the page that holds it.
 #[derive(Clone, Debug)]
 struct Part {
     summary: TextSummary,
+    id: [u8; 32],
     page: PageRef,
+}
+impl Part {
+    fn root(root: PayloadRoot, summary: TextSummary) -> Self {
+        Self {
+            summary,
+            id: root.id,
+            page: root.page,
+        }
+    }
+    fn node(&self) -> identity::Node {
+        identity::Node {
+            counts: self.summary,
+            id: self.id,
+        }
+    }
 }
 impl TokenCodec for Part {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
+        out.seq(3);
         self.summary.encode(out);
+        out.bytes(&self.id);
         self.page.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
+        input.expect_struct(3)?;
         Ok(Self {
             summary: TextSummary::decode(input)?,
+            id: input
+                .bytes()?
+                .try_into()
+                .map_err(|_| TokenError::Invalid("a payload identity is 32 bytes".into()))?,
             page: PageRef::decode(input)?,
         })
     }
 }
-pub fn build(access: &Access<'_>, bytes: &[u8], text: bool) -> Result<PageRef, HeapFault> {
+/// Writes `bytes`, a text's when `text`, as the payload tree of its
+/// logical identity tree, and returns its root page with the root id the
+/// identity grammar gives (the long value's key above `identity::FLAT_MAX`).
+///
+/// # Errors
+///
+/// The page port's faults; empty content; a text that is no UTF-8.
+pub fn build(access: &Access<'_>, bytes: &[u8], text: bool) -> Result<PayloadRoot, HeapFault> {
     let kind = identity::Kind::of(text);
     let mut parts = Vec::new();
     for span in identity::cuts(bytes, kind) {
@@ -53,7 +83,8 @@ pub fn build(access: &Access<'_>, bytes: &[u8], text: bool) -> Result<PageRef, H
             out.bytes(chunk);
         }
         let page = access.seal(PageKind::PAYLOAD_LEAF, out.into_bytes(), Vec::new())?;
-        parts.push(Part { summary, page });
+        let id = identity::leaf(kind, summary, chunk).id;
+        parts.push(Part { summary, id, page });
     }
     if parts.is_empty() {
         return Err(HeapFault::Malformed("empty payload must be inline".into()));
@@ -61,39 +92,24 @@ pub fn build(access: &Access<'_>, bytes: &[u8], text: bool) -> Result<PageRef, H
     while parts.len() > 1 {
         let mut next = Vec::new();
         for children in parts.chunks(identity::FANOUT) {
-            let summary = add(children.iter().map(|p| p.summary))?;
+            let node = identity::index(kind, &children.iter().map(Part::node).collect::<Vec<_>>())?;
             let page = access.seal(
                 PageKind::PAYLOAD_INDEX,
                 encode_body(&children.to_vec()),
                 children.iter().map(|p| p.page).collect(),
             )?;
-            next.push(Part { summary, page });
+            next.push(Part {
+                summary: node.counts,
+                id: node.id,
+                page,
+            });
         }
         parts = next;
     }
-    Ok(parts[0].page)
-}
-fn add(parts: impl Iterator<Item = TextSummary>) -> Result<TextSummary, HeapFault> {
-    let mut sum = TextSummary {
-        utf8_bytes: 0,
-        chars: 0,
-        utf16_units: 0,
-    };
-    for p in parts {
-        sum.utf8_bytes = sum
-            .utf8_bytes
-            .checked_add(p.utf8_bytes)
-            .ok_or_else(|| HeapFault::Malformed("payload length overflow".into()))?;
-        sum.chars = sum
-            .chars
-            .checked_add(p.chars)
-            .ok_or_else(|| HeapFault::Malformed("payload character overflow".into()))?;
-        sum.utf16_units = sum
-            .utf16_units
-            .checked_add(p.utf16_units)
-            .ok_or_else(|| HeapFault::Malformed("payload UTF-16 overflow".into()))?;
-    }
-    Ok(sum)
+    Ok(PayloadRoot {
+        page: parts[0].page,
+        id: parts[0].id,
+    })
 }
 #[cfg(test)]
 pub(super) mod cursor_work {
@@ -199,11 +215,11 @@ struct TextWalk {
 impl TextWalk {
     fn open(
         access: &Access<'_>,
-        page: PageRef,
+        root: PayloadRoot,
         summary: TextSummary,
         mut index: u64,
     ) -> Result<Self, HeapFault> {
-        let mut part = Part { page, summary };
+        let mut part = Part::root(root, summary);
         let mut path = Vec::new();
         loop {
             match read(access, &part, true)? {
@@ -335,12 +351,16 @@ fn decode(part: &Part, text: bool, answer: super::PageAnswer) -> Result<Node, He
             work.scanned += bytes.len();
         });
         input.finish().map_err(|e| bad(e.to_string()))?;
+        let kind = identity::Kind::of(text);
         if bytes.is_empty()
             || bytes.len() > PAYLOAD_LEAF_BYTES as usize
             || declared != part.summary
-            || identity::counts(bytes, identity::Kind::of(text))? != declared
+            || identity::counts(bytes, kind)? != declared
         {
             return Err(bad("payload leaf summary mismatch".into()));
+        }
+        if identity::leaf(kind, declared, bytes).id != part.id {
+            return Err(bad("payload leaf identity mismatch".into()));
         }
         #[cfg(test)]
         let backing = Arc::clone(&answer.tokens);
@@ -356,11 +376,19 @@ fn decode(part: &Part, text: bool, answer: super::PageAnswer) -> Result<Node, He
     } else if answer.kind == PageKind::PAYLOAD_INDEX {
         let mut children: Vec<Part> =
             decode_body(&answer.tokens).map_err(|e| bad(e.to_string()))?;
-        if children.is_empty()
-            || children.len() > 32
-            || add(children.iter().map(|p| p.summary))? != part.summary
-        {
+        let node = identity::index(
+            identity::Kind::of(text),
+            &children.iter().map(Part::node).collect::<Vec<_>>(),
+        )
+        .map_err(|_| bad("payload index aggregate mismatch".into()))?;
+        if node.counts != part.summary {
             return Err(bad("payload index aggregate mismatch".into()));
+        }
+        if node.id != part.id {
+            return Err(bad("payload index identity mismatch".into()));
+        }
+        if !text && !canonical_spans(&children) {
+            return Err(bad("payload index spans are not canonical".into()));
         }
         for child in &mut children {
             grant(&mut child.page, &answer.children)?;
@@ -370,13 +398,31 @@ fn decode(part: &Part, text: bool, answer: super::PageAnswer) -> Result<Node, He
         Err(bad("wrong payload page kind".into()))
     }
 }
+/// Bytes children span what the identity grammar's position gives them:
+/// every child but the last spans one full subtree of `LEAF · FANOUTᵏ`
+/// octets, and the last at most that. Rank selection then trusts no unread
+/// subtree's length.
+fn canonical_spans(children: &[Part]) -> bool {
+    let Some((last, full)) = children.split_last() else {
+        return false;
+    };
+    let span = full.first().unwrap_or(last).summary.utf8_bytes;
+    let mut whole = identity::LEAF as u64;
+    while whole < span {
+        whole = whole.saturating_mul(identity::FANOUT as u64);
+    }
+    (full.is_empty() || whole == span)
+        && full.iter().all(|child| child.summary.utf8_bytes == whole)
+        && last.summary.utf8_bytes != 0
+        && last.summary.utf8_bytes <= whole
+}
 enum Node {
     Leaf(Leaf),
     Index(Vec<Part>),
 }
 pub fn visit(
     access: &Access<'_>,
-    page: PageRef,
+    root: PayloadRoot,
     summary: TextSummary,
     text: bool,
     range: Range<u64>,
@@ -432,7 +478,7 @@ pub fn visit(
             "payload range is out of bounds".into(),
         ));
     }
-    let _ = walk(access, &Part { summary, page }, text, range, visitor)?;
+    let _ = walk(access, &Part::root(root, summary), text, range, visitor)?;
     Ok(())
 }
 /// One node of a payload tree: a leaf's bytes, or an index node's children
@@ -440,7 +486,7 @@ pub fn visit(
 #[derive(Clone, Debug)]
 pub enum PayloadNode {
     Leaf(Vec<u8>),
-    Index(Vec<(PageRef, u64)>),
+    Index(Vec<(PayloadRoot, u64)>),
 }
 
 /// The node of the payload tree at `page`, whose whole summary is
@@ -453,12 +499,12 @@ pub enum PayloadNode {
 /// The page port's faults, and a range that is no node of the tree.
 pub fn node_at(
     access: &Access<'_>,
-    page: PageRef,
+    root: PayloadRoot,
     summary: TextSummary,
     text: bool,
     range: Range<u64>,
 ) -> Result<PayloadNode, HeapFault> {
-    let mut part = Part { summary, page };
+    let mut part = Part::root(root, summary);
     let mut offset = 0u64;
     loop {
         let node = read(access, &part, text)?;
@@ -468,7 +514,15 @@ pub fn node_at(
                 Node::Index(children) => PayloadNode::Index(
                     children
                         .into_iter()
-                        .map(|child| (child.page, child.summary.utf8_bytes))
+                        .map(|child| {
+                            (
+                                PayloadRoot {
+                                    page: child.page,
+                                    id: child.id,
+                                },
+                                child.summary.utf8_bytes,
+                            )
+                        })
                         .collect(),
                 ),
             });
@@ -498,7 +552,7 @@ pub fn node_at(
 /// until their own parent has decoded and granted them.
 pub(super) fn copy(
     access: &Access<'_>,
-    page: PageRef,
+    root: PayloadRoot,
     summary: TextSummary,
     text: bool,
 ) -> Result<Vec<u8>, HeapFault> {
@@ -530,9 +584,9 @@ pub(super) fn copy(
     }
     walk(
         access,
-        &Part { page, summary },
+        &Part::root(root, summary),
         text,
-        access.read(page)?,
+        access.read(root.page)?,
         &mut out,
     )?;
     Ok(out)
@@ -540,7 +594,7 @@ pub(super) fn copy(
 
 pub fn offset(
     access: &Access<'_>,
-    page: PageRef,
+    root: PayloadRoot,
     summary: TextSummary,
     mut index: u64,
 ) -> Result<u64, HeapFault> {
@@ -552,7 +606,7 @@ pub fn offset(
     if index == summary.chars {
         return Ok(summary.utf8_bytes);
     }
-    let mut part = Part { summary, page };
+    let mut part = Part::root(root, summary);
     let mut offset = 0;
     loop {
         match read(access, &part, true)? {
@@ -789,7 +843,7 @@ impl PageReader for PagedHeap {
                 )?;
                 if invalid {
                     return Err(HeapFault::Corrupt {
-                        page: digits.id,
+                        page: digits.page.id,
                         reason: "integer summary mismatch".into(),
                     });
                 }

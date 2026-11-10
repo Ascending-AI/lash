@@ -1273,12 +1273,21 @@ impl PagedHeap {
         }) {
             return Ok(key.clone());
         }
+        // A payload longer than `FLAT_MAX` is keyed by the root id its pages
+        // commit to, read from no page; a shorter one by its content.
+        let long = super::identity::FLAT_MAX as u64;
         let key = match value {
-            PageValue::Text(text) => Some(match text.body.resident() {
-                Some(resident) => super::identity::text_key(resident),
-                None => super::identity::text_key(&self.copy_text(text)?),
+            PageValue::Text(text) => Some(match (&text.body, text.body.resident()) {
+                (_, Some(resident)) => super::identity::text_key(resident),
+                (TextPayload::Paged(root), None) if text.summary.utf8_bytes > long => {
+                    NormalKey::Digest(root.id)
+                }
+                _ => super::identity::text_key(&self.copy_text(text)?),
             }),
-            PageValue::Bytes(bytes) => Some(super::identity::bytes_key(&self.copy_bytes(bytes)?)),
+            PageValue::Bytes(bytes) => Some(match &bytes.body {
+                Payload::Paged(root) if bytes.len > long => NormalKey::Digest(root.id),
+                _ => super::identity::bytes_key(&self.copy_bytes(bytes)?),
+            }),
             _ => {
                 let mut out = TokenWriter::new();
                 if tokens(self, value, &mut out)? {

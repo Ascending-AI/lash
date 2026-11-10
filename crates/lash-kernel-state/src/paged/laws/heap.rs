@@ -1037,38 +1037,53 @@ fn paged_text_cursor_preserves_boundary_fault_order() {
         id: PageId([255; 32]),
         grant: PageGrant::NONE,
     };
-    let mut out = TokenWriter::new();
-    out.seq(3);
-    for (summary, page) in [
+    // Each edge commits its child's identity; the zero-extent one is never
+    // read, so any id stands for it.
+    let leaf = |text: &str| {
+        let counts = lash_kernel_doc::heap_values::text_summary(text);
+        crate::paged::identity::leaf(crate::paged::identity::Kind::Text, counts, text.as_bytes())
+    };
+    let edges = [
+        (leaf(&"A".repeat(4096)), first),
         (
-            lash_kernel_doc::heap_values::text_summary(&"A".repeat(4096)),
-            first,
-        ),
-        (
-            TextSummary {
-                utf8_bytes: 0,
-                chars: 0,
-                utf16_units: 0,
+            crate::paged::identity::Node {
+                counts: TextSummary {
+                    utf8_bytes: 0,
+                    chars: 0,
+                    utf16_units: 0,
+                },
+                id: [0; 32],
             },
             empty,
         ),
-        (lash_kernel_doc::heap_values::text_summary("é😀"), last),
-    ] {
-        out.seq(2);
-        summary.encode(&mut out);
+        (leaf("é😀"), last),
+    ];
+    let mut out = TokenWriter::new();
+    out.seq(3);
+    for (node, page) in edges {
+        out.seq(3);
+        node.counts.encode(&mut out);
+        out.bytes(&node.id);
         page.encode(&mut out);
     }
+    let root = crate::paged::identity::index(
+        crate::paged::identity::Kind::Text,
+        &edges.map(|(node, _)| node),
+    )
+    .unwrap();
     // Rank selection skips zero-extent links without demanding their pages.
     // Advancing the retained frontier must make the same demand decision.
-    text.body = TextPayload::paged(
-        heap.access
+    text.body = TextPayload::paged(lash_kernel_doc::heap::PayloadRoot {
+        page: heap
+            .access
             .seal(
                 PageKind::PAYLOAD_INDEX,
                 out.into_bytes(),
                 vec![first, empty, last],
             )
             .unwrap(),
-    );
+        id: root.id,
+    });
     pages.borrow_mut().pages.remove(&missing);
     let mut cursor = payload::TextCursor::new(text.clone(), 0);
     for _ in 0..4095 {

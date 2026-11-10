@@ -225,14 +225,14 @@ impl Cell for SessionRow {
     fn children(&self, out: &mut Vec<PageRef>) {
         for held in std::iter::once(&self.name).chain(&self.description) {
             if let Held::Paged(paged) = held {
-                out.push(paged.page);
+                out.push(paged.root.page);
             }
         }
     }
     fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
         for held in std::iter::once(&mut self.name).chain(&mut self.description) {
             if let Held::Paged(paged) = held {
-                grant(&mut paged.page, children)?;
+                grant(&mut paged.root.page, children)?;
             }
         }
         Ok(())

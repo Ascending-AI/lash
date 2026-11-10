@@ -54,7 +54,15 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     items(path = "crates/lash-kernel-state/src/paged/tree/key.rs", Key),
 ///     items(path = "crates/lash-kernel-state/src/paged/tree.rs", Summary, Link, Branch, Node, load_shared, seal, encode, decode),
 ///     items(path = "crates/lash-kernel-state/src/paged/tree/inline.rs", inline_node, seal_nested, encode, decode),
-///     items(path = "crates/lash-kernel-state/src/paged/payload.rs", Part, build, read, encode, decode),
+///     items(path = "crates/lash-kernel-state/src/paged/payload.rs", Part, build, read, encode, decode, canonical_spans),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/tree/canonical.rs",
+///         HARD_BYTES, leaf_cap, index_cap, boundary_hash, ends, weight, cut,
+///     ),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/run/session.rs",
+///         RunFunction, BINDING, FUNCTION, row_key, Held, SessionRow, SessionPage, encode, decode,
+///     ),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/identity.rs",
 ///         FLAT_MAX, LEAF, FANOUT, Kind, Node, counts, cuts, leaf, index, of, text_key, bytes_key, long,
@@ -74,7 +82,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///         path = "crates/lash-kernel-state/src/paged/run/objects.rs",
 ///         cover(
 ///             "impl TokenCodec for ObjectKind", "impl TokenCodec for RunValue", "impl TokenCodec for Record",
-///             "impl TokenCodec for Head", "impl TokenCodec for Heads",
+///             "impl TokenCodec for Head", "impl TokenCodec for Heads", "impl TokenCodec for Paged",
 ///         ),
 ///     ),
 ///     file(

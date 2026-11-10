@@ -766,6 +766,80 @@ fn cold_load_preserves_roots_and_admits_before_install() {
     );
 }
 
+/// Contract §6 (astra 3): a paged payload's row commits its counts and
+/// root id, so a load compares them with the head its referrers name it by
+/// before it reads a payload page. A row holding another text of equal
+/// counts is a store fault even when its payload pages are gone.
+#[test]
+fn a_paged_row_its_head_does_not_certify_is_refused_before_its_pages_are_read() {
+    let (named, stored) = ("a".repeat(9000), "b".repeat(9000));
+    let pages = Pages::default();
+    let mut directory = pages.directory(None);
+    let paged = lash_kernel_state::paged::run::objects::Paged::write(
+        directory.access(),
+        stored.as_bytes(),
+        true,
+    )
+    .expect("a payload");
+    directory
+        .put(
+            ObjectId(0),
+            Row::of(
+                Record::List(vec![RunValue::Object(ObjectKind::LongText, ObjectId(1))]),
+                Heads(vec![(ObjectId(1), text_head(&named))]),
+            ),
+        )
+        .expect("a put");
+    directory
+        .put(ObjectId(1), Row::of(Record::Paged(paged), Heads::default()))
+        .expect("a put");
+    let sealed = HeapRoot {
+        high_water: HighWater(2),
+        directory: directory.seal().expect("a seal"),
+        roots: vec![RunValue::Object(ObjectKind::List, ObjectId(0))],
+        heads: Heads::default(),
+    };
+    pages.pages.borrow_mut().retain(|_, answer| {
+        !matches!(
+            answer.kind,
+            lash_kernel_state::paged::PageKind::PAYLOAD_LEAF
+                | lash_kernel_state::paged::PageKind::PAYLOAD_INDEX
+        )
+    });
+    let (mut heap, root) = opened(&pages, &sealed, u64::MAX);
+    load(&mut heap, root, &[root]).expect("a load");
+    let [text] = members(&heap, root)[..] else {
+        panic!("one member");
+    };
+    let refused = load(&mut heap, text, &[root]);
+    assert!(
+        matches!(refused, Err(LoadError::Store(HeapFault::Corrupt { .. }))),
+        "{refused:?}"
+    );
+}
+
+/// Contract §6 (astra 4): a seal publishes a payload's row only under the
+/// identity its builder computed. An object whose cached head names
+/// another text of equal counts is refused, never published under a key
+/// its content does not have.
+#[test]
+fn a_seal_refuses_a_payload_whose_cached_head_names_other_content() {
+    let pages = Pages::default();
+    let mut directory = pages.directory(None);
+    let mut high_water = HighWater(0);
+    let mut arena = Arena::new();
+    let text = arena.text(&"a".repeat(9000));
+    arena
+        .certify(text.handle().expect("a text"), text_head(&"b".repeat(9000)))
+        .expect("a head");
+    let root = list(&mut arena, vec![text]);
+    let refused = seal(&mut arena, &[root], &mut directory, &mut high_water);
+    assert!(
+        matches!(&refused, Err(SealError::Fault { problem }) if problem.contains("identity")),
+        "{refused:?}"
+    );
+}
+
 /// Astra §1: an immutable two rows name opens once, as one slot the
 /// heap holds once, however many loads name it.
 #[test]

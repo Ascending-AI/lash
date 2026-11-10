@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::heap::HeapFault;
-use lash_kernel_doc::heap::{IntSummary, NormalKey, PAYLOAD_LEAF_BYTES, PageRef, TextSummary};
+use lash_kernel_doc::heap::{IntSummary, NormalKey, PAYLOAD_LEAF_BYTES, PayloadRoot, TextSummary};
 use lash_kernel_doc::heap_values::text_summary;
 use lash_kernel_doc::linked_site::LinkedSite;
 use lash_kernel_doc::{Float, Handle, Integer};
@@ -341,12 +341,14 @@ impl Record {
 }
 
 /// A text's or bytes' payload tree: whether it is text, its summary (bytes'
-/// counts only their bytes) and its root page.
+/// counts only their bytes), and its root page with the identity it
+/// commits to, which is the value's key (a paged payload is always longer
+/// than `identity::FLAT_MAX`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Paged {
     pub text: bool,
     pub summary: TextSummary,
-    pub page: PageRef,
+    pub root: PayloadRoot,
 }
 
 impl Paged {
@@ -379,18 +381,37 @@ impl Paged {
         Ok(Self {
             text,
             summary,
-            page: crate::paged::payload::build(access, bytes, text)?,
+            root: crate::paged::payload::build(access, bytes, text)?,
         })
     }
 
+    /// The head this payload's object is named by: its counts and, being
+    /// longer than `identity::FLAT_MAX`, the root id as its key. What a
+    /// load compares with the referrers' head before reading a page, and
+    /// what a seal compares with a head already certified.
+    pub fn head(&self) -> Head {
+        let normal = NormalKey::Digest(self.root.id);
+        if self.text {
+            Head::LongText {
+                summary: self.summary,
+                normal,
+            }
+        } else {
+            Head::Bytes {
+                len: self.summary.utf8_bytes,
+                normal,
+            }
+        }
+    }
+
     /// The whole payload, read from its pages, each level's siblings in
-    /// one batch.
+    /// one batch, every edge checked against the root id.
     ///
     /// # Errors
     ///
     /// The page port's faults, and a tree that disagrees with the summary.
     pub fn read(&self, access: &Access<'_>) -> Result<Vec<u8>, HeapFault> {
-        super::super::payload::copy(access, self.page, self.summary, self.text)
+        super::super::payload::copy(access, self.root, self.summary, self.text)
     }
 }
 
@@ -399,14 +420,14 @@ impl TokenCodec for Paged {
         out.seq(3);
         self.text.encode(out);
         self.summary.encode(out);
-        self.page.encode(out);
+        self.root.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(3)?;
         let paged = Self {
             text: bool::decode(input)?,
             summary: TextSummary::decode(input)?,
-            page: PageRef::decode(input)?,
+            root: PayloadRoot::decode(input)?,
         };
         if paged.summary.utf8_bytes <= PAYLOAD_LEAF_BYTES {
             return Err(TokenError::Invalid(

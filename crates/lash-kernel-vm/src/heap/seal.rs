@@ -303,6 +303,23 @@ fn resident(chunks: &Chunks) -> Result<Vec<&Value>, SealError> {
     Ok(values)
 }
 
+/// The row of a payload the seal built, refused when the object already
+/// holds a head that names other counts or another identity: a stale cached
+/// head must not publish under a key its content does not have.
+fn published(arena: &Arena, handle: ArenaHandle, paged: Paged) -> Result<Record, SealError> {
+    let held = arena
+        .facts(handle)
+        .map_err(|error| fault(error.to_string()))?
+        .head()
+        .cloned();
+    if held.is_some_and(|head| head != paged.head()) {
+        return Err(fault(
+            "a payload's head disagrees with the identity its seal built",
+        ));
+    }
+    Ok(Record::Paged(paged))
+}
+
 fn record(arena: &Arena, handle: ArenaHandle, access: &Access<'_>) -> Result<Record, SealError> {
     let value = |value: &Value| run_value(arena, value);
     let values = |chunks: &Chunks| -> Result<Vec<RunValue>, SealError> {
@@ -373,9 +390,11 @@ fn record(arena: &Arena, handle: ArenaHandle, access: &Access<'_>) -> Result<Rec
                 return Err(fault("a moved text reached the seal"));
             }
             if whole.len() as u64 > PAYLOAD_LEAF_BYTES {
-                Record::Paged(
+                published(
+                    arena,
+                    handle,
                     Paged::write(access, whole.as_bytes(), true).map_err(SealError::Heap)?,
-                )
+                )?
             } else {
                 Record::LongText(Arc::from(whole))
             }
@@ -391,7 +410,11 @@ fn record(arena: &Arena, handle: ArenaHandle, access: &Access<'_>) -> Result<Rec
                 }
             }
             if whole.len() as u64 > PAYLOAD_LEAF_BYTES {
-                Record::Paged(Paged::write(access, &whole, false).map_err(SealError::Heap)?)
+                published(
+                    arena,
+                    handle,
+                    Paged::write(access, &whole, false).map_err(SealError::Heap)?,
+                )?
             } else {
                 Record::Bytes(Arc::from(whole))
             }

@@ -323,8 +323,8 @@ pub fn value_children(value: &PageValue, out: &mut Vec<PageRef>) {
         | PageValue::Bytes(BytesRef {
             body: Payload::Paged(p),
             ..
-        }) => out.push(**p),
-        PageValue::Int(IntRef::Paged { digits, .. }) => out.push(**digits),
+        }) => out.push(p.page),
+        PageValue::Int(IntRef::Paged { digits, .. }) => out.push(digits.page),
         PageValue::Tuple(t) => match &t.body {
             Payload::Paged(p) => out.push(**p),
             Payload::Resident(v) => {
@@ -347,7 +347,7 @@ pub fn value_children(value: &PageValue, out: &mut Vec<PageRef>) {
 pub fn value_grants(value: &mut PageValue, children: &[PageRef]) -> Result<(), HeapFault> {
     fn text_grants(text: &mut TextRef, children: &[PageRef]) -> Result<(), HeapFault> {
         if let TextPayload::Paged(p) = &mut text.body {
-            grant(Arc::make_mut(p), children)?;
+            grant(&mut Arc::make_mut(p).page, children)?;
         }
         Ok(())
     }
@@ -355,10 +355,12 @@ pub fn value_grants(value: &mut PageValue, children: &[PageRef]) -> Result<(), H
         PageValue::Text(t) => text_grants(t, children)?,
         PageValue::Bytes(b) => {
             if let Payload::Paged(p) = &mut b.body {
-                grant(Arc::make_mut(p), children)?;
+                grant(&mut Arc::make_mut(p).page, children)?;
             }
         }
-        PageValue::Int(IntRef::Paged { digits, .. }) => grant(Arc::make_mut(digits), children)?,
+        PageValue::Int(IntRef::Paged { digits, .. }) => {
+            grant(&mut Arc::make_mut(digits).page, children)?;
+        }
         PageValue::Tuple(t) => match &mut Arc::make_mut(t).body {
             Payload::Paged(p) => grant(Arc::make_mut(p), children)?,
             Payload::Resident(v) => {
