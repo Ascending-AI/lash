@@ -238,8 +238,24 @@ impl KernelMachine {
         crate::perf_witness::Profiling::publish_context(self, context);
     }
 
+    /// The run's semantic checkpoint: it seals, unbudgeted, and reads the
+    /// seal back through the port its heap sealed through.
     pub(crate) fn semantic_checkpoint(&mut self) -> lash_kernel_state::semantic::Checkpoint {
-        retired("semantic_checkpoint")
+        let sealed = self
+            .core
+            .seal(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            })
+            .expect("a semantic checkpoint seals the run")
+            .expect("an unbudgeted seal completes");
+        let access = self
+            .core
+            .page_access()
+            .expect("a sealed run has a page port")
+            .clone();
+        lash_kernel_state::semantic::run_checkpoint(&sealed.root, access)
+            .expect("a semantic checkpoint reads its own seal")
     }
     pub(crate) fn logical_balance(
         &self,

@@ -55,6 +55,21 @@ pub fn same_checkpoint(a: &Checkpoint, b: &Checkpoint) -> bool {
     a.continuation == b.continuation && a.graph == b.graph
 }
 
+/// Reads the run the bytecode core sealed under `root` through `access`,
+/// the port its heap seals through: what a running machine reads its own
+/// seal back by.
+///
+/// # Errors
+///
+/// Any fault reading a reachable page; [`HeapFault::Corrupt`] for a root
+/// that is not a run root.
+pub fn run_checkpoint(
+    root: &CheckpointRoot,
+    access: crate::paged::tree::Access<'static>,
+) -> Result<Checkpoint, HeapFault> {
+    run::checkpoint(root, access)
+}
+
 /// Reads a sealed checkpoint's semantic state. Faults remain infrastructure.
 ///
 /// # Errors
@@ -69,7 +84,7 @@ pub fn checkpoint(
         .ok_or_else(|| HeapFault::Malformed("the page port answered nothing".into()))??
         .kind;
     if kind == PageKind::RUN_ROOT {
-        return run::checkpoint(root, source);
+        return run::checkpoint(root, crate::paged::tree::Access::new(source));
     }
     let mut heap = PagedHeap::open_header(root.heap, source, EditEpoch(0))?;
     heap.set_family_base(Box::new(
@@ -573,11 +588,11 @@ mod run {
     /// minted stay out, as allocator history.
     pub(super) fn checkpoint(
         root: &CheckpointRoot,
-        source: Box<dyn PageSource>,
+        access: Access<'static>,
     ) -> Result<Checkpoint, HeapFault> {
-        let (record, directory) = crate::paged::run::continuation::open(source, root.heap)?;
+        let record = crate::paged::run::continuation::read(&access, root.heap)?;
         let mut reader = Reader {
-            directory,
+            directory: Directory::over(record.heap.directory, access),
             graph: Vec::new(),
             seen: BTreeMap::new(),
             ids: Vec::new(),

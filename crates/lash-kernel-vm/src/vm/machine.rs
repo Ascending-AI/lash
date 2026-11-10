@@ -316,6 +316,14 @@ impl CoreMachine {
             Watch::new(&self.document, &self.vm.program, observing, path, tape).map(Box::new);
     }
 
+    /// The page port the run's heap seals through.
+    #[cfg(test)]
+    pub(crate) fn page_access(
+        &self,
+    ) -> Option<&lash_kernel_state::kernel_internals::tree::Access<'static>> {
+        self.vm.heap.access()
+    }
+
     #[cfg(test)]
     pub(crate) fn wait_count(&self) -> u64 {
         self.vm.tasks.waits.len() as u64
