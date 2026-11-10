@@ -100,14 +100,21 @@ pub enum RewriteFault {
 /// callable and function id a rewrite needs an image for.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LiveCode {
-    /// The links whose code a live frame runs: the run's own for its
-    /// declared code, a closure's for a frame running it.
-    pub frames: BTreeSet<LinkId>,
+    /// The code each live frame runs: the link, the run's own for its
+    /// declared code and a closure's for a frame running it, and the unit
+    /// its site stands in, a helper's body as that helper's
+    /// [`Unit::Library`].
+    pub frames: BTreeSet<(LinkId, Unit)>,
     pub links: BTreeSet<LinkId>,
     pub callables: BTreeSet<CallableId>,
     pub functions: BTreeSet<FunctionId>,
     /// Every site the run stands at or names.
     pub sites: BTreeSet<Site>,
+    /// The helpers the run's resume points reach, as the run pinned them.
+    pub pins: BTreeSet<FunctionId>,
+    /// The helpers code the run holds as a value may call, as it recorded
+    /// them.
+    pub held_code: BTreeSet<FunctionId>,
 }
 
 /// Either the ids met, or the images they are rewritten to.
@@ -532,7 +539,9 @@ pub fn live_code(pages: &mut dyn PageSource, root: &CheckpointRoot) -> Result<Li
                 }
             },
         };
-        live.frames.insert(link);
+        live.frames.insert((link, frame.unit.site.unit.clone()));
     }
+    live.pins = record.pins.iter().copied().collect();
+    live.held_code = record.held_code.iter().copied().collect();
     Ok(live)
 }
