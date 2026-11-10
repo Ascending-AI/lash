@@ -223,7 +223,7 @@ pub fn opened(head: &Head) -> (Body, Summary) {
 
 /// The head of the immutable `body`, whose summary is `shape` and whose
 /// normal form `normal` gives.
-fn head_of(
+pub(super) fn head_of(
     body: &Body,
     shape: Summary,
     normal: impl FnOnce() -> Result<Option<NormalKey>, NativeError>,

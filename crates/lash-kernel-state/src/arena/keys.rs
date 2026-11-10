@@ -348,14 +348,50 @@ pub(crate) fn normal_key(
     if let Some(normal) = certified(facts, value) {
         return Ok(normal.cloned());
     }
-    if let Value::LongText(handle) | Value::Bytes(handle) = value {
-        return long_key(Some(*handle), body(objects, *handle)?).map(Some);
+    let normal = if let Value::LongText(handle) | Value::Bytes(handle) = value {
+        Some(long_key(Some(*handle), body(objects, *handle)?)?)
+    } else {
+        let mut out = TokenWriter::new();
+        tokens(objects, facts, value, &mut out)?.then(|| identity::flat(out))
+    };
+    certify(objects, facts, value, &normal);
+    Ok(normal)
+}
+
+/// Installs the head `normal` completes on the immutable `value`, so its
+/// key is computed once: a tuple embeds each member's key ([`nested`]),
+/// and a member already keyed answers by its head, so keying a shared
+/// graph is linear in its distinct objects, not its leaves. Nothing else
+/// changes with it: the head is what a seal would certify. A value that
+/// names an object or task at any depth is left to its seal: a ref keyed
+/// before its referent's first seal is keyed by a token that changes.
+fn certify(
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
+    value: &Value,
+    normal: &Option<NormalKey>,
+) {
+    let (Value::Tuple(handle)
+    | Value::LongText(handle)
+    | Value::BigInt(handle)
+    | Value::BigTimestamp(handle)
+    | Value::Bytes(handle)) = value
+    else {
+        return;
+    };
+    let (Some(fact), Ok(body)) = (facts.get(handle.index() as usize), body(objects, *handle))
+    else {
+        return;
+    };
+    if fact.summary.has_edges {
+        return;
     }
-    let mut out = TokenWriter::new();
-    if !tokens(objects, facts, value, &mut out)? {
-        return Ok(None);
+    if let (Ok(head), Ok(projected)) = (
+        super::heads::head_of(body, fact.summary, || Ok(normal.clone())),
+        fact.try_projection(),
+    ) {
+        let _ = projected.head.set(head);
     }
-    Ok(Some(identity::flat(out)))
 }
 
 /// The key of a held text or bytes `body`, of `object` when the arena

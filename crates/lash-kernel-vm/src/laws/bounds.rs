@@ -1617,18 +1617,12 @@ fn an_immutable_allocation_is_checked_where_it_is_built_even_when_dropped() {
 /// that follows its objects, not its leaves.
 #[test]
 fn a_tuple_graph_with_two_to_the_sixty_four_leaves_is_built_by_its_objects() {
-    // Building 64 shared pairs is 64 objects of work. Work by leaves would
-    // never finish, so it is caught as a run still going after a minute.
-    let (done, ended) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let (end, _) = core_end(
-            "  let s = 1\n  let i = 0\n  while num.lt(i, 64) {\n    set s = (s, s)\n    set i = num.add(i, 1)\n  }\n  let n = list.len([s])\n  return n",
-            64 << 10,
-        );
-        let _ = done.send(result(end));
-    });
-    let answer = ended
-        .recv_timeout(std::time::Duration::from_secs(60))
-        .expect("a run building 64 shared pairs is still going after a minute");
-    assert_eq!(answer, int(1));
+    // Building and keying 64 shared pairs is 64 objects of work: each
+    // pair's key embeds its member's, computed once. Work by leaves would
+    // never finish.
+    let (end, _) = core_end(
+        "  let s = 1\n  let i = 0\n  while num.lt(i, 64) {\n    set s = (s, s)\n    set i = num.add(i, 1)\n  }\n  let n = list.len([s])\n  return n",
+        64 << 10,
+    );
+    assert_eq!(result(end), int(1));
 }
