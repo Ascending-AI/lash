@@ -624,7 +624,7 @@ struct Observed {
     end: String,
     charged: Option<u64>,
     printed: Vec<lash_kernel_doc::Datum>,
-    tape: Option<Vec<lash_kernel_exec::Weight>>,
+    tape: Option<Vec<crate::Weight>>,
     slices: Vec<Option<u64>>,
     requests: Vec<Vec<lash_kernel_doc::Datum>>,
     asked: Vec<(u64, u64)>,

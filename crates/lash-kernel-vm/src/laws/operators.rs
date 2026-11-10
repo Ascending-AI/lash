@@ -497,34 +497,6 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
         Arc::new(document),
         crate::PreparedLibrary::with_helpers(Arc::new(registry), helpers),
     );
-    let admitted = program
-        .library
-        .admit(&program.document, Default::default(), &program.selection)
-        .unwrap_or_else(|_| panic!("the invoke is admitted"));
-    let exe = admitted
-        .executable(
-            &program.document,
-            &program.library,
-            &program.documents,
-            &program.functions,
-            &program.instances,
-        )
-        .unwrap_or_else(|_| panic!("the invoke compiles"));
-    let (stream, _, _) = exe.statement(exe.block(exe.code(exe.main.unwrap()).body).stmts[0]);
-    let invoke = stream
-        .nested
-        .iter()
-        .find(|nested| {
-            matches!(
-                nested.kind,
-                crate::compile::NestedKind::Call(crate::compile::NestedCallee::CheckedHelper(_))
-            )
-        })
-        .unwrap();
-    assert!(
-        invoke.operator,
-        "a template-bearing invoke must select its prepared operator"
-    );
     let mut machine =
         super::embedder::start_machine(program, ROOMY, Setup::default().start).unwrap();
     let mut host = super::embedder::World::default();
@@ -634,7 +606,7 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
     ) -> (
         String,
         Option<u64>,
-        Vec<lash_kernel_exec::Weight>,
+        Vec<crate::Weight>,
         Vec<lash_kernel_state::semantic::Checkpoint>,
     ) {
         let mut embedder = Embedder::with(
@@ -669,8 +641,8 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
             .steps()
             .into_iter()
             .flat_map(|weight| match weight {
-                lash_kernel_exec::Weight::Units(n) => {
-                    vec![lash_kernel_exec::Weight::Units(1); n as usize]
+                crate::Weight::Units(n) => {
+                    vec![crate::Weight::Units(1); n as usize]
                 }
                 atomic => vec![atomic],
             })

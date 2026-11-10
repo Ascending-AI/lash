@@ -9,10 +9,10 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_exec::Weight;
 use lash_kernel_state::paged::{Checkpoint, PageSource, SealBudget};
 use lash_kernel_value::observation::{ExecutionPath, RunObservation, SiteCounts};
 use lash_kernel_value::package::{Fill, Link};
+use lash_kernel_vm::Weight;
 use lash_kernel_vm::{
     Bounds, CellStart, Charge, ChargeTape, CoreMachine, DeliverError, Delivered, Host,
     KernelMachine, Machine, MachineError, MachineOptions, Meters, OpenError, Outcome,

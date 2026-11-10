@@ -71,8 +71,8 @@ fn observe(program: &Program, charge_limit: u64) -> Observed {
             .steps()
             .into_iter()
             .flat_map(|weight| match weight {
-                lash_kernel_exec::Weight::Units(units) => {
-                    vec![lash_kernel_exec::Weight::Units(1); units as usize]
+                lash_kernel_vm::Weight::Units(units) => {
+                    vec![lash_kernel_vm::Weight::Units(1); units as usize]
                 }
                 atomic => vec![atomic],
             })
@@ -186,8 +186,9 @@ main {{
         let mut bounds = std::collections::BTreeSet::from([0]);
         for event in &expected.tape {
             let units = match event {
-                lash_kernel_exec::Weight::Units(units)
-                | lash_kernel_exec::Weight::Atomic(units) => *units,
+                lash_kernel_vm::Weight::Units(units) | lash_kernel_vm::Weight::Atomic(units) => {
+                    *units
+                }
             };
             bounds.insert(charged);
             bounds.insert(charged + units / 2);
@@ -261,9 +262,7 @@ main {{
     let mut charged = 0;
     for event in &expected.tape {
         let units = match event {
-            lash_kernel_exec::Weight::Units(units) | lash_kernel_exec::Weight::Atomic(units) => {
-                *units
-            }
+            lash_kernel_vm::Weight::Units(units) | lash_kernel_vm::Weight::Atomic(units) => *units,
         };
         for bound in [charged, charged + units / 2] {
             assert_eq!(

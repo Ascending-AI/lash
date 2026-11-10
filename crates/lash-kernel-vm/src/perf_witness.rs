@@ -52,29 +52,6 @@ pub fn take_work() -> Option<Work> {
     Some(counts)
 }
 
-#[inline(always)]
-pub(crate) fn enabled() -> bool {
-    WORK.with(|work| work.get().is_some())
-}
-
-pub(crate) fn step() {
-    WORK.with(|work| {
-        if let Some(mut counts) = work.get() {
-            counts.vm_steps += 1;
-            work.set(Some(counts));
-        }
-    });
-}
-
-pub(crate) fn publish() {
-    WORK.with(|work| {
-        if let Some(mut counts) = work.get() {
-            counts.root_publishes += 1;
-            work.set(Some(counts));
-        }
-    });
-}
-
 /// Stop diagnostics on this thread, including heap diagnostics.
 pub fn disable_work() {
     WORK.set(None);
@@ -173,15 +150,6 @@ pub fn observe_preparation(observer: Option<Box<dyn FnMut(Preparation)>>) {
     PREPARATION.with(|slot| *slot.borrow_mut() = observer);
 }
 
-#[cfg(feature = "perf-witness")]
-pub(crate) fn preparation(event: Preparation) {
-    PREPARATION.with(|slot| {
-        if let Some(observer) = slot.borrow_mut().as_mut() {
-            observer(event);
-        }
-    });
-}
-
 /// The run's logical balance, observed at machine verdict points.
 pub type MemoryObserver = fn(u64);
 thread_local! {
@@ -190,7 +158,4 @@ thread_local! {
 /// Installs or removes the calling thread's diagnostic memory observer.
 pub fn observe_memory(observer: Option<MemoryObserver>) {
     MEMORY_OBSERVER.set(observer);
-}
-pub(crate) fn memory_observer() -> Option<MemoryObserver> {
-    MEMORY_OBSERVER.get()
 }

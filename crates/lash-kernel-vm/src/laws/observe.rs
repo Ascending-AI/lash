@@ -77,7 +77,7 @@ struct Seen {
     printed: Vec<Datum>,
     requests: Vec<Request>,
     charged: u64,
-    events: Vec<lash_kernel_exec::Weight>,
+    events: Vec<crate::Weight>,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -221,7 +221,7 @@ fn run(source: &str, setup: Setup, observing: Observing) -> (Seen, Option<WorkRe
     seen.printed = std::mem::take(&mut embedder.world.printed);
     seen.requests = std::mem::take(&mut embedder.requests);
     seen.charged = embedder.machine.meters().charged.expect("exact charge");
-    seen.events = lash_kernel_exec::Weight::expand(tape.steps());
+    seen.events = crate::Weight::expand(tape.steps());
     assert!(
         !seen.events.is_empty(),
         "the observer compares emitted charge facts"

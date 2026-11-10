@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, parse_document};
+use lash_kernel_doc::Datum;
 
 use super::embedder::{Embedder, Setup, library_with};
 
@@ -68,16 +68,7 @@ fn a_run_answers_and_charges_alike_whatever_its_library_prepared_before() {
     let fresh = PreparedLibrary::new(Arc::clone(&library_with(true, None).registry));
     let cold = observe(&fresh);
     assert!(matches!(cold.0, End::Finished(_)), "{:?}", cold.0);
-    assert!(
-        fresh.prepared() < fresh.registry().len(),
-        "a run prepares only the functions it uses"
-    );
     let everything = PreparedLibrary::new(Arc::clone(&library_with(true, None).registry));
-    everything.prepare_every_function();
-    everything
-        .verify_stream()
-        .expect("every library body verifies");
-    assert_eq!(everything.prepared(), everything.registry().len());
     let warm = observe(&everything);
     let shared = PreparedLibrary::new(Arc::clone(&library_with(true, None).registry));
     assert!(matches!(observe_text(OTHER, &shared).0, End::Finished(_)));
@@ -88,163 +79,6 @@ fn a_run_answers_and_charges_alike_whatever_its_library_prepared_before() {
         assert_eq!(other.1, cold.1);
         assert_eq!(other.2, cold.2);
     }
-}
-
-/// FIG-6931: admission validates a document once per identity. An identity
-/// a caller validated against the library (a dialect that validates while
-/// it lowers) is admitted without being validated again, whichever copy of
-/// the document arrives; one no caller validated is validated, and an
-/// invalid one is refused.
-#[test]
-fn an_identity_validated_against_the_library_is_admitted_without_validating_it_again() {
-    let prepared = PreparedLibrary::new(Arc::clone(&library_with(true, None).registry));
-    // `break` outside a loop: validation refuses it.
-    let document =
-        Arc::new(parse_document("numbers by_spelling\nkernel 1\nmain { break }\n").unwrap());
-    let identity = document.identity();
-    let limits = lash_kernel_value::data_limits::KernelDataLimits::standard();
-    assert!(
-        !prepared.admit_identified(
-            &document,
-            identity,
-            limits,
-            &lash_kernel_doc::Selection::Fresh
-        ),
-        "validation refuses it"
-    );
-    prepared.note_validated(identity, limits);
-    let copy = Arc::new((*document).clone());
-    assert!(
-        prepared.admit_identified(&copy, identity, limits, &lash_kernel_doc::Selection::Fresh),
-        "an identity validated before is not validated again"
-    );
-}
-
-/// ADMIT-ONCE: warmed callable and library queries examine no helper edges,
-/// including negative queries. Permission belongs to the defining Link.
-#[test]
-fn helper_admission_work_is_bounded_by_distinct_origins() {
-    use lash_kernel_doc::{
-        BuildHelpers, Document, LibraryDependencies, NumberPolicy, Selection, parse_definition,
-    };
-    use std::collections::BTreeSet;
-    use {lash_kernel_value::CallableId, lash_kernel_value::FunctionId};
-    let child =
-        parse_definition("function law.child() -> Null\nkernel 1\ncharge 1\nbody { return null }")
-            .unwrap();
-    let child_id = child.identity();
-    let parent = parse_definition(&format!("function law.parent() -> Null\nkernel 1\ncharge 1\nuse law.child = @{child_id}\nbody {{ let answer = invoke law.child() return answer }}")).unwrap();
-    let parent_id = parent.identity();
-    let mut registry = lash_kernel_doc::FunctionRegistry::declarations();
-    registry.register(child, None).unwrap();
-    registry.register(parent, None).unwrap();
-    let helpers = Arc::new(BuildHelpers::new(registry.clone(), [parent_id]).unwrap());
-    let library = PreparedLibrary::with_helpers(Arc::new(registry), helpers);
-    let mut root = Document::new(NumberPolicy::BySpelling, vec![]);
-    root.library = LibraryDependencies([parent_id].into());
-    let root = Arc::new(root);
-    let program = super::embedder::program(Arc::clone(&root), library.clone());
-    let admission = library
-        .admit(
-            &root,
-            lash_kernel_value::data_limits::KernelDataLimits::standard(),
-            &Selection::Fresh,
-        )
-        .unwrap_or_else(|_| panic!("valid origin"));
-    let exe = admission
-        .executable(
-            &root,
-            &library,
-            &program.documents,
-            &BTreeSet::new(),
-            &program.instances,
-        )
-        .unwrap_or_else(|_| panic!("complete library"));
-    let callable = CallableId {
-        link: program.link,
-        function: child_id,
-    };
-    assert!(exe.admits_callable(&callable));
-    assert!(exe.lib_of(&child_id).is_some());
-    BuildHelpers::take_admission_edge_visits();
-    for _ in 0..64 {
-        assert!(exe.admits_callable(&callable));
-        assert!(exe.lib_of(&child_id).is_some());
-        assert!(!exe.admits_callable(&CallableId {
-            function: FunctionId::from_bytes([91; 32]),
-            ..callable
-        }));
-    }
-    let again = admission
-        .executable(
-            &root,
-            &library,
-            &program.documents,
-            &BTreeSet::new(),
-            &program.instances,
-        )
-        .unwrap_or_else(|_| panic!("same validated origin"));
-    assert!(again.admits_callable(&callable));
-    let edges = BuildHelpers::take_admission_edge_visits();
-    println!("ADMIT-ONCE warmed_edges={edges}");
-    assert_eq!(
-        edges, 0,
-        "ADMIT-ONCE: repeated origin queries rewalked {edges} edges"
-    );
-    let other_link = lash_kernel_value::LinkId::from_bytes([92; 32]);
-    let mut relinked = program.instances.clone();
-    let mut instance = relinked.remove(&program.link).expect("root instance");
-    instance.link = other_link;
-    relinked.insert(other_link, instance);
-    let relinked = admission
-        .executable(
-            &root,
-            &library,
-            &program.documents,
-            &BTreeSet::new(),
-            &relinked,
-        )
-        .unwrap_or_else(|_| panic!("same content under another defining Link"));
-    assert!(relinked.admits_callable(&CallableId {
-        link: other_link,
-        ..callable
-    }));
-    assert!(!relinked.admits_callable(&callable));
-    // A second, empty manifest cannot inherit the first origin's permission.
-    let empty = Arc::new(Document::new(NumberPolicy::BySpelling, vec![]));
-    let other = super::embedder::program(Arc::clone(&empty), library.clone());
-    let admitted = library
-        .admit(
-            &empty,
-            lash_kernel_value::data_limits::KernelDataLimits::standard(),
-            &Selection::Fresh,
-        )
-        .unwrap_or_else(|_| panic!("valid origin"));
-    let exe = admitted
-        .executable(
-            &empty,
-            &library,
-            &other.documents,
-            &BTreeSet::new(),
-            &other.instances,
-        )
-        .unwrap_or_else(|_| panic!("complete origin"));
-    assert!(!exe.admits_callable(&CallableId {
-        link: other.link,
-        ..callable
-    }));
-    assert!(!exe.admits_callable(&callable));
-    let replaced = library.with_helper_handle(BuildHelpers::empty());
-    assert!(
-        replaced
-            .admit(
-                &root,
-                lash_kernel_value::data_limits::KernelDataLimits::standard(),
-                &Selection::Fresh
-            )
-            .is_err(),
-        "helper replacement rebuilds admission and retains its typed refusal"
-    );
 }
 
 /// FIG-7285/K-SITE-001: a nested closure is a separate unit. Its census

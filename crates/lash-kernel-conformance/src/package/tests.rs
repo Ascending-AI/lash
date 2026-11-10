@@ -261,7 +261,7 @@ fn conf_meter_performing_callback_plan_emits_the_bodys_events() {
     assert_eq!(reference.end, ExpectedEnd::Finished(Datum::Null));
     assert_eq!(reference.trace.len(), 2);
     assert_eq!(reference.parks, 2);
-    assert!(tape.contains(&lash_kernel_exec::charge::Weight::Atomic(2)));
+    assert!(tape.contains(&lash_kernel_vm::Weight::Atomic(2)));
     kit.check(&Witness {
         function: id,
         law: Law::Meter,
@@ -298,7 +298,7 @@ fn metered_events(
     assert_eq!(installed_events, events, "{main}");
     let metered = events
         .iter()
-        .filter(|event| **event == lash_kernel_exec::charge::Weight::Atomic(2))
+        .filter(|event| **event == lash_kernel_vm::Weight::Atomic(2))
         .count();
     (body, metered)
 }

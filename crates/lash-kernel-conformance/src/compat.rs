@@ -230,11 +230,11 @@ enum Charge {
     Atomic(u64),
 }
 
-impl From<lash_kernel_exec::Weight> for Charge {
-    fn from(weight: lash_kernel_exec::Weight) -> Self {
+impl From<lash_kernel_vm::Weight> for Charge {
+    fn from(weight: lash_kernel_vm::Weight) -> Self {
         match weight {
-            lash_kernel_exec::Weight::Units(n) => Self::Units(n),
-            lash_kernel_exec::Weight::Atomic(n) => Self::Atomic(n),
+            lash_kernel_vm::Weight::Units(n) => Self::Units(n),
+            lash_kernel_vm::Weight::Atomic(n) => Self::Atomic(n),
         }
     }
 }

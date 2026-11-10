@@ -1,4 +1,4 @@
-//! The flat stream (`lash_kernel_exec::Op`): each statement runs as one
+//! The flat stream: each statement runs as one
 //! range of decoded ops. Its expression nodes are charged at their
 //! pre-order positions (`K-CHG-002`), whether `pair.twice` answers
 //! natively or runs its kernel body (`K-MACH-008`).

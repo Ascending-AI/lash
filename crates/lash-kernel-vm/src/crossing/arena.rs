@@ -32,7 +32,7 @@ struct Walk<'a, 'r> {
 }
 
 /// Copies an effect argument out of the run, walked with `ty`, the type
-/// its parameter `name` declares (see [`super::copy_out_tool_arg`]).
+/// its parameter `name` declares.
 pub(crate) fn copy_out_tool_arg(
     arena: &Arena,
     run: &CrossingRun<'_>,

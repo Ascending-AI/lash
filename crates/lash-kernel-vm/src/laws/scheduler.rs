@@ -40,7 +40,7 @@ fn cold_parks_agree() {
                 embedder.requests,
                 saved,
                 embedder.machine.meters().charged,
-                lash_kernel_exec::Weight::expand(tape.steps()),
+                crate::Weight::expand(tape.steps()),
             )
         };
         let reference = run(false);

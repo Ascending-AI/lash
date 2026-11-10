@@ -90,19 +90,14 @@ type Observation = (
     Vec<(&'static str, crate::Meters, [u64; 3])>,
     Vec<lash_kernel_state::semantic::Checkpoint>,
     Vec<Request>,
-    Vec<lash_kernel_exec::Weight>,
+    Vec<crate::Weight>,
 );
 
 /// What a run shows its embedder whatever its slices: result, prints,
 /// effects and charge events.
 fn semantic(
     (end, printed, _, _, requests, events): Observation,
-) -> (
-    String,
-    Vec<Datum>,
-    Vec<Request>,
-    Vec<lash_kernel_exec::Weight>,
-) {
+) -> (String, Vec<Datum>, Vec<Request>, Vec<crate::Weight>) {
     (end, printed, requests, events)
 }
 
@@ -181,7 +176,7 @@ fn run_selected(
         stops,
         checkpoints,
         embedder.requests,
-        lash_kernel_exec::Weight::expand(tape.steps()),
+        crate::Weight::expand(tape.steps()),
     )
 }
 

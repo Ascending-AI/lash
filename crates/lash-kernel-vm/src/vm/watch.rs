@@ -6,8 +6,8 @@
 //! bill alike (contract §3): observation changes no result, charge, park
 //! or slice return.
 
+use crate::observe::Weight;
 use lash_kernel_doc::{Document, TaskId, Value};
-use lash_kernel_exec::Weight;
 use lash_kernel_value::sites::{Site, TaskIdentity};
 
 use crate::SiteCounts;

@@ -283,7 +283,7 @@ fn control_seals_agree() {
                 }
             }
         };
-        (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
+        (end, saved, crate::Weight::expand(tape.steps()))
     };
     let reference = run(false);
     assert_eq!(
@@ -424,7 +424,7 @@ fn helper_seals_agree() {
             }
         };
 
-        (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
+        (end, saved, crate::Weight::expand(tape.steps()))
     };
     let reference = run(false);
     assert_eq!(

@@ -2705,16 +2705,6 @@
     "peak_bytes": 445743104,
     "samples": 1646
   },
-  "lash-kernel-exec/lash_kernel_exec": {
-    "cpu_count": 1,
-    "cpu_samples": 77,
-    "mean_cores": 1.0,
-    "memory_kb": 1572864,
-    "p95_cores": 1.36,
-    "p99_peak_bytes": 133423104,
-    "peak_bytes": 133423104,
-    "samples": 77
-  },
   "lash-kernel-labels/lash_kernel_labels": {
     "cpu_count": 2,
     "cpu_samples": 55,

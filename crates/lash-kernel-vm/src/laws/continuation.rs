@@ -28,7 +28,7 @@ use lash_kernel_state::paged::{
 };
 use lash_kernel_value::names::FunctionId;
 
-use lash_kernel_exec::coord::{RestoreRefusal, SitePath};
+use crate::machine::kernel::{RestoreRefusal, SitePath};
 use lash_kernel_value::sites::Site;
 
 use super::embedder::{self, Embedder, Setup, label};
@@ -799,7 +799,7 @@ fn park_where(
 /// A frame standing at an action whose Enter is accepted and whose result
 /// is not yet delivered: a spawn, a wait, a join or a yield.
 const STANDING: ContinuationPhase = ContinuationPhase::Source {
-    phase: crate::compile::room::Phase::Enter as u32,
+    phase: 0,
     progress: 2,
 };
 

@@ -862,15 +862,6 @@ impl<'embedding> Server<'embedding> {
                 refusal: refusal.into(),
             }),
         })?;
-        // Admitted by identity: one validated before, in lowering or an
-        // earlier decode, is not validated again (FIG-6931). A refusal is
-        // the start's, which admits it again.
-        library.admit_identified(
-            document.shared(),
-            document.id(),
-            self.bootstrap.tuning.kernel_data,
-            &selection,
-        );
         let executable = {
             let mut executable = functions.clone();
             for document in documents.values() {

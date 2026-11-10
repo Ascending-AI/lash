@@ -400,7 +400,9 @@ fn k_lib_009_document_corpus_names_registered_definitions() {
 
 /// K-CHG-003/004: a guard's zero/nonzero mask selects exactly the declared
 /// completion formula over the recorded operator corpus. Errors keep the
-/// generic raise path; no result bit is invented for them.
+/// generic raise path; no result bit is invented for them. The frozen
+/// engine's mask-to-units plan went with it (FIG-7688); the masks and the
+/// charged/value-only agreement stand.
 #[test]
 fn prepared_scalar_completion_matches_operator_corpus() {
     let mut registry = FunctionRegistry::new();
@@ -416,7 +418,6 @@ fn prepared_scalar_completion_matches_operator_corpus() {
             let Some(prepared) = registered.native().unwrap().prepare() else {
                 continue;
             };
-            let definition = registered.definition();
             let mut heap = testsupport::heap();
             let args: Vec<Value> = case["args"]
                 .as_array()
@@ -436,146 +437,12 @@ fn prepared_scalar_completion_matches_operator_corpus() {
             let Some(mask) = answer.scalar_sizes else {
                 continue;
             };
-            let Some(units) =
-                lash_kernel_vm::kernel_internals::prepared_scalar_charge(definition, mask)
-            else {
-                continue;
-            };
-            let generic = definition
-                .charge()
-                .expect("formula-metered library function")
-                .evaluate(&mut |operand, measure| {
-                    let value = match operand {
-                        Operand::Result => Some(&answer.value),
-                        Operand::Param(name) => definition
-                            .signature
-                            .params
-                            .iter()
-                            .position(|param| param.name == *name)
-                            .and_then(|index| args.get(index)),
-                    };
-                    value.map_or(0, |value| match measure {
-                        Measure::Size => size(value, &heap),
-                        Measure::DeepSize => deep_size(value, &heap),
-                        Measure::Magnitude => magnitude(value, &heap),
-                        Measure::NestedSize => nested_size(value, &heap),
-                    })
-                });
-            assert_eq!(units, generic, "{name}: guard mask {mask:04b}");
-            assert_eq!(
-                units,
-                case["expected"]["charged"].as_u64().unwrap(),
-                "{name}: recorded charge"
-            );
             specialized += 1;
             masks.insert(mask);
         }
     }
     assert!(specialized > 0);
     assert!(masks.contains(&0) && masks.iter().any(|mask| mask & 8 != 0));
-}
-
-/// K-CHG-003: what a region charges a call from its values alone, where
-/// each carries its measurements (an immediate, or a construction of no
-/// members), is the declared formula's amount, for every numeric and
-/// collection function of at most three parameters over every combination
-/// of such operands, `same`'s sum with a minimum included. `same` of two
-/// immediates, or of one and an empty construction, takes it every time.
-#[test]
-fn immediate_charges_are_the_declared_formula() {
-    let mut registry = FunctionRegistry::new();
-    lash_kernel_vm::register_machine_functions(&mut registry).unwrap();
-    register_numbers(&mut registry).unwrap();
-    crate::register_collections(&mut registry).unwrap();
-    crate::register_text_json(&mut registry).unwrap();
-    let mut heap = testsupport::heap();
-    let long = "fourteen bytes";
-    let mut operands: Vec<(Value, bool)> = [
-        Datum::Null,
-        Datum::Absent,
-        Datum::Bool(true),
-        Datum::Int(0.into()),
-        Datum::Int(7.into()),
-        Datum::Int((-3).into()),
-        Datum::Float(lash_kernel_doc::Float::new(2.5)),
-        Datum::Text(String::new()),
-        Datum::Text("record".into()),
-        Datum::Text(long.into()),
-    ]
-    .into_iter()
-    .map(|datum| (decode(datum, &mut heap), false))
-    .collect();
-    for empty in [
-        Datum::Tuple(Vec::new()),
-        Datum::List(Vec::new()),
-        Datum::Record(Vec::new()),
-    ] {
-        operands.push((decode(empty, &mut heap), true));
-    }
-    let results: Vec<Value> = [
-        Datum::Bool(false),
-        Datum::Int(0.into()),
-        Datum::Int(9.into()),
-        Datum::Text("text".into()),
-    ]
-    .into_iter()
-    .map(|datum| decode(datum, &mut heap))
-    .collect();
-    let mut answered = 0u64;
-    for (_, registered) in registry.iter() {
-        let definition = registered.definition();
-        let params = &definition.signature.params;
-        if params.len() > 3 {
-            continue;
-        }
-        let same = definition.name.as_str() == "same";
-        let combinations = operands.len().pow(params.len() as u32);
-        for combination in 0..combinations {
-            let mut rest = combination;
-            let mut args = Vec::new();
-            let mut fresh = 0u16;
-            for at in 0..params.len() {
-                let (value, empty) = operands[rest % operands.len()];
-                rest /= operands.len();
-                args.push(value);
-                if empty {
-                    fresh |= 1 << at;
-                }
-            }
-            for result in &results {
-                let fast = lash_kernel_vm::kernel_internals::immediate_charge(
-                    definition, &args, fresh, result,
-                );
-                if same {
-                    assert!(fast.is_some(), "same{args:?} takes the immediate charge");
-                }
-                let Some(fast) = fast else {
-                    continue;
-                };
-                let general = definition
-                    .charge()
-                    .expect("formula-metered library function")
-                    .evaluate(&mut |operand, measure| {
-                        let value = match operand {
-                            Operand::Result => Some(result),
-                            Operand::Param(name) => params
-                                .iter()
-                                .position(|param| param.name == *name)
-                                .and_then(|index| args.get(index)),
-                        };
-                        value.map_or(0, |value| match measure {
-                            Measure::Size => size(value, &heap),
-                            Measure::DeepSize => deep_size(value, &heap),
-                            Measure::Magnitude => magnitude(value, &heap),
-                            Measure::NestedSize => nested_size(value, &heap),
-                        })
-                    });
-                assert_eq!(fast, general, "{}{args:?} -> {result:?}", definition.name);
-                answered += 1;
-            }
-        }
-    }
-    assert!(answered > 0);
 }
 
 /// FIG-6941, K-NUM and K-CHG-003: every published typed kernel is the
@@ -680,34 +547,6 @@ fn typed_scalar_kernels_agree_with_general_entries_on_edge_pairs() {
                             testsupport::datum(&heap, &general),
                             "{context}"
                         );
-                        let units = lash_kernel_vm::kernel_internals::prepared_scalar_charge(
-                            &definition,
-                            answer.scalar_sizes.unwrap(),
-                        )
-                        .unwrap();
-                        let generic = definition
-                            .charge()
-                            .expect("formula-metered library function")
-                            .evaluate(&mut |operand, measure| {
-                                let value = match operand {
-                                    Operand::Result => &general,
-                                    Operand::Param(name) => {
-                                        &args[definition
-                                            .signature
-                                            .params
-                                            .iter()
-                                            .position(|p| p.name == *name)
-                                            .unwrap()]
-                                    }
-                                };
-                                match measure {
-                                    Measure::Size => size(value, &heap),
-                                    Measure::DeepSize => deep_size(value, &heap),
-                                    Measure::Magnitude => magnitude(value, &heap),
-                                    Measure::NestedSize => nested_size(value, &heap),
-                                }
-                            });
-                        assert_eq!(units, generic, "{context}");
                     }
                 }
             }

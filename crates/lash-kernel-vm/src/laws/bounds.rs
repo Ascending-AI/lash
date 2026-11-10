@@ -948,7 +948,7 @@ fn flat_charge_summaries_preserve_exact_graph_sizes() {
             .steps()
             .iter()
             .filter_map(|weight| match weight {
-                lash_kernel_exec::Weight::Atomic(n) if *n >= 10000 => Some(*n),
+                crate::Weight::Atomic(n) if *n >= 10000 => Some(*n),
                 _ => None,
             })
             .collect();
@@ -962,7 +962,7 @@ fn flat_charge_summaries_preserve_exact_graph_sizes() {
                 lash_kernel_doc::Datum::Null
             );
             actual.extend(rest.steps().iter().filter_map(|weight| match weight {
-                lash_kernel_exec::Weight::Atomic(n) if *n >= 10000 => Some(*n),
+                crate::Weight::Atomic(n) if *n >= 10000 => Some(*n),
                 _ => None,
             }));
         } else {
@@ -975,7 +975,7 @@ fn flat_charge_summaries_preserve_exact_graph_sizes() {
                 .steps()
                 .iter()
                 .filter_map(|weight| match weight {
-                    lash_kernel_exec::Weight::Atomic(n) if *n >= 10000 => Some(*n),
+                    crate::Weight::Atomic(n) if *n >= 10000 => Some(*n),
                     _ => None,
                 })
                 .collect();

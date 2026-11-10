@@ -954,7 +954,7 @@ fn helper_frames_agree() {
             embedder.world.printed,
             embedder.requests,
             embedder.machine.meters().charged,
-            lash_kernel_exec::Weight::expand(tape.steps()),
+            crate::Weight::expand(tape.steps()),
             checkpoints,
             stops,
         )
@@ -1013,7 +1013,7 @@ main { return call rooted() }
         Vec<Datum>,
         Vec<Request>,
         Option<u64>,
-        Vec<lash_kernel_exec::Weight>,
+        Vec<crate::Weight>,
         Vec<lash_kernel_state::semantic::Checkpoint>,
         Vec<(&'static str, crate::Meters, [u64; 3])>,
     );
@@ -1264,7 +1264,7 @@ fn native_boundaries_agree() {
         (
             end,
             run.machine.meters().charged,
-            lash_kernel_exec::Weight::expand(tape.steps()),
+            crate::Weight::expand(tape.steps()),
             boundaries,
             run.requests,
             [

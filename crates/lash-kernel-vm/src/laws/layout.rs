@@ -204,8 +204,8 @@ main {
             tape.steps()
                 .into_iter()
                 .flat_map(|weight| match weight {
-                    lash_kernel_exec::Weight::Units(n) => {
-                        vec![lash_kernel_exec::Weight::Units(1); n as usize]
+                    crate::Weight::Units(n) => {
+                        vec![crate::Weight::Units(1); n as usize]
                     }
                     atomic => vec![atomic],
                 })
@@ -327,8 +327,8 @@ body {
             .steps()
             .into_iter()
             .flat_map(|weight| match weight {
-                lash_kernel_exec::Weight::Units(n) => {
-                    vec![lash_kernel_exec::Weight::Units(1); n as usize]
+                crate::Weight::Units(n) => {
+                    vec![crate::Weight::Units(1); n as usize]
                 }
                 atomic => vec![atomic],
             })
@@ -522,7 +522,7 @@ type ScalarObserved = (
     String,
     Vec<Datum>,
     Vec<Request>,
-    Vec<lash_kernel_exec::Weight>,
+    Vec<crate::Weight>,
     u64,
     Vec<lash_kernel_state::semantic::Checkpoint>,
 );
@@ -591,8 +591,8 @@ fn observe_scalar_bounded(
         .steps()
         .into_iter()
         .flat_map(|weight| match weight {
-            lash_kernel_exec::Weight::Units(n) => {
-                vec![lash_kernel_exec::Weight::Units(1); n as usize]
+            crate::Weight::Units(n) => {
+                vec![crate::Weight::Units(1); n as usize]
             }
             atomic => vec![atomic],
         })
@@ -973,7 +973,7 @@ fn free_cells_agree() {
                 }
             }
         };
-        (end, saved, lash_kernel_exec::Weight::expand(tape.steps()))
+        (end, saved, crate::Weight::expand(tape.steps()))
     };
     let reference = run(false);
     assert_eq!(reference.0, int(5));

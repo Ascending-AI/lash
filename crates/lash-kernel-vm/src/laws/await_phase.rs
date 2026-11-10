@@ -239,10 +239,5 @@ fn an_await_waits_where_its_policy_waits() {
         .into_iter()
         .filter_map(|(task, frame, phase)| (task == TaskId::MAIN && frame == 0).then_some(phase))
         .collect();
-    assert_eq!(
-        phases,
-        [ContinuationPhase::Call {
-            phase: crate::compile::room::Phase::Enter.code()
-        }]
-    );
+    assert_eq!(phases, [ContinuationPhase::Call { phase: 0 }]);
 }

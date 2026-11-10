@@ -38,7 +38,7 @@ const KEYED_SORT: &str = r#"main {
 type Observation = (
     End,
     Option<u64>,
-    Vec<lash_kernel_exec::Weight>,
+    Vec<crate::Weight>,
     Vec<(lash_kernel_state::semantic::Checkpoint, [u64; 3])>,
     Vec<Request>,
     [u64; 3],

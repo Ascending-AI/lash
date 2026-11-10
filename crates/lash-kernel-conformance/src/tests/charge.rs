@@ -3,7 +3,8 @@
 //! equals the machine at every bound around every event of every case's
 //! charge program.
 
-use lash_kernel_exec::charge::{Ending, ReferenceCharger, Weight};
+use lash_kernel_vm::Weight;
+use lash_kernel_vm::kernel_internals::{Ending, ReferenceCharger};
 use lash_kernel_vm::{ChargeTape, KernelMachine, PreparedLibrary};
 
 use crate::machine::{Park, Run, run_case_in};

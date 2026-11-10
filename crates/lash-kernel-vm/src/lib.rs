@@ -124,12 +124,9 @@
 //!   `linked_carry::a_foreign_linked_kernel_or_closure_refuses_before_rewriting_on_sqlite`,
 //!   `paged_carry::a_paged_carry_commits_one_consistent_side_and_resumes_after_retirement_on_sqlite`.
 
-mod admission;
 /// The bytecode core's compiler output (FIG-7688 cutover).
 #[allow(dead_code)]
 mod bytecode;
-mod compile;
-mod costs;
 mod crossing;
 mod data;
 /// Seal and open of the bytecode core (FIG-7692).
@@ -140,6 +137,7 @@ mod functions;
 #[allow(dead_code)]
 mod heap;
 pub mod interface;
+mod library;
 mod machine;
 mod observe;
 /// The machine's face after the persistent-heap cutover (FIG-6195):
@@ -155,10 +153,10 @@ mod vm;
 #[cfg(test)]
 mod laws;
 
-pub use compile::{PreparedLibrary, body_census};
 pub use functions::{MachineFunctions, implement_machine_functions, register_machine_functions};
+pub use library::{PreparedLibrary, body_census};
 pub use machine::kernel::KernelMachine;
-pub use observe::{ChargeTape, ObservationMode};
+pub use observe::{ChargeTape, ObservationMode, Weight};
 pub use paged::{SealedRoot, validate_foreign_checkpoint};
 pub use session_editor::{SessionEditor, SessionValue};
 pub use vm::machine::CoreMachine;

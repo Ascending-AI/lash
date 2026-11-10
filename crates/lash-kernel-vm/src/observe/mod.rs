@@ -6,6 +6,7 @@
 //! export. A machine that observes nothing pays one branch at each
 //! observation point.
 
+mod charge;
 mod context;
 mod profile;
 mod symbols;
@@ -25,13 +26,8 @@ pub use symbols::{CodeKind, CodeSymbol, CodeWork, LibKind, LibSymbol, NativeWork
 #[cfg(any(test, feature = "perf-witness"))]
 pub use work::{CodeCounts, NativeCounts};
 
-pub(crate) use context::Publisher;
-pub(crate) use work::Counting;
-
+pub use charge::{Ending, ReferenceCharger, Weight};
 use lash_kernel_doc::TaskId;
-use lash_kernel_exec::Weight;
-
-use crate::compile::{CodeId, LibId, StmtId};
 
 pub use lash_kernel_value::observation::RunObservation as ObservationMode;
 
@@ -118,44 +114,8 @@ impl PathRecorder {
     }
 }
 
-/// Something a run did that an observer sees.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Event {
-    /// A task's innermost frame begins a statement.
-    Statement {
-        task: TaskId,
-        code: CodeId,
-        stmt: StmtId,
-        charging: bool,
-    },
-    /// A frame was pushed.
-    Push {
-        task: TaskId,
-        code: CodeId,
-    },
-    /// A frame was left, once its call was charged.
-    Pop {
-        task: TaskId,
-    },
-    TaskEnded(TaskId),
-    /// A library function with no frame is called, by `task`.
-    NativeEnter {
-        task: TaskId,
-        lib: LibId,
-    },
-    /// Its fast path answered.
-    NativeFast,
-    /// Its guard counted this much work.
-    GuardWork(u64),
-    /// It returned or raised, and was charged.
-    NativeExit,
-    /// A library function's formula is evaluated.
-    FormulaEnter(LibId),
-    FormulaExit,
-}
-
 /// Every charge a run makes, in order, as the per-unit reference charger
-/// reads them (`K-CHG-002`, [`lash_kernel_exec::ReferenceCharger`]): each
+/// reads them (`K-CHG-002`, [`ReferenceCharger`]): each
 /// unit run as [`Weight::Units`], each other charge as [`Weight::Atomic`].
 /// A run that passes its bound inside a unit run records the units within
 /// it, then the unit that passes. Clones share one record, so a law keeps
@@ -203,108 +163,5 @@ impl ChargeTape {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-}
-
-/// What one machine observes.
-pub(crate) struct Observer {
-    #[cfg(any(test, feature = "perf-witness"))]
-    pub(crate) work_witness: bool,
-    pub(crate) path: Option<PathRecorder>,
-    pub(crate) work: Option<Counting>,
-    pub(crate) context: Option<Publisher>,
-    pub(crate) charges: Option<ChargeTape>,
-}
-
-impl Observer {
-    pub(crate) fn new() -> Self {
-        Self {
-            #[cfg(any(test, feature = "perf-witness"))]
-            work_witness: false,
-            path: None,
-            work: None,
-            context: None,
-            charges: None,
-        }
-    }
-
-    /// Statement projections need the observing executor. A sampler's context
-    /// follows frame transitions independently and never selects that executor.
-    pub(crate) fn projects_execution(&self) -> bool {
-        self.path.is_some() || self.work.is_some()
-    }
-
-    /// Semantic observers retain helper bodies; context publication alone does
-    /// not change admission or replace prepared answers with those bodies.
-    pub(crate) fn observes_bodies(&self) -> bool {
-        self.projects_execution() || self.charges.is_some() || {
-            #[cfg(any(test, feature = "perf-witness"))]
-            {
-                self.work_witness
-            }
-            #[cfg(not(any(test, feature = "perf-witness")))]
-            {
-                false
-            }
-        }
-    }
-
-    #[inline(never)]
-    pub(crate) fn on(&mut self, event: Event, charged: u64, allocated: u64) {
-        if let Some(work) = &mut self.work {
-            match event {
-                Event::Statement { code, charging, .. } => work.statement(code.0, charging),
-                Event::Push { task, code } => {
-                    work.flush(charged, allocated);
-                    work.push(task.0 as usize, code.0);
-                }
-                Event::Pop { task } => {
-                    work.flush(charged, allocated);
-                    work.pop(task.0 as usize);
-                }
-                Event::TaskEnded(task) => {
-                    work.flush(charged, allocated);
-                    work.task_ended(task.0 as usize);
-                }
-                Event::NativeEnter { task, lib } => {
-                    work.flush(charged, allocated);
-                    work.native_enter(task.0 as usize, lib.0);
-                }
-                Event::NativeFast => work.native_fast(),
-                Event::GuardWork(units) => work.guard_work(units),
-                Event::NativeExit => {
-                    work.flush(charged, allocated);
-                    work.native_exit();
-                }
-                Event::FormulaEnter(lib) => work.formula(lib.0),
-                Event::FormulaExit => {}
-            }
-        }
-        if let Some(context) = &mut self.context {
-            match event {
-                Event::Statement {
-                    task, code, stmt, ..
-                } => context.statement(task.0, code.0, stmt.0),
-                Event::Push { task, code } => context.push(task.0, code.0),
-                Event::Pop { task } => context.pop(task.0),
-                Event::NativeEnter { lib, .. } => context.enter(GuestPhase::Native(lib.0)),
-                Event::FormulaEnter(lib) => context.enter(GuestPhase::Formula(lib.0)),
-                Event::NativeExit | Event::FormulaExit => context.leave(),
-                Event::TaskEnded(_) | Event::NativeFast | Event::GuardWork(_) => {}
-            }
-        }
-    }
-
-    /// An expression or an action operand is evaluated: counted, and
-    /// nothing a context shows.
-    #[inline(never)]
-    pub(crate) fn expression(&mut self, charging: bool) {
-        if let Some(work) = &mut self.work {
-            work.expression(charging);
-        }
-    }
-
-    pub(crate) fn publish(&mut self, context: Arc<GuestContext>) {
-        self.context = Some(Publisher::new(context));
     }
 }

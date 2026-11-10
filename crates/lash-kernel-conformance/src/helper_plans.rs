@@ -129,7 +129,7 @@ struct Observed {
     prints: Vec<Datum>,
     requests: Vec<Request>,
     charged: u64,
-    tape: Vec<lash_kernel_exec::Weight>,
+    tape: Vec<lash_kernel_vm::Weight>,
 }
 
 fn run(case: &runner::Case, program: &Program, projector: &mut Projector<'_>) -> Observed {
@@ -309,8 +309,8 @@ fn run_with_options(
             .steps()
             .into_iter()
             .flat_map(|weight| match weight {
-                lash_kernel_exec::Weight::Units(units) => {
-                    vec![lash_kernel_exec::Weight::Units(1); units as usize]
+                lash_kernel_vm::Weight::Units(units) => {
+                    vec![lash_kernel_vm::Weight::Units(1); units as usize]
                 }
                 atomic => vec![atomic],
             })

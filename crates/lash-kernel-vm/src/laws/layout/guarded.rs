@@ -458,7 +458,6 @@ fn resident_native_items_agree() {
 /// Accepted regions agree with Source at warm, cold and refused boundaries.
 #[test]
 fn collection_region_preparations_preserve_source_and_storage() {
-    collection_store_closes_charge_the_rhs_once();
     const BODY: &str = r#"
         let out = [0, 0] let i = 0 let n = resident.len(values) let list = true
         for value in values { set out[resident.len(out)] = value }
@@ -631,7 +630,7 @@ fn collection_region_preparations_preserve_source_and_storage() {
             (
                 format!("{end:?}"),
                 runtime.machine.meters(),
-                lash_kernel_exec::Weight::expand(tape.steps()),
+                crate::Weight::expand(tape.steps()),
                 stops,
                 finished,
             ),
@@ -640,13 +639,7 @@ fn collection_region_preparations_preserve_source_and_storage() {
     };
     // Sealed cold at every stop, a run ends, charges and records its
     // charge events as it does whole.
-    let outcome = |observed: &(
-        String,
-        crate::Meters,
-        Vec<lash_kernel_exec::Weight>,
-        _,
-        bool,
-    )| {
+    let outcome = |observed: &(String, crate::Meters, Vec<crate::Weight>, _, bool)| {
         (
             observed.0.clone(),
             observed.1.charged,
@@ -698,64 +691,5 @@ fn collection_region_preparations_preserve_source_and_storage() {
     assert!(
         refusals >= 4,
         "the matrix exercises actual resource refusals"
-    );
-}
-
-/// K-CHG-002: a value-first indexed write has four fixed forms: its
-/// statement, RHS literal, target read and index literal. Pin costs nothing.
-fn collection_store_closes_charge_the_rhs_once() {
-    let run = Embedder::with(
-        "main { let values = [1, 2] set values[0] = 3 return values }",
-        Setup::default(),
-    );
-    let (program, _) = run.program(false);
-    let admitted = program
-        .library
-        .admit(&program.document, Default::default(), &program.selection)
-        .unwrap_or_else(|_| panic!("collection close source admits"));
-    let exe = admitted
-        .executable(
-            &program.document,
-            &program.library,
-            &program.documents,
-            &program.functions,
-            &program.instances,
-        )
-        .unwrap_or_else(|_| panic!("collection close source compiles"));
-    let plan = (0..exe.code_count())
-        .map(|n| crate::compile::CodeId(n as u32))
-        .find(|code| {
-            exe.code(*code).params.is_empty() && exe.block(exe.code(*code).body).stmts.len() == 3
-        })
-        .unwrap();
-    let statement = exe.block(exe.code(plan).body).stmts[1];
-    let (stream, stmt, _) = exe.statement(statement);
-    assert!(
-        stream.ops[stmt.ops.start as usize..stmt.ops.end() as usize]
-            .iter()
-            .any(|op| matches!(op, lash_kernel_exec::Op::Pin { .. })),
-        "the real value-first source span contains Pin"
-    );
-    let charges = crate::compile::room::charges::region_isa::program(&exe, plan).unwrap();
-    let fixed: u64 = charges
-        .events
-        .iter()
-        .filter(|(at, _)| {
-            at.site.unit == stmt.site.unit && at.site.path.starts_with(&stmt.site.path)
-        })
-        .flat_map(|(_, closes)| closes.iter())
-        .flat_map(|close| close.tape.iter())
-        .map(|item| match item {
-            crate::compile::room::charges::region_isa::ChargeItem::Fixed { weight, .. } => {
-                weight.units()
-            }
-            crate::compile::room::charges::region_isa::ChargeItem::Formula { .. } => {
-                panic!("the indexed write has no formula")
-            }
-        })
-        .sum();
-    assert_eq!(
-        fixed, 4,
-        "statement + RHS literal + target read + index literal; Pin adds no fee"
     );
 }

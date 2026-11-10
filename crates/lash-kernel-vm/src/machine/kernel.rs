@@ -170,6 +170,33 @@ impl crate::perf_witness::Profiling for KernelMachine {
     }
 }
 
+/// The action coordinate the retired restore probes report (L2 retargets their laws).
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SitePath(pub Box<[u32]>);
+
+/// The refusal the retired restore probes report (L2 retargets their laws).
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RestoreRefusal {
+    /// The task's state disagrees with the action.
+    TaskState { action: SitePath },
+}
+
+#[cfg(test)]
+impl std::fmt::Display for RestoreRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TaskState { action } => {
+                write!(
+                    f,
+                    "the task's state disagrees with the action at {action:?}"
+                )
+            }
+        }
+    }
+}
+
 /// A law reached a probe of the frozen engine the core replaced. Its owner
 /// retargets the law to the core after the flip (FIG-7688 phase 2); until
 /// then it fails here, by name.
@@ -312,14 +339,11 @@ impl KernelMachine {
         tasks.dedup();
         tasks
     }
-    pub(crate) fn loop_headers(&mut self) -> Vec<lash_kernel_state::paged::HeaderRecord> {
-        retired("loop_headers")
-    }
     pub(crate) fn tamper_task_state(
         &mut self,
         _task: lash_kernel_doc::TaskId,
         _state: lash_kernel_state::paged::TaskStateRecord,
-    ) -> Result<(), super::Halt> {
+    ) -> Result<(), String> {
         retired("tamper_task_state")
     }
     pub(crate) fn tamper_pending(
@@ -341,14 +365,14 @@ impl KernelMachine {
             &mut lash_kernel_state::paged::LoopRecord,
             &lash_kernel_state::kernel_internals::tree::Access<'_>,
         ),
-    ) -> Result<lash_kernel_exec::coord::SitePath, String> {
+    ) -> Result<SitePath, String> {
         retired("tamper_loop")
     }
     pub(crate) fn restore_refusal(
         &mut self,
         _task: lash_kernel_doc::TaskId,
         _index: u64,
-    ) -> Result<Option<lash_kernel_exec::coord::RestoreRefusal>, String> {
+    ) -> Result<Option<RestoreRefusal>, String> {
         retired("restore_refusal")
     }
     pub(crate) fn source_call_phase(
@@ -375,22 +399,5 @@ impl KernelMachine {
     }
     pub(crate) fn assert_external_native_boundary_law(&self, _id: lash_kernel_value::FunctionId) {
         retired("assert_external_native_boundary_law")
-    }
-    pub(crate) fn check_source_constructor_certificates(
-        &self,
-        _source: &std::sync::Arc<crate::compile::room::Source>,
-        _link: lash_kernel_value::content_ids::LinkId,
-        _expression: &str,
-    ) -> Vec<String> {
-        retired("check_source_constructor_certificates")
-    }
-    pub(crate) fn check_source_closure_certificates(
-        &self,
-        _source: &std::sync::Arc<crate::compile::room::Source>,
-        _identity: std::sync::Arc<lash_kernel_doc::arena::ClosureIdentity>,
-        _names: Vec<lash_kernel_value::Name>,
-        _code: lash_kernel_doc::arena::LocalCode,
-    ) {
-        retired("check_source_closure_certificates")
     }
 }

@@ -49,13 +49,13 @@ struct Observed {
     requests: Vec<Request>,
     stops: Vec<(&'static str, crate::Meters, [u64; 3])>,
     checkpoints: Vec<lash_kernel_state::semantic::Checkpoint>,
-    events: Vec<lash_kernel_exec::Weight>,
+    events: Vec<crate::Weight>,
 }
 
 impl Observed {
     /// What a run shows its embedder, whatever its slices: result,
     /// prints, effects and the charge events in order.
-    fn outcome(&self) -> (&str, &[Datum], &[Request], &[lash_kernel_exec::Weight]) {
+    fn outcome(&self) -> (&str, &[Datum], &[Request], &[crate::Weight]) {
         (&self.end, &self.printed, &self.requests, &self.events)
     }
 }
@@ -144,7 +144,7 @@ fn observe_reopening(
         requests: embedder.requests,
         stops,
         checkpoints,
-        events: lash_kernel_exec::Weight::expand(tape.steps()),
+        events: crate::Weight::expand(tape.steps()),
     }
 }
 

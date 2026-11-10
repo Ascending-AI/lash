@@ -39,10 +39,10 @@ use crate::bytecode::charge_tables::RESULT;
 use crate::bytecode::op::Op;
 use crate::bytecode::program::{Callee, Constant, Operand, Program, Then, Unit, UnitId, UnitKind};
 use crate::heap::{Heap, LoadError, MemoryRefused};
+use crate::observe::Weight;
 use crate::{Bound, ChargeLimiter, Host, LimitDecision};
 use charge::{Meter, Refused, Rest};
 use frames::{Bill, Context, Frame, Handler};
-use lash_kernel_exec::Weight;
 
 /// Why [`Vm::run`] returned.
 #[derive(Debug)]

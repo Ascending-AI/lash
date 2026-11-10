@@ -49,7 +49,7 @@ fn wide_windows_agree_warm_and_cold() {
             embedder.world.printed,
             embedder.requests,
             embedder.machine.meters().charged.unwrap(),
-            lash_kernel_exec::Weight::expand(tape.steps()),
+            crate::Weight::expand(tape.steps()),
             checkpoints,
         )
     };

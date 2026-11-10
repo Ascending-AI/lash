@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use lash_kernel_doc::Document;
 use lash_kernel_doc::FunctionRegistry;
-use lash_kernel_exec::charge::Weight;
 use lash_kernel_value::names::FunctionId;
+use lash_kernel_vm::Weight;
 use lash_kernel_vm::{ChargeTape, KernelMachine, Machine as _, PreparedLibrary};
 
 use crate::machine::{Run, run_case_in};

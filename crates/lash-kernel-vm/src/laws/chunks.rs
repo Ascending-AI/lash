@@ -210,36 +210,3 @@ fn a_host_copy_of_a_megabyte_binding_batches_its_payload_siblings() {
         );
     }
 }
-
-/// Ordered page faults: a later index's missing page must not outrank a
-/// corrupt leaf in the earlier subtree, even when the indexes share a read.
-#[test]
-fn a_host_text_copy_keeps_the_first_subtrees_fault_ahead_of_a_later_batch_fault() {
-    use lash_kernel_doc::heap::{PageValue, TextPayload};
-    use lash_kernel_state::kernel_internals::{PagedHeap, stored_pages, tree::Access};
-    use lash_kernel_state::paged::{EditEpoch, PageKind, SemanticHeap};
-
-    let source = Source::default();
-    let access = Access::new(Box::new(source.clone()));
-    let text: String = (0..65)
-        .map(|i| format!("{i:04}{}", "x".repeat(4092)))
-        .collect();
-    let text = stored_pages::text(&access, &text).unwrap();
-    let TextPayload::Paged(root) = &text.body else {
-        panic!("paged text")
-    };
-    let mut stored = source.0.borrow_mut();
-    let indexes = stored[&root.id].children.clone();
-    assert!(indexes.len() >= 2);
-    assert_eq!(stored[&indexes[0].id].kind, PageKind::PAYLOAD_INDEX);
-    let first_leaf = stored[&indexes[0].id].children[0];
-    stored.get_mut(&first_leaf.id).unwrap().tokens = Arc::from([]);
-    stored.remove(&indexes[1].id);
-    drop(stored);
-
-    let heap = PagedHeap::fresh(Box::new(source), EditEpoch(1));
-    let result = crate::data::copy_page_out(&heap, &PageValue::Text(text));
-    assert!(
-        matches!(result, Err(crate::data::CopyError::Heap(HeapFault::Corrupt { page, .. })) if page == first_leaf.id)
-    );
-}

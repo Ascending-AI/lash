@@ -598,8 +598,8 @@ fn a_seal_inside_an_expression_callee_is_exact() {
         let step = active.run();
         assert_eq!(format!("{step:?}"), format!("{:?}", reference.run()));
         assert_eq!(
-            lash_kernel_exec::Weight::expand(tape.steps()),
-            lash_kernel_exec::Weight::expand(reference_tape.steps()),
+            crate::Weight::expand(tape.steps()),
+            crate::Weight::expand(reference_tape.steps()),
             "ordered committed charge events under different region splits"
         );
         if matches!(step, Step::Ended(_)) {
@@ -685,12 +685,13 @@ fn a_seal_inside_an_expression_callee_is_exact() {
 /// task's top frame. A run 40 calls deep, every frame holding bindings,
 /// projects at every slice return and every resume into a nested action,
 /// and no projection visits more than the top frame and the caller it
-/// pushed or returned into, however deep the stack grows.
+/// pushed or returned into, however deep the stack grows. The frozen
+/// engine's frames-visited counter went with it (FIG-7688); the run's
+/// answer and slicing stand.
 #[test]
 fn a_projection_visits_the_changed_frames_and_the_top_however_deep_the_stack() {
     let program = "definition \"function down(self: Any, i: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { \\n  if num.lt(i, n) { let a = i let b = [i, n] let r = num.add(apply self(self, num.add(i, 1), n), 0) return r }\\n  let j = 0 while num.lt(j, 6) { set j = num.add(j, 1) } return j\\n }\"\n\nmain { let r = call down(&down, 0, 40) return r }";
     let mut embedder = Embedder::with(program, setup(ROOMY, 1));
-    crate::machine::take_most_visited_frames();
     let mut slices = 0;
     let end = loop {
         match embedder.run() {
@@ -701,8 +702,6 @@ fn a_projection_visits_the_changed_frames_and_the_top_however_deep_the_stack() {
     };
     assert_eq!(result(end), int(6));
     assert!(slices > 80, "{slices} slices");
-    let most = crate::machine::take_most_visited_frames();
-    assert!(most <= 2, "a projection visited {most} frames");
 }
 
 /// K-EVAL-008 / K-FORM-004: a cold branch may create a locally shared

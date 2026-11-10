@@ -3472,12 +3472,6 @@
       "p99_anon_peak_bytes": 398315520,
       "samples": 1646
     },
-    "lash-kernel-exec/lash_kernel_exec": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 133423104,
-      "samples": 77
-    },
     "lash-kernel-labels/lash_kernel_labels": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,

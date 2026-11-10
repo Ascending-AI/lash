@@ -1,14 +1,11 @@
 //! What the tokens an observation holds name: each code's function and
 //! site, each library function's identity and name, and each statement's
-//! site. Resolved after the fact, from the executable, never while a run
-//! is observed.
+//! site. Resolved after the fact, never while a run is observed.
 
 use lash_kernel_value::names::FunctionId;
 use lash_kernel_value::sites::Site;
-use lash_kernel_value::sites::Unit;
 
-use super::work::{CodeCounts, Counting, NativeCounts, Owner};
-use crate::compile::{CodeId, Executable, LibId, LibRun};
+use super::work::{CodeCounts, NativeCounts};
 
 /// What kind of code a code token names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,72 +85,6 @@ pub struct GuestSymbols {
 }
 
 impl GuestSymbols {
-    pub(crate) fn of(exe: &Executable) -> Self {
-        let unit_name = |unit: &Unit| match unit {
-            Unit::Main => "main".to_string(),
-            Unit::Function(name) => name.to_string(),
-            Unit::Library(function) => exe
-                .library_name(function)
-                .map_or_else(|| function.to_string(), ToString::to_string),
-        };
-        let codes = (0..exe.code_count() as u32)
-            .map(|token| {
-                let site = exe.code(CodeId(token)).site.clone();
-                let function = match &site.unit {
-                    Unit::Library(function) => Some(*function),
-                    _ => None,
-                };
-                let (kind, name) = match (&site.unit, site.path.is_empty()) {
-                    (_, false) => {
-                        let path: Vec<String> = site.path.iter().map(u32::to_string).collect();
-                        (
-                            CodeKind::Closure,
-                            format!("{}/closure@{}", unit_name(&site.unit), path.join(".")),
-                        )
-                    }
-                    (Unit::Main, true) => (CodeKind::Main, unit_name(&site.unit)),
-                    (Unit::Function(_), true) => (CodeKind::Function, unit_name(&site.unit)),
-                    (Unit::Library(_), true) => (CodeKind::LibraryBody, unit_name(&site.unit)),
-                };
-                CodeSymbol {
-                    token,
-                    kind,
-                    name,
-                    function,
-                    site,
-                }
-            })
-            .collect();
-        let libs = (0..exe.lib_count() as u32)
-            .map(|token| {
-                let lib = exe.lib(LibId(token));
-                LibSymbol {
-                    token,
-                    kind: match lib.run {
-                        LibRun::Native { .. } | LibRun::Declaration => LibKind::Native,
-                        LibRun::Machine(_) => LibKind::Machine,
-                        LibRun::Body(_) => LibKind::Body,
-                    },
-                    name: lib.header.name.to_string(),
-                    function: lib.specialization.function,
-                }
-            })
-            .collect();
-        let mut statements = vec![None; exe.stmt_count()];
-        for block in exe.blocks() {
-            for (index, stmt) in block.stmts.iter().enumerate() {
-                if let Some(slot) = statements.get_mut(stmt.0 as usize) {
-                    *slot = Some(block.site.child(index as u32));
-                }
-            }
-        }
-        Self {
-            codes,
-            libs,
-            statements,
-        }
-    }
-
     pub fn code(&self, token: u32) -> Option<&CodeSymbol> {
         self.codes.get(token as usize)
     }
@@ -204,71 +135,6 @@ pub struct WorkReport {
 }
 
 impl WorkReport {
-    pub(crate) fn of(
-        counting: &Counting,
-        symbols: &GuestSymbols,
-        charged: u64,
-        allocated: u64,
-        metered: bool,
-    ) -> Self {
-        let mut counting = counting.clone();
-        counting.flush(charged, allocated);
-        counting.close_all();
-        let calls_by = |owner: Owner| -> Vec<(u32, u64)> {
-            counting
-                .native_calls
-                .range((owner, 0)..=(owner, u32::MAX))
-                .map(|((_, lib), count)| (*lib, *count))
-                .collect()
-        };
-        let codes = counting
-            .codes
-            .iter()
-            .enumerate()
-            .filter(|(_, counts)| **counts != CodeCounts::default())
-            .filter_map(|(token, counts)| {
-                Some(CodeWork {
-                    symbol: symbols.code(token as u32)?.clone(),
-                    counts: {
-                        let mut counts = *counts;
-                        counts.self_charge = metered.then(|| counts.self_charge.unwrap_or(0));
-                        counts.inclusive_charge =
-                            metered.then(|| counts.inclusive_charge.unwrap_or(0));
-                        counts
-                    },
-                    native_calls: calls_by(Owner::Code(token as u32)),
-                })
-            })
-            .collect();
-        let natives = counting
-            .natives
-            .iter()
-            .enumerate()
-            .filter(|(_, counts)| **counts != NativeCounts::default())
-            .filter_map(|(token, counts)| {
-                Some(NativeWork {
-                    symbol: symbols.lib(token as u32)?.clone(),
-                    counts: {
-                        let mut counts = *counts;
-                        counts.self_charge = metered.then(|| counts.self_charge.unwrap_or(0));
-                        counts.zero_charge_calls =
-                            metered.then(|| counts.zero_charge_calls.unwrap_or(0));
-                        counts
-                    },
-                })
-            })
-            .collect();
-        Self {
-            charged: metered.then(|| charged.saturating_sub(counting.began.0)),
-            heap_insertions: allocated.saturating_sub(counting.began.1),
-            unattributed_charge: metered.then_some(counting.unattributed_charge),
-            unattributed_insertions: counting.unattributed_insertions,
-            unattributed_native_calls: calls_by(Owner::Nobody),
-            codes,
-            natives,
-        }
-    }
-
     /// The run's charge less every self charge and the unattributed one:
     /// zero, when the counters saw every unit once.
     pub fn residual(&self) -> Option<i128> {
