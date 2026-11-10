@@ -5,16 +5,21 @@
 //!   every id-bearing record a run holds is rewritten.
 //! - A rewrite whose correspondence misses an id the run names refuses
 //!   with that id, before it writes a page.
+//! - A rewrite whose site correspondence drops a site of the run's own
+//!   code that the run stands at or names refuses with that site, before
+//!   it writes a page: a node that did not survive is never carried onto
+//!   whatever node the successor has at its path.
 
 use std::collections::BTreeSet;
 
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::PageId;
 use lash_kernel_state::paged::run::rewrite::{
-    RewriteFault, RunCorrespondence, Unmapped, live_code, rewrite,
+    RewriteFault, RunCorrespondence, SiteMap, Unmapped, live_code, rewrite,
 };
 use lash_kernel_value::LinkId;
 use lash_kernel_value::names::{CallableId, FunctionId, Name};
+use lash_kernel_value::sites::Unit;
 
 use super::embedder::{ROOMY, Setup, Source, World, core_program};
 use crate::{CellStart, CoreMachine, Machine, Step};
@@ -141,6 +146,31 @@ fn a_rewrite_leaves_no_old_code_id_and_refuses_an_unmapped_one_before_writing() 
         matches!(
             refused,
             Err(RewriteFault::Unmapped(Unmapped::Callable(callable))) if callable == foreign
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(source.0.borrow().len(), written, "a refusal wrote a page");
+
+    let dropped = live
+        .sites
+        .iter()
+        .filter(|site| site.unit == Unit::Main)
+        .max()
+        .cloned()
+        .expect("the parked run stands in its main");
+    let mut moved = map.clone();
+    moved.sites = Some(SiteMap::new(
+        lash_kernel_doc::Correspondence::identity(
+            root.document,
+            live.sites.iter().filter(|site| **site != dropped).cloned(),
+        )
+        .unwrap(),
+    ));
+    let refused = rewrite(&mut pages, &root, &moved);
+    assert!(
+        matches!(
+            &refused,
+            Err(RewriteFault::Unmapped(Unmapped::Site(site))) if *site == dropped
         ),
         "{refused:?}"
     );

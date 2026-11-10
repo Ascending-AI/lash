@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageRef};
-use lash_kernel_doc::{Datum, ErrorDatum};
+use lash_kernel_doc::{Correspondence, Datum, ErrorDatum};
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::{CallableId, FunctionId};
 use lash_kernel_value::sites::{EffectIdentity, Site, TaskIdentity, Unit};
@@ -43,14 +43,44 @@ pub struct RunCorrespondence {
     /// A callable's image's link is its link's image.
     pub callables: BTreeMap<CallableId, CallableId>,
     pub functions: BTreeMap<FunctionId, FunctionId>,
+    /// Where each node of the predecessor's own code went, when the
+    /// succession moved or rewrote nodes: a site in one of its units is
+    /// carried to its successor or refused; any other site keeps its path,
+    /// its unit's function id mapped by `functions`.
+    pub sites: Option<SiteMap>,
 }
 
-/// A code id a run names and the correspondence has no image for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A document correspondence and the units of its base it covers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SiteMap {
+    correspondence: Correspondence,
+    units: BTreeSet<Unit>,
+}
+
+impl SiteMap {
+    /// The site map `correspondence` states: its base's units are the
+    /// units its entries leave from.
+    pub fn new(correspondence: Correspondence) -> Self {
+        let units = correspondence
+            .entries()
+            .iter()
+            .map(|entry| entry.from.unit.clone())
+            .collect();
+        Self {
+            correspondence,
+            units,
+        }
+    }
+}
+
+/// A code id or site a run names and the correspondence has no image for.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Unmapped {
     Link(LinkId),
     Callable(CallableId),
     Function(FunctionId),
+    /// A site of the predecessor's code whose node did not survive.
+    Site(Site),
 }
 
 /// Why a run was not rewritten. Nothing was written when the fault is
@@ -76,6 +106,8 @@ pub struct LiveCode {
     pub links: BTreeSet<LinkId>,
     pub callables: BTreeSet<CallableId>,
     pub functions: BTreeSet<FunctionId>,
+    /// Every site the run stands at or names.
+    pub sites: BTreeSet<Site>,
 }
 
 /// Either the ids met, or the images they are rewritten to.
@@ -140,6 +172,22 @@ impl Ids<'_> {
     }
 
     fn site(&mut self, site: &mut Site) -> Result<(), RewriteFault> {
+        match self {
+            Self::Collect(live) => {
+                live.sites.insert(site.clone());
+            }
+            Self::Map(RunCorrespondence {
+                sites: Some(map), ..
+            }) if map.units.contains(&site.unit) => {
+                *site = map
+                    .correspondence
+                    .successor(site)
+                    .cloned()
+                    .ok_or_else(|| RewriteFault::Unmapped(Unmapped::Site(site.clone())))?;
+                return Ok(());
+            }
+            Self::Map(_) => {}
+        }
         match &mut site.unit {
             Unit::Library(function) => self.function(function),
             Unit::Main | Unit::Function(_) => Ok(()),
@@ -439,6 +487,9 @@ fn check(live: &LiveCode, map: &RunCorrespondence) -> Result<(), RewriteFault> {
     }
     for function in &live.functions {
         ids.function(&mut function.clone())?;
+    }
+    for site in &live.sites {
+        ids.site(&mut site.clone())?;
     }
     Ok(())
 }
