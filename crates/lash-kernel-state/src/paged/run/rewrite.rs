@@ -11,15 +11,20 @@
 //! large chunks that do, the directory paths to them, the run's state and
 //! a root over them. Every page the old root names stays as it was.
 //!
-//! A [`FunctionValue`](lash_kernel_doc::FunctionValue) an argument holds
-//! is frozen data a host admits by its own retained provenance; it is not
-//! rewritten.
+//! A [`FunctionValue`] a request's argument holds, the closure a run
+//! crossed into an effect, is rewritten like the rest: its callable, the
+//! local functions its start convention names (its own link's), its
+//! creation site, its token's members and every capture, nested function
+//! values included. Its captions and signature origin are display
+//! coordinates of a document, not code ids, and stay.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageRef};
-use lash_kernel_doc::{Correspondence, Datum, ErrorDatum};
+use lash_kernel_doc::{
+    CaptureValue, Correspondence, Datum, ErrorDatum, FunctionTarget, FunctionValue, StartConvention,
+};
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::{CallableId, FunctionId};
 use lash_kernel_value::sites::{EffectIdentity, Site, TaskIdentity, Unit};
@@ -253,10 +258,68 @@ impl Ids<'_> {
             | Datum::Text(_)
             | Datum::Bytes(_)
             | Datum::Timestamp(_)
-            | Datum::Handle(_)
-            | Datum::FunctionValue(_) => {}
+            | Datum::Handle(_) => {}
+            Datum::FunctionValue(value) => self.function_value(value)?,
         }
         Ok(())
+    }
+
+    fn function_value(&mut self, value: &mut FunctionValue) -> Result<(), RewriteFault> {
+        let link = value.callable.link;
+        self.callable(&mut value.callable)?;
+        match &mut value.convention {
+            StartConvention::Direct | StartConvention::PyArgsList { .. } => {}
+            StartConvention::TsDirect { await_fn: target }
+            | StartConvention::PyDirect { cleanup: target } => self.target(link, target)?,
+            StartConvention::TsArgsList { await_fn, same_fn } => {
+                self.target(link, await_fn)?;
+                self.target(link, same_fn)?;
+            }
+        }
+        if let Some(site) = &mut value.creation {
+            self.site(site)?;
+        }
+        for member in value.token.iter_mut().flatten() {
+            self.datum(member)?;
+        }
+        for capture in value.captures.values_mut() {
+            self.capture(capture)?;
+        }
+        Ok(())
+    }
+
+    /// A start convention's local function: a callable of `link`.
+    fn target(&mut self, link: LinkId, target: &mut FunctionTarget) -> Result<(), RewriteFault> {
+        if let FunctionTarget::Local(function) = target {
+            let mut callable = CallableId {
+                link,
+                function: *function,
+            };
+            self.callable(&mut callable)?;
+            *function = callable.function;
+        }
+        Ok(())
+    }
+
+    fn capture(&mut self, capture: &mut CaptureValue) -> Result<(), RewriteFault> {
+        match capture {
+            CaptureValue::Data(datum) => self.datum(datum),
+            CaptureValue::Function(value) => self.function_value(value),
+            CaptureValue::Reference(_) => Ok(()),
+            CaptureValue::Tuple(members)
+            | CaptureValue::List(members)
+            | CaptureValue::Set(members) => members
+                .iter_mut()
+                .try_for_each(|member| self.capture(member)),
+            CaptureValue::Map(pairs) => pairs.iter_mut().try_for_each(|(key, member)| {
+                self.capture(key)?;
+                self.capture(member)
+            }),
+            CaptureValue::Record(fields) => fields
+                .iter_mut()
+                .try_for_each(|(_, member)| self.capture(member)),
+            CaptureValue::Error { data, .. } => self.capture(data),
+        }
     }
 
     fn heads(&mut self, heads: &mut Heads) -> Result<(), RewriteFault> {
