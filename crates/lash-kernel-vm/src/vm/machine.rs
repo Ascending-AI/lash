@@ -153,25 +153,14 @@ fn foreign_closures(
 fn build(
     program: &Program,
     bounds: Bounds,
-    entry: Option<&Name>,
+    root: Option<&super::callable::Root<'_>>,
     modes: crate::interface::EffectModes,
     opened: Opened<'_>,
     used: u64,
     available: Option<&lash_kernel_doc::BuildHelpers>,
 ) -> Result<(Vm<SlotHeap>, Option<lash_kernel_doc::StartConvention>), StartError> {
     let document = &program.document;
-    let export = match entry {
-        None => None,
-        Some(name) => match document.exports.get(name) {
-            Some(lash_kernel_doc::Export::Function(export)) => Some(export),
-            _ => {
-                return Err(StartError::UnknownEntry {
-                    entry: name.clone(),
-                });
-            }
-        },
-    };
-    let convention = export.map(|export| export.convention.clone());
+    let convention = root.map(|root| root.entry.convention.clone());
     let registry = program.library.registry().clone();
     // Every Link the build loads: a function value of one calls that
     // Link's own body.
@@ -200,18 +189,20 @@ fn build(
         })
         .collect();
     let Opened { mut heap, roots } = opened;
-    let closures = foreign_closures(&mut heap, roots, program.link)?;
+    let mut closures = foreign_closures(&mut heap, roots, program.link)?;
+    closures.extend(root.iter().flat_map(|root| root.closures.iter().cloned()));
     let loaded = crate::bytecode::compile::Linked {
         others,
         imports,
         closures,
+        functions: root.map_or_else(Vec::new, |root| root.functions.clone()),
     };
-    let mut code = crate::bytecode::conventions::compile_selected(
+    let mut code = crate::bytecode::compile::compile(
         document,
         &registry,
         program.link,
         &loaded,
-        export,
+        root.map(|root| &root.entry),
         available,
         &program.library.core(available),
     )
@@ -251,6 +242,32 @@ fn unavailable_helper(function: lash_kernel_value::FunctionId) -> OpenError {
 fn malformed(problem: impl ToString) -> OpenError {
     OpenError::Malformed {
         problem: problem.to_string(),
+    }
+}
+
+/// The export `name` names in `document`.
+fn exported<'d>(
+    document: &'d Document,
+    name: &Name,
+) -> Result<&'d lash_kernel_doc::FunctionExport, StartError> {
+    match document.exports.get(name) {
+        Some(lash_kernel_doc::Export::Function(export)) => Ok(export),
+        _ => Err(StartError::UnknownEntry {
+            entry: name.clone(),
+        }),
+    }
+}
+
+/// A start on `export`, a declared or library function the run enters.
+fn entered(export: &lash_kernel_doc::FunctionExport) -> super::callable::Root<'_> {
+    super::callable::Root {
+        entry: crate::bytecode::compile::Entry {
+            function: export.function,
+            convention: &export.convention,
+            captures: None,
+        },
+        closures: Vec::new(),
+        functions: Vec::new(),
     }
 }
 
@@ -358,19 +375,41 @@ impl CoreMachine {
         source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
         let document = program.document.clone();
-        let entry = match &start.target {
-            Target::Main => None,
-            Target::Entry(name) => Some(name.clone()),
-            Target::Callable(_) => {
-                return Err(linked("the bytecode core starts no callable yet"));
-            }
+        let (entry, callable) = match &start.target {
+            Target::Main => (None, None),
+            Target::Entry(name) => (Some(name.clone()), None),
+            Target::Callable(function) => (
+                None,
+                Some((
+                    function,
+                    super::callable::export(&program, function, limits)?,
+                )),
+            ),
         };
-        let export = entry
+        let export = match (&entry, &callable) {
+            (Some(name), _) => Some(exported(&document, name)?),
+            (None, Some((_, export))) => Some(export),
+            (None, None) => None,
+        };
+        let names = callable
             .as_ref()
-            .and_then(|name| match document.exports.get(name) {
-                Some(lash_kernel_doc::Export::Function(export)) => Some(export),
-                _ => None,
-            });
+            .map(|(function, _)| super::callable::names(function));
+        let root = match (&callable, export) {
+            (Some((function, export)), _) => {
+                let (closures, functions) = super::callable::held(function);
+                Some(super::callable::Root {
+                    entry: crate::bytecode::compile::Entry {
+                        function: export.function,
+                        convention: &export.convention,
+                        captures: names.as_deref(),
+                    },
+                    closures,
+                    functions,
+                })
+            }
+            (None, Some(export)) => Some(entered(export)),
+            (None, None) => None,
+        };
         let params = export.map_or_else(Vec::new, |export| export.signature.params.clone());
         let (heap, session) = match start.session.as_ref().map(SessionRoot::run_page) {
             None => (
@@ -405,7 +444,7 @@ impl CoreMachine {
         let (mut vm, convention) = build(
             &program,
             bounds,
-            entry.as_ref(),
+            root.as_ref(),
             start.modes,
             opened,
             0,
@@ -461,7 +500,14 @@ impl CoreMachine {
             }
         }
         let main = vm.program.main;
-        vm.start(main, &args, None)
+        let closure = match &callable {
+            Some((function, _)) => Some(
+                super::callable::restore(&mut vm, function)
+                    .map_err(|flow| linked(format!("{flow:?}")))?,
+            ),
+            None => None,
+        };
+        vm.start(main, &args, closure)
             .map_err(|flow| linked(format!("{flow:?}")))?;
         Ok(Self {
             vm,
@@ -576,10 +622,17 @@ impl Machine for CoreMachine {
             .iter()
             .map(|use_| (*use_, OperationMode::Read))
             .collect();
+        let export = record
+            .entry
+            .as_ref()
+            .map(|name| exported(&program.document, name))
+            .transpose()
+            .map_err(|error| malformed(format!("the run's entry is not exported: {error:?}")))?;
+        let root = export.map(entered);
         let (mut vm, convention) = build(
             &program,
             bounds,
-            record.entry.as_ref(),
+            root.as_ref(),
             modes,
             Opened {
                 heap,

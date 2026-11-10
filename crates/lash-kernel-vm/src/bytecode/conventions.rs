@@ -4,69 +4,37 @@
 //! a frame around the body nor a synthetic statement or charge. Ordinary
 //! calls of the same function still use its unadapted body.
 
-use lash_kernel_doc::{Datum, Decoder, Document, Export, FunctionTarget, Literal, StartConvention};
+use lash_kernel_doc::{Datum, Decoder, Document, FunctionTarget, Literal, StartConvention};
+use lash_kernel_value::Type;
 use lash_kernel_value::sites::Unit as SiteUnit;
-use lash_kernel_value::{FunctionId, Type};
 
-use super::compile::{Compiler, Fun, Result, unsupported};
+use super::compile::{Compiler, Entry, Fun, Result, unsupported};
 use super::op::Op;
 use super::program::{Block, CallSite, Event, RootCleanup, Unit, UnitId, UnitKind};
 use crate::StartError;
 
-/// Compiles the convention of the selected export. Several exports may name
-/// one body with different start signatures and conventions (`K-DOC-003`).
-/// Only the export lookup is narrowed; code identities still use the original
-/// Link, and every body, import and constant is unchanged.
-pub(crate) fn compile_selected(
-    document: &Document,
-    registry: &lash_kernel_doc::FunctionRegistry,
-    link: lash_kernel_value::LinkId,
-    linked: &super::compile::Linked<'_>,
-    export: Option<&lash_kernel_doc::FunctionExport>,
-    available: Option<&lash_kernel_doc::BuildHelpers>,
-    library: &super::library::Library,
-) -> Result<super::program::Program> {
-    let mut selected = std::borrow::Cow::Borrowed(document);
-    let entry = export.map(|export| export.function);
-    if let Some(lash_kernel_doc::FunctionExport {
-        function: entry,
-        convention,
-        ..
-    }) = export
-        && document.exports.values().any(|export| {
-            matches!(export, Export::Function(export) if export.function == *entry && export.convention != *convention)
-        })
-    {
-        selected.to_mut().exports.retain(|_, export| {
-            !matches!(export, Export::Function(export) if export.function == *entry && export.convention != *convention)
-        });
-    }
-    super::compile::compile(&selected, registry, link, linked, entry, available, library)
-}
-
-/// Selects an entry's unit, retaining the existing path for other conventions.
-pub(crate) fn entry(compiler: &mut Compiler<'_>, id: FunctionId) -> Result<UnitId> {
-    let convention = compiler
-        .document
-        .exports
-        .values()
-        .find_map(|export| match export {
-            Export::Function(export) if export.function == id => Some(&export.convention),
-            _ => None,
-        });
-    let await_fn = match convention {
-        Some(
-            StartConvention::TsDirect { await_fn } | StartConvention::TsArgsList { await_fn, .. },
-        ) => await_fn,
-        Some(StartConvention::PyDirect { cleanup }) => return clean_up(compiler, id, cleanup),
-        _ => return compiler.body(id, false),
+/// The unit a start runs: the entry's body under its start convention.
+/// Several exports may name one body with different conventions
+/// (`K-DOC-003`); the start's own is the one compiled.
+pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<UnitId> {
+    let id = entry.function;
+    let await_fn = match entry.convention {
+        StartConvention::TsDirect { await_fn } | StartConvention::TsArgsList { await_fn, .. } => {
+            await_fn
+        }
+        StartConvention::PyDirect { cleanup } => return clean_up(compiler, entry, cleanup),
+        StartConvention::Direct | StartConvention::PyArgsList { .. } => {
+            return match entry.captures {
+                None => compiler.body(id, false),
+                Some(_) => root(compiler, entry),
+            };
+        }
     };
     let FunctionTarget::Local(await_fn) = await_fn else {
         return unsupported("a TypeScript entry settlement through an imported function");
     };
     let await_fn = *await_fn;
-    let at = compiler.reserve();
-    compiler.function(id, None, None, at, false, UnitKind::Declared(id))?;
+    let at = root(compiler, entry)?;
     let site = Fun::new(SiteUnit::Library(id), false, false, None);
     let callee = compiler.callee(&site, await_fn)?;
     let mark = compiler.mark(&site, &site.statement);
@@ -108,6 +76,19 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, id: FunctionId) -> Result<UnitI
     Ok(at)
 }
 
+/// The entry's own unit, apart from the body its calls run: a callable's
+/// reads its frozen captures where a closure reads its own (`K-CLO-004`).
+fn root(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<UnitId> {
+    let id = entry.function;
+    let at = compiler.reserve();
+    let kind = match entry.captures {
+        Some(_) => UnitKind::Closure(id),
+        None => UnitKind::Declared(id),
+    };
+    compiler.function(id, None, entry.captures, at, false, kind)?;
+    Ok(at)
+}
+
 /// An entry whose convention declares a run-root cleanup (`K-TASK-019`):
 /// once the body has left the root frame by its return, by falling off
 /// its end or by its raise, its `finally` blocks run, the cleanup is
@@ -117,15 +98,15 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, id: FunctionId) -> Result<UnitI
 /// only the body's return or raise while the cleanup runs.
 fn clean_up(
     compiler: &mut Compiler<'_>,
-    id: FunctionId,
+    entry: &Entry<'_>,
     cleanup: &FunctionTarget,
 ) -> Result<UnitId> {
+    let id = entry.function;
     let FunctionTarget::Local(cleanup) = cleanup else {
         return unsupported("a run-root cleanup through an imported function");
     };
     let cleanup = *cleanup;
-    let at = compiler.reserve();
-    compiler.function(id, None, None, at, false, UnitKind::Declared(id))?;
+    let at = root(compiler, entry)?;
     let site = Fun::new(SiteUnit::Library(id), false, false, None);
     let callee = compiler.callee(&site, cleanup)?;
     let mark = compiler.mark(&site, &site.statement);

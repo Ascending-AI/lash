@@ -62,12 +62,17 @@ pub fn compile_document(
     link: lash_kernel_value::LinkId,
     entry: Option<&lash_kernel_doc::FunctionExport>,
 ) -> Result<BytecodeProgram, StartError> {
-    let mut code = crate::bytecode::conventions::compile_selected(
+    let entry = entry.map(|export| crate::bytecode::compile::Entry {
+        function: export.function,
+        convention: &export.convention,
+        captures: None,
+    });
+    let mut code = crate::bytecode::compile::compile(
         document,
         registry,
         link,
         &Default::default(),
-        entry,
+        entry.as_ref(),
         None,
         &crate::bytecode::library::Library::default(),
     )
@@ -122,7 +127,11 @@ pub fn library_inventory(
                         registry,
                         link,
                         &Default::default(),
-                        Some(*function),
+                        Some(&crate::bytecode::compile::Entry {
+                            function: *function,
+                            convention: &lash_kernel_doc::StartConvention::Direct,
+                            captures: None,
+                        }),
                         None,
                         &library,
                     )

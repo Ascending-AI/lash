@@ -63,7 +63,7 @@ pub(crate) fn compile(
     registry: &FunctionRegistry,
     link: LinkId,
     linked: &Linked<'_>,
-    entry: Option<FunctionId>,
+    entry: Option<&Entry<'_>>,
     available: Option<&BuildHelpers>,
     library: &Library,
 ) -> Result<Program> {
@@ -91,7 +91,23 @@ pub(crate) fn compile(
     for identity in &linked.closures {
         compiler.saved_closure(identity)?;
     }
+    for callable in &linked.functions {
+        compiler.enter_link(callable.link)?;
+        let from = compiler.units.len();
+        if let Err(error) = compiler.trampoline(callable.function) {
+            compiler.refuse_from(from, &error);
+        }
+    }
     compiler.finish(main)
+}
+
+/// What a start runs instead of `main`: a declared or library function,
+/// or a callable's, under the start's convention.
+pub(crate) struct Entry<'a> {
+    pub function: FunctionId,
+    pub convention: &'a lash_kernel_doc::StartConvention,
+    /// A callable's frozen captures, by name, in its closure's order.
+    pub captures: Option<&'a [Name]>,
 }
 
 /// The function each Link's function import slot resolves to.
@@ -103,10 +119,14 @@ pub type Imports = BTreeMap<(LinkId, ImportSlot), CallableId>;
 pub struct Linked<'a> {
     pub others: Vec<(LinkId, &'a Document)>,
     pub imports: Imports,
-    /// The closures of other Links the run holds, one for each callable:
-    /// a saved function's code, compiled in its own Link with the capture
-    /// shape its save froze.
+    /// The closures of other Links the run holds, and those a callable
+    /// start's frozen captures hold, one for each callable: a saved
+    /// function's code, compiled in its own Link with the capture shape
+    /// its save froze.
     pub closures: Vec<ClosureIdentity>,
+    /// The function values a callable start's frozen captures hold: each
+    /// needs its Link's trampoline.
+    pub functions: Vec<CallableId>,
 }
 
 /// Where a read or write of a name goes.
@@ -702,11 +722,17 @@ impl<'a> Compiler<'a> {
             }
             let from = self.units.len();
             if let Err(error) = self.trampoline(*id) {
-                for at in from..self.units.len() {
-                    if self.units[at].is_none() {
-                        self.units[at] = Some(self.unavailable(&error.0));
-                    }
-                }
+                self.refuse_from(from, &error);
+            }
+        }
+    }
+
+    /// Every unit reserved from `from` and left uncompiled refuses with
+    /// `error` when it runs.
+    fn refuse_from(&mut self, from: usize, error: &Unsupported) {
+        for at in from..self.units.len() {
+            if self.units[at].is_none() {
+                self.units[at] = Some(self.unavailable(&error.0));
             }
         }
     }

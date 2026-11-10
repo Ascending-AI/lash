@@ -10,6 +10,7 @@
 //! costs, which only place the slice's end: no limit, no dynamic fee and
 //! no charge readout.
 
+pub(crate) mod callable;
 pub(crate) mod calls;
 pub(crate) mod charge;
 pub(crate) mod datum;
