@@ -1,6 +1,7 @@
 //! Helper schedules obey PLAN-INDEP through the kernel-owned equality seam.
-//! Layouts 0 and 1 answer closed helpers by their generated plans and the
-//! rest by their natives; layout 3 runs every body (FIG-6678).
+//! The installed arm answers each helper by its native; the cold arm runs a
+//! library holding every body without its native, so the two compare native
+//! and body (`K-LIB-006`, FIG-6678).
 #![allow(
     clippy::unwrap_used,
     reason = "malformed fixtures and failed machine operations are law failures"
@@ -64,6 +65,16 @@ fn generated_plan_indexes_are_in_function_identity_order() {
             );
         }
     }
+}
+
+/// The installed definitions with every body registered without its native,
+/// so the core runs the body wherever the installed library calls the native
+/// (`K-LIB-006`). The core ignores layouts, so a layout cannot select bodies.
+pub(crate) fn bodies(library: &lash_kernel_vm::PreparedLibrary) -> lash_kernel_vm::PreparedLibrary {
+    lash_kernel_vm::testing::library(
+        library,
+        lash_kernel_vm::testing::ExecutionStrategy::Interpreted,
+    )
 }
 
 #[allow(
@@ -391,7 +402,7 @@ fn compare(dialect: &str, shard: Option<usize>) {
             "{} native carry",
             case.id
         );
-        let prepared = body.get_or_insert_with(|| in_layout(&program.library, Layout(3)));
+        let prepared = body.get_or_insert_with(|| bodies(&program.library));
         program.library = prepared.clone();
         let mut cold = Projector {
             imports: Some(&reference.images),
@@ -598,7 +609,11 @@ fn compare_control(source: &str, charge: u64) -> Observed {
         stride: 0,
         nanoseconds: 0,
     };
-    let expected = run_bounded::<3>(&case, &program, &mut Projector::default(), charge);
+    let reference = Program {
+        library: bodies(&program.library),
+        ..program.clone()
+    };
+    let expected = run_bounded::<3>(&case, &reference, &mut Projector::default(), charge);
     assert_eq!(
         run_bounded::<0>(&case, &program, &mut Projector::default(), charge),
         expected
@@ -1504,7 +1519,7 @@ fn lowered(groups: &[(&str, &[(&str, &str)])]) -> Vec<(runner::Case, Program)> {
 fn lowered_dialect_loops_observe_what_their_bodies_observe() {
     for (case, program) in dialect_loop_programs() {
         let bodies = Program {
-            library: in_layout(&program.library, Layout(3)),
+            library: bodies(&program.library),
             ..program.clone()
         };
         let planned = run::<0>(&case, &program, &mut Projector::default());

@@ -171,7 +171,7 @@ main {{
         )
         .expect("prepare linked law document");
         let reference = Program {
-            library: in_layout(&program.library, Layout(3)),
+            library: bodies(&program.library),
             ..program.clone()
         };
         let expected = observe::<3>(&reference, 50_000_000);
@@ -250,7 +250,7 @@ main {{
     )
     .expect("prepare linked law document");
     let reference = Program {
-        library: in_layout(&program.library, Layout(3)),
+        library: bodies(&program.library),
         ..program.clone()
     };
     let expected = observe::<3>(&reference, 50_000_000);
@@ -317,7 +317,7 @@ result = labels
             panic!("text construction lowers")
         };
         let reference = Program {
-            library: in_layout(&program.library, Layout(3)),
+            library: bodies(&program.library),
             ..program.clone()
         };
         let expected = run::<3>(&case, &reference, &mut Projector::default());

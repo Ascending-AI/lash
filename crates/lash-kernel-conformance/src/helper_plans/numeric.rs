@@ -82,7 +82,7 @@ fn generated_scalar_contracts_agree_with_their_bodies() {
         };
         let registry = base.library.registry();
         let general = in_layout(&base.library, Layout(1));
-        let bodies = in_layout(&base.library, Layout(3));
+        let bodies = bodies(&base.library);
         for name in names {
             let (function, registered) = registry
                 .iter()
@@ -227,7 +227,7 @@ fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
         })
         .collect::<String>();
     let general = in_layout(&base.library, Layout(1));
-    let bodies = in_layout(&base.library, Layout(3));
+    let bodies = bodies(&base.library);
     let pairs = [
         ("0", "0"),
         ("1", "0"),
