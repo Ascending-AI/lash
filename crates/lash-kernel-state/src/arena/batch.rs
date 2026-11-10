@@ -813,29 +813,8 @@ impl PreparedInstallation<'_> {
         depth_limit: usize,
         literals: bool,
     ) -> Result<PreparedGraphProof, HeapFault> {
-        self.prove_region_values(pages, values, depth_limit, literals, None)
-    }
-    pub(crate) fn prove_region_values(
-        &mut self,
-        pages: &Access<'_>,
-        values: &[Value],
-        depth_limit: usize,
-        literals: bool,
-        region: Option<(&[(ArenaHandle, u64)], u64)>,
-    ) -> Result<PreparedGraphProof, HeapFault> {
         if self.batch.proof.is_some() {
             return Err(proof_fault("a batch proof is already sealed"));
-        }
-        if let Some((_, count)) = region {
-            self.registration
-                .reserve_region_identities(count)
-                .map_err(|error| proof_fault(&error.to_string()))?;
-            self.registration
-                .read_arena()
-                .allocations
-                .checked_add(count)
-                .ok_or_else(|| proof_fault("region allocation counter overflow"))?;
-            self.batch.allocations = count;
         }
         let mutable: Vec<_> = self
             .batch
@@ -850,23 +829,14 @@ impl PreparedInstallation<'_> {
                 ordinal: self
                     .batch
                     .next_provisional
-                    .checked_add(if let Some((ordinals, _)) = region {
-                        ordinals
-                            .iter()
-                            .find(|(target, _)| target == handle)
-                            .ok_or_else(|| proof_fault("region omitted a fresh identity"))?
-                            .1
-                    } else {
-                        index as u64
-                    })
+                    .checked_add(index as u64)
                     .ok_or_else(|| proof_fault("batch identity overflow"))?,
             };
-            if region.is_none()
-                && self
-                    .registration
-                    .reserve_entity()
-                    .map_err(|error| proof_fault(&error.to_string()))?
-                    != entity
+            if self
+                .registration
+                .reserve_entity()
+                .map_err(|error| proof_fault(&error.to_string()))?
+                != entity
             {
                 return Err(proof_fault("prepared allocation ordinals changed"));
             }
@@ -1466,9 +1436,6 @@ impl PreparedBatch {
     /// rebuild, host allocation or recoverable failure remains after this check.
     pub fn publish(self, arena: &mut Arena) {
         assert!(arena.registration_active() && self.is_current(arena));
-        self.publish_region(arena);
-    }
-    pub(crate) fn publish_region(self, arena: &mut Arena) {
         arena.allocations += self.allocations;
         for entry in &self.entries {
             arena.resident = arena.resident.saturating_add(body_values(&entry.body));
@@ -1619,5 +1586,3 @@ impl Arena {
         );
     }
 }
-
-mod region;

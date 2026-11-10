@@ -347,17 +347,6 @@ impl Ledger {
         outputs: &[(Owner, RootValue<'_>)],
         pending: &mut Vec<EntityId>,
     ) -> Result<Vec<(Owner, Option<Holding>)>, HeapFault> {
-        self.ownership_changes_with_graph(arena, access, inputs, outputs, pending, None)
-    }
-    pub(super) fn ownership_changes_with_graph(
-        &self,
-        arena: &mut Arena,
-        access: &Access<'_>,
-        inputs: &[Owner],
-        outputs: &[(Owner, RootValue<'_>)],
-        pending: &mut Vec<EntityId>,
-        graph: Option<&crate::arena::PreparedGraphProof>,
-    ) -> Result<Vec<(Owner, Option<Holding>)>, HeapFault> {
         // Small source exits need no owner-set indexes. Larger boundaries retain
         // logarithmic duplicate checks, with the same current-view admission.
         let large = inputs.len() + outputs.len() > 32;
@@ -398,26 +387,7 @@ impl Ledger {
                     "source destination was not consumed: {owner:?}, inputs {inputs:?}"
                 )));
             }
-            let holding = if let RootValue::Capture(handle) = value
-                && let Some(graph) = graph
-                && graph.contains_handle(*handle)
-            {
-                if !matches!(
-                    owner,
-                    Owner::Value {
-                        slot: Slot::Capture(_),
-                        ..
-                    }
-                ) {
-                    return Err(invalid("a captured cell needs a capture owner"));
-                }
-                let entity = graph
-                    .region_cell(*handle)
-                    .ok_or_else(|| invalid("a fresh capture must name its proved variable cell"))?;
-                Holding::with_edges(0, [Identity::Object(entity)], access)?
-            } else {
-                self.project_root(arena, access, owner, value)?
-            };
+            let holding = self.project_root(arena, access, owner, value)?;
             holding.each_edge(access, &mut |edge| {
                 if let Identity::Object(entity) = edge.target {
                     pending.push(entity);

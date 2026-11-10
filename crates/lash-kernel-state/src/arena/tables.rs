@@ -350,14 +350,6 @@ impl Own {
 }
 
 impl Index {
-    pub(super) fn region_resequence(
-        &mut self,
-        sequences: Vec<u64>,
-        next: u64,
-    ) -> Result<(), NativeError> {
-        self.own_mut().resequence(sequences, next)
-    }
-
     /// The index of a large table opened from the heap: `chunks` cold
     /// chunks of `width` sequences each, below `next`.
     pub(super) fn chunked(width: u64, chunks: usize, next: u64) -> Self {
@@ -848,26 +840,6 @@ impl super::Arena {
         find(handle, table, index, key)?
             .map(|place| pair(table, place).map(|pair| (pair[0], pair[1])))
             .transpose()
-    }
-
-    pub(crate) fn region_table_next(&self, handle: ArenaHandle) -> Result<u64, NativeError> {
-        Ok(self.table_view(handle)?.1.next())
-    }
-    pub(crate) fn region_table_entry(
-        &self,
-        handle: ArenaHandle,
-        key: &Key,
-    ) -> Result<Option<(Value, Value, u64)>, NativeError> {
-        let (table, index) = self.table_view(handle)?;
-        let Some(place) = find(handle, table, index, key)? else {
-            return Ok(None);
-        };
-        let pair = pair(table, place)?;
-        let sequence = index
-            .sequences(place.chunk)
-            .get(place.at)
-            .ok_or(NativeError::Malformed("table member has no sequence"))?;
-        Ok(Some((pair[0], pair[1], sequence)))
     }
 
     /// Writes `value` over the entry under `key`, if the table holds one:

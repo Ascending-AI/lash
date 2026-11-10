@@ -69,7 +69,6 @@ impl Arena {
             provisional,
             dirty,
             committed: false,
-            detached: false,
             batch: Batch::Native(Vec::new()),
         })
     }
@@ -85,7 +84,6 @@ pub struct Registration<'a> {
     provisional: u64,
     dirty: usize,
     committed: bool,
-    detached: bool,
     batch: Batch,
 }
 enum Batch {
@@ -107,45 +105,6 @@ impl Batch {
     }
 }
 impl Registration<'_> {
-    pub(super) fn reserve_region_headers(
-        &mut self,
-        count: usize,
-    ) -> Result<Vec<ArenaHandle>, NativeError> {
-        let mut bodies = Vec::new();
-        let mut handles = Vec::new();
-        for result in [bodies.try_reserve(count), handles.try_reserve(count)] {
-            result.map_err(|_| lash_kernel_doc::heap::HeapFault::Exhausted {
-                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
-            })?;
-        }
-        for _ in 0..count {
-            let handle = self.arena.objects.reserve();
-            handles.push(handle);
-            bodies.push((handle, Body::Free));
-        }
-        self.reserve_objects(Batch::Bodies(bodies))?;
-        Ok(handles)
-    }
-    pub(super) fn fill_region_headers(&mut self, bodies: Vec<Body>) -> Result<(), NativeError> {
-        let Batch::Bodies(headers) = &mut self.batch else {
-            return Err(malformed("region has no headers"));
-        };
-        if headers.len() != bodies.len() {
-            return Err(malformed("region headers do not cover bodies"));
-        }
-        for ((_, target), body) in headers.iter_mut().zip(bodies) {
-            *target = body;
-        }
-        Ok(())
-    }
-    pub(super) fn reserve_region_identities(&mut self, count: u64) -> Result<(), NativeError> {
-        self.arena.next_provisional = self
-            .arena
-            .next_provisional
-            .checked_add(count)
-            .ok_or_else(|| malformed("region identity progression overflow"))?;
-        Ok(())
-    }
     pub(super) fn reserve_batch(
         &mut self,
         new: Vec<(ArenaHandle, NewObject)>,
@@ -233,9 +192,6 @@ impl Registration<'_> {
 }
 impl Drop for Registration<'_> {
     fn drop(&mut self) {
-        if self.detached {
-            return;
-        }
         if !self.committed {
             self.arena.objects.discard_install(self.batch.handles());
             let mut kept = self.dirty;
@@ -279,39 +235,5 @@ impl Drop for Registration<'_> {
         }
         self.arena.keyed.clear();
         self.arena.registering = false;
-    }
-}
-
-/// The affine rollback facts separated from the arena borrow. Only the region
-/// port may transfer them; the original Registration still owns all cleanup.
-pub(super) struct RegistrationRecord {
-    next: u64,
-    provisional: u64,
-    dirty: usize,
-    batch: Batch,
-}
-impl Registration<'_> {
-    pub(super) fn detach(mut self) -> RegistrationRecord {
-        let record = RegistrationRecord {
-            next: self.next,
-            provisional: self.provisional,
-            dirty: self.dirty,
-            batch: std::mem::replace(&mut self.batch, Batch::Native(Vec::new())),
-        };
-        self.detached = true;
-        record
-    }
-}
-impl RegistrationRecord {
-    pub(super) fn attach(self, arena: &mut Arena) -> Registration<'_> {
-        Registration {
-            arena,
-            next: self.next,
-            provisional: self.provisional,
-            dirty: self.dirty,
-            committed: false,
-            detached: false,
-            batch: self.batch,
-        }
     }
 }

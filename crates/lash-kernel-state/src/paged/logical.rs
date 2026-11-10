@@ -34,19 +34,10 @@ pub use program::{
 };
 pub use program::{FrameEvent, ScratchEvent, VirtualBody, VirtualEntity};
 mod publication;
-mod region;
 use members::PreparedMember;
 pub use members::{Member, MemberFault};
 pub use ownership::{PublicationValue, RootValue};
 pub use publication::{AcceptedBoundary, BoundaryTransaction, MemberEdit};
-use region::Lineage;
-#[cfg(any(test, feature = "testing", feature = "perf-witness"))]
-pub use region::fixtures as region_fixtures;
-pub use region::{
-    LeaseAllocation, LeaseCallable, LeaseFacts, LeaseFault, LeaseGraphExit, LeaseLoader,
-    LeaseMeasure, LeaseMember, LeaseObject, LeaseOp, LeaseProjection, LeaseStep, LeaseValue,
-    NativeBatch, PreparedStateExit, ReadyLeaseStep, StateExit, StateLease,
-};
 mod warming;
 pub use warming::WarmFact;
 mod values;
@@ -671,6 +662,10 @@ pub enum Change {
     },
 }
 
+/// A ledger's identity: stamps and admissions from another ledger are refused.
+#[derive(Debug)]
+struct Lineage;
+
 pub struct Ledger {
     state: State,
     identity: Rc<Lineage>,
@@ -729,7 +724,7 @@ impl Prepared {
     ) -> Result<Self, HeapFault> {
         let mut swept = Ledger {
             state: before.state.clone(),
-            identity: Rc::new(Lineage::default()),
+            identity: Rc::new(Lineage),
             revision: before.revision,
             facts: Default::default(),
         };
@@ -784,7 +779,7 @@ impl Ledger {
                 refinements: 0,
                 next_invocation: 1,
             },
-            identity: Rc::new(Lineage::default()),
+            identity: Rc::new(Lineage),
             revision: 0,
             facts: Default::default(),
         }
@@ -799,7 +794,7 @@ impl Ledger {
                 refinements: root.refinements,
                 next_invocation: root.next_invocation,
             },
-            identity: Rc::new(Lineage::default()),
+            identity: Rc::new(Lineage),
             revision: 0,
             facts: Default::default(),
         };
@@ -862,7 +857,6 @@ impl Ledger {
     /// A callback, cold load or safe-point handoff expires outstanding
     /// capabilities even when no logical holding changes. Price stays constant.
     pub fn handoff(&mut self) -> Result<(), HeapFault> {
-        self.require_unleased()?;
         self.revision = self
             .revision
             .checked_add(1)
@@ -1074,7 +1068,6 @@ impl Ledger {
         accepted: Accepted,
         semantic: impl FnOnce(),
     ) -> Result<(), HeapFault> {
-        self.require_unleased()?;
         let Prepared {
             identity,
             revision,

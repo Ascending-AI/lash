@@ -39,7 +39,6 @@ impl Ledger {
     /// Observe the committed ledger through its ordinary cold-page reader.
     /// This neither changes prices nor creates holding or publication authority.
     pub fn testing_snapshot(&self, access: &Access<'_>) -> Result<LedgerSnapshot, HeapFault> {
-        self.require_unleased()?;
         let mut roots = Vec::new();
         for tree in [&self.state.owners, &self.state.execution, &self.state.ended] {
             visit_tree(tree, access, &mut |root| {
