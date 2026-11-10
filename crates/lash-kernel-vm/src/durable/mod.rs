@@ -38,6 +38,7 @@ use crate::vm::frames::{Bill, Context, Frame, Handler};
 use crate::vm::tasks::{Joiner, ListJoin, Pending, Phase as WaitState, Resume, State, Task, Wait};
 pub(crate) use admit::admit;
 pub(crate) use code::live;
+use lash_kernel_state::arena::Arena;
 
 /// The phases a frame can stand in, in the order a saved point is looked
 /// for: a frame under another stands at its call.
@@ -85,7 +86,14 @@ pub(crate) fn seal(
         } else {
             &task.cx
         };
-        saved.push(save_task(&program, &occurrences, task, cx, &mut values)?);
+        saved.push(save_task(
+            &program,
+            &occurrences,
+            vm.heap.arena(),
+            task,
+            cx,
+            &mut values,
+        )?);
     }
     let waits = tasks
         .waits
@@ -186,6 +194,7 @@ fn occurrence_sites(program: &Program) -> HashMap<u32, (LinkId, Site)> {
 fn save_task(
     program: &Program,
     occurrences: &HashMap<u32, (LinkId, Site)>,
+    arena: &Arena,
     task: &Task,
     cx: &Context,
     values: &mut Values,
@@ -201,7 +210,7 @@ fn save_task(
         } else {
             &TOP
         };
-        frames.push(save_frame(program, cx, frame, end, phases, values)?);
+        frames.push(save_frame(program, arena, cx, frame, end, phases, values)?);
     }
     let handlers = cx
         .handlers
@@ -274,6 +283,7 @@ fn point<'a>(unit: &'a Unit, frame: &Frame, size: usize, phases: &[Phase]) -> Op
 
 fn save_frame(
     program: &Program,
+    arena: &Arena,
     cx: &Context,
     frame: &Frame,
     end: usize,
@@ -299,16 +309,21 @@ fn save_frame(
             locals.len()
         )));
     }
-    let slots = locals
-        .iter()
-        .enumerate()
-        .map(|(at, local)| RunSlot {
+    let mut slots = Vec::with_capacity(locals.len());
+    for (at, local) in locals.iter().enumerate() {
+        let mut value = cx.stack[base + at];
+        if let (SlotRole::Loop(CURSOR), Some(walked)) = (&local.role, at.checked_sub(1))
+            && matches!(locals[walked].role, SlotRole::Loop(WALKED))
+        {
+            value = saved_cursor(arena, cx.stack[base + walked], value)?;
+        }
+        slots.push(RunSlot {
             site: local.site.to_vec(),
             role: save_role(&local.role),
             copy: local.copy,
-            value: values.put(cx.stack[base + at]),
-        })
-        .collect();
+            value: values.put(value),
+        });
+    }
     let operands = cx.stack[base + locals.len()..end]
         .iter()
         .map(|value| values.put(*value))
@@ -333,6 +348,35 @@ fn save_frame(
             from: bill.from,
         }),
     })
+}
+
+/// A loop's first two slots: what it walks and its cursor.
+const WALKED: u8 = 0;
+const CURSOR: u8 = 1;
+
+/// The cursor a loop saves in `walked`. A loop's cursor in a table is the
+/// sequence of the entry it last gave (`K-ITER-003`); a table saved whole
+/// keeps no sequences and reopens with its entries numbered by position,
+/// so its cursor saves as the position of the last entry at or before
+/// it. A table saved chunked keeps its sequences, and its cursor with them.
+fn saved_cursor(arena: &Arena, walked: Value, cursor: Value) -> Result<Value, SealError> {
+    let (Value::Map(table) | Value::Set(table), Value::Int(sequence)) = (walked, cursor) else {
+        return Ok(cursor);
+    };
+    let native = |error: lash_kernel_doc::NativeError| fault(error.to_string());
+    if crate::heap::large::is_large(arena.body(table).map_err(native)?) {
+        return Ok(cursor);
+    }
+    let mut position = None;
+    let mut after = None;
+    while let Some((at, _)) = arena.table_next(table, after).map_err(native)? {
+        if at > sequence as u64 {
+            break;
+        }
+        position = Some(position.map_or(0, |p: i64| p + 1));
+        after = Some(at);
+    }
+    Ok(position.map_or(Value::Absent, Value::Int))
 }
 
 /// A handler, by the `try` that installed it.
