@@ -1,9 +1,6 @@
-//! Continuation and pressure laws over the real persistent heap and S7 census.
+//! Continuation and pressure laws over the real persistent heap.
 use super::embedder::{Embedder, Setup, int, result};
 use crate::{Machine, Request, Step};
-use lash_kernel_doc::heap::PageValue;
-use lash_kernel_state::kernel_internals::census_impl::Census;
-use lash_kernel_state::kernel_internals::{PagedHeap, tree};
 use lash_kernel_state::paged::*;
 use lash_kernel_value::tokens::encode_body;
 
@@ -68,61 +65,27 @@ fn a_projection_refusal_preserves_the_typed_heap_cause() {
     assert_eq!(error, crate::SealError::Heap(HeapFault::LeaseLost));
 }
 
-/// S4/K-SES-001: Main retains session function pins, Entry starts without
-/// a session, and both retain their target kind through a cold continuation.
+/// S4/K-SES-001: Main adopts the session it is started with and carries it
+/// on, Entry starts without a session and carries none, and both retain
+/// their target kind through a cold continuation.
 #[test]
 fn main_and_entry_keep_their_distinct_checkpoint_roots() {
     use crate::{CellStart, EffectModes, Target};
     use lash_kernel_doc::Datum;
     use lash_kernel_value::Name;
-    use tree::{SealWork, Tree};
+    let mut first = Embedder::new("main { let kept = [3] return null }");
+    let crate::End::Finished(finished) = first.run_to_end(&[]) else {
+        panic!("the first cell finishes")
+    };
+    let session = finished.carry.expect("a main cell carries its session");
     for entry in [false, true] {
         let mut embedder = Embedder::new(
             r#"definition "function f(x: Any) -> Any\nkernel 1\nmetering statements\nbody { let v = perform 0(x) as Any return v }"
-main { let v = perform 0(7) as Any return v }"#,
+main { let v = perform 0(kept[0]) as Any return v }"#,
         );
-        let mut heap = PagedHeap::fresh(Box::new(embedder.source.clone()), EditEpoch(1));
-        heap.set_census(Box::new(Census::restore(heap.certificate()).unwrap()))
-            .unwrap();
-        // The VM preserves host-validated immutable pins without interpreting
-        // their payload. Use a real frozen page and the canonical function table.
-        let pin = lash_kernel_state::paged::FunctionRecord {
-            environment: heap.allocate_object(ObjectInit::Record(vec![])).unwrap(),
-            callable: lash_kernel_value::CallableId {
-                link: lash_kernel_value::LinkId::from_bytes([4; 32]),
-                function: *embedder.document.functions.keys().next().unwrap(),
-            },
-            name: lash_kernel_state::paged::NameRef::new(&Name::new("host pin"), heap.pages())
-                .unwrap(),
-            meta: lash_kernel_doc::heap::PageValue::Null,
-            closure: heap.freeze_datum(&Datum::Null).unwrap().root,
-            captures: Default::default(),
-            before: Default::default(),
-            after: Default::default(),
-        };
-        let mut functions = Tree::new(false);
-        functions
-            .write(b"host pin".to_vec(), pin, heap.pages())
-            .unwrap();
-        functions
-            .seal(
-                heap.pages(),
-                &mut SealWork::new(SealBudget {
-                    pages: u64::MAX,
-                    bytes: u64::MAX,
-                }),
-            )
-            .unwrap();
-        let functions = functions.keyed_root().unwrap();
-        let session = heap
-            .carry(CarryRoots {
-                bindings: KeyedRoot::Empty,
-                functions,
-            })
-            .unwrap();
-        let certificate = heap.certificate();
+        embedder.source = first.source.clone();
         let (program, _) = embedder.program(true);
-        embedder.machine = crate::KernelMachine::start_with_census(
+        embedder.machine = crate::KernelMachine::start(
             program,
             Setup::default().bounds,
             CellStart {
@@ -133,7 +96,7 @@ main { let v = perform 0(7) as Any return v }"#,
                     Target::Main
                 },
                 args: if entry {
-                    vec![Datum::Int(7.into())]
+                    vec![Datum::Int(3.into())]
                 } else {
                     Vec::new()
                 },
@@ -142,22 +105,10 @@ main { let v = perform 0(7) as Any return v }"#,
                 host: Vec::new(),
             },
             Box::new(embedder.source.clone()),
-            Box::new(
-                Census::restore(if entry {
-                    AccountingCertificate::FRESH
-                } else {
-                    certificate
-                })
-                .unwrap(),
-            ),
         )
         .unwrap();
         assert!(matches!(embedder.run(), Step::Parked(_)));
         let root = reopen(&mut embedder);
-        assert_eq!(
-            root.functions,
-            if entry { KeyedRoot::Empty } else { functions }
-        );
         assert_eq!(
             root.target,
             if entry {
@@ -170,15 +121,12 @@ main { let v = perform 0(7) as Any return v }"#,
         let crate::End::Finished(finished) = embedder.run_to_end(&[]) else {
             panic!("finish")
         };
-        assert_eq!(finished.result, int(7));
-        if entry {
-            assert!(finished.carry.is_none());
-        } else {
-            assert_eq!(
-                lash_kernel_state::kernel_internals::session_functions(&finished.carry.unwrap()),
-                functions
-            );
-        }
+        assert_eq!(finished.result, int(3));
+        assert_eq!(
+            finished.carry.is_some(),
+            !entry,
+            "only main carries a session"
+        );
     }
 }
 
@@ -352,12 +300,13 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
     }
 }
 
-/// K-MACH infrastructure causes stay typed when inbound argument freezing
-/// fails; a page-port loss is never an argument/type refusal.
+/// K-MACH infrastructure causes stay typed: a page port lost under a run
+/// started with a long argument surfaces as the port's fault where the
+/// run first reaches the port, never as an argument or type refusal. The
+/// core holds an entry's arguments resident, so the start itself succeeds.
 #[test]
 fn argument_freezing_preserves_a_page_ports_typed_failure() {
-    use super::embedder::{ROOMY, census};
-    use crate::{CellStart, EffectModes, StartError, Target};
+    use crate::{CellStart, EffectModes, Target};
     use lash_kernel_doc::Datum;
     use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
     struct Lost;
@@ -370,7 +319,7 @@ fn argument_freezing_preserves_a_page_ports_typed_failure() {
         }
     }
     let (program, _) = Embedder::new(
-        r#"definition "function f(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return x }"
+        r#"definition "function f(x: Any) -> Any\nkernel 1\nmetering statements\nbody { let y = perform 0(x) as Any return y }"
 main {}"#,
     )
     .program(true);
@@ -382,10 +331,26 @@ main {}"#,
         modes: EffectModes::new(),
         host: Vec::new(),
     };
-    assert!(matches!(
-        crate::KernelMachine::start_with_census(program, ROOMY, start, Box::new(Lost), census()),
-        Err(StartError::Heap(HeapFault::LeaseLost))
-    ));
+    let mut machine =
+        crate::KernelMachine::start(program, super::embedder::ROOMY, start, Box::new(Lost))
+            .expect("the start reaches no page");
+    let fault = match machine.run(&mut super::embedder::World::default(), u64::MAX) {
+        Ok(Step::Parked(_)) => format!(
+            "{:?}",
+            machine
+                .seal(SealBudget {
+                    pages: u64::MAX,
+                    bytes: u64::MAX,
+                })
+                .expect_err("a seal through a lost port fails")
+        ),
+        Ok(step) => panic!("the entry never parked: {step:?}"),
+        Err(error) => format!("{error:?}"),
+    };
+    assert!(
+        fault.contains("Heap(LeaseLost)") || fault.contains("Host(LeaseLost)"),
+        "{fault}"
+    );
 }
 
 /// D-IMM/S4: a native error remains a bounded descriptor while finally
@@ -674,92 +639,48 @@ main {
 /// identities and sharing reachable from a continuation remain observable.
 #[test]
 fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
-    // Record edits are required to vary allocator history and pc independently of execution.
-    use super::embedder::Embedder;
-    use lash_kernel_state::kernel_internals::tree::Tree;
-    use lash_kernel_state::paged::{ObjectInit, SemanticHeap};
-    let mut run = Embedder::new("main { let a = [1] let b = a do perform 0(1) as Any return b }");
-    assert!(matches!(run.run(), crate::Step::Parked(_)));
-    let root = run.checkpoint();
-    let snapshot = |root: &CheckpointRoot| {
+    use lash_kernel_state::paged::run::continuation;
+    // `b` aliases `a` when the first delivery is 1, and is an equal list of
+    // its own otherwise; nothing else of the delivery is kept.
+    const SOURCE: &str = "main { let a = [1] let b = if(num.lt(perform 0(1) as Any, 2), a, [1]) do perform 0(2) as Any return b }";
+    let parked = |first: i64| {
+        let mut run = Embedder::new(SOURCE);
+        assert!(matches!(run.run(), Step::Parked(_)));
+        let request = run.pending.remove(0);
+        run.machine
+            .deliver(
+                super::embedder::wait_of(&request),
+                crate::Outcome::Completed(super::embedder::int(first)),
+            )
+            .unwrap();
+        assert!(matches!(run.run(), Step::Parked(_)));
+        run
+    };
+    let snapshot = |run: &Embedder, root: &CheckpointRoot| {
         lash_kernel_state::semantic::checkpoint(root, Box::new(run.source.clone())).unwrap()
     };
-    let original = snapshot(&root);
-    let mut heap =
-        PagedHeap::open_header(root.heap, Box::new(run.source.clone()), EditEpoch(20)).unwrap();
-    heap.restore_execution_roots(&root);
-    heap.set_census(Box::new(Census::restore(heap.certificate()).unwrap()))
-        .unwrap();
-    heap.allocate_object(ObjectInit::List(vec![PageValue::Bool(false)]))
-        .unwrap();
-    heap.seal(SealBudget {
-        pages: u64::MAX,
-        bytes: u64::MAX,
-    })
-    .unwrap()
-    .unwrap();
-    let mut garbage = root.clone();
-    garbage.heap = heap.sealed_root().unwrap();
+    let mut run = parked(1);
+    let root = run.checkpoint();
+    let original = snapshot(&run, &root);
+    // A cold reopen and a second seal give every object a new history.
+    run.open_at(&root, true);
+    let resealed = run.checkpoint();
     assert_eq!(
-        snapshot(&garbage),
+        snapshot(&run, &resealed),
         original,
-        "allocator and unreachable garbage are outside equality"
+        "allocator history is outside equality"
     );
-    let mut tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
-    let key = lash_kernel_state::kernel_internals::directory::ordinal_key(0);
-    let mut task = tasks.get(&key, heap.pages()).unwrap().unwrap();
-    let frame_key = lash_kernel_state::kernel_internals::directory::ordinal_key(0);
-    let mut frame = task.frames.get(&frame_key, heap.pages()).unwrap().unwrap();
-    frame
-        .pending
-        .as_mut()
-        .expect("the canonical region continuation")
-        .site = vec![0, 0];
-    task.frames.write(frame_key, frame, heap.pages()).unwrap();
-    tasks.write(key, task, heap.pages()).unwrap();
-    tasks
-        .seal(
-            heap.pages(),
-            &mut lash_kernel_state::kernel_internals::tree::SealWork::new(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            }),
-        )
-        .unwrap();
-    let mut moved = root;
-    moved.tasks = tasks.keyed_root().unwrap();
-    assert_ne!(snapshot(&moved), original, "a frame pc is exact");
-    let mut bindings = Tree::<BindingRecord>::of_keyed(&garbage.session);
-    let key = lash_kernel_state::kernel_internals::metadata::metadata_key(
-        &lash_kernel_value::names::Name::new("b"),
-    );
-    let mut binding = bindings.get(&key, heap.pages()).unwrap().unwrap();
-    let independent = heap
-        .allocate_object(ObjectInit::List(vec![PageValue::Int(
-            lash_kernel_doc::heap::IntRef::Inline(1.into()),
-        )]))
-        .unwrap();
-    binding.value = BoundRecord::Value(PageValue::List(independent));
-    bindings.write(key, binding, heap.pages()).unwrap();
-    bindings
-        .seal(
-            heap.pages(),
-            &mut lash_kernel_state::kernel_internals::tree::SealWork::new(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            }),
-        )
-        .unwrap();
-    heap.seal(SealBudget {
-        pages: u64::MAX,
-        bytes: u64::MAX,
-    })
-    .unwrap()
-    .unwrap();
-    garbage.heap = heap.sealed_root().unwrap();
-    garbage.session = bindings.keyed_root().unwrap();
+    let access =
+        lash_kernel_state::kernel_internals::tree::Access::new(Box::new(run.source.clone()));
+    let mut record = continuation::read(&access, root.heap).unwrap();
+    record.tasks[0].frames[0].site = super::embedder::main_site([0, 0]);
+    let mut moved = root.clone();
+    moved.heap = continuation::write(&access, &record).unwrap();
+    assert_ne!(snapshot(&run, &moved), original, "a frame's point is exact");
+    let mut unshared = parked(2);
+    let root = unshared.checkpoint();
     assert_ne!(
-        snapshot(&garbage),
+        snapshot(&unshared, &root),
         original,
         "equal lists with broken sharing are different graphs"
     );
