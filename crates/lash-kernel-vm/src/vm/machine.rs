@@ -65,8 +65,8 @@ struct Header {
     helper_library: lash_kernel_value::HelperLibraryId,
     owner: lash_kernel_doc::heap::PageId,
     host: Vec<Name>,
-    /// The export the run started on; `main` when none.
-    entry: Option<Name>,
+    /// What the run started on.
+    start: continuation::RunStart,
 }
 
 impl Header {
@@ -80,7 +80,7 @@ impl Header {
             helper_library: program.helpers().identity(),
             owner,
             host: Vec::new(),
-            entry: None,
+            start: continuation::RunStart::Main,
         }
     }
 }
@@ -279,6 +279,25 @@ fn entered(export: &lash_kernel_doc::FunctionExport) -> super::callable::Root<'_
     }
 }
 
+/// A start on the callable `function`, whose export is `export` and whose
+/// captures bind `names`.
+fn called<'a>(
+    function: &lash_kernel_doc::FunctionValue,
+    export: &'a lash_kernel_doc::FunctionExport,
+    names: Option<&'a [Name]>,
+) -> super::callable::Root<'a> {
+    let (closures, functions) = super::callable::held(function);
+    super::callable::Root {
+        entry: crate::bytecode::compile::Entry {
+            function: export.function,
+            convention: &export.convention,
+            captures: names,
+        },
+        closures,
+        functions,
+    }
+}
+
 fn linked(problem: impl ToString) -> StartError {
     StartError::Linked {
         problem: problem.to_string(),
@@ -299,7 +318,7 @@ impl CoreMachine {
             .collect();
         reads.sort();
         reads.dedup();
-        crate::durable::seal(&mut self.vm, self.header.entry.clone(), reads)
+        crate::durable::seal(&mut self.vm, self.header.start.clone(), reads)
     }
 
     /// Records every charge the run makes from here on in `tape`, in order
@@ -411,18 +430,7 @@ impl CoreMachine {
             .as_ref()
             .map(|(function, _)| super::callable::names(function));
         let root = match (&callable, export) {
-            (Some((function, export)), _) => {
-                let (closures, functions) = super::callable::held(function);
-                Some(super::callable::Root {
-                    entry: crate::bytecode::compile::Entry {
-                        function: export.function,
-                        convention: &export.convention,
-                        captures: names.as_deref(),
-                    },
-                    closures,
-                    functions,
-                })
-            }
+            (Some((function, export)), _) => Some(called(function, export, names.as_deref())),
             (None, Some(export)) => Some(entered(export)),
             (None, None) => None,
         };
@@ -474,7 +482,11 @@ impl CoreMachine {
         let mut header = Header::of(&program, bounds, start.owner);
         header.host = start.host.iter().map(|(name, _)| name.clone()).collect();
         vm.crossing.host.clone_from(&header.host);
-        header.entry = entry;
+        header.start = match (entry, &callable) {
+            (Some(name), _) => continuation::RunStart::Entry(name),
+            (None, Some((function, _))) => continuation::RunStart::Callable(Box::clone(function)),
+            (None, None) => continuation::RunStart::Main,
+        };
         let code = Arc::clone(&vm.program);
         let decoder = Decoder {
             max_depth: vm.value_depth,
@@ -628,11 +640,12 @@ impl Machine for CoreMachine {
                 return Err(unavailable_helper(*function));
             }
         }
-        if matches!(root.target, CellTargetKind::Main) != record.entry.is_none() {
-            return Err(malformed("the root's target and its run's entry disagree"));
+        let main = matches!(record.start, continuation::RunStart::Main);
+        if matches!(root.target, CellTargetKind::Main) != main {
+            return Err(malformed("the root's target and its run's start disagree"));
         }
         header.host = root.host.clone();
-        header.entry = record.entry.clone();
+        header.start = record.start.clone();
         let (heap, values) = SlotHeap::open(bounds.memory, &record.heap, directory)
             .map_err(|error| malformed(format!("the run's heap does not open: {error:?}")))?;
         let modes = record
@@ -640,13 +653,38 @@ impl Machine for CoreMachine {
             .iter()
             .map(|use_| (*use_, OperationMode::Read))
             .collect();
-        let export = record
-            .entry
+        // The run's program is compiled again on what it started on.
+        let export = match &record.start {
+            continuation::RunStart::Main => None,
+            continuation::RunStart::Entry(name) => {
+                Some(exported(&program.document, name).map_err(|error| {
+                    malformed(format!("the run's entry is not exported: {error:?}"))
+                })?)
+            }
+            continuation::RunStart::Callable(_) => None,
+        };
+        let callable = match &record.start {
+            continuation::RunStart::Callable(function) => Some((
+                function.as_ref(),
+                super::callable::export(
+                    &program,
+                    function,
+                    lash_kernel_value::data_limits::KernelDataLimits::standard(),
+                )
+                .map_err(|error| {
+                    malformed(format!("the run's callable does not start: {error:?}"))
+                })?,
+            )),
+            _ => None,
+        };
+        let names = callable
             .as_ref()
-            .map(|name| exported(&program.document, name))
-            .transpose()
-            .map_err(|error| malformed(format!("the run's entry is not exported: {error:?}")))?;
-        let root = export.map(entered);
+            .map(|(function, _)| super::callable::names(function));
+        let root = match (&callable, export) {
+            (Some((function, export)), _) => Some(called(function, export, names.as_deref())),
+            (None, Some(export)) => Some(entered(export)),
+            (None, None) => None,
+        };
         let (mut vm, convention) = build(
             &program,
             bounds,
@@ -827,9 +865,9 @@ impl Machine for CoreMachine {
             closure: header.closure,
             helper_library: header.helper_library,
             owner: header.owner,
-            target: match header.entry {
-                None => CellTargetKind::Main,
-                Some(_) => CellTargetKind::Entry,
+            target: match header.start {
+                continuation::RunStart::Main => CellTargetKind::Main,
+                _ => CellTargetKind::Entry,
             },
             functions: KeyedRoot::Empty,
             status: RootStatus::Parked,
@@ -884,7 +922,7 @@ impl CoreMachine {
     }
 
     /// The run finished with `result`, ended by `ender`: a `main` cell
-    /// hands its session on (`K-SES-001`), an entry nothing.
+    /// hands its session on (`K-SES-001`), an entry or a callable nothing.
     fn end_cell(
         &mut self,
         ender: Option<usize>,
@@ -894,9 +932,11 @@ impl CoreMachine {
         if let Some(error) = self.vm.tasks.outstanding(ender, &self.vm.program.units) {
             return self.ended(End::Error(error));
         }
-        let (carry, not_carried) = match self.header.entry {
-            Some(_) => (None, Vec::new()),
-            None => {
+        let (carry, not_carried) = match self.header.start {
+            continuation::RunStart::Entry(_) | continuation::RunStart::Callable(_) => {
+                (None, Vec::new())
+            }
+            continuation::RunStart::Main => {
                 self.ended = true;
                 let mut save = self.save.take();
                 let (carry, not_carried) = crate::durable::session::carry(

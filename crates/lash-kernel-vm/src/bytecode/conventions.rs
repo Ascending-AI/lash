@@ -172,8 +172,9 @@ fn append(unit: &mut Unit, ops: &[Op]) {
     });
 }
 
-/// Decodes TS source parameters before packing the private calling convention.
-/// Other conventions retain the machine's existing decoding path.
+/// Decodes TS and packed Python source parameters before packing the
+/// private calling convention. Other conventions retain the machine's
+/// existing decoding path.
 pub(crate) fn arguments(
     document: &Document,
     code: &super::program::Program,
@@ -184,8 +185,18 @@ pub(crate) fn arguments(
     let Some(export) = export else {
         return Ok(None);
     };
-    if !typescript(&export.convention) {
+    let packed = matches!(export.convention, StartConvention::PyArgsList { .. });
+    if !typescript(&export.convention) && !packed {
         return Ok(None);
+    }
+    if packed && raw.len() > export.signature.params.len() {
+        return Err(StartError::Arguments {
+            problem: format!(
+                "expected at most {} arguments, got {}",
+                export.signature.params.len(),
+                raw.len()
+            ),
+        });
     }
     let decoder = Decoder {
         max_depth,
@@ -210,6 +221,24 @@ pub(crate) fn arguments(
         }
     }
     match export.convention {
+        // The body takes its positional arguments as a list, the rest by
+        // name, and the active exception (none at a start).
+        StartConvention::PyArgsList { positional } => {
+            let keywords = export
+                .signature
+                .params
+                .iter()
+                .zip(args.iter().cloned())
+                .skip(positional as usize)
+                .map(|(param, value)| (Datum::Text(param.name.as_str().to_owned()), value))
+                .collect();
+            args.truncate(positional as usize);
+            Ok(Some(vec![
+                Datum::List(args),
+                Datum::Map(keywords),
+                Datum::Absent,
+            ]))
+        }
         StartConvention::TsArgsList { .. } => {
             for value in raw.iter().skip(export.signature.params.len()) {
                 args.push(

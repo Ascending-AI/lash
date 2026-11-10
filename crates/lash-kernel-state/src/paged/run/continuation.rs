@@ -67,8 +67,8 @@ record! {
     /// A sealed run: its heap and the machine's state beside it.
     pub struct RunRecord {
         pub heap: HeapRoot,
-        /// The export the run started on; `main` when none.
-        pub entry: Option<Name>,
+        /// What the run started on.
+        pub start: RunStart,
         /// The operation uses the run binds as reads (`K-EFF-012`).
         pub reads: Vec<OperationUse>,
         /// What the run has paid.
@@ -119,6 +119,35 @@ record! {
         /// across seals, never shrunk, since a cold page's values are not
         /// read to seal.
         pub held_code: Vec<FunctionId>,
+    }
+}
+
+/// What a run started on: its program is compiled again from it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RunStart {
+    Main,
+    /// An export, by name.
+    Entry(Name),
+    /// A callable a run published (`K-CLO-004`), its frozen captures
+    /// with it.
+    Callable(Box<lash_kernel_doc::FunctionValue>),
+}
+
+impl TokenCodec for RunStart {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Main => out.sum(0, 0),
+            Self::Entry(name) => one(out, 1, name),
+            Self::Callable(function) => one(out, 2, function.as_ref()),
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(match input.sum()? {
+            (0, 0) => Self::Main,
+            (1, 1) => Self::Entry(Name::decode(input)?),
+            (2, 1) => Self::Callable(Box::new(lash_kernel_doc::FunctionValue::decode(input)?)),
+            (variant, _) => return Err(TokenError::UnsupportedVariant { variant }),
+        })
     }
 }
 

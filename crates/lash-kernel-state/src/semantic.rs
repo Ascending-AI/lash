@@ -607,7 +607,7 @@ mod run {
         reader.put(&root.status);
         reader.put(&root.host);
         reader.put(&root.meters);
-        reader.put(&record.entry);
+        reader.put(&record.start);
         reader.put(&record.reads);
         reader.put(&record.charged);
         reader.put(&record.refused);

@@ -18,12 +18,12 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, JoinMode, Value};
 use lash_kernel_state::paged::run::continuation::{
-    JoinKind, PointPhase, RunBill, RunFrame, RunHandler, RunJoin, RunJoiner, RunOccurrence,
+    self, JoinKind, PointPhase, RunBill, RunFrame, RunHandler, RunJoin, RunJoiner, RunOccurrence,
     RunRecord, RunRequest, RunResume, RunSlot, RunTask, RunTaskState, RunUnit, RunWait,
     SlotRole as SavedRole, UnitKind as SavedKind, WaitPhase,
 };
 use lash_kernel_value::content_ids::LinkId;
-use lash_kernel_value::names::{Name, OperationUse};
+use lash_kernel_value::names::OperationUse;
 use lash_kernel_value::sites::Site;
 
 use crate::bytecode::op::Op;
@@ -58,7 +58,7 @@ fn fault(problem: impl Into<String>) -> SealError {
     }
 }
 
-/// Seals `vm`'s heap and state, started on `entry` and binding `reads` as
+/// Seals `vm`'s heap and state, started on `start` and binding `reads` as
 /// reads.
 ///
 /// # Errors
@@ -67,7 +67,7 @@ fn fault(problem: impl Into<String>) -> SealError {
 /// saves it; the heap's seal errors.
 pub(crate) fn seal(
     vm: &mut Vm<SlotHeap>,
-    entry: Option<Name>,
+    start: continuation::RunStart,
     reads: Vec<OperationUse>,
 ) -> Result<RunRecord, SealError> {
     if vm.restart.is_some() || vm.retrying || vm.unadmitted.is_some() {
@@ -134,7 +134,7 @@ pub(crate) fn seal(
     let held_code = code::held(&program, &vm.heap.code).into_iter().collect();
     Ok(RunRecord {
         heap,
-        entry,
+        start,
         reads,
         charged,
         refused,

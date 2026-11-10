@@ -20,7 +20,7 @@ use lash_kernel_doc::Datum;
 use lash_kernel_state::kernel_internals::tree::Access;
 use lash_kernel_state::paged::SealBudget;
 use lash_kernel_state::paged::run::continuation::{
-    self, PointPhase, RunBill, RunRecord, RunResume, RunTaskState, UnitKind, WaitPhase,
+    self, PointPhase, RunBill, RunRecord, RunResume, RunStart, RunTaskState, UnitKind, WaitPhase,
 };
 use lash_kernel_value::names::Name;
 
@@ -558,7 +558,7 @@ fn a_run_started_on_an_export_opens_at_its_root() {
     start.args = vec![Datum::Text("in".into())];
     let sealed = sealed(text, start, At::Park);
     let record = sealed.record();
-    assert_eq!(record.entry, Some(Name::new("go")));
+    assert_eq!(record.start, RunStart::Entry(Name::new("go")));
     assert_eq!(
         record.tasks[0].frames.len(),
         1,
