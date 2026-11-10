@@ -22,6 +22,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::Value;
+use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::arena::native::{NativeError, Retry};
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_state::paged::SessionRoot;
@@ -35,8 +36,8 @@ use crate::heap::Heap;
 use crate::heap::slots::SlotHeap;
 use crate::interface::MachineError;
 use crate::paged::SealError;
-use crate::vm::Vm;
 use crate::vm::tasks::MAIN;
+use crate::vm::{Flow, Stop, Vm};
 
 /// The globals past the program's: the carried session's bindings `main`
 /// names nowhere, ascending, then its saved functions, in that order.
@@ -312,6 +313,9 @@ pub(crate) fn carry(
             .collect::<Result<Vec<_>, MachineError>>()?;
         for (kind, id, function) in new {
             let value = sealed_function(vm, kind, id);
+            if let Value::Closure(closure) = value {
+                freeze(vm, closure)?;
+            }
             // The session holds its functions in name order.
             match vm
                 .session
@@ -362,6 +366,34 @@ pub(crate) fn carry(
     )
     .map_err(MachineError::Heap)?;
     Ok((SessionRoot::run(page), not_carried))
+}
+
+/// Freezes newly saved `closure`'s captures as its cell left them
+/// (FIG-5778), loading what of them is cold.
+fn freeze(vm: &mut Vm<SlotHeap>, closure: ArenaHandle) -> Result<(), MachineError> {
+    loop {
+        match vm.freeze(closure) {
+            Ok(()) => return Ok(()),
+            Err(Flow::Cold { object, chunk }) => vm.reload(object, chunk).map_err(stopped)?,
+            Err(Flow::Stop(stop)) => return Err(stopped(*stop)),
+            Err(Flow::Raise(_)) => {
+                return Err(fault("a saved function's capture reaches itself"));
+            }
+        }
+    }
+}
+
+/// What a stop while freezing captures is to the carry.
+fn stopped(stop: Stop) -> MachineError {
+    match stop {
+        Stop::Host(fault) => MachineError::Host(fault),
+        Stop::Fault(problem) => fault(problem),
+        Stop::Bound(exceeded) => fault(format!(
+            "freezing a saved function's captures passed the {:?} bound",
+            exceeded.bound
+        )),
+        _ => fault("freezing a saved function's captures stopped the run"),
+    }
 }
 
 /// The kind of the closure or function object `id`.

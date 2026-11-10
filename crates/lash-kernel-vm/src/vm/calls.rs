@@ -92,6 +92,12 @@ impl<H: Heap> Vm<H> {
                 let unit = self
                     .closure_unit(&callable)
                     .ok_or_else(|| fault("a closure of a body the program lacks"))?;
+                // A saved function runs over a fresh copy of its frozen
+                // captures (FIG-6193).
+                let handle = match self.saved_function(handle) {
+                    true => self.fresh_closure(handle)?,
+                    false => handle,
+                };
                 (unit, Some(handle), callable)
             }
             Value::Function(handle) => {
@@ -119,7 +125,12 @@ impl<H: Heap> Vm<H> {
         self.meter.leave();
         self.exact = true;
         let link = self.link_index(&callable.link).unwrap_or(0);
-        self.enter(unit, argc, closure, None, link)
+        // The frame holds the closure only once entered.
+        let mark = self.held.len();
+        self.held.extend(closure.map(Value::Closure));
+        let entered = self.enter(unit, argc, closure, None, link);
+        self.held.truncate(mark);
+        entered
     }
 
     /// Calls native `native` over its top `argc` operands; `charged` when

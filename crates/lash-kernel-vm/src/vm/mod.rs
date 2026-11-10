@@ -18,6 +18,7 @@ mod digests;
 mod exceeded;
 mod fits;
 pub(crate) mod frames;
+mod frozen;
 pub(crate) mod inline;
 mod library;
 pub(crate) mod loops;
