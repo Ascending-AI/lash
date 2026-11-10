@@ -565,3 +565,31 @@ fn a_run_started_on_an_export_opens_at_its_root() {
         panic!("the entry run refuses: {error:?}");
     }
 }
+
+/// K-EFF-008: an occurrence counter has no next value at `u64::MAX`.
+/// A run reopened with any one site's counter exhausted ends with the
+/// typed machine fault when the site is entered again, never a wrapped
+/// identity or a panic.
+#[test]
+fn an_exhausted_occurrence_counter_ends_the_run_with_a_machine_fault() {
+    let text = "definition \"function g(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { return x }\"\nmain { let i = 0 while num.lt(i, 2) { let r = call g(i) let w = perform 0(r) as Any set i = num.add(i, 1) } return i }";
+    let sealed = sealed(text, main_start(), At::Delivered);
+    let record = sealed.record();
+    let sites = record.tasks[0].occurrences.len();
+    assert!(sites >= 2, "the call and the perform are both counted");
+    for at in 0..sites {
+        let mut exhausted = record.clone();
+        exhausted.tasks[0].occurrences[at].count = u64::MAX;
+        let site = exhausted.tasks[0].occurrences[at].site.clone();
+        let mut opened = sealed.open(&exhausted).unwrap();
+        let result = opened.run(&mut World::default(), u64::MAX);
+        assert!(
+            matches!(
+                result,
+                Err(crate::MachineError::Fault { ref problem })
+                    if problem == "occurrence counter overflow"
+            ),
+            "{site:?}: {result:?}"
+        );
+    }
+}

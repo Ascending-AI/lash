@@ -1174,7 +1174,7 @@ impl<H: Heap> Vm<H> {
                         if self.sites {
                             sync!($at);
                         }
-                        self.enter_call(host, entry, $call);
+                        check!(self.enter_call(host, entry, $call));
                     }
                 };
             }

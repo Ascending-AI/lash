@@ -335,15 +335,15 @@ impl Task {
 
     /// Counts a run of the site of `mark` by a frame running as Link
     /// `link`, giving how many came before.
-    fn advance(&mut self, mark: &Mark, link: u32) -> u64 {
+    fn advance(&mut self, mark: &Mark, link: u32) -> Run<u64> {
         if mark.occurrence & LIB == 0 {
             return self.count(mark.occurrence);
         }
         let key = crate::bytecode::program::Program::counter(link, mark.occurrence);
         let count = self.library.entry(key).or_insert(0);
         let before = *count;
-        *count += 1;
-        before
+        *count = next_occurrence(before)?;
+        Ok(before)
     }
 }
 
@@ -351,21 +351,30 @@ impl Task {
     /// Counts an entry into document site `occurrence`, giving how many
     /// came before.
     #[inline]
-    fn count(&mut self, occurrence: u32) -> u64 {
+    fn count(&mut self, occurrence: u32) -> Run<u64> {
         let at = occurrence as usize;
         match self.occurrences.get_mut(at) {
             Some(count) => {
                 let before = *count;
-                *count = before + 1;
-                before
+                *count = next_occurrence(before)?;
+                Ok(before)
             }
             None => {
                 self.occurrences.resize(at + 1, 0);
                 self.occurrences[at] = 1;
-                0
+                Ok(0)
             }
         }
     }
+}
+
+/// The counter after `count`: an exhausted counter is a machine fault,
+/// never a wrapped identity (`K-EFF-008`).
+#[inline]
+fn next_occurrence(count: u64) -> Run<u64> {
+    count
+        .checked_add(1)
+        .ok_or_else(|| super::fault("occurrence counter overflow"))
 }
 
 const CANCELLED: (&str, &str) = ("cancelled", "the task was cancelled");
@@ -449,15 +458,22 @@ impl<H: Heap> Vm<H> {
     /// Counts the running task's entry into the authored call or action at
     /// `mark` and `site` of `unit` (`K-EFF-008`), and tells a host that
     /// observes sites where it stands. Library code enters no site.
-    pub(super) fn entered(&mut self, host: &mut dyn Host, unit: &Unit, mark: &Mark, site: &Site) {
+    pub(super) fn entered(
+        &mut self,
+        host: &mut dyn Host,
+        unit: &Unit,
+        mark: &Mark,
+        site: &Site,
+    ) -> Run<()> {
         if !unit.authored {
-            return;
+            return Ok(());
         }
         let link = self.running_link();
-        let occurrence = self.running().advance(mark, link);
+        let occurrence = self.running().advance(mark, link)?;
         if self.sites {
             self.tell_entry(host, site, occurrence);
         }
+        Ok(())
     }
 
     /// Counts the running task's entry into authored call `call`, whose
@@ -466,11 +482,17 @@ impl<H: Heap> Vm<H> {
     /// counts before the call reads anything, so a call its arguments
     /// refuse is entered too.
     #[inline]
-    pub(super) fn enter_call(&mut self, host: &mut dyn Host, entry: u32, call: &CallSite) {
-        let occurrence = self.running().count(entry);
+    pub(super) fn enter_call(
+        &mut self,
+        host: &mut dyn Host,
+        entry: u32,
+        call: &CallSite,
+    ) -> Run<()> {
+        let occurrence = self.running().count(entry)?;
         if self.sites {
             self.tell_entry(host, &call.site, occurrence);
         }
+        Ok(())
     }
 
     /// Hands an observing host the running task's entry into `site`, the
@@ -702,7 +724,7 @@ impl<H: Heap> Vm<H> {
             | ActionSite::JoinMany { site, .. }
             | ActionSite::Yield { site }
             | ActionSite::Cancel { site }
-            | ActionSite::CancelEffect { site } => self.entered(host, unit, &mark, site),
+            | ActionSite::CancelEffect { site } => self.entered(host, unit, &mark, site)?,
             ActionSite::Perform { .. } | ActionSite::Spawn { .. } => {}
         }
         match &unit.actions[n as usize] {
@@ -750,7 +772,7 @@ impl<H: Heap> Vm<H> {
                     ))));
                 }
                 let link = self.running_link();
-                let occurrence = self.running().advance(&mark, link);
+                let occurrence = self.running().advance(&mark, link)?;
                 let wait = self.tasks.next_wait;
                 self.tasks.next_wait += 1;
                 let identity = EffectIdentity {
@@ -928,7 +950,7 @@ impl<H: Heap> Vm<H> {
         let from = self.cx.stack.len() - argc;
         let rooted_in_document = self.callee_authored(stub, self.cx.stack.get(from).copied())?;
         let link = self.running_link();
-        let occurrence = self.running().advance(mark, link);
+        let occurrence = self.running().advance(mark, link)?;
         let spawn_origin = (!unit.authored || !rooted_in_document).then(|| self.task_origin());
         let parent = Arc::clone(&self.tasks.all[self.tasks.running].identity);
         let identity = Arc::new(TaskIdentity::Spawned(SpawnIdentity {
