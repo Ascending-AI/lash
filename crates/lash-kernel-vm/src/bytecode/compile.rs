@@ -82,6 +82,9 @@ pub fn compile(
             compiler.declare_all(true);
         }
     }
+    for identity in &linked.closures {
+        compiler.saved_closure(identity)?;
+    }
     compiler.finish(main)
 }
 
@@ -94,6 +97,10 @@ pub type Imports = BTreeMap<(LinkId, ImportSlot), CallableId>;
 pub struct Linked<'a> {
     pub others: Vec<(LinkId, &'a Document)>,
     pub imports: Imports,
+    /// The closures of other Links the run holds, one for each callable:
+    /// a saved function's code, compiled in its own Link with the capture
+    /// shape its save froze.
+    pub closures: Vec<ClosureIdentity>,
 }
 
 /// Where a read or write of a name goes.
@@ -632,6 +639,7 @@ impl<'a> Compiler<'a> {
         &mut self,
         id: FunctionId,
         outer: Option<&Fun>,
+        saved: Option<&[Name]>,
         at: UnitId,
         covered: bool,
         kind: UnitKind,
@@ -642,7 +650,11 @@ impl<'a> Compiler<'a> {
         };
         // A free name is a host binding of the root Link's main: another
         // Link's function must not read the root's.
-        if outer.is_none() && self.link != self.root && !self.free_names(id)?.is_empty() {
+        if outer.is_none()
+            && saved.is_none()
+            && self.link != self.root
+            && !self.free_names(id)?.is_empty()
+        {
             return unsupported(format!(
                 "function {id} of another Link reads names its own Link binds"
             ));
@@ -674,6 +686,12 @@ impl<'a> Compiler<'a> {
                 captures.push(source);
             }
         }
+        // A saved closure's captures are the ones its save froze, in order.
+        for name in saved.into_iter().flatten() {
+            f.captures
+                .insert(name.clone(), f.capture_names.len() as u16);
+            f.capture_names.push(name.clone());
+        }
         self.declare(&mut f, &params, &body.block)?;
         f.leader();
         self.block(&mut f, &body.block)?;
@@ -703,7 +721,7 @@ impl<'a> Compiler<'a> {
         } else {
             UnitKind::Body(id)
         };
-        match self.function(id, None, at, covered, kind) {
+        match self.function(id, None, None, at, covered, kind) {
             Ok(_) => Ok(at),
             Err(error) => {
                 self.scope.bodies.remove(&(id, covered));
@@ -979,7 +997,7 @@ impl<'a> Compiler<'a> {
     pub(crate) fn closure(&mut self, f: &mut Fun, id: FunctionId) -> Result<u32> {
         let at = self.reserve();
         let (captures, capture_names) =
-            match self.function(id, Some(f), at, false, UnitKind::Closure(id)) {
+            match self.function(id, Some(f), None, at, false, UnitKind::Closure(id)) {
                 Ok(found) => found,
                 Err(error) => {
                     self.units[at as usize] = Some(self.unavailable(&error.0));
@@ -1004,6 +1022,24 @@ impl<'a> Compiler<'a> {
             captures,
         });
         Ok(index)
+    }
+
+    /// The unit of a closure of another Link the run holds, compiled in
+    /// that Link over the captures `identity` names. A Link the build does
+    /// not load gets none: calling the closure refuses where it runs.
+    fn saved_closure(&mut self, identity: &ClosureIdentity) -> Result<()> {
+        let callable = identity.callable;
+        if !self.links.contains_key(&callable.link) {
+            return Ok(());
+        }
+        self.enter_link(callable.link)?;
+        let at = self.reserve();
+        let kind = UnitKind::Closure(callable.function);
+        let saved = Some(identity.capture_names.as_slice());
+        if let Err(error) = self.function(callable.function, None, saved, at, false, kind) {
+            self.units[at as usize] = Some(self.unavailable(&error.0));
+        }
+        Ok(())
     }
 
     // --- Sealing.
@@ -1034,6 +1070,7 @@ impl<'a> Compiler<'a> {
             origin,
             declared,
             owner,
+            capture_names,
             ..
         } = f;
         // Points are recorded in lowering order; an `if`'s test and a
@@ -1091,6 +1128,7 @@ impl<'a> Compiler<'a> {
             covered,
             params,
             locals: locals.max(params),
+            captures: capture_names.len() as u16,
             boxed,
             ops,
             event,

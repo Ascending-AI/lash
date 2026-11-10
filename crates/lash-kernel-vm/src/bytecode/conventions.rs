@@ -61,7 +61,7 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, id: FunctionId) -> Result<UnitI
     };
     let await_fn = *await_fn;
     let at = compiler.reserve();
-    compiler.function(id, None, at, false, UnitKind::Declared(id))?;
+    compiler.function(id, None, None, at, false, UnitKind::Declared(id))?;
     let site = Fun::new(SiteUnit::Library(id), false, false, None);
     let callee = compiler.callee(&site, await_fn)?;
     let mark = compiler.mark(&site, &site.statement);
@@ -120,7 +120,7 @@ fn clean_up(
     };
     let cleanup = *cleanup;
     let at = compiler.reserve();
-    compiler.function(id, None, at, false, UnitKind::Declared(id))?;
+    compiler.function(id, None, None, at, false, UnitKind::Declared(id))?;
     let site = Fun::new(SiteUnit::Library(id), false, false, None);
     let callee = compiler.callee(&site, cleanup)?;
     let mark = compiler.mark(&site, &site.statement);

@@ -85,14 +85,77 @@ impl Header {
     }
 }
 
+/// A heap a run opens over, and the values its root holds.
+struct Opened<'a> {
+    heap: SlotHeap,
+    roots: &'a [Value],
+}
+
+/// The closures of Links other than `link` that `roots` reach through
+/// closures and the cells they capture, one for each callable: code only
+/// its own Link's document holds, so the build compiles it there. A cold
+/// object is loaded as the run would load it to call the closure.
+fn foreign_closures(
+    heap: &mut SlotHeap,
+    roots: &[Value],
+    link: lash_kernel_value::LinkId,
+) -> Result<Vec<lash_kernel_doc::arena::ClosureIdentity>, StartError> {
+    use lash_kernel_doc::{NativeError, Retry};
+    fn load(heap: &mut SlotHeap, roots: &[Value], error: NativeError) -> Result<(), StartError> {
+        let NativeError::Retry(Retry::Cold { object, chunk }) = error else {
+            return Err(linked(format!("a held closure does not read: {error:?}")));
+        };
+        heap.load(object, chunk, &mut |visit| {
+            roots.iter().for_each(&mut *visit)
+        })
+        .map_err(|error| linked(format!("a held closure does not load: {error:?}")))
+    }
+    let mut work: Vec<_> = roots
+        .iter()
+        .filter_map(|value| match value {
+            Value::Closure(handle) => Some(*handle),
+            _ => None,
+        })
+        .collect();
+    let mut seen = HashSet::new();
+    let mut callables = HashSet::new();
+    let mut found = Vec::new();
+    while let Some(handle) = work.pop() {
+        if !seen.insert(handle.index()) {
+            continue;
+        }
+        let (identity, captures) = loop {
+            match heap.arena().closure(handle) {
+                Ok((identity, captures, _)) => break (identity.clone(), captures.to_vec()),
+                Err(error) => load(heap, roots, error)?,
+            }
+        };
+        for cell in captures {
+            let value = loop {
+                match heap.arena().cell(cell) {
+                    Ok(value) => break value,
+                    Err(error) => load(heap, roots, error)?,
+                }
+            };
+            if let Value::Closure(inner) = value {
+                work.push(inner);
+            }
+        }
+        if identity.callable.link != link && callables.insert(identity.callable) {
+            found.push(identity);
+        }
+    }
+    Ok(found)
+}
+
 /// The run of `program` on `entry` (`main` when none) compiled as a start
-/// compiles it, over `heap`, having charged `used`.
+/// compiles it, over `opened`, having charged `used`.
 fn build(
     program: &Program,
     bounds: Bounds,
     entry: Option<&Name>,
     modes: crate::interface::EffectModes,
-    heap: SlotHeap,
+    opened: Opened<'_>,
     used: u64,
     available: Option<&lash_kernel_doc::BuildHelpers>,
 ) -> Result<(Vm<SlotHeap>, Option<lash_kernel_doc::StartConvention>), StartError> {
@@ -136,7 +199,13 @@ fn build(
                 })
         })
         .collect();
-    let loaded = crate::bytecode::compile::Linked { others, imports };
+    let Opened { mut heap, roots } = opened;
+    let closures = foreign_closures(&mut heap, roots, program.link)?;
+    let loaded = crate::bytecode::compile::Linked {
+        others,
+        imports,
+        closures,
+    };
     let mut code = crate::bytecode::conventions::compile_selected(
         document,
         &registry,
@@ -329,8 +398,19 @@ impl CoreMachine {
                 (heap, Some((session, values)))
             }
         };
-        let (mut vm, convention) =
-            build(&program, bounds, entry.as_ref(), start.modes, heap, 0, None)?;
+        let roots = session
+            .as_ref()
+            .map_or(&[][..], |(_, values)| values.as_slice());
+        let opened = Opened { heap, roots };
+        let (mut vm, convention) = build(
+            &program,
+            bounds,
+            entry.as_ref(),
+            start.modes,
+            opened,
+            0,
+            None,
+        )?;
         vm.value_depth = limits.value_depth();
         if let Some((session, values)) = session {
             crate::durable::session::bind(&mut vm, &session, values);
@@ -501,7 +581,10 @@ impl Machine for CoreMachine {
             bounds,
             record.entry.as_ref(),
             modes,
-            heap,
+            Opened {
+                heap,
+                roots: &values,
+            },
             record.charged,
             changed.map(|helpers| helpers.as_ref()),
         )

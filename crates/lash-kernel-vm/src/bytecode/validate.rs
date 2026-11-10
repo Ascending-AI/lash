@@ -68,10 +68,10 @@ pub fn validate(program: &Program) -> Result<Vec<u32>, Malformed> {
             )));
         }
     }
-    let captures = captures(program)?;
+    captures(program)?;
     let mut checked = Vec::with_capacity(program.units.len());
     for (id, unit) in program.units.iter().enumerate() {
-        checked.push(Unit::check(unit, program, id as UnitId, &captures)?);
+        checked.push(Unit::check(unit, program, id as UnitId)?);
     }
     for (id, unit) in program.units.iter().enumerate() {
         for n in 0..unit.inlines.len() {
@@ -81,10 +81,8 @@ pub fn validate(program: &Program) -> Result<Vec<u32>, Malformed> {
     Ok(checked.into_iter().map(|(height, _)| height).collect())
 }
 
-/// Each unit's capture count, from the closures that make it: every
-/// closure of one unit gives it the same captures.
-fn captures(program: &Program) -> Result<Vec<Option<usize>>, Malformed> {
-    let mut counts = vec![None; program.units.len()];
+/// Every closure site captures as many cells as the unit it makes says.
+fn captures(program: &Program) -> Result<(), Malformed> {
     for (maker, unit) in program.units.iter().enumerate() {
         for site in &unit.closures {
             let problem = |problem: String| Malformed {
@@ -92,31 +90,24 @@ fn captures(program: &Program) -> Result<Vec<Option<usize>>, Malformed> {
                 pc: None,
                 problem,
             };
-            let Some(count) = counts.get_mut(site.unit as usize) else {
+            let Some(made) = program.units.get(site.unit as usize) else {
                 return Err(problem(format!("a closure of missing unit {}", site.unit)));
             };
-            match *count {
-                Some(known) if known != site.captures.len() => {
-                    return Err(problem(format!(
-                        "closures of unit {} capture {known} and {} variables",
-                        site.unit,
-                        site.captures.len()
-                    )));
-                }
-                _ => *count = Some(site.captures.len()),
+            if usize::from(made.captures) != site.captures.len() {
+                return Err(problem(format!(
+                    "a closure of unit {} captures {} variables of its {}",
+                    site.unit,
+                    site.captures.len(),
+                    made.captures
+                )));
             }
         }
     }
-    Ok(counts)
+    Ok(())
 }
 
 impl Unit {
-    fn check(
-        &self,
-        program: &Program,
-        id: UnitId,
-        captures: &[Option<usize>],
-    ) -> Result<(u32, Vec<Option<u32>>), Malformed> {
+    fn check(&self, program: &Program, id: UnitId) -> Result<(u32, Vec<Option<u32>>), Malformed> {
         let at = |pc: usize, problem: String| Malformed {
             unit: id,
             pc: Some(pc as u32),
@@ -191,7 +182,7 @@ impl Unit {
                 )));
             }
         }
-        let own = captures[id as usize].unwrap_or(0);
+        let own = usize::from(self.captures);
         for site in &self.closures {
             let fits = site.captures.iter().all(|capture| match *capture {
                 Capture::Local(n) => local(n),
@@ -779,6 +770,7 @@ mod tests {
                 covered: false,
                 params: 0,
                 locals: 0,
+                captures: 0,
                 boxed: Vec::new(),
                 step: vec![false; ops.len()],
                 ops,

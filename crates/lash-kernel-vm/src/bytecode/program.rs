@@ -107,6 +107,9 @@ pub struct Unit {
     pub params: u16,
     /// Locals, parameters first.
     pub locals: u16,
+    /// The cells each closure of it captures (`K-CLO-001`); none for a
+    /// unit no closure runs.
+    pub captures: u16,
     /// Locals a closure shares, parameters included: each is boxed into
     /// a cell at entry (`K-CLO-001`).
     pub boxed: Vec<u16>,
