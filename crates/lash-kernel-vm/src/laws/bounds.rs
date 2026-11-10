@@ -1442,3 +1442,193 @@ fn a_delivered_outcome_is_held_at_its_deep_size_until_it_is_consumed() {
         );
     }
 }
+
+/// `K-BND-003`, contract §2: a constructor is admitted at exactly what
+/// the run held before it plus its object's schedule, and its operands
+/// are held once, by the values they already were. Under that bound by
+/// one byte the constructor is refused with the memory bound and the run
+/// holds what it held before it: the operands still live, nothing of the
+/// refused object. At the bound and above it the run finishes. A list or
+/// tuple of two holds an object part and a value a member; a record of
+/// two fields holds an object part and two values a field.
+#[test]
+fn a_constructor_is_admitted_at_exactly_its_schedule_and_a_refusal_keeps_its_operands() {
+    use crate::heap::meter::{OBJECT, VALUE};
+    for (constructor, schedule) in [
+        ("[a, a]", OBJECT + 2 * VALUE),
+        ("(a, a)", OBJECT + 2 * VALUE),
+        ("{x: a, y: a}", OBJECT + 4 * VALUE),
+    ] {
+        let body = format!("  let a = work.fill(1000)\n  let c = {constructor}\n  return 7");
+        let base = threshold(&body);
+        let (end, held) = core_end(&body, base - 1);
+        let End::Error(RunError::Bound(exceeded)) = end else {
+            panic!("{constructor} under {}: {end:?}", base - 1);
+        };
+        assert_eq!(
+            (exceeded.bound, exceeded.limit),
+            (Bound::Memory, base - 1),
+            "{constructor}"
+        );
+        assert_eq!(held + schedule, base, "{constructor}");
+        for memory in [base, base + 1] {
+            assert_eq!(result(core_end(&body, memory).0), int(7), "{constructor}");
+        }
+    }
+}
+
+/// `K-BND-003`, G013: a run's peak is what is live at its fullest point,
+/// counted by slot. Every value overwritten while another name still
+/// holds it stays held: rebinding `a` and then `b`, the last alias of the
+/// first list, holds three `n`-member lists at the second rebinding, so
+/// each further member raises the least finishing bound by three values;
+/// releasing `b` first leaves two. Graphs that reach one list from a
+/// tuple, a record and a list hold its members once, so each further
+/// member raises the bound by one value.
+#[test]
+fn the_core_peak_holds_every_live_alias_and_counts_a_shared_member_once() {
+    use crate::heap::meter::VALUE;
+    let overwrite = |n: u64, release: bool| {
+        let release = if release { "  set b = null\n" } else { "" };
+        format!(
+            "  let a = work.fill({n})\n  let b = a\n  set a = work.fill({n})\n{release}  \
+             set b = work.fill({n})\n  return 0"
+        )
+    };
+    let shared = |n: u64| {
+        format!(
+            "  let a = work.fill({n})\n  let t = (a, a)\n  let r = {{x: a, y: t}}\n  \
+             let l = [t, r, a]\n  return 0"
+        )
+    };
+    for (name, body, each) in [
+        (
+            "both aliases live",
+            &(|n| overwrite(n, false)) as &dyn Fn(u64) -> String,
+            3,
+        ),
+        ("last alias released", &|n| overwrite(n, true), 2),
+        ("shared member", &shared, 1),
+    ] {
+        let base = threshold(&body(1000));
+        for k in [1u64, 7, 100] {
+            assert_eq!(
+                threshold(&body(1000 + k)),
+                base + each * VALUE * k,
+                "{name} +{k}"
+            );
+        }
+    }
+}
+
+/// The least memory bound a core run of `body` finishes under, each park's
+/// requests answered from the laws' table as it parks.
+fn threshold_answering(body: &str) -> u64 {
+    use super::embedder::{answer, wait_of};
+    let text = format!("main {{\n{body}\n}}");
+    let finishes = |memory| {
+        let bounds = Bounds { memory, ..ROOMY };
+        let mut machine =
+            super::embedder::core_machine(&text, bounds, None).expect("the law's document starts");
+        let mut world = World::default();
+        loop {
+            match machine.run(&mut world, u64::MAX).expect("the core runs") {
+                Step::Ended(end) => return matches!(end, End::Finished(_)),
+                Step::Slice => {}
+                Step::Parked(park) => {
+                    for request in &park.requests {
+                        machine.deliver(wait_of(request), answer(request)).unwrap();
+                    }
+                }
+            }
+        }
+    };
+    assert!(finishes(ROOMY.memory), "{text}");
+    let (mut refused, mut passed) = (0u64, ROOMY.memory);
+    while passed - refused > 1 {
+        let mid = refused + (passed - refused) / 2;
+        if finishes(mid) {
+            passed = mid;
+        } else {
+            refused = mid;
+        }
+    }
+    passed
+}
+
+/// Seam E, `K-BND-003`: a statement's temporaries are not held past its
+/// exit, however it exits: normally, by `print`, by a raise its `catch`
+/// handles, or through a park its delivery resumes. The next statement's
+/// `n`-member list fits in the room the temporary list took, so each
+/// further member raises the least finishing bound by one value; a
+/// temporary still held would make it two.
+#[test]
+fn a_statement_holds_none_of_its_temporaries_past_any_exit() {
+    use crate::heap::meter::VALUE;
+    type Exit = (&'static str, fn(u64) -> String);
+    let exits: [Exit; 4] = [
+        ("normal", |n| {
+            format!("  let m = list.len([work.fill({n})])")
+        }),
+        ("print", |n| format!("  print list.len([work.fill({n})])")),
+        ("raise", |n| {
+            format!("  try {{ let x = [work.fill({n})][false] }} catch e {{ let caught = 1 }}")
+        }),
+        ("park", |n| {
+            format!("  let m = list.len([work.fill({n}), perform 0(1) as Any])")
+        }),
+    ];
+    for (exit, statement) in exits {
+        let body = |n: u64| format!("{}\n  let b = work.fill({n})\n  return 0", statement(n));
+        let base = threshold_answering(&body(1000));
+        for k in [1u64, 7, 100] {
+            assert_eq!(
+                threshold_answering(&body(1000 + k)),
+                base + VALUE * k,
+                "{exit} +{k}"
+            );
+        }
+    }
+}
+
+/// `K-VAL-034`, `K-BND-003`: an immutable value's depth is checked where
+/// it is constructed, whether or not anything keeps it. After `i` rounds
+/// of `set t = (t,)` from `()`, `t` nests `1 + i` levels, and a tuple
+/// holding it `2 + i`: at 128 levels the throwaway tuple is built and
+/// counted, at 129 it raises `too_deep` though its value would be dropped
+/// at once, and the run goes on to the statement after its `catch`.
+#[test]
+fn an_immutable_allocation_is_checked_where_it_is_built_even_when_dropped() {
+    use super::embedder::{text, value};
+    let dropped = |rounds: u64| {
+        format!(
+            "let t = () let i = 0 while num.lt(i, {rounds}) {{ set t = (t,) set i = num.add(i, 1) }} \
+             let kind = \"built\" try {{ let n = list.len([(t,)]) }} catch e {{ set kind = e.kind }} \
+             return kind"
+        )
+    };
+    assert_eq!(value(&dropped(126)), text("built"));
+    assert_eq!(value(&dropped(127)), text("too_deep"));
+}
+
+/// `K-BND-003`, `K-VAL-034`: a tuple graph doubled 64 times over one
+/// member names 2^64 leaves but is 64 objects, 65 levels deep: it is
+/// built, counted by its slots and dropped under a 64 KiB bound, in work
+/// that follows its objects, not its leaves.
+#[test]
+fn a_tuple_graph_with_two_to_the_sixty_four_leaves_is_built_by_its_objects() {
+    // Building 64 shared pairs is 64 objects of work. Work by leaves would
+    // never finish, so it is caught as a run still going after a minute.
+    let (done, ended) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (end, _) = core_end(
+            "  let s = 1\n  let i = 0\n  while num.lt(i, 64) {\n    set s = (s, s)\n    set i = num.add(i, 1)\n  }\n  let n = list.len([s])\n  return n",
+            64 << 10,
+        );
+        let _ = done.send(result(end));
+    });
+    let answer = ended
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("a run building 64 shared pairs is still going after a minute");
+    assert_eq!(answer, int(1));
+}

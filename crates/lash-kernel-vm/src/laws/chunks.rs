@@ -210,3 +210,50 @@ fn a_host_copy_of_a_megabyte_binding_batches_its_payload_siblings() {
         );
     }
 }
+
+/// Ordered page faults on a host crossing: copying a retained text to the
+/// host reports the fault of the earliest content it cannot read. A
+/// corrupt page holding the text's first chunk outranks a missing page
+/// holding its last, though the copy may ask for both in one round trip.
+#[test]
+fn a_host_text_copy_reports_the_earliest_chunks_fault_ahead_of_a_later_one() {
+    use lash_kernel_doc::Datum;
+    use lash_kernel_value::Name;
+
+    let source = Source::default();
+    let name = Name::new("big");
+    let text: String = (0..65)
+        .map(|i| format!("{i:04}{}", "x".repeat(4092)))
+        .collect();
+    let mut editor = crate::SessionEditor::open(None, Box::new(source.clone())).unwrap();
+    editor.set(&name, &Datum::Text(text)).unwrap();
+    let root = editor.seal().unwrap();
+    let holding = |chunk: &[u8]| {
+        let stored = source.0.borrow();
+        let found: Vec<_> = stored
+            .iter()
+            .filter(|(_, page)| page.tokens.windows(chunk.len()).any(|at| at == chunk))
+            .map(|(id, _)| *id)
+            .collect();
+        let [id] = found[..] else {
+            panic!(
+                "one page holds {:?}: {found:?}",
+                String::from_utf8_lossy(chunk)
+            );
+        };
+        id
+    };
+    let first = holding(b"0000xxxxxxxx");
+    let last = holding(b"0064xxxxxxxx");
+    {
+        let mut stored = source.0.borrow_mut();
+        stored.get_mut(&first).unwrap().tokens = Arc::from([]);
+        stored.remove(&last);
+    }
+    let mut cold = crate::SessionEditor::open(Some(&root), Box::new(source.clone())).unwrap();
+    let result = cold.get(&name);
+    assert!(
+        matches!(result, Err(HeapFault::Corrupt { page, .. }) if page == first),
+        "{result:?}"
+    );
+}

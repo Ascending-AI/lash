@@ -128,3 +128,192 @@ fn a_function_value_runs_its_own_link_s_body_or_is_refused() {
         assert_eq!(applied(pick), expected, "{case}");
     }
 }
+
+/// LINK-IDENTITY: a run starts only on documents that are the bytes their
+/// Links name. A prepared program whose root document, or another
+/// document it retains, is changed afterwards is refused at its start,
+/// typed, whichever of the two changed; the unchanged program starts.
+#[test]
+fn a_program_whose_root_or_retained_document_changed_is_refused_at_start() {
+    use lash_kernel_value::Name;
+    let library = shared_library(true, None, true);
+    let text = |main: &str| format!("numbers by_spelling\n{}{main}", library.header);
+    let root = Arc::new(document(&text(ROOT), &library.registry));
+    let other = Arc::new(document(&text(OTHER), &library.registry));
+    let (root_link, other_link) = (link(&root), link(&other));
+    let other_id = other.identity();
+    let program = Program::prepare(
+        root_link.identity(),
+        BTreeMap::from([
+            (root.identity(), Arc::clone(&root)),
+            (other_id, Arc::clone(&other)),
+        ]),
+        &BTreeMap::from([
+            (root_link.identity(), root_link),
+            (other_link.identity(), other_link),
+        ]),
+        PageId([8; 32]),
+        PreparedLibrary::new(Arc::clone(&library.registry)),
+    )
+    .unwrap();
+    let start = |program: Program| {
+        <CoreMachine as Machine>::start(
+            program,
+            ROOMY,
+            Setup::default().start,
+            Box::new(Source::default()),
+        )
+    };
+    let changed = |document: &mut Arc<Document>| {
+        Arc::make_mut(document)
+            .private_bindings
+            .insert(Name::new("changed"));
+    };
+    assert!(
+        start(program.clone()).is_ok(),
+        "the prepared program starts"
+    );
+    let mut root_changed = program.clone();
+    changed(&mut root_changed.document);
+    let mut retained_changed = program;
+    changed(retained_changed.documents.get_mut(&other_id).unwrap());
+    for (case, program) in [("root", root_changed), ("retained", retained_changed)] {
+        let started = start(program);
+        assert!(
+            matches!(started, Err(crate::StartError::Linked { .. })),
+            "{case}: {:?}",
+            started.map(|_| ())
+        );
+    }
+}
+
+/// LINK-FILL (FIG-7109): an import runs the export its Link fills it
+/// with. Two Links over the same documents that fill one import with two
+/// exports of one retained document run two bodies: a loop calling it
+/// four times sums 4 under `first` and 8 under `second`. The export a
+/// Link does not fill is not executable in its program.
+#[test]
+fn an_import_runs_the_export_its_link_fills_it_with() {
+    use lash_kernel_value::package::{Fill, Link};
+    use lash_kernel_value::{ContractId, ExportName, ImportKind, Name, OperationRequirement};
+    let library = shared_library(true, None, true);
+    let text = |main: &str| format!("numbers by_spelling\n{}{main}", library.header);
+    let helpers = Arc::new(document(
+        &text(
+            "definition \"function first(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { return 1 }\"\n\
+             definition \"function second(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { return 2 }\"\nmain {}",
+        ),
+        &library.registry,
+    ));
+    let root = Arc::new(document(
+        &text(
+            "import 90 code law.helper(x: Any) -> Any direct\nmain { let i = 0 let s = 0 while num.lt(i, 4) { let x = invoke import 90(i) set s = num.add(s, x) set i = num.add(i, 1) } return s }",
+        ),
+        &library.registry,
+    ));
+    let helper_link = link(&helpers);
+    for (name, unfilled, expected) in [("first", "second", 4), ("second", "first", 8)] {
+        let root_link = Link {
+            helper_fills: Default::default(),
+            document: root.identity(),
+            fills: root
+                .imports
+                .iter()
+                .map(|(slot, import)| {
+                    let fill = match &import.kind {
+                        ImportKind::Operation { signature } => Fill::Operation(
+                            OperationRequirement::new(signature.clone(), ContractId::new("1")),
+                        ),
+                        _ => Fill::Export {
+                            link: helper_link.identity(),
+                            export: ExportName {
+                                name: Name::new(name),
+                                member: None,
+                            },
+                        },
+                    };
+                    (*slot, fill)
+                })
+                .collect(),
+        };
+        let program = Program::prepare(
+            root_link.identity(),
+            BTreeMap::from([
+                (root.identity(), Arc::clone(&root)),
+                (helpers.identity(), Arc::clone(&helpers)),
+            ]),
+            &BTreeMap::from([
+                (root_link.identity(), root_link),
+                (helper_link.identity(), helper_link.clone()),
+            ]),
+            PageId([8; 32]),
+            PreparedLibrary::new(Arc::clone(&library.registry)),
+        )
+        .unwrap();
+        assert!(
+            !program.functions.contains(&declared(&helpers, unfilled)),
+            "{name}: the unfilled export is executable"
+        );
+        let mut machine = <CoreMachine as Machine>::start(
+            program,
+            ROOMY,
+            Setup::default().start,
+            Box::new(Source::default()),
+        )
+        .unwrap();
+        let end = loop {
+            match machine.run(&mut World::default(), u64::MAX).unwrap() {
+                Step::Ended(end) => break end,
+                Step::Slice => {}
+                Step::Parked(park) => panic!("{name}: parked {park:?}"),
+            }
+        };
+        assert_eq!(
+            super::embedder::result(end),
+            super::embedder::int(expected),
+            "{name}"
+        );
+    }
+}
+
+/// A run keeps no document alive past itself: once the program and the
+/// machine that ran it are dropped, nothing a start or a run compiled or
+/// cached holds the root document.
+#[test]
+fn a_finished_run_retains_no_document() {
+    let library = shared_library(true, None, true);
+    // Parsed here, not through the laws' document cache, which keeps
+    // what it parsed.
+    let root = Arc::new(
+        lash_kernel_doc::parse_document(
+            "numbers by_spelling\nkernel 1\nmain { let xs = [1, 2] let f = fn() { return xs } let v = apply f() return v }\n",
+        )
+        .unwrap(),
+    );
+    let lifetime = Arc::downgrade(&root);
+    let root_link = link(&root);
+    let program = Program::prepare(
+        root_link.identity(),
+        BTreeMap::from([(root.identity(), root)]),
+        &BTreeMap::from([(root_link.identity(), root_link)]),
+        PageId([8; 32]),
+        PreparedLibrary::new(Arc::clone(&library.registry)),
+    )
+    .unwrap();
+    let mut machine = <CoreMachine as Machine>::start(
+        program,
+        ROOMY,
+        Setup::default().start,
+        Box::new(Source::default()),
+    )
+    .unwrap();
+    assert!(matches!(
+        machine.run(&mut World::default(), u64::MAX).unwrap(),
+        Step::Ended(End::Finished(_))
+    ));
+    drop(machine);
+    assert!(
+        lifetime.upgrade().is_none(),
+        "the document outlived its run"
+    );
+}

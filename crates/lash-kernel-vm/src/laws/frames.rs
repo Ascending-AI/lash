@@ -746,3 +746,30 @@ fn a_cold_branch_keeps_its_locally_shared_cell_when_the_loop_reenters() {
         );
     }
 }
+
+/// Seam D: a seal after a park deep in a call stack writes what changed
+/// since the last seal, not every frame. Each of `n` frames holds a list
+/// of its own; between two seals only the deepest frame moves, so the
+/// second seal's projection visits as much at depth 80 as at depth 40.
+#[test]
+fn a_seal_deep_in_a_stack_visits_no_more_for_a_deeper_stack() {
+    let visits = |depth: u64| {
+        let program = format!(
+            "definition \"function down(self: Any, i: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {{ \\n  if num.lt(i, n) {{ let b = [i, n] let r = num.add(apply self(self, num.add(i, 1), n), 0) return r }}\\n  let x = perform 0(\\\"first\\\") as Any let y = perform 0(\\\"second\\\") as Any return 6\\n }}\"\n\nmain {{ let r = call down(&down, 0, {depth}) return r }}"
+        );
+        let mut embedder = Embedder::new(&program);
+        assert!(matches!(embedder.run(), Step::Parked(_)));
+        embedder.checkpoint();
+        embedder.deliver("first");
+        assert!(matches!(embedder.run(), Step::Parked(_)));
+        crate::perf_witness::enable_work();
+        embedder.checkpoint();
+        let work = crate::perf_witness::take_work().unwrap();
+        crate::perf_witness::disable_work();
+        embedder.deliver("second");
+        assert_eq!(result(embedder.run_to_end(&[])), int(6));
+        work.heap.projection_visits
+    };
+    let shallow = visits(40);
+    assert_eq!(visits(80), shallow, "the seal walked unchanged frames");
+}

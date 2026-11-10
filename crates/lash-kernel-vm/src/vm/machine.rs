@@ -416,6 +416,8 @@ impl CoreMachine {
         source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
         CellStart::admit_host_metadata(start.host.iter().map(|(name, _)| name.as_str()))?;
+        // A program changed since it was prepared is refused before it runs.
+        program.validate_links()?;
         let document = program.document.clone();
         let (entry, callable) = match &start.target {
             Target::Main => (None, None),

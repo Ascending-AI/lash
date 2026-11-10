@@ -181,3 +181,43 @@ fn a_core_run_sealed_and_opened_cold_at_every_pause_leaves_what_an_unpaused_run_
         }
     }
 }
+
+/// K-TASK-024 / K-MACH-007: a thousand-way fan-out parks with every
+/// child's request, accepts one delivery per cold reopen, and ends with
+/// every child joined once: the result is the fan-out's width after
+/// exactly that many deliveries.
+#[test]
+fn a_thousand_way_fan_out_delivered_one_per_cold_reopen_joins_every_child_once() {
+    const W: u64 = 1_000;
+    let mut embedder = super::embedder::Embedder::with(
+        &format!(
+            "definition \"function child(i: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {{ let r = perform 0(i) as Any return r }}\"\n\
+             main {{\n  let hs = []\n  let i = 0\n  while num.lt(i, {W}) {{\n    let h = spawn call child(i)\n    set hs[list.len(hs)] = h\n    set i = num.add(i, 1)\n  }}\n  let n = 0\n  for h in hs {{\n    let r = join h\n    set n = num.add(n, 1)\n  }}\n  return n\n}}"
+        ),
+        Setup {
+            bounds: crate::Bounds {
+                live_tasks: 1_001,
+                requests_per_park: 1_000,
+                ..ROOMY
+            },
+            ..Setup::default()
+        },
+    );
+    let Step::Parked(park) = embedder.run() else {
+        panic!("every child waits");
+    };
+    assert_eq!(park.requests.len() as u64, W);
+    let mut delivered = 0;
+    let end = loop {
+        embedder.reopen(true);
+        embedder.deliver_next();
+        delivered += 1;
+        match embedder.run() {
+            Step::Ended(end) => break end,
+            Step::Parked(park) => assert!(park.requests.is_empty(), "no child asks twice"),
+            step => panic!("{step:?}"),
+        }
+    };
+    assert_eq!(super::embedder::result(end), super::embedder::int(W as i64));
+    assert_eq!(delivered, W);
+}
