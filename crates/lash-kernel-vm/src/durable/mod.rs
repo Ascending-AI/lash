@@ -677,9 +677,12 @@ fn open_frame(
                 unit.name, saved.site, saved.phase, saved.copy
             )
         })?;
-    if saved.slots.len() != usize::from(unit.locals) {
+    // Each saved slot is found by what it holds. A slot the unit declares
+    // and the save does not name, one a successor added, starts unbound:
+    // the succession refuses any held coordinate it cannot place.
+    if saved.slots.len() > usize::from(unit.locals) {
         return Err(format!(
-            "a frame of {} holds another number of slots",
+            "a frame of {} holds more slots than it has",
             unit.name
         ));
     }

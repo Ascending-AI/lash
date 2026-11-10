@@ -830,6 +830,10 @@ impl<'a> Compiler<'a> {
                     charged: !covered,
                 })
             }
+            None if definition.body().is_none() => Ok(Callee::Unit {
+                unit: self.unlinked(id),
+                charge: None,
+            }),
             None => {
                 let charge = if covered {
                     None
@@ -842,6 +846,20 @@ impl<'a> Compiler<'a> {
                 })
             }
         }
+    }
+
+    /// A native the build declares and does not link: a unit that refuses
+    /// when it runs, so code that never calls it still compiles.
+    fn unlinked(&mut self, id: FunctionId) -> UnitId {
+        if let Some(unit) = self.scope.missing.get(&id) {
+            return *unit;
+        }
+        let at = self.reserve();
+        let mut unit = self.unavailable(&format!("native {id} is not linked in this build"));
+        unit.owner = Some(id);
+        self.units[at as usize] = Some(unit);
+        self.scope.missing.insert(id, at);
+        at
     }
 
     fn native(
