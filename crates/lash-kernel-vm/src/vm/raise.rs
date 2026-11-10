@@ -7,6 +7,25 @@ use super::{Flow, Restart, Run, Stop, Vm};
 use crate::heap::Heap;
 
 impl<H: Heap> Vm<H> {
+    /// Whether program global `n` is one no binding gave a value.
+    #[inline]
+    pub(super) fn unbound(&self, n: u16) -> bool {
+        self.unbound.get(usize::from(n)).copied().unwrap_or(false)
+    }
+
+    /// The raise a read or write of unbound global `n` makes: a free name
+    /// of `main` the environment does not provide (`K-FORM-003`,
+    /// `K-ADM-004`).
+    #[cold]
+    #[inline(never)]
+    pub(super) fn unbound_variable(&mut self, n: u16) -> Flow {
+        let name = self.program.globals[usize::from(n)].clone();
+        self.error(
+            "unbound_variable",
+            &format!("`{}` is not declared here", name.as_str()),
+        )
+    }
+
     /// Unwinds to the innermost handler of the running task: each frame
     /// left bills its completion formula with a result of size 0
     /// (`K-CHG-003`). Without a handler the task's raise is uncaught. A

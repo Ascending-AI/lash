@@ -485,6 +485,10 @@ impl CoreMachine {
         )?;
         vm.value_depth = limits.value_depth();
         vm.crossing.data = limits;
+        let session_names: Vec<Name> = session
+            .as_ref()
+            .map(|(session, ..)| session.names.clone())
+            .unwrap_or_default();
         if let Some((session, values, page)) = session {
             crate::durable::session::bind(&mut vm, &session, values, page);
         }
@@ -538,6 +542,12 @@ impl CoreMachine {
                 vm.globals[at] = Self::copy_in(&mut vm, datum)?;
             }
         }
+        vm.unbound = globals
+            .iter()
+            .map(|name| {
+                !start.host.iter().any(|(bound, _)| bound == name) && !session_names.contains(name)
+            })
+            .collect();
         let main = vm.program.main;
         let closure = match &callable {
             Some((function, _)) => Some(

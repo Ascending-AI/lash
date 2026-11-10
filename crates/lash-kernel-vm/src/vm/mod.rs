@@ -209,6 +209,10 @@ pub(crate) struct Vm<H: Heap> {
     /// The host bindings main's free names use, then the session's bindings it
     /// names nowhere, then its saved functions' objects ([`Self::session`]).
     pub globals: Vec<Value>,
+    /// The program's globals no host or session binding gave a value:
+    /// reading or assigning one raises (`K-FORM-003`). Empty, all bound,
+    /// in a run that resumes.
+    pub(crate) unbound: Box<[bool]>,
     /// What the globals past the program's are (`K-SES-001`, `K-SES-004`).
     pub(crate) session: crate::durable::session::Carried,
     /// `main`'s locals as its bottom frame left them: what its top-level
@@ -352,6 +356,7 @@ impl<H: Heap> Vm<H> {
             implementations: [Vec::new(), Vec::new()],
             identities: Default::default(),
             globals,
+            unbound: Box::default(),
             session: Default::default(),
             top: None,
             cx: Context::default(),
@@ -1147,8 +1152,23 @@ impl<H: Heap> Vm<H> {
                         let value = self.pop();
                         self.cx.stack[base + usize::from(n)] = value;
                     }
-                    Op::Global(n) => self.push(self.globals[usize::from(n)]),
+                    Op::Global(n) => {
+                        let value = self.globals[usize::from(n)];
+                        if let Value::Absent = value
+                            && self.unbound(n)
+                        {
+                            sync!(pc);
+                            return Err(self.unbound_variable(n));
+                        }
+                        self.push(value);
+                    }
                     Op::SetGlobal(n) => {
+                        if let Value::Absent = self.globals[usize::from(n)]
+                            && self.unbound(n)
+                        {
+                            sync!(pc);
+                            return Err(self.unbound_variable(n));
+                        }
                         let value = self.pop();
                         self.globals[usize::from(n)] = value;
                     }
