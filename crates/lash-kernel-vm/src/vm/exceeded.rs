@@ -31,7 +31,7 @@ impl<H: Heap> Vm<H> {
                     .or_else(|| self.cx.frames.last().map(|frame| frame.unit))
                     .map(|unit| self.program.unit(unit));
                 (
-                    unit.map(|unit| unit.name.clone()),
+                    unit.map(|unit| self.named(unit)),
                     unit.map(|unit| unit.site.clone()),
                 )
             }
@@ -109,6 +109,22 @@ impl<H: Heap> Vm<H> {
             )),
             false => None,
         }
+    }
+
+    /// The function a stop in `unit` names: a spawn's stub is no
+    /// function, so a stop there names the function the stub calls.
+    fn named(&self, unit: &crate::bytecode::program::Unit) -> Arc<str> {
+        use crate::bytecode::program::{Callee, UnitKind};
+        let called = match (&unit.kind, unit.calls.first().map(|call| &call.callee)) {
+            (UnitKind::Spawn, Some(Callee::Native { native, .. })) => {
+                Some(&self.program.native(*native).name)
+            }
+            (UnitKind::Spawn, Some(Callee::Unit { unit, .. })) => {
+                Some(&self.program.unit(*unit).name)
+            }
+            _ => None,
+        };
+        Arc::clone(called.unwrap_or(&unit.name))
     }
 
     /// The library call the nearest authored frame made, for a bound
