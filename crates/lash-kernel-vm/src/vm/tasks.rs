@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
+use lash_kernel_doc::arena::Body;
 use lash_kernel_doc::arena::native::NewObject;
 use lash_kernel_doc::{Datum, JoinMode, TaskId, Value};
 use lash_kernel_value::content_ids::LinkId;
@@ -152,6 +153,10 @@ pub(crate) struct Tasks {
     pub requests_limit: u32,
     pub join_limit: u32,
     pub operations: Operations,
+    /// How many tasks the run had when its heap last sealed or opened: only
+    /// these may have a handle on a page, where the retirement of unreached
+    /// results cannot look.
+    pub(crate) paged: usize,
 }
 
 impl Tasks {
@@ -173,6 +178,7 @@ impl Tasks {
             requests_limit: u32::MAX,
             join_limit: u32::MAX,
             operations: HashMap::new(),
+            paged: 0,
         }
     }
 
@@ -380,6 +386,94 @@ fn next_occurrence(count: u64) -> Run<u64> {
 const CANCELLED: (&str, &str) = ("cancelled", "the task was cancelled");
 
 impl<H: Heap> Vm<H> {
+    /// Retires the result of every ended task no handle reaches, before a
+    /// collection (`K-TASK-009`, `K-TASK-018`, S7): no `join` can read it
+    /// again, so it is no longer a root. The task keeps how it ended, Ok or
+    /// raised, for the run's end. Handles are traced from every root but
+    /// the ended results themselves, then through the results of the tasks
+    /// so reached. A handle on a page is not visible: where the trace meets
+    /// a cold object, every task the run had at its last seal or open
+    /// counts as reached.
+    pub(crate) fn retire_unreached(&mut self) {
+        let holds = |task: &Task| matches!(&task.state, State::Ended(Ok(value) | Err(value)) if value.handle().is_some());
+        if !self.tasks.all.iter().skip(1).any(holds) {
+            return;
+        }
+        let count = self.tasks.all.len();
+        let mut reach = Reach {
+            reached: vec![false; count],
+            pending: Vec::new(),
+            tasks: Vec::new(),
+        };
+        {
+            let mut visit = |value: &Value| reach.value(value);
+            self.constants.iter().for_each(&mut visit);
+            self.globals.iter().for_each(&mut visit);
+            self.top.iter().flatten().for_each(&mut visit);
+            self.held.iter().for_each(&mut visit);
+            self.cx.roots(&mut visit);
+            if let Some(restart) = &self.restart {
+                restart.roots(&mut visit);
+            }
+        }
+        for task in &self.tasks.all {
+            task.cx.roots(&mut |value| reach.value(value));
+            match &task.state {
+                State::Ready(Resume::Value(value) | Resume::Raise(value)) => reach.value(value),
+                State::Ready(Resume::Joined(joined)) | State::Waiting(Wait::Join(joined)) => {
+                    reach.task(*joined);
+                }
+                _ => {}
+            }
+        }
+        for join in self.tasks.joins.values() {
+            join.members.iter().for_each(|&member| reach.task(member));
+        }
+        let arena = self.heap.arena();
+        let mut seen = HashSet::new();
+        let mut cold = false;
+        loop {
+            while let Some(handle) = reach.pending.pop() {
+                if !seen.insert(handle.index()) {
+                    continue;
+                }
+                let (Ok(body), Ok(facts)) = (arena.body(handle), arena.facts(handle)) else {
+                    continue;
+                };
+                cold |= facts.cold
+                    || match body {
+                        Body::Cold(_) => true,
+                        Body::List(sequence) | Body::Tuple(sequence) => {
+                            sequence.chunks.first_cold().is_some()
+                        }
+                        Body::Map(table) | Body::Set(table) | Body::Record(table) => {
+                            table.chunks.first_cold().is_some()
+                        }
+                        _ => false,
+                    };
+                lash_kernel_state::arena::each_member(body, &mut |value| reach.value(value));
+                if let Body::Closure { captures, .. } = body {
+                    reach.pending.extend(captures.iter().copied());
+                }
+            }
+            let Some(task) = reach.tasks.pop() else {
+                break;
+            };
+            if let State::Ended(Ok(value) | Err(value)) = &self.tasks.all[task].state {
+                reach.value(value);
+            }
+        }
+        let kept = if cold { self.tasks.paged } else { 0 };
+        for (id, task) in self.tasks.all.iter_mut().enumerate().skip(kept.max(1)) {
+            if reach.reached[id] {
+                continue;
+            }
+            if let State::Ended(Ok(value) | Err(value)) = &mut task.state {
+                *value = Value::Null;
+            }
+        }
+    }
+
     // --- Where a task stands.
 
     /// Where frame `at` of `cx` stands: at the call it made, or at the
@@ -1301,3 +1395,28 @@ pub(crate) fn decode(
 
 /// The `host` fault a read raised, for the machine.
 pub(crate) type ReadFault = HostFault;
+
+/// The tasks a retirement trace has reached, and what it has still to visit.
+struct Reach {
+    reached: Vec<bool>,
+    pending: Vec<lash_kernel_doc::arena::ArenaHandle>,
+    tasks: Vec<usize>,
+}
+
+impl Reach {
+    fn value(&mut self, value: &Value) {
+        match value {
+            Value::Task(TaskId(id)) | Value::TaskRef(TaskId(id)) => self.task(*id as usize),
+            _ => self.pending.extend(value.handle()),
+        }
+    }
+
+    fn task(&mut self, task: usize) {
+        if let Some(reached) = self.reached.get_mut(task)
+            && !*reached
+        {
+            *reached = true;
+            self.tasks.push(task);
+        }
+    }
+}

@@ -324,6 +324,7 @@ impl CoreMachine {
             .collect();
         reads.sort();
         reads.dedup();
+        self.vm.tasks.paged = self.vm.tasks.all.len();
         crate::durable::seal(&mut self.vm, self.header.start.clone(), reads)
     }
 
@@ -720,6 +721,7 @@ impl Machine for CoreMachine {
         vm.crossing.host.clone_from(&header.host);
         crate::durable::admit(&vm.program, &vm.tasks.operations, &record)?;
         crate::durable::open(&mut vm, &record, &values).map_err(malformed)?;
+        vm.tasks.paged = vm.tasks.all.len();
         if changed.is_some() {
             crate::durable::live(&vm).map_err(unavailable_helper)?;
         }

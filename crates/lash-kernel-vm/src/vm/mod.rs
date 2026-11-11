@@ -753,6 +753,7 @@ impl<H: Heap> Vm<H> {
 
     /// Mark-sweep from every value the machine holds.
     pub(crate) fn collect(&mut self) {
+        self.retire_unreached();
         let Self {
             heap,
             constants,
@@ -782,6 +783,7 @@ impl<H: Heap> Vm<H> {
     #[cfg(test)]
     fn chill(&mut self) {
         let Some(chill) = self.chill else { return };
+        self.tasks.paged = self.tasks.all.len();
         let mut roots = Vec::new();
         let mut visit = |value: &Value| roots.push(*value);
         self.constants.iter().for_each(&mut visit);

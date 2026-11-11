@@ -874,6 +874,10 @@ impl Embedder {
             match self.run() {
                 Step::Ended(end) => return end,
                 Step::Slice => {}
+                // A quiet point hands over cancellation requests alone; the
+                // running task goes on first (`K-MACH-003`, `K-TASK-017`).
+                Step::Parked(park)
+                    if park.requests.is_empty() && !park.cancel_requests.is_empty() => {}
                 Step::Parked(_) => {
                     let next = match order.next() {
                         Some(name) => (*name).to_string(),
