@@ -8,6 +8,12 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "process_events";
 
+/// The view of every event of a process: [`TABLE`]'s rows and the terminal
+/// event a finished process keeps on its own row (FIG-7701). Every read names
+/// it; an event that follows the terminal one is an ordinary row, so no read
+/// assumes the packed event is the last.
+pub const LOG_VIEW: &str = "process_event_log";
+
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str =
     "process_id, sequence, event_type, idempotency_key, header_json, payload_json, replay_digest";
@@ -19,33 +25,33 @@ crate::statements! {
         /// any, with its optional payload and immutable replay digest:
         /// the idempotency half of an append.
         select_by_replay_key = "SELECT header_json, payload_json, replay_digest
-                 FROM process_events
+                 FROM process_event_log
                  WHERE process_id = ?1 AND idempotency_key = ?2";
 
         /// One indexed event under process `?1` and replay key `?2`, bounded
         /// by the snapshot sequence `?3`. The caller checks its sequence
         /// against the release horizon before decoding the payload.
-        read_by_replay_key = "SELECT sequence, (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_events
+        read_by_replay_key = "SELECT sequence, (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_event_log
                  WHERE process_id = ?1 AND idempotency_key = ?2 AND sequence <= ?3";
 
         /// The highest sequence process `?1` has recorded, or `NULL` when it
         /// has recorded none.
-        select_max_sequence = "SELECT MAX(sequence) FROM process_events WHERE process_id = ?1";
+        select_max_sequence = "SELECT MAX(sequence) FROM process_event_log WHERE process_id = ?1";
 
         /// At most `?3` full rows process `?1` recorded after `?2`.
-        page_full = "SELECT (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_events
+        page_full = "SELECT (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_event_log
                  WHERE process_id = ?1 AND sequence > ?2
                  ORDER BY sequence ASC LIMIT ?3";
 
         /// The same bounded read without selecting any JSON.
-        page_lite = "SELECT sequence, event_type FROM process_events
+        page_lite = "SELECT sequence, event_type FROM process_event_log
                  WHERE process_id = ?1 AND sequence > ?2
                  ORDER BY sequence ASC LIMIT ?3";
 
         /// The last `?2` retained events of process `?1`, newest first: a
         /// released row is never part of the tail. The caller reverses them;
         /// the descending order is what lets the primary key serve the limit.
-        list_recent = "SELECT (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_events
+        list_recent = "SELECT (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_event_log
                          WHERE process_id = ?1
                            AND sequence > COALESCE(
                                (SELECT released_through FROM process_event_horizons
@@ -55,7 +61,7 @@ crate::statements! {
 
         /// Bounds and size of the next release page, without loading payloads.
         page_release = "SELECT MAX(sequence), COUNT(*) FROM (
-                 SELECT sequence FROM process_events
+                 SELECT sequence FROM process_event_log
                  WHERE process_id = ?1 AND sequence > ?2 AND sequence <= ?3
                  ORDER BY sequence ASC LIMIT ?4
              ) AS release_page";
@@ -64,6 +70,20 @@ crate::statements! {
         release = "UPDATE process_events SET payload_json = NULL
                  WHERE process_id = ?1 AND sequence > ?2 AND sequence <= ?3
                    AND event_type != ?4";
+
+        /// The same release of the terminal event packed on the process row.
+        release_packed = "UPDATE processes SET terminal_event_payload = NULL
+                 WHERE process_id = ?1 AND terminal_event_sequence > ?2
+                   AND terminal_event_sequence <= ?3 AND terminal_event_type != ?4";
+
+        /// Record the event that ends process `?1` on its row, with the
+        /// columns [`insert`](Self::insert) takes. Its first terminal only:
+        /// a row already holding one is left as it is.
+        pack_terminal = "UPDATE processes SET terminal_event_sequence = ?2,
+                     terminal_event_type = ?3, terminal_event_key = ?4,
+                     terminal_event_header = ?5, terminal_event_payload = ?6,
+                     terminal_event_digest = ?7
+                 WHERE process_id = ?1 AND terminal_event_sequence IS NULL";
 
         /// Record one event: `?1` process, `?2` sequence, `?3` type, `?4`
         /// replay key, `?5` header, `?6` payload and `?7` replay digest.

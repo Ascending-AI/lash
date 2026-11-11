@@ -81,6 +81,12 @@ pub async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_ident
         .await;
 }
 
+pub async fn the_terminal_event_reads_releases_and_prunes_like_any_event(
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
+    event_release::the_terminal_event_reads_releases_and_prunes_like_any_event(registry).await;
+}
+
 pub async fn long_cancellation_requester_replay_is_backend_safe(
     registry: Arc<dyn ProcessRegistry>,
 ) {

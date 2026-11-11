@@ -625,6 +625,21 @@ CREATE TABLE IF NOT EXISTS processes (
     consumer_hold_scope_kind TEXT,
     consumer_hold_scope_id TEXT,
     consumer_hold_cancels INTEGER,
+    -- A finished process keeps the event that ended it and its parent-end
+    -- plan on its own row (FIG-7701). The event is exactly the header,
+    -- nullable payload and replay digest an event row holds; readers see it
+    -- through process_event_log, never assuming it is the last event.
+    terminal_event_sequence INTEGER,
+    terminal_event_type TEXT,
+    terminal_event_key TEXT,
+    terminal_event_header TEXT,
+    terminal_event_payload TEXT,
+    terminal_event_digest TEXT,
+    end_plan_scope_id TEXT,
+    end_plan_payload TEXT,
+    end_plan_ended_at_ms INTEGER,
+    CONSTRAINT ck_processes_terminal_event CHECK ((terminal_event_sequence IS NULL) = (terminal_event_type IS NULL) AND (terminal_event_sequence IS NULL) = (terminal_event_header IS NULL) AND (terminal_event_sequence IS NULL) = (terminal_event_digest IS NULL) AND (terminal_event_sequence IS NOT NULL OR (terminal_event_key IS NULL AND terminal_event_payload IS NULL))),
+    CONSTRAINT ck_processes_end_plan CHECK ((end_plan_scope_id IS NULL) = (end_plan_payload IS NULL) AND (end_plan_scope_id IS NULL) = (end_plan_ended_at_ms IS NULL)),
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
     CONSTRAINT ck_processes_last_event_sequence CHECK (typeof(last_event_sequence) = 'integer'),
@@ -703,6 +718,19 @@ CREATE TABLE IF NOT EXISTS process_events (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_process_events_key
     ON process_events(process_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
+
+-- Every event of a process: its event rows and the terminal event packed on
+-- its row. Readers use this; only appends, releases and prunes name a part.
+CREATE VIEW IF NOT EXISTS process_event_log AS
+    SELECT process_id, sequence, event_type, idempotency_key, header_json, payload_json, replay_digest
+    FROM process_events
+    UNION ALL
+    SELECT process_id, terminal_event_sequence, terminal_event_type, terminal_event_key,
+        terminal_event_header, terminal_event_payload, terminal_event_digest
+    FROM processes WHERE terminal_event_sequence IS NOT NULL;
+-- Retention reclaims packed plans by their end instant.
+CREATE INDEX IF NOT EXISTS idx_processes_end_plan
+    ON processes(end_plan_ended_at_ms) WHERE end_plan_ended_at_ms IS NOT NULL;
 
 -- The event prefix a host released of a still-retained process (FIG-3482):
 -- events at or below `released_through` keep their row without a payload,

@@ -345,6 +345,10 @@ lash_store_sql::statements! {
 
         /// Prune the process rows named by the id array `?1`, stamping their
         /// tombstones `?2`; reports the events and the rows it removed.
+        /// A packed terminal event counts as an event, and a packed
+        /// parent-end plan moves to `parent_end_plans` (FIG-7701): the reclaim
+        /// that ran first in the same transaction already cleared every packed
+        /// plan retention may drop, so a late child is refused as before.
         ///
         /// One statement for the whole prune, where SQLite issues eight under
         /// its write lock. Every part has to see the same snapshot: the
@@ -364,7 +368,19 @@ lash_store_sql::statements! {
              RETURNING event.process_id
          ),
          event_count AS MATERIALIZED (
-             SELECT count(*) AS value FROM deleted_events
+             SELECT (SELECT count(*) FROM deleted_events)
+                  + (SELECT count(*) FROM processes AS process
+                     JOIN candidates AS candidate USING (process_id)
+                     WHERE process.terminal_event_sequence IS NOT NULL) AS value
+         ),
+         restored_plans AS (
+             INSERT INTO parent_end_plans (parent_kind, parent_id, parent_payload, ended_at_ms)
+             SELECT 'process', process.end_plan_scope_id, process.end_plan_payload,
+                    process.end_plan_ended_at_ms
+             FROM candidates AS candidate
+             JOIN processes AS process USING (process_id)
+             WHERE process.end_plan_scope_id IS NOT NULL
+             ON CONFLICT (parent_kind, parent_id) DO NOTHING
          ),
          inserted_tombstones AS (
              INSERT INTO process_tombstones (
@@ -527,6 +543,18 @@ lash_store_sql::statements! {
                SELECT 1 FROM processes AS child
                WHERE child.lifetime_scope_kind = plan.parent_kind
                  AND child.lifetime_scope_id = plan.parent_id
+                 AND {{live_process_status(child.status)}}
+           )";
+
+        /// The same reclaim of the plans packed on process rows (FIG-7701):
+        /// a physical update of those columns only.
+        reclaim_packed = "UPDATE processes AS plan
+         SET end_plan_scope_id = NULL, end_plan_payload = NULL, end_plan_ended_at_ms = NULL
+         WHERE plan.end_plan_ended_at_ms < ?1
+           AND NOT EXISTS (
+               SELECT 1 FROM processes AS child
+               WHERE child.lifetime_scope_kind = 'process'
+                 AND child.lifetime_scope_id = plan.end_plan_scope_id
                  AND {{live_process_status(child.status)}}
            )";
     }

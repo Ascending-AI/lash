@@ -100,7 +100,7 @@ pub(super) fn read_sqlite_surface(process_path: &Path) -> SurfaceState {
     );
     let events = sqlite_simple_json_rows(
         &process,
-        "SELECT process_id, header_json, payload_json, replay_digest FROM process_events ORDER BY process_id, sequence",
+        "SELECT process_id, header_json, payload_json, replay_digest FROM process_event_log ORDER BY process_id, sequence",
         |row| {
             let header: String = row.get(1)?;
             let payload: Option<String> = row.get(2)?;
@@ -180,7 +180,7 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
             .unwrap();
     let records = record_rows.into_iter().map(|(record, change_seq)| normalized_json(serde_json::json!({"change_seq": change_seq, "record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}))).collect();
     let event_rows: Vec<(String, String, Option<String>, String)> = sqlx::query_as(
-        "SELECT process_id, header_json, payload_json, replay_digest FROM lash_process_events ORDER BY process_id, sequence",
+        "SELECT process_id, header_json, payload_json, replay_digest FROM lash_process_event_log ORDER BY process_id, sequence",
     )
     .fetch_all(pool)
     .await

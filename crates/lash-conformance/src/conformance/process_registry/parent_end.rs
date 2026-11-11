@@ -84,13 +84,13 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         Err(error) => panic!("read parent after retention prune: {error:?}"),
     };
     assert!(!parent_after_prune, "the pruned parent row is gone");
-    assert!(
+    assert_eq!(
         registry
             .get_parent_end_plan(&parent_scope)
             .await
-            .expect("read parent-end ledger row after retention prune")
-            .is_some(),
-        "the ledger row outlives the process row it was written for"
+            .expect("read parent-end ledger row after retention prune"),
+        Some(pending),
+        "the ledger row outlives the process row it was written for, first stamp and all"
     );
     // A `Cancel` child registering after the ledger row exists is fenced.
     let late = crate::started_until_starter(
@@ -147,6 +147,26 @@ pub(super) async fn parent_end_plans_are_reclaimed_by_retention(
         .expect("register cancel child under the live parent");
 
     complete_process(&registry, &parent.id).await;
+    // Another originator's ended parent, with no child: the filter keeps its
+    // row, and retention still reclaims its plan, as for any plan.
+    let kept = registry
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
+            serde_json::Value::Null,
+            ProcessProvenance::session(SessionScope::new("parent-end-reclaim-kept")),
+            lash_execution_contracts::process::Lifetime::Detached,
+        ))
+        .await
+        .expect("register a parent the prune filter excludes");
+    let kept_scope = lash_core::ScopeId::process(kept.id.clone());
+    complete_process(&registry, &kept.id).await;
+    assert!(
+        registry
+            .get_parent_end_plan(&kept_scope)
+            .await
+            .expect("read the excluded parent's plan")
+            .is_some(),
+        "the ended parent has its plan"
+    );
 
     let filter = ProcessListFilter {
         status: ProcessStatusFilter::Any,
@@ -188,6 +208,22 @@ pub(super) async fn parent_end_plans_are_reclaimed_by_retention(
             .expect("read the ledger row after retention"),
         None,
         "retention reclaims a row once no live child names its scope"
+    );
+    assert_eq!(
+        registry
+            .get_parent_end_plan(&kept_scope)
+            .await
+            .expect("read the excluded parent's plan after retention"),
+        None,
+        "retention reclaims the plan of a parent whose row it keeps"
+    );
+    assert!(
+        registry
+            .get_process(&kept.id)
+            .await
+            .expect("read the excluded parent")
+            .is_some(),
+        "the filter keeps the excluded parent's row"
     );
 }
 

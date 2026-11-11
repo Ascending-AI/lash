@@ -738,6 +738,7 @@ lash_conformance::__process_registry_register! {
                 (observer_events_are_auditable_and_transfer_is_atomic, "observer-audit-transfer"),
                 (a_boundary_commits_its_prelude_in_its_own_transaction, "process-event-batch-boundary"),
                 (releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity, "release-event-prefix"),
+                (the_terminal_event_reads_releases_and_prunes_like_any_event, "terminal-event-reads"),
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
                 (an_unstamped_cancelled_terminal_replay_coalesces, "unstamped-cancelled-terminal-replay"),
 

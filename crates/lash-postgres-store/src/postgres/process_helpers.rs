@@ -345,7 +345,15 @@ async fn stage_process_event_append_tx(
             projected_record,
         } => {
             let header = lash_execution_contracts::process::ProcessEventHeader::of(&event);
-            crate::observed_sql::query(process_sql().event.insert.sql())
+            // The append that ends the process keeps its event on the
+            // process row (FIG-7701); any later event is an ordinary row.
+            let ends = !record.is_terminal() && projected_record.is_terminal();
+            let statement = if ends {
+                process_sql().event.pack_terminal.sql()
+            } else {
+                process_sql().event.insert.sql()
+            };
+            let written = crate::observed_sql::query(statement)
                 .bind(process_id.as_str())
                 .bind(sequence as i64)
                 .bind(event.fact.event_type())
@@ -356,6 +364,12 @@ async fn stage_process_event_append_tx(
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(plugin_sqlx_error)?;
+            if written.rows_affected() != 1 {
+                return Err(PluginError::StoredDataCorrupt {
+                    record_kind: "process_event".to_owned(),
+                    message: format!("process {process_id} already keeps a terminal event"),
+                });
+            }
             *record = projected_record;
             // A process that just reached a terminal status is an ended parent
             // scope: its ledger row rides the same transaction as the terminal

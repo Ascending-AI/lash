@@ -122,6 +122,7 @@ pub const TABLES: &[&str] = &[
     durable::OWNER_COMMIT_LATCHES_TABLE,
     durable::graph::ADMISSIONS_TABLE,
     durable::graph::CATALOG_VIEW,
+    process::events::LOG_VIEW,
     durable::graph::EDGES_TABLE,
     durable::pages::FRONTIER_TABLE,
     durable::pages::HOLDS_TABLE,

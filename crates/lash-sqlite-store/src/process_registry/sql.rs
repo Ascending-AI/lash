@@ -545,6 +545,12 @@ lash_store_sql::statements! {
     pub(crate) struct EventSqliteStatements @ "process_event" {
         delete_by_process_ids = "DELETE FROM process_events
              WHERE process_id IN (SELECT value FROM json_each(?1))";
+
+        /// How many of the processes named by the id array `?1` keep a
+        /// packed terminal event: a prune counts them with the rows it deletes.
+        count_packed = "SELECT COUNT(*) FROM processes
+             WHERE process_id IN (SELECT value FROM json_each(?1))
+               AND terminal_event_sequence IS NOT NULL";
     }
 }
 
@@ -561,6 +567,26 @@ lash_store_sql::statements! {
                  AND child.lifetime_scope_id = parent_end_plans.parent_id
                  AND {{live_process_status(child.status)}}
            )";
+
+        /// The same reclaim of the plans packed on process rows (FIG-7701):
+        /// a physical update of those columns only.
+        reclaim_packed = "UPDATE processes
+         SET end_plan_scope_id = NULL, end_plan_payload = NULL, end_plan_ended_at_ms = NULL
+         WHERE end_plan_ended_at_ms < ?1
+           AND NOT EXISTS (
+               SELECT 1 FROM processes AS child
+               WHERE child.lifetime_scope_kind = 'process'
+                 AND child.lifetime_scope_id = processes.end_plan_scope_id
+                 AND {{live_process_status(child.status)}}
+           )";
+
+        /// A prune moves the plans packed on the rows named by the id array
+        /// `?1` to the table; reclaim already cleared the ones it may drop.
+        restore_packed = "INSERT INTO parent_end_plans (parent_kind, parent_id, parent_payload, ended_at_ms)
+         SELECT 'process', end_plan_scope_id, end_plan_payload, end_plan_ended_at_ms
+         FROM processes
+         WHERE process_id IN (SELECT value FROM json_each(?1)) AND end_plan_scope_id IS NOT NULL
+         ON CONFLICT (parent_kind, parent_id) DO NOTHING";
     }
 }
 

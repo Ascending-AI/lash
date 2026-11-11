@@ -505,9 +505,16 @@ impl SqliteProcessRegistry {
                 projected_record,
             } => {
                 let header = lash_execution_contracts::process::ProcessEventHeader::of(&event);
-                crate::conn::cached_execute(
+                // The append that ends the process keeps its event on the
+                // process row (FIG-7701); any later event is an ordinary row.
+                let ends = !record.is_terminal() && projected_record.is_terminal();
+                let written = crate::conn::cached_execute(
                     conn,
-                    process_sql().event.insert.sql(),
+                    if ends {
+                        process_sql().event.pack_terminal.sql()
+                    } else {
+                        process_sql().event.insert.sql()
+                    },
                     params![
                         process_id.as_str(),
                         sequence as i64,
@@ -519,6 +526,14 @@ impl SqliteProcessRegistry {
                     ],
                 )
                 .map_err(process_sqlite_error)?;
+                if written != 1 {
+                    return Err(
+                        lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
+                            record_kind: "process_event".to_owned(),
+                            message: format!("process {process_id} already keeps a terminal event"),
+                        },
+                    );
+                }
                 *record = projected_record;
                 // A process that just reached a terminal status is an ended
                 // parent scope: its ledger row rides the same transaction as

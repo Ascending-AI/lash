@@ -60,14 +60,19 @@ pub(super) async fn release_process_events(
             break;
         };
         let count: i64 = row.get(1);
-        crate::observed_sql::query(process_sql().event.release.sql())
-            .bind(process_id.as_str())
-            .bind(clamp_sequence_bound(after))
-            .bind(end)
-            .bind(lash_execution_contracts::process::ProcessEventKind::CancelRequested.as_str())
-            .execute(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(plugin_sqlx_error)?;
+        for sql in [
+            process_sql().event.release.sql(),
+            process_sql().event.release_packed.sql(),
+        ] {
+            crate::observed_sql::query(sql)
+                .bind(process_id.as_str())
+                .bind(clamp_sequence_bound(after))
+                .bind(end)
+                .bind(lash_execution_contracts::process::ProcessEventKind::CancelRequested.as_str())
+                .execute(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(plugin_sqlx_error)?;
+        }
         released_events += plugin_u64_from_sql("ProcessEvent", "count", count)?;
         after = plugin_u64_from_sql("ProcessEvent", "sequence", end)?;
     }

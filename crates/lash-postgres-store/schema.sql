@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 39.
+-- lash-postgres-store schema, component version 40.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -652,6 +652,21 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     consumer_hold_scope_kind TEXT,
     consumer_hold_scope_id TEXT COLLATE "C",
     consumer_hold_cancels BOOLEAN,
+    -- A finished process keeps the event that ended it and its parent-end
+    -- plan on its own row (FIG-7701). The event is exactly the header,
+    -- nullable payload and replay digest an event row holds; readers see it
+    -- through lash_process_event_log, never assuming it is the last event.
+    terminal_event_sequence BIGINT,
+    terminal_event_type TEXT,
+    terminal_event_key TEXT,
+    terminal_event_header TEXT,
+    terminal_event_payload TEXT,
+    terminal_event_digest TEXT,
+    end_plan_scope_id TEXT COLLATE "C",
+    end_plan_payload TEXT,
+    end_plan_ended_at_ms BIGINT,
+    CONSTRAINT ck_processes_terminal_event CHECK ((terminal_event_sequence IS NULL) = (terminal_event_type IS NULL) AND (terminal_event_sequence IS NULL) = (terminal_event_header IS NULL) AND (terminal_event_sequence IS NULL) = (terminal_event_digest IS NULL) AND (terminal_event_sequence IS NOT NULL OR (terminal_event_key IS NULL AND terminal_event_payload IS NULL))),
+    CONSTRAINT ck_processes_end_plan CHECK ((end_plan_scope_id IS NULL) = (end_plan_payload IS NULL) AND (end_plan_scope_id IS NULL) = (end_plan_ended_at_ms IS NULL)),
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
     CONSTRAINT ck_processes_cancel_requested_at CHECK ((cancel_requested_at_ms IS NULL) = ((replace(lifecycle_json, chr(92) || 'u0000', chr(92) || 'u0001')::json -> 'cancel_request') IS NULL)),
@@ -729,6 +744,19 @@ CREATE TABLE IF NOT EXISTS lash_process_events (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_process_events_key
     ON lash_process_events(process_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
+
+-- Every event of a process: its event rows and the terminal event packed on
+-- its row. Readers use this; only appends, releases and prunes name a part.
+CREATE OR REPLACE VIEW lash_process_event_log AS
+    SELECT process_id, sequence, event_type, idempotency_key, header_json, payload_json, replay_digest
+    FROM lash_process_events
+    UNION ALL
+    SELECT process_id, terminal_event_sequence, terminal_event_type, terminal_event_key,
+        terminal_event_header, terminal_event_payload, terminal_event_digest
+    FROM lash_processes WHERE terminal_event_sequence IS NOT NULL;
+-- Retention reclaims packed plans by their end instant.
+CREATE INDEX IF NOT EXISTS idx_lash_processes_end_plan
+    ON lash_processes(end_plan_ended_at_ms) WHERE end_plan_ended_at_ms IS NOT NULL;
 
 -- The event prefix a host released of a still-retained process (FIG-3482):
 -- events at or below `released_through` keep their row without a payload,
@@ -934,7 +962,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- the fleet epoch, the transactional clock rows, and the catalog identity.
 -- `gen_random_uuid()` is core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version, min_reader)
-VALUES ('lash-postgres-store', 39, 39)
+VALUES ('lash-postgres-store', 40, 40)
 ON CONFLICT (component) DO NOTHING;
 
 -- The fleet epoch starts at the floor of the installing build's writable

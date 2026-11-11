@@ -78,12 +78,19 @@ async fn reclaim_settled_parent_end_plans_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     cutoff: i64,
 ) -> Result<u64, PluginError> {
-    crate::observed_sql::query(process_sql().plan_postgres.delete_reclaimable.sql())
-        .bind(cutoff)
-        .execute(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map(|done| done.rows_affected())
-        .map_err(plugin_sqlx_error)
+    let mut reclaimed = 0;
+    for sql in [
+        process_sql().plan_postgres.delete_reclaimable.sql(),
+        process_sql().plan_postgres.reclaim_packed.sql(),
+    ] {
+        reclaimed += crate::observed_sql::query(sql)
+            .bind(cutoff)
+            .execute(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected();
+    }
+    Ok(reclaimed)
 }
 
 pub(super) async fn prune_terminal_processes(
@@ -98,6 +105,18 @@ pub(super) async fn prune_terminal_processes(
     let mut tx = begin_guarded(&registry.pool, &registry.fence)
         .await
         .map_err(plugin_store_error)?;
+    // Reclaiming packed plans locks retained process rows beyond the
+    // candidates; one prune at a time keeps two prunes from locking each
+    // other's rows in opposite orders.
+    crate::observed_sql::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_text
+            .sql(),
+    )
+    .bind("lash-process-prune")
+    .execute(crate::observed_sql::executor(&mut **tx))
+    .await
+    .map_err(plugin_sqlx_error)?;
     let prunable = select_prunable(
         &mut **tx,
         process_sql()

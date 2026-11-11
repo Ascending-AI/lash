@@ -17,7 +17,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 39
+version 40
 table lash_abandoned_consumer_holds
   column abandoned_at_ms bigint not-null
   column hold_key text not-null
@@ -399,6 +399,9 @@ table lash_processes
   column consumer_hold_scope_kind text nullable
   column created_at_ms bigint not-null
   column driver_json text nullable
+  column end_plan_ended_at_ms bigint nullable
+  column end_plan_payload text nullable
+  column end_plan_scope_id text nullable
   column execution_json text not-null
   column identity_kind text not-null
   column identity_label text nullable
@@ -415,6 +418,12 @@ table lash_processes
   column start_key text nullable
   column state_rev bigint not-null default
   column status text not-null generated
+  column terminal_event_digest text nullable
+  column terminal_event_header text nullable
+  column terminal_event_key text nullable
+  column terminal_event_payload text nullable
+  column terminal_event_sequence bigint nullable
+  column terminal_event_type text nullable
   column unsequenced_saves integer not-null default
   column updated_at_ms bigint not-null
   column written_epoch bigint nullable
