@@ -8,8 +8,12 @@
 //! A region's fold (`bytecode::fold`) runs once its activation is made,
 //! and one that holds completes it as the region's `Op::Leave` would.
 
+use std::cell::Cell;
+
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::native::InlineOperation;
+use lash_kernel_doc::plan::Table;
+use lash_kernel_state::arena::{Key, PropertySlot};
 
 use super::frames::{Activation, Frame};
 use super::{Flow, Restart, Run, Stop, Vm, fault};
@@ -188,8 +192,8 @@ impl<H: Heap> Vm<H> {
             Slot::Const(n) => self.konst(n),
             Slot::Made(n) => made[usize::from(n)],
         };
-        for &step in &fold.steps[..usize::from(fold.len)] {
-            let value = match step {
+        for step in &fold.steps[..usize::from(fold.len)] {
+            let value = match *step {
                 Step::Answer {
                     operation,
                     args,
@@ -210,6 +214,27 @@ impl<H: Heap> Vm<H> {
                         return None;
                     }
                     continue;
+                }
+                Step::Lookup { target, key } => {
+                    let (target, key) = (read(&made, target), read(&made, key));
+                    if !InlineOperation::Membership(Table::Map).accepts(&[target, key]) {
+                        return None;
+                    }
+                    let Value::Map(object) = target else {
+                        return None;
+                    };
+                    let arena = self.heap.arena();
+                    match key {
+                        Value::Text(text) => {
+                            let cell = self.lookups.cell(step);
+                            let (value, proof) = arena
+                                .table_read(object, cell.get(), &Key::text(&text))
+                                .ok()?;
+                            cell.set(proof);
+                            value?
+                        }
+                        key => arena.table_get(object, &key).ok()??,
+                    }
                 }
                 Step::Index { target, index } => {
                     let arena = self.heap.arena();
@@ -311,5 +336,24 @@ impl<H: Heap> Vm<H> {
         self.settle(completion, activation.callee)?;
         self.cx.stack.truncate(activation.base as usize);
         Ok(())
+    }
+}
+
+/// The position proofs of folded short-text key reads, by the read's
+/// step: a small table its steps share by their place in the program.
+/// Each proof the arena checks whole against the table it reads, its
+/// object, revision and key, so a proof another step or table left is
+/// only a miss.
+#[derive(Default)]
+pub(crate) struct Lookups([Cell<Option<PropertySlot>>; LOOKUPS]);
+
+const LOOKUPS: usize = 32;
+
+impl Lookups {
+    /// The proof cell of the read at `step`.
+    #[inline]
+    fn cell(&self, step: &Step) -> &Cell<Option<PropertySlot>> {
+        let at = (std::ptr::from_ref(step) as usize).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        &self.0[at >> (usize::BITS - LOOKUPS.trailing_zeros())]
     }
 }

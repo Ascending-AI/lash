@@ -18,7 +18,7 @@ use lash_kernel_value::{EntryTypeMismatch, RecordRest, Signature, Type, TypeMism
 use super::datum::copy_in;
 use super::{Run, Vm, fault, read};
 use crate::bytecode::op::Op;
-use crate::bytecode::program::Checked;
+use crate::bytecode::program::{Checked, Shallow};
 use crate::heap::Heap;
 
 impl<H: Heap> Vm<H> {
@@ -26,16 +26,31 @@ impl<H: Heap> Vm<H> {
     /// not fit `checked`'s parameter at its place.
     pub(super) fn check_arguments(&mut self, checked: &Checked, argc: usize) -> Run<()> {
         let Signature { params, .. } = &checked.signature;
-        if !(checked.signature.required()..=params.len()).contains(&argc) {
+        if !(checked.required..=params.len()).contains(&argc) {
             return Err(self.error(
                 "arity",
                 "arguments do not fit the imported function signature",
             ));
         }
         let from = self.cx.stack.len() - argc;
-        for (param, at) in params.iter().zip(from..).take(argc) {
+        // Below a value depth of two the check itself may raise
+        // (`Self::fits`, `Self::any_members`); above it, an inline scalar
+        // of the named kind and a collection of any members fit by their
+        // kind alone.
+        let deep = self.value_depth > 1;
+        for ((param, shallow), at) in params.iter().zip(&checked.shallow).zip(from..).take(argc) {
             let value = self.cx.stack[at];
             if param.optional && matches!(value, Value::Absent) {
+                continue;
+            }
+            let fits = deep
+                && match (shallow, value) {
+                    (Shallow::Map, Value::Map(_))
+                    | (Shallow::List, Value::List(_))
+                    | (Shallow::Set, Value::Set(_)) => true,
+                    _ => plainly_fits(value, &param.ty),
+                };
+            if fits {
                 continue;
             }
             if let Some(mismatch) = self.fits(value, &param.ty, self.value_depth)? {

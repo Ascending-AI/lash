@@ -1198,6 +1198,68 @@ main {
   return [total, xs, m]
 }"#;
 
+/// One folded read site of `law.get` sees two maps whose key `"a"`
+/// stands at different positions, the first map's entry removed, read
+/// missing and written back at another position, and the second's value
+/// overwritten in place. The fold reads each through one lookup, which
+/// keeps a position proof for its next run: each read answers its own
+/// map's current entry, as the run calling `law.get` through its frame
+/// does, resident, cold and in slices.
+const LOOKUP_CONTRACT: &str = r#"main {
+  let t = map{"a": 1, "b": 2}
+  let u = map{"b": 7, "a": 8}
+  let i = 0
+  while num.lt(i, 3) {
+    for w in [t, u] { print invoke law.get(w, "a") }
+    remove t["a"]
+    for w in [t, u, t] { print invoke law.get(w, "a") }
+    set t["a"] = num.add(i, 40)
+    set u["a"] = num.add(i, 60)
+    set i = num.add(i, 1)
+  }
+  return [t, u]
+}"#;
+
+#[test]
+fn a_folded_map_read_answers_each_maps_current_entry_at_its_site() {
+    let held = crate::vm::inline::held();
+    for how in [
+        Drive::default(),
+        Drive {
+            exact: true,
+            ..Drive::default()
+        },
+        Drive {
+            slice: 3,
+            ..Drive::default()
+        },
+        Drive {
+            cold: true,
+            ..Drive::default()
+        },
+    ] {
+        let seen = inlined(LOOKUP_CONTRACT, how);
+        assert_eq!(
+            seen,
+            reference(LOOKUP_CONTRACT, how),
+            "exact {}, slice {}, cold {}",
+            how.exact,
+            how.slice,
+            how.cold
+        );
+        // Each trip: both maps' entries, then the first map missing it
+        // around the second's.
+        let trips = [(1, 8), (40, 60), (41, 61)];
+        let expected: Vec<_> = trips
+            .iter()
+            .flat_map(|&(t, u)| [t, u, 0, u, 0])
+            .map(super::embedder::int)
+            .collect();
+        assert_eq!(seen.printed, expected, "{seen:?}");
+    }
+    assert!(crate::vm::inline::held() > held, "no region's fold held");
+}
+
 /// Astra cold path, items 1-10: a run whose objects are paged out at
 /// every statement boundary shows its host what the resident run does,
 /// on the prepaid and exact paths, under Exact and Off, at every charge

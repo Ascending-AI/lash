@@ -476,6 +476,12 @@ pub(in crate::laws) fn helper_probes(
     for (name, params, result, body) in [
         ("helper.typed", "x: Int", "Int", "return x"),
         ("helper.return_checked", "x: Any", "Int", "return x"),
+        (
+            "helper.typed_members",
+            "xs: List(Int), m: Map(Text, Any), s: Set(Any)",
+            "Any",
+            "return 0",
+        ),
         ("helper.optional", "x: Int, y?: Any", "Any", "return (x, y)"),
         (
             "helper.apply_typed",
@@ -831,6 +837,7 @@ fn helper_frames_agree() {
             [
                 "helper.typed",
                 "helper.return_checked",
+                "helper.typed_members",
                 "helper.optional",
                 "helper.apply_typed",
                 "helper.checked_answer",
@@ -950,7 +957,7 @@ main { return call rooted() }
     const BODY_PARK: &str = r#"main { let d = {step: fn(x) { do perform 0("forward") as Any return 7 }} return invoke helper.forward_next(d) }"#;
     const ROOT_CALLBACK: &str =
         "main { let d = {step: fn(x) { return 7 }} return invoke helper.next(d) }";
-    const CONTRACTS: [&str; 17] = [
+    const CONTRACTS: [&str; 18] = [
         REDUCTION,
         VISIT,
         SCAN,
@@ -966,6 +973,10 @@ main { return call rooted() }
         "main { return invoke helper.typed(7) }",
         "main { return invoke helper.optional(7) }",
         "main { try { return invoke helper.typed(false) } catch err { return err.kind } }",
+        // A collection argument fits by its kind alone only when its
+        // members may be of any type: a member or key of the wrong type
+        // does not fit.
+        r#"main { for args in [([1], map{"a": "x"}, set{1}), (["bad"], map{}, set{}), ([], map{1: 2}, set{})] { try { print invoke helper.typed_members(args[0], args[1], args[2]) } catch err { print err.kind } } return 0 }"#,
         "main { try { return invoke helper.return_checked(\"bad\") } catch err { return err.kind } }",
         "main { try { return invoke helper.apply_typed(fn(a, b) { return a }) } catch err { return err.kind } }",
     ];
@@ -1050,6 +1061,10 @@ main { return call rooted() }
             // and the body on a function argument's declared signature.
             if source.contains("helper.return_checked(") {
                 assert_eq!(actual.0, format!("{:?}", text("entry_type_mismatch")));
+            }
+            if source.contains("helper.typed_members(") {
+                let refused = text("function_argument");
+                assert_eq!(actual.1, [int(0), refused.clone(), refused]);
             }
             if source.contains("helper.apply_typed(") {
                 assert_eq!(actual.0, format!("{:?}", text("function_argument")));

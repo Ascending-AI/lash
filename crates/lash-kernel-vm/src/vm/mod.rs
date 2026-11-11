@@ -300,6 +300,9 @@ pub(crate) struct Vm<H: Heap> {
     pub(crate) retrying: bool,
     /// Whether the running slice's host observes sites (`Host::observes_sites`).
     pub(crate) sites: bool,
+    /// The position proofs of folded short-text key reads (`inline`):
+    /// process-local, each checked whole by the arena before it is used.
+    pub(crate) lookups: inline::Lookups,
     /// The laws' forced-cold runs: pages every object out at each
     /// statement boundary, the machine's values rooted.
     #[cfg(test)]
@@ -401,6 +404,7 @@ impl<H: Heap> Vm<H> {
             raised_at: None,
             retrying: false,
             sites: false,
+            lookups: Default::default(),
             #[cfg(test)]
             chill: None,
             #[cfg(test)]

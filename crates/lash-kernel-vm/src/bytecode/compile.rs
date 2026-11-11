@@ -1361,13 +1361,13 @@ impl<'a> Compiler<'a> {
                 .iter()
                 .any(|param| param.ty != lash_kernel_value::Type::Any);
         typed.then(|| {
-            Arc::new(Checked {
-                callable: CallableId {
+            Arc::new(Checked::new(
+                CallableId {
                     link: self.link,
                     function: id,
                 },
-                signature: signature.clone(),
-            })
+                signature.clone(),
+            ))
         })
     }
 

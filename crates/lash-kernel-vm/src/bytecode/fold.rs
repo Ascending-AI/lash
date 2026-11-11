@@ -36,6 +36,7 @@
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::native::{InlineOperation, IntegerTextDomain, ScalarDomain};
+use lash_kernel_doc::plan::Table;
 
 use super::op::Op;
 
@@ -214,6 +215,7 @@ fn walk(
                     return None;
                 };
                 kind_tests(program, &mut path.steps, &mut result);
+                lookups(&mut path.steps, &mut result);
                 let mut steps = [Step::Guard {
                     value: result,
                     holds: true,
@@ -308,10 +310,92 @@ fn slots(step: &mut Step, mut each: impl FnMut(&mut Slot)) {
     match step {
         Step::Answer { args, argc, .. } => args[..usize::from(*argc)].iter_mut().for_each(each),
         Step::KindIs { value, .. } | Step::Guard { value, .. } => each(value),
-        Step::Index { target, index } => {
+        Step::Index { target, index } | Step::Lookup { target, key: index } => {
             each(target);
             each(index);
         }
+    }
+}
+
+/// Makes each map membership answer that only a guard that it holds
+/// reads, followed by an index read of the same map at the same key, one
+/// `Step::Lookup` in the answer's place, and drops the guard and the
+/// index read: the lookup declines where the answer declines or the
+/// guard would not hold, and makes the value the index read would. A
+/// dict read through a Python subscript helper tests membership this way
+/// before its index.
+fn lookups(steps: &mut Vec<Step>, result: &mut Slot) {
+    // The value step `at` makes, if it makes one.
+    let made_at = |steps: &[Step], at: usize| -> Option<u8> {
+        if matches!(steps[at], Step::Guard { .. }) {
+            return None;
+        }
+        let before = steps[..at]
+            .iter()
+            .filter(|step| !matches!(step, Step::Guard { .. }))
+            .count();
+        u8::try_from(before).ok()
+    };
+    'next: loop {
+        for at in 0..steps.len() {
+            let Step::Answer {
+                operation: InlineOperation::Membership(Table::Map),
+                args: [target, key],
+                argc: 2,
+            } = steps[at]
+            else {
+                continue;
+            };
+            let Some(answer) = made_at(steps, at) else {
+                continue;
+            };
+            let answer_slot = Slot::Made(answer);
+            // The guard that it holds must be its only reader.
+            let mut guard = None;
+            let mut others = *result == answer_slot;
+            for (k, step) in steps.iter_mut().enumerate() {
+                match *step {
+                    Step::Guard { value, holds: true }
+                        if value == answer_slot && guard.is_none() =>
+                    {
+                        guard = Some(k);
+                    }
+                    _ => slots(step, |slot| others |= *slot == answer_slot),
+                }
+            }
+            let Some(guard) = guard.filter(|_| !others) else {
+                continue;
+            };
+            let Some(index) =
+                (at + 1..steps.len()).find(|&k| steps[k] == Step::Index { target, index: key })
+            else {
+                continue;
+            };
+            let Some(read) = made_at(steps, index) else {
+                continue;
+            };
+            steps[at] = Step::Lookup { target, key };
+            // The index read's value is the lookup's: its readers read
+            // that, and the values after it move down one.
+            let mut renumber = |slot: &mut Slot| {
+                if let Slot::Made(m) = slot {
+                    if *m == read {
+                        *slot = answer_slot;
+                    } else if *m > read {
+                        *m -= 1;
+                    }
+                }
+            };
+            let (first, second) = (guard.max(index), guard.min(index));
+            steps.remove(first);
+            steps.remove(second);
+            renumber(result);
+            for step in steps.iter_mut() {
+                slots(step, &mut renumber);
+            }
+            continue 'next;
+        }
+        return;
     }
 }
 

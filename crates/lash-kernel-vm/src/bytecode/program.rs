@@ -348,6 +348,11 @@ pub enum Step {
     /// An index read that finds a value, making it: a list or tuple at
     /// an integer, or a map at a key it holds.
     Index { target: Slot, index: Slot },
+    /// A map's membership answer, the guard that it holds and the index
+    /// read of the same map at the same key, as one lookup making the
+    /// value: it declines where the membership answer declines or finds
+    /// no entry, and otherwise makes what the index read would.
+    Lookup { target: Slot, key: Slot },
 }
 
 /// A run of one prepaid block's ops that dispatches at once (`fuse`): up
@@ -494,6 +499,52 @@ pub struct CallSite {
 pub struct Checked {
     pub callable: CallableId,
     pub signature: lash_kernel_value::Signature,
+    /// How many leading parameters a call must supply.
+    pub required: usize,
+    /// What each parameter's type holds a value to by its kind alone
+    /// (`Shallow`), in order.
+    pub shallow: Box<[Shallow]>,
+}
+
+impl Checked {
+    pub fn new(callable: CallableId, signature: lash_kernel_value::Signature) -> Self {
+        Self {
+            callable,
+            required: signature.required(),
+            shallow: signature
+                .params
+                .iter()
+                .map(|param| Shallow::of(&param.ty))
+                .collect(),
+            signature,
+        }
+    }
+}
+
+/// What a parameter's type decides of a value by its kind alone. A value
+/// it does not decide is checked whole.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shallow {
+    /// An inline scalar the type names fits (`fits::plainly_fits`).
+    Plain,
+    /// A map, list or set of the kind fits a collection type whose members
+    /// are of any type, wherever its members stand within the value
+    /// depth: below the depth's last level, every member does.
+    Map,
+    List,
+    Set,
+}
+
+impl Shallow {
+    fn of(ty: &lash_kernel_value::Type) -> Self {
+        use lash_kernel_value::Type;
+        match ty {
+            Type::Map(map) if matches!((&map.key, &map.value), (Type::Any, Type::Any)) => Self::Map,
+            Type::List(item) if matches!(**item, Type::Any) => Self::List,
+            Type::Set(item) if matches!(**item, Type::Any) => Self::Set,
+            _ => Self::Plain,
+        }
+    }
 }
 
 /// Where a frame stands at a call or an action (`K-EVAL-008`,
