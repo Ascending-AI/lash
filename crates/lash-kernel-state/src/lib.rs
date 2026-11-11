@@ -7,35 +7,12 @@ pub(crate) mod perf_witness;
 /// Semantic state readers for carry and continuation equality.
 pub mod semantic;
 
-/// The paged heap's implementation, for the other kernel crates only: the
-/// machine executes on it and kernel laws inspect it. Nothing outside
+/// Page-level internals, for the other kernel crates only: the machine
+/// seals and reads through them and kernel laws inspect them. Nothing outside
 /// `crates/lash-kernel-*` names this module (`scripts/check-kernel-boundary.py`,
 /// FIG-6688); hosts use [`paged`]'s records, page port and session readers.
 #[doc(hidden)]
 pub mod kernel_internals {
-    /// The paged engine's session heap header; a bytecode-core session's
-    /// run page, which no paged heap opens.
-    pub fn session_heap(session: &crate::paged::SessionRoot) -> lash_kernel_doc::heap::PageRef {
-        match &session.0 {
-            crate::paged::SessionForm::Paged(session) => session.heap,
-            crate::paged::SessionForm::Run(page) => *page,
-        }
-    }
-    /// The paged engine's session bindings; none in a bytecode-core one.
-    pub fn session_bindings(session: &crate::paged::SessionRoot) -> crate::paged::KeyedRoot {
-        match &session.0 {
-            crate::paged::SessionForm::Paged(session) => session.bindings,
-            crate::paged::SessionForm::Run(_) => crate::paged::KeyedRoot::Empty,
-        }
-    }
-    /// The paged engine's saved functions; none in a bytecode-core one.
-    pub fn session_functions(session: &crate::paged::SessionRoot) -> crate::paged::KeyedRoot {
-        match &session.0 {
-            crate::paged::SessionForm::Paged(session) => session.functions,
-            crate::paged::SessionForm::Run(_) => crate::paged::KeyedRoot::Empty,
-        }
-    }
-
     pub fn checkpoint(root: crate::paged::CheckpointRoot) -> crate::paged::Checkpoint {
         crate::paged::checkpoint::Checkpoint(root, None)
     }
@@ -43,27 +20,6 @@ pub mod kernel_internals {
         &checkpoint.0
     }
 
-    pub mod logical {
-        pub use crate::paged::logical::*;
-    }
-    pub mod census_impl {
-        pub use crate::paged::census_impl::*;
-    }
-    pub mod directory {
-        pub use crate::paged::directory::*;
-    }
-    pub mod family_impl {
-        pub use crate::paged::family_impl::*;
-    }
-    pub mod heap_impl {
-        pub use crate::paged::heap_impl::*;
-    }
-    pub mod metadata {
-        pub use crate::paged::metadata::*;
-    }
-    pub mod payload {
-        pub use crate::paged::payload::*;
-    }
     #[cfg(any(test, feature = "perf-witness"))]
     pub mod perf_witness {
         pub use crate::perf_witness::*;
@@ -71,15 +27,6 @@ pub mod kernel_internals {
     pub mod tree {
         pub use crate::paged::tree::*;
     }
-    pub mod resident {
-        pub use crate::paged::resident::{
-            ResidentRoots, Walked, frame_values, incoming_bytes, state_values,
-        };
-    }
-    pub use crate::paged::heap_impl::PagedHeap;
-    pub use crate::paged::stored::{
-        CARD, StoredCards, StoredHead, StoredObject, pages as stored_pages, reads as page_reads,
-    };
 }
 use lash_kernel_doc::Datum;
 use lash_kernel_value::names::OperationUse;

@@ -270,7 +270,7 @@ pub(crate) fn carry(
         .iter()
         .filter_map(RunValue::id)
         .collect();
-    let reaching = Reach::new(directory, saved).classify(&heap.roots[..bound])?;
+    let reaching = Reach::new(vm.heap.arena(), directory, saved).classify(&heap.roots[..bound])?;
     let dropped: Vec<Name> = names
         .iter()
         .zip(&reaching)
@@ -490,9 +490,11 @@ fn top_level(vm: &mut Vm<SlotHeap>) -> Result<Vec<(Name, Value)>, MachineError> 
 }
 
 /// Which sealed values reach a closure, a function or a task other than a
-/// saved function's, through the directory's rows: a leaf object is never
-/// read, a large one's chunks are.
+/// saved function's: a resident object is read in the arena, a cold one
+/// through its directory row (a leaf object is never read, a large one's
+/// chunks are), so carrying a resident graph reads none of it back.
 struct Reach<'a> {
+    arena: &'a lash_kernel_state::arena::Arena,
     directory: &'a Directory,
     /// Objects that reach none: the saved functions', and every object
     /// found to.
@@ -500,8 +502,13 @@ struct Reach<'a> {
 }
 
 impl<'a> Reach<'a> {
-    fn new(directory: &'a Directory, saved: BTreeSet<ObjectId>) -> Self {
+    fn new(
+        arena: &'a lash_kernel_state::arena::Arena,
+        directory: &'a Directory,
+        saved: BTreeSet<ObjectId>,
+    ) -> Self {
         Self {
+            arena,
             directory,
             clean: saved,
         }
@@ -519,6 +526,12 @@ impl<'a> Reach<'a> {
         }
         while let Some(id) = work.pop() {
             if self.clean.contains(&id) || !seen.insert(id) {
+                continue;
+            }
+            if let Some(found) = self.resident(id, &mut work) {
+                if found {
+                    return Ok(true);
+                }
                 continue;
             }
             let row = self
@@ -550,6 +563,97 @@ impl<'a> Reach<'a> {
         Ok(false)
     }
 
+    /// Whether object `id`, held whole in the arena, is or directly holds a
+    /// closure, a function or a task, queueing the objects it names; none
+    /// when the arena holds it cold or in part, for its row to answer.
+    fn resident(&self, id: ObjectId, work: &mut Vec<ObjectId>) -> Option<bool> {
+        use lash_kernel_doc::arena::{Body, Chunks};
+        fn whole(chunks: &Chunks) -> bool {
+            (0..chunks.count()).all(|chunk| chunks.resident(chunk).is_some())
+        }
+        let handle = self.arena.entity_handle(crate::heap::open::entity(id))?;
+        if self.arena.facts(handle).ok()?.cold {
+            return None;
+        }
+        let body = self.arena.body(handle).ok()?;
+        let whole = match body {
+            Body::List(sequence) | Body::Tuple(sequence) => whole(&sequence.chunks),
+            Body::Map(table) | Body::Set(table) | Body::Record(table) => whole(&table.chunks),
+            Body::Closure { .. } | Body::Function(_) => return Some(true),
+            Body::Error(_) | Body::Cell(_) => true,
+            _ => return None,
+        };
+        if !whole {
+            return None;
+        }
+        let mut found = false;
+        let mut unnamed = false;
+        lash_kernel_state::arena::each_member(body, &mut |value| {
+            if found || unnamed {
+                return;
+            }
+            match self.member(value) {
+                Some(Member::Reaches) => found = true,
+                Some(Member::Object(id)) => work.push(id),
+                Some(Member::Leaf) => {}
+                None => unnamed = true,
+            }
+        });
+        if unnamed { None } else { Some(found) }
+    }
+
+    /// What resident member `value` is to the walk; none for an object the
+    /// last seal gave no id.
+    fn member(&self, value: &Value) -> Option<Member> {
+        let id = |handle: &ArenaHandle| {
+            let facts = self.arena.facts(*handle).ok()?;
+            match facts.entity()? {
+                lash_kernel_doc::heap::EntityId {
+                    family: lash_kernel_doc::heap::FamilyId::PRIMARY,
+                    ordinal,
+                } => Some(ObjectId(ordinal)),
+                _ => None,
+            }
+        };
+        Some(match value {
+            Value::Task(_) | Value::TaskRef(_) => Member::Reaches,
+            Value::Closure(handle) | Value::Function(handle) => {
+                if self.clean.contains(&id(handle)?) {
+                    Member::Leaf
+                } else {
+                    Member::Reaches
+                }
+            }
+            Value::LongText(_) | Value::Bytes(_) | Value::BigInt(_) | Value::BigTimestamp(_) => {
+                Member::Leaf
+            }
+            Value::Handle(handle)
+                if !matches!(
+                    self.arena.body(*handle),
+                    Ok(lash_kernel_doc::arena::Body::Cell(_))
+                ) =>
+            {
+                Member::Leaf
+            }
+            Value::Handle(handle)
+            | Value::Tuple(handle)
+            | Value::Error(handle)
+            | Value::List(handle)
+            | Value::Map(handle)
+            | Value::Set(handle)
+            | Value::Record(handle)
+            | Value::ObjectRef(handle) => {
+                let id = id(handle)?;
+                if self.clean.contains(&id) {
+                    Member::Leaf
+                } else {
+                    Member::Object(id)
+                }
+            }
+            _ => Member::Leaf,
+        })
+    }
+
     /// Whether `value` is itself a closure, a function or a task; else
     /// queues the object it names, when that object may hold one.
     fn direct(&self, value: &RunValue, work: &mut Vec<ObjectId>) -> bool {
@@ -575,6 +679,16 @@ impl<'a> Reach<'a> {
             _ => false,
         }
     }
+}
+
+/// A resident member, as the reach walk takes it.
+enum Member {
+    /// A closure, a function or a task other than a saved function.
+    Reaches,
+    /// An object that may hold one.
+    Object(ObjectId),
+    /// Nothing that can hold one.
+    Leaf,
 }
 
 fn fault(problem: impl Into<String>) -> MachineError {

@@ -3,12 +3,12 @@
 //! `paged::identity`. Expected keys are golden values computed outside the
 //! code under test, from the grammar's statement (r57/l2-text-identity.md):
 //! SHA-256 over the tags, little-endian counts and child ids.
-use super::heap::fresh;
+use super::pages::fresh;
 use crate::arena::Arena;
 
 use crate::paged::identity::{self, Kind};
 use crate::paged::{PageKind, payload};
-use lash_kernel_doc::heap::{HeapFault, NormalKey, PageReader, PageValue, PayloadRoot};
+use lash_kernel_doc::heap::{HeapFault, NormalKey, PayloadRoot};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter};
 use std::ops::ControlFlow;
 
@@ -75,11 +75,11 @@ fn octets() -> Vec<(Vec<u8>, NormalKey)> {
 
 /// A value keeps its flat key up to 4096 bytes and is keyed by its
 /// identity tree's root above, the same whether the arena holds it
-/// resident or a page heap holds it paged.
+/// resident or the payload tree holds it paged.
 #[test]
 fn a_long_value_is_keyed_by_its_identity_root_wherever_it_is_held() {
     let mut arena = Arena::new();
-    let (heap, _pages) = fresh();
+    let (access, _pages) = fresh();
     for (text, expected) in texts() {
         assert_eq!(identity::text_key(&text), expected, "{} bytes", text.len());
         let resident = arena.text(&text);
@@ -89,13 +89,15 @@ fn a_long_value_is_keyed_by_its_identity_root_wherever_it_is_held() {
             "resident text of {} bytes",
             text.len()
         );
-        let paged = PageValue::Text(heap.text(&text).expect("paged text"));
-        assert_eq!(
-            heap.normal_key(&paged).expect("keyed"),
-            Some(expected),
-            "paged text of {} bytes",
-            text.len()
-        );
+        if text.len() > 4096 {
+            let root = payload::build(&access, text.as_bytes(), true).expect("paged text");
+            assert_eq!(
+                NormalKey::Digest(root.id),
+                expected,
+                "paged text of {} bytes",
+                text.len()
+            );
+        }
     }
     for (octets, expected) in octets() {
         assert_eq!(
@@ -111,19 +113,21 @@ fn a_long_value_is_keyed_by_its_identity_root_wherever_it_is_held() {
             "resident bytes of {} octets",
             octets.len()
         );
-        let paged = PageValue::Bytes(heap.bytes(&octets).expect("paged bytes"));
-        assert_eq!(
-            heap.normal_key(&paged).expect("keyed"),
-            Some(expected),
-            "paged bytes of {} octets",
-            octets.len()
-        );
+        if octets.len() > 4096 {
+            let root = payload::build(&access, &octets, false).expect("paged bytes");
+            assert_eq!(
+                NormalKey::Digest(root.id),
+                expected,
+                "paged bytes of {} octets",
+                octets.len()
+            );
+        }
     }
 }
 
 /// A tuple embeds a long member by its identity root under the member tag
-/// (`sum(11)`), in the arena and in a page heap alike: the paged heap once
-/// embedded the member's raw text, so equal tuples keyed apart.
+/// (`sum(11)`), as the arena keys it (the retired page heap once embedded the member's
+/// raw text, so equal tuples keyed apart).
 #[test]
 fn a_tuple_embeds_a_long_member_by_its_identity_root() {
     let expected = NormalKey::Inline(bytes(
@@ -135,12 +139,8 @@ fn a_tuple_embeds_a_long_member_by_its_identity_root() {
     let tuple = arena.tuple(vec![member], 8).expect("tuple");
     assert_eq!(
         arena.semantics().normal_key(&tuple).expect("keyed"),
-        Some(expected.clone())
+        Some(expected)
     );
-    let (heap, _pages) = fresh();
-    let member = PageValue::Text(heap.text(&text).expect("paged text"));
-    let tuple = PageValue::Tuple(heap.tuple(vec![member]).expect("tuple"));
-    assert_eq!(heap.normal_key(&tuple).expect("keyed"), Some(expected));
 }
 
 fn corrupt(fault: HeapFault) -> String {
@@ -156,23 +156,23 @@ fn corrupt(fault: HeapFault) -> String {
 /// leaf, and a range that consumes no substituted edge still reads.
 #[test]
 fn a_payload_read_refuses_a_page_that_is_not_the_identity_its_edge_commits_to() {
-    let (heap, pages) = fresh();
+    let (access, pages) = fresh();
     let (a, b) = ("a".repeat(9000), "b".repeat(9000));
     let summary = identity::counts(a.as_bytes(), Kind::Text).expect("counts");
-    let root_a = payload::build(&heap.access, a.as_bytes(), true).expect("a");
-    let root_b = payload::build(&heap.access, b.as_bytes(), true).expect("b");
+    let root_a = payload::build(&access, a.as_bytes(), true).expect("a");
+    let root_b = payload::build(&access, b.as_bytes(), true).expect("b");
     let honest_b_under_a = PayloadRoot {
         page: root_b.page,
         id: root_a.id,
     };
     assert_eq!(
-        corrupt(payload::copy(&heap.access, honest_b_under_a, summary, true).unwrap_err()),
+        corrupt(payload::copy(&access, honest_b_under_a, summary, true).unwrap_err()),
         "payload index identity mismatch"
     );
     // A's first leaf is the page a 4096-byte prefix seals; the store now
     // answers B's first leaf under it.
     let leaf = |text: &str| {
-        payload::build(&heap.access, &text.as_bytes()[..4096], true)
+        payload::build(&access, &text.as_bytes()[..4096], true)
             .expect("leaf")
             .page
     };
@@ -183,13 +183,13 @@ fn a_payload_read_refuses_a_page_that_is_not_the_identity_its_edge_commits_to() 
         answer.page = store.pages[&leaf_a.id].page;
         store.pages.insert(leaf_a.id, answer);
     }
-    heap.pages().clear();
+    access.clear();
     assert_eq!(
-        corrupt(payload::copy(&heap.access, root_a, summary, true).unwrap_err()),
+        corrupt(payload::copy(&access, root_a, summary, true).unwrap_err()),
         "payload leaf identity mismatch"
     );
     let mut first = Vec::new();
-    let fault = payload::visit(&heap.access, root_a, summary, true, 0..10, &mut |chunk| {
+    let fault = payload::visit(&access, root_a, summary, true, 0..10, &mut |chunk| {
         first.extend_from_slice(chunk);
         ControlFlow::Continue(())
     })
@@ -197,17 +197,10 @@ fn a_payload_read_refuses_a_page_that_is_not_the_identity_its_edge_commits_to() 
     assert_eq!(corrupt(fault), "payload leaf identity mismatch");
     assert!(first.is_empty(), "no substituted byte is exposed");
     let mut tail = Vec::new();
-    payload::visit(
-        &heap.access,
-        root_a,
-        summary,
-        true,
-        8192..9000,
-        &mut |chunk| {
-            tail.extend_from_slice(chunk);
-            ControlFlow::Continue(())
-        },
-    )
+    payload::visit(&access, root_a, summary, true, 8192..9000, &mut |chunk| {
+        tail.extend_from_slice(chunk);
+        ControlFlow::Continue(())
+    })
     .expect("the third leaf's edge is intact");
     assert_eq!(tail, &a.as_bytes()[8192..]);
 }
@@ -218,9 +211,9 @@ fn a_payload_read_refuses_a_page_that_is_not_the_identity_its_edge_commits_to() 
 /// commits honestly to its own ids and is still refused.
 #[test]
 fn a_bytes_index_over_non_canonical_spans_is_refused() {
-    let (heap, _pages) = fresh();
-    let short = payload::build(&heap.access, &[1; 2048], false).expect("short leaf");
-    let full = payload::build(&heap.access, &[2; 4096], false).expect("full leaf");
+    let (access, _pages) = fresh();
+    let short = payload::build(&access, &[1; 2048], false).expect("short leaf");
+    let full = payload::build(&access, &[2; 4096], false).expect("full leaf");
     let counts = |len: u64| identity::counts(&vec![0; len as usize], Kind::Bytes).expect("counts");
     let nodes = [
         identity::Node {
@@ -241,8 +234,7 @@ fn a_bytes_index_over_non_canonical_spans_is_refused() {
         out.bytes(&node.id);
         leaf.page.encode(&mut out);
     }
-    let page = heap
-        .access
+    let page = access
         .seal(
             PageKind::PAYLOAD_INDEX,
             out.into_bytes(),
@@ -250,7 +242,7 @@ fn a_bytes_index_over_non_canonical_spans_is_refused() {
         )
         .expect("index page");
     let fault = payload::copy(
-        &heap.access,
+        &access,
         PayloadRoot { page, id: root.id },
         root.counts,
         false,

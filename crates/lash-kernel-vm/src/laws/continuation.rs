@@ -991,25 +991,37 @@ fn a_root_stated_under_another_format_is_refused() {
 /// session, whose root is the paged engine's record.
 #[test]
 fn the_paged_engines_state_is_refused_as_retired() {
-    use lash_kernel_doc::heap::HeapFault;
-    use lash_kernel_state::kernel_internals::PagedHeap;
-    use lash_kernel_state::paged::{
-        CarryRoots, EditEpoch, HeapLifecycle as _, KeyedRoot, SemanticHeap as _, SessionRoot,
+    use lash_kernel_doc::heap::{HeapFault, PageRef};
+    use lash_kernel_state::paged::{KeyedRoot, PageBody, PageKind, PageSource as _, SessionRoot};
+    use lash_kernel_value::tokens::{
+        RetiredState, TokenCodec as _, TokenError, TokenWriter, decode_body,
     };
-    use lash_kernel_value::tokens::{RetiredState, TokenError, decode_body, encode_body};
     let mut embedder = parked();
-    let mut heap = PagedHeap::fresh(Box::new(embedder.source.clone()), EditEpoch(1));
-    let session = heap
-        .carry(CarryRoots {
-            bindings: KeyedRoot::Empty,
-            functions: KeyedRoot::Empty,
+    // The paged engine rooted both under its heap's header, a keyed leaf
+    // page, and wrote its session as a four-field record: the header,
+    // the binding and function trees and the data-only certificate.
+    let header = embedder
+        .source
+        .clone()
+        .seal(PageBody {
+            kind: PageKind::KEYED_LEAF,
+            tokens: Vec::new(),
+            children: Vec::new(),
         })
         .unwrap();
+    let mut session = TokenWriter::new();
+    session.seq(4);
+    PageRef::encode(&header, &mut session);
+    KeyedRoot::Empty.encode(&mut session);
+    KeyedRoot::Empty.encode(&mut session);
+    // The certificate: its closure entities and task edges.
+    session.seq(2);
+    0_u64.encode(&mut session);
+    0_u64.encode(&mut session);
     assert_eq!(
-        decode_body::<SessionRoot>(&encode_body(&session)).err(),
+        decode_body::<SessionRoot>(&session.into_bytes()).err(),
         Some(TokenError::Retired(RetiredState::Session))
     );
-    let header = session.pages()[0];
     let mut root = embedder.checkpoint();
     root.heap = header;
     let opened = crate::KernelMachine::open(

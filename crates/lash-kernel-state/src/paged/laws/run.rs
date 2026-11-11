@@ -4,7 +4,7 @@ use super::super::run::directory::{Directory, DirectoryRoot, Row};
 use super::super::run::ids::{HighWater, IdsExhausted, ObjectId};
 use super::super::run::objects::{Head, Heads, ObjectKind, Record, RunValue};
 use super::super::run::root::HeapRoot;
-use super::heap::{Pages, Source};
+use super::pages::{Pages, Source};
 use crate::arena::{Arena, text_key};
 use lash_kernel_doc::Integer;
 use lash_kernel_doc::arena::{Body, Chunk, LongText};

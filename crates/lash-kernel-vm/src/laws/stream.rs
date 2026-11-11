@@ -7,7 +7,7 @@ use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::PageId;
 use lash_kernel_value::names::Name;
 
-use super::embedder::{ROOMY, Source, World, census, library};
+use super::embedder::{ROOMY, Source, World, library};
 use crate::{
     Bound, Bounds, CellStart, End, Machine, PreparedLibrary, Program, RunError, Step, Target,
 };
@@ -303,12 +303,11 @@ fn ends(program: &Program, charge: u64) -> (End, u64) {
         charge_limit: charge,
         ..ROOMY
     };
-    let mut machine = crate::KernelMachine::start_with_census(
+    let mut machine = <crate::KernelMachine as crate::Machine>::start(
         program.clone(),
         bounds,
         start,
         Box::new(Source::default()),
-        census(),
     )
     .unwrap_or_else(|error| panic!("{error}"));
     match machine.run(&mut World::default(), u64::MAX) {

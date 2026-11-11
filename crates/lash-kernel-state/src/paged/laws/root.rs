@@ -115,112 +115,50 @@ fn a_checkpoint_root_fits_its_root_bound() {
     }
 }
 
-/// S4/S7/K-BND-003: a frame costs its fixed 64 bytes plus its iteration
-/// holding, priced by the memory ledger's LogicalHeldV1 algebra
-/// (memory-ledger.md, "Frame" and "Ordinary immutable value"): a list or map
-/// cursor holds one 16-byte reference occurrence (the entity's header and
-/// members are priced once with the entity), and a tuple cursor holds the
-/// tuple occurrence, 16 plus its Null and Bool occurrences of 16 each. The
-/// price survives the codec and the frame tree.
+/// A page of another kind is never read as a checkpoint root: the root's
+/// own kind is checked before its tokens are decoded.
 #[test]
-fn loop_holdings_keep_their_exact_frame_offsets_after_open() {
-    use tree::{Cell, SealWork, Tree};
-    use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
-    let (mut heap, _) = super::heap::fresh();
-    let list = PageValue::List(
-        heap.allocate_object(ObjectInit::List(vec![PageValue::Null]))
-            .unwrap(),
-    );
-    let map = PageValue::Map(heap.allocate_object(ObjectInit::Map(Vec::new())).unwrap());
-    let tuple = PageValue::Tuple(
-        heap.tuple(vec![PageValue::Null, PageValue::Bool(true)])
-            .unwrap(),
-    );
-    for (value, expected) in [(list, 64 + 16), (map, 64 + 16), (tuple, 64 + 16 + 16 + 16)] {
-        let mut frame = FrameRecord::fresh(
-            lash_kernel_value::LinkId::from_bytes([1; 32]),
-            SiteRef::new(&Site::new(Unit::Main, [0]), &heap.access).unwrap(),
-        );
-        frame
-            .iterated
-            .write(
-                directory::ordinal_key(0),
-                IteratedRecord(value),
-                &heap.access,
-            )
-            .unwrap();
-        assert_eq!(frame.cost(), expected);
-        frame
-            .prepare(
-                &heap.access,
-                &mut SealWork::new(SealBudget {
-                    pages: u64::MAX,
-                    bytes: u64::MAX,
-                }),
-            )
-            .unwrap();
-        let reopened: FrameRecord = decode_body(&encode_body(&frame)).unwrap();
-        assert_eq!(reopened.cost(), expected);
-        let mut frames = Tree::new(true);
-        frames
-            .write(directory::ordinal_key(0), reopened, &heap.access)
-            .unwrap();
-        assert_eq!(frames.cost(), expected);
+fn a_page_of_another_kind_is_refused_as_a_root() {
+    let page = PageRef {
+        id: PageId([7; 32]),
+        grant: PageGrant::NONE,
+    };
+    let answer = |kind| PageAnswer {
+        page,
+        kind,
+        tokens: Vec::new().into(),
+        children: Vec::new(),
+    };
+    for kind in [PageKind(16), PageKind::KEYED_LEAF, PageKind::PAYLOAD_LEAF] {
+        assert!(matches!(
+            CheckpointRoot::of_answer(&answer(kind)),
+            Err(HeapFault::Corrupt { reason, .. }) if reason == "not a checkpoint root"
+        ));
     }
-}
-#[test]
-fn a_kernel_whole_root_is_refused() {
-    // A whole root is a many-field struct, while the heap-header is a
-    // one-field tagged record. It cannot be interpreted by the new reader.
-    let (mut heap, pages) = super::heap::fresh();
-    super::heap::seal(&mut heap);
-    let header = heap.sealed_root().expect("header");
-    pages
-        .borrow_mut()
-        .pages
-        .get_mut(&header.id)
-        .expect("page")
-        .kind = PageKind(16);
-    assert!(
-        PagedHeap::open_header(header, Box::new(super::heap::Source(pages)), EditEpoch(2)).is_err()
-    );
 }
 
 #[test]
 fn a_large_join_resumes_by_reading_only_member_paths() {
-    use super::super::tree::{Cell, SealWork, Tree};
-    use super::heap::{Pages, Source};
-    use lash_kernel_doc::{JoinMode, TaskId};
-
-    use std::cell::RefCell;
-    use std::rc::Rc;
-    let pages = Rc::new(RefCell::new(Pages::default()));
-    let access = tree::Access::new(Box::new(Source(Rc::clone(&pages))));
-    let mut join = ListJoinRecord {
-        joiner: TaskId(0),
-        mode: JoinMode::All,
-        members: Tree::new(true),
-    };
-    for ordinal in 0..100_000 {
-        join.members
-            .write(
-                directory::ordinal_key(ordinal),
-                TaskId(ordinal + 1),
-                &access,
-            )
+    use super::super::tree::{SealWork, Tree};
+    let (access, pages) = super::pages::fresh();
+    let mut members = Tree::<u32>::new(true);
+    for ordinal in 0..100_000_u32 {
+        members
+            .write(u64::from(ordinal).to_be_bytes(), ordinal + 1, &access)
             .expect("member");
     }
     assert!(
-        join.prepare(
-            &access,
-            &mut SealWork::new(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX
-            })
-        )
-        .expect("seal")
+        members
+            .seal_nested(
+                &access,
+                &mut SealWork::new(SealBudget {
+                    pages: u64::MAX,
+                    bytes: u64::MAX
+                })
+            )
+            .expect("seal")
     );
-    let tokens = encode_body(&join);
+    let tokens = encode_body(&members);
     assert!(tokens.len() < 4096);
     assert!(
         pages
@@ -229,16 +167,15 @@ fn a_large_join_resumes_by_reading_only_member_paths() {
             .values()
             .all(|p| p.tokens.len() + 32 * p.children.len() + 32 <= 65_536)
     );
-    let opened: ListJoinRecord = decode_body(&tokens).expect("join");
+    let opened: Tree<u32> = decode_body(&tokens).expect("join");
     access.clear();
     pages.borrow_mut().reads = 0;
     assert_eq!(
         opened
-            .members
             .rank_get(52_345, &access)
             .expect("one member")
             .map(|(_, task)| task),
-        Some(TaskId(52_346))
+        Some(52_346)
     );
     assert!(
         pages.borrow().reads <= 5,
@@ -254,10 +191,9 @@ fn a_large_join_resumes_by_reading_only_member_paths() {
     ] {
         let mut got = Vec::new();
         opened
-            .members
             .visit_ranks(&access, start, end, &mut |task| got.push(*task))
             .expect("range");
-        let expected: Vec<_> = (start..end.min(100_000)).map(|at| TaskId(at + 1)).collect();
+        let expected: Vec<_> = (start..end.min(100_000)).map(|at| at as u32 + 1).collect();
         assert_eq!(got, expected, "ranks {start}..{end}");
     }
 }
@@ -267,25 +203,17 @@ fn a_large_join_resumes_by_reading_only_member_paths() {
 #[test]
 fn contextual_inline_reads_reuse_their_validated_rows() {
     use super::super::tree::Tree;
-    use lash_kernel_doc::TaskId;
-    let (heap, _) = super::heap::fresh();
-    let rows = Tree::nested_from_rows(
-        vec![(directory::ordinal_key(0), TaskId(7))],
-        true,
-        &heap.access,
-    )
-    .unwrap()
-    .in_family(lash_kernel_doc::heap::FamilyId(8));
+    let (access, _) = super::pages::fresh();
+    let rows = Tree::nested_from_rows(vec![(0_u64.to_be_bytes(), 7_u32)], true, &access)
+        .unwrap()
+        .in_family(lash_kernel_doc::heap::FamilyId(8));
     let tokens = encode_body(&rows);
     crate::perf_witness::enable_work();
-    let opened: Tree<TaskId> = decode_body(&tokens).unwrap();
+    let opened: Tree<u32> = decode_body(&tokens).unwrap();
     for _ in 0..3 {
         assert_eq!(
-            opened
-                .rank_get(0, &heap.access)
-                .unwrap()
-                .map(|(_, value)| value),
-            Some(TaskId(7))
+            opened.rank_get(0, &access).unwrap().map(|(_, value)| value),
+            Some(7)
         );
     }
     assert_eq!(encode_body(&opened), tokens);

@@ -92,40 +92,25 @@ pub trait Profiling {
     fn guest_symbols(&self) -> GuestSymbols;
 }
 
-/// The site of the statement the first ready task of the sealed `root`
-/// runs next, read through `source`: where a profiler places a run that
-/// parked. None when no task is ready.
+/// Where the first ready task of the sealed `checkpoint` stands, read
+/// through `source`: a statement or an action nested in one (`K-SITE-001`),
+/// where a profiler places a run that parked. None when no task is ready.
 ///
 /// # Errors
 ///
-/// The heap's faults reading the root's tables.
+/// The heap's faults reading the run's record.
 pub fn next_ready_statement(
     checkpoint: &lash_kernel_state::paged::Checkpoint,
     source: Box<dyn lash_kernel_state::paged::PageSource>,
 ) -> Result<Option<lash_kernel_value::sites::Site>, lash_kernel_doc::heap::HeapFault> {
     let root = lash_kernel_state::kernel_internals::checkpoint_root(checkpoint);
-    use lash_kernel_state::kernel_internals::PagedHeap;
-    use lash_kernel_state::kernel_internals::directory::ordinal_key;
-    use lash_kernel_state::kernel_internals::tree::Tree;
-    use lash_kernel_state::paged::{EditEpoch, FrameRecord, TaskRecord};
-    let heap = PagedHeap::open_header(root.heap, source, EditEpoch(1))?;
-    let ready = Tree::<lash_kernel_doc::TaskId>::of_sequence(&root.ready);
-    let Some((_, next)) = ready.rank_get(0, heap.pages())? else {
-        return Ok(None);
-    };
-    let tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
-    let Some(task) = tasks.get(&ordinal_key(next.0), heap.pages())? else {
-        return Ok(None);
-    };
-    let Some(top) = task.frames.len().checked_sub(1) else {
-        return Ok(None);
-    };
-    let Some((_, frame)) = task.frames.rank_get(top, heap.pages())? else {
-        return Ok(None);
-    };
-    let frame: FrameRecord = frame;
-    let site = frame.statement.resolve(heap.pages())?;
-    Ok(Some(lash_kernel_value::sites::Site::clone(&site)))
+    let (run, _) = lash_kernel_state::paged::run::continuation::open(source, root.heap)?;
+    Ok(run
+        .ready
+        .first()
+        .and_then(|task| run.tasks.get(*task as usize))
+        .and_then(|task| task.frames.last())
+        .map(|frame| frame.site.clone()))
 }
 
 /// A first-use library compilation boundary. A callback body's compilation

@@ -71,7 +71,7 @@ impl<const N: usize> FactTable for [Facts; N] {
 }
 
 mod batch;
-pub use batch::{PreparedBatch, PreparedGraphProof, PreparedInstallation, PreparedValueProof};
+pub use batch::{PreparedBatch, PreparedInstallation};
 
 mod bench;
 mod chunks;
@@ -79,28 +79,23 @@ mod cold_roots;
 mod heads;
 mod keys;
 mod layouts;
-mod table_write;
-pub use table_write::PreparedTableMember;
-mod list_write;
 mod ops;
 mod reach;
 mod sizes;
 mod tables;
 mod texts;
-pub use texts::PreparedTexts;
 mod versions;
 pub use versions::{ContentVersion, Registration};
 mod member_events;
-pub(crate) use member_events::{MemberEntry, MemberEvent};
+pub(crate) use member_events::MemberEvent;
 
-pub use crate::paged::stored::CARD;
+/// How many list positions, or table insertion sequences, one dirty card
+/// covers.
+pub const CARD: u64 = 64;
 pub use bench::{Bench, Called, Usage};
 pub use chunks::{ColdChunk, LOOKUP, PayloadPart};
 pub use heads::opened;
 pub use keys::{ArenaSemantics, Key, text_key};
-pub use list_write::{
-    PreparedCellWrite, PreparedListRemove, PreparedListWrite, PreparedMemberBody,
-};
 pub use ops::invalid_key;
 pub use reach::{Reach, Reached};
 pub use sizes::Summary;
@@ -111,8 +106,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use lash_kernel_doc::arena::{
-    ArenaHandle, Body, Bytes, Chunk, Chunks, ColdImmutable, ErrorBody, LongText, Objects, Sequence,
-    ShortText,
+    ArenaHandle, Body, Bytes, Chunk, Chunks, ErrorBody, LongText, Objects, Sequence, ShortText,
 };
 use lash_kernel_doc::heap::{EntityId, PageValue, TextSummary};
 
@@ -190,9 +184,6 @@ pub struct Projected {
     /// first normalization. Shared immutable DAGs reuse the calculation, not
     /// the holding charge. Representation changes preserve this cost.
     logical_immutable_cost: std::cell::OnceCell<u64>,
-    /// Immutable source occurrence and direct identity edges. This cache owns
-    /// no runtime value and does not retain an arena body for collection.
-    pub(crate) logical_holding: std::cell::OnceCell<crate::paged::logical::Holding>,
     /// An immutable's head (lead ruling A): the one a row opened it with,
     /// or the one its first seal certified. Fixed once given: the object
     /// never changes, and every row that names it holds this head.
@@ -1872,7 +1863,6 @@ mod tests {
     /// freed as any object is, and the next is made afresh.
     #[test]
     fn an_empty_tuple_is_one_object_while_one_is_live() {
-        Arena::check_prepared_empty_tuple();
         let mut arena = Arena::new();
         let Ok(Value::Tuple(first)) = arena.tuple(Vec::new(), 8) else {
             panic!("an empty tuple")

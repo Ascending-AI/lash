@@ -702,12 +702,11 @@ impl Embedder {
                 })
                 .collect();
         }
-        let machine = crate::KernelMachine::start_with_census(
+        let machine = <crate::KernelMachine as crate::Machine>::start(
             program,
             setup.bounds,
             start,
             Box::new(source.clone()),
-            census(),
         )?;
         Ok(Self {
             machine,
@@ -951,11 +950,16 @@ pub(crate) fn function_site<const N: usize>(name: &str, path: [u32; N]) -> Site 
     Site::new(function_unit(name), path)
 }
 
-use lash_kernel_state::kernel_internals::census_impl::Census;
+thread_local! {
+    /// Pages any law [`Source`] on this thread has answered.
+    pub(crate) static PAGE_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct Source(pub(crate) Rc<RefCell<BTreeMap<PageId, PageAnswer>>>);
 impl PageSource for Source {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+        PAGE_READS.set(PAGE_READS.get() + pages.len() as u64);
         Ok(pages
             .iter()
             .map(|page| {
@@ -986,20 +990,16 @@ impl PageSource for Source {
         Ok(page)
     }
 }
-pub(crate) fn census() -> Box<dyn AllocationCensus> {
-    Box::new(Census::restore(AccountingCertificate::FRESH).unwrap())
-}
 pub(crate) fn start_machine(
     program: Program,
     bounds: Bounds,
     start: CellStart,
 ) -> Result<KernelMachine, crate::StartError> {
-    crate::KernelMachine::start_with_census(
+    <crate::KernelMachine as crate::Machine>::start(
         program,
         bounds,
         start,
         Box::new(Source::default()),
-        census(),
     )
 }
 

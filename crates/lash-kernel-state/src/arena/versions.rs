@@ -69,7 +69,7 @@ impl Arena {
             provisional,
             dirty,
             committed: false,
-            batch: Batch::Native(Vec::new()),
+            batch: Vec::new(),
         })
     }
 }
@@ -86,72 +86,21 @@ pub struct Registration<'a> {
     committed: bool,
     batch: Batch,
 }
-enum Batch {
-    Native(Vec<(ArenaHandle, NewObject)>),
-    Bodies(Vec<(ArenaHandle, Body)>),
-}
-impl Batch {
-    fn len(&self) -> usize {
-        match self {
-            Self::Native(values) => values.len(),
-            Self::Bodies(values) => values.len(),
-        }
-    }
-    fn handles(&self) -> impl ExactSizeIterator<Item = ArenaHandle> + DoubleEndedIterator + '_ {
-        (0..self.len()).map(|at| match self {
-            Self::Native(values) => values[at].0,
-            Self::Bodies(values) => values[at].0,
-        })
-    }
-}
+type Batch = Vec<(ArenaHandle, NewObject)>;
 impl Registration<'_> {
     pub(super) fn reserve_batch(
         &mut self,
         new: Vec<(ArenaHandle, NewObject)>,
     ) -> Result<(), NativeError> {
-        self.reserve_objects(Batch::Native(new))
-    }
-    pub(super) fn reserve_body(&mut self, body: Body) -> Result<ArenaHandle, NativeError> {
-        let mut values = Vec::new();
-        values
-            .try_reserve(1)
-            .map_err(|_| lash_kernel_doc::heap::HeapFault::Exhausted {
-                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
-            })?;
-        let handle = self.arena.objects.reserve();
-        values.push((handle, body));
-        self.reserve_objects(Batch::Bodies(values))?;
-        Ok(handle)
-    }
-    pub(super) fn reserve_cells(
-        &mut self,
-        values: &[Value],
-    ) -> Result<Vec<ArenaHandle>, NativeError> {
-        let mut bodies = Vec::new();
-        let mut handles = Vec::new();
-        for result in [
-            bodies.try_reserve(values.len()),
-            handles.try_reserve(values.len()),
-        ] {
-            result.map_err(|_| lash_kernel_doc::heap::HeapFault::Exhausted {
-                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
-            })?;
-        }
-        for value in values {
-            let handle = self.arena.objects.reserve();
-            handles.push(handle);
-            bodies.push((handle, Body::Cell(*value)));
-        }
-        self.reserve_objects(Batch::Bodies(bodies))?;
-        Ok(handles)
-    }
-    fn reserve_objects(&mut self, batch: Batch) -> Result<(), NativeError> {
         assert_eq!(self.batch.len(), 0);
-        self.batch = batch;
-        let result = self.arena.objects.prepare_install(self.batch.handles());
+        self.batch = new;
+        let result = self
+            .arena
+            .objects
+            .prepare_install(self.batch.iter().map(|(handle, _)| *handle));
         if matches!(result, Err(lash_kernel_doc::heap::HeapFault::Malformed(_))) {
             // Forged slots confer no authority to return a live or unreserved slot.
-            self.batch = Batch::Native(Vec::new());
+            self.batch = Vec::new();
         }
         result.map_err(NativeError::from)
     }
@@ -162,26 +111,9 @@ impl Registration<'_> {
         &mut self,
         at: usize,
     ) -> Result<(ArenaHandle, Body), NativeError> {
-        match &mut self.batch {
-            Batch::Native(values) => {
-                let (handle, object) = &mut values[at];
-                let object = std::mem::replace(object, NewObject::List(Vec::new()));
-                Ok((*handle, super::batch::raw_body(object)?))
-            }
-            Batch::Bodies(values) => {
-                let (handle, body) = &mut values[at];
-                Ok((*handle, std::mem::replace(body, Body::Cell(Value::Absent))))
-            }
-        }
-    }
-
-    /// The provisional ledger key of the next body the journal creates: a
-    /// projection gives it its durable id if anything saves it.
-    pub fn reserve_entity(&mut self) -> Result<EntityId, NativeError> {
-        self.arena.take_provisional()
-    }
-    pub(super) fn read_arena(&self) -> &Arena {
-        self.arena
+        let (handle, object) = &mut self.batch[at];
+        let object = std::mem::replace(object, NewObject::List(Vec::new()));
+        Ok((*handle, super::batch::raw_body(object)?))
     }
     pub fn arena(&mut self) -> &mut Arena {
         self.arena
@@ -193,7 +125,9 @@ impl Registration<'_> {
 impl Drop for Registration<'_> {
     fn drop(&mut self) {
         if !self.committed {
-            self.arena.objects.discard_install(self.batch.handles());
+            self.arena
+                .objects
+                .discard_install(self.batch.iter().map(|(handle, _)| *handle));
             let mut kept = self.dirty;
             for at in self.dirty..self.arena.dirty.len() {
                 let handle = self.arena.dirty[at];

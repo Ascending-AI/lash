@@ -391,7 +391,7 @@ fn session_binding_keys_survive_cold_reopens() {
     let carry = finished.carry.expect("a session cell carries bindings");
     let (session, _) = lash_kernel_state::paged::run::session::open(
         Box::new(embedder.source.clone()),
-        lash_kernel_state::kernel_internals::session_heap(&carry),
+        carry.page(),
     )
     .unwrap();
     for name in ["v0", "v69", long.as_str()] {

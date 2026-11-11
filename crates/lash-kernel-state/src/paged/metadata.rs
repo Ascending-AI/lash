@@ -1,5 +1,5 @@
 //! Bounded semantic metadata; ancestry shares immutable parent nodes.
-use super::directory::ordinal_key;
+
 use super::payload::{build, visit};
 use super::tree::{Access, Cell, SealWork, Tree, grant};
 use super::{PageKind, SealBudget};
@@ -258,7 +258,7 @@ impl SiteRef {
         };
         let mut path = Tree::new(true);
         for (index, step) in site.path.iter().enumerate() {
-            path.write(ordinal_key(index as u64), *step, access)?;
+            path.write((index as u64).to_be_bytes(), *step, access)?;
         }
         path.seal_nested(access, &mut budget())?;
         let cached = OnceLock::new();

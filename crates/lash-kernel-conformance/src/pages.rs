@@ -5,14 +5,9 @@
 //! Test-owned page storage; execution and accounting are the real S4/S7 implementations.
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::*;
-use lash_kernel_state::kernel_internals::{
-    PagedHeap,
-    census_impl::Census,
-    tree::{SealWork, Tree},
-};
 use lash_kernel_state::paged::*;
 use lash_kernel_value::names::Name;
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 #[derive(Clone, Default)]
 pub(crate) struct Source {
     pages: Rc<RefCell<BTreeMap<PageId, PageAnswer>>>,
@@ -64,121 +59,22 @@ pub(crate) struct Session {
 impl Session {
     #[cfg(test)]
     pub(crate) fn names(&self) -> std::collections::BTreeSet<Name> {
-        let mut names = std::collections::BTreeSet::new();
-        if let Some(root) = &self.root {
-            let heap = self.heap();
-            let tree = Tree::<BindingRecord>::of_keyed(
-                &lash_kernel_state::kernel_internals::session_bindings(root),
-            );
-            tree.visit(heap.pages(), &mut |_, binding| {
-                names.insert(binding.name.resolve(heap.pages()).unwrap());
-                true
-            })
-            .unwrap();
-        }
-        names
-    }
-    pub(crate) fn heap(&self) -> PagedHeap {
-        match &self.root {
-            Some(root) => PagedHeap::open_header(
-                lash_kernel_state::kernel_internals::session_heap(root),
-                Box::new(self.source.clone()),
-                EditEpoch(1),
-            )
-            .unwrap(),
-            None => PagedHeap::fresh(Box::new(self.source.clone()), EditEpoch(1)),
-        }
-    }
-    fn census(&self) -> Box<Census> {
-        Box::new(Census::restore(self.heap().certificate()).unwrap())
+        lash_kernel_vm::SessionEditor::open(self.root.as_ref(), Box::new(self.source.clone()))
+            .unwrap()
+            .names()
+            .unwrap()
     }
     pub(crate) fn seeded(values: impl IntoIterator<Item = (Name, Datum)>) -> Self {
-        let mut session = Self::default();
-        let mut heap = session.heap();
-        heap.set_census(session.census()).unwrap();
-        let mut table = Tree::new(false);
+        let source = Source::default();
+        let mut editor =
+            lash_kernel_vm::SessionEditor::open(None, Box::new(source.clone())).unwrap();
         for (name, datum) in values {
-            let value = decode(&mut heap, datum);
-            table
-                .write(
-                    lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
-                    BindingRecord {
-                        name: NameRef::new(&name, heap.pages()).unwrap(),
-                        declared: SiteRef::new(
-                            &lash_kernel_value::sites::Site {
-                                unit: lash_kernel_value::sites::Unit::Main,
-                                path: Vec::new(),
-                            },
-                            heap.pages(),
-                        )
-                        .unwrap(),
-                        value: BoundRecord::Value(value),
-                    },
-                    heap.pages(),
-                )
-                .unwrap();
+            editor.set(&name, &datum).unwrap();
         }
-        table
-            .seal(heap.pages(), &mut SealWork::new(BUDGET))
-            .unwrap();
-        let bindings = table.keyed_root().unwrap();
-        heap.set_session_root(table).unwrap();
-        session.root = Some(
-            heap.carry(CarryRoots {
-                bindings,
-                functions: KeyedRoot::Empty,
-            })
-            .unwrap(),
-        );
-        session
-    }
-}
-pub(crate) fn decode(heap: &mut PagedHeap, datum: Datum) -> PageValue {
-    match datum {
-        Datum::Null => PageValue::Null,
-        Datum::Absent => PageValue::Absent,
-        Datum::Bool(v) => PageValue::Bool(v),
-        Datum::Int(v) => PageValue::Int(heap.int(v).unwrap()),
-        Datum::Float(v) => PageValue::Float(v),
-        Datum::Text(v) => PageValue::Text(heap.text(&v).unwrap()),
-        Datum::Bytes(v) => PageValue::Bytes(heap.bytes(v.as_slice()).unwrap()),
-        Datum::Timestamp(v) => PageValue::Timestamp(v),
-        Datum::Function(v) => PageValue::Function(Box::new(v)),
-        Datum::Handle(v) => PageValue::Handle(Arc::new(v)),
-        Datum::Tuple(v) => {
-            let v = v.into_iter().map(|v| decode(heap, v)).collect();
-            PageValue::Tuple(heap.tuple(v).unwrap())
+        Self {
+            root: Some(editor.seal().unwrap()),
+            source,
         }
-        Datum::List(v) => {
-            let v = v.into_iter().map(|v| decode(heap, v)).collect();
-            PageValue::List(heap.allocate_object(ObjectInit::List(v)).unwrap())
-        }
-        Datum::Set(v) => {
-            let v = v.into_iter().map(|v| decode(heap, v)).collect();
-            PageValue::Set(heap.allocate_object(ObjectInit::Set(v)).unwrap())
-        }
-        Datum::Map(v) => {
-            let v = v
-                .into_iter()
-                .map(|(k, v)| (decode(heap, k), decode(heap, v)))
-                .collect();
-            PageValue::Map(heap.allocate_object(ObjectInit::Map(v)).unwrap())
-        }
-        Datum::Record(v) => {
-            let v = v
-                .into_iter()
-                .map(|(k, v)| (heap.text(&k).unwrap(), decode(heap, v)))
-                .collect();
-            PageValue::Record(heap.allocate_object(ObjectInit::Record(v)).unwrap())
-        }
-        Datum::Error(v) => {
-            let mut error = ErrorRef::new(&v.kind, &v.message);
-            error.data = Payload::Resident(Arc::new(decode(heap, v.data().clone())));
-            heap.canonical_value(PageValue::Error(Arc::new(error)))
-                .unwrap()
-        }
-        Datum::Number(_) => panic!("corpus inputs have decoded numbers"),
-        Datum::FunctionValue(_) => panic!("a function value never enters a run"),
     }
 }
 

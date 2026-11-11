@@ -464,16 +464,19 @@ fn a_session_carried_under_one_closure_is_adopted_under_another() {
 }
 
 /// FIG-7455: a dead cell-local closure must not make carrying a resident
-/// data graph reconstruct every object from its stored directory.
+/// data graph read its objects back from pages: the pages the run reads
+/// after its last park do not grow with the graph it carries.
 #[test]
 fn carrying_resident_records_does_not_read_them_back_from_pages() {
     let source = r#"
-definition "function build(callback: Any) -> Any\nkernel 1\nmetering statements\nbody { let rows = [] let i = 0 while num.lt(i, 500) { set rows[list.len(rows)] = {key: i} set i = num.add(i, 1) } let temporary = callback do perform 0(0) as Any return rows }"
+definition "function build(callback: Any) -> Any\nkernel 1\nmetering statements\nbody { let rows = [] let i = 0 while num.lt(i, ROWS) { set rows[list.len(rows)] = {key: i} set i = num.add(i, 1) } let temporary = callback do perform 0(0) as Any return rows }"
 main { let host_callback = fn() { return 1 } let records = call build(fn() { return 1 }) do perform 0(0) as Any return list.len(records) }
 "#;
-    for ending in ["return list.len(records)", "finish list.len(records)"] {
+    let reads = |rows: i64, ending: &str| {
         let mut run = Embedder::with(
-            &source.replace("return list.len(records)", ending),
+            &source
+                .replace("ROWS", &rows.to_string())
+                .replace("return list.len(records)", ending),
             Setup {
                 start: crate::CellStart {
                     host: vec![(
@@ -489,16 +492,13 @@ main { let host_callback = fn() { return 1 } let records = call build(fn() { ret
         run.deliver_next();
         assert!(matches!(run.run(), Step::Parked(_)));
         run.deliver_next();
-        crate::perf_witness::enable_work();
+        let before = super::embedder::PAGE_READS.get();
         let ended = run.run_to_end(&[]);
-        let work = crate::perf_witness::take_work().unwrap();
-        crate::perf_witness::disable_work();
-        assert!(matches!(ended, crate::End::Finished(ref end) if end.result == int(500)));
-        assert!(
-            work.heap.object_head_lookups < 100,
-            "carry rebuilt the resident graph: {} stored object lookups",
-            work.heap.object_head_lookups
-        );
+        assert!(matches!(ended, crate::End::Finished(ref end) if end.result == int(rows)));
+        super::embedder::PAGE_READS.get() - before
+    };
+    for ending in ["return list.len(records)", "finish list.len(records)"] {
+        assert_eq!(reads(500, ending), reads(50, ending), "{ending}");
     }
 }
 
@@ -538,7 +538,7 @@ fn a_failed_outcomes_number_tokens_are_decoded_before_it_is_frozen() {
 /// publish an oversized checkpoint. Count token framing and UTF-8 bytes.
 #[test]
 fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
-    use super::embedder::{ROOMY, census};
+    use super::embedder::ROOMY;
     use crate::{CellStart, EffectModes, StartError, Target};
     use lash_kernel_doc::Datum;
     use lash_kernel_value::Name;
@@ -558,7 +558,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
         ),
     ] {
         let (program, _) = embedder.program(false);
-        let result = crate::KernelMachine::start_with_census(
+        let result = <crate::KernelMachine as crate::Machine>::start(
             program,
             ROOMY,
             CellStart {
@@ -570,7 +570,6 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
                 host: names.into_iter().map(|name| (name, Datum::Null)).collect(),
             },
             Box::new(embedder.source.clone()),
-            census(),
         );
         if let Some(actual) = refused_size {
             assert!(

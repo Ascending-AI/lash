@@ -48,14 +48,6 @@ pub enum SessionValue {
     },
 }
 
-/// The run session page `session` names; a session in a retired form is
-/// refused.
-fn run_page(session: &SessionRoot) -> Result<lash_kernel_doc::heap::PageRef, HeapFault> {
-    session.run_page().ok_or_else(|| {
-        HeapFault::Malformed("a paged-engine session is retired and never reopened".into())
-    })
-}
-
 /// A saved function the session holds: its record, its object, and the
 /// callable a relink gives it.
 struct Saved {
@@ -101,7 +93,7 @@ impl SessionEditor {
         session: Option<&SessionRoot>,
         source: Box<dyn PageSource>,
     ) -> Result<Self, HeapFault> {
-        let page = session.map(run_page).transpose()?;
+        let page = session.map(SessionRoot::page);
         let (heap, bindings, sealed, saved) = match session {
             None => (
                 SlotHeap::durable(
@@ -116,7 +108,7 @@ impl SessionEditor {
                 Vec::new(),
             ),
             Some(session) => {
-                let (session, directory) = session::open(source, run_page(session)?)?;
+                let (session, directory) = session::open(source, session.page())?;
                 let (heap, values) =
                     SlotHeap::open(u64::MAX, &session.heap, directory).map_err(loaded)?;
                 let bound = session.names.len();
@@ -235,7 +227,7 @@ impl SessionEditor {
 
     /// The run session `session` names.
     fn read(&self, session: &SessionRoot) -> Result<RunSession, HeapFault> {
-        session::read(self.directory()?.access(), run_page(session)?)
+        session::read(self.directory()?.access(), session.page())
     }
 
     fn directory(&self) -> Result<&Directory, HeapFault> {

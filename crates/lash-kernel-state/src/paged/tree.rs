@@ -236,6 +236,23 @@ impl<'a> Access<'a> {
             children,
         })
     }
+    /// Seals a childless page as [`Self::seal`] does and keeps it read, for
+    /// a page the run reads again before it leaves: a record's edge page,
+    /// which the same seal's pruning walks.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::seal`].
+    pub fn seal_kept(&self, kind: PageKind, tokens: Vec<u8>) -> Result<PageRef, HeapFault> {
+        let page = self.seal(kind, tokens.clone(), Vec::new())?;
+        self.keep(&PageAnswer {
+            page,
+            kind,
+            tokens: tokens.into(),
+            children: Vec::new(),
+        });
+        Ok(page)
+    }
     /// The pages sealed through this access, and their token bytes.
     pub fn written(&self) -> (u64, u64) {
         self.written.get()
@@ -815,8 +832,6 @@ impl<T: Cell> Tree<T> {
         access: &Access<'_>,
         read: impl FnOnce(Option<&T>) -> R,
     ) -> Result<R, HeapFault> {
-        #[cfg(any(test, feature = "perf-witness"))]
-        note_lookup::<T>();
         fn walk<T: Cell, R>(
             branch: &Branch<T>,
             key: &[u8],
@@ -852,8 +867,6 @@ impl<T: Cell> Tree<T> {
         rank: u64,
         access: &Access<'_>,
     ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
-        #[cfg(any(test, feature = "perf-witness"))]
-        note_lookup::<T>();
         fn walk<T: Cell>(
             branch: &Branch<T>,
             mut rank: u64,
@@ -890,8 +903,6 @@ impl<T: Cell> Tree<T> {
         key: Option<&[u8]>,
         access: &Access<'_>,
     ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
-        #[cfg(test)]
-        note_lookup::<T>();
         fn walk<T: Cell>(
             branch: &Branch<T>,
             key: Option<&[u8]>,
@@ -923,8 +934,6 @@ impl<T: Cell> Tree<T> {
             .map_or(Ok(None), |r| walk(r, key, access, self.sequence))
     }
     pub fn passed(&self, key: &[u8], access: &Access<'_>) -> Result<u64, HeapFault> {
-        #[cfg(any(test, feature = "perf-witness"))]
-        note_lookup::<T>();
         fn walk<T: Cell>(
             branch: &Branch<T>,
             key: &[u8],
@@ -1046,8 +1055,6 @@ impl<T: Cell> Tree<T> {
     where
         F: FnOnce(&mut Vec<(Key, T)>, Result<usize, usize>, Cow<'_, [u8]>) -> Result<bool, E>,
     {
-        #[cfg(test)]
-        note_lookup::<T>();
         fn edit<T: Cell, E: From<HeapFault>, F>(
             branch: &mut Branch<T>,
             key: Cow<'_, [u8]>,
@@ -1201,8 +1208,6 @@ impl<T: Cell> Tree<T> {
         Ok(changed)
     }
     pub fn remove(&mut self, key: &[u8], access: &Access<'_>) -> Result<Option<T>, HeapFault> {
-        #[cfg(test)]
-        note_lookup::<T>();
         // Find the row without taking ownership of any search-path node.
         // In particular, an absent key must not dirty or measure a leaf.
         fn locate<T: Cell>(
@@ -1350,19 +1355,6 @@ impl<T: Cell> NodeGuard<'_, T> {
         }
     }
 }
-#[cfg(any(test, feature = "perf-witness"))]
-thread_local! {
-    static BINDING_COPIES: std::cell::Cell<Option<(u64, u64)>> = const { std::cell::Cell::new(None) };
-}
-/// Enables transient binding-leaf copy counts on this thread: leaves and rows.
-#[cfg(any(test, feature = "perf-witness"))]
-pub fn enable_binding_copies() {
-    BINDING_COPIES.set(Some((0, 0)));
-}
-#[cfg(any(test, feature = "perf-witness"))]
-pub fn take_binding_copies() -> (u64, u64) {
-    BINDING_COPIES.replace(Some((0, 0))).unwrap_or_default()
-}
 fn make_dirty<T: Cell>(
     branch: &mut Branch<T>,
     access: &Access<'_>,
@@ -1380,16 +1372,6 @@ fn make_dirty<T: Cell>(
     if let Link::Dirty(page) = &mut branch.link
         && Rc::strong_count(page) > 1
     {
-        #[cfg(any(test, feature = "perf-witness"))]
-        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<super::BindingRecord>() {
-            BINDING_COPIES.with(|count| {
-                if let Some((leaves, rows)) = count.get()
-                    && let Node::Leaf(values) = &*page.borrow()
-                {
-                    count.set(Some((leaves + 1, rows + values.len() as u64)));
-                }
-            });
-        }
         let private = page.borrow().clone();
         let private = Rc::new(residency::DirtyNode::new(private));
         access.track_copy(page, &private, seq);
@@ -1603,23 +1585,6 @@ impl SealWork {
         true
     }
 }
-#[cfg(test)]
-thread_local! {
-    static HEAD_LOOKUPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(any(test, feature = "perf-witness"))]
-fn note_lookup<T: 'static>() {
-    #[cfg(feature = "perf-witness")]
-    if std::any::TypeId::of::<T>() == std::any::TypeId::of::<super::directory::ObjectHead>() {
-        crate::perf_witness::record(|work| work.object_head_lookups += 1);
-    }
-    #[cfg(test)]
-    if std::any::TypeId::of::<T>() == std::any::TypeId::of::<super::directory::ObjectHead>() {
-        HEAD_LOOKUPS.set(HEAD_LOOKUPS.get() + 1);
-    }
-}
-
 enum SourcePort<'a> {
     Owned(Box<dyn PageSource>),
     Borrowed(&'a mut dyn PageSource),

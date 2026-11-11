@@ -45,7 +45,6 @@ use super::{CARD, Facts};
 #[derive(Debug)]
 pub struct Index(Repr);
 mod patch;
-pub(crate) use patch::PreparedIndexGrowth;
 
 #[derive(Debug)]
 enum Repr {

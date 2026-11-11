@@ -76,7 +76,7 @@ fn carried(finished: &Finished, source: &Source) -> Vec<String> {
     let page = finished
         .carry
         .as_ref()
-        .and_then(SessionRoot::run_page)
+        .map(SessionRoot::page)
         .expect("a main cell carries a bytecode-core session");
     let access = Access::new(Box::new(source.clone()));
     session::read(&access, page)
@@ -270,7 +270,7 @@ fn a_binding_holding_a_saved_function_carries_it_by_identity() {
         .seal()
         .unwrap();
     for session in [end.carry.unwrap(), edited] {
-        let page = session.run_page().unwrap();
+        let page = session.page();
         let (carried, directory) = session::open(Box::new(source.clone()), page).unwrap();
         assert_eq!(carried.functions, vec![saved.clone()]);
         let list = carried.binding(0).and_then(RunValue::id).unwrap();
@@ -364,7 +364,7 @@ main {\n  let k = 1\n  let f = fn() { return k }\n  let fs = [f]\n  let t = spaw
         ]
     );
     assert_eq!(carried(&end, &source), names(&["f", "fs", "k", "v"]));
-    let page = end.carry.as_ref().and_then(SessionRoot::run_page).unwrap();
+    let page = end.carry.as_ref().map(SessionRoot::page).unwrap();
     let (session, directory) = session::open(Box::new(source.clone()), page).unwrap();
     assert_eq!(
         session.functions,

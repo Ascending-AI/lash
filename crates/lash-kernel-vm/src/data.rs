@@ -57,24 +57,6 @@ impl ChargeArena for Arena {
         self.flat_charge_size(value)
     }
 }
-impl ChargeArena for lash_kernel_state::arena::PreparedInstallation<'_> {
-    fn body(&self, handle: ArenaHandle) -> Result<&Body, NativeError> {
-        self.body(handle)
-    }
-    fn integer(&self, value: &Value) -> Result<Option<Integer>, NativeError> {
-        self.integer(value)
-    }
-    fn sequence(&self, handle: ArenaHandle) -> Result<&[Value], NativeError> {
-        self.sequence(handle)
-    }
-    fn entries(&self, handle: ArenaHandle) -> Result<&[Value], NativeError> {
-        self.entries(handle)
-    }
-    fn len(&self, handle: ArenaHandle) -> Result<u64, NativeError> {
-        self.len(handle)
-    }
-}
-
 fn integer_of(arena: &Arena, value: &Value) -> Result<Option<Integer>, NativeError> {
     view_integer_of(arena, value)
 }

@@ -68,7 +68,7 @@ pub use namespaces::{
 pub use notes::{Note, SiteLayers, SiteLayersRefusal, site_layers};
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, DOCUMENT_NODE_KIND,
-    FUNCTION_BUNDLE_NODE_KIND, Left, NotSaved, RelinkGap, Saved, Unusable, relink_saved,
+    FUNCTION_BUNDLE_NODE_KIND, NotSaved, RelinkGap, Unusable, relink_saved,
 };
 /// A saved function as the kernel holds it: its captures and token are
 /// frozen heap values, which only the kernel crates read (FIG-6688). A
@@ -96,5 +96,4 @@ pub mod kernel_internals {
     pub use crate::saved::run::{
         Left as RunLeft, Saved as RunSaved, SavedFunction as RunSavedFunction, save as save_run,
     };
-    pub use crate::saved::save;
 }

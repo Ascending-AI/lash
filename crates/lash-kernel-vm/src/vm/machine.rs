@@ -458,7 +458,7 @@ impl CoreMachine {
             (None, None) => None,
         };
         let params = export.map_or_else(Vec::new, |export| export.signature.params.clone());
-        let (heap, session) = match start.session.as_ref().map(SessionRoot::run_page) {
+        let (heap, session) = match start.session.as_ref().map(SessionRoot::page) {
             None => (
                 SlotHeap::durable(
                     heap_bound(&bounds),
@@ -469,12 +469,7 @@ impl CoreMachine {
                 ),
                 None,
             ),
-            Some(None) => {
-                return Err(StartError::Bindings {
-                    problem: "the bytecode core opens no paged-engine session".into(),
-                });
-            }
-            Some(Some(page)) => {
+            Some(page) => {
                 let (session, directory) =
                     lash_kernel_state::paged::run::session::open(source, page)?;
                 let (heap, values) = SlotHeap::open(heap_bound(&bounds), &session.heap, directory)

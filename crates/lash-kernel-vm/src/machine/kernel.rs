@@ -167,16 +167,6 @@ impl crate::perf_witness::Profiling for KernelMachine {
 #[cfg(test)]
 #[allow(clippy::unused_self, clippy::needless_pass_by_value)]
 impl KernelMachine {
-    pub(crate) fn start_with_census(
-        program: Program,
-        bounds: Bounds,
-        start: CellStart,
-        source: Box<dyn PageSource>,
-        _census: Box<dyn lash_kernel_state::paged::AllocationCensus>,
-    ) -> Result<Self, StartError> {
-        Self::start(program, bounds, start, source)
-    }
-
     /// Opens `root`, a whole checkpoint root.
     pub(crate) fn open_in(
         program: Program,

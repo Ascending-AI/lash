@@ -369,12 +369,7 @@ impl CodeModeExecutionState {
     /// in [`FETCH_BATCH`] batches: loading `names` then costs O(tree
     /// depth) store round trips, never one per page.
     async fn prefetch_binding_tree(&mut self) -> Result<(), PageAccessError> {
-        let Some(page) = self
-            .current
-            .session
-            .as_ref()
-            .and_then(SessionRoot::bindings_page)
-        else {
+        let Some(page) = self.current.session.as_ref().map(SessionRoot::page) else {
             return Ok(());
         };
         self.pages.prefetch_tree(NodeId(page.id.0)).await

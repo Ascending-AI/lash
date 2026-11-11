@@ -238,3 +238,10 @@ pub fn grant(page: &mut PageRef, children: &[PageRef]) -> Result<(), HeapFault> 
         })?;
     Ok(())
 }
+
+/// What a seal may spend before it yields (host work, never guest charge).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SealBudget {
+    pub pages: u64,
+    pub bytes: u64,
+}

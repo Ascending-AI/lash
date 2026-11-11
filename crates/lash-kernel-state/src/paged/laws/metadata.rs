@@ -1,8 +1,7 @@
 //! Bounded S1/S4 metadata and exact diagnostic projections.
-use super::super::directory::ordinal_key;
-use super::super::tree::{Cell, SealWork, Tree};
+use super::super::tree::{SealWork, Tree};
 use super::super::*;
-use super::heap::{fresh, seal};
+use super::pages::fresh;
 
 use lash_kernel_doc::heap::*;
 use lash_kernel_value::names::Name;
@@ -18,137 +17,36 @@ fn work() -> SealWork {
     })
 }
 
-/// LogicalHeldV1: cursor occurrences are complete values, captured cells
-/// borrow reach, and completion-formula mirrors add no guest occurrence.
-#[test]
-fn source_frame_costs_distinguish_owned_values_captures_and_formula_mirrors() {
-    let (mut heap, _) = fresh();
-    let access = heap.pages().clone();
-    let site = SiteRef::new(&Site::new(Unit::Main, vec![0]), &access).unwrap();
-    let variable = heap
-        .allocate_object(ObjectInit::Variable(PageValue::Null))
-        .unwrap();
-    let list = heap.allocate_object(ObjectInit::List(vec![])).unwrap();
-    let tuple = PageValue::Tuple(heap.tuple(vec![PageValue::Null, PageValue::Null]).unwrap());
-    let mut frame =
-        FrameRecord::fresh(lash_kernel_value::LinkId::from_bytes([1; 32]), site.clone());
-    for (at, value) in [
-        BoundRecord::Shared(variable),
-        BoundRecord::Captured(variable),
-        BoundRecord::Value(tuple.clone()),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        frame
-            .bindings
-            .write(
-                ordinal_key(at as u64),
-                BindingRecord {
-                    name: NameRef::new(&Name::new(format!("v{at}")), &access).unwrap(),
-                    declared: site.clone(),
-                    value,
-                },
-                &access,
-            )
-            .unwrap();
-    }
-    assert_eq!(frame.bindings.cost(), 16 + 48);
-    for (at, (value, expected)) in [
-        (tuple.clone(), 48),
-        (PageValue::List(list), 16),
-        (PageValue::text("abcd"), 20),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let cursor = IteratedRecord(value);
-        assert_eq!(cursor.cost(), expected);
-        frame
-            .iterated
-            .write(ordinal_key(at as u64), cursor, &access)
-            .unwrap();
-    }
-    frame
-        .departing
-        .write(ordinal_key(0), PageValue::Null, &access)
-        .unwrap();
-    let mut arguments = Tree::new(false);
-    arguments.write(ordinal_key(0), tuple, &access).unwrap();
-    frame.arguments = Some(arguments);
-    assert_eq!(frame.cost(), 228); // header 64 + bindings 64 + cursors 84 + departure 16.
-    assert!(frame.prepare(&access, &mut work()).unwrap());
-    let cold: FrameRecord = decode_body(&encode_body(&frame)).unwrap();
-    assert_eq!(cold.cost(), 228);
-    assert!(
-        matches!(cold.bindings.get(&ordinal_key(1), &access).unwrap().unwrap().value, BoundRecord::Captured(id) if id == variable)
-    );
-    frame.arguments = None;
-    assert_eq!(
-        frame.cost(),
-        cold.cost(),
-        "charge bookkeeping cannot change the guest balance"
-    );
-}
-
 /// S4 metadata amendment: a long binding and capture name are descriptors,
 /// and sealing their rows never materializes or copies the payload again.
 #[test]
 fn megabyte_binding_and_capture_names_keep_bounded_cells() {
-    let (mut heap, pages) = fresh();
+    let (access, pages) = fresh();
     let name = Name::new("x".repeat(1 << 20));
-    let named = NameRef::new(&name, &heap.access).unwrap();
-    let site = SiteRef::new(&Site::new(Unit::Function(name.clone()), [0]), &heap.access).unwrap();
-    let variable = heap
-        .allocate_object(ObjectInit::Variable(PageValue::Null))
-        .unwrap();
-    let closure = heap
-        .allocate_object(ObjectInit::Closure {
-            callable: lash_kernel_value::names::CallableId {
-                link: lash_kernel_value::LinkId::from_bytes([1; 32]),
-                function: lash_kernel_value::names::FunctionId::from_bytes([2; 32]),
-            },
-            site: site.clone(),
-            captures: vec![(named.clone(), variable)],
-        })
-        .unwrap();
+    let named = NameRef::new(&name, &access).unwrap();
+    let site = SiteRef::new(&Site::new(Unit::Function(name.clone()), [0]), &access).unwrap();
     let key = metadata::metadata_key(&name);
-    let mut bindings = Tree::new(false);
-    bindings
-        .write(
-            key.clone(),
-            BindingRecord {
-                name: named,
-                declared: site,
-                value: BoundRecord::Value(PageValue::Closure(closure)),
-            },
-            &heap.access,
-        )
-        .unwrap();
+    let mut names = Tree::new(false);
+    names.write(key.clone(), named, &access).unwrap();
     let before = pages.borrow().seals;
-    bindings.seal(&heap.access, &mut work()).unwrap();
-    seal(&mut heap);
+    names.seal(&access, &mut work()).unwrap();
     assert!(
-        pages.borrow().seals - before <= 4,
-        "bounded rows, directory and header"
+        pages.borrow().seals - before <= 2,
+        "the name's row, not its payload"
     );
-    let root = bindings.page().unwrap();
-    let restored = Tree::<BindingRecord>::open(
-        Some(root),
-        bindings.len(),
-        LogicalBytes(bindings.cost()),
+    let restored = Tree::<NameRef>::open(
+        Some(names.page().unwrap()),
+        names.len(),
+        LogicalBytes(names.cost()),
         false,
     );
-    let binding = restored.get(&key, &heap.access).unwrap().unwrap();
-    assert_eq!(binding.name.resolve(&heap.access).unwrap(), name);
+    access.clear();
+    let opened = restored.get(&key, &access).unwrap().unwrap();
+    assert_eq!(opened.resolve(&access).unwrap(), name);
     assert_eq!(
-        binding.declared.resolve(&heap.access).unwrap().unit,
+        site.resolve(&access).unwrap().unit,
         Unit::Function(name.clone())
     );
-    let closure = heap.closure(closure).unwrap();
-    let capture = closure.captures.get(&key, &heap.access).unwrap().unwrap();
-    assert_eq!(capture.0.resolve(&heap.access).unwrap(), name);
-    assert_eq!(capture.1, variable);
     assert!(
         pages
             .borrow()
@@ -162,36 +60,22 @@ fn megabyte_binding_and_capture_names_keep_bounded_cells() {
 /// and its task row costs the same bounded work at every lineage depth.
 #[test]
 fn ten_thousand_spawn_ancestors_have_bounded_writes_and_exact_diagnostics() {
-    let (mut heap, pages) = fresh();
+    let (access, pages) = fresh();
     let site = Site::new(Unit::Main, [7]);
-    let saved_site = SiteRef::new(&site, &heap.access).unwrap();
+    let saved_site = SiteRef::new(&site, &access).unwrap();
     let mut identity = TaskIdentityRef::MAIN;
-    let mut tasks = Tree::new(false);
     for occurrence in 0..10_000 {
+        let before = pages.borrow().seals;
         identity =
-            TaskIdentityRef::spawn(identity, saved_site.clone(), occurrence, &heap.access).unwrap();
-        tasks
-            .write(
-                ordinal_key(0),
-                TaskRecord {
-                    identity,
-                    state: TaskStateRecord::Ready,
-                    joiners: Tree::new(true),
-                    observed: false,
-                    passed: false,
-                    occurrences: Tree::new(false),
-                    frames: Tree::new(true),
-                    spawn_origin: None,
-                },
-                &heap.access,
-            )
-            .unwrap();
-        heap.set_execution_roots(tasks.clone(), Tree::new(false), &[], &[])
-            .unwrap();
-        tasks.seal(&heap.access, &mut work()).unwrap();
-        assert!(pages.borrow().pages[&tasks.page().unwrap().id].tokens.len() < 512);
+            TaskIdentityRef::spawn(identity, saved_site.clone(), occurrence, &access).unwrap();
+        assert!(
+            pages.borrow().seals - before <= 1,
+            "one parent node per spawn"
+        );
+        let node = identity.root.expect("a spawned identity names its node");
+        assert!(pages.borrow().pages[&node.id].tokens.len() < 512);
     }
-    let mut projected = identity.resolve(&heap.access).unwrap();
+    let mut projected = identity.resolve(&access).unwrap();
     for occurrence in (0..10_000).rev() {
         let TaskIdentity::Spawned(spawned) = projected else {
             panic!("missing ancestor");
@@ -212,16 +96,16 @@ fn ten_thousand_spawn_ancestors_have_bounded_writes_and_exact_diagnostics() {
 /// validation, even when the referenced payload was previously read.
 #[test]
 fn a_cached_metadata_name_does_not_hide_a_bad_payload_summary() {
-    let (heap, _) = fresh();
-    let first = NameRef::new(&Name::new("n".repeat(1 << 20)), &heap.access).unwrap();
-    first.resolve(&heap.access).unwrap();
+    let (access, _) = fresh();
+    let first = NameRef::new(&Name::new("n".repeat(1 << 20)), &access).unwrap();
+    first.resolve(&access).unwrap();
     let mut text: TextRef = decode_body(&encode_body(&first)).unwrap();
     text.summary.utf8_bytes += 1;
     text.summary.utf16_units += 1;
     text.summary.chars += 1;
     let bad: NameRef = decode_body(&encode_body(&text)).unwrap();
     assert!(matches!(
-        bad.resolve(&heap.access),
+        bad.resolve(&access),
         Err(HeapFault::Corrupt { .. })
     ));
 }

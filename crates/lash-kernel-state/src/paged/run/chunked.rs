@@ -315,7 +315,7 @@ pub fn rewrite_edges(
             out.push(EdgePart {
                 first: run[0].0,
                 ids: run.len() as u32,
-                page: access.seal(PageKind::KEYED_LEAF, encode_body(&page), Vec::new())?,
+                page: access.seal_kept(PageKind::KEYED_LEAF, encode_body(&page))?,
             });
         }
         Ok::<(), HeapFault>(())
