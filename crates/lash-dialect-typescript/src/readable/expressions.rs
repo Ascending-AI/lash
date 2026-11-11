@@ -880,7 +880,14 @@ impl Lifter<'_> {
                     k::Expr::Variable(name),
                     k::Expr::Literal(k::Literal::Text(label)),
                 ],
-            ) if name.as_str() == label => self.variable(name),
+            ) if name.as_str() == label => {
+                // Where the binding is declared before the read (a
+                // materialized capture cell), the check is spelled.
+                if self.style.exact {
+                    return Ok(constructor("value.initialized", vec![self.variable(name)?]));
+                }
+                self.variable(name)
+            }
             (name, [left, right])
                 if crate::constructs::operators::BINARY
                     .iter()
@@ -962,6 +969,7 @@ impl Lifter<'_> {
                 {
                     return Ok(Expr::Call(Box::new(spelled(path)), args));
                 }
+                let binding = self.style.exact && self.reads_binding(receiver);
                 let target = match (receiver, global(namespace)) {
                     (k::Expr::Literal(k::Literal::Absent), Some(global)) => {
                         Expr::Ident(global.to_owned())
@@ -988,6 +996,24 @@ impl Lifter<'_> {
                         .find(|(_, rows)| implements(rows))
                         .map_or(method, |(member, _)| member)
                 };
+                // A list's own row on a receiver binding is `list.method`
+                // under the exact style: a capture cell is of no known kind.
+                if binding
+                    && table.methods.get(method).is_some_and(|rows| {
+                        rows.iter().any(|(kind, path)| {
+                            *kind == lash_ext_ts_helpers::builtins::Receiver::List
+                                && table.functions.get(path) == Some(&name)
+                        })
+                    })
+                {
+                    return Ok(self::constructor(
+                        "list.method",
+                        [target, Expr::Text(method.to_owned())]
+                            .into_iter()
+                            .chain(args)
+                            .collect(),
+                    ));
+                }
                 Ok(Expr::Call(
                     Box::new(Expr::Field(Box::new(target), method.to_owned())),
                     args,

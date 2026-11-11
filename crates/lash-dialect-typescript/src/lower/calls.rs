@@ -844,6 +844,14 @@ impl Lowerer<'_> {
         span: SourceSpan,
         discard_result: bool,
     ) -> Lowering<Operand> {
+        // `value.initialized(k)` is the read `k` it names, whose check
+        // stands before the expression reading it, as a read's does.
+        if let Some((root, path)) = static_path(callee)
+            && !self.is_bound(root)
+            && let Some(exact @ exact::Exact::Initialized) = exact::Exact::named(&path)
+        {
+            return self.call_exact(exact, args, span, discard_result, false);
+        }
         self.expression_block(|this| this.call(callee, args, span, discard_result, false))
     }
 

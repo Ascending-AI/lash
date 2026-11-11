@@ -176,8 +176,10 @@ pub(super) struct Lifter<'a> {
     pub(super) labels: BTreeMap<Name, super::labels::Exit>,
     /// The label a loop body's exit handler gave the loop being lifted.
     pub(super) loop_label: Option<String>,
-    /// The unit's source evidence: the declared types of its locals.
-    pub(super) evidence: Option<&'a k::SourceEvidence>,
+    /// The unit's source evidence: the declared types of its locals. A
+    /// materialized factory has none of its own; it takes the agreeing union
+    /// of the functions it contains, whose captures it declares.
+    pub(super) evidence: BTreeMap<Name, lash_kernel_value::Type>,
 }
 
 impl<'a> Lifter<'a> {
@@ -293,8 +295,8 @@ impl<'a> Lifter<'a> {
             labels: BTreeMap::new(),
             loop_label: None,
             evidence: match &unit {
-                Unit::Library(id) => document.source_evidence.get(id),
-                _ => None,
+                Unit::Library(id) => declared_locals(document, *id),
+                _ => BTreeMap::new(),
             },
         };
         if let Some(body) = body {
@@ -1325,4 +1327,49 @@ pub(super) fn reads_name(node: k::Node<'_>, name: &Name) -> bool {
             .into_iter()
             .any(|child| reads_name(child, name)),
     }
+}
+
+/// The declared types `function`'s locals carry: its own source evidence, or
+/// for a function without any (a materialized factory) the types its
+/// contained functions agree on. A name two of them declare differently
+/// keeps none.
+fn declared_locals(
+    document: &k::Document,
+    function: lash_kernel_value::FunctionId,
+) -> BTreeMap<Name, lash_kernel_value::Type> {
+    if let Some(evidence) = document.source_evidence.get(&function) {
+        return evidence
+            .declared_locals
+            .iter()
+            .map(|local| (local.name.clone(), local.ty.clone()))
+            .collect();
+    }
+    let mut reached = BTreeSet::new();
+    let mut pending = vec![function];
+    while let Some(id) = pending.pop() {
+        if let Some(body) = document.functions.get(&id).and_then(|d| d.body())
+            && reached.insert(id)
+        {
+            pending.extend(k::Node::Block(&body.block).functions_within());
+        }
+    }
+    let mut declared = BTreeMap::new();
+    let mut conflicting = BTreeSet::new();
+    for local in reached
+        .iter()
+        .filter_map(|id| document.source_evidence.get(id))
+        .flat_map(|evidence| &evidence.declared_locals)
+    {
+        match declared.get(&local.name) {
+            Some(ty) if *ty != local.ty => {
+                conflicting.insert(local.name.clone());
+            }
+            Some(_) => {}
+            None => {
+                declared.insert(local.name.clone(), local.ty.clone());
+            }
+        }
+    }
+    declared.retain(|name, _| !conflicting.contains(name));
+    declared
 }

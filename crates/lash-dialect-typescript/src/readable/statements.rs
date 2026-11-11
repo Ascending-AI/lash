@@ -25,8 +25,8 @@ impl Lifter<'_> {
                 // A local's declared type is spelled again where its source
                 // evidence names one an annotation writes; readback proves
                 // it lowers alike.
-                if let Some(ty) = self.evidence.and_then(|evidence| evidence.declared(kernel))
-                    && let Ok(ty) = self.ts_type(None, ty, &k::FieldRoot::Result, &mut Vec::new())
+                if let Some(ty) = self.evidence.get(kernel).cloned()
+                    && let Ok(ty) = self.ts_type(None, &ty, &k::FieldRoot::Result, &mut Vec::new())
                 {
                     let constant = !self.reassigned(&name);
                     return Ok(StmtKind::Declared {
@@ -72,6 +72,15 @@ impl Lifter<'_> {
                 then_block,
                 else_block,
             } => {
+                if self.style.exact
+                    && let Some([target, index, value]) =
+                        self.list_write(condition, then_block, else_block)
+                {
+                    return Ok(StmtKind::Expr(super::expressions::constructor(
+                        "list.set",
+                        vec![self.expr(&target)?, self.expr(&index)?, self.expr(&value)?],
+                    )));
+                }
                 let condition = self.condition(condition)?;
                 let then = self.block(then_block, &site.child(1))?;
                 let arm = site.child(2);
@@ -256,6 +265,14 @@ impl Lifter<'_> {
                 {
                     let list = Expr::Ident(self.binding(list)?);
                     let value = self.rhs(value)?;
+                    // A binding of no known kind (a capture cell) spells the
+                    // list's own push.
+                    if self.style.exact {
+                        return Ok(StmtKind::Expr(super::expressions::constructor(
+                            "list.method",
+                            vec![list, Expr::Text("push".to_owned()), value],
+                        )));
+                    }
                     Ok(StmtKind::Expr(Expr::Call(
                         Box::new(Expr::Field(Box::new(list), "push".to_owned())),
                         vec![value],
@@ -353,6 +370,75 @@ impl Lifter<'_> {
     }
 
     /// `invoke helper(target, key)` with `helper` the named library function.
+    /// The element write `xs[i] = v` of a list the source built, as the
+    /// front end guards it: `i`'s position test unless it is a literal, the
+    /// bound that admits an append, the element written in place, and the
+    /// `ts.set` helper wherever a test fails. A binding of no known kind (a
+    /// capture cell) adds a kind test to that write, so it spells the
+    /// list's own write, `list.set(xs, i, v)`.
+    fn list_write(
+        &self,
+        condition: &k::Expr,
+        then_block: &[k::Stmt],
+        else_block: &[k::Stmt],
+    ) -> Option<[k::Expr; 3]> {
+        use crate::constructs::reads::{APPEND_BOUNDS, POSITION};
+        let is = |id: &lash_kernel_value::FunctionId, name: &str| self.is(id, name);
+        let mut guards = vec![(condition, else_block)];
+        let mut block = then_block;
+        if let [
+            k::Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            },
+        ] = block
+        {
+            guards.push((condition, else_block.as_slice()));
+            block = then_block;
+        }
+        let [
+            k::Stmt::Assign {
+                place: k::Place::Member(member),
+                value: k::Rhs::Expr(value),
+                order: k::AssignOrder::ValueFirst,
+            },
+        ] = block
+        else {
+            return None;
+        };
+        let k::Member::Index { target, index } = member else {
+            return None;
+        };
+        if !matches!(target, k::Expr::Variable(_)) {
+            return None;
+        }
+        let (bound, position) = match guards.as_slice() {
+            [bound] => (bound, None),
+            [position, bound] => (bound, Some(position)),
+            _ => return None,
+        };
+        if APPEND_BOUNDS.recognize(bound.0, &is)? != [index, target] {
+            return None;
+        }
+        match position {
+            Some(position) if POSITION.recognize(position.0, &is)? != [index] => return None,
+            Some(_) => {}
+            None if !matches!(index, k::Expr::Literal(_)) => return None,
+            None => {}
+        }
+        let helper = [target.clone(), index.clone(), value.clone()];
+        for (_, otherwise) in &guards {
+            let [k::Stmt::Do { value: written }] = otherwise else {
+                return None;
+            };
+            if self.helper_read(&k::Rhs::Expr(written.clone()), "ts.set")? != helper {
+                return None;
+            }
+        }
+        Some(helper)
+    }
+
     pub(super) fn helper_read(&self, value: &k::Rhs, helper: &str) -> Option<Vec<k::Expr>> {
         match value {
             k::Rhs::Action(k::Action::Call {

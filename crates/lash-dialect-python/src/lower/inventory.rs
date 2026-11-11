@@ -120,6 +120,22 @@ pub(crate) fn forms() -> Vec<(String, String)> {
                 ));
             }
         }
+        for operator in crate::constructs::operators::BINARY
+            .iter()
+            .filter_map(|row| row.token())
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            // An item's in-place operation pins its place and reads the item
+            // with the receiver's own read before the store.
+            for (receiver, key) in [("[y, y]", "1"), ("{'a': y}", "'a'"), ("x", "x")] {
+                forms.push((
+                    format!("{annotation} {receiver}[{key}] {operator}="),
+                    format!(
+                        "def demo(x: Any, y: {annotation}) -> Any:\n    z = {receiver}\n    z[{key}] {operator}= y\n    return z\n"
+                    ),
+                ));
+            }
+        }
         for operator in crate::constructs::operators::UNARY {
             forms.push((
                 format!("{annotation} {}", operator.token),

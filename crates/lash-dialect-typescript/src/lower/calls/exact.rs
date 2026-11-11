@@ -18,13 +18,23 @@
 //! - `list.method(xs, "name", ...args)` is that call on a list the source
 //!   built: the list's own row (`map` over its slots, say) without the kind
 //!   test, its receiver and named arguments read as `callable.method` reads
-//!   them. A receiver that is no list fails that row's kind check.
+//!   them. The printer uses it for every row of the list's own table
+//!   (`push`, `indexOf`, `sort`, ...). A receiver that is no list gets that
+//!   row: its kind check where the row has one (`push` reads the list's
+//!   length), else the generic row (`indexOf` of a text finds nothing).
 //! - `list.length(xs)` is `xs.length` of a list the source built: its
 //!   length as a float, with no kind test.
 //! - `record.field(r, "name")` is `r.name` of a record the source built:
 //!   its own field where it is unbranded, else the helper read.
 //! - `value.length(t)` is `t.length` of a text the source built: the
 //!   length helper's read, a number. (`text` is no reserved root.)
+//! - `list.set(xs, i, v)` is the element write `xs[i] = v` of a list the
+//!   source built: `i`'s position test and the bound that admits an
+//!   append, then the element written in place, else `ts.set`. A receiver
+//!   that is no list fails that bound's length read where the write runs.
+//! - `value.initialized(k)` is the read of a `let` or `const` an enclosing
+//!   function declares later: its temporal-dead-zone check (`ts.tdz`),
+//!   which fails where the read runs while the binding is uninitialized.
 //!
 //! Neither infers, pins, forwards or converts anything else: each lowers to
 //! the nodes, helpers and order of the ordinary lowering it names, and keeps
@@ -41,9 +51,11 @@ pub(in crate::lower) enum Exact {
     ListElement,
     ListLength,
     ListMethod,
+    ListSet,
     Method,
     RecordField,
     TextLength,
+    Initialized,
 }
 
 impl Exact {
@@ -52,6 +64,8 @@ impl Exact {
             "list.element" => Self::ListElement,
             "list.length" => Self::ListLength,
             "list.method" => Self::ListMethod,
+            "list.set" => Self::ListSet,
+            "value.initialized" => Self::Initialized,
             "callable.method" => Self::Method,
             "record.field" => Self::RecordField,
             "value.length" => Self::TextLength,
@@ -165,6 +179,55 @@ impl Lowerer<'_> {
                     self.in_place.remove(&name);
                 }
                 called
+            }
+            Exact::ListSet => {
+                let [
+                    ast::CallArg::Value(object @ ast::Expr::Ident(receiver, _)),
+                    ast::CallArg::Value(index),
+                    ast::CallArg::Value(value),
+                ] = args
+                else {
+                    return refuse("list.set takes a bound list, an index and a value");
+                };
+                if !self.is_bound(receiver) {
+                    return refuse("list.set takes a bound list");
+                }
+                // `lower_assign`'s order: the receiver, read in place as a
+                // binding nothing reassigns is, then the key, then the
+                // value, each held before the write.
+                let added = self.in_place.insert(receiver.clone());
+                let object = self.lower_expr(object).map(|object| self.pin(object));
+                if added {
+                    self.in_place.remove(receiver);
+                }
+                let object = Operand {
+                    ty: Ty::Array,
+                    ..object?
+                };
+                let property = ast::MemberProperty::Index(Box::new(index.clone()));
+                let key = match self.lower_key(&property)? {
+                    Key::Computed(key) => Key::Computed(self.pin(key)),
+                    Key::Static(_) => return refuse("list.set takes a computed index"),
+                };
+                let value = self.lower_expr(value)?;
+                let value = self.pin(value);
+                self.set_member(&object, &key, value)?;
+                Ok(Operand::undefined())
+            }
+            Exact::Initialized => {
+                let [ast::CallArg::Value(ast::Expr::Ident(name, _))] = args else {
+                    return refuse("value.initialized takes a binding");
+                };
+                let Some(kernel) = self.binding_kernel(name) else {
+                    return refuse("value.initialized takes a binding");
+                };
+                let read = match self.resolve(name, Some(span))? {
+                    // The read is checked already where the binding is not
+                    // yet declared.
+                    Some(checked) if checked != kernel => checked,
+                    _ => self.initialised(kernel, name)?,
+                };
+                Ok(Operand::variable(read, Ty::Unknown))
             }
             Exact::ListLength | Exact::RecordField | Exact::TextLength => {
                 let (object, key, ty) = match (exact, args) {

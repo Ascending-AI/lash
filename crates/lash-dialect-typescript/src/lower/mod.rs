@@ -704,6 +704,15 @@ impl Lowerer<'_> {
             && !self.facts.assigned(name)
     }
 
+    /// The kernel name a source binding in scope is lowered to.
+    pub(crate) fn binding_kernel(&self, name: &str) -> Option<Name> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.bindings.get(name))
+            .map(|binding| binding.kernel.clone())
+    }
+
     pub(crate) fn is_bound(&self, name: &str) -> bool {
         self.scopes
             .iter()
@@ -739,7 +748,11 @@ impl Lowerer<'_> {
 
     /// The variable a source name reads, checked for use before its
     /// declaration.
-    fn resolve(&mut self, name: &str, span: Option<SourceSpan>) -> Lowering<Option<Name>> {
+    pub(crate) fn resolve(
+        &mut self,
+        name: &str,
+        span: Option<SourceSpan>,
+    ) -> Lowering<Option<Name>> {
         let function = self.functions.len() - 1;
         let Some((scope, binding)) = self.binding_mut(name) else {
             if let Some(captured) = self.captured(name) {
@@ -752,9 +765,13 @@ impl Lowerer<'_> {
             return Ok(Some(session));
         };
         let kernel = binding.kernel.clone();
+        let owner = binding.function;
         if binding.live {
+            self.carry_declared(owner, &kernel);
             return Ok(Some(kernel));
         }
+        self.carry_declared(owner, &kernel);
+        let binding = &self.scopes[scope].bindings[name];
         let lexical = matches!(binding.kind, BindingKind::Let | BindingKind::Const);
         if lexical && binding.function == function {
             return Err(Diagnostic::new(
@@ -771,9 +788,35 @@ impl Lowerer<'_> {
         Ok(Some(kernel))
     }
 
+    /// Carries the type the function `owner` declares `kernel` with into
+    /// every function between it and the one using it: a capture's declared
+    /// type is source evidence where it is used, and a materialized factory
+    /// declares it again from there. It never proves a construction.
+    fn carry_declared(&mut self, owner: usize, kernel: &Name) {
+        let Some(Some(ty)) = self
+            .functions
+            .get(owner)
+            .and_then(|f| f.declared.get(kernel))
+            .cloned()
+        else {
+            return;
+        };
+        for frame in self.functions.iter_mut().skip(owner + 1) {
+            frame
+                .declared
+                .entry(kernel.clone())
+                .and_modify(|declared| {
+                    if declared.as_ref() != Some(&ty) {
+                        *declared = None;
+                    }
+                })
+                .or_insert_with(|| Some(ty.clone()));
+        }
+    }
+
     /// Checks that a `let` or `const` a function reads from an enclosing
     /// scope has been initialised, and gives the checked value's variable.
-    fn initialised(&mut self, kernel: Name, name: &str) -> Lowering<Name> {
+    pub(crate) fn initialised(&mut self, kernel: Name, name: &str) -> Lowering<Name> {
         let checked = self.invoke(
             "ts.tdz",
             &[Operand::variable(kernel, Ty::Unknown), Operand::text(name)],
@@ -802,7 +845,10 @@ impl Lowerer<'_> {
                 ));
             }
             let kernel = binding.kernel.clone();
-            if !binding.live {
+            let owner = binding.function;
+            let live = binding.live;
+            self.carry_declared(owner, &kernel);
+            if !live {
                 // The check reads the variable; a `var` or a function is
                 // only made to exist.
                 if let Some(checked) = self.resolve(name, span)?

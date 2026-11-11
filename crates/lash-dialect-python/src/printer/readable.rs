@@ -47,7 +47,7 @@ impl Renderer<'_> {
     }
     /// A member's target is a primary: an operator is grouped, and so is any
     /// target but a variable, member or call when `simple` asks for it.
-    fn member_target(&mut self, target: &k::Expr, simple: bool) {
+    pub(super) fn member_target(&mut self, target: &k::Expr, simple: bool) {
         let grouped = self.precedence(target) < PRIMARY
             || simple
                 && !matches!(

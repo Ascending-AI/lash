@@ -781,6 +781,7 @@ async fn shipped_callables(
         &lash::package::RecordedPackages,
         &lash::vm::WorkflowEnvironmentRequest,
     ),
+    format: SourceFormat,
     source: &str,
     names: &[&str],
 ) -> (
@@ -790,7 +791,7 @@ async fn shipped_callables(
 ) {
     let imported = core
         .host_artifacts()
-        .import_workflow(SourceFormat::TypeScriptV1.language(), source, request, None)
+        .import_workflow(format.language(), source, request, None)
         .await
         .unwrap();
     let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
@@ -850,6 +851,66 @@ async fn shipped_callables(
     (publication, origin, functions)
 }
 
+/// Each shipped callable of `cases` publishes, prints in `format` and
+/// re-imports; the original and the reimported callable both answer the
+/// case's expected value. Answers each printed source by case name.
+async fn printed_callables(
+    (core, pin, base, request): (
+        &lash::LashCore,
+        &lash::process::HostArtifactPin,
+        &lash::process::ProcessEnv,
+        &lash::vm::WorkflowEnvironmentRequest,
+    ),
+    (publication, origin): (&super::support::Publication, &lash::package::CallableOrigin),
+    format: SourceFormat,
+    cases: &[(&str, serde_json::Value, serde_json::Value)],
+    functions: &[FunctionValue],
+) -> std::collections::BTreeMap<String, String> {
+    let mut printed_sources = std::collections::BTreeMap::new();
+    let mut refused = Vec::new();
+    for ((name, args, expected), function) in cases.iter().zip(functions) {
+        let definition = match core
+            .host_artifacts()
+            .publish_callable(pin, function, request, origin, None)
+            .await
+        {
+            Ok(definition) => definition,
+            Err(error) => {
+                refused.push(format!("{format:?} {name} publication: {error:?}"));
+                continue;
+            }
+        };
+        let printed = core
+            .host_artifacts()
+            .print_workflow(&definition.id, None, format, Default::default())
+            .await
+            .unwrap();
+        let roundtrip = publish_source(core, pin, &printed.source, format, request, "run").await;
+        let roundtrip_env = definition_environment(core, pin, &roundtrip, base).await;
+        for (definition, env, kind) in [
+            (&definition, &publication.env_ref, "original"),
+            (&roundtrip, &roundtrip_env, "roundtrip"),
+        ] {
+            assert_eq!(
+                outcome(
+                    core,
+                    env,
+                    definition,
+                    &format!("{format:?}-{name}-{kind}"),
+                    args
+                )
+                .await,
+                Ok(expected.clone()),
+                "{format:?} {name} {kind}\n{}",
+                printed.source,
+            );
+        }
+        printed_sources.insert((*name).to_owned(), printed.source);
+    }
+    assert!(refused.is_empty(), "{}", refused.join("\n"));
+    printed_sources
+}
+
 /// What `definition` started under `env` with `args` ends in.
 async fn outcome(
     core: &lash::LashCore,
@@ -889,10 +950,12 @@ async fn outcome(
     Err((kind, failure.message))
 }
 
-/// FIG-7697, FIG-7707: a callable that reads a captured list by a literal
-/// or computed index or its length, maps over it, calls a captured map's or
-/// set's methods, indexes a captured list it reassigns, or reads a captured
-/// text's length or record's field, publishes: its printed source
+/// FIG-7697, FIG-7707, FIG-7710: a callable that reads a captured list by a
+/// literal or computed index or its length, maps over it or calls another
+/// of its rows, pushes onto it or adds into its element, calls a captured
+/// map's or set's methods, indexes a captured list it reassigns, reads a
+/// captured text's length or record's field, or reads a `const` declared
+/// after it, publishes: its printed source
 /// re-imports to the same kernel document (publication proves it), and
 /// both answer alike. The printed operations keep their own checks: a list
 /// read or length of an edited fill that is no list fails the list's kind
@@ -913,8 +976,15 @@ export async function ships(): Promise<string> {
     const indexed = async (x: number): Promise<number> => xs[x];
     const long = async (x: number): Promise<number> => x + xs.length;
     const scaled = async (x: number): Promise<unknown> => xs.map((v: number) => v + x);
+    const found = async (x: number): Promise<number> => xs.indexOf(x);
     const measured = async (x: number): Promise<number> => x + t.length;
     const fielded = async (x: number): Promise<number> => x + r.a;
+    const zs = [1];
+    const pushed = async (x: number): Promise<number> => { zs.push(x); return zs.length + zs[1]; };
+    const ws = [1, 2];
+    const bumped = async (x: number): Promise<number> => { ws[1] += x; return ws[1]; };
+    const later = async (x: number): Promise<unknown> => [x, k];
+    const k = 4;
     const mapped = async (key: string): Promise<unknown> => { m.set(key, 2); return m.has(key) ? m.get(key) : 0; };
     const sets = async (x: number): Promise<boolean> => { s.add(x); return s.has(x); };
     const reassigned = async (x: number): Promise<number> => { ys = [x, x + 1]; return ys[1]; };
@@ -925,8 +995,12 @@ export async function ships(): Promise<string> {
     await tools.capture({value: "collection-indexed", nested: {fact: indexed}});
     await tools.capture({value: "collection-long", nested: {fact: long}});
     await tools.capture({value: "collection-scaled", nested: {fact: scaled}});
+    await tools.capture({value: "collection-found", nested: {fact: found}});
     await tools.capture({value: "collection-measured", nested: {fact: measured}});
     await tools.capture({value: "collection-fielded", nested: {fact: fielded}});
+    await tools.capture({value: "collection-pushed", nested: {fact: pushed}});
+    await tools.capture({value: "collection-bumped", nested: {fact: bumped}});
+    await tools.capture({value: "collection-later", nested: {fact: later}});
     return "shipped";
 }
 "#;
@@ -956,58 +1030,33 @@ export async function ships(): Promise<string> {
             serde_json::json!(4),
         ),
         ("fielded", serde_json::json!({"x": 1}), serde_json::json!(6)),
+        ("found", serde_json::json!({"x": 8}), serde_json::json!(1)),
+        ("pushed", serde_json::json!({"x": 5}), serde_json::json!(7)),
+        ("bumped", serde_json::json!({"x": 3}), serde_json::json!(5)),
+        (
+            "later",
+            serde_json::json!({"x": 1}),
+            serde_json::json!([1, 4]),
+        ),
     ];
     let names: Vec<_> = cases.iter().map(|(name, ..)| *name).collect();
-    let (publication, origin, functions) =
-        shipped_callables(&core, &pin, (&base, &packages, &request), source, &names).await;
-    let mut printed_sources = std::collections::BTreeMap::new();
-    let mut refused = Vec::new();
-    for ((name, args, expected), function) in cases.iter().zip(&functions) {
-        let definition = match core
-            .host_artifacts()
-            .publish_callable(&pin, function, &request, &origin, None)
-            .await
-        {
-            Ok(definition) => definition,
-            Err(error) => {
-                refused.push(format!("{name} publication: {error:?}"));
-                continue;
-            }
-        };
-        let printed = core
-            .host_artifacts()
-            .print_workflow(
-                &definition.id,
-                None,
-                SourceFormat::TypeScriptV1,
-                Default::default(),
-            )
-            .await
-            .unwrap();
-        let roundtrip = publish_source(
-            &core,
-            &pin,
-            &printed.source,
-            SourceFormat::TypeScriptV1,
-            &request,
-            "run",
-        )
-        .await;
-        let roundtrip_env = definition_environment(&core, &pin, &roundtrip, &base).await;
-        for (definition, env, kind) in [
-            (&definition, &publication.env_ref, "original"),
-            (&roundtrip, &roundtrip_env, "roundtrip"),
-        ] {
-            assert_eq!(
-                outcome(&core, env, definition, &format!("{name}-{kind}"), args).await,
-                Ok(expected.clone()),
-                "{name} {kind}\n{}",
-                printed.source,
-            );
-        }
-        printed_sources.insert(*name, printed.source);
-    }
-    assert!(refused.is_empty(), "{}", refused.join("\n"));
+    let (publication, origin, functions) = shipped_callables(
+        &core,
+        &pin,
+        (&base, &packages, &request),
+        SourceFormat::TypeScriptV1,
+        source,
+        &names,
+    )
+    .await;
+    let printed_sources = printed_callables(
+        (&core, &pin, &base, &request),
+        (&publication, &origin),
+        SourceFormat::TypeScriptV1,
+        &cases,
+        &functions,
+    )
+    .await;
 
     // Each edited fill replaces the one literal the printed source fills
     // the capture with.
@@ -1078,6 +1127,153 @@ export async function ships(): Promise<string> {
         .await,
         ordinary,
     );
+    // FIG-7710: a list's own row on a text fill runs the list row,
+    // `Array.prototype.indexOf.call("78", 8)` (-1: no element is strictly
+    // 8), not the text's `"78".indexOf(8)` (1).
+    assert_eq!(
+        run_source(
+            edited("found", "[7, 8]", "\"78\""),
+            "found-text",
+            serde_json::json!({"x": 8}),
+        )
+        .await,
+        Ok(serde_json::json!(-1)),
+    );
+    // A push onto a text would dispatch the text's member; the
+    // list's own push reads the list's length first, whose kind check
+    // fails.
+    assert_eq!(
+        run_source(
+            edited("pushed", "[1]", "\"ab\""),
+            "pushed-text",
+            serde_json::json!({"x": 5}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
+    );
+    // `ws[1] += x` of a text would read its character and write nothing;
+    // the list's element read fails its kind check where it runs, and the
+    // list's write fails at the bound it tests.
+    assert_eq!(
+        run_source(
+            edited("bumped", "[1, 2]", "\"ab\""),
+            "bumped-text",
+            serde_json::json!({"x": 3}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
+    );
+    assert_eq!(
+        run_source(
+            "export async function run(x: number, xs: unknown): Promise<unknown> {\n  list.set(xs, 1, x);\n  return xs;\n}\n".into(),
+            "set-text",
+            serde_json::json!({"x": 3, "xs": "ab"}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
+    );
+    // The spelled check fails where the read of a binding still in its
+    // temporal dead zone does.
+    let uninitialized = |read: &str| {
+        format!(
+            "export async function run(x: number): Promise<unknown> {{\n  const f = async (): Promise<unknown> => [x, {read}];\n  const r = await f();\n  const k = 4;\n  return r;\n}}\n"
+        )
+    };
+    let ordinary = run_source(
+        uninitialized("k"),
+        "later-ordinary",
+        serde_json::json!({"x": 1}),
+    )
+    .await;
+    assert!(ordinary.is_err(), "{ordinary:?}");
+    assert_eq!(
+        run_source(
+            uninitialized("value.initialized(k)"),
+            "later-spelled",
+            serde_json::json!({"x": 1}),
+        )
+        .await,
+        ordinary,
+    );
+    // The Python twins: `zs.append(x)` and `ws[1] += x` on a captured list.
+    let python = r#"
+async def ships() -> str:
+    zs = [1]
+    async def appended(x: int) -> int:
+        zs.append(x)
+        return len(zs) + zs[1]
+    ws = [1, 2]
+    async def added(x: int) -> int:
+        ws[1] += x
+        return ws[1]
+    await tools.capture({"value": "collection-appended", "nested": {"fact": appended}})
+    await tools.capture({"value": "collection-added", "nested": {"fact": added}})
+    return "shipped"
+"#;
+    let cases = [
+        (
+            "appended",
+            serde_json::json!({"x": 5}),
+            serde_json::json!(7),
+        ),
+        ("added", serde_json::json!({"x": 3}), serde_json::json!(5)),
+    ];
+    let names: Vec<_> = cases.iter().map(|(name, ..)| *name).collect();
+    let (publication, origin, functions) = shipped_callables(
+        &core,
+        &pin,
+        (&base, &packages, &request),
+        SourceFormat::PythonV1,
+        python,
+        &names,
+    )
+    .await;
+    let printed_python = printed_callables(
+        (&core, &pin, &base, &request),
+        (&publication, &origin),
+        SourceFormat::PythonV1,
+        &cases,
+        &functions,
+    )
+    .await;
+    // A captured binding's receiver is untyped in Python: `ws[1] += x` of a
+    // text reads its character with the generic item read, and the
+    // in-place add fails where the original's does, before any store.
+    let source = &printed_python["added"];
+    assert_eq!(source.matches("[1, 2]").count(), 1, "{source}");
+    let definition = publish_source(
+        &core,
+        &pin,
+        &source.replace("[1, 2]", "\"ab\""),
+        SourceFormat::PythonV1,
+        &request,
+        "run",
+    )
+    .await;
+    let env = definition_environment(&core, &pin, &definition, &base).await;
+    assert_eq!(
+        outcome(
+            &core,
+            &env,
+            &definition,
+            "added-text",
+            &serde_json::json!({"x": 3})
+        )
+        .await,
+        Err((
+            Some("TypeError".to_owned()),
+            "unsupported operand type(s) for +: 'str' and 'int'".to_owned()
+        )),
+    );
     core.shutdown().await.unwrap();
 }
 
@@ -1117,6 +1313,7 @@ export async function ships(): Promise<string> {
         &core,
         &pin,
         (&base, &packages, &request),
+        SourceFormat::TypeScriptV1,
         source,
         &["ten", "twenty"],
     )

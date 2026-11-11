@@ -80,12 +80,24 @@ receiver binding, and each argument that names a binding, where the
 method's dispatch reads them, with no hold before later operands run.
 `list.method(xs, "name", ...args)` is that call on a list the source built:
 the list's own row (`map` over its slots, say) with no kind test, its
-receiver and named arguments read as `callable.method` reads them.
+receiver and named arguments read as `callable.method` reads them. It
+spells every row of the list's own table (`push`, `indexOf`, `sort`, ...); a
+receiver that is no list gets that row, with its kind check where it has one.
+`list.set(xs, i, v)` is a built list's element write: `i`'s position test and
+the bound that admits an append, then the write in place, else `ts.set`, so
+`xs[i] += v` on a capture reads `list.element` and writes `list.set`.
+`value.initialized(k)` is the read of a binding an enclosing function declares
+later: its temporal-dead-zone check, failing where the read runs.
 `list.length(xs)` is a built list's length as a float, with no kind test, so
 a receiver that is no list fails the length read's own kind check.
 `record.field(r, "name")` is a built record's field: its own field where it is
 unbranded, else the read helper. `value.length(t)` is a built text's
 `length`: the length helper's read, a number (`text` is no reserved root).
+A materialized capture's factory declares its cell with the declared type the
+captured binding's evidence carries, so an annotated binding (`xs: unknown[]`)
+keeps the lowering its annotation chose. Python prints an in-place update of
+an item, `xs[i] op= v`, from its pinned target and key, item read and
+operator, for a list, a dict or any target.
 Each lowers to the nodes, helpers and evaluation order of the lowering it
 names, and keeps that operation's failures at its own site. Python's
 `@callable.direct` on a nested function preserves that bare closure ABI and its

@@ -326,7 +326,8 @@ mod tests {
     /// `cursor` of another type keeps its own. The printed callable reads back
     /// exactly, with no forwarding call the annotation's absence would add,
     /// as captured and after its value is stored and carried; without the
-    /// evidence it is unprintable.
+    /// evidence it is unprintable. A callable capturing a declared binding
+    /// carries its declared type (FIG-7710).
     #[test]
     fn declared_local_types_print_from_their_evidence() {
         let source = r#"try {
@@ -407,6 +408,34 @@ console.log(JSON.stringify(created));
             function
         });
         let refused = reads_back(&bare);
+        assert!(
+            matches!(refused, Err(PrintError::Unprintable { .. })),
+            "{refused:?}"
+        );
+        // FIG-7710: the declared type of a binding a callable captures is the
+        // capturing callable's evidence too; the materialized capture cell
+        // declares it again.
+        let captured = crate::lower(
+            "const us: unknown[] = [1, 2];\nconst annotated = async (): Promise<unknown> => us[1];\n",
+            &environment,
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+        )
+        .unwrap();
+        let filled = |mut function: k::FunctionValue| {
+            let int = |i: i64| k::CaptureValue::Data(k::Datum::Int(i.into()));
+            function.captures = [(
+                lash_kernel_value::Name::new("us"),
+                k::CaptureValue::List(vec![int(1), int(2)]),
+            )]
+            .into();
+            function
+        };
+        reads_back(&materialize_callable_as(&captured, filled)).unwrap();
+        let refused = reads_back(&materialize_callable_as(&captured, |function| {
+            let mut function = filled(function);
+            function.declared_locals.clear();
+            function
+        }));
         assert!(
             matches!(refused, Err(PrintError::Unprintable { .. })),
             "{refused:?}"
