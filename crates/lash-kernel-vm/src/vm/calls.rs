@@ -80,7 +80,12 @@ impl<H: Heap> Vm<H> {
                 self.enter(callee, argc, None, bill, link)
             }
             Callee::Value => self.call_value(argc),
-            Callee::Native { native, charged } => self.call_native(program, native, argc, charged),
+            Callee::Native { native, charged } => {
+                if let Some(checked) = &site.checked {
+                    self.check_arguments(checked, argc)?;
+                }
+                self.call_native(program, native, argc, charged)
+            }
             Callee::Machine {
                 function, charge, ..
             } => self.call_machine(function, charge, argc),
@@ -235,6 +240,10 @@ impl<H: Heap> Vm<H> {
         let len = self.cx.stack.len();
         if let Some(answer) = self.answer(program, native, charged, &self.cx.stack[len - argc..]) {
             let (value, fee) = answer?;
+            if let Some(unfit) = self.native_unfit(value)? {
+                self.cx.stack.truncate(len - argc);
+                return Err(self.typed_error("entry_type_mismatch", &unfit));
+            }
             self.cx.stack.truncate(len - argc);
             self.push(value);
             if let Some(units) = fee
@@ -525,6 +534,25 @@ impl<H: Heap> Vm<H> {
         charge: Option<u32>,
         done: Done,
     ) -> Run<()> {
+        // The answer is held to the call's result before anything
+        // commits: a cold read resumes this completion, never the native.
+        let unfit = match &done {
+            Done::Value(value) => match self.native_unfit(*value) {
+                Ok(unfit) => unfit,
+                Err(flow) => {
+                    if let Flow::Cold { .. } = flow {
+                        self.restart = Some(Restart::Native {
+                            from: from as u32,
+                            native,
+                            charge,
+                            done,
+                        });
+                    }
+                    return Err(flow);
+                }
+            },
+            Done::Raised(_) | Done::Refused(..) => None,
+        };
         let fee = match charge {
             Some(charge) => {
                 let result = match &done {
@@ -551,7 +579,9 @@ impl<H: Heap> Vm<H> {
         self.cx.stack.truncate(from);
         let raised = match done {
             Done::Value(value) => {
-                self.push(value);
+                if unfit.is_none() {
+                    self.push(value);
+                }
                 None
             }
             Done::Raised(value) => Some(Ok(value)),
@@ -561,6 +591,9 @@ impl<H: Heap> Vm<H> {
             && let Err(flow) = self.fee(units)
         {
             return Err(self.billed_by(flow, native));
+        }
+        if let Some(unfit) = unfit {
+            return Err(self.typed_error("entry_type_mismatch", &unfit));
         }
         match raised {
             None => Ok(()),

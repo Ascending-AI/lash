@@ -685,6 +685,29 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// The contract a call through import `slot`, resolved to `callable`,
+    /// holds to: the import's declared signature, the export's public
+    /// one, which the arguments fit before the callee's own ABI adapts
+    /// them and its result fits as it returns (FIG-7143), when it types
+    /// something.
+    pub(crate) fn import_checked(
+        &self,
+        slot: ImportSlot,
+        callable: CallableId,
+    ) -> Option<Arc<Checked>> {
+        let lash_kernel_value::names::ImportKind::Code { signature, .. } =
+            &self.document.imports.get(&slot)?.kind
+        else {
+            return None;
+        };
+        let typed = signature.result != lash_kernel_value::Type::Any
+            || signature
+                .params
+                .iter()
+                .any(|param| param.ty != lash_kernel_value::Type::Any);
+        typed.then(|| Arc::new(Checked::new(callable, signature.clone())))
+    }
+
     /// The callee `callable` is from `f`: its own Link's code.
     pub(crate) fn callee_at(&mut self, f: &Fun, callable: CallableId) -> Result<Callee> {
         let home = self.link;
@@ -1440,6 +1463,7 @@ impl<'a> Compiler<'a> {
         &mut self,
         f: &Fun,
         callee: Option<CallableId>,
+        checked: Option<Arc<Checked>>,
         argc: u16,
     ) -> Result<UnitId> {
         let site = f.site();
@@ -1462,6 +1486,9 @@ impl<'a> Compiler<'a> {
             Some(callable) => self.callee_at(&g, callable)?,
         };
         self.call(&mut g, target, argc, site);
+        if let Some(call) = g.calls.last_mut() {
+            call.checked = checked;
+        }
         g.emit(Op::Return);
         self.seal(g, at, UnitKind::Spawn, values, Arc::from("spawn"));
         Ok(at)

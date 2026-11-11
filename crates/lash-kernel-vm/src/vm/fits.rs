@@ -92,6 +92,30 @@ impl<H: Heap> Vm<H> {
         }
     }
 
+    /// Why `value`, a native's answer to the running frame's call, does
+    /// not fit the result the call holds to: an import's public result
+    /// binds a native implementation as it binds a body (FIG-7143).
+    #[inline(always)]
+    pub(super) fn native_unfit(&mut self, value: Value) -> Run<Option<EntryTypeMismatch>> {
+        let Some(frame) = self.cx.frames.last() else {
+            return Ok(None);
+        };
+        let unit = self.program.unit(frame.unit);
+        let Some(Op::Call(site)) = (frame.pc as usize)
+            .checked_sub(1)
+            .and_then(|pc| unit.ops.get(pc))
+        else {
+            return Ok(None);
+        };
+        match &unit.calls[*site as usize].checked {
+            None => Ok(None),
+            Some(checked) => {
+                let checked = std::sync::Arc::clone(checked);
+                self.checked_result(&checked, value)
+            }
+        }
+    }
+
     /// Why `value` does not fit `checked`'s result, unless it plainly fits.
     #[cold]
     #[inline(never)]

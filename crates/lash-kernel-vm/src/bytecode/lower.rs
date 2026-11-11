@@ -742,7 +742,10 @@ impl Compiler<'_> {
             }
             DocCallee::Import(slot) => {
                 let callable = self.imported(*slot)?;
-                (self.callee_at(f, callable)?, None)
+                (
+                    self.callee_at(f, callable)?,
+                    self.import_checked(*slot, callable),
+                )
             }
         };
         f.point(f.here(), Point::Action(site.clone()));
@@ -776,15 +779,21 @@ impl Compiler<'_> {
     }
 
     fn spawn(&mut self, f: &mut Fun, callee: &DocCallee, argc: usize, site: Site) -> Result<()> {
-        let target = match callee {
-            DocCallee::Value(_) => None,
-            DocCallee::Local(id) => Some(CallableId {
-                link: self.link,
-                function: *id,
-            }),
-            DocCallee::Import(slot) => Some(self.imported(*slot)?),
+        let (target, checked) = match callee {
+            DocCallee::Value(_) => (None, None),
+            DocCallee::Local(id) => (
+                Some(CallableId {
+                    link: self.link,
+                    function: *id,
+                }),
+                None,
+            ),
+            DocCallee::Import(slot) => {
+                let callable = self.imported(*slot)?;
+                (Some(callable), self.import_checked(*slot, callable))
+            }
         };
-        let unit = self.stub(f, target, argc as u16)?;
+        let unit = self.stub(f, target, checked, argc as u16)?;
         let values = argc as u16 + u16::from(target.is_none());
         self.task_action(
             f,

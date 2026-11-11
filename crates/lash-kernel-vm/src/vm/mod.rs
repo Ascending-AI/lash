@@ -1282,6 +1282,7 @@ impl<H: Heap> Vm<H> {
                         enter!(call, pc, rerun);
                         if let Callee::Native { native, charged } = call.callee
                             && call.argc == 2
+                            && call.checked.is_none()
                         {
                             let len = self.cx.stack.len();
                             let args = [self.cx.stack[len - 2], self.cx.stack[len - 1]];
