@@ -1173,3 +1173,39 @@ fn a_cold_integer_copies_out_with_its_sign_and_every_digit() {
         ])
     );
 }
+
+/// K-LIB-007 (FIG-7688): sealing a text on a shared append buffer gives
+/// the text the head its bytes alone give, and writes those bytes, never
+/// the buffer's spare capacity; from then on the buffer takes no append,
+/// so nothing past what was sealed is ever written to it.
+#[test]
+fn a_sealed_shared_text_keeps_its_identity_and_its_buffer_takes_no_append() {
+    use lash_kernel_doc::arena::{Body, SharedText};
+    let shared = SharedText::new(&[LONG, "!"], 2 * (LONG.len() + 1)).expect("a buffer");
+    let mut arena = Arena::new();
+    let text = arena
+        .create(NewObject::LongText {
+            text: shared.clone().into(),
+            summary: counts(&format!("{LONG}!")),
+        })
+        .expect("a text");
+    let copy = arena
+        .create(NewObject::long_text(format!("{LONG}!")))
+        .expect("a copy");
+    let unsealed = arena.head(text.handle().unwrap()).expect("a head");
+    assert_eq!(unsealed, arena.head(copy.handle().unwrap()).unwrap());
+    let root = list(&mut arena, vec![text]);
+    let pages = Pages::default();
+    let mut directory = pages.directory(None);
+    seal(&mut arena, &[root], &mut directory, &mut HighWater(0)).expect("a seal");
+    assert_eq!(arena.head(text.handle().unwrap()).unwrap(), unsealed);
+    let Ok(Body::LongText(sealed)) = arena.body(text.handle().unwrap()) else {
+        panic!("a resident text");
+    };
+    let sealed = sealed.shared().expect("still on its buffer");
+    assert_eq!(sealed.as_str(), format!("{LONG}!"));
+    assert!(
+        shared.append("?").is_none(),
+        "a sealed text's buffer takes an append"
+    );
+}

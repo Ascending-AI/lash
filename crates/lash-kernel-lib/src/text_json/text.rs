@@ -1,7 +1,7 @@
 use super::Selection;
 use lash_kernel_doc::{
     Formula, Integer, NativeCall, NativeError, NewObject, Nursery, Operand, PreparedNative,
-    TextView, Value,
+    TextView, Value, arena::SharedText,
 };
 
 use num_traits::ToPrimitive;
@@ -692,27 +692,46 @@ fn utf16_compare(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     )?))
 }
 /// The two texts joined, its lengths the sums of theirs: the bytes are
-/// copied once and never counted again.
+/// copied once and never counted again. A long result is on a shared
+/// append buffer (K-LIB-007): when the left text ends at the tip of an
+/// unfrozen buffer with room, the right text is written past the tip and
+/// the left's bytes are not copied; at the tip of a full buffer the result
+/// takes a new one of twice its length; otherwise one of exactly its
+/// length. Each text is admitted for its own length only, as a copy is.
 fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let (text, other) = (text_view(&call.args, 0)?, text_view(&call.args, 1)?);
     let (a, b) = (text.summary(), other.summary());
+    let tip = text.shared().filter(|shared| shared.at_tip());
     let (text, other) = (text.whole()?, other.whole()?);
     let len = text
         .len()
         .checked_add(other.len())
         .ok_or_else(crate::exhausted)?;
     call.new.hold(0, super::room(len))?;
-    let mut out = String::new();
-    out.try_reserve_exact(len).map_err(|_| crate::exhausted())?;
-    out.push_str(&text);
-    out.push_str(&other);
-    #[cfg(test)]
-    let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
     let summary = lash_kernel_doc::heap::TextSummary {
         utf8_bytes: len as u64,
         chars: a.chars + b.chars,
         utf16_units: a.utf16_units + b.utf16_units,
     };
+    if len <= lash_kernel_doc::arena::ShortText::MAX {
+        let mut out = String::with_capacity(len);
+        out.push_str(&text);
+        out.push_str(&other);
+        return Ok(call.new.text_of(out, summary));
+    }
+    let parts = [text.as_ref(), other.as_ref()];
+    // A host that refuses the doubled buffer still gets the exact one, so
+    // the call refuses only where a copy would.
+    let out = match tip {
+        Some(tip) => tip
+            .append(&other)
+            .or_else(|| SharedText::new(&parts, len.saturating_mul(2))),
+        None => None,
+    }
+    .or_else(|| SharedText::new(&parts, len))
+    .ok_or_else(crate::exhausted)?;
+    #[cfg(test)]
+    let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
     Ok(call.new.text_of(out, summary))
 }
 /// [`concat`] of two short texts whose concatenation is short: the same

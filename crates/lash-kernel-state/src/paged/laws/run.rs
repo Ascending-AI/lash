@@ -191,7 +191,7 @@ fn immutable_heads_reject_conflicting_kind_summary_or_key() {
     let body = |text: &str| {
         Body::LongText(LongText {
             summary: lash_kernel_doc::heap_values::text_summary(text),
-            chunks: Box::new([Chunk::Resident(text.to_owned())]),
+            chunks: Box::new([Chunk::Resident(text.to_owned().into())]),
         })
     };
     let arena = Arena::new();

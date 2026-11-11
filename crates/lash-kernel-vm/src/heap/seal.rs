@@ -386,9 +386,6 @@ fn record(arena: &Arena, handle: ArenaHandle, access: &Access<'_>) -> Result<Rec
                     }
                 }
             }
-            if text.moved() {
-                return Err(fault("a moved text reached the seal"));
-            }
             if whole.len() as u64 > PAYLOAD_LEAF_BYTES {
                 published(
                     arena,

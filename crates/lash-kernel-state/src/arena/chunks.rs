@@ -428,7 +428,7 @@ impl Arena {
                         joined.push_str(part);
                     }
                 }
-                text.chunks = Box::new([Chunk::Resident(joined)]);
+                text.chunks = Box::new([Chunk::Resident(joined.into())]);
             }
             Body::Bytes(bytes) if bytes.chunks.len() > 1 && first_cold(&bytes.chunks).is_none() => {
                 let mut joined = Vec::with_capacity(bytes.len as usize);
@@ -532,7 +532,7 @@ impl Arena {
                 splice(
                     &mut text.chunks,
                     chunk as usize,
-                    vec![Chunk::Resident(text_part)],
+                    vec![Chunk::Resident(text_part.into())],
                 )?;
             }
             (Body::Bytes(held), PayloadPart::Leaf(bytes)) => {

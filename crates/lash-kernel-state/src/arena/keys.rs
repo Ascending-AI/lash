@@ -346,9 +346,6 @@ pub(crate) fn text<'a>(
     match value {
         Value::Text(short) => Ok(short.as_str()),
         Value::LongText(handle) => match body(objects, *handle)? {
-            Body::LongText(long) if long.moved() => Err(NativeError::Malformed(
-                "a text whose storage moved was read",
-            )),
             Body::LongText(long) => Ok(whole(*handle, &long.chunks)?.map_or("", |text| text)),
             _ => Err(NativeError::Malformed("a text handle names another body")),
         },
@@ -458,6 +455,7 @@ fn certify(
         super::heads::head_of(body, fact.summary, || Ok(normal.clone())),
         fact.try_projection(),
     ) {
+        super::freeze(body);
         let _ = projected.head.set(head);
     }
 }
@@ -480,9 +478,6 @@ fn long_key(object: Option<ArenaHandle>, body: &Body) -> Result<NormalKey, Nativ
         }
     }
     match body {
-        Body::LongText(text) if text.moved() => Err(NativeError::Malformed(
-            "a text whose storage moved was read",
-        )),
         Body::LongText(text) => Ok(identity::text_key(
             held(&text.chunks).map_err(unread)?.map_or("", |text| text),
         )),

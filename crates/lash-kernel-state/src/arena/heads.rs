@@ -132,6 +132,7 @@ impl Arena {
     /// Fixes `head` as the immutable `handle`'s, as a seal that wrote a row
     /// naming it does: every later row names it so.
     pub fn certify(&self, handle: ArenaHandle, head: Head) -> Result<(), NativeError> {
+        super::freeze(self.body(handle)?);
         let _ = self.facts(handle)?.try_projection()?.head.set(head);
         Ok(())
     }

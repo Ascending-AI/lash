@@ -118,7 +118,6 @@ pub(crate) fn body(body: &Body) -> u64 {
         Body::Free => return 0,
         Body::Cold(_) => 0,
         Body::BigInt(int) | Body::Timestamp(int) => integer(int),
-        Body::LongText(text) if text.moved() => text.summary.utf8_bytes,
         Body::LongText(text) => resident(&text.chunks),
         Body::Bytes(bytes) => resident(&bytes.chunks),
         Body::Tuple(sequence) => values(sequence.chunks.resident_len()),

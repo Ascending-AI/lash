@@ -83,7 +83,6 @@ mod ops;
 mod reach;
 mod sizes;
 mod tables;
-mod texts;
 mod versions;
 pub use versions::{ContentVersion, Registration};
 
@@ -788,7 +787,7 @@ impl Arena {
     fn long_text(&mut self, text: String) -> ArenaHandle {
         let summary = text_summary(&text);
         self.insert(
-            Body::LongText(resident_text(text, summary)),
+            Body::LongText(resident_text(text.into(), summary)),
             Facts::default(),
         )
     }
@@ -1239,6 +1238,7 @@ impl Arena {
     /// Keeps `page` as the page form of the immutable `handle`, unless it
     /// has one.
     pub fn keep_page(&self, handle: ArenaHandle, page: PageValue) -> Result<(), NativeError> {
+        freeze(self.body(handle)?);
         let _ = self.facts(handle)?.try_projection()?.page.set(page);
         Ok(())
     }
@@ -1295,6 +1295,7 @@ impl Arena {
             return Err(malformed("a durable identity names two objects"));
         }
         self.facts(handle)?.try_projection()?;
+        freeze(self.body(handle)?);
         self.entities.insert(entity, handle);
         let facts = &mut self.facts[handle.index() as usize];
         facts.try_projection_mut()?.entity = Some(entity);
@@ -1628,7 +1629,7 @@ pub enum Raise {
     TooDeep,
 }
 
-fn resident_text(text: String, summary: TextSummary) -> LongText {
+fn resident_text(text: lash_kernel_doc::arena::TextBytes, summary: TextSummary) -> LongText {
     LongText {
         summary,
         chunks: Box::new([Chunk::Resident(text)]),
@@ -1643,6 +1644,16 @@ pub fn cold_text(summary: TextSummary, page: lash_kernel_doc::heap::PageRef) -> 
             page,
             len: u32::try_from(summary.utf8_bytes).unwrap_or(u32::MAX),
         }]),
+    }
+}
+
+/// Lets no later append extend the shared buffer a long text `body` is
+/// on: the text has a durable identity, a head or a page form, so what was
+/// sealed of it, or will be, stays local to its own bytes (K-LIB-007).
+#[inline]
+pub(crate) fn freeze(body: &Body) {
+    if let Body::LongText(text) = body {
+        text.freeze();
     }
 }
 

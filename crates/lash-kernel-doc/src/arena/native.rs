@@ -232,9 +232,6 @@ impl<'call> Args<'call> {
     #[inline]
     pub fn long_text(&self, object: ArenaHandle) -> Result<TextView<'call>, NativeError> {
         match self.body(object)? {
-            Body::LongText(text) if text.moved() => Err(NativeError::Malformed(
-                "a text whose storage moved was read",
-            )),
             Body::LongText(text) => Ok(TextView::Long { object, text }),
             _ => Err(NativeError::Malformed("a text handle names another body")),
         }
@@ -611,6 +608,16 @@ impl<'call> TextView<'call> {
         }
     }
 
+    /// The text's bytes on a shared append buffer, when it is one
+    /// resident chunk on one.
+    #[inline]
+    pub fn shared(&self) -> Option<&'call super::SharedText> {
+        match self {
+            Self::Short(_) => None,
+            Self::Long { text, .. } => text.shared(),
+        }
+    }
+
     /// The text whole, when it is in one resident piece.
     pub fn as_str(&self) -> Option<&'call str> {
         match self {
@@ -690,7 +697,7 @@ pub enum NewObject {
     Record(Vec<(Value, Value)>),
     /// A long text and its lengths.
     LongText {
-        text: String,
+        text: super::TextBytes,
         summary: crate::heap::TextSummary,
     },
     /// A function reference by a name past [`ShortText::MAX`] bytes.
@@ -710,7 +717,10 @@ impl NewObject {
     /// The long text `text`, its lengths counted.
     pub fn long_text(text: String) -> Self {
         let summary = crate::heap_values::text_summary(&text);
-        Self::LongText { text, summary }
+        Self::LongText {
+            text: text.into(),
+            summary,
+        }
     }
 
     /// The value that names the object, by the slot it takes.
@@ -872,7 +882,12 @@ impl<'call> Nursery<'call> {
     /// A text whose lengths `summary` gives, as [`Self::text`] makes it:
     /// what a native that joins texts of known lengths builds without
     /// counting its bytes again.
-    pub fn text_of(&mut self, text: String, summary: crate::heap::TextSummary) -> Value {
+    pub fn text_of(
+        &mut self,
+        text: impl Into<super::TextBytes>,
+        summary: crate::heap::TextSummary,
+    ) -> Value {
+        let text = text.into();
         match ShortText::new(&text) {
             Some(short) => Value::Text(short),
             None => self.allocate(NewObject::LongText { text, summary }),

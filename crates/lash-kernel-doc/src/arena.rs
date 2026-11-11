@@ -23,6 +23,9 @@
 //! value a native sees carries a release protocol.
 
 pub mod native;
+mod text_buffer;
+
+pub use text_buffer::{SharedText, TextBytes};
 
 use crate::number::{Float, Integer};
 
@@ -616,19 +619,32 @@ impl Table {
 /// its whole payload; decoding a chunk that names an index page gives one
 /// cold chunk per child, and one that names a leaf gives its text, so a
 /// read decodes only the leaves it reaches and their index path. A text a
-/// region's accumulator built holds spare capacity past its bytes, which
-/// the next concatenation of it grows into (FIG-6795).
+/// concatenation built is one resident chunk on a shared append buffer
+/// ([`TextBytes::Shared`]).
 #[derive(Debug)]
 pub struct LongText {
     pub summary: TextSummary,
-    pub chunks: Box<[Chunk<String>]>,
+    pub chunks: Box<[Chunk<TextBytes>]>,
 }
 
 impl LongText {
-    /// Whether a concatenation took the text's storage: it keeps its
-    /// summary and holds no chunk, and nothing may read its bytes.
-    pub fn moved(&self) -> bool {
-        self.chunks.is_empty() && self.summary.utf8_bytes != 0
+    /// The text's shared bytes, when it is one resident chunk on a shared
+    /// append buffer.
+    #[inline]
+    pub fn shared(&self) -> Option<&SharedText> {
+        match &*self.chunks {
+            [Chunk::Resident(bytes)] => bytes.shared(),
+            _ => None,
+        }
+    }
+
+    /// Lets no later append extend the buffer the text is on: it has a
+    /// durable identity, a head or a page form.
+    #[inline]
+    pub fn freeze(&self) {
+        if let Some(shared) = self.shared() {
+            shared.freeze();
+        }
     }
 }
 

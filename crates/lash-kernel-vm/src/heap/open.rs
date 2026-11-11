@@ -255,7 +255,7 @@ pub(crate) fn body(arena: &mut Arena, record: &Record, heads: &Heads) -> Result<
         Record::Timestamp(nanoseconds) => Body::Timestamp(nanoseconds.clone()),
         Record::LongText(text) => Body::LongText(LongText {
             summary: lash_kernel_doc::heap_values::text_summary(text),
-            chunks: Box::new([Chunk::Resident(text.to_string())]),
+            chunks: Box::new([Chunk::Resident(text.to_string().into())]),
         }),
         Record::Bytes(bytes) => Body::Bytes(Bytes {
             len: bytes.len() as u64,

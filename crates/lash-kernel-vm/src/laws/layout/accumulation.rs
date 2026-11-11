@@ -343,3 +343,89 @@ fn original_text_body_prefixes() {
         }
     }
 }
+
+/// K-LIB-007 (FIG-7688): a text appended at the shared tip of its left
+/// operand's buffer leaves every other text its bytes. An alias of the
+/// left, a second append from the same left, a closure's capture, the
+/// right operand a native borrows from the left's own buffer, and an
+/// append after a park from the version its checkpoint retains each read
+/// what a copy would give them, warm, at every slice, and sealed and
+/// reopened cold at every stop.
+#[test]
+fn a_shared_tip_append_leaves_every_other_text_its_bytes() {
+    let source = scalar_document(
+        r#"let s = law.native_concat("abcdefghijklmnop", "q") set s = law.native_concat(s, "r") let alias = s let pair = law.native_concat(s, s) let a = law.native_concat(alias, "1") let b = law.native_concat(alias, "2") let keep = fn() { return alias } set s = law.native_concat(pair, "!") do perform 0("middle") as Any let c = law.native_concat(alias, "3") set s = law.native_concat(s, "?") print (alias, a, b, apply keep()) return (s, pair, c)"#,
+    );
+    let alias = "abcdefghijklmnopqr";
+    let pair = format!("{alias}{alias}");
+    let texts = |texts: &[&str]| {
+        Datum::Tuple(
+            texts
+                .iter()
+                .map(|text| Datum::Text((*text).into()))
+                .collect(),
+        )
+    };
+    let printed = vec![texts(&[
+        alias,
+        &format!("{alias}1"),
+        &format!("{alias}2"),
+        alias,
+    ])];
+    let end = format!(
+        "finished {:?}",
+        texts(&[&format!("{pair}!?"), &pair, &format!("{alias}3")])
+    );
+    let roomy = super::super::embedder::ROOMY;
+    for slice in [u64::MAX, 1, 2, 5] {
+        let (got, prints, ..) = run_selected(&source, true, slice, roomy, false, true);
+        assert_eq!((&got, &prints), (&end, &printed), "warm at slice {slice}");
+    }
+    for slice in [u64::MAX, 1, 3] {
+        let (got, prints, ..) = run_selected(&source, true, slice, roomy, true, true);
+        assert_eq!((&got, &prints), (&end, &printed), "cold at slice {slice}");
+    }
+}
+
+/// K-LIB-007 / K-CHG-001 (FIG-7688): a chain of appends at the shared tip
+/// holds and charges what the copying path does. Prepending to the same
+/// texts never finds a tip, so it copies at every step; statement by
+/// statement both hold the same memory and record the same charge, and
+/// every memory bound refuses both at the same stop and total.
+#[test]
+fn a_shared_tip_chain_holds_and_refuses_as_a_copying_one() {
+    let chain = |step: &str| {
+        scalar_document(&format!(
+            r#"let s = "abcdefghijklmnop" let i = 0 while flat.lt(i, 40) {{ set s = {step} set i = flat.add(i, 1) }} do perform 0("built") as Any return i"#
+        ))
+    };
+    let (append, prepend) = (
+        chain(r#"law.native_concat(s, "é😀")"#),
+        chain(r#"law.native_concat("é😀", s)"#),
+    );
+    let observed = |source: &str, slice, bounds| {
+        let (end, _, stops, _, _, events) = run_selected(source, true, slice, bounds, false, true);
+        (end, stops, events)
+    };
+    let roomy = super::super::embedder::ROOMY;
+    let whole = observed(&append, 1, roomy);
+    assert_eq!(
+        whole,
+        observed(&prepend, 1, roomy),
+        "statement by statement"
+    );
+    let peak = whole
+        .1
+        .iter()
+        .map(|(_, meters)| meters.memory)
+        .max()
+        .unwrap();
+    for memory in (peak / 2..=peak + 64).step_by(16) {
+        let bounds = Bounds { memory, ..roomy };
+        assert_eq!(
+            observed(&append, u64::MAX, bounds),
+            observed(&prepend, u64::MAX, bounds),
+            "memory {memory}"
+        );
+    }
+}
