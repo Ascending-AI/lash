@@ -214,6 +214,9 @@ impl Lifter<'_> {
             && self.is(function, "list.len")
             && let [target] = args.as_slice()
         {
+            if self.style.exact && self.reads_binding(target) {
+                return Ok(constructor("list.length", vec![self.expr(target)?]));
+            }
             return Ok(Expr::Field(
                 Box::new(self.expr(target)?),
                 "length".to_owned(),
@@ -907,8 +910,13 @@ impl Lifter<'_> {
                     .strip_prefix("ts.property.")
                     .or_else(|| name.strip_prefix("ts.member."))
                     .unwrap_or_else(|| unreachable!("a member helper"));
+                let exact = property == "length" && self.style.exact && self.reads_binding(target);
                 let target = self.expr(target)?;
-                Ok(Expr::Field(Box::new(target), property.to_owned()))
+                Ok(if exact {
+                    constructor("value.length", vec![target])
+                } else {
+                    Expr::Field(Box::new(target), property.to_owned())
+                })
             }
             ("ts.get_numeric" | "ts.get_computed" | "ts.text_index", [target, key]) => {
                 let target = self.expr(target)?;

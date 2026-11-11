@@ -475,8 +475,8 @@ pub fn materialize_workflow(
         Expr::Literal(Literal::Function(wrapper_id)),
     )]);
     let used_helpers: BTreeSet<_> = document
-        .units()
-        .flat_map(|(_, block)| Node::Block(block).functions_within())
+        .referenced_functions()
+        .into_iter()
         .filter(|id| helpers.contains(id))
         .collect();
     document.library.0.extend(used_helpers);

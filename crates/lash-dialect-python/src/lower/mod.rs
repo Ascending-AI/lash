@@ -44,7 +44,7 @@ use lash_kernel_doc::{
 
 use ruff_python_ast::{self as ast};
 use ruff_text_size::{Ranged, TextRange};
-use {lash_kernel_value::FunctionId, lash_kernel_value::FunctionName, lash_kernel_value::Name};
+use {lash_kernel_value::FunctionId, lash_kernel_value::Name};
 
 use crate::diagnostics::{self, Code};
 use crate::exceptions::Classes;
@@ -195,7 +195,6 @@ pub(crate) struct Lowerer<'a> {
     imports: lash_kernel_dialect::authoring::Imports,
     local_functions: BTreeMap<FunctionId, lash_kernel_doc::FunctionDefinition>,
     local_notes: BTreeMap<FunctionId, Vec<Note>>,
-    used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
     taken: HashSet<String>,
     scopes: Vec<Scope>,
@@ -328,7 +327,6 @@ pub(crate) fn lower(
         imports: lash_kernel_dialect::authoring::Imports::default(),
         local_functions: BTreeMap::new(),
         local_notes: BTreeMap::new(),
-        used: BTreeMap::new(),
         private: BTreeSet::new(),
         taken,
         scopes: vec![Scope {
@@ -408,9 +406,10 @@ pub(crate) fn lower(
         .requires
         .kernels
         .insert(lash_kernel_doc::KERNEL_VERSION);
+    let referenced = document.referenced_functions();
     lash_kernel_dialect::authoring::include_library_dependencies(
         &mut document,
-        lowerer.used.keys().copied(),
+        referenced,
         environment.library,
     )
     .map_err(|message| diagnostics::unplaced(Code::LibraryMissing, message))?;
@@ -962,10 +961,6 @@ impl Lowerer<'_> {
         };
         #[cfg(test)]
         inventory::record(name, function);
-        let listed = FunctionName::new(name).map_err(|error| {
-            diagnostics::unplaced(Code::LibraryMissing, format!("`{name}`: {error}"))
-        })?;
-        self.used.insert(function, listed);
         Ok(function)
     }
 

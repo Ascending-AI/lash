@@ -192,6 +192,35 @@ impl Document {
             }))
     }
 
+    /// Every function this document's units and exports name: what its
+    /// lowering kept, never what a lowering resolved and then discarded.
+    pub fn referenced_functions(&self) -> BTreeSet<FunctionId> {
+        let mut found: BTreeSet<FunctionId> = self
+            .units()
+            .flat_map(|(_, block)| Node::Block(block).functions_within())
+            .collect();
+        let mut exported = Vec::new();
+        for offered in self.exports.values() {
+            match offered {
+                Export::Function(function) => exported.push(function),
+                Export::Type(ty) => {
+                    found.insert(ty.checker);
+                    exported.extend(ty.members.values().map(|member| match member {
+                        TypeMember::Static(function)
+                        | TypeMember::Method(function)
+                        | TypeMember::Property(function) => function,
+                    }));
+                }
+                Export::Error { .. } => {}
+            }
+        }
+        for function in exported {
+            found.insert(function.function);
+            found.extend(function.convention.functions().into_iter().copied());
+        }
+        found
+    }
+
     /// Every statement and block of this document's own units with the
     /// node itself, in [`Site`] order. A node's index in the answer is its
     /// ordinal: [`site_ordinals`](Self::site_ordinals) ranks this walk's

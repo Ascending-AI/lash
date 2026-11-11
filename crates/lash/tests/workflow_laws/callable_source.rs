@@ -889,14 +889,15 @@ async fn outcome(
     Err((kind, failure.message))
 }
 
-/// FIG-7697: a callable that reads a captured list by index, or calls a
-/// captured map's or set's methods, or indexes a captured list it
-/// reassigns, publishes: its printed source re-imports to the same kernel
-/// document (publication proves it), and both answer alike. The printed
-/// operations keep their own checks: a list read of an edited fill that is
-/// no list fails the list's kind check rather than reading the text, and a
-/// method of a fill of another kind fails as that method call of an
-/// ordinary binding does.
+/// FIG-7697, FIG-7707: a callable that reads a captured list by a literal
+/// or computed index or its length, maps over it, calls a captured map's or
+/// set's methods, indexes a captured list it reassigns, or reads a captured
+/// text's length or record's field, publishes: its printed source
+/// re-imports to the same kernel document (publication proves it), and
+/// both answer alike. The printed operations keep their own checks: a list
+/// read or length of an edited fill that is no list fails the list's kind
+/// check rather than reading the text, and a method of a fill of another
+/// kind fails as that method call of an ordinary binding does.
 #[tokio::test]
 async fn published_callables_capturing_collections_print_their_exact_operations() {
     let (core, pin, base, packages, request) = super::packages::capturing_views().await;
@@ -906,7 +907,14 @@ export async function ships(): Promise<string> {
     const m = new Map([["a", 1]]);
     const s = new Set([1]);
     let ys = [5];
+    const t = "abc";
+    const r = {a: 5, b: "z"};
     const listed = async (x: number): Promise<number> => x + xs[1];
+    const indexed = async (x: number): Promise<number> => xs[x];
+    const long = async (x: number): Promise<number> => x + xs.length;
+    const scaled = async (x: number): Promise<unknown> => xs.map((v: number) => v + x);
+    const measured = async (x: number): Promise<number> => x + t.length;
+    const fielded = async (x: number): Promise<number> => x + r.a;
     const mapped = async (key: string): Promise<unknown> => { m.set(key, 2); return m.has(key) ? m.get(key) : 0; };
     const sets = async (x: number): Promise<boolean> => { s.add(x); return s.has(x); };
     const reassigned = async (x: number): Promise<number> => { ys = [x, x + 1]; return ys[1]; };
@@ -914,6 +922,11 @@ export async function ships(): Promise<string> {
     await tools.capture({value: "collection-mapped", nested: {fact: mapped}});
     await tools.capture({value: "collection-sets", nested: {fact: sets}});
     await tools.capture({value: "collection-reassigned", nested: {fact: reassigned}});
+    await tools.capture({value: "collection-indexed", nested: {fact: indexed}});
+    await tools.capture({value: "collection-long", nested: {fact: long}});
+    await tools.capture({value: "collection-scaled", nested: {fact: scaled}});
+    await tools.capture({value: "collection-measured", nested: {fact: measured}});
+    await tools.capture({value: "collection-fielded", nested: {fact: fielded}});
     return "shipped";
 }
 "#;
@@ -930,6 +943,19 @@ export async function ships(): Promise<string> {
             serde_json::json!({"x": 3}),
             serde_json::json!(4),
         ),
+        ("indexed", serde_json::json!({"x": 0}), serde_json::json!(7)),
+        ("long", serde_json::json!({"x": 1}), serde_json::json!(3)),
+        (
+            "scaled",
+            serde_json::json!({"x": 1}),
+            serde_json::json!([8, 9]),
+        ),
+        (
+            "measured",
+            serde_json::json!({"x": 1}),
+            serde_json::json!(4),
+        ),
+        ("fielded", serde_json::json!({"x": 1}), serde_json::json!(6)),
     ];
     let names: Vec<_> = cases.iter().map(|(name, ..)| *name).collect();
     let (publication, origin, functions) =
@@ -1012,6 +1038,20 @@ export async function ships(): Promise<string> {
         run_source(
             edited("listed", "[7, 8]", "\"78\""),
             "listed-text",
+            serde_json::json!({"x": 1}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
+    );
+    // `xs.length` of a text would be its length (2); the list's length
+    // takes the list's own read, whose kind check fails.
+    assert_eq!(
+        run_source(
+            edited("long", "[7, 8]", "\"78\""),
+            "long-text",
             serde_json::json!({"x": 1}),
         )
         .await,

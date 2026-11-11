@@ -651,12 +651,21 @@ impl Lifter<'_> {
         {
             args.push(self.expr(context)?);
         }
-        Ok(Some(Expr::Call(
-            Box::new(Expr::Field(
-                Box::new(self.expr(receiver)?),
-                method.to_owned(),
-            )),
-            args,
-        )))
+        let exact = self.style.exact && self.reads_binding(receiver);
+        let receiver = self.expr(receiver)?;
+        Ok(Some(if exact {
+            super::expressions::constructor(
+                "list.method",
+                [receiver, Expr::Text(method.to_owned())]
+                    .into_iter()
+                    .chain(args)
+                    .collect(),
+            )
+        } else {
+            Expr::Call(
+                Box::new(Expr::Field(Box::new(receiver), method.to_owned())),
+                args,
+            )
+        }))
     }
 }

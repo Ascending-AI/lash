@@ -19,7 +19,7 @@ use lash_kernel_doc::{
     Rhs, Stmt, TryStmt,
 };
 
-use {lash_kernel_value::FunctionId, lash_kernel_value::FunctionName, lash_kernel_value::Name};
+use {lash_kernel_value::FunctionId, lash_kernel_value::Name};
 
 use crate::adapter as ast;
 use crate::types::{Facts, PlainRecord, Ty};
@@ -261,7 +261,6 @@ pub(crate) struct Lowerer<'a> {
     pub(crate) buf: Buf,
     kernel_depth: usize,
     span: Option<SourceSpan>,
-    used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
     facts: Facts,
     /// The source names an exact operation spelling reads in place while
@@ -398,7 +397,6 @@ fn lower_beside_result(
         buf: Buf::default(),
         kernel_depth: 0,
         span: None,
-        used: BTreeMap::new(),
         private: BTreeSet::new(),
         in_place: BTreeSet::new(),
         facts: Facts::analyse(
@@ -505,9 +503,10 @@ fn lower_beside_result(
         .requires
         .kernels
         .insert(lash_kernel_doc::KERNEL_VERSION);
+    let referenced = document.referenced_functions();
     lash_kernel_dialect::authoring::include_library_dependencies(
         &mut document,
-        lowerer.used.keys().copied(),
+        referenced,
         environment.library,
     )
     .map_err(|message| Diagnostic::new(DiagnosticCode::LinkError, message, lowerer.span))?;
@@ -1077,9 +1076,6 @@ impl Lowerer<'_> {
         })?;
         #[cfg(test)]
         inventory::record(name, function);
-        if let Ok(qualified) = FunctionName::new(name) {
-            self.used.insert(function, qualified);
-        }
         Ok(function)
     }
 

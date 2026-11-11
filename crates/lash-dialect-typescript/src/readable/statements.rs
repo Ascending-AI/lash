@@ -377,30 +377,44 @@ impl Lifter<'_> {
         then_block: &[k::Stmt],
         else_block: &[k::Stmt],
     ) -> Lift<Option<Expr>> {
-        let Some(target) = self.kind_test(condition, "record") else {
-            return Ok(None);
+        // A record the source built takes no kind test: its unbranded test
+        // alone guards the direct read, and its brand the helper's.
+        let (target, direct, guarded, otherwise) = match self.kind_test(condition, "record") {
+            Some(target) => {
+                let [
+                    k::Stmt::If {
+                        condition: test,
+                        then_block: direct,
+                        else_block: guarded,
+                    },
+                ] = then_block
+                else {
+                    return Ok(None);
+                };
+                let values = crate::constructs::reads::UNBRANDED
+                    .recognize(test, &|id, name| self.is(id, name));
+                if values.is_none_or(|values| values.as_slice() != [target]) {
+                    return Ok(None);
+                }
+                (
+                    target,
+                    direct.as_slice(),
+                    guarded.as_slice(),
+                    Some(else_block),
+                )
+            }
+            None => {
+                let values = crate::constructs::reads::UNBRANDED
+                    .recognize(condition, &|id, name| self.is(id, name));
+                match values.as_deref() {
+                    Some([target]) => (*target, then_block, else_block, None),
+                    _ => return Ok(None),
+                }
+            }
         };
-        let [
-            k::Stmt::If {
-                condition: unbranded,
-                then_block: direct,
-                else_block: guarded,
-            },
-        ] = then_block
-        else {
-            return Ok(None);
-        };
-        let Some(values) =
-            crate::constructs::reads::UNBRANDED.recognize(unbranded, &|id, name| self.is(id, name))
-        else {
-            return Ok(None);
-        };
-        if values.as_slice() != [target] {
-            return Ok(None);
-        }
         // A name some built-in has is the record's own only where the record
         // holds a field by it; otherwise its built-in helper reads it.
-        let (direct, owned) = match direct.as_slice() {
+        let (direct, owned) = match direct {
             [
                 k::Stmt::If {
                     condition: k::Expr::Call { function, args },
@@ -448,12 +462,17 @@ impl Lifter<'_> {
                 held != field || !helper_args(Self::sets(otherwise, name))
             })
             || !helper_args(Self::sets(guarded, name))
-            || !helper_args(Self::sets(else_block, name))
+            || otherwise.is_some_and(|otherwise| !helper_args(Self::sets(otherwise, name)))
         {
             return Ok(None);
         }
+        let exact = otherwise.is_none() && self.style.exact && self.reads_binding(target);
         let target = self.expr(target)?;
-        Ok(Some(Expr::Field(Box::new(target), field.clone())))
+        Ok(Some(if exact {
+            super::expressions::constructor("record.field", vec![target, Expr::Text(field.clone())])
+        } else {
+            Expr::Field(Box::new(target), field.clone())
+        }))
     }
 
     /// `x[i]`: a list's element, a hole read as undefined, or any other

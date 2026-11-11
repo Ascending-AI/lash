@@ -69,7 +69,7 @@ member, such as `callable.invoke(views.heading, digits)`, calls that linked
 Import with exactly those operands. Neither form adds argument snapshots,
 adaptation, packing, a receiver, an exception operand or an await adapter.
 This preserves calls over frozen capture cells even when ordinary package
-call lowering would snapshot a mutable argument. TypeScript has two more exact operation spellings, used only when the
+call lowering would snapshot a mutable argument. TypeScript has more exact operation spellings, used only when the
 convenient spelling does not read back, as when a materialized capture cell
 replaces the binding whose facts the original lowering took.
 `list.element(xs, i)` is the element read of a list the source built: its
@@ -78,6 +78,14 @@ its own, so a receiver that is no list fails that bounds test's kind check.
 `callable.method(m, "name", ...args)` is `m.name(args)`. It reads the
 receiver binding, and each argument that names a binding, where the
 method's dispatch reads them, with no hold before later operands run.
+`list.method(xs, "name", ...args)` is that call on a list the source built:
+the list's own row (`map` over its slots, say) with no kind test, its
+receiver and named arguments read as `callable.method` reads them.
+`list.length(xs)` is a built list's length as a float, with no kind test, so
+a receiver that is no list fails the length read's own kind check.
+`record.field(r, "name")` is a built record's field: its own field where it is
+unbranded, else the read helper. `value.length(t)` is a built text's
+`length`: the length helper's read, a number (`text` is no reserved root).
 Each lowers to the nodes, helpers and evaluation order of the lowering it
 names, and keeps that operation's failures at its own site. Python's
 `@callable.direct` on a nested function preserves that bare closure ABI and its

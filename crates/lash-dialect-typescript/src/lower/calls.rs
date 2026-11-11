@@ -295,7 +295,7 @@ impl Lowerer<'_> {
     }
 
     /// The helper that reads `object.key` with JavaScript's meaning.
-    fn read_member(&mut self, object: &Operand, key: &Key, ty: Ty) -> Lowering<Operand> {
+    pub(super) fn read_member(&mut self, object: &Operand, key: &Key, ty: Ty) -> Lowering<Operand> {
         if let Key::Static(name) = key
             && self.table.properties.contains_key(name.as_str())
         {
@@ -1099,6 +1099,34 @@ impl Lowerer<'_> {
         if let Some(ty) = &proven {
             object.ty = ty.clone();
         }
+        self.call_method_on(
+            object,
+            proven.is_some(),
+            MethodCall {
+                property,
+                args,
+                span,
+                discard_result,
+                awaited,
+            },
+        )
+    }
+
+    /// `object.property(args)` on a receiver already read and held, whose
+    /// type is its own (`proven` when construction proved it).
+    pub(super) fn call_method_on(
+        &mut self,
+        object: Operand,
+        proven: bool,
+        call: MethodCall<'_>,
+    ) -> Lowering<Operand> {
+        let MethodCall {
+            property,
+            args,
+            span,
+            discard_result,
+            awaited,
+        } = call;
         let key = self.lower_key(property)?;
         let key = self.reference_key(&object, key)?;
         self.check_method(&object, &key, args, span)?;
@@ -1118,8 +1146,7 @@ impl Lowerer<'_> {
             }
         }
         if let Key::Static(name) = &key
-            && let Some(called) =
-                self.call_declared(&object, name, args, discard_result, proven.is_some())?
+            && let Some(called) = self.call_declared(&object, name, args, discard_result, proven)?
         {
             return Ok(called);
         }
@@ -1464,4 +1491,13 @@ pub(crate) fn position_guard(
     is_native: impl Fn(&lash_kernel_value::FunctionId, &str) -> bool,
 ) -> Option<&Expr> {
     reads::position(condition, &is_native)
+}
+
+/// A method call's own parts, apart from its receiver.
+pub(super) struct MethodCall<'a> {
+    pub(super) property: &'a ast::MemberProperty,
+    pub(super) args: &'a [ast::CallArg],
+    pub(super) span: SourceSpan,
+    pub(super) discard_result: bool,
+    pub(super) awaited: bool,
 }
