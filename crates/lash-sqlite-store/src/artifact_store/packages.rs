@@ -64,7 +64,9 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
                 let wanted = serde_json::to_string(&references.keys().collect::<Vec<_>>())
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
                 let missing: std::collections::BTreeSet<String> = tx
-                    .statement(held::HELD_SQL.held.select_unheld.sql())?
+                    // Held means reached: through the referrer's own edges,
+                    // or what those artifacts hold (FIG-7700).
+                    .statement(held::HELD_SQL.held.select_unreached.sql())?
                     .query_map(
                         params![
                             MODULE_ARTIFACT_NAMESPACE,
@@ -91,23 +93,16 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
         let referrer = referrer.clone();
         self.conn
             .call(move |tx| {
-                let held = tx
-                    .statement(
-                        artifact_sql()
-                            .edges
-                            .select_referrer_edges_in_namespace
-                            .sql(),
-                    )?
+                let held: bool = tx
+                    .statement(artifact_sql().dependencies.select_reaches_namespace.sql())?
                     .query_row(
                         params![
                             MODULE_ARTIFACT_NAMESPACE,
                             referrer.kind().as_str(),
                             referrer.canonical_id()
                         ],
-                        |_| Ok(()),
-                    )
-                    .optional()?
-                    .is_some();
+                        |row| row.get(0),
+                    )?;
                 Ok(!held && artifact_fenced_tx(tx, &referrer)?)
             })
             .await
@@ -137,19 +132,17 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
                 let sql = lash_store_sql::durable::packages::PackageStatements::render(
                     crate::schema_layout::MAIN,
                 );
-                let held = tx
-                    .statement(sql.labels_held.sql())?
+                let held: bool = tx
+                    .statement(artifact_sql().dependencies.select_reaches.sql())?
                     .query_row(
                         params![
                             MODULE_ARTIFACT_NAMESPACE,
-                            reference,
                             referrer.kind().as_str(),
-                            referrer.canonical_id()
+                            referrer.canonical_id(),
+                            reference
                         ],
-                        |_| Ok(()),
-                    )
-                    .optional()?
-                    .is_some();
+                        |row| row.get(0),
+                    )?;
                 if !held {
                     return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
                         artifact_ref: reference,

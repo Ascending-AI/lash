@@ -634,6 +634,9 @@ fn capture_missing(effect: &str, tool: &str) -> String {
     }
 }
 
+#[path = "process_env_stored.rs"]
+pub mod stored;
+
 #[cfg(test)]
 #[path = "process_env_tests.rs"]
 mod tests;

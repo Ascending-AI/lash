@@ -1,7 +1,7 @@
 //! The artifact family: immutable artifact bytes and the referrer edges that
 //! keep them alive (ADR 0113).
 //!
-//! Five tables. [`blobs`] is the content-addressed byte store, shared with
+//! Six tables. [`blobs`] is the content-addressed byte store, shared with
 //! checkpoint storage — every checkpoint root and component lives there too,
 //! which is why a blob delete is always conditional on every other rooting
 //! relation. [`refs`] is SQLite's pointer table from a namespaced artifact
@@ -10,7 +10,8 @@
 //! [`referrer_edges`] is the exact referrer-edge set — the edge *is* the
 //! liveness fact, never a maintained count — [`referrer_fences`] is the
 //! permanent end of every referrer kind, and [`cleanup_obligations`] is the
-//! cleanup each ended or guarded referrer still owes.
+//! cleanup each ended or guarded referrer still owes. [`dependency_edges`]
+//! is what an artifact itself keeps alive: retention only, never a referrer.
 //!
 //! [`lash_vm_artifacts`] is where PostgreSQL keeps those inline bytes. It has
 //! no SQLite half, so it owns its name and its column lists here and every
@@ -19,6 +20,7 @@
 
 pub mod blobs;
 pub mod cleanup_obligations;
+pub mod dependency_edges;
 pub mod lash_vm_artifacts;
 pub mod referrer_edges;
 pub mod referrer_fences;

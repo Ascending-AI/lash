@@ -17,7 +17,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 37
+version 38
 table lash_abandoned_consumer_holds
   column abandoned_at_ms bigint not-null
   column hold_key text not-null
@@ -68,6 +68,14 @@ table lash_artifact_cleanup_obligations
   column referrer_kind text not-null
   unique (obligation_id)
   primary-key (referrer_kind, referrer_id)
+table lash_artifact_dependency_edges
+  column artifact_ref text not-null
+  column holder_namespace text not-null
+  column holder_ref text not-null
+  column namespace text not-null
+  primary-key (holder_namespace, holder_ref, namespace, artifact_ref)
+  foreign-key (holder_namespace, holder_ref) references lash_lash_vm_artifacts (namespace, artifact_ref) on delete cascade
+  foreign-key (namespace, artifact_ref) references lash_lash_vm_artifacts (namespace, artifact_ref) on delete no action
 table lash_artifact_referrer_edges
   column artifact_ref text not-null
   column namespace text not-null
@@ -252,6 +260,8 @@ table lash_graph_nodes
 table lash_lash_vm_artifacts
   column artifact_bytes bytea nullable
   column artifact_ref text not-null
+  column body_at integer nullable
+  column body_ref text nullable
   column graph_ref bigint nullable
   column namespace text not-null
   column storage_kind smallint not-null

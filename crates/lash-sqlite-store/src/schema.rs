@@ -444,11 +444,19 @@ CREATE TABLE IF NOT EXISTS attachment_blobs (
     stored_at_ms  INTEGER NOT NULL
 );
 
+-- An environment head's blob is its bytes without the body span, which
+-- splices back from body_ref (namespace process_env_body) at body_at
+-- (FIG-7700). Every other row has neither.
 CREATE TABLE IF NOT EXISTS artifact_refs (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
     blob_ref     INTEGER NOT NULL REFERENCES blobs(id),
-    PRIMARY KEY (namespace, artifact_ref)
+    body_ref     TEXT,
+    body_at      INTEGER,
+    PRIMARY KEY (namespace, artifact_ref),
+    CONSTRAINT ck_artifact_refs_body CHECK (
+        (body_ref IS NULL AND body_at IS NULL)
+        OR (namespace = 'process_execution_env' AND body_ref IS NOT NULL AND body_at >= 0))
 );
 
 -- Exact referrer edges for immutable artifacts. The edge is the liveness fact;
@@ -485,6 +493,22 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 
 CREATE INDEX IF NOT EXISTS idx_artifact_referrer_edges_referrer
     ON artifact_referrer_edges(referrer_kind, referrer_id);
+
+-- What an artifact itself keeps alive (FIG-7700): a head its body, a body
+-- its closure. Retention only, never a referrer. Deleting the holder deletes
+-- its edges; a held artifact cannot be deleted while an edge names it.
+CREATE TABLE IF NOT EXISTS artifact_dependency_edges (
+    namespace        TEXT NOT NULL,
+    artifact_ref     TEXT NOT NULL,
+    holder_namespace TEXT NOT NULL,
+    holder_ref       TEXT NOT NULL,
+    PRIMARY KEY (holder_namespace, holder_ref, namespace, artifact_ref),
+    FOREIGN KEY (holder_namespace, holder_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE,
+    FOREIGN KEY (namespace, artifact_ref) REFERENCES artifact_refs(namespace, artifact_ref)
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS idx_artifact_dependency_edges_held
+    ON artifact_dependency_edges(namespace, artifact_ref);
 
 CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
     referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (length(referrer_kind) > 0),

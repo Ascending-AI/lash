@@ -16,8 +16,6 @@ crate::statements! {
              VALUES (?1, ?2, ?3, ?4) ON CONFLICT (namespace, package_ref, label_digest) DO NOTHING";
         labels = "SELECT labels_json FROM package_labels
              WHERE namespace = ?1 AND package_ref = ?2 ORDER BY label_digest";
-        labels_held = "SELECT artifact_ref FROM artifact_referrer_edges
-             WHERE namespace = ?1 AND artifact_ref = ?2 AND referrer_kind = ?3 AND referrer_id = ?4";
         /// Every node whose lease is live at `?1`, with its decoded format
         /// sets as a JSON array and its capabilities as JSON, by node.
         live_nodes = "SELECT n.node_id, n.formats_json, n.capabilities_json

@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 37.
+-- lash-postgres-store schema, component version 38.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -786,18 +786,28 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_retired_owners (
 
 -- An artifact is its bytes (storage_kind 0) or, through the graph bridge, a
 -- graph node its namespace codec validates (storage_kind 1), never both
--- (FIG-5887 §7). Only the bridge's graph_ref roots graph material.
+-- (FIG-5887 §7). Only the bridge's graph_ref roots graph material. An
+-- environment head (storage_kind 2) is its bytes without the body span,
+-- which splices back from body_ref (namespace process_env_body) at body_at
+-- (FIG-7700).
 CREATE TABLE IF NOT EXISTS lash_lash_vm_artifacts (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
     storage_kind SMALLINT NOT NULL CONSTRAINT ck_lash_vm_artifacts_storage_kind
-        CHECK (storage_kind IN (0, 1)),
+        CHECK (storage_kind IN (0, 1, 2)),
     artifact_bytes BYTEA,
     graph_ref BIGINT REFERENCES lash_blobs(id) ON DELETE RESTRICT,
+    body_ref TEXT,
+    body_at INTEGER,
     PRIMARY KEY (namespace, artifact_ref),
     CONSTRAINT ck_lash_vm_artifacts_storage CHECK (
-        (storage_kind = 0 AND artifact_bytes IS NOT NULL AND graph_ref IS NULL)
-        OR (storage_kind = 1 AND artifact_bytes IS NULL AND graph_ref IS NOT NULL))
+        (storage_kind = 0 AND artifact_bytes IS NOT NULL AND graph_ref IS NULL
+            AND body_ref IS NULL AND body_at IS NULL)
+        OR (storage_kind = 1 AND artifact_bytes IS NULL AND graph_ref IS NOT NULL
+            AND body_ref IS NULL AND body_at IS NULL)
+        OR (storage_kind = 2 AND namespace = 'process_execution_env'
+            AND artifact_bytes IS NOT NULL AND graph_ref IS NULL
+            AND body_ref IS NOT NULL AND body_at BETWEEN 0 AND octet_length(artifact_bytes)))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_lash_vm_artifacts_graph_ref
     ON lash_lash_vm_artifacts (graph_ref) WHERE graph_ref IS NOT NULL;
@@ -824,6 +834,20 @@ CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
 );
 CREATE INDEX IF NOT EXISTS idx_lash_artifact_referrer_edges_referrer
     ON lash_artifact_referrer_edges(referrer_kind, referrer_id);
+-- What an artifact itself keeps alive (FIG-7700): a head its body, a body
+-- its closure. Retention only, never a referrer. Deleting the holder deletes
+-- its edges; a held artifact cannot be deleted while an edge names it.
+CREATE TABLE IF NOT EXISTS lash_artifact_dependency_edges (
+    namespace TEXT NOT NULL,
+    artifact_ref TEXT NOT NULL,
+    holder_namespace TEXT NOT NULL,
+    holder_ref TEXT NOT NULL,
+    PRIMARY KEY (holder_namespace, holder_ref, namespace, artifact_ref),
+    FOREIGN KEY (holder_namespace, holder_ref) REFERENCES lash_lash_vm_artifacts(namespace, artifact_ref) ON DELETE CASCADE,
+    FOREIGN KEY (namespace, artifact_ref) REFERENCES lash_lash_vm_artifacts(namespace, artifact_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_lash_artifact_dependency_edges_held
+    ON lash_artifact_dependency_edges(namespace, artifact_ref);
 CREATE TABLE IF NOT EXISTS lash_referrer_fences (
     referrer_kind TEXT NOT NULL CONSTRAINT ck_referrer_fences_kind CHECK (referrer_kind IN ('environment_version', 'frame_environment', 'process_record', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload', 'source')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_referrer_fences_id CHECK (char_length(referrer_id) > 0),
@@ -888,7 +912,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- the fleet epoch, the transactional clock rows, and the catalog identity.
 -- `gen_random_uuid()` is core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version, min_reader)
-VALUES ('lash-postgres-store', 37, 37)
+VALUES ('lash-postgres-store', 38, 38)
 ON CONFLICT (component) DO NOTHING;
 
 -- The fleet epoch starts at the floor of the installing build's writable
@@ -2811,6 +2835,8 @@ DECLARE
     v_refs jsonb := jsonb_build_array(jsonb_build_array(p_kind, p_id));
     v_plans jsonb := '[]'::jsonb;
     v_artifacts jsonb;
+    v_locked jsonb;
+    v_round jsonb;
     v_checks jsonb;
     v_body jsonb;
     item jsonb;
@@ -2841,8 +2867,18 @@ BEGIN
         JOIN jsonb_array_elements(v_refs) ref ON edge.referrer_kind = ref.value->>0
             AND edge.referrer_id = ref.value->>1
         WHERE edge.namespace = ANY(p_namespaces)) named;
+    -- What the named artifacts hold, transitively, joins their one sorted
+    -- lock acquisition: deleting them can free it. A holder's dependency
+    -- edges are immutable while it lives (FIG-7700).
+    WITH RECURSIVE reach(namespace, artifact_ref) AS (
+        SELECT named.value->>0, named.value->>1 FROM jsonb_array_elements(v_artifacts) named
+        UNION
+        SELECT dep.namespace, dep.artifact_ref FROM lash_artifact_dependency_edges dep
+        JOIN reach ON dep.holder_namespace = reach.namespace AND dep.holder_ref = reach.artifact_ref)
+    SELECT COALESCE(jsonb_agg(jsonb_build_array(namespace, artifact_ref)
+        ORDER BY namespace, artifact_ref), '[]'::jsonb) INTO v_locked FROM reach;
     FOR held IN SELECT value->>0 AS namespace, value->>1 AS artifact_ref
-        FROM jsonb_array_elements(v_artifacts) ORDER BY namespace, artifact_ref LOOP
+        FROM jsonb_array_elements(v_locked) ORDER BY namespace, artifact_ref LOOP
         PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:' || held.namespace || ':' || held.artifact_ref, 0));
     END LOOP;
     -- This statement starts after every lock wait. Include all remaining
@@ -2858,14 +2894,27 @@ BEGIN
         DELETE FROM lash_artifact_referrer_edges edge USING jsonb_array_elements(v_refs) ref
             WHERE edge.referrer_kind = ref.value->>0 AND edge.referrer_id = ref.value->>1
                 AND edge.namespace = ANY(p_namespaces);
-        WITH gone AS (
-            DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_artifacts) named
-            WHERE artifact.namespace = named.value->>0 AND artifact.artifact_ref = named.value->>1
-                AND NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges edge
-                    WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
-            RETURNING artifact.graph_ref)
-        SELECT ARRAY(SELECT node.hash FROM gone JOIN lash_blobs AS node ON node.id = gone.graph_ref)
-            INTO v_frontier;
+        -- Delete what nothing names or holds, then, round by round, what a
+        -- deleted artifact held that nothing keeps now.
+        v_frontier := ARRAY[]::BYTEA[];
+        v_round := v_artifacts;
+        WHILE jsonb_array_length(v_round) > 0 LOOP
+            WITH gone AS (
+                DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_round) named
+                WHERE artifact.namespace = named.value->>0 AND artifact.artifact_ref = named.value->>1
+                    AND NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges edge
+                        WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
+                    AND NOT EXISTS (SELECT 1 FROM lash_artifact_dependency_edges dep
+                        WHERE dep.namespace = artifact.namespace AND dep.artifact_ref = artifact.artifact_ref)
+                RETURNING artifact.namespace, artifact.artifact_ref, artifact.graph_ref),
+            freed AS (
+                SELECT DISTINCT dep.namespace, dep.artifact_ref FROM gone
+                JOIN lash_artifact_dependency_edges dep ON dep.holder_namespace = gone.namespace
+                    AND dep.holder_ref = gone.artifact_ref)
+            SELECT v_frontier || ARRAY(SELECT node.hash FROM gone JOIN lash_blobs AS node ON node.id = gone.graph_ref),
+                COALESCE((SELECT jsonb_agg(jsonb_build_array(namespace, artifact_ref)) FROM freed), '[]'::jsonb)
+                INTO v_frontier, v_round;
+        END LOOP;
         -- A bridged artifact's row was its graph node's root: peel it
         -- (FIG-5949).
         PERFORM lash_graph_retire((v_frontier), (4096), (p_now));

@@ -103,6 +103,7 @@ pub const TABLES: &[&str] = &[
     durable::packages::DEBTS_TABLE,
     artifact::blobs::TABLE,
     artifact::cleanup_obligations::TABLE,
+    artifact::dependency_edges::TABLE,
     artifact::lash_vm_artifacts::TABLE,
     artifact::referrer_edges::TABLE,
     artifact::referrer_fences::TABLE,

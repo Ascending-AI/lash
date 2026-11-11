@@ -53,13 +53,26 @@ lash_store_sql::statements! {
          ORDER BY COALESCE(definition_json, '') COLLATE \"C\", COALESCE(env_ref, '') COLLATE \"C\", MIN(process_id)";
 
         /// Environment bytes by reference without executable reconstruction.
-        select_environment_bytes = "SELECT artifact_bytes FROM lash_vm_artifacts WHERE namespace = ?1 AND artifact_ref = ?2";
+        /// A head's body is spliced back in the same snapshot (FIG-7700).
+        select_environment_bytes = "SELECT CASE WHEN a.storage_kind = 2
+                 THEN substr(a.artifact_bytes, 1, a.body_at) || body.artifact_bytes || substr(a.artifact_bytes, a.body_at + 1)
+                 ELSE a.artifact_bytes END
+             FROM lash_vm_artifacts a
+             LEFT JOIN lash_vm_artifacts body ON a.storage_kind = 2
+               AND body.namespace = 'process_env_body' AND body.artifact_ref = a.body_ref
+             WHERE a.namespace = ?1 AND a.artifact_ref = ?2";
 
         /// A retained process and its environment bytes, or its prune tombstone, atomically.
-        select_authority = "SELECT (substr(p.start_json, 1, length(p.start_json) - 1) || ',' || substr(p.execution_json, 2, length(p.execution_json) - 2) || ',' || substr(p.lifecycle_json, 2)) AS record_json, a.artifact_bytes, NULL::text, NULL::bigint
+        select_authority = "SELECT (substr(p.start_json, 1, length(p.start_json) - 1) || ',' || substr(p.execution_json, 2, length(p.execution_json) - 2) || ',' || substr(p.lifecycle_json, 2)) AS record_json,
+                 CASE WHEN a.storage_kind = 2
+                     THEN substr(a.artifact_bytes, 1, a.body_at) || body.artifact_bytes || substr(a.artifact_bytes, a.body_at + 1)
+                     ELSE a.artifact_bytes END,
+                 NULL::text, NULL::bigint
              FROM processes p
              LEFT JOIN lash_vm_artifacts a ON a.namespace = ?2
                AND a.artifact_ref = p.execution_json::jsonb #>> '{input,launch,env}'
+             LEFT JOIN lash_vm_artifacts body ON a.storage_kind = 2
+               AND body.namespace = 'process_env_body' AND body.artifact_ref = a.body_ref
              WHERE p.process_id = ?1
              UNION ALL
              SELECT NULL, NULL, terminal_label, pruned_at_ms

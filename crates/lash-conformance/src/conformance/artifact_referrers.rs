@@ -685,6 +685,159 @@ where
     );
 }
 
+/// An environment whose packages and authored roots reach a published
+/// package, a Link and its Document, all first held by `configured`.
+struct OriginEnv {
+    configured: ArtifactReferrer,
+    document: lash_kernel_value::names::DocumentId,
+    package: lash_core_store::packages::PackageRecord,
+    publication: lash_vocabulary::package::PublicationRecord,
+    key: lash_vocabulary::package::PublicationKey,
+    authored: lash_core_store::packages::LinkRecord,
+    accepted: lash_core_store::tool_surface::RecordedPackages,
+    env_ref: lash_core::ProcessEnvRef,
+    bytes: Vec<u8>,
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture validates each store step"
+)]
+async fn origin_env(
+    handles: &crate::fused_artifact_store::ArtifactStoreHandles,
+    snapshot_only: bool,
+) -> OriginEnv {
+    use lash_core_store::packages::{LinkRecord, PackageRecord};
+    use {
+        lash_kernel_value::names::*, lash_kernel_value::package::*,
+        lash_vocabulary::claims::RegistryKind, lash_vocabulary::package::*,
+    };
+
+    let (configured, configured_claim) = pin_claim();
+    let document = DocumentId::from_bytes([73; 32]);
+    handles
+        .artifacts
+        .publish_module_artifact(&configured_claim, &document.to_string(), b"origin document")
+        .await
+        .expect("document");
+    let link = Link {
+        helper_fills: Default::default(),
+        document,
+        fills: Default::default(),
+    };
+    let link = LinkRecord {
+        id: link.identity(),
+        link,
+    };
+    handles
+        .packages
+        .put_link(&configured_claim, &link, &[])
+        .await
+        .expect("Link");
+    let package = Package {
+        path: PackagePath::parse("law").expect("path"),
+        members: [(
+            Segment::new("run").expect("segment"),
+            Member {
+                visibility: Visibility::Public,
+                kind: MemberKind::Export {
+                    link: link.id,
+                    export: ExportName {
+                        name: Name::new("run"),
+                        member: None,
+                    },
+                },
+            },
+        )]
+        .into(),
+    };
+    let package = PackageRecord {
+        id: package.identity(),
+        package,
+    };
+    handles
+        .packages
+        .put_package(&configured_claim, &package)
+        .await
+        .expect("Package");
+    let publication = PublicationRecord {
+        context: PublicationContext {
+            domain: PublicationDomain("law".into()),
+            scope: PublicationScope::Host,
+            publisher: PublisherInstance("configured".into()),
+            root: Segment::new("law").expect("root"),
+        },
+        path: package.package.path.clone(),
+        content: PublishedContent::Package(package.id),
+        code_links: [link.id].into(),
+        imported_publications: Vec::new(),
+    };
+    let key = handles
+        .packages
+        .publish(&configured_claim, &publication)
+        .await
+        .expect("publication");
+    // An authored root is retained independently of the published package roots.
+    let authored = Link {
+        helper_fills: Default::default(),
+        document,
+        fills: [(
+            ImportSlot(0),
+            Fill::Export {
+                link: link.id,
+                export: ExportName {
+                    name: Name::new("run"),
+                    member: None,
+                },
+            },
+        )]
+        .into(),
+    };
+    let authored = LinkRecord {
+        id: authored.identity(),
+        link: authored,
+    };
+    handles
+        .packages
+        .put_link(&configured_claim, &authored, &[])
+        .await
+        .expect("authored root");
+    let mut execution =
+        lash_core_store::tool_surface::ExecutionEnvironment::empty(RegistryKind::Process);
+    if !snapshot_only {
+        execution.publications = vec![publication.clone()];
+    }
+    execution.authored.insert(authored.id);
+    let accepted = lash_core_store::tool_surface::RecordedPackages {
+        consumer: Some(publication.context.clone()),
+        snapshot: NamespaceSnapshot {
+            advertisements: vec![AcceptedAdvertisement {
+                publication: publication.clone(),
+                advertisement: PackageAdvertisement::Enumerated(package.package.clone()),
+            }],
+        },
+        routes: Vec::new(),
+    };
+    let env = lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(1024))
+        .execution(execution)
+        .packages(accepted.clone())
+        .build()
+        .expect("env");
+    let env_ref = env.stable_ref().expect("env ref");
+    let bytes = env.to_store_bytes().expect("env bytes");
+    OriginEnv {
+        configured,
+        document,
+        package,
+        publication,
+        key,
+        authored,
+        accepted,
+        env_ref,
+        bytes,
+    }
+}
+
 /// L-ENV-ORIGIN: publishing/acquiring an env and carrying Start to ProcessRecord
 /// retains the exact publication and authored Link closure under the same claim.
 /// Source cleanup, cold acquisition and the final fence cannot lose or resurrect it.
@@ -696,126 +849,20 @@ pub async fn process_env_carry_retains_exact_origin<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    use lash_core_store::packages::{LinkRecord, PackageRecord};
-    use {
-        lash_kernel_value::names::*, lash_kernel_value::package::*,
-        lash_vocabulary::claims::RegistryKind, lash_vocabulary::package::*,
-    };
     for snapshot_only in [false, true] {
         let fixture = make();
         let handles = fixture.open;
-        let (configured, configured_claim) = pin_claim();
-        let document = DocumentId::from_bytes([73; 32]);
-        handles
-            .artifacts
-            .publish_module_artifact(&configured_claim, &document.to_string(), b"origin document")
-            .await
-            .expect("document");
-        let link = Link {
-            helper_fills: Default::default(),
+        let OriginEnv {
+            configured,
             document,
-            fills: Default::default(),
-        };
-        let link = LinkRecord {
-            id: link.identity(),
-            link,
-        };
-        handles
-            .packages
-            .put_link(&configured_claim, &link, &[])
-            .await
-            .expect("Link");
-        let package = Package {
-            path: PackagePath::parse("law").expect("path"),
-            members: [(
-                Segment::new("run").expect("segment"),
-                Member {
-                    visibility: Visibility::Public,
-                    kind: MemberKind::Export {
-                        link: link.id,
-                        export: ExportName {
-                            name: Name::new("run"),
-                            member: None,
-                        },
-                    },
-                },
-            )]
-            .into(),
-        };
-        let package = PackageRecord {
-            id: package.identity(),
-            package,
-        };
-        handles
-            .packages
-            .put_package(&configured_claim, &package)
-            .await
-            .expect("Package");
-        let publication = PublicationRecord {
-            context: PublicationContext {
-                domain: PublicationDomain("law".into()),
-                scope: PublicationScope::Host,
-                publisher: PublisherInstance("configured".into()),
-                root: Segment::new("law").expect("root"),
-            },
-            path: package.package.path.clone(),
-            content: PublishedContent::Package(package.id),
-            code_links: [link.id].into(),
-            imported_publications: Vec::new(),
-        };
-        let key = handles
-            .packages
-            .publish(&configured_claim, &publication)
-            .await
-            .expect("publication");
-        // An authored root is retained independently of the published package roots.
-        let authored = Link {
-            helper_fills: Default::default(),
-            document,
-            fills: [(
-                ImportSlot(0),
-                Fill::Export {
-                    link: link.id,
-                    export: ExportName {
-                        name: Name::new("run"),
-                        member: None,
-                    },
-                },
-            )]
-            .into(),
-        };
-        let authored = LinkRecord {
-            id: authored.identity(),
-            link: authored,
-        };
-        handles
-            .packages
-            .put_link(&configured_claim, &authored, &[])
-            .await
-            .expect("authored root");
-        let mut execution =
-            lash_core_store::tool_surface::ExecutionEnvironment::empty(RegistryKind::Process);
-        if !snapshot_only {
-            execution.publications = vec![publication.clone()];
-        }
-        execution.authored.insert(authored.id);
-        let accepted = lash_core_store::tool_surface::RecordedPackages {
-            consumer: Some(publication.context.clone()),
-            snapshot: NamespaceSnapshot {
-                advertisements: vec![AcceptedAdvertisement {
-                    publication: publication.clone(),
-                    advertisement: PackageAdvertisement::Enumerated(package.package.clone()),
-                }],
-            },
-            routes: Vec::new(),
-        };
-        let env = lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(1024))
-            .execution(execution)
-            .packages(accepted.clone())
-            .build()
-            .expect("env");
-        let env_ref = env.stable_ref().expect("env ref");
-        let bytes = env.to_store_bytes().expect("env bytes");
+            publication,
+            key,
+            authored,
+            accepted,
+            env_ref,
+            bytes,
+            ..
+        } = origin_env(&handles, snapshot_only).await;
         let start_key =
             lash_core::StartKey::for_host(format!("origin-{}", HostArtifactPin::mint()));
         let start = ArtifactReferrer::Start(start_key.clone());
@@ -947,5 +994,581 @@ where
             matches!(cold.process_env.publish_process_env(&start_claim, &env_ref, &bytes).await,
         Err(ArtifactStoreError::ReferrerEnded { referrer }) if referrer == start)
         );
+    }
+}
+
+/// A store returns an environment's bytes exactly as published, whatever
+/// spelling the publisher chose, and keeps a shared part alive while any
+/// environment that contains it lives (FIG-7700). The oracle is the
+/// published bytes themselves and their content address.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each store step"
+)]
+pub async fn process_env_spellings_read_back_exactly<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    use lash_core_store::process_identity::process_env_ref_for_bytes;
+    let fixture = make();
+    let store = &fixture.open.process_env;
+    let member = |env: &lash_core::ProcessEnv, key: &str| {
+        let value = serde_json::to_value(env).expect("env value");
+        serde_json::to_string(&value[key]).expect("member")
+    };
+    let first = lash_core::testing::process_env_of_size(64);
+    let second = lash_core::testing::process_env_of_size(65);
+    let [p, l, e, c] = ["packages", "limits", "execution", "components"].map(|k| member(&first, k));
+    let c2 = member(&second, "components");
+    let pretty = serde_json::to_vec_pretty(&serde_json::to_value(&first).expect("env value"))
+        .expect("pretty env");
+    let spellings: Vec<Vec<u8>> = vec![
+        first.to_store_bytes().expect("canonical"),
+        format!(" {{ \"packages\" :\t{p} ,\n\"limits\":{l},  \"execution\" : {e}\r\n, \"components\":{c} }}\n").into_bytes(),
+        // The same members as the spelling above, with other components.
+        format!(" {{ \"packages\" :\t{p} ,\n\"limits\":{l},  \"execution\" : {e}\r\n, \"components\":{c2} }}\n").into_bytes(),
+        format!("{{\"components\":{c},\"execution\":{e},\"limits\":{l},\"packages\":{p}}}").into_bytes(),
+        format!("{{\"packages\":{p},\"components\":{c},\"limits\":{l},\"execution\":{e}}}").into_bytes(),
+        format!("{{\"p\\u0061ckages\":{p},\"limits\":{l},\"execution\":{e},\"components\":{c}}}").into_bytes(),
+        pretty,
+    ];
+    for bytes in &spellings {
+        lash_core::ProcessEnv::from_store_bytes(bytes).expect("each spelling is an environment");
+    }
+    let (publisher, claim) = pin_claim();
+    let (survivor, survivor_claim) = pin_claim();
+    let refs: Vec<_> = spellings
+        .iter()
+        .map(|bytes| process_env_ref_for_bytes(bytes))
+        .collect();
+    for (env_ref, bytes) in refs.iter().zip(&spellings) {
+        store
+            .publish_process_env(&claim, env_ref, bytes)
+            .await
+            .expect("spelling publishes");
+    }
+    store
+        .acquire_process_env(&survivor_claim, &refs[1])
+        .await
+        .expect("survivor holds one spelling");
+    let reopened = (fixture.reopen)();
+    for (env_ref, bytes) in refs.iter().zip(&spellings) {
+        let read = reopened
+            .process_env
+            .get_process_env(env_ref)
+            .await
+            .expect("read spelling")
+            .expect("spelling stored");
+        assert_eq!(
+            String::from_utf8_lossy(&read),
+            String::from_utf8_lossy(bytes),
+            "a spelling reads back exactly"
+        );
+        assert_eq!(process_env_ref_for_bytes(&read), *env_ref);
+    }
+    reopened
+        .process_env
+        .end_process_env_referrer(&end(publisher))
+        .await
+        .expect("publisher ends");
+    for (index, env_ref) in refs.iter().enumerate() {
+        let read = store
+            .get_process_env(env_ref)
+            .await
+            .expect("read after publisher");
+        if index == 1 {
+            assert_eq!(
+                read.as_ref(),
+                Some(&spellings[1]),
+                "a held spelling outlives its siblings"
+            );
+        } else {
+            assert_eq!(read, None, "an unheld spelling is reclaimed");
+        }
+    }
+    store
+        .end_process_env_referrer(&end(survivor))
+        .await
+        .expect("survivor ends");
+    assert_eq!(
+        store
+            .get_process_env(&refs[1])
+            .await
+            .expect("read after survivor"),
+        None
+    );
+}
+
+/// What a referrer's package authority answers: the publications it does
+/// not hold, and whether it may label the package.
+async fn package_authority(
+    packages: &dyn lash_durable::packages::PackageStore,
+    claim: &ReferrerClaim,
+    origin: &OriginEnv,
+) -> (String, String) {
+    let unheld = packages
+        .unheld_publications(
+            claim,
+            &std::collections::BTreeSet::from([origin.key.clone()]),
+        )
+        .await;
+    let labels = packages
+        .put_labels(claim, &origin.package.id, "{\"law\":\"authority\"}")
+        .await;
+    (format!("{unheld:?}"), format!("{labels:?}"))
+}
+
+/// A referrer that holds an environment answers package authority as a
+/// referrer holding the environment's closure itself does (FIG-7700): held
+/// while it holds the environment, carried with a release, held again by
+/// whoever republishes it, and refused once ended. A referrer holding
+/// nothing is never answered as a holder.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each store step"
+)]
+pub async fn environment_holders_answer_package_authority_as_direct_holders<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let fixture = make();
+    let handles = fixture.open;
+    let origin = origin_env(&handles, false).await;
+    let held = ("Ok({})".to_owned(), "Ok(())".to_owned());
+    let start_key = lash_core::StartKey::for_host(format!("authority-{}", HostArtifactPin::mint()));
+    let start = ArtifactReferrer::Start(start_key.clone());
+    let start_claim = ReferrerClaim::guarded(ReferrerGuard::Start {
+        start_key,
+        starter: lash_core::ExecutionScope::runtime_operation("env-authority")
+            .journal_identity()
+            .expect("journal"),
+    });
+    handles
+        .process_env
+        .publish_process_env(&start_claim, &origin.env_ref, &origin.bytes)
+        .await
+        .expect("publish env");
+    handles
+        .artifacts
+        .end_module_referrer(&end(origin.configured.clone()))
+        .await
+        .expect("configured ends");
+    assert_eq!(
+        package_authority(&*handles.packages, &start_claim, &origin).await,
+        held,
+        "the publisher holds its environment's closure"
+    );
+    let (_, bystander_claim) = pin_claim();
+    let (unheld, labels) = package_authority(&*handles.packages, &bystander_claim, &origin).await;
+    assert_eq!(
+        unheld,
+        format!("Ok({{{:?}}})", origin.key),
+        "a bystander holds nothing"
+    );
+    assert_eq!(
+        labels,
+        format!(
+            "Err(Package(Missing({:?})))",
+            lash_durable::packages::package_reference(&origin.package.id)
+        ),
+        "a bystander may not label"
+    );
+
+    // Release as the cleanup relay applies it: the module share carries the
+    // publication to a pin, then the environment share carries the
+    // environment to the process.
+    let (pin, carried_claim) = pin_claim();
+    let process = ArtifactReferrer::ProcessRecord(lash_vocabulary::identity::ProcessId::fixture(
+        "env-authority",
+    ));
+    let process_claim = ReferrerClaim::unguarded(process.clone()).expect("process claim");
+    handles
+        .artifacts
+        .end_module_referrer(&ResolvedArtifactCleanup {
+            referrer: start.clone(),
+            carries: vec![ArtifactCarry {
+                artifact: ArtifactName {
+                    store: ArtifactStoreId::module(),
+                    artifact_ref: lash_durable::packages::publication_reference(&origin.key),
+                },
+                to: pin.clone(),
+            }],
+        })
+        .await
+        .expect("start's module share carries the publication");
+    handles
+        .process_env
+        .end_process_env_referrer(&ResolvedArtifactCleanup {
+            referrer: start.clone(),
+            carries: vec![ArtifactCarry {
+                artifact: ArtifactName {
+                    store: ArtifactStoreId::ProcessEnv,
+                    artifact_ref: origin.env_ref.as_str().into(),
+                },
+                to: process.clone(),
+            }],
+        })
+        .await
+        .expect("start's environment share carries the environment");
+    let reopened = (fixture.reopen)();
+    let (unheld, labels) = package_authority(&*reopened.packages, &start_claim, &origin).await;
+    assert!(
+        unheld.contains("ReferrerEnded") && labels.contains("ReferrerEnded"),
+        "an ended publisher is refused: {unheld} {labels}"
+    );
+    for (claim, who) in [(&process_claim, "the process"), (&carried_claim, "the pin")] {
+        assert_eq!(
+            package_authority(&*reopened.packages, claim, &origin).await,
+            held,
+            "{who} holds what the release carried to it"
+        );
+    }
+    // Republish: a fresh referrer publishes the stored environment again.
+    let (republisher, republisher_claim) = pin_claim();
+    reopened
+        .process_env
+        .publish_process_env(&republisher_claim, &origin.env_ref, &origin.bytes)
+        .await
+        .expect("republish env");
+    reopened
+        .process_env
+        .end_process_env_referrer(&end(process.clone()))
+        .await
+        .expect("process environment ends");
+    reopened
+        .artifacts
+        .end_module_referrer(&end(process))
+        .await
+        .expect("process modules end");
+    assert_eq!(
+        package_authority(&*reopened.packages, &carried_claim, &origin).await,
+        held,
+        "the pin's carried publication outlives the process"
+    );
+    reopened
+        .artifacts
+        .end_module_referrer(&end(pin))
+        .await
+        .expect("pin ends");
+    assert_eq!(
+        package_authority(&*reopened.packages, &republisher_claim, &origin).await,
+        held,
+        "the republisher holds the closure"
+    );
+    reopened
+        .process_env
+        .end_process_env_referrer(&end(republisher.clone()))
+        .await
+        .expect("republisher environment ends");
+    reopened
+        .artifacts
+        .end_module_referrer(&end(republisher))
+        .await
+        .expect("republisher modules end");
+    assert_eq!(
+        reopened
+            .packages
+            .publication(&origin.key)
+            .await
+            .expect("read"),
+        None,
+        "the last holder's end reclaims the publication"
+    );
+    assert_eq!(
+        reopened
+            .process_env
+            .get_process_env(&origin.env_ref)
+            .await
+            .expect("read"),
+        None
+    );
+}
+
+/// The referrers of one cut run, minted fresh so runs never share a fence.
+struct CutRun {
+    origin: OriginEnv,
+    start: ArtifactReferrer,
+    start_claim: ReferrerClaim,
+    process: ArtifactReferrer,
+    process_claim: ReferrerClaim,
+    pin: ArtifactReferrer,
+    pin_claim: ReferrerClaim,
+    republisher: ArtifactReferrer,
+    republisher_claim: ReferrerClaim,
+}
+
+/// The steps of [`environment_retention_survives_a_cut_at_every_step`].
+/// A step names the first step of the delivery it belongs to: a recovered
+/// delivery replays every share from there, as the cleanup relay does.
+const CUT_STEPS: [(&str, usize); 10] = [
+    ("start publishes the environment", 0),
+    ("configured ends", 1),
+    ("start's module share carries the publication to the pin", 2),
+    (
+        "start's environment share carries the environment to the process",
+        2,
+    ),
+    ("republisher publishes the environment again", 4),
+    ("process's module share ends", 5),
+    ("process's environment share ends", 5),
+    ("pin ends", 7),
+    ("republisher's module share ends", 8),
+    ("republisher's environment share ends", 8),
+];
+
+fn carry(store: ArtifactStoreId, artifact_ref: String, to: &ArtifactReferrer) -> ArtifactCarry {
+    ArtifactCarry {
+        artifact: ArtifactName {
+            store,
+            artifact_ref,
+        },
+        to: to.clone(),
+    }
+}
+
+impl CutRun {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance fixture builds valid claims"
+    )]
+    async fn new(handles: &crate::fused_artifact_store::ArtifactStoreHandles) -> Self {
+        let origin = origin_env(handles, false).await;
+        let start_key = lash_core::StartKey::for_host(format!("cut-{}", HostArtifactPin::mint()));
+        let start = ArtifactReferrer::Start(start_key.clone());
+        let start_claim = ReferrerClaim::guarded(ReferrerGuard::Start {
+            start_key,
+            starter: lash_core::ExecutionScope::runtime_operation("env-cut")
+                .journal_identity()
+                .expect("journal"),
+        });
+        let process =
+            ArtifactReferrer::ProcessRecord(lash_vocabulary::identity::ProcessId::fixture(
+                &format!("env-cut-{}", HostArtifactPin::mint()),
+            ));
+        let process_claim = ReferrerClaim::unguarded(process.clone()).expect("process claim");
+        let (pin, carried_claim) = pin_claim();
+        let (republisher, republisher_claim) = pin_claim();
+        Self {
+            origin,
+            start,
+            start_claim,
+            process,
+            process_claim,
+            pin,
+            pin_claim: carried_claim,
+            republisher,
+            republisher_claim,
+        }
+    }
+
+    async fn step(
+        &self,
+        handles: &crate::fused_artifact_store::ArtifactStoreHandles,
+        step: usize,
+    ) -> Result<(), String> {
+        let env_ref = self.origin.env_ref.as_str().to_owned();
+        let publication = lash_durable::packages::publication_reference(&self.origin.key);
+        let answer = match step {
+            0 => {
+                handles
+                    .process_env
+                    .publish_process_env(
+                        &self.start_claim,
+                        &self.origin.env_ref,
+                        &self.origin.bytes,
+                    )
+                    .await
+            }
+            1 => {
+                handles
+                    .artifacts
+                    .end_module_referrer(&end(self.origin.configured.clone()))
+                    .await
+            }
+            2 => {
+                handles
+                    .artifacts
+                    .end_module_referrer(&ResolvedArtifactCleanup {
+                        referrer: self.start.clone(),
+                        carries: vec![carry(ArtifactStoreId::module(), publication, &self.pin)],
+                    })
+                    .await
+            }
+            3 => {
+                handles
+                    .process_env
+                    .end_process_env_referrer(&ResolvedArtifactCleanup {
+                        referrer: self.start.clone(),
+                        carries: vec![carry(ArtifactStoreId::ProcessEnv, env_ref, &self.process)],
+                    })
+                    .await
+            }
+            4 => {
+                handles
+                    .process_env
+                    .publish_process_env(
+                        &self.republisher_claim,
+                        &self.origin.env_ref,
+                        &self.origin.bytes,
+                    )
+                    .await
+            }
+            5 => {
+                handles
+                    .artifacts
+                    .end_module_referrer(&end(self.process.clone()))
+                    .await
+            }
+            6 => {
+                handles
+                    .process_env
+                    .end_process_env_referrer(&end(self.process.clone()))
+                    .await
+            }
+            7 => {
+                handles
+                    .artifacts
+                    .end_module_referrer(&end(self.pin.clone()))
+                    .await
+            }
+            8 => {
+                handles
+                    .artifacts
+                    .end_module_referrer(&end(self.republisher.clone()))
+                    .await
+            }
+            _ => {
+                handles
+                    .process_env
+                    .end_process_env_referrer(&end(self.republisher.clone()))
+                    .await
+            }
+        };
+        answer.map_err(|error| format!("{}: {error:?}", CUT_STEPS[step].0))
+    }
+
+    /// What every reader answers: the environment's bytes, the publication,
+    /// and each referrer's package authority, with refusals by kind only.
+    async fn observe(
+        &self,
+        handles: &crate::fused_artifact_store::ArtifactStoreHandles,
+    ) -> Vec<String> {
+        let kind = |error: String| -> String {
+            error
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '(')
+                .collect()
+        };
+        let mut seen = vec![
+            match handles
+                .process_env
+                .get_process_env(&self.origin.env_ref)
+                .await
+            {
+                Ok(Some(bytes)) if bytes == self.origin.bytes => "environment exact".to_owned(),
+                other => format!("environment {other:?}"),
+            },
+            format!(
+                "publication {:?}",
+                handles
+                    .packages
+                    .publication(&self.origin.key)
+                    .await
+                    .map(|found| found.is_some())
+            ),
+        ];
+        for claim in [
+            &self.start_claim,
+            &self.process_claim,
+            &self.pin_claim,
+            &self.republisher_claim,
+        ] {
+            let unheld = handles
+                .packages
+                .unheld_publications(
+                    claim,
+                    &std::collections::BTreeSet::from([self.origin.key.clone()]),
+                )
+                .await;
+            seen.push(match unheld {
+                Ok(unheld) => format!("unheld {}", unheld.len()),
+                Err(error) => kind(format!("{error:?}")),
+            });
+        }
+        seen
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum EnvCut {
+    /// The step's transaction never commits.
+    Lost,
+    /// The step commits and its reply is lost.
+    Committed,
+}
+
+/// Run every step, cutting `cut` if given. A cut reopens the store and
+/// replays the interrupted delivery from its first share. Answers each
+/// step's observations.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each store step"
+)]
+async fn env_cut_run<F>(make: &F, cut: Option<(usize, EnvCut)>) -> Vec<Vec<String>>
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let fixture = make();
+    let mut handles = fixture.open;
+    let run = CutRun::new(&handles).await;
+    let mut seen = Vec::new();
+    for (step, (_, delivery)) in CUT_STEPS.iter().enumerate() {
+        match cut {
+            Some((at, fault)) if at == step => {
+                if matches!(fault, EnvCut::Committed) {
+                    run.step(&handles, step).await.expect("step before the cut");
+                }
+                drop(handles);
+                handles = (fixture.reopen)();
+                for replay in *delivery..=step {
+                    run.step(&handles, replay)
+                        .await
+                        .expect("recovery replays the delivery");
+                }
+            }
+            _ => run.step(&handles, step).await.expect("step"),
+        }
+        seen.push(run.observe(&handles).await);
+    }
+    seen
+}
+
+/// A process environment's retention and the package authority it carries
+/// survive a crash at every step of publish, release and republish: a lost
+/// or a committed-but-unanswered step, recovered by replaying its delivery,
+/// leaves every reader answering as the uncut run does (FIG-7700).
+pub async fn environment_retention_survives_a_cut_at_every_step<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let uncut = env_cut_run(&make, None).await;
+    assert_eq!(
+        uncut.last().map(|last| &last[..2]),
+        Some(
+            &[
+                "environment Ok(None)".to_owned(),
+                "publication Ok(false)".to_owned()
+            ][..]
+        ),
+        "the last end reclaims everything"
+    );
+    for (step, (name, _)) in CUT_STEPS.iter().enumerate() {
+        for fault in [EnvCut::Lost, EnvCut::Committed] {
+            assert_eq!(
+                env_cut_run(&make, Some((step, fault))).await,
+                uncut,
+                "cut {fault:?} at `{name}`"
+            );
+        }
     }
 }

@@ -49,7 +49,9 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
             .collect();
         let wanted: Vec<_> = references.keys().cloned().collect();
         let missing: BTreeSet<String> =
-            crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.select_unheld.sql())
+            // Held means reached: through the referrer's own edges, or what
+            // those artifacts hold (FIG-7700).
+            crate::observed_sql::query_scalar(artifact_sql().postgres.select_unreached.sql())
                 .bind(MODULE_ARTIFACT_NAMESPACE)
                 .bind(&wanted)
                 .bind(referrer.kind().as_str())
@@ -70,19 +72,15 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
         referrer: &ArtifactReferrer,
     ) -> Result<bool, lash_durable::DurableError> {
         let mut tx = self.pool.acquire().await.map_err(backend)?;
-        let held = crate::observed_sql::query(
-            artifact_sql()
-                .edges
-                .select_referrer_edges_in_namespace
-                .sql(),
+        let held: bool = crate::observed_sql::query_scalar(
+            artifact_sql().dependencies.select_reaches_namespace.sql(),
         )
         .bind(MODULE_ARTIFACT_NAMESPACE)
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
-        .map_err(backend)?
-        .is_some();
+        .map_err(backend)?;
         Ok(!held && is_fenced_tx(&mut tx, referrer).await?)
     }
     async fn put_package_labels(
@@ -105,22 +103,22 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
             return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
         }
         lock_artifact_tx(&mut tx, MODULE_ARTIFACT_NAMESPACE, reference).await?;
-        let sql = lash_store_sql::durable::packages::PackageStatements::render(Dialect::postgres());
-        let held = crate::observed_sql::query(sql.labels_held.sql())
-            .bind(MODULE_ARTIFACT_NAMESPACE)
-            .bind(reference)
-            .bind(referrer.kind().as_str())
-            .bind(referrer.canonical_id())
-            .fetch_optional(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(backend)?
-            .is_some();
+        let held: bool =
+            crate::observed_sql::query_scalar(artifact_sql().dependencies.select_reaches.sql())
+                .bind(MODULE_ARTIFACT_NAMESPACE)
+                .bind(referrer.kind().as_str())
+                .bind(referrer.canonical_id())
+                .bind(reference)
+                .fetch_one(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(backend)?;
         if !held {
             return Err(ArtifactStoreError::ArtifactMissing {
                 artifact_ref: reference.to_owned(),
             }
             .into());
         }
+        let sql = lash_store_sql::durable::packages::PackageStatements::render(Dialect::postgres());
         crate::observed_sql::query(sql.insert_labels.sql())
             .bind(MODULE_ARTIFACT_NAMESPACE)
             .bind(reference)

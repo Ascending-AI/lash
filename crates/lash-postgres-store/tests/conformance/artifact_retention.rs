@@ -93,6 +93,9 @@ lash_conformance::artifact_referrer_tests!(@catalogue {
             (process_env_carry_retains_exact_origin, "process-env-origin-retention"),
             (attachment_only_referrers_cannot_acquire_artifacts, "artifact-referrer-kind-refusal"),
             (captured_environments_are_shared_until_the_last_referrer_ends, "captured-environment-referrers"),
+            (process_env_spellings_read_back_exactly, "process-env-exact-spellings"),
+            (environment_holders_answer_package_authority_as_direct_holders, "process-env-package-authority"),
+            (environment_retention_survives_a_cut_at_every_step, "process-env-crash-cuts"),
 
             (retry_idempotency_after_destination_ends, "artifact-referrer-retry-idempotency"),
         ]);

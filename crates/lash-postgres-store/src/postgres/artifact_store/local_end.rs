@@ -122,6 +122,8 @@ DECLARE
     v_refs jsonb := jsonb_build_array(jsonb_build_array(p_kind, p_id));
     v_plans jsonb := '[]'::jsonb;
     v_artifacts jsonb;
+    v_locked jsonb;
+    v_round jsonb;
     v_checks jsonb;
     v_body jsonb;
     item jsonb;
@@ -152,8 +154,18 @@ BEGIN
         JOIN jsonb_array_elements(v_refs) ref ON edge.referrer_kind = ref.value->>0
             AND edge.referrer_id = ref.value->>1
         WHERE edge.namespace = ANY(p_namespaces)) named;
+    -- What the named artifacts hold, transitively, joins their one sorted
+    -- lock acquisition: deleting them can free it. A holder's dependency
+    -- edges are immutable while it lives (FIG-7700).
+    WITH RECURSIVE reach(namespace, artifact_ref) AS (
+        SELECT named.value->>0, named.value->>1 FROM jsonb_array_elements(v_artifacts) named
+        UNION
+        SELECT dep.namespace, dep.artifact_ref FROM lash_artifact_dependency_edges dep
+        JOIN reach ON dep.holder_namespace = reach.namespace AND dep.holder_ref = reach.artifact_ref)
+    SELECT COALESCE(jsonb_agg(jsonb_build_array(namespace, artifact_ref)
+        ORDER BY namespace, artifact_ref), '[]'::jsonb) INTO v_locked FROM reach;
     FOR held IN SELECT value->>0 AS namespace, value->>1 AS artifact_ref
-        FROM jsonb_array_elements(v_artifacts) ORDER BY namespace, artifact_ref LOOP
+        FROM jsonb_array_elements(v_locked) ORDER BY namespace, artifact_ref LOOP
         PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:' || held.namespace || ':' || held.artifact_ref, 0));
     END LOOP;
     -- This statement starts after every lock wait. Include all remaining
@@ -169,14 +181,27 @@ BEGIN
         DELETE FROM lash_artifact_referrer_edges edge USING jsonb_array_elements(v_refs) ref
             WHERE edge.referrer_kind = ref.value->>0 AND edge.referrer_id = ref.value->>1
                 AND edge.namespace = ANY(p_namespaces);
-        WITH gone AS (
-            DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_artifacts) named
-            WHERE artifact.namespace = named.value->>0 AND artifact.artifact_ref = named.value->>1
-                AND NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges edge
-                    WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
-            RETURNING artifact.graph_ref)
-        SELECT ARRAY(SELECT node.hash FROM gone JOIN lash_blobs AS node ON node.id = gone.graph_ref)
-            INTO v_frontier;
+        -- Delete what nothing names or holds, then, round by round, what a
+        -- deleted artifact held that nothing keeps now.
+        v_frontier := ARRAY[]::BYTEA[];
+        v_round := v_artifacts;
+        WHILE jsonb_array_length(v_round) > 0 LOOP
+            WITH gone AS (
+                DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_round) named
+                WHERE artifact.namespace = named.value->>0 AND artifact.artifact_ref = named.value->>1
+                    AND NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges edge
+                        WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
+                    AND NOT EXISTS (SELECT 1 FROM lash_artifact_dependency_edges dep
+                        WHERE dep.namespace = artifact.namespace AND dep.artifact_ref = artifact.artifact_ref)
+                RETURNING artifact.namespace, artifact.artifact_ref, artifact.graph_ref),
+            freed AS (
+                SELECT DISTINCT dep.namespace, dep.artifact_ref FROM gone
+                JOIN lash_artifact_dependency_edges dep ON dep.holder_namespace = gone.namespace
+                    AND dep.holder_ref = gone.artifact_ref)
+            SELECT v_frontier || ARRAY(SELECT node.hash FROM gone JOIN lash_blobs AS node ON node.id = gone.graph_ref),
+                COALESCE((SELECT jsonb_agg(jsonb_build_array(namespace, artifact_ref)) FROM freed), '[]'::jsonb)
+                INTO v_frontier, v_round;
+        END LOOP;
         -- A bridged artifact's row was its graph node's root: peel it
         -- (FIG-5949).
         {PEEL}

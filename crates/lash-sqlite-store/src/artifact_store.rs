@@ -20,6 +20,7 @@ use lash_core_store::artifact_referrer::ReferrerClaim;
 use lash_core_store::artifact_referrer::ResolvedArtifactCleanup;
 use lash_execution_contracts::module_artifacts::ArtifactStoreError;
 use lash_store_sql::artifact::blobs::BlobStatements;
+use lash_store_sql::artifact::dependency_edges::DependencyEdgeStatements;
 use lash_store_sql::artifact::referrer_edges::ReferrerEdgeStatements;
 use lash_store_sql::artifact::referrer_fences::ReferrerFenceStatements;
 
@@ -64,6 +65,20 @@ lash_store_sql::statements! {
              VALUES (?1, ?2, COALESCE((SELECT id FROM blobs WHERE hash = ?3), CASE WHEN ?3 IS NOT NULL THEN -1 END))
              ON CONFLICT (namespace, artifact_ref) DO NOTHING";
 
+        /// Point environment head `?1`/`?2` at blob `?3`, its body `?4`
+        /// splicing back at `?5` (FIG-7700).
+        insert_head_pointer = "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref, body_ref, body_at)
+             VALUES (?1, ?2, COALESCE((SELECT id FROM blobs WHERE hash = ?3), CASE WHEN ?3 IS NOT NULL THEN -1 END), ?4, ?5)
+             ON CONFLICT (namespace, artifact_ref) DO NOTHING";
+
+        /// A head `?1`/`?2`'s body offset and the blob its body points at;
+        /// no row for an artifact stored whole.
+        select_env_body = "SELECT refs.body_at, (SELECT hash FROM blobs WHERE id = body.blob_ref)
+             FROM artifact_refs AS refs
+             LEFT JOIN artifact_refs AS body ON body.namespace = 'process_env_body'
+                 AND body.artifact_ref = refs.body_ref
+             WHERE refs.namespace = ?1 AND refs.artifact_ref = ?2 AND refs.body_ref IS NOT NULL";
+
         /// The blob `?1`/`?2` points at.
         select_blob_ref = "SELECT (SELECT hash FROM blobs WHERE id = blob_ref) AS blob_ref FROM artifact_refs
              WHERE namespace = ?1 AND artifact_ref = ?2";
@@ -104,6 +119,7 @@ lash_store_sql::statements! {
 
 /// Every artifact-family statement, rendered once.
 pub(crate) struct ArtifactSql {
+    pub(crate) dependencies: DependencyEdgeStatements,
     pub(crate) edges: ReferrerEdgeStatements,
     pub(crate) fences: ReferrerFenceStatements,
     pub(crate) refs: RefSqliteStatements,
@@ -114,6 +130,7 @@ pub(crate) struct ArtifactSql {
 static ARTIFACT_SQL: LazyLock<ArtifactSql> = LazyLock::new(|| {
     let dialect = crate::schema_layout::MAIN;
     ArtifactSql {
+        dependencies: DependencyEdgeStatements::render(dialect),
         edges: ReferrerEdgeStatements::render(dialect),
         fences: ReferrerFenceStatements::render(dialect),
         refs: RefSqliteStatements::render(dialect.with_vocabulary(LOCAL_ARTIFACT_NAMESPACES)),
@@ -135,6 +152,9 @@ pub(crate) fn artifact_sql() -> &'static ArtifactSql {
 /// disjoint. The composite key does.
 pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "kernel_document";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
+/// Where environment bodies live, beside the heads at their references.
+pub(crate) const PROCESS_ENV_BODY_NAMESPACE: &str =
+    lash_core_store::process_env::stored::BODY_NAMESPACE;
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
 pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
@@ -155,6 +175,9 @@ const LOCAL_ARTIFACT_NAMESPACES: lash_store_sql::Vocabulary =
         },
     )]);
 
+mod env_storage;
+pub(crate) use env_storage::splice_env_parts;
+use env_storage::{splice_env_body_conn, store_process_env_tx};
 mod held;
 #[path = "artifact_store/packages.rs"]
 mod packages;
@@ -258,69 +281,6 @@ fn decode_stored_edge(kind: &str, id: &str) -> Result<ArtifactReferrer, StoreErr
     })
 }
 
-/// Read and retain environment provenance inside the same writer transaction.
-fn retain_process_env_tx(
-    tx: &rusqlite::Connection,
-    env_ref: &str,
-    referrer: &ArtifactReferrer,
-) -> rusqlite::Result<()> {
-    fn read(
-        tx: &rusqlite::Connection,
-        namespace: &str,
-        reference: &str,
-    ) -> rusqlite::Result<Vec<u8>> {
-        let stored: Option<(Option<String>, Option<i64>)> = tx
-            .statement(artifact_sql().refs.select_body_ref.sql())?
-            .query_row(params![namespace, reference], |row| {
-                Ok((crate::codec::optional_hash_column(row, 0)?, row.get(1)?))
-            })
-            .optional()?;
-        let Some((Some(blob), encoding)) = stored else {
-            return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
-                artifact_ref: reference.into(),
-            }));
-        };
-        if encoding == Some(1) {
-            SqliteStore::module_node_conn(tx, &blob).map_err(sqlite_conversion_error)
-        } else {
-            SqliteStore::get_blob_conn(tx, &BlobRef(blob))
-                .map_err(sqlite_conversion_error)?
-                .ok_or_else(|| {
-                    artifact_failure(ArtifactStoreError::ArtifactMissing {
-                        artifact_ref: reference.into(),
-                    })
-                })
-        }
-    }
-    let bytes = read(tx, PROCESS_ENV_NAMESPACE, env_ref)?;
-    let mut pending = lash_durable::packages::process_env_roots(&bytes)
-        .map_err(|error| artifact_failure(error.into()))?;
-    let mut found = std::collections::BTreeSet::new();
-    while let Some(reference) = pending.pop() {
-        if !found.insert(reference.clone()) {
-            continue;
-        }
-        let bytes = read(tx, MODULE_ARTIFACT_NAMESPACE, &reference)?;
-        pending.extend(
-            lash_durable::packages::content_dependencies(&reference, &bytes)
-                .map_err(|error| artifact_failure(error.into()))?,
-        );
-    }
-    for reference in found {
-        crate::conn::cached_execute(
-            tx,
-            artifact_sql().edges.insert_edge.sql(),
-            params![
-                MODULE_ARTIFACT_NAMESPACE,
-                reference,
-                referrer.kind().as_str(),
-                referrer.canonical_id()
-            ],
-        )?;
-    }
-    Ok(())
-}
-
 /// Validate and retain a start's environment in the transaction admitting
 /// its process. The writer orders this acquisition against source cleanup.
 pub(crate) fn acquire_process_env_tx(
@@ -347,7 +307,7 @@ pub(crate) fn acquire_process_env_tx(
         }
         .into());
     }
-    retain_process_env_tx(tx, env.as_str(), &referrer).map_err(artifact_sqlite_error)?;
+    // The head holds its closure: the start's one edge keeps all of it.
     crate::conn::cached_execute(
         tx,
         artifact_sql().edges.insert_edge.sql(),
@@ -426,36 +386,37 @@ impl SqliteStore {
                     crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms)
                         .map_err(sqlite_conversion_error)?;
                 }
-                let blob_ref = Self::insert_artifact_blob_conn(
-                    tx,
-                    descriptor,
-                    &bytes,
-                    blob_profile,
-                    tx.fleet(),
-                )?;
-                crate::conn::cached_execute(
-                    tx,
-                    artifact_sql().refs.insert_pointer.sql(),
-                    params![
-                        namespace,
-                        artifact_ref,
-                        crate::codec::SqlHash(blob_ref.as_str())
-                    ],
-                )?;
-                let stored_blob_ref: String = tx
-                    .statement(artifact_sql().refs.select_blob_ref.sql())
-                    .and_then(|mut statement| {
-                        statement.query_row(params![namespace, artifact_ref], |row| {
-                            crate::codec::hash_column(row, 0)
-                        })
-                    })?;
-                if stored_blob_ref != blob_ref.as_str() {
-                    return Err(artifact_failure(ArtifactStoreError::Immutable {
-                        artifact_ref,
-                    }));
-                }
                 if namespace == PROCESS_ENV_NAMESPACE {
-                    retain_process_env_tx(tx, &artifact_ref, referrer)?;
+                    store_process_env_tx(tx, &artifact_ref, &bytes, blob_profile, tx.fleet())?;
+                } else {
+                    let blob_ref = Self::insert_artifact_blob_conn(
+                        tx,
+                        descriptor,
+                        &bytes,
+                        blob_profile,
+                        tx.fleet(),
+                    )?;
+                    crate::conn::cached_execute(
+                        tx,
+                        artifact_sql().refs.insert_pointer.sql(),
+                        params![
+                            namespace,
+                            artifact_ref,
+                            crate::codec::SqlHash(blob_ref.as_str())
+                        ],
+                    )?;
+                    let stored_blob_ref: String = tx
+                        .statement(artifact_sql().refs.select_blob_ref.sql())
+                        .and_then(|mut statement| {
+                            statement.query_row(params![namespace, artifact_ref], |row| {
+                                crate::codec::hash_column(row, 0)
+                            })
+                        })?;
+                    if stored_blob_ref != blob_ref.as_str() {
+                        return Err(artifact_failure(ArtifactStoreError::Immutable {
+                            artifact_ref,
+                        }));
+                    }
                 }
                 crate::conn::cached_execute(
                     tx,
@@ -499,9 +460,6 @@ impl SqliteStore {
             if let Some(cleanup) = claim.guard_cleanup() {
                 crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms)
                     .map_err(sqlite_conversion_error)?;
-            }
-            if namespace == PROCESS_ENV_NAMESPACE {
-                retain_process_env_tx(tx, &artifact_ref, referrer)?;
             }
             crate::conn::cached_execute(tx, artifact_sql().edges.insert_edge.sql(),
                 params![namespace, artifact_ref, referrer.kind().as_str(), referrer.canonical_id()])?;
@@ -597,9 +555,6 @@ impl SqliteStore {
                     artifact_ref: artifact_ref.clone(),
                     to: carry.to.clone(),
                 }));
-            }
-            if namespace == PROCESS_ENV_NAMESPACE {
-                retain_process_env_tx(tx, artifact_ref, &carry.to)?;
             }
             crate::conn::cached_execute(
                 tx,
@@ -798,10 +753,16 @@ impl SqliteStore {
                         .map(|body| Some(Some(body)))
                         .map_err(sqlite_conversion_error);
                 }
-                Ok(Some(
-                    Self::get_blob_conn(conn, &BlobRef(blob_ref))
-                        .map_err(sqlite_conversion_error)?,
-                ))
+                let blob = Self::get_blob_conn(conn, &BlobRef(blob_ref))
+                    .map_err(sqlite_conversion_error)?;
+                // A head's body splices back in the same snapshot (FIG-7700).
+                match blob {
+                    Some(head) if namespace == PROCESS_ENV_NAMESPACE => Ok(Some(
+                        splice_env_body_conn(conn, &artifact_ref, head)
+                            .map_err(sqlite_conversion_error)?,
+                    )),
+                    blob => Ok(Some(blob)),
+                }
             })
             .await
             .map_err(sqlite_error)?;
