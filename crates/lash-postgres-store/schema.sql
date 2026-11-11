@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 38.
+-- lash-postgres-store schema, component version 39.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -69,6 +69,28 @@ CREATE TABLE IF NOT EXISTS lash_fleet_format (
     format_version INTEGER NOT NULL,
     CONSTRAINT ck_fleet_format_singleton CHECK (singleton)
 );
+
+-- The writer fence's check (ADR 0115 §2.2-2.4): a guarded writer's `BEGIN`
+-- runs it as a statement of its own after the fence's shared lock, in the
+-- same simple query, so its read takes a snapshot once the lock is held. It
+-- writes nothing. When the row does not record the epoch the writer expects
+-- it raises `LF001` with the recorded epoch as its detail, empty when the row
+-- is absent, and the query's block rolls back before `BEGIN` runs.
+CREATE OR REPLACE FUNCTION lash_writer_fence(p_expected INTEGER)
+RETURNS VOID
+LANGUAGE plpgsql
+VOLATILE
+AS $lash_writer_fence$
+DECLARE
+    v_fleet INTEGER;
+BEGIN
+    SELECT format_version INTO v_fleet FROM lash_fleet_format WHERE singleton;
+    IF v_fleet IS DISTINCT FROM p_expected THEN
+        RAISE EXCEPTION 'lash_writer_fence: the fleet records another epoch'
+            USING ERRCODE = 'LF001', DETAIL = COALESCE(v_fleet::text, '');
+    END IF;
+END
+$lash_writer_fence$;
 
 -- The fleet record's per-plugin writer ranges (FIG-4746), beside `F`: the
 -- format versions the fleet permits each plugin's state and config namespaces
@@ -912,7 +934,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- the fleet epoch, the transactional clock rows, and the catalog identity.
 -- `gen_random_uuid()` is core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version, min_reader)
-VALUES ('lash-postgres-store', 38, 38)
+VALUES ('lash-postgres-store', 39, 39)
 ON CONFLICT (component) DO NOTHING;
 
 -- The fleet epoch starts at the floor of the installing build's writable

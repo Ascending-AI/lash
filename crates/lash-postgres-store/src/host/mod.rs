@@ -309,8 +309,13 @@ pub async fn begin_unfenced(pool: &PgPool) -> Result<Transaction<'static, Postgr
 pub struct TransactionPrelude {
     begin: Arc<str>,
     /// The guards and the writer fence's shared lock and then `BEGIN`, in
-    /// one simple query: what a guarded writer begins with.
+    /// one simple query: what a durable commit begins with, reading the
+    /// epoch in its own first statement.
     fenced: Arc<str>,
+    /// The isolation level, the guards and the writer fence's shared lock,
+    /// each terminated: what precedes the fence's check in a guarded
+    /// writer's `BEGIN` ([`Self::fenced_expecting`]).
+    fence_lock: Arc<str>,
     deadline: Option<Duration>,
     /// The `lock_timeout` a one-call commit installs, and its statement
     /// budget in milliseconds.
@@ -342,6 +347,7 @@ impl TransactionPrelude {
         Self {
             begin: statement.into(),
             fenced: fenced_begin(&settings).into(),
+            fence_lock: fence_lock(&settings).into(),
             deadline: guards.operation_deadline,
             call_guards: (
                 timeout_setting(guards.lock).map(|ms| format!("{ms}ms").into()),
@@ -359,6 +365,7 @@ impl TransactionPrelude {
         Self {
             begin: "BEGIN".into(),
             fenced: fenced_begin("").into(),
+            fence_lock: fence_lock("").into(),
             deadline: None,
             call_guards: (None, None),
         }
@@ -374,6 +381,25 @@ impl TransactionPrelude {
     /// ([`crate::guarded_tx`]).
     pub(crate) fn fenced(&self) -> &str {
         &self.fenced
+    }
+
+    /// A guarded writer's `BEGIN` expecting the fleet epoch `expected`: the
+    /// guards, the writer fence's shared lock, then the fence's check as a
+    /// statement of its own, then `BEGIN`, in one simple query
+    /// ([`crate::guarded_tx`]).
+    ///
+    /// The check is a separate statement after the lock's, so under read
+    /// committed it reads the fleet row with a snapshot taken once the lock
+    /// is held, and it runs in the implicit block `BEGIN` then adopts. When
+    /// the row does not record `expected` it raises, carrying what it read,
+    /// and the block rolls back whole before `BEGIN` runs: the connection is
+    /// left outside any transaction, as a refused lock wait leaves it.
+    pub(crate) fn fenced_expecting(&self, expected: u32) -> String {
+        format!(
+            "{}SELECT {}({expected}); BEGIN",
+            self.fence_lock,
+            crate::guarded_tx::WRITER_FENCE_FUNCTION
+        )
     }
 
     /// What a one-call commit installs in place of the `BEGIN`'s guards:
@@ -443,9 +469,15 @@ impl TransactionPrelude {
 /// fence's read, the transaction's next statement, takes its snapshot only
 /// once the lock is held: read committed, whatever the deployment's default.
 fn fenced_begin(settings: &str) -> String {
+    format!("{}BEGIN", fence_lock(settings))
+}
+
+/// The isolation level, `settings` and the writer fence's shared lock, each
+/// terminated: the head of every fenced `BEGIN`.
+fn fence_lock(settings: &str) -> String {
     let sql = crate::connection_sql::connection_sql();
     format!(
-        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; {settings}{}; BEGIN",
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; {settings}{}; ",
         sql.lock_xact_fleet_fence_shared.sql()
     )
 }

@@ -33,7 +33,7 @@ impl SessionFaultStore for PostgresStore {
         at_ms: u64,
     ) -> Result<Option<SessionFault>, StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         let changed = crate::observed_sql::query(session_sql().meta.record_fault.sql())
             .bind(session_id.as_str())
             .bind(record.to_stored()?)
@@ -86,7 +86,7 @@ impl SessionFaultStore for PostgresStore {
 
     async fn clear_session_fault(&self, session_id: &SessionId) -> Result<bool, StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         let changed = crate::observed_sql::query(session_sql().meta.clear_fault.sql())
             .bind(session_id.as_str())
             .execute(crate::observed_sql::executor(&mut **tx))

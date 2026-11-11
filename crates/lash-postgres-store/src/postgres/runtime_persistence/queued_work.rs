@@ -10,7 +10,7 @@ impl PostgresStore {
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkBatch, StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -27,7 +27,7 @@ impl PostgresStore {
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -45,7 +45,7 @@ impl PostgresStore {
         batch_id: &str,
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;

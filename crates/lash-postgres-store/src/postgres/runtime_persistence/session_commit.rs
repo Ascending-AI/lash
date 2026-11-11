@@ -232,7 +232,7 @@ impl SessionCommitStore for PostgresStore {
         base: &lash_core_store::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -315,7 +315,7 @@ impl SessionCommitStore for PostgresStore {
         remaining: Vec<lash_core_store::session_identity::SessionObserverIntent>,
     ) -> Result<(), StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         let present: Option<i32> = crate::observed_sql::query_scalar(
             crate::session_sql::session_sql()
@@ -362,7 +362,7 @@ impl PostgresStore {
     ) -> Result<Result<RuntimeCommitReceipt, FleetMoved>, StoreError> {
         let now = self.clock.timestamp_ms();
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         if let Err(moved) = tx.require_encoded_under(encoded_under) {
             return Ok(Err(moved));
         }

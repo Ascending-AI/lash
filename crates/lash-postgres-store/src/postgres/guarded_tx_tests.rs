@@ -286,6 +286,82 @@ async fn pg_fence_encodes_again_when_f_moves() {
     assert_eq!(storage.fleet_format().version(), NEXT);
 }
 
+/// A writer whose fence lock waits behind a finalize that moves `F` past
+/// this build's range, or removes the fleet row, reads what that finalize
+/// committed once the lock is granted: it is refused, typed, and writes
+/// nothing. A fence that read the row with a snapshot taken before its lock
+/// wait would admit the old epoch and write.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pg_fence_reads_what_a_finalize_it_waited_behind_committed() {
+    for (case, change) in [
+        (
+            "moved",
+            format!("UPDATE lash_fleet_format SET format_version = {PAST_WRITABLE}"),
+        ),
+        ("removed", "DELETE FROM lash_fleet_format".to_owned()),
+    ] {
+        let Some(database) = isolated().await else {
+            return;
+        };
+        let storage = crate::testing::connect(database.url())
+            .await
+            .expect("open the isolated store");
+        let mut finalize = crate::host::begin_unfenced(storage.pool())
+            .await
+            .expect("begin the finalize");
+        sqlx::query("SELECT pg_advisory_xact_lock(715425, 0)")
+            .execute(&mut *finalize)
+            .await
+            .expect("finalize takes the fence lock exclusive");
+        sqlx::query(&change)
+            .execute(&mut *finalize)
+            .await
+            .expect("finalize changes the fleet row");
+
+        let session_id = SessionId::from(match case {
+            "moved" => "fence-waits-moved",
+            _ => "fence-waits-removed",
+        });
+        let writer = tokio::spawn({
+            let store = storage.store();
+            let meta = root_meta(&session_id);
+            async move {
+                store
+                    .admit_session(
+                        &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(meta),
+                    )
+                    .await
+            }
+        });
+        until_a_lock_waiter(&storage).await;
+        finalize.commit().await.expect("finalize commits");
+
+        let error = writer
+            .await
+            .expect("join the writer")
+            .expect_err("the waiting writer reads the committed fleet row");
+        match case {
+            "moved" => assert!(
+                matches!(
+                    error,
+                    StoreError::WriterFenced { recorded: PAST_WRITABLE, writable }
+                        if writable == FleetFormat::writable()
+                ),
+                "expected WriterFenced at epoch {PAST_WRITABLE}, got {error:?}"
+            ),
+            _ => assert!(
+                matches!(error, StoreError::Incompatible { .. }),
+                "expected Incompatible for an absent fleet row, got {error:?}"
+            ),
+        }
+        assert_eq!(
+            meta_rows(&storage, &session_id).await,
+            0,
+            "{case}: zero writes"
+        );
+    }
+}
+
 /// A fence that meets contention behind a finalize retries from a fresh
 /// `BEGIN`, and the retry reads the epoch finalize committed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

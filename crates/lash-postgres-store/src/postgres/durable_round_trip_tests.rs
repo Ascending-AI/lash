@@ -2181,3 +2181,27 @@ async fn environment_dependency_retention_round_trips_ignore_the_dependency_coun
         "round trips grow with the dependency count: {measured:?}"
     );
 }
+
+/// A guarded transaction's writer fence rides its `BEGIN`: the lock, the
+/// check of the fleet epoch and `BEGIN` are one simple query, so a
+/// transaction that writes nothing pays its `BEGIN` and its `COMMIT` only
+/// (FIG-7701 R4).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_guarded_transaction_fences_within_its_begin() {
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the guarded-transaction round-trip budget: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let (_, trips) = round_trips(async {
+        let tx = crate::guarded_tx::begin_guarded(storage.pool(), &storage.fence)
+            .await
+            .expect("the fence admits the recorded epoch");
+        tx.commit().await.expect("commit");
+    })
+    .await;
+    assert_eq!(trips, 2, "BEGIN with its fence, then COMMIT");
+}

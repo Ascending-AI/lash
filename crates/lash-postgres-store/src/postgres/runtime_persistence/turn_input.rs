@@ -30,7 +30,7 @@ impl lash_core_store::store::TurnInputStore for PostgresStore {
             session_id, source_key,
         )?;
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -45,7 +45,7 @@ impl lash_core_store::store::TurnInputStore for PostgresStore {
         batch: lash_core_store::turn_input_vocabulary::PendingTurnInputBatch,
     ) -> Result<Vec<lash_core_store::turn_input_vocabulary::PendingTurnInput>, StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -216,7 +216,7 @@ impl lash_core_store::store::TurnInputStore for PostgresStore {
         StoreError,
     > {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -264,7 +264,7 @@ impl lash_core_store::store::TurnInputStore for PostgresStore {
         StoreError,
     > {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;

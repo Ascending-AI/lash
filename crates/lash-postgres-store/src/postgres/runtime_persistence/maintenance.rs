@@ -35,7 +35,7 @@ impl StoreMaintenance for PostgresStore {
 impl PostgresStore {
     async fn vacuum_tombstones(&self, session_id: &SessionId) -> Result<VacuumReport, StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
+        let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
         // The session's write lock, which every enqueue takes before it
         // interns a spec, taken before any row this pass deletes: an
         // admission that reuses a spec row commits its input before the
@@ -123,7 +123,7 @@ impl PostgresStore {
         // they held, in an ordinary guarded transaction of its own.
         {
             let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-            let mut tx = begin_guarded(connection, &self.fence).await?;
+            let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
             crate::revisions::release_unretained_tx(&mut tx, true, None, self.retirement_instant())
                 .await?;
             tx.commit().await.map_err(store_sqlx_error)?;
@@ -131,7 +131,7 @@ impl PostgresStore {
         // Finish expired material even when this session never commits again.
         loop {
             let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-            let mut tx = begin_guarded(connection, &self.fence).await?;
+            let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
             let released = crate::durable::retention::release_material_batch(&mut tx, None)
                 .await
                 .map_err(store_sqlx_error)?;
@@ -152,7 +152,7 @@ impl PostgresStore {
         };
         for session in sessions {
             let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-            let mut tx = begin_guarded(connection, &self.fence).await?;
+            let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
             super::lock_session_history_mutation_tx(&mut tx, &session).await?;
             crate::revisions::release_revision_material_tx(
                 &mut tx,
@@ -189,7 +189,7 @@ impl PostgresStore {
         let mut after = String::new();
         loop {
             let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-            let mut tx = begin_guarded(connection, &self.fence).await?;
+            let mut tx = begin_guarded((connection, &self.pool), &self.fence).await?;
             let (last, gone) =
                 crate::durable::audit_page(&mut tx, &after, crate::durable::AUDIT_PAGE)
                     .await
