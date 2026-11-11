@@ -877,7 +877,9 @@ fn spawned_immediate_export_mismatch_keeps_child_identity() {
 }
 
 /// K-HOST and K-CHG: a synchronous native export needs no Main or guest
-/// body, and its declared formula is the charge on that path.
+/// body. A start is an ordinary call of its export: the call pays the
+/// declared formula (7), a `Both` runs its body, and the start copies its
+/// result out (1, `K-CHG-002`, a518577de5), as on origin/main.
 #[test]
 fn native_export_starts_without_main_and_pays_its_formula() {
     struct Answer(bool);
@@ -983,13 +985,13 @@ fn native_export_starts_without_main_and_pays_its_formula() {
             {
                 Step::Slice => {}
                 Step::Ended(End::Finished(done)) => {
-                    assert_eq!(done.result, Datum::Bool(true));
+                    assert_eq!(done.result, Datum::Bool(true), "kind {kind}");
                     break;
                 }
                 other => panic!("export did not complete: {other:?}"),
             }
         }
-        assert_eq!(machine.meters().charged, Some(7));
+        assert_eq!(machine.meters().charged, Some(8), "kind {kind}");
     }
 }
 

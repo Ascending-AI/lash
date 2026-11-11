@@ -4,13 +4,16 @@
 //! a frame around the body nor a synthetic statement or charge. Ordinary
 //! calls of the same function still use its unadapted body.
 
+use std::sync::Arc;
+
 use lash_kernel_doc::{Datum, Decoder, Document, FunctionTarget, Literal, StartConvention};
 use lash_kernel_value::Type;
+use lash_kernel_value::names::FunctionId;
 use lash_kernel_value::sites::Unit as SiteUnit;
 
 use super::compile::{Compiler, Entry, Fun, Result, unsupported};
 use super::op::Op;
-use super::program::{Block, CallSite, Event, RootCleanup, Unit, UnitId, UnitKind};
+use super::program::{Block, CallSite, Callee, Event, RootCleanup, Unit, UnitId, UnitKind};
 use crate::StartError;
 
 /// The unit a start runs: the entry's body under its start convention.
@@ -25,6 +28,7 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<Un
         StartConvention::PyDirect { cleanup } => return clean_up(compiler, entry, cleanup),
         StartConvention::Direct | StartConvention::PyArgsList { .. } => {
             return match entry.captures {
+                None if called(compiler, id) => root(compiler, entry),
                 None => compiler.entry_body(id),
                 Some(_) => root(compiler, entry),
             };
@@ -80,8 +84,29 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<Un
 
 /// The entry's own unit, apart from the body its calls run: a callable's
 /// reads its frozen captures where a closure reads its own (`K-CLO-004`).
+///
+/// A function a call bills by its formula starts through a call of it,
+/// as any caller's call runs it: the unit passes the start's arguments
+/// on, the call runs what a call of it runs and pays the function's
+/// formula, and the start copies its result out (`K-HOST`, `K-CHG-002`,
+/// `K-CHG-007`). No Main is needed, nor a guest body for a native.
 fn root(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<UnitId> {
     let id = entry.function;
+    if entry.captures.is_none() && called(compiler, id) {
+        let params = compiler.def(&id)?.signature.params.len();
+        let Ok(argc) = u16::try_from(params) else {
+            return unsupported("a native entry with more parameters than a call passes");
+        };
+        let site = Fun::new(SiteUnit::Library(id), false, false, None);
+        if compiler.def(&id)?.body().is_some() {
+            return billed(compiler, id, site, argc);
+        }
+        let callable = lash_kernel_value::names::CallableId {
+            link: compiler.link,
+            function: id,
+        };
+        return compiler.stub(&site, Some(callable), None, argc);
+    }
     let at = compiler.reserve();
     let kind = match entry.captures {
         Some(_) => UnitKind::Closure(id),
@@ -89,6 +114,42 @@ fn root(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<UnitId> {
     };
     compiler.function(id, None, entry.captures, at, false, kind)?;
     Ok(at)
+}
+
+/// The start of a formula-billed `id` with a guest body: a unit that
+/// passes the start's arguments to a call of that body, which runs its
+/// statements covered and pays the formula. A function that has a
+/// native as well still runs its body, as a call of it does on the
+/// reference engine.
+fn billed(compiler: &mut Compiler<'_>, id: FunctionId, mut g: Fun, argc: u16) -> Result<UnitId> {
+    let definition = compiler.def(&id)?;
+    let at = compiler.reserve();
+    g.locals = argc;
+    g.leader();
+    for value in 0..argc {
+        g.emit(Op::Local(value));
+    }
+    let callee = Callee::Unit {
+        unit: compiler.body(id, true)?,
+        charge: compiler.charge(id, definition),
+    };
+    let site = g.site();
+    compiler.call(&mut g, callee, argc, site);
+    g.emit(Op::Return);
+    compiler.seal(g, at, UnitKind::Spawn, argc, Arc::from("spawn"));
+    Ok(at)
+}
+
+/// Whether a start of `id` runs as a call of it: a native is registered
+/// for it, it has no kernel body, or a call bills its formula.
+fn called(compiler: &Compiler<'_>, id: FunctionId) -> bool {
+    compiler
+        .registry
+        .get(&id)
+        .is_some_and(|registered| registered.native().is_some())
+        || compiler
+            .def(&id)
+            .is_ok_and(|definition| definition.body().is_none() || definition.charge().is_some())
 }
 
 /// An entry whose convention declares a run-root cleanup (`K-TASK-019`):
