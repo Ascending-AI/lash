@@ -1403,6 +1403,13 @@ kernel 1
 charge sum(6, deep(index))
 body {
   let k = kind(target)
+  # A dict holding a key that is not a tuple, a slice's form, answers at once;
+  # every other subscript takes the arms below, the dict's among them.
+  if same(k, "map") {
+    if same(kind(index), "tuple") {} else {
+      if map.contains(target, index) { return target[index] }
+    }
+  }
   if same(k, "tuple") {
     let iterator_token = invoke py.token(target, "py.iterator")
     if iterator_token { do invoke py.fail("TypeError", "iterator is not a sequence") }
