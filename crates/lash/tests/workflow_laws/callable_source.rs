@@ -768,6 +768,382 @@ async def ships() -> str:
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// The workflow `ships` of `source`, imported and run once; it hands each
+/// callable of `names` to `tools.capture` as `collection-{name}`. Answers
+/// the run's publication and each shipped callable with the origin its
+/// publication takes.
+async fn shipped_callables(
+    core: &lash::LashCore,
+    pin: &lash::process::HostArtifactPin,
+    (base, packages, request): (
+        &lash::process::ProcessEnv,
+        &lash::package::RecordedPackages,
+        &lash::vm::WorkflowEnvironmentRequest,
+    ),
+    source: &str,
+    names: &[&str],
+) -> (
+    super::support::Publication,
+    lash::package::CallableOrigin,
+    Vec<FunctionValue>,
+) {
+    let imported = core
+        .host_artifacts()
+        .import_workflow(SourceFormat::TypeScriptV1.language(), source, request, None)
+        .await
+        .unwrap();
+    let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+        panic!("{imported:?}");
+    };
+    let publication = publish_recorded(
+        core,
+        pin,
+        &document,
+        &Name::new("ships"),
+        base,
+        None,
+        (packages, request),
+    )
+    .await
+    .unwrap();
+    let run = start_with(
+        core,
+        &publication.env_ref,
+        &publication.definition,
+        &format!("ship-{}", names.join("-")),
+        Default::default(),
+    )
+    .await;
+    assert_eq!(finished(core, &run).await, serde_json::json!("shipped"));
+    let origin = lash::package::CallableOrigin {
+        publications: publication
+            .environment
+            .execution()
+            .publications
+            .iter()
+            .map(lash::package::PublicationRecord::key)
+            .collect(),
+        authored: publication.environment.execution().authored.clone(),
+    };
+    let functions = names
+        .iter()
+        .map(|name| {
+            let marker = format!("collection-{name}");
+            let shipped = ECHO_CALLS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .rev()
+                .find(|args| args["value"] == marker)
+                .unwrap()["nested"]["fact"]
+                .clone();
+            FunctionValue::from_transport_json(
+                &shipped,
+                &lash::workflow::document::FunctionRegistry::default(),
+                Default::default(),
+                lash_kernel_value::data_limits::KernelDataLimits::standard(),
+            )
+            .unwrap()
+        })
+        .collect();
+    (publication, origin, functions)
+}
+
+/// What `definition` started under `env` with `args` ends in.
+async fn outcome(
+    core: &lash::LashCore,
+    env: &lash::process::ProcessEnvRef,
+    definition: &lash::process::ProcessDefinition,
+    key: &str,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, (Option<String>, String)> {
+    let run = start_with(
+        core,
+        env,
+        definition,
+        key,
+        args.as_object().unwrap().clone(),
+    )
+    .await;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        core.processes().await_output(&run),
+    )
+    .await
+    .expect("the process settles")
+    .expect("the output reads");
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("the process settles with an output: {output:?}");
+    };
+    if output.is_success() {
+        return Ok(output.value_for_projection());
+    }
+    let lash::tools::ToolCallOutcome::Failure(failure) = output.outcome else {
+        panic!("the process fails: {output:?}");
+    };
+    let kind = match failure.cause.as_deref() {
+        Some(lash::tools::ToolFailureCause::UncaughtError { error_kind, .. }) => error_kind.clone(),
+        other => panic!("the failure's cause is the uncaught error: {other:?}"),
+    };
+    Err((kind, failure.message))
+}
+
+/// FIG-7697: a callable that reads a captured list by index, or calls a
+/// captured map's or set's methods, or indexes a captured list it
+/// reassigns, publishes: its printed source re-imports to the same kernel
+/// document (publication proves it), and both answer alike. The printed
+/// operations keep their own checks: a list read of an edited fill that is
+/// no list fails the list's kind check rather than reading the text, and a
+/// method of a fill of another kind fails as that method call of an
+/// ordinary binding does.
+#[tokio::test]
+async fn published_callables_capturing_collections_print_their_exact_operations() {
+    let (core, pin, base, packages, request) = super::packages::capturing_views().await;
+    let source = r#"
+export async function ships(): Promise<string> {
+    const xs = [7, 8];
+    const m = new Map([["a", 1]]);
+    const s = new Set([1]);
+    let ys = [5];
+    const listed = async (x: number): Promise<number> => x + xs[1];
+    const mapped = async (key: string): Promise<unknown> => { m.set(key, 2); return m.has(key) ? m.get(key) : 0; };
+    const sets = async (x: number): Promise<boolean> => { s.add(x); return s.has(x); };
+    const reassigned = async (x: number): Promise<number> => { ys = [x, x + 1]; return ys[1]; };
+    await tools.capture({value: "collection-listed", nested: {fact: listed}});
+    await tools.capture({value: "collection-mapped", nested: {fact: mapped}});
+    await tools.capture({value: "collection-sets", nested: {fact: sets}});
+    await tools.capture({value: "collection-reassigned", nested: {fact: reassigned}});
+    return "shipped";
+}
+"#;
+    let cases = [
+        ("listed", serde_json::json!({"x": 1}), serde_json::json!(9)),
+        (
+            "mapped",
+            serde_json::json!({"key": "k"}),
+            serde_json::json!(2),
+        ),
+        ("sets", serde_json::json!({"x": 2}), serde_json::json!(true)),
+        (
+            "reassigned",
+            serde_json::json!({"x": 3}),
+            serde_json::json!(4),
+        ),
+    ];
+    let names: Vec<_> = cases.iter().map(|(name, ..)| *name).collect();
+    let (publication, origin, functions) =
+        shipped_callables(&core, &pin, (&base, &packages, &request), source, &names).await;
+    let mut printed_sources = std::collections::BTreeMap::new();
+    let mut refused = Vec::new();
+    for ((name, args, expected), function) in cases.iter().zip(&functions) {
+        let definition = match core
+            .host_artifacts()
+            .publish_callable(&pin, function, &request, &origin, None)
+            .await
+        {
+            Ok(definition) => definition,
+            Err(error) => {
+                refused.push(format!("{name} publication: {error:?}"));
+                continue;
+            }
+        };
+        let printed = core
+            .host_artifacts()
+            .print_workflow(
+                &definition.id,
+                None,
+                SourceFormat::TypeScriptV1,
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        let roundtrip = publish_source(
+            &core,
+            &pin,
+            &printed.source,
+            SourceFormat::TypeScriptV1,
+            &request,
+            "run",
+        )
+        .await;
+        let roundtrip_env = definition_environment(&core, &pin, &roundtrip, &base).await;
+        for (definition, env, kind) in [
+            (&definition, &publication.env_ref, "original"),
+            (&roundtrip, &roundtrip_env, "roundtrip"),
+        ] {
+            assert_eq!(
+                outcome(&core, env, definition, &format!("{name}-{kind}"), args).await,
+                Ok(expected.clone()),
+                "{name} {kind}\n{}",
+                printed.source,
+            );
+        }
+        printed_sources.insert(*name, printed.source);
+    }
+    assert!(refused.is_empty(), "{}", refused.join("\n"));
+
+    // Each edited fill replaces the one literal the printed source fills
+    // the capture with.
+    let edited = |name: &str, literal: &str, replacement: &str| {
+        let source = &printed_sources[name];
+        assert_eq!(source.matches(literal).count(), 1, "{source}");
+        source.replace(literal, replacement)
+    };
+    let run_source = |source: String, key: &'static str, args: serde_json::Value| {
+        let (core, pin, request, base) = (&core, &pin, &request, &base);
+        async move {
+            let definition = publish_source(
+                core,
+                pin,
+                &source,
+                SourceFormat::TypeScriptV1,
+                request,
+                "run",
+            )
+            .await;
+            let env = definition_environment(core, pin, &definition, base).await;
+            outcome(core, &env, &definition, key, &args).await
+        }
+    };
+    // `xs[1]` of a text would read its character ("18"); the list read
+    // takes the list's length first, whose kind check fails.
+    assert_eq!(
+        run_source(
+            edited("listed", "[7, 8]", "\"78\""),
+            "listed-text",
+            serde_json::json!({"x": 1}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
+    );
+    // A map method of a list fails as the same method of an ordinary
+    // binding nothing reassigns, a parameter.
+    let ordinary = run_source(
+        "export async function run(key: string, m: unknown): Promise<unknown> {\n  m.set(key, 2);\n  return m.has(key) ? m.get(key) : 0;\n}\n".into(),
+        "mapped-ordinary",
+        serde_json::json!({"key": "k", "m": [["a", 1]]}),
+    )
+    .await;
+    assert!(ordinary.is_err(), "{ordinary:?}");
+    assert_eq!(
+        run_source(
+            edited("mapped", "map.from_entries([\"a\", 1])", "[[\"a\", 1]]"),
+            "mapped-list",
+            serde_json::json!({"key": "k"}),
+        )
+        .await,
+        ordinary,
+    );
+    core.shutdown().await.unwrap();
+}
+
+/// FIG-7697 graph: each of two instances of one callable, bound to distinct
+/// values, captures a list holding a callable that calls it back. Each
+/// publishes, prints and re-imports to a callable that recurses through
+/// its own list to its own value, while the published callable still runs
+/// under its original defining Link. A capture past the function-value
+/// bound is refused before anything is published.
+#[tokio::test]
+async fn published_callables_capturing_a_collection_of_themselves_keep_their_graph() {
+    let (core, pin, base, packages, request) = super::packages::capturing_views().await;
+    let source = r#"
+export async function ships(): Promise<string> {
+    const make = (base: number) => {
+        const loop = [null];
+        const seen = new Set([base]);
+        const answer = async (n: number): Promise<number> => {
+            if (n <= 0) {
+                return seen.has(base) ? base : -1;
+            }
+            const next = loop[0];
+            return await next(n - 1);
+        };
+        const again = async (n: number): Promise<number> => await answer(n);
+        loop[0] = again;
+        return answer;
+    };
+    const ten = make(10);
+    const twenty = make(20);
+    await tools.capture({value: "collection-ten", nested: {fact: ten}});
+    await tools.capture({value: "collection-twenty", nested: {fact: twenty}});
+    return "shipped";
+}
+"#;
+    let (publication, origin, functions) = shipped_callables(
+        &core,
+        &pin,
+        (&base, &packages, &request),
+        source,
+        &["ten", "twenty"],
+    )
+    .await;
+    assert_eq!(functions[0].callable, functions[1].callable);
+    for (function, expected) in functions.iter().zip([10, 20]) {
+        let definition = core
+            .host_artifacts()
+            .publish_callable(&pin, function, &request, &origin, None)
+            .await
+            .unwrap_or_else(|error| panic!("{expected}: {error:?}"));
+        let printed = core
+            .host_artifacts()
+            .print_workflow(
+                &definition.id,
+                None,
+                SourceFormat::TypeScriptV1,
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        let roundtrip = publish_source(
+            &core,
+            &pin,
+            &printed.source,
+            SourceFormat::TypeScriptV1,
+            &request,
+            "run",
+        )
+        .await;
+        let roundtrip_env = definition_environment(&core, &pin, &roundtrip, &base).await;
+        // The published callable runs under the environment its own
+        // defining Link was published in.
+        for (definition, env, kind) in [
+            (&definition, &publication.env_ref, "original"),
+            (&roundtrip, &roundtrip_env, "roundtrip"),
+        ] {
+            assert_eq!(
+                outcome(
+                    &core,
+                    env,
+                    definition,
+                    &format!("{expected}-{kind}"),
+                    &serde_json::json!({"n": 2}),
+                )
+                .await,
+                Ok(serde_json::json!(expected)),
+                "{expected} {kind}\n{}",
+                printed.source,
+            );
+        }
+    }
+
+    let ceiling = lash::workflow::document::FunctionValueLimits::CEILING;
+    let mut large = functions[0].clone();
+    large.captures.insert(
+        Name::new("surplus"),
+        CaptureValue::Data(Datum::Text("x".repeat(usize::try_from(ceiling).unwrap()))),
+    );
+    let refused = core
+        .host_artifacts()
+        .publish_callable(&pin, &large, &request, &origin, None)
+        .await
+        .unwrap_err();
+    assert!(format!("{refused:?}").contains("TooLarge"), "{refused:?}");
+    core.shutdown().await.unwrap();
+}
+
 async fn publish_source(
     core: &lash::LashCore,
     pin: &lash::process::HostArtifactPin,

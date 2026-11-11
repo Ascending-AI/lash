@@ -33,6 +33,11 @@ pub(super) struct Style {
     /// Numeric natives over checked `number` operands are written as the
     /// operators they lower from (`n < 1`), not as `num.lt(num.checked_float(n), 1)`.
     pub(super) operators: bool,
+    /// An unchecked list read and a method call on a receiver read in place
+    /// are written as the exact operations they lower from
+    /// (`list.element`, `callable.method`), not as `xs[i]` and `m.get(k)`,
+    /// whose ordinary lowering takes the receiver binding's own facts.
+    pub(super) exact: bool,
 }
 
 pub(super) fn refuse<T>(why: impl Into<String>) -> Lift<T> {
@@ -344,6 +349,15 @@ impl<'a> Lifter<'a> {
     /// Whether some statement of the unit assigns `name` after binding it.
     pub(super) fn reassigned(&self, name: &str) -> bool {
         self.assigned.contains(&Name::new(name))
+    }
+
+    /// Whether `expr` reads a binding itself, rather than a temporary the
+    /// front end held a value in.
+    pub(super) fn reads_binding(&self, expr: &k::Expr) -> bool {
+        matches!(expr, k::Expr::Variable(name)
+            if !self.substitutions.contains_key(name)
+                && !self.templates.contains_key(name)
+                && self.pending_at(name).is_none())
     }
 
     /// Where the temporary `name` stands among those waiting to be read.

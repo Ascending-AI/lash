@@ -260,6 +260,10 @@ pub(crate) struct Lowerer<'a> {
     used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
     facts: Facts,
+    /// The source names an exact operation spelling reads in place while
+    /// its operands are lowered (`callable.method`): no hold before the
+    /// operation reads them.
+    in_place: BTreeSet<String>,
     /// What tests have shown of names, innermost last, for the code being
     /// lowered now.
     narrowed: Vec<(String, Ty)>,
@@ -391,6 +395,7 @@ fn lower_beside_result(
         span: None,
         used: BTreeMap::new(),
         private: BTreeSet::new(),
+        in_place: BTreeSet::new(),
         facts: Facts::analyse(
             program,
             cell.bindings,

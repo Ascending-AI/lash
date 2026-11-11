@@ -553,6 +553,12 @@ impl Lifter<'_> {
         }
         let target = self.expr(target)?;
         let index = self.expr(index)?;
+        if otherwise.is_none() && self.style.exact {
+            return Ok(Some(super::expressions::constructor(
+                "list.element",
+                vec![target, index],
+            )));
+        }
         Ok(Some(Expr::Index(Box::new(target), Box::new(index))))
     }
 

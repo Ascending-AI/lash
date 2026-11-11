@@ -1081,7 +1081,7 @@ pub(super) fn literal_of(literal: &k::Literal) -> Lift<Expr> {
     })
 }
 
-fn constructor(name: &str, args: Vec<Expr>) -> Expr {
+pub(super) fn constructor(name: &str, args: Vec<Expr>) -> Expr {
     Expr::Call(Box::new(Expr::Ident(name.into())), args)
 }
 

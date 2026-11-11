@@ -11,6 +11,7 @@ use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 use lash_ext_ts_helpers::builtins::Receiver;
 
 mod discovery;
+mod exact;
 mod methods;
 mod values;
 pub(crate) use discovery::tool_calls;
@@ -859,6 +860,12 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         if let Some((root, path)) = static_path(callee)
             && !self.is_bound(root)
+            && let Some(exact) = exact::Exact::named(&path)
+        {
+            return self.call_exact(exact, args, span, discard_result, awaited);
+        }
+        if let Some((root, path)) = static_path(callee)
+            && !self.is_bound(root)
             && let Some(constructor) =
                 lash_kernel_dialect::value_constructors::Constructor::named(&path)
         {
@@ -1047,54 +1054,7 @@ impl Lowerer<'_> {
         match callee {
             ast::Expr::Member {
                 object, property, ..
-            } => {
-                let proven = self.facts.primitive(object);
-                let object = self.lower_expr(object)?;
-                let mut object = self.pin(object);
-                // Representation proof can refine unknown data, but a
-                // contradictory trusted kind still owns its typed refusal.
-                let proven = proven.filter(|ty| {
-                    declared_receiver(&object.ty).is_none_or(|(receiver, _)| {
-                        declared_receiver(ty).is_some_and(|(kind, _)| kind == receiver)
-                    })
-                });
-                if let Some(ty) = &proven {
-                    object.ty = ty.clone();
-                }
-                let key = self.lower_key(property)?;
-                let key = self.reference_key(&object, key)?;
-                self.check_method(&object, &key, args, span)?;
-                if let (Ty::Package(brand), Key::Static(name)) = (&object.ty, &key) {
-                    let brand = brand.clone();
-                    return self.call_typed_member(&object, &brand, name, args, awaited);
-                }
-                if let Key::Static(name) = &key
-                    && matches!(
-                        object.ty,
-                        Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Union(_)
-                    )
-                {
-                    let targets = self.selectable(name, true);
-                    if !targets.is_empty() || self.seals() {
-                        return self.select_call(&object, name, &targets, args, awaited);
-                    }
-                }
-                if let Key::Static(name) = &key
-                    && let Some(called) =
-                        self.call_declared(&object, name, args, discard_result, proven.is_some())?
-                {
-                    return Ok(called);
-                }
-                if let Key::Static(name) = &key
-                    && let Some(called) = self.call_map(&object, name, args)?
-                {
-                    return Ok(called);
-                }
-                let function = self.get_member(&object, &key)?;
-                let function = self.pin(function);
-                let args = self.arguments(args)?;
-                self.apply_method(function, object, key.operand(), args)
-            }
+            } => self.call_method(object, property, args, span, discard_result, awaited),
             ast::Expr::OptionalChain { base, operations } => {
                 let (function, receiver, name) =
                     self.optional_reference(base, operations, false)?;
@@ -1113,6 +1073,65 @@ impl Lowerer<'_> {
                 self.apply(function, Operand::undefined(), args, declared)
             }
         }
+    }
+
+    /// `object.property(args)`: the receiver, held before the arguments
+    /// run unless nothing can reassign it.
+    pub(super) fn call_method(
+        &mut self,
+        object: &ast::Expr,
+        property: &ast::MemberProperty,
+        args: &[ast::CallArg],
+        span: SourceSpan,
+        discard_result: bool,
+        awaited: bool,
+    ) -> Lowering<Operand> {
+        let proven = self.facts.primitive(object);
+        let object = self.lower_expr(object)?;
+        let mut object = self.pin(object);
+        // Representation proof can refine unknown data, but a
+        // contradictory trusted kind still owns its typed refusal.
+        let proven = proven.filter(|ty| {
+            declared_receiver(&object.ty).is_none_or(|(receiver, _)| {
+                declared_receiver(ty).is_some_and(|(kind, _)| kind == receiver)
+            })
+        });
+        if let Some(ty) = &proven {
+            object.ty = ty.clone();
+        }
+        let key = self.lower_key(property)?;
+        let key = self.reference_key(&object, key)?;
+        self.check_method(&object, &key, args, span)?;
+        if let (Ty::Package(brand), Key::Static(name)) = (&object.ty, &key) {
+            let brand = brand.clone();
+            return self.call_typed_member(&object, &brand, name, args, awaited);
+        }
+        if let Key::Static(name) = &key
+            && matches!(
+                object.ty,
+                Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Union(_)
+            )
+        {
+            let targets = self.selectable(name, true);
+            if !targets.is_empty() || self.seals() {
+                return self.select_call(&object, name, &targets, args, awaited);
+            }
+        }
+        if let Key::Static(name) = &key
+            && let Some(called) =
+                self.call_declared(&object, name, args, discard_result, proven.is_some())?
+        {
+            return Ok(called);
+        }
+        if let Key::Static(name) = &key
+            && let Some(called) = self.call_map(&object, name, args)?
+        {
+            return Ok(called);
+        }
+        let function = self.get_member(&object, &key)?;
+        let function = self.pin(function);
+        let args = self.arguments(args)?;
+        self.apply_method(function, object, key.operand(), args)
     }
 
     /// A Map cannot carry guest fields: its method read always selects its

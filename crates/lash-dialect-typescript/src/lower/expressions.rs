@@ -364,15 +364,16 @@ impl Lowerer<'_> {
     pub(super) fn read(&mut self, name: &str, span: Option<SourceSpan>) -> Lowering<Operand> {
         let span = span.or(self.span);
         if let Some(kernel) = self.resolve(name, span)? {
-            let stable = !self.facts.assigned(name)
-                && self.binding_mut(name).is_some_and(|(_, binding)| {
-                    binding.live
-                        && binding.kernel == kernel
-                        && matches!(
-                            binding.kind,
-                            super::BindingKind::Const | super::BindingKind::Local
-                        )
-                });
+            let stable = self.in_place.contains(name)
+                || !self.facts.assigned(name)
+                    && self.binding_mut(name).is_some_and(|(_, binding)| {
+                        binding.live
+                            && binding.kernel == kernel
+                            && matches!(
+                                binding.kind,
+                                super::BindingKind::Const | super::BindingKind::Local
+                            )
+                    });
             return Ok(Operand {
                 stable,
                 ..Operand::variable(kernel, {

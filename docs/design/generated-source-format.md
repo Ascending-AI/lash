@@ -67,7 +67,17 @@ member, such as `callable.invoke(views.heading, digits)`, calls that linked
 Import with exactly those operands. Neither form adds argument snapshots,
 adaptation, packing, a receiver, an exception operand or an await adapter.
 This preserves calls over frozen capture cells even when ordinary package
-call lowering would snapshot a mutable argument. Python's
+call lowering would snapshot a mutable argument. TypeScript has two more exact operation spellings, used only when the
+convenient spelling does not read back, as when a materialized capture cell
+replaces the binding whose facts the original lowering took.
+`list.element(xs, i)` is the element read of a list the source built: its
+bounds test, its element, otherwise the numeric read. It has no kind test of
+its own, so a receiver that is no list fails that bounds test's kind check.
+`callable.method(m, "name", ...args)` is `m.name(args)`. It reads the
+receiver binding, and each argument that names a binding, where the
+method's dispatch reads them, with no hold before later operands run.
+Each lowers to the nodes, helpers and evaluation order of the lowering it
+names, and keeps that operation's failures at its own site. Python's
 `@callable.direct` on a nested function preserves that bare closure ABI and its
 annotated signature. Parameters name positional operands; `= ...` marks an
 optional operand without adding a default-value prologue or a binder. This

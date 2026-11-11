@@ -40,14 +40,19 @@ pub fn print(
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
     let mut printed = print_attempt(document, captions, library, options, STYLES[0]);
+    // Exact operation spellings come last: only a document whose convenient
+    // reads and method calls do not read back is printed with them.
     for style in [false, true]
         .into_iter()
-        .flat_map(|block_bodies| {
-            [false, true].into_iter().flat_map(move |const_functions| {
-                STYLES.iter().map(move |style| lift::Style {
-                    block_bodies,
-                    const_functions,
-                    ..*style
+        .flat_map(|exact| {
+            [false, true].into_iter().flat_map(move |block_bodies| {
+                [false, true].into_iter().flat_map(move |const_functions| {
+                    STYLES.iter().map(move |style| lift::Style {
+                        block_bodies,
+                        const_functions,
+                        exact,
+                        ..*style
+                    })
                 })
             })
         })
@@ -69,24 +74,28 @@ const STYLES: [lift::Style; 4] = [
         const_functions: false,
         operators: true,
         preserve_temporaries: false,
+        exact: false,
     },
     lift::Style {
         block_bodies: false,
         const_functions: false,
         operators: true,
         preserve_temporaries: true,
+        exact: false,
     },
     lift::Style {
         block_bodies: false,
         const_functions: false,
         operators: false,
         preserve_temporaries: false,
+        exact: false,
     },
     lift::Style {
         block_bodies: false,
         const_functions: false,
         operators: false,
         preserve_temporaries: true,
+        exact: false,
     },
 ];
 

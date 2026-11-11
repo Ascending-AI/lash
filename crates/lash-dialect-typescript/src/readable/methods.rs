@@ -76,14 +76,13 @@ impl Lifter<'_> {
                 return Ok(None);
             }
             args.truncate(written);
-            let callee = Expr::Field(Box::new(self.expr(target)?), method.into());
             let items = args
                 .iter()
                 .map(|item| self.expr(item))
                 .collect::<Lift<_>>()?;
             return Ok(Some((
                 result.clone(),
-                Expr::Call(Box::new(callee), items),
+                self.method_call(target, method, items)?,
                 2,
             )));
         }
@@ -105,14 +104,13 @@ impl Lifter<'_> {
                 && let [receiver, k::Expr::List(items)] = args.as_slice()
                 && receiver == target
             {
-                let callee = Expr::Field(Box::new(self.expr(target)?), method.into());
                 let items = items
                     .iter()
                     .map(|item| self.expr(item))
                     .collect::<Lift<_>>()?;
                 return Ok(Some((
                     result.clone(),
-                    Expr::Call(Box::new(callee), items),
+                    self.method_call(target, method, items)?,
                     2,
                 )));
             }
@@ -423,7 +421,32 @@ impl Lifter<'_> {
             return Err("a method called by another name than it was read by".to_owned());
         }
         let args = args.iter().map(|arg| self.expr(arg)).collect::<Lift<_>>()?;
+        if self.style.exact && self.reads_binding(target) {
+            return Ok(Some(self.method_call(target, method, args)?));
+        }
         Ok(Some(Expr::Call(Box::new(read), args)))
+    }
+
+    /// `target.method(args)`, or under [`super::lift::Style::exact`]
+    /// `callable.method(target, "method", args)` when the call reads its
+    /// receiver binding in place.
+    fn method_call(&mut self, target: &k::Expr, method: &str, args: Vec<Expr>) -> Lift<Expr> {
+        let exact = self.style.exact && self.reads_binding(target);
+        let receiver = self.expr(target)?;
+        Ok(if exact {
+            super::expressions::constructor(
+                "callable.method",
+                [receiver, Expr::Text(method.to_owned())]
+                    .into_iter()
+                    .chain(args)
+                    .collect(),
+            )
+        } else {
+            Expr::Call(
+                Box::new(Expr::Field(Box::new(receiver), method.to_owned())),
+                args,
+            )
+        })
     }
 
     /// The arguments `call` passes the method `member` holds, with `target`
