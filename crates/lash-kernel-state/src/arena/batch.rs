@@ -7,6 +7,34 @@ use lash_kernel_doc::heap::{HeapFault, HostResource};
 /// sparse; the crate's fast hasher replaces SipHash for these u32 keys.
 type Slots<V> = HashMap<u32, V, foldhash::fast::RandomState>;
 
+/// A batch's members by slot index. The members are distinct slots, so a
+/// small batch is searched in place and only a large one builds a map.
+struct Members(Option<Slots<usize>>);
+impl Members {
+    const SEARCHED: usize = 8;
+    fn new(len: usize) -> Result<Self, HeapFault> {
+        if len <= Self::SEARCHED {
+            return Ok(Self(None));
+        }
+        let mut map = Slots::default();
+        map.try_reserve(len).map_err(|_| exhausted())?;
+        Ok(Self(Some(map)))
+    }
+    fn insert(&mut self, index: u32, at: usize) {
+        if let Some(map) = &mut self.0 {
+            map.insert(index, at);
+        }
+    }
+    fn get(&self, entries: &[Entry], index: u32) -> Option<usize> {
+        match &self.0 {
+            Some(map) => map.get(&index).copied(),
+            None => entries
+                .iter()
+                .position(|entry| entry.handle.index() == index),
+        }
+    }
+}
+
 pub(super) struct Entry {
     pub(super) handle: ArenaHandle,
     body: Body,
@@ -15,21 +43,21 @@ pub(super) struct Entry {
 struct View<'a> {
     arena: &'a Arena,
     entries: &'a [Entry],
-    indices: &'a Slots<usize>,
+    indices: &'a Members,
 }
 impl Bodies for View<'_> {
     fn get(&self, handle: ArenaHandle) -> Option<&Body> {
         self.indices
-            .get(&handle.index())
-            .and_then(|i| (self.entries[*i].handle == handle).then_some(&self.entries[*i].body))
+            .get(self.entries, handle.index())
+            .and_then(|i| (self.entries[i].handle == handle).then_some(&self.entries[i].body))
             .or_else(|| self.arena.objects.get(handle))
     }
 }
 impl FactTable for View<'_> {
     fn get(&self, index: usize) -> Option<&Facts> {
         self.indices
-            .get(&(index as u32))
-            .map(|i| &self.entries[*i].facts)
+            .get(self.entries, index as u32)
+            .map(|i| &self.entries[i].facts)
             .or_else(|| self.arena.facts.get(index))
     }
 }
@@ -91,8 +119,7 @@ impl Arena {
         let tokens = registration.arena().tokens;
         let mut entries = Vec::new();
         reserve(&mut entries, len)?;
-        let mut indices = Slots::default();
-        indices.try_reserve(len).map_err(|_| exhausted())?;
+        let mut indices = Members::new(len)?;
         let mut allocations = 0u64;
         for at in 0..len {
             let (handle, body) = registration.take_batch_body(at)?;
@@ -137,8 +164,10 @@ impl Arena {
                 each_member(&entries[at].body, &mut |value| {
                     if immutable
                         && matches!(value, Value::Tuple(_) | Value::Error(_))
-                        && let Some(child) = value.handle().and_then(|h| indices.get(&h.index()))
-                        && !done[*child]
+                        && let Some(child) = value
+                            .handle()
+                            .and_then(|h| indices.get(&entries, h.index()))
+                        && !done[child]
                     {
                         ready = false;
                     }
@@ -212,7 +241,7 @@ impl Arena {
             each_handle(&entries[at].body, &mut |handle| {
                 if Bodies::get(&view, handle).is_none_or(|body| matches!(body, Body::Free)) {
                     error = Some(malformed("a batch member names a stale object"));
-                } else if !indices.contains_key(&handle.index()) {
+                } else if indices.get(&entries, handle.index()).is_none() {
                     if let Some(version) = arena.content_version(handle) {
                         if let Err(fault) = reserve(&mut dependencies, 1) {
                             error = Some(fault.into());

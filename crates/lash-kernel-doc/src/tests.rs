@@ -852,3 +852,25 @@ fn logical_prices_ignore_residency_and_reject_understated_summaries() {
     assert_eq!(Cost::frame([16, 17]), 97);
     assert_eq!(Cost::task(97, Some(&PageValue::Null)), 113);
 }
+
+#[test]
+fn a_batch_names_each_reserved_slot_once_and_a_refusal_releases_nothing() {
+    use crate::arena::{Body, Objects};
+    let mut objects = Objects::default();
+    let first = objects.insert(Body::Cell(crate::Value::Bool(true)));
+    let second = objects.insert(Body::Cell(crate::Value::Bool(false)));
+    objects.release(first);
+    objects.release(second);
+    // `second` was released last, so it is taken first; `first` stays listed.
+    let taken = objects.reserve();
+    let listed = crate::arena::ArenaHandle::new(first.index(), first.generation() + 1);
+    assert_eq!(taken.index(), second.index());
+    for refused in [vec![taken, taken], vec![taken, listed], vec![listed]] {
+        assert!(
+            objects.prepare_install(refused.iter().copied()).is_err(),
+            "{refused:?}"
+        );
+    }
+    assert!(objects.prepare_install([taken].into_iter()).is_ok());
+    assert_eq!(objects.reserve().index(), first.index());
+}

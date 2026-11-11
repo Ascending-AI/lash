@@ -815,37 +815,56 @@ impl Objects {
     /// Every target must still be reserved, distinct and in installation order.
     pub fn prepare_install(
         &mut self,
-        handles: impl ExactSizeIterator<Item = ArenaHandle>,
+        handles: impl Iterator<Item = ArenaHandle> + Clone,
     ) -> Result<(), crate::heap::HeapFault> {
         use crate::heap::{HeapFault, HostResource};
-        let exhausted = || HeapFault::Exhausted {
-            resource: HostResource::StagingBytes,
-        };
-        let mut seen = std::collections::HashSet::new();
-        seen.try_reserve(handles.len()).map_err(|_| exhausted())?;
+        // A released slot taken again is unlisted. While it is checked it is
+        // listed once more, so a second target naming it is refused like a
+        // slot nobody reserved; past the end, targets must run consecutively.
         let mut end = self.slots.len();
-        for handle in handles {
+        let mut marked = 0;
+        let mut valid = true;
+        for handle in handles.clone() {
             let index = handle.index as usize;
-            let valid = if index < self.slots.len() {
-                self.slots[index].generation == handle.generation
-                    && matches!(self.slots[index].body, Body::Free)
-                    && !self.slots[index].listed.get()
+            valid = if let Some(slot) = self.slots.get(index) {
+                let reserved = slot.generation == handle.generation
+                    && matches!(slot.body, Body::Free)
+                    && !slot.listed.get();
+                if reserved {
+                    slot.listed.set(true);
+                    marked += 1;
+                }
+                reserved
             } else {
-                let valid = index == end
+                let reserved = index == end
                     && handle.generation == 0
                     && index < self.slots.len() + self.reserved.get() as usize;
                 end += 1;
-                valid
+                reserved
             };
-            if !valid || !seen.insert(handle.index) {
-                return Err(HeapFault::Malformed(
-                    "a batch target is not a distinct reserved slot".into(),
-                ));
+            if !valid {
+                break;
             }
+        }
+        for handle in handles {
+            if marked == 0 {
+                break;
+            }
+            if let Some(slot) = self.slots.get(handle.index as usize) {
+                slot.listed.set(false);
+                marked -= 1;
+            }
+        }
+        if !valid {
+            return Err(HeapFault::Malformed(
+                "a batch target is not a distinct reserved slot".into(),
+            ));
         }
         self.slots
             .try_reserve(end - self.slots.len())
-            .map_err(|_| exhausted())
+            .map_err(|_| HeapFault::Exhausted {
+                resource: HostResource::StagingBytes,
+            })
     }
 
     /// Returns an abandoned batch's reserved slots in reverse reservation order.
