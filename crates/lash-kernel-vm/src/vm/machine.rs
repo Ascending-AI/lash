@@ -41,12 +41,45 @@ pub struct CoreMachine {
     document: Arc<Document>,
     ended: bool,
     convention: Option<lash_kernel_doc::StartConvention>,
+    /// The public result an entry's or callable's value fits as it
+    /// leaves the run.
+    output: Option<Output>,
     header: Header,
     /// A budgeted seal's written run record and what the checkpoint root
     /// takes from it, until the run moves.
     partial: Option<Partial>,
     /// What saves the functions a session cell's end drops (`K-SES-004`).
     save: Option<Box<dyn crate::CellSave>>,
+}
+
+/// The public result a start's value fits as it leaves the run
+/// (FIG-7143): a value that does not is the entry's typed mismatch at
+/// `output`, uncaught. A TypeScript start's value is its settlement
+/// hook's, and fits there.
+struct Output {
+    callable: lash_kernel_value::CallableId,
+    result: lash_kernel_value::Type,
+}
+
+impl Output {
+    fn of(
+        link: lash_kernel_value::LinkId,
+        export: &lash_kernel_doc::FunctionExport,
+    ) -> Option<Self> {
+        let result = &export.signature.result;
+        if *result == lash_kernel_value::Type::Any
+            || crate::bytecode::conventions::typescript(&export.convention)
+        {
+            return None;
+        }
+        Some(Self {
+            callable: lash_kernel_value::CallableId {
+                link,
+                function: export.function,
+            },
+            result: result.clone(),
+        })
+    }
 }
 
 /// The run record a budgeted seal wrote before its budget ran out.
@@ -506,6 +539,7 @@ impl CoreMachine {
             (None, None) => None,
         };
         let params = export.map_or_else(Vec::new, |export| export.signature.params.clone());
+        let output = export.and_then(|export| Output::of(program.link, export));
         let (heap, session) = match start.session.as_ref().map(SessionRoot::page) {
             None => (
                 SlotHeap::durable(
@@ -630,6 +664,7 @@ impl CoreMachine {
             partial: None,
             save: None,
             convention,
+            output,
             header,
         })
     }
@@ -797,6 +832,11 @@ impl Machine for CoreMachine {
             (None, Some(export)) => Some(entered(export)),
             (None, None) => None,
         };
+        let output = callable
+            .as_ref()
+            .map(|(_, export)| export)
+            .or(export)
+            .and_then(|export| Output::of(program.link, export));
         let (mut vm, convention) = build(
             &program,
             bounds,
@@ -825,6 +865,7 @@ impl Machine for CoreMachine {
             partial: None,
             save: None,
             convention,
+            output,
             header,
         })
     }
@@ -865,6 +906,9 @@ impl Machine for CoreMachine {
         match self.vm.run(host, slice) {
             Stop::Returned(result) => {
                 let result = crate::bytecode::conventions::result(self.convention.as_ref(), result);
+                if let Some(error) = self.unfit_output(&result)? {
+                    return self.ended(End::Error(RunError::Uncaught { error, site: None }));
+                }
                 self.end_cell(None, false, result)
             }
             Stop::Finish(result) => {
@@ -1080,6 +1124,36 @@ impl CoreMachine {
             carry,
             not_carried,
         })))
+    }
+
+    /// The entry's typed mismatch `result` makes as it leaves the run,
+    /// unless it fits the start's public result.
+    fn unfit_output(&self, result: &Datum) -> Result<Option<Datum>, MachineError> {
+        let Some(output) = &self.output else {
+            return Ok(None);
+        };
+        let code = &self.vm.program;
+        let decoder = Decoder {
+            max_depth: self.vm.value_depth,
+            policy: self.document.numbers,
+            declared: &|callable| code.callable(callable),
+        };
+        let Err(lash_kernel_doc::DecodeRefusal::Type { mismatch }) =
+            decoder.decode(result, &output.result)
+        else {
+            return Ok(None);
+        };
+        let kind = "entry_type_mismatch";
+        let data = lash_kernel_doc::diagnostic_datum(&lash_kernel_value::EntryTypeMismatch {
+            callable: output.callable,
+            mismatch: mismatch.within("output"),
+        })
+        .map_err(|error| MachineError::Fault {
+            problem: error.to_string(),
+        })?;
+        Ok(Some(Datum::Error(Box::new(
+            lash_kernel_doc::ErrorDatum::new(kind.into(), kind.into(), data),
+        ))))
     }
 
     fn uncaught(&mut self, value: Value) -> Result<Step, MachineError> {

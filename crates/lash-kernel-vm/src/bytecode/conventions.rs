@@ -291,7 +291,7 @@ pub(crate) fn refused(
     }
 }
 
-fn typescript(convention: &StartConvention) -> bool {
+pub(crate) fn typescript(convention: &StartConvention) -> bool {
     matches!(
         convention,
         StartConvention::TsDirect { .. } | StartConvention::TsArgsList { .. }
