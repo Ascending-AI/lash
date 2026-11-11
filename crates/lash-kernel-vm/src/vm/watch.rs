@@ -24,7 +24,7 @@ pub(crate) struct Watch {
     /// branch's `then` and `otherwise` ordinals, the first alone for the
     /// others. `None` where the document names no such site.
     ordinals: Vec<Vec<[Option<u32>; 2]>>,
-    /// Action issues, empty-block entries and tests since the last take, by ordinal;
+    /// Statement starts, block entries, action issues and tests since the last take, by ordinal;
     /// empty when counts are not observed.
     counts: Vec<u64>,
     path: Option<PathRecorder>,
@@ -151,9 +151,13 @@ impl Watch {
             }
             let [first, second] = ordinals[k];
             match point {
-                // A statement start is on the path but not counted: the
-                // counts are action issues, empty-block entries and tests.
-                Point::Start(site) => trace(site),
+                // A statement start is on the path and counted: statement
+                // starts, block entries, action issues and tests share the
+                // run-count channel, each in its own ordinal domain.
+                Point::Start(site) => {
+                    count(first);
+                    trace(site);
+                }
                 Point::Branch { then, otherwise } => {
                     // A condition that is not a bool raises: nothing is entered.
                     let (site, ordinal) = match stack.last() {
