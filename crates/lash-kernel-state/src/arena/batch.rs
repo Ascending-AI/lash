@@ -49,7 +49,6 @@ pub struct PreparedBatch {
     tokens: u64,
     freed: u64,
     allocations: u64,
-    next_provisional: u64,
     registration_epoch: u64,
     pub(super) entries: Vec<Entry>,
     dependencies: Vec<ContentVersion>,
@@ -243,7 +242,6 @@ impl Arena {
             tokens: arena.tokens,
             freed: arena.freed,
             allocations,
-            next_provisional: arena.next_provisional().ordinal,
             registration_epoch: arena.registration_epoch,
             entries,
             dependencies,
@@ -263,18 +261,6 @@ impl PreparedBatch {
             && std::rc::Rc::ptr_eq(&self.identity, &arena.identity)
             && self.tokens == arena.tokens
             && self.freed == arena.freed
-            && self.entries.iter().all(|entry| {
-                entry
-                    .facts
-                    .provisional()
-                    .is_none_or(|id| id.ordinal < arena.next_provisional().ordinal)
-            })
-            && arena.entities.capacity() - arena.entities.len()
-                >= self
-                    .entries
-                    .iter()
-                    .filter(|entry| entry.facts.provisional().is_some())
-                    .count()
             && self
                 .dependencies
                 .iter()

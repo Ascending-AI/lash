@@ -86,8 +86,6 @@ mod tables;
 mod texts;
 mod versions;
 pub use versions::{ContentVersion, Registration};
-mod member_events;
-pub(crate) use member_events::MemberEvent;
 
 /// How many list positions, or table insertion sequences, one dirty card
 /// covers.
@@ -169,10 +167,6 @@ pub struct Projected {
     /// A mutable object's durable identity: given by the first projection
     /// that saves it, or the one its page names, and kept from then on.
     pub entity: Option<EntityId>,
-    /// The process-local ledger key of a mutable object the ledger priced
-    /// before any projection gave it [`Self::entity`]
-    /// ([`FamilyId::PROVISIONAL`](lash_kernel_doc::heap::FamilyId::PROVISIONAL)).
-    pub provisional: Option<EntityId>,
     /// The heap holds a head for the object: it was opened from one or
     /// projected to one. A projection writes such a list's or table's dirty
     /// cards into it, never the whole object.
@@ -210,12 +204,6 @@ impl Projected {
 }
 
 impl Facts {
-    /// The key the ledger holds the object under, if it has one: its
-    /// provisional key until the ledger is rekeyed, then its durable id.
-    pub fn ledger_entity(&self) -> Option<EntityId> {
-        self.projected()
-            .and_then(|projected| projected.provisional.or(projected.entity))
-    }
     /// The projection facts, if any were given.
     #[inline]
     pub fn projected(&self) -> Option<&Projected> {
@@ -250,9 +238,6 @@ impl Facts {
     }
     pub fn entity(&self) -> Option<EntityId> {
         self.projected().and_then(|projected| projected.entity)
-    }
-    pub fn provisional(&self) -> Option<EntityId> {
-        self.projected().and_then(|projected| projected.provisional)
     }
     pub fn based(&self) -> bool {
         self.projected().is_some_and(|projected| projected.based)
@@ -355,25 +340,13 @@ pub struct Arena {
     identity: std::rc::Rc<()>,
     registering: bool,
     registration_epoch: u64,
-    watching_members: bool,
-    member_events: Vec<MemberEvent>,
     objects: Objects,
     keys: keys::KeyCache,
     facts: Vec<Facts>,
     /// The shared key layouts of the tables the run built.
     layouts: layouts::Layouts,
-    /// The one handle of each durable object the run has seen, and of each
-    /// object holding a provisional ledger key.
+    /// The one handle of each durable object the run has seen.
     entities: HashMap<EntityId, ArenaHandle>,
-    /// The ordinal the next provisional ledger key takes.
-    next_provisional: u64,
-    /// The objects given a provisional key under the active registration:
-    /// abandoning it takes them back.
-    keyed: Vec<ArenaHandle>,
-    /// Provisional ledger keys a projection replaced by durable ids, in the
-    /// order it gave them, with their objects: what the ledger rekeys next.
-    /// Until it does, the object's ledger key stays provisional.
-    rekeyed: Vec<(EntityId, EntityId, ArenaHandle)>,
     /// The primary ordinal the next object a projection saves takes.
     next_ordinal: u64,
     /// The objects with ids that changed since they were last projected.
@@ -546,69 +519,6 @@ impl Arena {
         self.next_ordinal
     }
 
-    /// The provisional ledger key the next object the ledger prices before
-    /// its projection takes.
-    pub fn next_provisional(&self) -> EntityId {
-        EntityId {
-            family: lash_kernel_doc::heap::FamilyId::PROVISIONAL,
-            ordinal: self.next_provisional,
-        }
-    }
-
-    /// Takes the next provisional ledger key.
-    pub(crate) fn take_provisional(&mut self) -> Result<EntityId, NativeError> {
-        let entity = self.next_provisional();
-        self.next_provisional = self
-            .next_provisional
-            .checked_add(1)
-            .ok_or_else(|| malformed("provisional ordinals overflow"))?;
-        Ok(entity)
-    }
-
-    /// What the ledger keys the mutable object `handle` by: its provisional
-    /// key until the ledger is rekeyed to its durable id, then that id, and
-    /// a provisional key given now if it has neither. Taking a key neither
-    /// identifies the object nor marks it for projection: a garbage object
-    /// never takes a durable id.
-    pub fn ledger_key(&mut self, handle: ArenaHandle) -> Result<EntityId, NativeError> {
-        let facts = self.facts(handle)?;
-        if let Some(entity) = facts.provisional().or(facts.entity()) {
-            return Ok(entity);
-        }
-        if !is_mutable(self.body(handle)?) {
-            return Err(malformed("an immutable has no ledger key"));
-        }
-        facts.try_projection()?;
-        let entity = self.take_provisional()?;
-        self.entities.insert(entity, handle);
-        self.facts[handle.index() as usize]
-            .try_projection_mut()?
-            .provisional = Some(entity);
-        if self.registering {
-            self.keyed.push(handle);
-        }
-        Ok(entity)
-    }
-
-    /// The provisional ledger keys projections replaced by durable ids
-    /// since the last call, in the order the ids were given. The caller
-    /// rekeys the ledger: from now on the objects' ledger keys are their ids.
-    pub fn take_rekeyed(&mut self) -> Vec<(EntityId, EntityId)> {
-        let rekeyed = std::mem::take(&mut self.rekeyed);
-        for (provisional, _, handle) in &rekeyed {
-            if self.entities.get(provisional) == Some(handle) {
-                self.entities.remove(provisional);
-                if let Some(projected) = self.facts[handle.index() as usize].projected_mut() {
-                    projected.provisional = None;
-                }
-            }
-        }
-        rekeyed
-            .into_iter()
-            .map(|(provisional, durable, _)| (provisional, durable))
-            .collect()
-    }
-
     /// How many mutable objects the run has created.
     pub fn allocations(&self) -> u64 {
         self.allocations
@@ -644,7 +554,7 @@ impl Arena {
         if index >= self.facts.len() {
             self.facts.resize_with(index + 1, Facts::default);
         }
-        if let Some(entity) = facts.entity().or(facts.provisional()) {
+        if let Some(entity) = facts.entity() {
             self.entities.insert(entity, handle);
         }
         self.tokens += 1;
@@ -1294,10 +1204,6 @@ impl Arena {
             .filter(|handle| self.objects.get(*handle).is_some())
     }
 
-    pub(crate) fn logical_handle(&self, entity: EntityId) -> Option<ArenaHandle> {
-        self.entities.get(&entity).copied()
-    }
-
     /// The durable id of the mutable object `handle`, given now if it has
     /// none: the next primary ordinal. It is dirty already, as every object
     /// the run creates is until it is projected.
@@ -1322,10 +1228,6 @@ impl Arena {
         self.entities.insert(entity, handle);
         let facts = &mut self.facts[handle.index() as usize];
         facts.try_projection_mut()?.entity = Some(entity);
-        if let Some(provisional) = facts.provisional() {
-            self.rekeyed.push((provisional, entity, handle));
-        }
-        let facts = &mut self.facts[handle.index() as usize];
         facts.dirty = true;
         facts.listed = true;
         self.dirty.push(handle);
@@ -1349,10 +1251,6 @@ impl Arena {
         self.entities.insert(entity, handle);
         let facts = &mut self.facts[handle.index() as usize];
         facts.try_projection_mut()?.entity = Some(entity);
-        if let Some(provisional) = facts.provisional() {
-            self.rekeyed.push((provisional, entity, handle));
-        }
-        let facts = &mut self.facts[handle.index() as usize];
         facts.dirty = true;
         if !facts.listed {
             facts.listed = true;
@@ -1538,7 +1436,6 @@ impl Arena {
     fn mark_roots(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) -> Vec<ArenaHandle> {
         let mut visited = Vec::new();
         roots(&mut |value| visited.extend(value.handle()));
-        self.pending_member_handles(&mut visited);
         let mut rooted = Vec::with_capacity(visited.len());
         for handle in visited {
             if self.objects.get(handle).is_none() {
@@ -1562,9 +1459,6 @@ impl Arena {
         let index = handle.index() as usize;
         let facts = std::mem::take(&mut self.facts[index]);
         if let Some(entity) = facts.entity() {
-            self.entities.remove(&entity);
-        }
-        if let Some(entity) = facts.provisional() {
             self.entities.remove(&entity);
         }
         if let Some(body) = self.objects.get(handle) {
@@ -1598,7 +1492,6 @@ impl Arena {
     pub fn collect_cycles(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) {
         let mut pending: Vec<ArenaHandle> = Vec::new();
         roots(&mut |value| pending.extend(value.handle()));
-        self.pending_member_handles(&mut pending);
         for (index, facts) in self.facts.iter().enumerate() {
             if facts.dirty
                 && facts.entity().is_some()

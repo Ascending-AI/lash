@@ -44,7 +44,6 @@ use super::{CARD, Facts};
 /// layout's, or its own.
 #[derive(Debug)]
 pub struct Index(Repr);
-mod patch;
 
 #[derive(Debug)]
 enum Repr {
@@ -822,25 +821,6 @@ impl super::Arena {
         Ok((table, index))
     }
 
-    pub(crate) fn logical_entry(
-        &self,
-        handle: ArenaHandle,
-        key: &Value,
-    ) -> Result<Option<(Value, Value)>, NativeError> {
-        let key = self.key(key)?;
-        self.logical_entry_key(handle, &key)
-    }
-    pub(crate) fn logical_entry_key(
-        &self,
-        handle: ArenaHandle,
-        key: &Key,
-    ) -> Result<Option<(Value, Value)>, NativeError> {
-        let (table, index) = self.table_view(handle)?;
-        find(handle, table, index, key)?
-            .map(|place| pair(table, place).map(|pair| (pair[0], pair[1])))
-            .transpose()
-    }
-
     /// Writes `value` over the entry under `key`, if the table holds one:
     /// the key keeps its first spelling and position (`K-KEY-003`). A
     /// value write moves no entry, so the table's position proofs stand.
@@ -900,7 +880,6 @@ impl super::Arena {
         }
         self.hold(&value);
         self.unhold(&old);
-        self.note_member(handle, Some(old), Some(value))?;
         Ok(Some(seq))
     }
 
@@ -956,7 +935,6 @@ impl super::Arena {
         };
         if unchanged {
             Self::mark_resident(facts, &mut self.dirty, handle, Some(seq / CARD));
-            self.note_member(handle, Some(old), Some(value))?;
             return Ok(true);
         }
         if !set {
@@ -965,7 +943,6 @@ impl super::Arena {
         self.hold(&value);
         self.unhold(&old);
         self.mark(handle, Some(seq / CARD))?;
-        self.note_member(handle, Some(old), Some(value))?;
         Ok(true)
     }
 
@@ -980,7 +957,6 @@ impl super::Arena {
         key: Value,
         value: Value,
     ) -> Result<u64, NativeError> {
-        let record = matches!(self.body(handle)?, Body::Record(_));
         let flat = self.facts(handle)?.flat;
         let (table, index) = self.table_parts(handle)?;
         let seq = index.next();
@@ -1025,11 +1001,6 @@ impl super::Arena {
         self.update_table_flat(handle, None, Some((&key, &value)));
         self.hold(&key);
         self.hold(&value);
-        self.note_entry(
-            handle,
-            None,
-            Some(super::member_events::MemberEntry::Pair { key, value, record }),
-        )?;
         Ok(seq)
     }
 
@@ -1040,7 +1011,6 @@ impl super::Arena {
         handle: ArenaHandle,
         key: &Key,
     ) -> Result<Option<(u64, Value)>, NativeError> {
-        let record = matches!(self.body(handle)?, Body::Record(_));
         let flat = self.facts(handle)?.flat;
         let (table, index) = self.table_parts(handle)?;
         let Some(place) = find(handle, table, index, key)? else {
@@ -1066,15 +1036,6 @@ impl super::Arena {
         self.update_table_flat(handle, Some((&removed, &value)), None);
         self.unhold(&removed);
         self.unhold(&value);
-        self.note_entry(
-            handle,
-            Some(super::member_events::MemberEntry::Pair {
-                key: removed,
-                value,
-                record,
-            }),
-            None,
-        )?;
         Ok(Some((seq, value)))
     }
 

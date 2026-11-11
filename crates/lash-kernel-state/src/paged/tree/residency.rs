@@ -442,8 +442,4 @@ impl Access<'_> {
         self.dirty.borrow_mut().staging = false;
         result
     }
-    #[cfg(test)]
-    pub(crate) fn dirty_bytes(&self) -> usize {
-        self.dirty.borrow().bytes
-    }
 }

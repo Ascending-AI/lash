@@ -37,10 +37,6 @@ pub struct FamilyId(pub u64);
 impl FamilyId {
     /// The family ordinary allocation draws from.
     pub const PRIMARY: Self = Self(0);
-    /// The process-local family of the ledger keys a mutable object takes
-    /// before its first projection gives it a durable id. Nothing durable
-    /// names one: a projection rekeys the ledger from it to the durable id.
-    pub const PROVISIONAL: Self = Self(u64::MAX);
 }
 
 /// A mutable object's identity: its family and its ordinal within it. Two

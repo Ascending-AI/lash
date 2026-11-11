@@ -30,7 +30,6 @@ impl Arena {
     ) -> Result<(), HeapFault> {
         let mut pending: Vec<ArenaHandle> = Vec::new();
         roots(&mut |value| pending.extend(value.handle()));
-        self.pending_member_handles(&mut pending);
         let mut traced: HashSet<EntityId> = HashSet::new();
         let mut absent: Vec<EntityId> = Vec::new();
         let mut marked = Vec::new();

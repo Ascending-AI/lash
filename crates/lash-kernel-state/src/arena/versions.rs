@@ -61,12 +61,10 @@ impl Arena {
             .ok_or_else(|| malformed("identity registrations overflow"))?;
         self.registering = true;
         let next = self.next_ordinal;
-        let provisional = self.next_provisional;
         let dirty = self.dirty.len();
         Ok(Registration {
             arena: self,
             next,
-            provisional,
             dirty,
             committed: false,
             batch: Vec::new(),
@@ -81,7 +79,6 @@ impl Arena {
 pub struct Registration<'a> {
     arena: &'a mut Arena,
     next: u64,
-    provisional: u64,
     dirty: usize,
     committed: bool,
     batch: Batch,
@@ -152,22 +149,7 @@ impl Drop for Registration<'_> {
             }
             self.arena.dirty.truncate(kept);
             self.arena.next_ordinal = self.next;
-            for handle in std::mem::take(&mut self.arena.keyed) {
-                let Some(facts) = self.arena.facts.get_mut(handle.index() as usize) else {
-                    continue;
-                };
-                if let Some(entity) = facts.provisional()
-                    && entity.ordinal >= self.provisional
-                {
-                    if let Some(projected) = facts.projected_mut() {
-                        projected.provisional = None;
-                    }
-                    self.arena.entities.remove(&entity);
-                }
-            }
-            self.arena.next_provisional = self.provisional;
         }
-        self.arena.keyed.clear();
         self.arena.registering = false;
     }
 }

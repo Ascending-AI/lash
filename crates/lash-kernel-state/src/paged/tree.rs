@@ -562,11 +562,6 @@ impl<T: Cell> Tree<T> {
     pub fn cost(&self) -> u64 {
         self.root.as_ref().map_or(0, |r| r.summary.cost)
     }
-    pub(crate) fn cached_task_edges(&self) -> Option<u64> {
-        self.root.as_ref().map_or(Some(0), |root| {
-            root.tasks_known.then_some(root.summary.tasks)
-        })
-    }
     pub fn task_edges(&self) -> u64 {
         self.root.as_ref().map_or(0, |r| r.summary.tasks)
     }

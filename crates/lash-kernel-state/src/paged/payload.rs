@@ -106,126 +106,6 @@ pub fn build(access: &Access<'_>, bytes: &[u8], text: bool) -> Result<PayloadRoo
         id: parts[0].id,
     })
 }
-#[cfg(test)]
-pub(super) mod cursor_work {
-    use super::*;
-    use std::cell::RefCell;
-    use std::collections::BTreeMap;
-    #[derive(Default, Debug)]
-    pub struct Work {
-        pub leaves: BTreeMap<PageId, u64>,
-        pub copied: usize,
-        pub scanned: usize,
-    }
-    thread_local! { pub static WORK: RefCell<Work> = RefCell::default(); }
-}
-
-/// A transient text walk with one validated leaf and a fanout-bounded frontier
-
-#[derive(Clone, Debug)]
-struct TextWalk {
-    leaf: Leaf,
-    offset: usize,
-    path: Vec<std::vec::IntoIter<Part>>,
-}
-impl TextWalk {
-    fn open(
-        access: &Access<'_>,
-        root: PayloadRoot,
-        summary: TextSummary,
-        mut index: u64,
-    ) -> Result<Self, HeapFault> {
-        let mut part = Part::root(root, summary);
-        let mut path = Vec::new();
-        loop {
-            match read(access, &part, true)? {
-                Node::Leaf(leaf) => {
-                    let text = std::str::from_utf8(leaf.bytes())
-                        .map_err(|e| HeapFault::Malformed(e.to_string()))?;
-                    let offset = text
-                        .char_indices()
-                        .inspect(|(_, c)| {
-                            #[cfg(test)]
-                            cursor_work::WORK.with_borrow_mut(|work| work.scanned += c.len_utf8());
-                            #[cfg(not(test))]
-                            let _ = c;
-                        })
-                        .nth(index as usize)
-                        .map(|(at, _)| at)
-                        .ok_or_else(|| HeapFault::Malformed("text rank mismatch".into()))?;
-                    return Ok(Self { leaf, offset, path });
-                }
-                Node::Index(children) => {
-                    let mut children = children.into_iter();
-                    part = loop {
-                        let child = children.next().ok_or_else(|| {
-                            HeapFault::Malformed("text index summary mismatch".into())
-                        })?;
-                        if index < child.summary.chars {
-                            break child;
-                        }
-                        index -= child.summary.chars;
-                    };
-                    path.push(children);
-                }
-            }
-        }
-    }
-    fn point(&self) -> Result<char, HeapFault> {
-        let bytes = self.leaf.bytes();
-        let first = *bytes
-            .get(self.offset)
-            .ok_or_else(|| HeapFault::Malformed("text rank mismatch".into()))?;
-        let width = if first < 0x80 {
-            1
-        } else if first < 0xe0 {
-            2
-        } else if first < 0xf0 {
-            3
-        } else {
-            4
-        };
-        // The leaf was validated once. Decode only this scalar, never the suffix.
-        let point = bytes
-            .get(self.offset..self.offset + width)
-            .and_then(|bytes| std::str::from_utf8(bytes).ok())
-            .and_then(|text| text.chars().next())
-            .ok_or_else(|| HeapFault::Malformed("text rank mismatch".into()))?;
-        #[cfg(test)]
-        cursor_work::WORK.with_borrow_mut(|work| work.scanned += width);
-        Ok(point)
-    }
-    fn advance(&mut self, access: &Access<'_>) -> Result<(), HeapFault> {
-        let mut part = loop {
-            let children = self
-                .path
-                .last_mut()
-                .ok_or_else(|| HeapFault::Malformed("text index summary mismatch".into()))?;
-            if let Some(child) = children.find(|child| child.summary.chars != 0) {
-                break child;
-            }
-            self.path.pop();
-        };
-        loop {
-            match read(access, &part, true)? {
-                Node::Leaf(leaf) => {
-                    self.leaf = leaf;
-                    self.offset = 0;
-                    return Ok(());
-                }
-                Node::Index(children) => {
-                    let mut children = children.into_iter();
-                    part = children
-                        .find(|child| child.summary.chars != 0)
-                        .ok_or_else(|| {
-                            HeapFault::Malformed("text index summary mismatch".into())
-                        })?;
-                    self.path.push(children);
-                }
-            }
-        }
-    }
-}
 
 // The payload range borrows the immutable token image; no leaf-sized allocation.
 #[derive(Clone, Debug)]
@@ -261,11 +141,6 @@ fn decode(part: &Part, text: bool, answer: super::PageAnswer) -> Result<Node, He
         };
         let end = input.position();
         let start = end - bytes.len();
-        #[cfg(test)]
-        cursor_work::WORK.with_borrow_mut(|work| {
-            *work.leaves.entry(part.page.id).or_default() += 1;
-            work.scanned += bytes.len();
-        });
         input.finish().map_err(|e| bad(e.to_string()))?;
         let kind = identity::Kind::of(text);
         if bytes.is_empty()
@@ -278,16 +153,10 @@ fn decode(part: &Part, text: bool, answer: super::PageAnswer) -> Result<Node, He
         if identity::leaf(kind, declared, bytes).id != part.id {
             return Err(bad("payload leaf identity mismatch".into()));
         }
-        #[cfg(test)]
-        let backing = Arc::clone(&answer.tokens);
         let leaf = Leaf {
             tokens: answer.tokens,
             range: start..end,
         };
-        #[cfg(test)]
-        if !Arc::ptr_eq(&leaf.tokens, &backing) {
-            cursor_work::WORK.with_borrow_mut(|work| work.copied += leaf.bytes().len());
-        }
         Ok(Node::Leaf(leaf))
     } else if answer.kind == PageKind::PAYLOAD_INDEX {
         let mut children: Vec<Part> =
@@ -483,48 +352,4 @@ pub(super) fn copy(
         &mut out,
     )?;
     Ok(out)
-}
-
-pub fn offset(
-    access: &Access<'_>,
-    root: PayloadRoot,
-    summary: TextSummary,
-    mut index: u64,
-) -> Result<u64, HeapFault> {
-    if index > summary.chars {
-        return Err(HeapFault::Malformed(
-            "character index is out of bounds".into(),
-        ));
-    }
-    if index == summary.chars {
-        return Ok(summary.utf8_bytes);
-    }
-    let mut part = Part::root(root, summary);
-    let mut offset = 0;
-    loop {
-        match read(access, &part, true)? {
-            Node::Leaf(leaf) => {
-                let text = std::str::from_utf8(leaf.bytes())
-                    .map_err(|e| HeapFault::Malformed(e.to_string()))?;
-                return text
-                    .char_indices()
-                    .nth(index as usize)
-                    .map(|(i, _)| offset + i as u64)
-                    .ok_or_else(|| HeapFault::Malformed("text rank mismatch".into()));
-            }
-            Node::Index(children) => {
-                let mut chosen = None;
-                for child in children {
-                    if index < child.summary.chars {
-                        chosen = Some(child);
-                        break;
-                    }
-                    index -= child.summary.chars;
-                    offset += child.summary.utf8_bytes;
-                }
-                part = chosen
-                    .ok_or_else(|| HeapFault::Malformed("text index summary mismatch".into()))?;
-            }
-        }
-    }
 }

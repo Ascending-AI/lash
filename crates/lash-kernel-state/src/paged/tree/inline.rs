@@ -2,35 +2,6 @@
 use super::*;
 
 impl<T: Cell> Tree<T> {
-    pub(crate) fn encode_pending(
-        &self,
-        len: u64,
-        cost: u64,
-        tasks: u64,
-        members: u64,
-        out: &mut TokenWriter,
-    ) {
-        out.seq(7);
-        self.sequence.encode(out);
-        None::<FamilyId>.encode(out);
-        if len == 0 {
-            out.sum(0, 0);
-        } else {
-            out.sum(2, 3);
-            PageRef {
-                id: PageId([0; 32]),
-                grant: lash_kernel_doc::heap::PageGrant::NONE,
-            }
-            .encode(out);
-            u64::MAX.encode(out);
-            true.encode(out);
-        }
-        len.encode(out);
-        cost.encode(out);
-        tasks.encode(out);
-        members.encode(out);
-    }
-
     pub fn children(&self, out: &mut Vec<PageRef>) {
         if let Some(root) = &self.root {
             match &root.link {
@@ -332,41 +303,6 @@ impl<T: Cell> Tree<T> {
                 }
             }
         }
-    }
-
-    /// The frozen writer changes cell interpretation without changing its
-    /// canonical relative tokens or duplicating its bounded storage links.
-    pub(crate) fn retype<U: Cell>(self) -> Result<Tree<U>, HeapFault> {
-        let root = self
-            .root
-            .map(|r| {
-                let r = Rc::unwrap_or_clone(r);
-                let link = match r.link {
-                    Link::Sealed(p) => Link::Sealed(p),
-                    Link::Inline { body, children } => Link::Inline {
-                        body: Inline::Tokens(body.tokens()),
-                        children,
-                    },
-                    Link::Dirty(_) => {
-                        return Err(HeapFault::Malformed("unsealed tree retype".into()));
-                    }
-                };
-                Ok(Branch {
-                    family: r.family,
-                    encoded_bytes: r.encoded_bytes,
-                    is_leaf: r.is_leaf,
-                    first: r.first,
-                    summary: r.summary,
-                    tasks_known: r.tasks_known,
-                    members_known: r.members_known,
-                    link,
-                })
-            })
-            .transpose()?;
-        Ok(Tree {
-            root: root.map(Rc::new),
-            sequence: self.sequence,
-        })
     }
 }
 impl<T: Cell> TokenCodec for Tree<T> {
