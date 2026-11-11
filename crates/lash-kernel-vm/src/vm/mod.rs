@@ -12,6 +12,7 @@
 
 pub(crate) mod callable;
 pub(crate) mod calls;
+mod cells;
 pub(crate) mod charge;
 pub(crate) mod datum;
 mod digests;
@@ -1373,6 +1374,10 @@ impl<H: Heap> Vm<H> {
                             None => continue 'frames,
                         }
                     }
+                    Op::CellGet(_) | Op::CellSet(_) | Op::CaptureGet(_) | Op::CaptureSet(_) => {
+                        sync!(pc);
+                        self.cell_op(op)?;
+                    }
                     _ => {
                         sync!(pc);
                         match self.operate(host, &program, unit, op, rerun)? {
@@ -1415,47 +1420,11 @@ impl<H: Heap> Vm<H> {
         rerun: bool,
     ) -> Run<Option<Stop>> {
         match op {
-            Op::CellGet(n) => {
-                let cell = self.cell_at(n)?;
-                let value = self
-                    .heap
-                    .cell_get(cell)
-                    .map_err(|error| self.native(error))?;
-                self.push(value);
-            }
-            Op::CellSet(n) => {
-                // The value leaves the stack once the write commits: a cold
-                // cell runs the op again with its operand still in place.
-                let cell = self.cell_at(n)?;
-                let [value] = self.operands::<1>();
-                self.heap
-                    .cell_set(cell, value)
-                    .map_err(|error| self.native(error))?;
-                self.pop();
-            }
             Op::Box(n) => {
                 let at = self.base() + usize::from(n);
                 let value = self.cx.stack[at];
                 let cell = self.cell(value)?;
                 self.cx.stack[at] = Value::Handle(cell);
-            }
-            Op::CaptureGet(n) => {
-                let cell = self.capture(n)?;
-                let value = self
-                    .heap
-                    .cell_get(cell)
-                    .map_err(|error| self.native(error))?;
-                self.push(value);
-            }
-            Op::CaptureSet(n) => {
-                // The value leaves the stack once the write commits: a cold
-                // cell runs the op again with its operand still in place.
-                let cell = self.capture(n)?;
-                let [value] = self.operands::<1>();
-                self.heap
-                    .cell_set(cell, value)
-                    .map_err(|error| self.native(error))?;
-                self.pop();
             }
             Op::MakeTuple(n) => self.make_tuple(n as usize)?,
             // A built value's members stay on the stack, rooted, until it
@@ -1647,6 +1616,10 @@ impl<H: Heap> Vm<H> {
             | Op::Inline(_)
             | Op::Leave(_)
             | Op::Deopt(_)
+            | Op::CellGet(_)
+            | Op::CellSet(_)
+            | Op::CaptureGet(_)
+            | Op::CaptureSet(_)
             | Op::Fused(_) => return Err(fault("a dispatched op ran out of line")),
         }
         Ok(None)
