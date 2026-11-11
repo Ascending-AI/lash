@@ -10,8 +10,10 @@ use crate::observe::Weight;
 use lash_kernel_doc::{Document, TaskId, Value};
 use lash_kernel_value::sites::{Site, TaskIdentity};
 
+use super::Run;
 use super::Vm;
-use crate::bytecode::program::{Point, Program, Unit, UnitId};
+use super::charge::Rest;
+use crate::bytecode::program::{Event, Point, Program, Unit, UnitId};
 use crate::heap::Heap;
 use crate::observe::{ChargeTape, PathRecorder};
 use crate::{Host, SiteCounts};
@@ -103,6 +105,8 @@ impl Watch {
     }
 
     pub(crate) fn charge(&self, weight: Weight) {
+        #[cfg(test)]
+        super::charge_work();
         if let Some(tape) = &self.tape
             && !matches!(weight, Weight::Units(0) | Weight::Atomic(0))
         {
@@ -169,6 +173,51 @@ impl Watch {
 }
 
 impl<H: Heap> Vm<H> {
+    /// [`Self::bill`] under `Charge::Off`, where the event only places the
+    /// slice, or onto the charge tape.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn bill_aside(&mut self, event: Event) -> Run<()> {
+        if self.off {
+            self.meter.place(event.units.saturating_add(event.atomic));
+            return Ok(());
+        }
+        self.bill_watched(event)
+    }
+
+    /// [`Self::bill`] onto the charge tape: each unit run whole, or the
+    /// units that fit and then the one that passes, and each atomic event
+    /// whole before the bound is checked.
+    #[cold]
+    #[inline(never)]
+    fn bill_watched(&mut self, event: Event) -> Run<()> {
+        #[cfg(test)]
+        super::charge_work();
+        let tape = |vm: &Self, weight| {
+            if let Some(watch) = &vm.watch {
+                watch.charge(weight);
+            }
+        };
+        if event.units != 0 {
+            match self.meter.units(event.units) {
+                Ok(()) => tape(self, Weight::Units(event.units)),
+                Err(refused) => {
+                    if let Rest::Units(rest) = refused.rest {
+                        tape(self, Weight::Units(event.units - rest + 1));
+                    }
+                    self.refusal(refused, false)?;
+                }
+            }
+        }
+        if event.atomic != 0 {
+            tape(self, Weight::Atomic(event.atomic));
+            if let Err(refused) = self.meter.atomic(event.atomic) {
+                self.refusal(refused, false)?;
+            }
+        }
+        Ok(())
+    }
+
     /// What op `pc` of unit `id`'s points see, before it runs.
     #[cold]
     #[inline(never)]

@@ -710,6 +710,8 @@ impl<H: Heap> Vm<H> {
     fn decoded(&mut self, datum: &Datum) -> Run<Value> {
         let value = super::datum::copy_in(self, datum)?;
         if !self.off {
+            #[cfg(test)]
+            super::charge_work();
             let size = crate::data::deep_size(self.heap.arena(), &value).map_err(super::read)?;
             self.held.push(value);
             let charged = self.fee(size);

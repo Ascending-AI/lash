@@ -46,6 +46,14 @@ thread_local! {
     static DEPTH_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+/// Counts one piece of charge work on this thread's witness: a formula
+/// evaluated, a fee sized or billed, a charge-tape write or a fixed event
+/// billed against the limit (FIG-6732). Compiled into test builds only.
+#[cfg(test)]
+pub(crate) fn charge_work() {
+    crate::perf_witness::record(|work| work.charge_work += 1);
+}
+
 /// The frames the call depth test has read on this thread so far.
 #[cfg(test)]
 pub(crate) fn depth_reads() -> u64 {
@@ -538,9 +546,11 @@ impl<H: Heap> Vm<H> {
     #[inline]
     fn bill(&mut self, unit: &Unit, pc: usize) -> Run<()> {
         let event = unit.event[pc];
-        if self.watch.is_some() && !self.off {
-            return self.bill_watched(event);
+        if self.watch.is_some() || self.off {
+            return self.bill_aside(event);
         }
+        #[cfg(test)]
+        charge_work();
         if event.units != 0
             && let Err(refused) = self.meter.units(event.units)
         {
@@ -554,37 +564,6 @@ impl<H: Heap> Vm<H> {
         Ok(())
     }
 
-    /// [`Self::bill`] onto the charge tape: each unit run whole, or the
-    /// units that fit and then the one that passes, and each atomic event
-    /// whole before the bound is checked.
-    #[cold]
-    #[inline(never)]
-    fn bill_watched(&mut self, event: crate::bytecode::program::Event) -> Run<()> {
-        let tape = |vm: &Self, weight| {
-            if let Some(watch) = &vm.watch {
-                watch.charge(weight);
-            }
-        };
-        if event.units != 0 {
-            match self.meter.units(event.units) {
-                Ok(()) => tape(self, Weight::Units(event.units)),
-                Err(refused) => {
-                    if let Rest::Units(rest) = refused.rest {
-                        tape(self, Weight::Units(event.units - rest + 1));
-                    }
-                    self.refusal(refused, false)?;
-                }
-            }
-        }
-        if event.atomic != 0 {
-            tape(self, Weight::Atomic(event.atomic));
-            if let Err(refused) = self.meter.atomic(event.atomic) {
-                self.refusal(refused, false)?;
-            }
-        }
-        Ok(())
-    }
-
     /// Bills a dynamic fee (a completion formula, a copy-out): on top of
     /// a prepaid block where the block still fits, otherwise on the exact
     /// path, the running block continuing event by event. Under
@@ -593,6 +572,8 @@ impl<H: Heap> Vm<H> {
         if self.off {
             return Ok(());
         }
+        #[cfg(test)]
+        charge_work();
         if let Some(watch) = &self.watch {
             watch.charge(Weight::Atomic(units));
         }
@@ -652,6 +633,8 @@ impl<H: Heap> Vm<H> {
 
     /// Evaluates formula `charge` over `args` and `result`.
     fn formula(&self, charge: u32, args: &[Value], result: Option<&Value>) -> Run<u64> {
+        #[cfg(test)]
+        charge_work();
         let formula = self.program.charge(charge);
         if let Some(units) = formula.constant() {
             return Ok(units);
@@ -1146,6 +1129,7 @@ impl<H: Heap> Vm<H> {
                 let mut op = ops[pc];
                 #[cfg(test)]
                 if !retrying && unit.step[pc] {
+                    crate::perf_witness::record(|work| work.vm_steps += 1);
                     self.chill();
                 }
                 if self.exact {

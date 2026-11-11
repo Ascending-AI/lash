@@ -456,7 +456,10 @@ fn a_host_value_depth_policy_is_honored_by_a_kernel_run() {
 }
 
 /// FIG-6732: opting out removes charge work, including completion formulas,
-/// rather than merely making the bound unbounded.
+/// rather than merely making the bound unbounded. The witness counts the
+/// core's charge work (formulas evaluated, fees sized and billed, charge
+/// tape writes, fixed events billed against the limit): none under Off,
+/// some under Exact for the same program, and Off still runs its steps.
 #[test]
 fn charge_off_performs_no_charge_work() {
     crate::perf_witness::enable_work();
@@ -473,21 +476,9 @@ fn charge_off_performs_no_charge_work() {
             ..Setup::default()
         },
     );
-    run.machine.count_work();
     assert_eq!(run.run(), Step::Slice, "Off must still yield slices");
     assert_eq!(result(run.run_to_end(&[])), int(7));
     assert_eq!(run.machine.meters().charged, None);
-    let report = run.machine.work().unwrap();
-    assert_eq!(report.charged, None);
-    assert_eq!(report.residual(), None);
-    assert!(report.codes.iter().all(|code| code.counts.self_charge.is_none() && code.counts.inclusive_charge.is_none()));
-    assert!(
-        report
-            .natives
-            .iter()
-            .all(|native| native.counts.self_charge.is_none()
-                && native.counts.zero_charge_calls.is_none())
-    );
     let work = crate::perf_witness::take_work().unwrap();
     assert_eq!(work.charge_work, 0, "Off must remove charge work");
     assert!(

@@ -95,6 +95,14 @@ impl Meter {
         }
     }
 
+    /// Adds a fixed event's `units` under `Charge::Off`, where they only
+    /// place the slice: no limit is compared.
+    #[inline]
+    pub(crate) fn place(&mut self, units: u64) {
+        debug_assert!(self.reserved.is_none(), "exact billing in a prepaid block");
+        self.used = self.used.saturating_add(units);
+    }
+
     /// Whether a block's reservation is outstanding.
     #[inline]
     pub(crate) fn prepaid(&self) -> bool {

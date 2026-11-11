@@ -102,6 +102,8 @@ impl<H: Heap> Vm<H> {
         let size = if self.off {
             None
         } else {
+            #[cfg(test)]
+            super::charge_work();
             Some(crate::data::deep_size(self.heap.arena(), value).map_err(read)?)
         };
         let datum = match crate::data::copy_out(self.heap.arena(), self.value_depth, value) {
@@ -172,6 +174,8 @@ impl<H: Heap> Vm<H> {
         let size = if self.off {
             None
         } else {
+            #[cfg(test)]
+            super::charge_work();
             let deep = crate::data::deep_size(self.heap.arena(), value).map_err(read)?;
             let functions = datum.as_ref().map_or(0, crate::crossing::crossed_bytes);
             Some(deep.saturating_add(functions))
