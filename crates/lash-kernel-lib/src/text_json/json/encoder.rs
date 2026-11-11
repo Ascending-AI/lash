@@ -401,6 +401,10 @@ fn normalize<'k, A: Source<'k>>(
     out: &mut Out<'_, '_, impl Output>,
     policy: &Policy<'_>,
 ) -> Result<View<'k, A::Value>, NativeError> {
+    // Without a target only a mapping changes.
+    if policy.target.is_none() && !matches!(view, View::Mapping(_)) {
+        return Ok(view);
+    }
     if let View::Mapping(fields) = view {
         let mut named = Vec::with_capacity(fields.len());
         for (key, value) in fields {
@@ -555,33 +559,18 @@ pub(super) fn encode<'k, A: Source<'k>>(
 }
 
 impl<'k, A: Source<'k>, S: Output> Encoder<'_, '_, '_, '_, 'k, A, S> {
-    fn walk(
+    /// A scalar's spelling, at a depth the caller checked: what `walk`
+    /// writes for a view with no members. A container's member loop writes
+    /// its scalar members here directly, without a `walk` frame each.
+    fn leaf(
         &mut self,
-        value: A::Value,
         view: View<'k, A::Value>,
-        depth: usize,
         raw_numbers: bool,
         path: Path<'_>,
-    ) -> Result<bool, NativeError> {
+    ) -> Result<(), NativeError> {
         let source = self.source;
         let target = self.target;
         let context = self.context;
-        let limit = self.limit;
-        #[cfg(test)]
-        let _frame = crate::native_contract_laws::scratch(4 * 16);
-        #[cfg(test)]
-        let _view = source.scratch(&view)?;
-        if depth > limit {
-            return Err(error(
-                "json_depth",
-                context,
-                path,
-                format!("JSON exceeds the configured {limit}-level kernel nesting limit"),
-            ));
-        }
-        if omitted(&view, target) {
-            return Ok(false);
-        }
         match view {
             View::Null => self.out.push("null")?,
             View::Bool(value) => self.out.push(if value { "true" } else { "false" })?,
@@ -627,6 +616,52 @@ impl<'k, A: Source<'k>, S: Output> Encoder<'_, '_, '_, '_, 'k, A, S> {
                 )
                 .map_err(|e| at(e, context, path))?,
             View::Text(text) => self.out.quote(&text)?,
+            _ => return Err(NativeError::Malformed("a JSON leaf holds members")),
+        }
+        Ok(())
+    }
+
+    /// The member at `depth` spelled by [`Self::leaf`]: a scalar within
+    /// the nesting limit, which `walk` would neither omit nor descend.
+    fn leaf_at(view: &View<'k, A::Value>, depth: usize, limit: usize) -> bool {
+        depth <= limit
+            && matches!(
+                view,
+                View::Null | View::Bool(_) | View::Number(_) | View::Text(_)
+            )
+    }
+
+    fn walk(
+        &mut self,
+        value: A::Value,
+        view: View<'k, A::Value>,
+        depth: usize,
+        raw_numbers: bool,
+        path: Path<'_>,
+    ) -> Result<bool, NativeError> {
+        let source = self.source;
+        let target = self.target;
+        let context = self.context;
+        let limit = self.limit;
+        #[cfg(test)]
+        let _frame = crate::native_contract_laws::scratch(4 * 16);
+        #[cfg(test)]
+        let _view = source.scratch(&view)?;
+        if depth > limit {
+            return Err(error(
+                "json_depth",
+                context,
+                path,
+                format!("JSON exceeds the configured {limit}-level kernel nesting limit"),
+            ));
+        }
+        if omitted(&view, target) {
+            return Ok(false);
+        }
+        match view {
+            scalar @ (View::Null | View::Bool(_) | View::Number(_) | View::Text(_)) => {
+                self.leaf(scalar, raw_numbers, path)?;
+            }
             View::Absent => {
                 return Err(error(
                     "not_data",
@@ -697,7 +732,9 @@ impl<'k, A: Source<'k>, S: Output> Encoder<'_, '_, '_, '_, 'k, A, S> {
                             )
                         })
                         .map_err(|e| at(e, context, child))?;
-                    if !self.walk(item, view, depth + 1, raw, child)? {
+                    if Self::leaf_at(&view, depth + 1, limit) {
+                        self.leaf(view, raw, child)?;
+                    } else if !self.walk(item, view, depth + 1, raw, child)? {
                         self.out.push("null")?;
                     }
                 }
@@ -805,7 +842,11 @@ impl<'k, A: Source<'k>, S: Output> Encoder<'_, '_, '_, '_, 'k, A, S> {
                     if self.out.indentation.is_some() && self.out.encoding.is_none() {
                         self.out.push(" ")?;
                     }
-                    self.walk(item, view, depth + 1, raw, child)?;
+                    if Self::leaf_at(&view, depth + 1, limit) {
+                        self.leaf(view, raw, child)?;
+                    } else {
+                        self.walk(item, view, depth + 1, raw, child)?;
+                    }
                     written += 1;
                 }
                 if written > 0 {
