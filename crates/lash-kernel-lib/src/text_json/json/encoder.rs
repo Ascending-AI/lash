@@ -770,12 +770,13 @@ impl<'k, A: Source<'k>, S: Output> Encoder<'_, '_, '_, '_, 'k, A, S> {
                 } else {
                     false
                 };
-                if target.is_some() && source.javascript() && kind == "record" {
-                    fields.sort_by_key(|(key, _)| {
-                        key.parse::<u32>()
-                            .ok()
-                            .filter(|index| *index < u32::MAX && index.to_string() == *key)
-                            .map_or((1, 0), |index| (0, index))
+                if target.is_some()
+                    && source.javascript()
+                    && kind == "record"
+                    && fields.iter().any(|(key, _)| array_index(key).is_some())
+                {
+                    fields.sort_by_cached_key(|(key, _)| {
+                        array_index(key).map_or((1, 0), |index| (0, index))
                     });
                 }
                 let mut raw = self.out.raw_numbers(kind, raw_numbers);
@@ -860,6 +861,24 @@ impl<'k, A: Source<'k>, S: Output> Encoder<'_, '_, '_, '_, 'k, A, S> {
         }
         Ok(true)
     }
+}
+
+/// `key` as a JavaScript array index: the canonical decimal spelling of a
+/// whole number below 2^32 - 1, which an object lists first, in ascending
+/// order. No sign, no leading zero but `0` itself.
+fn array_index(key: &str) -> Option<u32> {
+    let bytes = key.as_bytes();
+    if bytes.is_empty()
+        || bytes.len() > 10
+        || (bytes.len() > 1 && bytes[0] == b'0')
+        || !bytes.iter().all(u8::is_ascii_digit)
+    {
+        return None;
+    }
+    let index = bytes
+        .iter()
+        .fold(0u64, |value, digit| value * 10 + u64::from(digit - b'0'));
+    u32::try_from(index).ok().filter(|index| *index < u32::MAX)
 }
 
 struct StringOutput(String);

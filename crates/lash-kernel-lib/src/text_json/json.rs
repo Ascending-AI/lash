@@ -466,7 +466,9 @@ impl<S: Output> Out<'_, '_, S> {
             Numeric::Float(number) => {
                 if let Some(layout) = layout {
                     let value = number.get();
-                    if value.trunc() == value && value.abs() < 9007199254740992.0 {
+                    // Below 2^53 a float is whole exactly when the word it
+                    // truncates to gives it back; NaN fails the bound.
+                    if value.abs() < 9007199254740992.0 && value as i64 as f64 == value {
                         return layout.small_integer(
                             value.abs() as u64,
                             value.is_sign_negative(),

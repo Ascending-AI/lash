@@ -14,27 +14,31 @@ const BATCH: u64 = 16 * 1024;
 
 /// Text built in a nursery. Each piece costs twice its length and each
 /// explicit reservation its bytes, in order, exactly as if each were asked
-/// for alone (`K-BND-003`). The asks are gathered and passed to the nursery
-/// in batches of about [`BATCH`] bytes. A batch the nursery refuses is asked
-/// again ask by ask, so the refusal names the same ask, the same held total
-/// and the same wanted bytes as asking one by one would. Every hold, and the
-/// end of the writing ([`Self::finish`]), settles the gathered asks first,
-/// so no other event overtakes one of them.
+/// for alone (`K-BND-003`). The asks are summed and passed to the nursery
+/// in batches of about [`BATCH`] bytes, each batch only while it fits the
+/// room the nursery had left when the batch began. An ask that would not
+/// fit settles the batch before it, which holds, and is then asked alone,
+/// so its refusal names the same ask, the same held total and the same
+/// wanted bytes as asking one by one would. Every hold, and the end of the
+/// writing ([`Self::finish`]), settles the gathered asks first, so no other
+/// event overtakes one of them.
 pub(super) struct Text<'a, 'call> {
     text: String,
     new: &'a mut Nursery<'call>,
-    /// Asks not yet passed to the nursery, in order, and their sum.
-    asks: Vec<u64>,
+    /// The sum of the asks not yet passed to the nursery.
     gathered: u64,
+    /// What the nursery had left when the gathering began.
+    left: u64,
 }
 
 impl<'a, 'call> Text<'a, 'call> {
     pub fn new(new: &'a mut Nursery<'call>) -> Self {
+        let left = new.left();
         Self {
             text: String::new(),
             new,
-            asks: Vec::new(),
             gathered: 0,
+            left,
         }
     }
 
@@ -45,34 +49,40 @@ impl<'a, 'call> Text<'a, 'call> {
         Ok((answer?, self.text))
     }
 
+    #[inline]
     fn ask(&mut self, bytes: u64) -> Result<(), NativeError> {
-        if bytes == 0 {
-            return Ok(());
+        // Both are at most `left`, so the sum cannot wrap.
+        let gathered = self.gathered + bytes.min(u64::MAX / 2);
+        if gathered >= BATCH.min(self.left) {
+            return self.overflow(bytes);
         }
-        self.asks.push(bytes);
-        self.gathered = self.gathered.saturating_add(bytes);
-        if self.gathered >= BATCH {
-            self.settle()?;
-        }
+        self.gathered = gathered;
         Ok(())
     }
 
-    fn settle(&mut self) -> Result<(), NativeError> {
-        if self.asks.is_empty() {
-            return Ok(());
+    /// An ask that ends the batch: one that fills it, or one that does not
+    /// fit after the gathered asks, which all fit.
+    #[cold]
+    #[inline(never)]
+    fn overflow(&mut self, bytes: u64) -> Result<(), NativeError> {
+        if self.gathered.saturating_add(bytes) <= self.left {
+            self.gathered += bytes;
+            return self.settle();
         }
+        self.settle()?;
+        let answer = self.new.reserve(0, bytes);
+        self.left = self.new.left();
+        answer
+    }
+
+    fn settle(&mut self) -> Result<(), NativeError> {
         let gathered = std::mem::take(&mut self.gathered);
-        let mut asks = std::mem::take(&mut self.asks);
-        let answer = if self.new.reserve(0, gathered).is_ok() {
+        let answer = if gathered == 0 {
             Ok(())
         } else {
-            // The nursery held none of the batch: ask again one by one, so
-            // the first ask that does not fit is refused as it would be.
-            asks.iter()
-                .try_for_each(|bytes| self.new.reserve(0, *bytes))
+            self.new.reserve(0, gathered)
         };
-        asks.clear();
-        self.asks = asks;
+        self.left = self.new.left();
         answer
     }
 }
@@ -89,10 +99,13 @@ impl Output for Text<'_, '_> {
         self.ask(bytes)
     }
     fn read_whole(&mut self, bytes: u64) -> Result<(), NativeError> {
-        if bytes > IMMUTABLE_INLINE_MAX {
-            self.settle()?;
+        if bytes <= IMMUTABLE_INLINE_MAX {
+            return self.new.read_whole(bytes);
         }
-        self.new.read_whole(bytes)
+        self.settle()?;
+        let answer = self.new.read_whole(bytes);
+        self.left = self.new.left();
+        answer
     }
 }
 

@@ -814,6 +814,17 @@ impl<'call> Nursery<'call> {
         self.log.as_deref().unwrap_or(&[])
     }
 
+    /// The bytes a reservation may still ask for and be held: a single
+    /// [`Self::reserve`] of at most this many bytes and no values holds.
+    /// Unbounded when the nursery does not account.
+    pub fn left(&self) -> u64 {
+        if self.unaccounted {
+            u64::MAX
+        } else {
+            self.room.0.saturating_sub(self.held.0)
+        }
+    }
+
     /// Holds room for `values` values and `bytes` bytes the call is about
     /// to build, before it builds them.
     pub fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
