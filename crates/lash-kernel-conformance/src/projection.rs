@@ -99,11 +99,14 @@ impl Projector<'_> {
         Ok(())
     }
 
+    /// Contract §2 (R10): a run reopened cold counts a paged payload only
+    /// once it is read, so after each seal it holds no more than the warm
+    /// run it continues (as `native_codecs::cold_continues`, 9ede16f576).
     pub(crate) fn check_memory(&self) -> Result<(), HarnessError> {
         for (index, (warm, cold)) in self.memory.iter().enumerate() {
-            if warm != cold {
+            if cold > warm {
                 return Err(fault(format!(
-                    "memory after seal {index}: warm={warm}, cold={cold}"
+                    "memory after seal {index}: cold={cold} > warm={warm}"
                 )));
             }
         }

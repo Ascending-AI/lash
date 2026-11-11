@@ -293,10 +293,13 @@ fn reopen_all(name: &str, program: &Program, library: &PreparedLibrary, cut: &Cu
                 .unwrap();
         // This is already a cold accounting witness for the saved state.
         // Check it here instead of opening a second, unused machine at the cut.
-        assert_eq!(
-            point.memory,
-            machine.meters().memory,
-            "{name}: memory at cut {index} reopened"
+        // Contract §2 (R10): cold counts a paged payload only once read, so it
+        // holds no more than the cut run (9ede16f576).
+        let cold = machine.meters().memory;
+        assert!(
+            cold <= point.memory,
+            "{name}: memory at cut {index} reopened: cold {cold} > warm {}",
+            point.memory
         );
         let resealed = machine.seal(crate::pages::BUDGET).unwrap().unwrap();
         assert!(

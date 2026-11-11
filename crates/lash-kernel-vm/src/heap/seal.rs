@@ -122,15 +122,23 @@ pub(crate) fn seal(
             .map_err(|error| fault(error.to_string()))?;
     }
     let _ = arena.take_dirty();
-    // An object the roots no longer reach loses its row, but the arena may
-    // hold it until a release and give it out again: it is written anew
-    // before a row can name it, as every object with an id has a row.
-    for id in dead {
-        if let Some(handle) = arena.entity_handle(entity(id)) {
-            arena
-                .relist(handle)
-                .map_err(|error| fault(error.to_string()))?;
-        }
+    // An object the roots no longer reach loses its row and waits for a
+    // release; only the interned empty tuple is given out again before
+    // then, so it is written anew before a row can name it: every object
+    // with an id has a row.
+    if let Some(Value::Tuple(tuple)) = arena.resident_empty_tuple()
+        && let Some(EntityId {
+            family: FamilyId::PRIMARY,
+            ordinal,
+        }) = arena
+            .facts(tuple)
+            .map_err(|error| fault(error.to_string()))?
+            .entity()
+        && dead.contains(&ObjectId(ordinal))
+    {
+        arena
+            .relist(tuple)
+            .map_err(|error| fault(error.to_string()))?;
     }
     Ok((
         HeapRoot {
