@@ -54,7 +54,9 @@ fn process_lifecycle_write_size() {
             let Some(sql) = statement.expanded_sql() else {
                 return;
             };
-            if sql.starts_with("UPDATE processes\n") {
+            // Statements render compact on first use: one space between
+            // tokens (d3d1a47289).
+            if sql.starts_with("UPDATE processes ") {
                 WRITES.with(|writes| writes.borrow_mut().push(sql.len()));
             }
         }
