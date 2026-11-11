@@ -66,7 +66,7 @@ impl Arena {
             NewObject::List(values) | NewObject::Tuple(values) => self.sequence_bound(values.len()),
             NewObject::Map(entries) | NewObject::Record(entries) => self.table_bound(entries.len()),
             NewObject::Set(members) => self.table_bound(members.len()),
-            NewObject::LongText(text) => body_bytes(text.len() as u64 / 16),
+            NewObject::LongText { text, .. } => body_bytes(text.len() as u64 / 16),
             NewObject::Bytes(bytes) => body_bytes(bytes.len() as u64 / 16),
             NewObject::Function(_) => body_bytes(4),
             NewObject::BigInt(_) | NewObject::Timestamp(_) | NewObject::Error { .. } => {

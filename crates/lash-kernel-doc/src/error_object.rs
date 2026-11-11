@@ -166,7 +166,7 @@ impl Builder for NativeBuilder<'_, '_> {
                         Value::Text(text) => text.as_str().to_owned(),
                         Value::LongText(handle) => {
                             match self.new.built().iter().find(|(id, _)| id == handle) {
-                                Some((_, NewObject::LongText(text))) => text.to_string(),
+                                Some((_, NewObject::LongText { text, .. })) => text.to_string(),
                                 _ => self
                                     .args
                                     .text(key)?

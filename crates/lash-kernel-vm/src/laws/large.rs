@@ -306,14 +306,14 @@ fn a_point_read_with_long_keys_reads_one_index_page_and_one_chunk() {
     let (mut heap, map) = opened_large(&store, |heap| {
         let pairs = (0..N)
             .map(|i| {
-                let key = make(heap, NewObject::LongText(long_key(i)));
+                let key = make(heap, NewObject::long_text(long_key(i)));
                 (key, Value::Int(i))
             })
             .collect();
         make(heap, NewObject::Map(pairs))
     });
     for i in [0, N / 2 + 3, N - 1] {
-        let key = make(&mut heap, NewObject::LongText(long_key(i)));
+        let key = make(&mut heap, NewObject::long_text(long_key(i)));
         heap.forget_pages();
         let (value, reads, _) = store.during(|| get(&mut heap, &[map, key], map, key));
         assert_eq!(int(value), Some(i), "key {i}");

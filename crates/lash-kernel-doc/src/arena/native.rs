@@ -684,7 +684,11 @@ pub enum NewObject {
     Map(Vec<(Value, Value)>),
     Set(Vec<Value>),
     Record(Vec<(Value, Value)>),
-    LongText(String),
+    /// A long text and its lengths.
+    LongText {
+        text: String,
+        summary: crate::heap::TextSummary,
+    },
     /// A function reference by a name past [`ShortText::MAX`] bytes.
     Function(lash_kernel_value::names::CallableId),
     Bytes(Arc<[u8]>),
@@ -699,6 +703,12 @@ pub enum NewObject {
 }
 
 impl NewObject {
+    /// The long text `text`, its lengths counted.
+    pub fn long_text(text: String) -> Self {
+        let summary = crate::heap_values::text_summary(&text);
+        Self::LongText { text, summary }
+    }
+
     /// The value that names the object, by the slot it takes.
     pub fn naming(&self) -> fn(ArenaHandle) -> Value {
         match self {
@@ -707,7 +717,7 @@ impl NewObject {
             Self::Map(_) => Value::Map,
             Self::Set(_) => Value::Set,
             Self::Record(_) => Value::Record,
-            Self::LongText(_) => Value::LongText,
+            Self::LongText { .. } => Value::LongText,
             Self::Function(_) => Value::Function,
             Self::Bytes(_) => Value::Bytes,
             Self::BigInt(_) => Value::BigInt,
@@ -851,7 +861,17 @@ impl<'call> Nursery<'call> {
     pub fn text<T: AsRef<str> + Into<String>>(&mut self, text: T) -> Value {
         match ShortText::new(text.as_ref()) {
             Some(short) => Value::Text(short),
-            None => self.allocate(NewObject::LongText(text.into())),
+            None => self.allocate(NewObject::long_text(text.into())),
+        }
+    }
+
+    /// A text whose lengths `summary` gives, as [`Self::text`] makes it:
+    /// what a native that joins texts of known lengths builds without
+    /// counting its bytes again.
+    pub fn text_of(&mut self, text: String, summary: crate::heap::TextSummary) -> Value {
+        match ShortText::new(&text) {
+            Some(short) => Value::Text(short),
+            None => self.allocate(NewObject::LongText { text, summary }),
         }
     }
 

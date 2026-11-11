@@ -446,7 +446,7 @@ struct Six {
 }
 
 fn six(heap: &mut SlotHeap) -> Six {
-    let text = make(heap, NewObject::LongText(UNICODE.into()));
+    let text = make(heap, NewObject::long_text(UNICODE.into()));
     let big = make(
         heap,
         NewObject::BigInt(Integer::parse(BIG).expect("an int")),
@@ -845,7 +845,7 @@ fn a_seal_refuses_a_payload_whose_cached_head_names_other_content() {
 #[test]
 fn shared_immutable_reopens_as_one_slot_and_one_holding() {
     let (mut heap, _pages) = durable();
-    let text = make(&mut heap, NewObject::LongText(UNICODE.into()));
+    let text = make(&mut heap, NewObject::long_text(UNICODE.into()));
     let tuple = make(&mut heap, NewObject::Tuple(vec![text, Value::Int(1)]));
     let inner = make(&mut heap, NewObject::List(vec![tuple]));
     let root = make(&mut heap, NewObject::List(vec![tuple, inner, tuple]));

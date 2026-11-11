@@ -243,7 +243,7 @@ pub(crate) fn new_values_bytes(
                 message,
                 data,
             } => new_values_bytes(args, new, &[*kind, *message, data.value()]) - 16,
-            NewObject::LongText(text) => 16 + text.len() as u64,
+            NewObject::LongText { text, .. } => 16 + text.len() as u64,
             NewObject::Bytes(bytes) => 16 + bytes.len() as u64,
             NewObject::BigInt(n) | NewObject::Timestamp(n) => 16 + n.bits().div_ceil(8),
             NewObject::Function(_) => 16 + 64,
@@ -273,7 +273,7 @@ pub(crate) fn decoded_values_bytes(new: &lash_kernel_doc::Nursery<'_>, values: &
                 .unwrap()
                 .1
             {
-                NewObject::LongText(text) => 16 + text.len() as u64,
+                NewObject::LongText { text, .. } => 16 + text.len() as u64,
                 NewObject::BigInt(integer) => 16 + integer.bits().div_ceil(8),
                 _ => panic!("JSON constructor produced an unexpected immutable body"),
             },

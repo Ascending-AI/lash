@@ -47,7 +47,7 @@ pub(crate) trait Build {
     fn text(&mut self, text: &str) -> Run<Value> {
         match lash_kernel_doc::arena::ShortText::new(text) {
             Some(short) => Ok(Value::Text(short)),
-            None => self.alloc(NewObject::LongText(text.into())),
+            None => self.alloc(NewObject::long_text(text.into())),
         }
     }
 }

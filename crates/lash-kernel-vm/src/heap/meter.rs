@@ -187,7 +187,7 @@ pub(crate) fn new_object(object: &NewObject) -> u64 {
         NewObject::Map(pairs) | NewObject::Record(pairs) => {
             values((pairs.len() as u64).saturating_mul(2))
         }
-        NewObject::LongText(text) => text.len() as u64,
+        NewObject::LongText { text, .. } => text.len() as u64,
         NewObject::Bytes(bytes) => bytes.len() as u64,
         NewObject::BigInt(int) | NewObject::Timestamp(int) => integer(int),
         NewObject::Function(_) => CALLABLE,

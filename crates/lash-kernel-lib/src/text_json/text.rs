@@ -691,8 +691,12 @@ fn utf16_compare(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         text, other, &call.args,
     )?))
 }
+/// The two texts joined, its lengths the sums of theirs: the bytes are
+/// copied once and never counted again.
 fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-    let (text, other) = (text_arg(&call.args, 0)?, text_arg(&call.args, 1)?);
+    let (text, other) = (text_view(&call.args, 0)?, text_view(&call.args, 1)?);
+    let (a, b) = (text.summary(), other.summary());
+    let (text, other) = (text.whole()?, other.whole()?);
     let len = text
         .len()
         .checked_add(other.len())
@@ -704,7 +708,12 @@ fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     out.push_str(&other);
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(out))
+    let summary = lash_kernel_doc::heap::TextSummary {
+        utf8_bytes: len as u64,
+        chars: a.chars + b.chars,
+        utf16_units: a.utf16_units + b.utf16_units,
+    };
+    Ok(call.new.text_of(out, summary))
 }
 /// [`concat`] of two short texts whose concatenation is short: the same
 /// text, which is inline, so the call builds and holds nothing of the

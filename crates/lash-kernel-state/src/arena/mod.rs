@@ -786,7 +786,11 @@ impl Arena {
     }
 
     fn long_text(&mut self, text: String) -> ArenaHandle {
-        self.insert(Body::LongText(resident_text(text)), Facts::default())
+        let summary = text_summary(&text);
+        self.insert(
+            Body::LongText(resident_text(text, summary)),
+            Facts::default(),
+        )
     }
 
     /// An integer value: inline when it fits a word.
@@ -876,8 +880,51 @@ impl Arena {
 
     /// Prepares and atomically installs what a native call built, in reservation
     /// order. None takes a durable id until the ledger or projection gives it.
-    pub fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
+    pub fn install(&mut self, mut new: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
+        match new.as_slice() {
+            // A call that built nothing, only held room, installs nothing.
+            [] => return Ok(()),
+            [(_, object)] if leaf(object) => {
+                if let Some((handle, object)) = new.pop() {
+                    return self.install_leaf(handle, object);
+                }
+            }
+            _ => {}
+        }
         self.prepare_install(new)?.publish();
+        Ok(())
+    }
+
+    /// [`Self::install`] of a batch that is one object naming no other: it
+    /// has no member to summarize, normalize or count and no mutable entity,
+    /// so it is checked and placed without staging the general batch.
+    fn install_leaf(&mut self, handle: ArenaHandle, object: NewObject) -> Result<(), NativeError> {
+        use lash_kernel_doc::heap::{HeapFault, HostResource};
+        if self.registering {
+            return Err(malformed("nested identity registration"));
+        }
+        let once = std::iter::once(handle);
+        match self.objects.prepare_install(once.clone()) {
+            Ok(()) => {}
+            // Forged slots confer no authority to return a live or unreserved slot.
+            Err(fault @ HeapFault::Malformed(_)) => return Err(fault.into()),
+            Err(fault) => {
+                self.objects.discard_install(once);
+                return Err(fault.into());
+            }
+        }
+        let extent = (handle.index() as usize + 1).saturating_sub(self.facts.len());
+        if self.facts.try_reserve(extent).is_err() || self.zero.try_reserve(1).is_err() {
+            self.objects.discard_install(once);
+            return Err(HeapFault::Exhausted {
+                resource: HostResource::StagingBytes,
+            }
+            .into());
+        }
+        let body = batch::raw_body(object)?;
+        self.resident = self.resident.saturating_add(body_values(&body));
+        self.objects.install(handle, body);
+        self.place(handle, Facts::default());
         Ok(())
     }
 
@@ -961,8 +1008,11 @@ impl Arena {
                     },
                 ));
             }
-            NewObject::LongText(text) => {
-                return Ok((Body::LongText(resident_text(text)), Facts::default()));
+            NewObject::LongText { text, summary } => {
+                return Ok((
+                    Body::LongText(resident_text(text, summary)),
+                    Facts::default(),
+                ));
             }
             NewObject::Bytes(bytes) => {
                 return Ok((
@@ -1578,9 +1628,9 @@ pub enum Raise {
     TooDeep,
 }
 
-fn resident_text(text: String) -> LongText {
+fn resident_text(text: String, summary: TextSummary) -> LongText {
     LongText {
-        summary: text_summary(&text),
+        summary,
         chunks: Box::new([Chunk::Resident(text)]),
     }
 }
@@ -1594,6 +1644,17 @@ pub fn cold_text(summary: TextSummary, page: lash_kernel_doc::heap::PageRef) -> 
             len: u32::try_from(summary.utf8_bytes).unwrap_or(u32::MAX),
         }]),
     }
+}
+
+/// A new object that names no other object and is not a mutable entity.
+fn leaf(object: &NewObject) -> bool {
+    matches!(
+        object,
+        NewObject::LongText { .. }
+            | NewObject::Bytes(_)
+            | NewObject::BigInt(_)
+            | NewObject::Timestamp(_)
+    )
 }
 
 /// Whether a body has a chunk on its pages.
