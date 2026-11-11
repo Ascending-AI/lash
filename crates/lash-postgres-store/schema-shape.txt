@@ -666,6 +666,12 @@ table lash_turn_change_clock
   column retention_horizon bigint not-null
   column singleton integer not-null
   primary-key (singleton)
+table lash_turn_journal
+  column inputs text not-null
+  column run text not-null
+  column seq bigint not-null
+  column session_id text not-null
+  primary-key (session_id, run, seq)
 table lash_turn_namespaces
   column entry text not-null
   column graph_root_ref bigint nullable

@@ -147,6 +147,7 @@ DROP TABLE IF EXISTS lash_prompt_prefixes CASCADE;
 DROP TABLE IF EXISTS lash_turn_phases CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_namespaces CASCADE;
+
 DROP TABLE IF EXISTS lash_turn_journal CASCADE;
 
 DROP TABLE IF EXISTS lash_waits CASCADE;
