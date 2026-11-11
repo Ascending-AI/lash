@@ -1315,60 +1315,64 @@ impl<H: Heap> Vm<H> {
                         };
                         pc = fused.call as usize + 1;
                         // Two word ints: the answer and its fee in place, as
-                        // the native's ordinary answer gives them.
-                        let words = match (fused.words, args) {
-                            (Some(words), [Value::Int(a), Value::Int(b)]) => {
-                                lash_kernel_doc::scalar::ints(words.operation, a, b).and_then(
-                                    |value| match words.fee {
-                                        Some(_) if self.off => Some((value, None)),
-                                        Some(table) => {
-                                            let index = usize::from(a != 0)
-                                                | usize::from(b != 0) << 1
-                                                | usize::from(crate::data::size_two(&value)?) << 2;
-                                            Some((value, Some(table[index])))
-                                        }
-                                        None => Some((value, None)),
-                                    },
-                                )
-                            }
-                            _ => None,
-                        };
-                        let answer = match words {
-                            Some(answered) => Some(Ok(answered)),
-                            None => self.answer(&program, native, charged, &args),
-                        };
-                        let Some(answer) = answer else {
-                            // No inline answer: the pushes, then the call.
-                            for &pushed in &fused.operands[..usize::from(fused.pushes)] {
-                                self.push(operand(self, pushed));
-                            }
-                            sync!(pc);
-                            self.call(&program, unit, fused.site)?;
-                            continue 'frames;
-                        };
-                        let (value, fee) = check!(answer);
-                        self.cx.stack.truncate(len + usize::from(fused.pushes) - 2);
-                        self.push(value);
-                        if let Some(units) = fee
-                            && (self.watch.is_some() || !self.meter.prepay(units))
+                        // the native's ordinary answer gives them. An answer
+                        // of `ints` is an int or a bool, of size two exactly
+                        // when it is a nonzero int.
+                        let mut words = None;
+                        if let (Some(form), [Value::Int(a), Value::Int(b)]) = (fused.words, args)
+                            && let Some(value) = lash_kernel_doc::scalar::ints(form.operation, a, b)
                         {
-                            sync!(pc);
-                            self.fee(units)?;
+                            let fee = match form.fee {
+                                Some(table) if !self.off => {
+                                    let large = matches!(value, Value::Int(word) if word != 0);
+                                    Some(
+                                        table[usize::from(a != 0)
+                                            | usize::from(b != 0) << 1
+                                            | usize::from(large) << 2],
+                                    )
+                                }
+                                _ => None,
+                            };
+                            words = Some((value, fee));
                         }
+                        let (value, fee) = match words {
+                            Some(answered) => answered,
+                            None => match self.answer(&program, native, charged, &args) {
+                                Some(answer) => check!(answer),
+                                None => {
+                                    // No inline answer: the pushes, then the call.
+                                    for &pushed in &fused.operands[..usize::from(fused.pushes)] {
+                                        self.push(operand(self, pushed));
+                                    }
+                                    sync!(pc);
+                                    self.call(&program, unit, fused.site)?;
+                                    continue 'frames;
+                                }
+                            },
+                        };
+                        self.cx.stack.truncate(len + usize::from(fused.pushes) - 2);
+                        // A fee the block's reservation does not cover is
+                        // billed with the answer on the stack, where the
+                        // call left it.
+                        let value = match fee {
+                            Some(units) if self.watch.is_some() || !self.meter.prepay(units) => {
+                                self.push(value);
+                                sync!(pc);
+                                self.fee(units)?;
+                                self.pop()
+                            }
+                            _ => value,
+                        };
                         match fused.then {
-                            Then::Push => {}
+                            Then::Push => self.push(value),
                             Then::SetLocal(n) => {
                                 pc += 1;
-                                let value = self.pop();
                                 self.cx.stack[base + usize::from(n)] = value;
                             }
-                            Then::Pop => {
-                                pc += 1;
-                                self.pop();
-                            }
+                            Then::Pop => pc += 1,
                             Then::Branch { to, looping } => {
                                 pc += 1;
-                                match self.pop() {
+                                match value {
                                     Value::Bool(true) => {}
                                     Value::Bool(false) => pc = to as usize,
                                     _ => {
