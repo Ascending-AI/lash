@@ -48,8 +48,9 @@ use super::program::{
     Block, CallSite, Callee, Constant, InlineSite, LIB, Program, Unit, UnitId, UnitKind,
 };
 
-/// The most ops a body may hold to be expanded.
-const BUDGET: usize = 64;
+/// The most ops a body's region may hold to be expanded: its guard
+/// path's ops and two for each stub.
+const BUDGET: u32 = 128;
 
 #[cfg(test)]
 thread_local! {
@@ -112,8 +113,8 @@ pub(crate) fn inline(program: &mut Program) {
 }
 
 /// Whether `callee` is a body the pass may expand into `caller`: a covered
-/// library body, not the caller itself, small, sharing no local with a
-/// closure and seen by no observer.
+/// library body, not the caller itself, sharing no local with a closure
+/// and seen by no observer.  Its region's size is [`Region::of`]'s.
 fn admissible(program: &Program, caller: UnitId, callee: UnitId) -> bool {
     callee != caller && expandable(program.unit(callee))
 }
@@ -125,7 +126,6 @@ pub(crate) fn expandable(body: &Unit) -> bool {
         && body.boxed.is_empty()
         && body.closures.is_empty()
         && body.points.is_empty()
-        && body.ops.len() <= BUDGET
 }
 
 /// `body`'s op at `pc`, a fused run's first op as it was.
@@ -144,7 +144,9 @@ struct Region {
 
 impl Region {
     /// The region of `callee`, `None` when its entry block is off the
-    /// guard path or a jump of the path enters no block at its head.
+    /// guard path, a jump of the path enters no block at its head, the
+    /// path reaches no return, so that every run of the region would
+    /// deoptimize, or the region would hold more than [`BUDGET`] ops.
     fn of(program: &Program, callee: UnitId) -> Option<Self> {
         let body = program.unit(callee);
         let block_at = |pc: u32| body.blocks.iter().position(|block| block.start == pc);
@@ -174,7 +176,20 @@ impl Region {
                 work.push(k + 1);
             }
         }
-        if reached[0] != Some(true) {
+        let size: u32 = reached
+            .iter()
+            .zip(&body.blocks)
+            .map(|(on, block)| match on {
+                Some(true) => block.end - block.start,
+                Some(false) => 2,
+                None => 0,
+            })
+            .sum();
+        let returns = reached.iter().zip(&body.blocks).any(|(on, block)| {
+            *on == Some(true)
+                && (block.start..block.end).any(|pc| op_at(body, pc as usize) == Op::Return)
+        });
+        if reached[0] != Some(true) || !returns || size > BUDGET {
             return None;
         }
         let blocks = reached
