@@ -57,10 +57,21 @@ pub(crate) fn held(program: &Program, code: &BTreeSet<FunctionId>) -> BTreeSet<F
     let closures: HashMap<FunctionId, UnitId> = closure_units(program);
     code.iter()
         .filter_map(|function| match closures.get(function) {
-            Some(unit) => program.unit(*unit).owner,
+            Some(unit) => helper(program.unit(*unit)),
             None => (!program.declares(function)).then_some(*function),
         })
         .collect()
+}
+
+/// The build helper whose code `unit` runs: a library closure's own
+/// function, since one closure can stand in several helpers' bodies and
+/// a saved frame names only the closure (contract §7: every FunctionId
+/// of a live frame); otherwise the helper the unit compiles.
+fn helper(unit: &crate::bytecode::program::Unit) -> Option<FunctionId> {
+    match (&unit.kind, unit.owner) {
+        (UnitKind::Closure(function), Some(_)) => Some(*function),
+        (_, owner) => owner,
+    }
 }
 
 fn closure_units(program: &Program) -> HashMap<FunctionId, UnitId> {
@@ -116,8 +127,8 @@ impl<'p> Walk<'p> {
             if std::mem::replace(seen, true) {
                 continue;
             }
-            if let Some(owner) = unit.owner {
-                self.pins.insert(owner);
+            if let Some(function) = helper(unit) {
+                self.pins.insert(function);
             }
             // An inline region is its call; a fused run, its first op.
             let Some(op) = unit.original(pc as usize) else {
