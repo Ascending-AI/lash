@@ -559,6 +559,17 @@ pub fn rewrite(
     let mut out = root.clone();
     ids.link(&mut out.link)?;
     ids.run(&mut record)?;
+    // A saved constant belongs to its Link's code: a Link carried to
+    // another image places its own again, and its old objects live on only
+    // while a value of the run references them. A retained Link keeps its
+    // exact code, and so its constants.
+    record.constants.retain(|placed| {
+        map.retained.contains(&placed.link)
+            || map
+                .links
+                .get(&placed.link)
+                .is_none_or(|image| *image == placed.link)
+    });
     out.heap = continuation::write(&access, &record)?;
     Ok(out)
 }

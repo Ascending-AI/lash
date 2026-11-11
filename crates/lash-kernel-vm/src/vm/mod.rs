@@ -60,7 +60,7 @@ pub(crate) fn charge_work() {
 pub(crate) fn depth_reads() -> u64 {
     DEPTH_READS.with(std::cell::Cell::get)
 }
-use self::library::LibraryPlaced;
+use self::library::Library;
 use crate::bytecode::charge_tables::RESULT;
 use crate::bytecode::op::Op;
 use crate::bytecode::program::{Callee, Constant, LIB, Program, Then, Unit, UnitId, UnitKind};
@@ -214,8 +214,9 @@ pub(crate) struct Vm<H: Heap> {
     pub(crate) constants: Vec<Value>,
     /// What each Link's frames of library code read, by the Link's index:
     /// the library's constants, each placed in this instance's heap
-    /// before the first frame that reads it runs as the Link.
-    library: Vec<LibraryPlaced>,
+    /// before the first frame that reads it runs as the Link; and the
+    /// constants a sealed run placed that this instance has not.
+    library: Library,
     /// The Link each own unit runs as, by its index in the program's.
     links: Vec<u32>,
     /// Each native's implementation, by its tag, in this instance's registry,
@@ -316,7 +317,7 @@ impl<H: Heap> Vm<H> {
         off: bool,
         call_depth: u32,
         crossing: datum::Crossing,
-        placed: Option<&[Value]>,
+        mut saved: library::Saved,
     ) -> Result<Self, Stop> {
         // The run holds its own document's code; the program's constants
         // are code, its own or the library's, and hold nothing (contract
@@ -325,8 +326,13 @@ impl<H: Heap> Vm<H> {
             .admit(crate::heap::meter::code(&document))
             .err()
             .map(|refused| Exceeded::run(Bound::Memory, refused.bound));
+        // A sealed run's constants are code, held at nothing, until a
+        // collection finds no value referencing one it no longer places.
+        for value in saved.values() {
+            heap.adopt_constant(*value);
+        }
         let constants =
-            library::place_constants(&mut heap, &program, placed, unadmitted.is_some())?;
+            library::place_constants(&mut heap, &program, &mut saved, unadmitted.is_some())?;
         let frames = program
             .units
             .iter()
@@ -355,7 +361,7 @@ impl<H: Heap> Vm<H> {
             program,
             heap,
             constants,
-            library: Vec::new(),
+            library: Library::of(saved),
             links,
             implementations: [Vec::new(), Vec::new()],
             identities: Default::default(),
@@ -750,10 +756,7 @@ impl<H: Heap> Vm<H> {
         } = self;
         heap.collect(&mut |visit| {
             constants.iter().for_each(&mut *visit);
-            library
-                .iter()
-                .flat_map(LibraryPlaced::values)
-                .for_each(&mut *visit);
+            library.values().for_each(&mut *visit);
             globals.iter().for_each(&mut *visit);
             top.iter().flatten().for_each(&mut *visit);
             held.iter().for_each(&mut *visit);
@@ -777,10 +780,7 @@ impl<H: Heap> Vm<H> {
         let mut roots = Vec::new();
         let mut visit = |value: &Value| roots.push(*value);
         self.constants.iter().for_each(&mut visit);
-        self.library
-            .iter()
-            .flat_map(LibraryPlaced::values)
-            .for_each(&mut visit);
+        self.library.values().for_each(&mut visit);
         self.globals.iter().for_each(&mut visit);
         self.top.iter().flatten().for_each(&mut visit);
         self.held.iter().for_each(&mut visit);
@@ -813,10 +813,7 @@ impl<H: Heap> Vm<H> {
         } = self;
         let loaded = heap.load(object, chunk, &mut |visit| {
             constants.iter().for_each(&mut *visit);
-            library
-                .iter()
-                .flat_map(LibraryPlaced::values)
-                .for_each(&mut *visit);
+            library.values().for_each(&mut *visit);
             globals.iter().for_each(&mut *visit);
             top.iter().flatten().for_each(&mut *visit);
             held.iter().for_each(&mut *visit);

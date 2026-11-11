@@ -239,6 +239,60 @@ fn a_rewrite_moves_active_code_keeps_held_code_and_refuses_before_writing() {
     assert_eq!(held(&source, rewritten.heap.id, &old), kept, "old ids left");
 }
 
+/// A carry onto another root Link drops the run's saved constants of the
+/// replaced Link (contract §2, `K-VER-005`): the successor places its own
+/// code's constants, and the replaced Link's objects live on only while a
+/// value of the run references them. No page the new root reaches names
+/// the replaced Link.
+#[test]
+fn a_carry_to_another_link_keeps_no_constant_of_the_replaced_link() {
+    let source = Source::default();
+    let text = format!(
+        "main {{ let t = \"{}\" let w = perform 0(0) as Any return w }}",
+        "c".repeat(300)
+    );
+    let mut machine = <CoreMachine as Machine>::start(
+        core_program(&text, None),
+        ROOMY,
+        Setup::default().start,
+        Box::new(source.clone()),
+    )
+    .unwrap();
+    let Step::Parked(_) = machine.run(&mut World::default(), u64::MAX).unwrap() else {
+        panic!("the run never parks");
+    };
+    let sealed = machine
+        .seal(lash_kernel_state::paged::SealBudget {
+            pages: u64::MAX,
+            bytes: u64::MAX,
+        })
+        .unwrap()
+        .unwrap();
+    let root = crate::kernel_internals::sealed_root(&sealed).clone();
+    drop(machine);
+    let old = BTreeSet::from([*root.link.as_bytes()]);
+    assert_eq!(
+        held(&source, root.heap.id, &old),
+        old,
+        "the sealed run names its Link"
+    );
+    let mut pages = source.clone();
+    let live = live_code(&mut pages, &root).unwrap();
+    let mut map = RunCorrespondence::default();
+    for link in &live.links {
+        map.links
+            .insert(*link, LinkId::from_bytes(flipped(link.as_bytes())));
+    }
+    for function in &live.functions {
+        map.functions.insert(*function, *function);
+    }
+    let rewritten = rewrite(&mut pages, &root, &map).unwrap();
+    assert!(
+        held(&source, rewritten.heap.id, &old).is_empty(),
+        "the carried run names the replaced Link"
+    );
+}
+
 /// A run parked inside a function its document declares.
 const DECLARED: &str = "definition \"function inner() -> Any\\nkernel 1\\nmetering statements\\nbody { let w = perform 0(1) as Any return w }\"\nmain {\n  let v = call inner()\n  return v\n}";
 

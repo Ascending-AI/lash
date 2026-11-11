@@ -89,8 +89,8 @@ impl Header {
 struct Opened<'a> {
     heap: SlotHeap,
     roots: &'a [Value],
-    /// The program's own constants as a sealed run placed them.
-    constants: Option<&'a [Value]>,
+    /// The constants a sealed run placed.
+    saved: super::library::Saved,
 }
 
 /// The closures of Links other than `link` that `roots` reach through
@@ -193,7 +193,7 @@ fn build(
     let Opened {
         mut heap,
         roots,
-        constants,
+        saved,
     } = opened;
     let mut closures = foreign_closures(&mut heap, roots, program.link)?;
     closures.extend(root.iter().flat_map(|root| root.closures.iter().cloned()));
@@ -236,7 +236,7 @@ fn build(
             host: Vec::new(),
             data: lash_kernel_value::data_limits::KernelDataLimits::standard(),
         },
-        constants,
+        saved,
     )
     .map_err(|stop| linked(format!("{stop:?}")))?;
     vm.tasks.operations = operations;
@@ -485,7 +485,7 @@ impl CoreMachine {
         let opened = Opened {
             heap,
             roots,
-            constants: None,
+            saved: Default::default(),
         };
         let (mut vm, convention) = build(
             &program,
@@ -673,10 +673,10 @@ impl Machine for CoreMachine {
                 return Err(unavailable_helper(*function));
             }
         }
-        // Another image's library constant table need not be this one's:
-        // its constants are placed again as library code reads them.
+        // A sealed run's constants bind under the image they were placed
+        // in; under another, the program places its own (contract §7).
         if changed.is_some() {
-            record.library.clear();
+            record.constants.clear();
         }
         let main = matches!(record.start, continuation::RunStart::Main);
         if matches!(root.target, CellTargetKind::Main) != main {
@@ -686,15 +686,28 @@ impl Machine for CoreMachine {
         header.start = record.start.clone();
         let (heap, values) = SlotHeap::open(heap_bound(&bounds), &record.heap, directory)
             .map_err(|error| malformed(format!("the run's heap does not open: {error:?}")))?;
-        let constants = record
+        if record
+            .constants
+            .windows(2)
+            .any(|pair| (pair[0].link, pair[0].key) >= (pair[1].link, pair[1].key))
+        {
+            return Err(malformed("the run's constants are not ascending"));
+        }
+        let saved = record
             .constants
             .iter()
-            .map(|at| {
-                values.get(*at as usize).copied().ok_or_else(|| {
-                    malformed(format!("constant value {at} is past the run's roots"))
-                })
+            .map(|constant| {
+                values
+                    .get(constant.value as usize)
+                    .map(|value| ((constant.link, constant.key), *value))
+                    .ok_or_else(|| {
+                        malformed(format!(
+                            "constant value {} is past the run's roots",
+                            constant.value
+                        ))
+                    })
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<_, _>>()?;
         let modes = record
             .reads
             .iter()
@@ -740,7 +753,7 @@ impl Machine for CoreMachine {
             Opened {
                 heap,
                 roots: &values,
-                constants: Some(&constants),
+                saved,
             },
             record.charged,
             changed.map(|helpers| helpers.as_ref()),

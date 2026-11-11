@@ -92,14 +92,13 @@ record! {
         /// ascending: reading or writing one before it is bound raises
         /// `unbound_variable`.
         pub unbound: Vec<u32>,
-        /// Each of the program's own constants, by its index in the
-        /// program's constant table: the value it was placed as. A constant
-        /// is materialized once (contract §2); an open binds it to the
-        /// object it was placed as, and places no second one.
-        pub constants: Vec<u32>,
-        /// Each library constant a Link placed, ascending by Link and
-        /// constant index.
-        pub library: Vec<RunConstant>,
+        /// Each object constant the run placed, its own or library code's,
+        /// by its Link and content, ascending (contract §2: a constant is
+        /// materialized once). An open binds a constant it places to the
+        /// saved object of its Link with equal content, and places no
+        /// second one; a carry drops those of a Link it replaced, and an
+        /// open under another helper image drops them all.
+        pub constants: Vec<RunConstant>,
         /// Values the scheduler holds outside any task.
         pub held: Vec<u32>,
         /// The task whose context the machine holds.
@@ -138,14 +137,30 @@ record! {
 }
 
 record! {
-    /// A library constant Link `link` placed: constant `constant` of the
-    /// library's table, named by its durable name (the Link's index among
-    /// the program's and the constant's index, both functions of the
-    /// program), and the value it was placed as.
+    /// An object constant Link `link`'s code placed: its content's key
+    /// and the value it was placed as.
     pub struct RunConstant {
-        pub link: u32,
-        pub constant: u32,
+        pub link: LinkId,
+        pub key: ConstantKey,
         pub value: u32,
+    }
+}
+
+/// The digest of an object constant's kind and content: its durable name
+/// within its Link, whatever table position a program gives it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConstantKey(pub [u8; 32]);
+
+impl TokenCodec for ConstantKey {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.bytes(&self.0);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input
+            .bytes()?
+            .try_into()
+            .map(Self)
+            .map_err(|_| TokenError::Invalid("a constant key is not 32 bytes".into()))
     }
 }
 

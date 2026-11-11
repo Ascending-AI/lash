@@ -4,10 +4,13 @@
 //! here, as the code runs: the constants a library unit reads, placed
 //! once per Link, the closures it makes and the natives it calls.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::native::NewObject;
+use lash_kernel_state::paged::run::continuation::ConstantKey;
+use lash_kernel_value::LinkId;
 use lash_kernel_value::names::CallableId;
 
 use super::{Run, Stop, Vm, fault};
@@ -23,103 +26,165 @@ pub(crate) struct LibraryPlaced {
     units: Vec<bool>,
 }
 
-/// The program's own constants, placed in `heap`. A sealed run's are bound
-/// to the objects they were placed as (`placed`): a constant is
-/// materialized once (contract §2). A run its code does not fit places
-/// none.
+/// The object constants a sealed run placed and this instance has not
+/// placed again, by Link and content: placing an equal constant for that
+/// Link binds the saved object instead of a copy (contract §2). A table
+/// position is not a durable name: the process library grows in the
+/// order its code is first compiled, and the library bodies a program
+/// inlines bring their constants into its own table.
+pub(crate) type Saved = HashMap<(LinkId, ConstantKey), Value>;
+
+/// Every constant the instance's Links placed, and those a sealed run
+/// placed that it has not placed again.
+#[derive(Default)]
+pub(crate) struct Library {
+    links: Vec<LibraryPlaced>,
+    pub(crate) saved: Saved,
+}
+
+impl Library {
+    /// No constant placed yet, beside those `saved` holds.
+    pub(crate) fn of(saved: Saved) -> Self {
+        Self {
+            links: Vec::new(),
+            saved,
+        }
+    }
+
+    /// Every placed or saved constant: collection roots.
+    pub(crate) fn values(&self) -> impl Iterator<Item = &Value> {
+        self.links
+            .iter()
+            .flat_map(|placed| placed.constants.iter().flatten())
+            .chain(self.saved.values())
+    }
+}
+
+/// The durable name of object constant `object`: its kind and content.
+/// An immediate has none: it is its value.
+pub(crate) fn key(object: &NewObject) -> ConstantKey {
+    let mut out = lash_kernel_value::tokens::TokenWriter::default();
+    match object {
+        NewObject::LongText { text, .. } => {
+            out.sum(0, 1);
+            out.text(text);
+        }
+        NewObject::BigInt(int) => {
+            out.sum(1, 1);
+            out.text(&int.to_string());
+        }
+        NewObject::Bytes(bytes) => {
+            out.sum(2, 1);
+            out.bytes(bytes);
+        }
+        NewObject::Function(callable) => {
+            out.sum(3, 2);
+            out.bytes(callable.link.as_bytes());
+            out.bytes(callable.function.as_bytes());
+        }
+        _ => unreachable!("a constant is text, an integer, bytes or a function"),
+    }
+    ConstantKey(lash_kernel_value::tokens::logical_digest(&out.into_bytes()))
+}
+
+/// The object constant `constant` places, its function value naming
+/// Link `link` when library code of that Link reads it; none for an
+/// immediate.
+fn object(constant: &Constant, link: Option<LinkId>) -> Option<NewObject> {
+    Some(match constant {
+        Constant::Immediate(_) => return None,
+        Constant::Text(text) => NewObject::long_text(text.to_string()),
+        Constant::BigInt(int) => NewObject::BigInt(int.clone()),
+        Constant::Bytes(bytes) => NewObject::Bytes(bytes.clone()),
+        Constant::Function(callable) => NewObject::Function(CallableId {
+            link: link.unwrap_or(callable.link),
+            function: callable.function,
+        }),
+    })
+}
+
+/// Object constant `object` of Link `link` placed in `heap`: the object a
+/// sealed run placed it as, when `saved` has one.
+fn place<H: Heap>(
+    heap: &mut H,
+    saved: &mut Saved,
+    link: LinkId,
+    object: NewObject,
+) -> Result<Value, String> {
+    if !saved.is_empty()
+        && let Some(value) = saved.remove(&(link, key(&object)))
+    {
+        heap.adopt_constant(value);
+        return Ok(value);
+    }
+    heap.constant(object).map_err(|error| error.to_string())
+}
+
+/// The program's own constants, placed in `heap`, binding those `saved`
+/// holds. A run its code does not fit places none.
 pub(crate) fn place_constants<H: Heap>(
     heap: &mut H,
     program: &Program,
-    placed: Option<&[Value]>,
+    saved: &mut Saved,
     unadmitted: bool,
 ) -> Result<Vec<Value>, Stop> {
-    if placed.is_some_and(|placed| placed.len() != program.constants.len()) {
-        return Err(Stop::Fault(
-            "the run's constants are not its program's".into(),
-        ));
-    }
     let mut constants = Vec::with_capacity(program.constants.len());
-    for (at, constant) in program.constants.iter().enumerate() {
-        let object = match constant {
-            Constant::Immediate(value) => {
-                constants.push(*value);
-                continue;
-            }
-            Constant::Text(text) => NewObject::long_text(text.to_string()),
-            Constant::BigInt(int) => NewObject::BigInt(int.clone()),
-            Constant::Bytes(bytes) => NewObject::Bytes(bytes.clone()),
-            Constant::Function(callable) => NewObject::Function(*callable),
+    for constant in &program.constants {
+        let Some(object) = object(constant, None) else {
+            let Constant::Immediate(value) = constant else {
+                unreachable!()
+            };
+            constants.push(*value);
+            continue;
         };
         if unadmitted {
             constants.push(Value::Absent);
             continue;
         }
-        if let Some(saved) = placed.map(|placed| placed[at])
-            && saved.handle().is_some()
-        {
-            heap.adopt_constant(saved);
-            constants.push(saved);
-            continue;
-        }
-        let value = heap
-            .constant(object)
-            .map_err(|error| Stop::Fault(error.to_string()))?;
-        constants.push(value);
+        constants.push(place(heap, saved, program.link, object).map_err(Stop::Fault)?);
     }
     Ok(constants)
 }
 
-impl LibraryPlaced {
-    /// The constants it placed.
-    pub(crate) fn values(&self) -> impl Iterator<Item = &Value> {
-        self.constants.iter().flatten()
-    }
-}
-
 impl<H: Heap> Vm<H> {
-    /// Each library constant placed in the heap, as (Link index, constant
-    /// index, value).
-    pub(crate) fn placed_library(&self) -> impl Iterator<Item = (u32, u32, Value)> + '_ {
-        self.library.iter().enumerate().flat_map(|(link, placed)| {
-            placed
-                .constants
-                .iter()
-                .enumerate()
-                .filter_map(move |(at, value)| {
-                    value
-                        .filter(|value| value.handle().is_some())
-                        .map(|value| (link as u32, at as u32, value))
-                })
-        })
+    /// Every object constant placed in the heap, by its Link and content.
+    pub(crate) fn placed_constants(&self) -> Vec<(LinkId, ConstantKey, Value)> {
+        let program = &self.program;
+        let own = program
+            .constants
+            .iter()
+            .zip(&self.constants)
+            .filter(|(_, value)| value.handle().is_some())
+            .filter_map(|(constant, value)| {
+                object(constant, None).map(|object| (program.link, key(&object), *value))
+            });
+        let library = self
+            .library
+            .links
+            .iter()
+            .enumerate()
+            .flat_map(|(at, placed)| {
+                let link = program.links[at];
+                placed
+                    .constants
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(k, value)| {
+                        let value = value.filter(|value| value.handle().is_some())?;
+                        object(&program.lib.constants[k], Some(link))
+                            .map(|object| (link, key(&object), value))
+                    })
+            });
+        // A saved constant of a Link the program does not load is no longer
+        // its code's: its object lives on only while a value references it.
+        let saved = self
+            .library
+            .saved
+            .iter()
+            .filter(|((link, _), _)| program.link_index(link).is_some())
+            .map(|((link, key), value)| (*link, *key, *value));
+        own.chain(library).chain(saved).collect()
     }
-
-    /// Binds library constant `constant` of Link `link` to `value`, the
-    /// object a sealed run placed it as.
-    pub(crate) fn bind_library(
-        &mut self,
-        link: u32,
-        constant: u32,
-        value: Value,
-    ) -> Result<(), String> {
-        let count = self.program.lib.constants.len();
-        if constant as usize >= count || link as usize >= self.program.links.len() {
-            return Err(format!(
-                "library constant {constant} of Link {link} is not the program's"
-            ));
-        }
-        if self.library.len() <= link as usize {
-            self.library
-                .resize_with(link as usize + 1, Default::default);
-        }
-        let placed = &mut self.library[link as usize];
-        if placed.constants.len() < count {
-            placed.constants.resize(count, None);
-        }
-        self.heap.adopt_constant(value);
-        placed.constants[constant as usize] = Some(value);
-        Ok(())
-    }
-
     /// Whether a function value naming `callable` can enter the run: the
     /// Link it names is loaded and declares it.
     pub(crate) fn callable(&self, callable: &CallableId) -> bool {
@@ -171,6 +236,7 @@ impl<H: Heap> Vm<H> {
     #[inline(never)]
     fn library_constant(&self, n: u32) -> Value {
         self.library
+            .links
             .get(self.running_link() as usize)
             .and_then(|placed| placed.constants.get((n & !LIB) as usize).copied().flatten())
             .unwrap_or(Value::Absent)
@@ -185,6 +251,7 @@ impl<H: Heap> Vm<H> {
         }
         let placed = self
             .library
+            .links
             .get(link as usize)
             .and_then(|placed| placed.units.get((unit & !LIB) as usize).copied());
         if placed == Some(true) {
@@ -198,39 +265,36 @@ impl<H: Heap> Vm<H> {
         let program = Arc::clone(&self.program);
         let lib = &program.lib;
         let at = (unit & !LIB) as usize;
-        if self.library.len() <= link as usize {
-            self.library
+        let library = &mut self.library;
+        if library.links.len() <= link as usize {
+            library
+                .links
                 .resize_with(link as usize + 1, Default::default);
         }
+        let id = program.links[link as usize];
         for &n in lib.reads[at].iter() {
             let k = (n & !LIB) as usize;
-            let placed = &mut self.library[link as usize];
+            let placed = &mut library.links[link as usize];
             if placed.constants.len() <= k {
                 placed.constants.resize(lib.constants.len(), None);
             }
             if placed.constants[k].is_some() {
                 continue;
             }
-            let object = match &lib.constants[k] {
-                Constant::Immediate(value) => {
-                    placed.constants[k] = Some(*value);
-                    continue;
+            let value = match object(&lib.constants[k], Some(id)) {
+                None => {
+                    let Constant::Immediate(value) = &lib.constants[k] else {
+                        unreachable!()
+                    };
+                    *value
                 }
-                Constant::Text(text) => NewObject::long_text(text.to_string()),
-                Constant::BigInt(int) => NewObject::BigInt(int.clone()),
-                Constant::Bytes(bytes) => NewObject::Bytes(bytes.clone()),
-                Constant::Function(callable) => NewObject::Function(CallableId {
-                    link: program.links[link as usize],
-                    function: callable.function,
-                }),
+                Some(object) => {
+                    place(&mut self.heap, &mut library.saved, id, object).map_err(fault)?
+                }
             };
-            let value = self
-                .heap
-                .constant(object)
-                .map_err(|error| fault(error.to_string()))?;
-            self.library[link as usize].constants[k] = Some(value);
+            library.links[link as usize].constants[k] = Some(value);
         }
-        let placed = &mut self.library[link as usize];
+        let placed = &mut library.links[link as usize];
         if placed.units.len() <= at {
             placed.units.resize(lib.units.len(), false);
         }

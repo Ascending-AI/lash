@@ -87,18 +87,14 @@ pub(crate) fn seal(
         .filter(|(_, unbound)| **unbound)
         .map(|(at, _)| number(at))
         .collect::<Result<_, _>>()?;
-    let constants = vm
-        .constants
-        .iter()
-        .map(|value| values.put(*value))
-        .collect();
-    let library = vm
-        .placed_library()
-        .collect::<Vec<_>>()
+    let mut placed = vm.placed_constants();
+    placed.sort_unstable_by_key(|(link, key, _)| (*link, *key));
+    placed.dedup_by_key(|(link, key, _)| (*link, *key));
+    let constants = placed
         .into_iter()
-        .map(|(link, constant, value)| continuation::RunConstant {
+        .map(|(link, key, value)| continuation::RunConstant {
             link,
-            constant,
+            key,
             value: values.put(value),
         })
         .collect();
@@ -169,7 +165,6 @@ pub(crate) fn seal(
         carried: vm.session.page,
         unbound,
         constants,
-        library,
         held,
         running,
         installed,
@@ -631,16 +626,6 @@ pub(crate) fn open(
         unbound[*at as usize] = true;
     }
     vm.unbound = unbound.into_boxed_slice();
-    if record
-        .library
-        .windows(2)
-        .any(|pair| (pair[0].link, pair[0].constant) >= (pair[1].link, pair[1].constant))
-    {
-        return Err("the run's library constants are not ascending".into());
-    }
-    for placed in &record.library {
-        vm.bind_library(placed.link, placed.constant, value(placed.value)?)?;
-    }
     vm.held = record
         .held
         .iter()
