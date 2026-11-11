@@ -179,6 +179,17 @@ impl<H: Heap> Vm<H> {
                 stack[at] = stack[at + 1];
                 stack.truncate(at + 1);
             }
+            2 => {
+                stack[at] = stack[at + 1];
+                stack[at + 1] = stack[at + 2];
+                stack.truncate(at + 2);
+            }
+            3 => {
+                stack[at] = stack[at + 1];
+                stack[at + 1] = stack[at + 2];
+                stack[at + 2] = stack[at + 3];
+                stack.truncate(at + 3);
+            }
             _ => {
                 stack.remove(at);
             }

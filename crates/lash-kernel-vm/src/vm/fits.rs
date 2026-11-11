@@ -51,32 +51,44 @@ impl<H: Heap> Vm<H> {
 
     /// Why `value`, returned to an authored call of a typed build
     /// helper's body, does not fit the helper's declared result: the
-    /// caller's frame stands below the returning one, at the call.
-    #[inline]
+    /// caller's frame stands below the returning one, at the call. Most
+    /// calls hold to no typed result: the site's read is all they do.
+    #[inline(always)]
     pub(super) fn unfit_result(&mut self, value: Value) -> Run<Option<EntryTypeMismatch>> {
         let Some(caller) = self.cx.frames.len().checked_sub(2) else {
             return Ok(None);
         };
         let frame = &self.cx.frames[caller];
         let unit = self.program.unit(frame.unit);
-        let checked = match (frame.pc as usize)
+        let call = match (frame.pc as usize)
             .checked_sub(1)
             .and_then(|pc| unit.ops.get(pc))
         {
-            Some(Op::Call(site)) => unit.calls[*site as usize].checked.as_ref(),
-            Some(Op::Inline(n)) => unit.calls[unit.inlines[*n as usize].call as usize]
-                .checked
-                .as_ref(),
-            _ => None,
+            Some(Op::Call(site)) => &unit.calls[*site as usize],
+            Some(Op::Inline(n)) => &unit.calls[unit.inlines[*n as usize].call as usize],
+            _ => return Ok(None),
         };
-        // Most returns hold to no typed result, or plainly fit it.
-        match checked.filter(|checked| !plainly_fits(value, &checked.signature.result)) {
+        match &call.checked {
+            None => Ok(None),
             Some(checked) => {
                 let checked = std::sync::Arc::clone(checked);
-                self.result_unfit(&checked, value)
+                self.checked_result(&checked, value)
             }
-            None => Ok(None),
         }
+    }
+
+    /// Why `value` does not fit `checked`'s result, unless it plainly fits.
+    #[cold]
+    #[inline(never)]
+    fn checked_result(
+        &mut self,
+        checked: &Checked,
+        value: Value,
+    ) -> Run<Option<EntryTypeMismatch>> {
+        if plainly_fits(value, &checked.signature.result) {
+            return Ok(None);
+        }
+        self.result_unfit(checked, value)
     }
 
     /// Why `value`, returned through a call held to `checked`, does not

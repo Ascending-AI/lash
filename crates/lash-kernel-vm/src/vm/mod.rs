@@ -251,6 +251,9 @@ pub(crate) struct Vm<H: Heap> {
     /// The direct-call guard ([`calls::Direct`]): the instance's own
     /// cache, never sealed.
     direct: Option<calls::Direct>,
+    /// Capture reads the arena answered, by closure and capture: the
+    /// instance's own cache, never sealed.
+    captured: [std::cell::Cell<cells::Captured>; cells::KEPT],
     meter: Meter,
     /// The run is under `Charge::Off`: fixed costs place slices; no
     /// limit, fee or readout.
@@ -378,6 +381,7 @@ impl<H: Heap> Vm<H> {
             document,
             held: Vec::new(),
             direct: None,
+            captured: Default::default(),
             meter: Meter::new(used, if off { u64::MAX } else { limit }),
             off,
             exact: true,
@@ -980,10 +984,10 @@ impl<H: Heap> Vm<H> {
         self.admit(entry.cost)?;
         self.prepare(entry.unit, entry.link)?;
         let base = self.cx.stack.len() - argc;
-        self.cx.stack.resize(
-            base + usize::from(entry.locals.max(argc as u16)),
-            Value::Absent,
-        );
+        let height = base + usize::from(entry.locals.max(argc as u16));
+        if height > self.cx.stack.len() {
+            self.cx.stack.resize(height, Value::Absent);
+        }
         if entry.boxes {
             self.box_locals(entry.unit, base)?;
         }
@@ -1031,29 +1035,6 @@ impl<H: Heap> Vm<H> {
     #[inline]
     fn push(&mut self, value: Value) {
         self.cx.stack.push(value);
-    }
-
-    /// The cell local `slot` of the running frame holds.
-    fn cell_at(&self, slot: u16) -> Run<ArenaHandle> {
-        match self.cx.stack[self.base() + usize::from(slot)] {
-            Value::Handle(cell) => Ok(cell),
-            _ => Err(fault("a shared local holds no cell")),
-        }
-    }
-
-    /// The cell of the running closure's capture `n`.
-    fn capture(&self, n: u16) -> Run<ArenaHandle> {
-        let closure = self
-            .cx
-            .frames
-            .last()
-            .and_then(|frame| frame.closure)
-            .ok_or_else(|| fault("a capture outside a closure"))?;
-        let (_, captures, _) = self.heap.arena().closure(closure).map_err(read)?;
-        captures
-            .get(usize::from(n))
-            .copied()
-            .ok_or_else(|| fault("a capture past the closure's cells"))
     }
 
     // --- The dispatch loop.
