@@ -727,3 +727,47 @@ main {
     let order: Vec<_> = (1..=64).chain(1..=64).map(int).collect();
     assert_eq!(result(end), lash_kernel_doc::Datum::List(order));
 }
+
+/// Contract §2 and R10: a program constant counts once, when it is
+/// materialized, and a reopened run holds no more than the run it
+/// continues. A run parked after placing a long text constant, bound to a
+/// local, holds the same bytes cold as warm, through two opens.
+#[test]
+fn a_parked_constant_holds_the_same_cold_as_warm() {
+    let mut run = Embedder::new(&format!(
+        "main {{ let t = \"{}\" let r = perform 0(0) as Any let s = perform 0(1) as Any return 1 }}",
+        "c".repeat(1000)
+    ));
+    assert!(matches!(run.run(), Step::Parked(_)));
+    let warm = run.machine.meters().memory;
+    for open in 1..=2 {
+        reopen(&mut run);
+        assert_eq!(run.machine.meters().memory, warm, "open {open}");
+        run.deliver_next();
+        if open == 1 {
+            assert!(matches!(run.run(), Step::Parked(_)));
+        }
+    }
+    let end = run.run_to_end(&[]);
+    assert!(matches!(end, crate::End::Finished(ref end) if end.result == int(1)));
+}
+
+/// `K-FORM-003` across a seal: a name of `main` no host or session binding
+/// provides stays unbound in a run reopened cold, so reading or writing it
+/// raises `unbound_variable`.
+#[test]
+fn a_never_bound_name_raises_unbound_variable_after_a_cold_reopen() {
+    for body in ["return nowhere", "set nowhere = 1 return 1"] {
+        let mut run = Embedder::new(&format!("main {{ let r = perform 0(0) as Any {body} }}"));
+        assert!(matches!(run.run(), Step::Parked(_)));
+        reopen(&mut run);
+        run.deliver_next();
+        match run.run_to_end(&[]) {
+            crate::End::Error(crate::RunError::Uncaught {
+                error: lash_kernel_doc::Datum::Error(error),
+                ..
+            }) => assert_eq!(error.kind, "unbound_variable", "{body}"),
+            other => panic!("{body}: {other:?}"),
+        }
+    }
+}

@@ -89,6 +89,8 @@ impl Header {
 struct Opened<'a> {
     heap: SlotHeap,
     roots: &'a [Value],
+    /// The program's own constants as a sealed run placed them.
+    constants: Option<&'a [Value]>,
 }
 
 /// The closures of Links other than `link` that `roots` reach through
@@ -188,7 +190,11 @@ fn build(
                 })
         })
         .collect();
-    let Opened { mut heap, roots } = opened;
+    let Opened {
+        mut heap,
+        roots,
+        constants,
+    } = opened;
     let mut closures = foreign_closures(&mut heap, roots, program.link)?;
     closures.extend(root.iter().flat_map(|root| root.closures.iter().cloned()));
     let loaded = crate::bytecode::compile::Linked {
@@ -230,6 +236,7 @@ fn build(
             host: Vec::new(),
             data: lash_kernel_value::data_limits::KernelDataLimits::standard(),
         },
+        constants,
     )
     .map_err(|stop| linked(format!("{stop:?}")))?;
     vm.tasks.operations = operations;
@@ -480,7 +487,11 @@ impl CoreMachine {
         let roots = session
             .as_ref()
             .map_or(&[][..], |(_, values, _)| values.as_slice());
-        let opened = Opened { heap, roots };
+        let opened = Opened {
+            heap,
+            roots,
+            constants: None,
+        };
         let (mut vm, convention) = build(
             &program,
             bounds,
@@ -638,7 +649,8 @@ impl Machine for CoreMachine {
         if !matches!(root.status, RootStatus::Parked) {
             return Err(malformed("an ended root cannot execute"));
         }
-        let (record, directory) = continuation::open(source, root.heap).map_err(OpenError::Heap)?;
+        let (mut record, directory) =
+            continuation::open(source, root.heap).map_err(OpenError::Heap)?;
         // Under another build image, the run opens only if the image holds
         // every helper its live resume closure pins (contract §7).
         let changed = (root.helper_library != header.helper_library).then(|| program.helpers());
@@ -666,6 +678,11 @@ impl Machine for CoreMachine {
                 return Err(unavailable_helper(*function));
             }
         }
+        // Another image's library constant table need not be this one's:
+        // its constants are placed again as library code reads them.
+        if changed.is_some() {
+            record.library.clear();
+        }
         let main = matches!(record.start, continuation::RunStart::Main);
         if matches!(root.target, CellTargetKind::Main) != main {
             return Err(malformed("the root's target and its run's start disagree"));
@@ -674,6 +691,15 @@ impl Machine for CoreMachine {
         header.start = record.start.clone();
         let (heap, values) = SlotHeap::open(heap_bound(&bounds), &record.heap, directory)
             .map_err(|error| malformed(format!("the run's heap does not open: {error:?}")))?;
+        let constants = record
+            .constants
+            .iter()
+            .map(|at| {
+                values.get(*at as usize).copied().ok_or_else(|| {
+                    malformed(format!("constant value {at} is past the run's roots"))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let modes = record
             .reads
             .iter()
@@ -719,6 +745,7 @@ impl Machine for CoreMachine {
             Opened {
                 heap,
                 roots: &values,
+                constants: Some(&constants),
             },
             record.charged,
             changed.map(|helpers| helpers.as_ref()),

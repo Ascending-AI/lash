@@ -80,6 +80,28 @@ pub(crate) fn seal(
     let occurrences = occurrence_sites(&program);
     let mut values = Values::default();
     let globals = vm.globals.iter().map(|value| values.put(*value)).collect();
+    let unbound = vm
+        .unbound
+        .iter()
+        .enumerate()
+        .filter(|(_, unbound)| **unbound)
+        .map(|(at, _)| number(at))
+        .collect::<Result<_, _>>()?;
+    let constants = vm
+        .constants
+        .iter()
+        .map(|value| values.put(*value))
+        .collect();
+    let library = vm
+        .placed_library()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|(link, constant, value)| continuation::RunConstant {
+            link,
+            constant,
+            value: values.put(value),
+        })
+        .collect();
     let held = vm.held.iter().map(|value| values.put(*value)).collect();
     let tasks = &vm.tasks;
     let mut saved = Vec::with_capacity(tasks.all.len());
@@ -145,6 +167,9 @@ pub(crate) fn seal(
         session: vm.session.names.clone(),
         functions: vm.session.saved.clone(),
         carried: vm.session.page,
+        unbound,
+        constants,
+        library,
         held,
         running,
         installed,
@@ -592,6 +617,29 @@ pub(crate) fn open(
     vm.heap.code = record.held_code.iter().copied().collect();
     for (slot, at) in vm.globals.iter_mut().zip(&record.globals) {
         *slot = value(*at)?;
+    }
+    if record.unbound.windows(2).any(|pair| pair[0] >= pair[1])
+        || record
+            .unbound
+            .last()
+            .is_some_and(|last| *last as usize >= program.globals.len())
+    {
+        return Err("the run's unbound globals are not ascending among the program's".into());
+    }
+    let mut unbound = vec![false; program.globals.len()];
+    for at in &record.unbound {
+        unbound[*at as usize] = true;
+    }
+    vm.unbound = unbound.into_boxed_slice();
+    if record
+        .library
+        .windows(2)
+        .any(|pair| (pair[0].link, pair[0].constant) >= (pair[1].link, pair[1].constant))
+    {
+        return Err("the run's library constants are not ascending".into());
+    }
+    for placed in &record.library {
+        vm.bind_library(placed.link, placed.constant, value(placed.value)?)?;
     }
     vm.held = record
         .held

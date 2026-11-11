@@ -192,7 +192,7 @@ pub(crate) struct Vm<H: Heap> {
     pub program: Arc<Program>,
     pub heap: H,
     /// The program's constants, materialized in this instance's heap.
-    constants: Vec<Value>,
+    pub(crate) constants: Vec<Value>,
     /// What each Link's frames of library code read, by the Link's index:
     /// the library's constants, each placed in this instance's heap
     /// before the first frame that reads it runs as the Link.
@@ -297,6 +297,7 @@ impl<H: Heap> Vm<H> {
         off: bool,
         call_depth: u32,
         crossing: datum::Crossing,
+        placed: Option<&[Value]>,
     ) -> Result<Self, Stop> {
         // The run holds its own document's code; the program's constants
         // are code, its own or the library's, and hold nothing (contract
@@ -305,8 +306,15 @@ impl<H: Heap> Vm<H> {
             .admit(crate::heap::meter::code(&document))
             .err()
             .map(|refused| Exceeded::run(Bound::Memory, refused.bound));
+        // A sealed run's constants are bound to the objects they were
+        // placed as: a constant is materialized once (contract §2).
+        if placed.is_some_and(|placed| placed.len() != program.constants.len()) {
+            return Err(Stop::Fault(
+                "the run's constants are not its program's".into(),
+            ));
+        }
         let mut constants = Vec::with_capacity(program.constants.len());
-        for constant in &program.constants {
+        for (at, constant) in program.constants.iter().enumerate() {
             let object = match constant {
                 Constant::Immediate(value) => {
                     constants.push(*value);
@@ -319,6 +327,13 @@ impl<H: Heap> Vm<H> {
             };
             if unadmitted.is_some() {
                 constants.push(Value::Absent);
+                continue;
+            }
+            if let Some(saved) = placed.map(|placed| placed[at])
+                && saved.handle().is_some()
+            {
+                heap.adopt_constant(saved);
+                constants.push(saved);
                 continue;
             }
             let value = heap
@@ -763,6 +778,7 @@ impl<H: Heap> Vm<H> {
         let Self {
             heap,
             constants,
+            library,
             globals,
             top,
             cx,
@@ -773,6 +789,10 @@ impl<H: Heap> Vm<H> {
         } = self;
         heap.collect(&mut |visit| {
             constants.iter().for_each(&mut *visit);
+            library
+                .iter()
+                .flat_map(LibraryPlaced::values)
+                .for_each(&mut *visit);
             globals.iter().for_each(&mut *visit);
             top.iter().flatten().for_each(&mut *visit);
             held.iter().for_each(&mut *visit);
@@ -796,6 +816,10 @@ impl<H: Heap> Vm<H> {
         let mut roots = Vec::new();
         let mut visit = |value: &Value| roots.push(*value);
         self.constants.iter().for_each(&mut visit);
+        self.library
+            .iter()
+            .flat_map(LibraryPlaced::values)
+            .for_each(&mut visit);
         self.globals.iter().for_each(&mut visit);
         self.top.iter().flatten().for_each(&mut visit);
         self.held.iter().for_each(&mut visit);
@@ -817,6 +841,7 @@ impl<H: Heap> Vm<H> {
         let Self {
             heap,
             constants,
+            library,
             globals,
             top,
             cx,
@@ -827,6 +852,10 @@ impl<H: Heap> Vm<H> {
         } = self;
         let loaded = heap.load(object, chunk, &mut |visit| {
             constants.iter().for_each(&mut *visit);
+            library
+                .iter()
+                .flat_map(LibraryPlaced::values)
+                .for_each(&mut *visit);
             globals.iter().for_each(&mut *visit);
             top.iter().flatten().for_each(&mut *visit);
             held.iter().for_each(&mut *visit);

@@ -88,6 +88,18 @@ record! {
         /// The session page the carried session came from, whose rows the
         /// cell's carry edits.
         pub carried: Option<PageRef>,
+        /// The program's globals no host or session binding provides,
+        /// ascending: reading or writing one before it is bound raises
+        /// `unbound_variable`.
+        pub unbound: Vec<u32>,
+        /// Each of the program's own constants, by its index in the
+        /// program's constant table: the value it was placed as. A constant
+        /// is materialized once (contract §2); an open binds it to the
+        /// object it was placed as, and places no second one.
+        pub constants: Vec<u32>,
+        /// Each library constant a Link placed, ascending by Link and
+        /// constant index.
+        pub library: Vec<RunConstant>,
         /// Values the scheduler holds outside any task.
         pub held: Vec<u32>,
         /// The task whose context the machine holds.
@@ -122,6 +134,18 @@ record! {
         /// across seals, never shrunk, since a cold page's values are not
         /// read to seal.
         pub held_code: Vec<FunctionId>,
+    }
+}
+
+record! {
+    /// A library constant Link `link` placed: constant `constant` of the
+    /// library's table, named by its durable name (the Link's index among
+    /// the program's and the constant's index, both functions of the
+    /// program), and the value it was placed as.
+    pub struct RunConstant {
+        pub link: u32,
+        pub constant: u32,
+        pub value: u32,
     }
 }
 

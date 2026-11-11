@@ -64,6 +64,9 @@ pub(crate) struct SlotHeap {
     summaries: std::collections::HashMap<ObjectId, Vec<lash_kernel_doc::heap::EntityId>>,
     /// Each slot's schedule units, by slot index, while its object lives.
     units: Vec<u64>,
+    /// The slots of the program's placed constants: code, which the run
+    /// never holds, resident or cold (contract §2).
+    code_slots: std::collections::HashSet<u32>,
     held: u64,
     bound: u64,
     /// Every function a closure or function value the heap sealed names,
@@ -81,6 +84,7 @@ impl SlotHeap {
             payloads: std::collections::HashMap::new(),
             summaries: std::collections::HashMap::new(),
             units: Vec::new(),
+            code_slots: std::collections::HashSet::new(),
             held: 0,
             bound,
             code: std::collections::BTreeSet::new(),
@@ -191,9 +195,18 @@ impl SlotHeap {
     fn resettle(&mut self, handle: ArenaHandle) {
         let index = handle.index() as usize;
         let before = self.units.get(index).copied().unwrap_or(0);
-        let now = self.arena.body(handle).map_or(0, super::meter::body);
+        let now = self.holds(handle);
         self.held = self.held.saturating_sub(before).saturating_add(now);
         self.place(handle, now);
+    }
+
+    /// What slot `handle` holds under the schedule: its body's units, or
+    /// nothing for a placed constant.
+    fn holds(&self, handle: ArenaHandle) -> u64 {
+        if self.code_slots.contains(&handle.index()) {
+            return 0;
+        }
+        self.arena.body(handle).map_or(0, super::meter::body)
     }
 
     /// Seals what `roots` reach, then puts every clean list, map, set and
@@ -346,7 +359,7 @@ impl SlotHeap {
         }
         self.large.opened(id, chunked.clone());
         self.held = self.held.saturating_sub(wanted.saturating_add(placeholder));
-        let now = self.arena.body(object).map_or(0, super::meter::body);
+        let now = self.holds(object);
         self.held = self.held.saturating_add(now);
         self.place(object, now);
         Ok(())
@@ -525,7 +538,7 @@ impl SlotHeap {
             .get(object.index() as usize)
             .copied()
             .unwrap_or(0);
-        let now = self.arena.body(object).map_or(0, super::meter::body);
+        let now = self.holds(object);
         self.held = self.held.saturating_sub(before).saturating_add(now);
         self.place(object, now);
         Ok(())
@@ -633,7 +646,7 @@ impl SlotHeap {
         // Admitted as its schedule; it holds what its body does.
         let index = object.index() as usize;
         let before = self.units.get(index).copied().unwrap_or(0);
-        let now = self.arena.body(object).map_or(0, super::meter::body);
+        let now = self.holds(object);
         let fresh_units = units.saturating_sub(
             super::meter::values(page.members.len() as u64)
                 .saturating_sub(super::meter::COLD_CHUNK),
@@ -701,8 +714,22 @@ impl Heap for SlotHeap {
         let value = self.arena.create(object)?;
         if let Some(handle) = value.handle() {
             self.place(handle, 0);
+            self.code_slots.insert(handle.index());
         }
         Ok(value)
+    }
+
+    fn adopt_constant(&mut self, value: Value) {
+        if let Some(handle) = value.handle() {
+            let units = self
+                .units
+                .get(handle.index() as usize)
+                .copied()
+                .unwrap_or(0);
+            self.held = self.held.saturating_sub(units);
+            self.place(handle, 0);
+            self.code_slots.insert(handle.index());
+        }
     }
 
     fn install(&mut self, built: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
@@ -961,7 +988,7 @@ impl Heap for SlotHeap {
             .map_err(|error| malformed(error.to_string()))?;
         // The body was admitted as the record's schedule less the
         // placeholder; it holds what its body does.
-        let now = self.arena.body(object).map_or(0, super::meter::body);
+        let now = self.holds(object);
         self.held = self
             .held
             .saturating_sub(super::meter::record(&row.record))

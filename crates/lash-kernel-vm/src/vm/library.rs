@@ -23,7 +23,57 @@ pub(crate) struct LibraryPlaced {
     units: Vec<bool>,
 }
 
+impl LibraryPlaced {
+    /// The constants it placed.
+    pub(crate) fn values(&self) -> impl Iterator<Item = &Value> {
+        self.constants.iter().flatten()
+    }
+}
+
 impl<H: Heap> Vm<H> {
+    /// Each library constant placed in the heap, as (Link index, constant
+    /// index, value).
+    pub(crate) fn placed_library(&self) -> impl Iterator<Item = (u32, u32, Value)> + '_ {
+        self.library.iter().enumerate().flat_map(|(link, placed)| {
+            placed
+                .constants
+                .iter()
+                .enumerate()
+                .filter_map(move |(at, value)| {
+                    value
+                        .filter(|value| value.handle().is_some())
+                        .map(|value| (link as u32, at as u32, value))
+                })
+        })
+    }
+
+    /// Binds library constant `constant` of Link `link` to `value`, the
+    /// object a sealed run placed it as.
+    pub(crate) fn bind_library(
+        &mut self,
+        link: u32,
+        constant: u32,
+        value: Value,
+    ) -> Result<(), String> {
+        let count = self.program.lib.constants.len();
+        if constant as usize >= count || link as usize >= self.program.links.len() {
+            return Err(format!(
+                "library constant {constant} of Link {link} is not the program's"
+            ));
+        }
+        if self.library.len() <= link as usize {
+            self.library
+                .resize_with(link as usize + 1, Default::default);
+        }
+        let placed = &mut self.library[link as usize];
+        if placed.constants.len() < count {
+            placed.constants.resize(count, None);
+        }
+        self.heap.adopt_constant(value);
+        placed.constants[constant as usize] = Some(value);
+        Ok(())
+    }
+
     /// Whether a function value naming `callable` can enter the run: the
     /// Link it names is loaded and declares it.
     pub(crate) fn callable(&self, callable: &CallableId) -> bool {

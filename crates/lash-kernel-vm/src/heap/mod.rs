@@ -64,6 +64,11 @@ pub(crate) trait Heap {
     /// holds: it is admitted for nothing and frees nothing.
     fn constant(&mut self, object: NewObject) -> Result<Value, NativeError>;
 
+    /// Binds constant `value`, opened from a sealed run, as the code it was
+    /// placed as: the run holds nothing for it, and what the open admitted
+    /// for it is returned.
+    fn adopt_constant(&mut self, value: Value);
+
     /// Installs what a native call built, in reservation order.
     fn install(&mut self, built: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError>;
 
