@@ -1346,7 +1346,13 @@ impl<H: Heap> Vm<H> {
                             return Err(fault("a fused call of no native"));
                         };
                         if let Some(answer) = self.answer(&program, native, charged, &args) {
-                            let (value, fee) = check!(answer);
+                            let (value, fee) = match answer {
+                                Err(cold @ Flow::Cold { .. }) => {
+                                    sync!(fused::rerun_from(fused));
+                                    return Err(cold);
+                                }
+                                answer => check!(answer),
+                            };
                             if fee.is_none_or(|units| self.meter.prepay(units)) {
                                 self.cx.stack.truncate(len + usize::from(fused.pushes) - 2);
                                 take!(fused.then, value);

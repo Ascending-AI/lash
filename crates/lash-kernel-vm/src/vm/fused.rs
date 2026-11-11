@@ -8,6 +8,15 @@ use super::{Flow, Run, Vm, fault};
 use crate::bytecode::program::{Callee, Fused, Operand, Program, Then, Unit};
 use crate::heap::Heap;
 
+/// The frame `pc` a cold read in a fused run's answer leaves: past the
+/// run's own op, so the load runs the whole run again. The run reads its
+/// pushes in place and never makes them, so its call op alone would run
+/// short of its arguments.
+#[cold]
+pub(super) fn rerun_from(fused: &Fused) -> u32 {
+    fused.call - u32::from(fused.pushes) + 1
+}
+
 impl<H: Heap> Vm<H> {
     /// A branch's condition is no bool (`K-EVAL-005`).
     #[cold]
@@ -81,6 +90,10 @@ impl<H: Heap> Vm<H> {
         let (value, fee) = match words {
             Some(answered) => answered,
             None => match self.answer(program, native, charged, &args) {
+                Some(Err(cold @ Flow::Cold { .. })) => {
+                    self.cx.frames[top].pc = rerun_from(fused);
+                    return Err(cold);
+                }
                 Some(answer) => answer?,
                 None => {
                     // No inline answer: the pushes, then the call.
