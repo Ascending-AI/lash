@@ -868,8 +868,6 @@ fn open_frame(
     vm.heap
         .admit(vm.frame_cost(id))
         .map_err(|refused| format!("the memory bound does not admit a frame: {refused:?}"))?;
-    vm.prepare(id, link)
-        .map_err(|_| String::from("the memory bound does not admit a library constant"))?;
     let base = cx.stack.len();
     cx.stack
         .resize(base + usize::from(unit.locals), Value::Absent);

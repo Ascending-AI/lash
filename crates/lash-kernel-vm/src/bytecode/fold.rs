@@ -150,7 +150,8 @@ fn walk(
         }
         match unit.ops[pc] {
             Op::Block(_) | Op::Nop => {}
-            Op::Const(k) => path.stack.push(Slot::Const(k)),
+            Op::Const(k) if program.readable(k) => path.stack.push(Slot::Const(k)),
+            Op::Const(_) => return None,
             Op::Local(local) => {
                 let slot = match path.set.iter().rev().find(|(set, _)| *set == local) {
                     Some(&(_, slot)) => slot,

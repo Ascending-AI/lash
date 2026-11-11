@@ -935,7 +935,6 @@ impl<H: Heap> Vm<H> {
             )));
         }
         self.admit(entry.cost)?;
-        self.prepare(entry.unit, entry.link)?;
         let base = self.cx.stack.len() - argc;
         let height = base + usize::from(entry.locals.max(argc as u16));
         if height > self.cx.stack.len() {
@@ -1166,7 +1165,10 @@ impl<H: Heap> Vm<H> {
                         None => continue 'frames,
                     },
                     Op::Nop => {}
-                    Op::Const(n) => self.push(self.konst(n)),
+                    // A library constant is read out of line, placed at
+                    // its first read.
+                    Op::Const(n) if n & LIB != 0 => check!(self.library_read(n)),
+                    Op::Const(n) => self.push(self.constants[n as usize]),
                     Op::Local(n) => self.push(self.cx.stack[base + usize::from(n)]),
                     Op::SetLocal(n) => {
                         let value = self.pop();
@@ -1447,11 +1449,12 @@ impl<H: Heap> Vm<H> {
             }
             Op::MakeRecord(shape) => {
                 let shape = Arc::clone(&unit.records[shape as usize]);
-                let pairs = shape
-                    .iter()
-                    .map(|field| self.konst(*field))
-                    .zip(self.top(shape.len()).iter().copied())
-                    .collect();
+                let base = self.cx.stack.len() - shape.len();
+                let mut pairs = Vec::with_capacity(shape.len());
+                for (at, &field) in shape.iter().enumerate() {
+                    let name = self.read_constant(field)?;
+                    pairs.push((name, self.cx.stack[base + at]));
+                }
                 self.place(shape.len(), NewObject::Record(pairs))?;
             }
             Op::MakeClosure(n) => {
@@ -1484,7 +1487,7 @@ impl<H: Heap> Vm<H> {
             }
             Op::Field(field) => {
                 let [target] = self.operands();
-                let name = self.konst(field);
+                let name = self.read_constant(field)?;
                 let value = self.field(target, name)?;
                 self.popped(1);
                 self.push(value);
@@ -1501,12 +1504,14 @@ impl<H: Heap> Vm<H> {
             }
             Op::SetField(field) => {
                 let [value, target] = self.operands();
-                self.set_field(target, self.konst(field), value)?;
+                let name = self.read_constant(field)?;
+                self.set_field(target, name, value)?;
                 self.popped(2);
             }
             Op::SetFieldPlaceFirst(field) => {
                 let [target, value] = self.operands();
-                self.set_field(target, self.konst(field), value)?;
+                let name = self.read_constant(field)?;
+                self.set_field(target, name, value)?;
                 self.popped(2);
             }
             Op::RemoveIndex => {
@@ -1516,7 +1521,8 @@ impl<H: Heap> Vm<H> {
             }
             Op::RemoveField(field) => {
                 let [target] = self.operands();
-                self.remove_field(target, self.konst(field))?;
+                let name = self.read_constant(field)?;
+                self.remove_field(target, name)?;
                 self.popped(1);
             }
             Op::Call(site) => self.call(program, unit, site)?,

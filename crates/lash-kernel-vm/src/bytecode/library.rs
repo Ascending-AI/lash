@@ -81,9 +81,6 @@ pub struct LibCode {
     /// Every operation library code performs, by the body whose import
     /// it names.
     pub performs: Vec<(Option<FunctionId>, ImportSlot)>,
-    /// The constants each unit's code reads: what a Link's run places
-    /// before a frame of the unit runs.
-    pub reads: Vec<Box<[u32]>>,
     /// Each function's completion formula.
     pub charge_ids: HashMap<FunctionId, u32>,
     /// The frame height and each op's operand depth of every unit a
@@ -189,16 +186,14 @@ fn publish(held: &Arc<LibCode>, tables: &mut Tables) -> Result<LibCode> {
     super::inline::inline(&mut program);
     let checked = super::validate::checked(&program)
         .map_err(|error| Unsupported(format!("the library does not validate: {error}")))?;
-    let reads: Vec<Box<[u32]>> = program.units.iter().map(super::program::reads).collect();
     super::fold::fold(&mut program);
     super::fuse::fuse(&mut program);
     let mut code = LibCode::clone(held);
     let mut performs: std::collections::HashSet<_> = code.performs.iter().copied().collect();
-    let units = program.units.into_iter().zip(checked).zip(reads);
-    for (at, ((unit, (height, depth)), reads)) in units.enumerate() {
+    let units = program.units.into_iter().zip(checked);
+    for (at, (unit, (height, depth))) in units.enumerate() {
         let id = LIB | (held.units.len() + at) as UnitId;
         code.frames.push(crate::heap::meter::frame(&unit, height));
-        code.reads.push(reads);
         if super::inline::expandable(&unit) {
             code.regions.insert(id, (height, depth.into_boxed_slice()));
         }

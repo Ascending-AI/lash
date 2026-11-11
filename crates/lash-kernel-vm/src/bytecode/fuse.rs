@@ -52,7 +52,7 @@ pub(crate) fn fuse(program: &mut Program) {
     for (at, unit) in program.units.iter().enumerate() {
         let mut pc = 0;
         while pc < unit.ops.len() {
-            match run(unit, pc, &answered).map(|(mut fused, end)| {
+            match run(unit, pc, &answered, &|n| program.readable(n)).map(|(mut fused, end)| {
                 fused.words = words(fused.site, unit);
                 (fused, end)
             }) {
@@ -72,10 +72,16 @@ pub(crate) fn fuse(program: &mut Program) {
 }
 
 /// The run that starts at `pc`, and the op after it.
-fn run(unit: &Unit, pc: usize, answered: &impl Fn(u32, &Unit) -> bool) -> Option<(Fused, usize)> {
+/// A constant operand is one that reads without placing (`readable`).
+fn run(
+    unit: &Unit,
+    pc: usize,
+    answered: &impl Fn(u32, &Unit) -> bool,
+    readable: &impl Fn(u32) -> bool,
+) -> Option<(Fused, usize)> {
     let operand = |op: Op| match op {
         Op::Local(n) => Some(Operand::Local(n)),
-        Op::Const(n) => Some(Operand::Const(n)),
+        Op::Const(n) if readable(n) => Some(Operand::Const(n)),
         _ => None,
     };
     let mut operands = [Operand::Local(0); 2];

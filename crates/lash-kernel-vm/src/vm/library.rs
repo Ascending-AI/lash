@@ -1,8 +1,9 @@
 //! Library code in an instance (FIG-7688): the process's compiled
 //! library bakes in no Link, so a frame of a library unit runs as the
 //! Link of the frame that called it. What the Link decides is decided
-//! here, as the code runs: the constants a library unit reads, placed
-//! once per Link, the closures it makes and the natives it calls.
+//! here, as the code runs: the constants a library unit reads, each
+//! materialized once per Link on its first read, the closures it makes
+//! and the natives it calls.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,10 +21,11 @@ use crate::heap::Heap;
 /// What one Link's frames of library code read in an instance.
 #[derive(Default)]
 pub(crate) struct LibraryPlaced {
-    /// Each library constant, once placed.
+    /// Each library constant, once its first read placed it (contract
+    /// §2). No stored state depends on which library units a run
+    /// entered: a constant on a path the run never took is never placed,
+    /// so a body plan and a native plan save the same constants.
     constants: Vec<Option<Value>>,
-    /// Each library unit whose constants are placed.
-    units: Vec<bool>,
 }
 
 /// The object constants a sealed run placed and this instance has not
@@ -221,85 +223,112 @@ impl<H: Heap> Vm<H> {
         }
     }
 
-    /// Constant `n` as the running frame reads it.
+    /// Constant `n` where a fused run, a fold or a trace reads it: one
+    /// that reads without placing (`Program::readable`), the program's
+    /// own or a library immediate.
     #[inline(always)]
     pub(crate) fn konst(&self, n: u32) -> Value {
         if n & LIB == 0 {
             return self.constants[n as usize];
         }
+        self.readable_library(n)
+    }
+
+    /// Library constant `n` that reads without placing: out of line and
+    /// returning a bare value, so that the hot reads keep their
+    /// operands in registers.
+    #[cold]
+    #[inline(never)]
+    fn readable_library(&self, n: u32) -> Value {
+        let value = self.placed(n);
+        debug_assert!(
+            value.is_some(),
+            "a fused, folded or traced constant reads without placing"
+        );
+        value.unwrap_or(Value::Absent)
+    }
+
+    /// Constant `n` as an op reads it: a library constant is placed on
+    /// its first read, as the running frame's Link (contract §2).
+    #[inline(always)]
+    pub(crate) fn read_constant(&mut self, n: u32) -> Run<Value> {
+        if n & LIB == 0 {
+            return Ok(self.constants[n as usize]);
+        }
         self.library_constant(n)
     }
 
-    /// Library constant `n` as the running frame's Link placed it: out of
-    /// line, so that the dispatch loop holds only the own constant's read.
+    /// Pushes library constant `n` as an op reads it.
     #[cold]
     #[inline(never)]
-    fn library_constant(&self, n: u32) -> Value {
+    pub(crate) fn library_read(&mut self, n: u32) -> Run<()> {
+        let value = self.library_constant(n)?;
+        self.push(value);
+        Ok(())
+    }
+
+    /// Library constant `n`, placed now if this is its first read.
+    #[cold]
+    #[inline(never)]
+    fn library_constant(&mut self, n: u32) -> Run<Value> {
+        match self.placed(n) {
+            Some(value) => Ok(value),
+            None => self.place_library(n),
+        }
+    }
+
+    /// Library constant `n`: an immediate as the program holds it, which
+    /// has no identity to place; an object as the running frame's Link
+    /// placed it, or none before its first read. Out of line, so that
+    /// the dispatch loop holds only the own constant's read.
+    #[cold]
+    #[inline(never)]
+    fn placed(&self, n: u32) -> Option<Value> {
+        let k = (n & !LIB) as usize;
+        if let Constant::Immediate(value) = &self.program.lib.constants[k] {
+            return Some(*value);
+        }
         self.library
             .links
             .get(self.running_link() as usize)
-            .and_then(|placed| placed.constants.get((n & !LIB) as usize).copied().flatten())
-            .unwrap_or(Value::Absent)
+            .and_then(|placed| placed.constants.get(k).copied().flatten())
     }
 
-    /// Places what a frame of library unit `unit` reads as Link `link`,
-    /// once for each.
-    #[inline(always)]
-    pub(crate) fn prepare(&mut self, unit: UnitId, link: u32) -> Run<()> {
-        if unit & LIB == 0 {
-            return Ok(());
-        }
-        let placed = self
-            .library
-            .links
-            .get(link as usize)
-            .and_then(|placed| placed.units.get((unit & !LIB) as usize).copied());
-        if placed == Some(true) {
-            return Ok(());
-        }
-        self.place_library(unit, link)
-    }
-
+    /// Places library constant `n` as the running frame's Link, at its
+    /// first read: an object constant binds the object a sealed run
+    /// placed it as, when one was saved.
     #[cold]
-    fn place_library(&mut self, unit: UnitId, link: u32) -> Run<()> {
+    #[inline(never)]
+    fn place_library(&mut self, n: u32) -> Run<Value> {
+        let link = self.running_link() as usize;
+        let k = (n & !LIB) as usize;
         let program = Arc::clone(&self.program);
-        let lib = &program.lib;
-        let at = (unit & !LIB) as usize;
+        let constant = &program.lib.constants[k];
         let library = &mut self.library;
-        if library.links.len() <= link as usize {
-            library
-                .links
-                .resize_with(link as usize + 1, Default::default);
+        if library.links.len() <= link {
+            library.links.resize_with(link + 1, Default::default);
         }
-        let id = program.links[link as usize];
-        for &n in lib.reads[at].iter() {
-            let k = (n & !LIB) as usize;
-            let placed = &mut library.links[link as usize];
-            if placed.constants.len() <= k {
-                placed.constants.resize(lib.constants.len(), None);
+        let value = match object(constant, Some(program.links[link])) {
+            None => {
+                let Constant::Immediate(value) = constant else {
+                    unreachable!()
+                };
+                *value
             }
-            if placed.constants[k].is_some() {
-                continue;
-            }
-            let value = match object(&lib.constants[k], Some(id)) {
-                None => {
-                    let Constant::Immediate(value) = &lib.constants[k] else {
-                        unreachable!()
-                    };
-                    *value
-                }
-                Some(object) => {
-                    place(&mut self.heap, &mut library.saved, id, object).map_err(fault)?
-                }
-            };
-            library.links[link as usize].constants[k] = Some(value);
+            Some(object) => place(
+                &mut self.heap,
+                &mut library.saved,
+                program.links[link],
+                object,
+            )
+            .map_err(fault)?,
+        };
+        let placed = &mut library.links[link];
+        if placed.constants.len() <= k {
+            placed.constants.resize(program.lib.constants.len(), None);
         }
-        let placed = &mut library.links[link as usize];
-        if placed.units.len() <= at {
-            placed.units.resize(lib.units.len(), false);
-        }
-        placed.units[at] = true;
-        Ok(())
+        placed.constants[k] = Some(value);
+        Ok(value)
     }
 
     /// The body unit of a closure of `callable`.

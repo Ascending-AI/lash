@@ -20,7 +20,7 @@
 //! a head's trace replaces is still `Unit::original`'s.
 
 use super::op::Op;
-use super::program::{Program, Then, Unit};
+use super::program::{LIB, Program, Then, Unit};
 
 /// The most micro-ops one trace runs before it gives control back.
 const LENGTH: usize = 64;
@@ -140,13 +140,19 @@ impl Micro {
 
 /// Builds the traces of every unit of `program`, its own code.
 pub(crate) fn trace(program: &mut Program) {
+    let readable: Vec<bool> = (0..program.lib.constants.len())
+        .map(|k| program.readable(LIB | k as u32))
+        .collect();
+    let readable = |n: u32| n & LIB == 0 || readable[(n & !LIB) as usize];
     for unit in &mut program.units {
-        trace_unit(unit);
+        trace_unit(unit, &readable);
     }
 }
 
-/// Builds `unit`'s traces and puts each in place of its head's op.
-pub(crate) fn trace_unit(unit: &mut Unit) {
+/// Builds `unit`'s traces and puts each in place of its head's op. A
+/// constant goes into a line only where it reads without placing
+/// (`Program::readable`).
+pub(crate) fn trace_unit(unit: &mut Unit, readable: &impl Fn(u32) -> bool) {
     let mut at = vec![NONE; unit.ops.len()];
     let mut traces = Vec::new();
     let mut micros = Vec::new();
@@ -155,7 +161,7 @@ pub(crate) fn trace_unit(unit: &mut Unit) {
             continue;
         };
         let start = micros.len();
-        line(unit, head, &mut micros);
+        line(unit, head, readable, &mut micros);
         // A line earns its entry and exit cost where it loops back,
         // staying in the trace for every trip, or where it saves enough
         // dispatches. A run with no word path most often leaves the trace
@@ -216,7 +222,7 @@ pub(crate) fn trace_unit(unit: &mut Unit) {
 }
 
 /// The trace from block head `head`.
-fn line(unit: &Unit, head: usize, micros: &mut Vec<Micro>) {
+fn line(unit: &Unit, head: usize, readable: &impl Fn(u32) -> bool, micros: &mut Vec<Micro>) {
     let mut pc = head;
     for _ in 0..LENGTH {
         let Some(&op) = unit.ops.get(pc) else {
@@ -230,7 +236,7 @@ fn line(unit: &Unit, head: usize, micros: &mut Vec<Micro>) {
                 Some(&Op::SetLocal(to)) => (Micro::Copy { pc: at, from, to }, pc + 2),
                 _ => (Micro::Local { pc: at, n: from }, pc + 1),
             },
-            Op::Const(n) => (Micro::Const { pc: at, n }, pc + 1),
+            Op::Const(n) if readable(n) => (Micro::Const { pc: at, n }, pc + 1),
             Op::SetLocal(n) => (Micro::SetLocal { pc: at, n }, pc + 1),
             Op::Pop => (Micro::Pop { pc: at }, pc + 1),
             Op::CaptureGet(n) => (Micro::CaptureGet { pc: at, n }, pc + 1),

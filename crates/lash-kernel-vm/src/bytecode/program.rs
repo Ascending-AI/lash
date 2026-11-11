@@ -717,6 +717,15 @@ impl Program {
         }
     }
 
+    /// Whether constant `id` reads without placing: an own constant of a
+    /// document's program, placed when the run starts, or an immediate.
+    /// A library constant with an identity is placed at its first read
+    /// by an op (contract §2), so no fused run, fold or trace holds it.
+    pub(crate) fn readable(&self, id: u32) -> bool {
+        (self.tag == 0 && id & LIB == 0)
+            || matches!(self.get_constant(id), Some(Constant::Immediate(_)))
+    }
+
     /// Constant `id`, if the program or the library has it.
     pub fn get_constant(&self, id: u32) -> Option<&Constant> {
         match self.own(id, self.lib.constants.len()) {
@@ -820,24 +829,4 @@ impl Program {
 pub struct FunctionEntry {
     pub callable: CallableId,
     pub unit: UnitId,
-}
-
-/// Every constant `unit`'s code reads, once each.
-pub(crate) fn reads(unit: &Unit) -> Box<[u32]> {
-    let mut read: Vec<u32> = unit
-        .ops
-        .iter()
-        .filter_map(|op| match *op {
-            super::op::Op::Const(n)
-            | super::op::Op::Field(n)
-            | super::op::Op::SetField(n)
-            | super::op::Op::SetFieldPlaceFirst(n)
-            | super::op::Op::RemoveField(n) => Some(n),
-            _ => None,
-        })
-        .chain(unit.records.iter().flat_map(|shape| shape.iter().copied()))
-        .collect();
-    read.sort_unstable();
-    read.dedup();
-    read.into_boxed_slice()
 }
