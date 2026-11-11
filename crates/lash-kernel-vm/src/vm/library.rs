@@ -162,6 +162,14 @@ impl<H: Heap> Vm<H> {
         if n & LIB == 0 {
             return self.constants[n as usize];
         }
+        self.library_constant(n)
+    }
+
+    /// Library constant `n` as the running frame's Link placed it: out of
+    /// line, so that the dispatch loop holds only the own constant's read.
+    #[cold]
+    #[inline(never)]
+    fn library_constant(&self, n: u32) -> Value {
         self.library
             .get(self.running_link() as usize)
             .and_then(|placed| placed.constants.get((n & !LIB) as usize).copied().flatten())

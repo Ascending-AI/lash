@@ -961,14 +961,12 @@ impl<H: Heap> Vm<H> {
         self.admit(self.frame_cost(unit))?;
         let link = self.link_of(unit, caller);
         self.prepare(unit, link)?;
-        let program = Arc::clone(&self.program);
-        let code = program.unit(unit);
+        let code = self.program.unit(unit);
+        let (locals, boxes) = (code.locals, !code.boxed.is_empty());
         let base = self.cx.stack.len() - argc;
-        let boxes = !code.boxed.is_empty();
-        self.cx.stack.resize(
-            base + usize::from(code.locals.max(argc as u16)),
-            Value::Absent,
-        );
+        self.cx
+            .stack
+            .resize(base + usize::from(locals.max(argc as u16)), Value::Absent);
         if boxes {
             self.box_locals(unit, base)?;
         }

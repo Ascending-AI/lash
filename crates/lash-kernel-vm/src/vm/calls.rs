@@ -124,7 +124,12 @@ impl<H: Heap> Vm<H> {
         }
         self.meter.leave();
         self.exact = true;
-        let link = self.link_index(&callable.link).unwrap_or(0);
+        // Library code runs as the Link the value names; an own unit runs
+        // as its own whatever the caller passes (`Self::link_of`).
+        let link = match self.program.own_index(unit) {
+            Some(_) => 0,
+            None => self.link_index(&callable.link).unwrap_or(0),
+        };
         // The frame holds the closure only once entered.
         let mark = self.held.len();
         self.held.extend(closure.map(Value::Closure));
