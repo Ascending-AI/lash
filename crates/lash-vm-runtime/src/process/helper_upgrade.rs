@@ -26,41 +26,62 @@ fn invalid(message: impl std::fmt::Display) -> HelperUpgradeRefusal {
 pub(super) fn plan(
     content: &LinkedContent,
     root: LinkId,
-    archive: &lash_kernel_releases::archive::Archive,
+    candidate: &Candidate,
 ) -> Result<PlannedHelperUpgrade, HelperUpgradeRefusal> {
-    let release = archive
+    let release = candidate
+        .archive
         .releases
         .last()
         .ok_or_else(|| invalid("empty helper ledger"))?
         .library
         .identity;
-    plan_at(content, root, archive, &validated(archive)?, release)
+    plan_at(content, root, candidate, release)
 }
 
-/// The archive's authenticated definitions, which [`plan_at`] plans over.
-pub(super) fn validated(
-    archive: &lash_kernel_releases::archive::Archive,
-) -> Result<lash_kernel_releases::archive::Definitions, HelperUpgradeRefusal> {
-    archive
-        .validate()
-        .map_err(|error| HelperUpgradeRefusal::Archive {
-            message: error.to_string(),
+/// The build's helper archive and, once authenticated, its definitions,
+/// which [`plan_at`] plans over.
+pub(super) struct Candidate {
+    pub archive: lash_kernel_releases::archive::Archive,
+    pub definitions: Result<lash_kernel_releases::archive::Definitions, HelperUpgradeRefusal>,
+}
+
+/// The build's candidate, parsed and authenticated once per process: it is
+/// compiled in, so every upgrade and succession search reads one history.
+/// `Err` carries why the candidate could not be read.
+pub(super) fn candidate() -> Result<&'static Candidate, String> {
+    static CANDIDATE: std::sync::OnceLock<Result<Candidate, String>> = std::sync::OnceLock::new();
+    CANDIDATE
+        .get_or_init(|| {
+            let archive = lash_kernel_releases::archive_candidate().map_err(|e| e.to_string())?;
+            let definitions = archive
+                .validate()
+                .map_err(|error| HelperUpgradeRefusal::Archive {
+                    message: error.to_string(),
+                });
+            Ok(Candidate {
+                archive,
+                definitions,
+            })
         })
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
 pub(super) fn plan_at(
     content: &LinkedContent,
     root: LinkId,
-    archive: &lash_kernel_releases::archive::Archive,
-    definitions: &lash_kernel_releases::archive::Definitions,
+    candidate: &Candidate,
     release: lash_kernel_value::HelperLibraryId,
 ) -> Result<PlannedHelperUpgrade, HelperUpgradeRefusal> {
+    let definitions = candidate.definitions.as_ref().map_err(Clone::clone)?;
     let reached = content
         .documents
         .values()
         .flat_map(|doc| doc.library.iter().copied())
         .collect();
-    let upgrade = archive.upgrade_within(definitions, &reached, release)?;
+    let upgrade = candidate
+        .archive
+        .upgrade_within(definitions, &reached, release)?;
     let mut planned = PlannedHelperUpgrade {
         content: LinkedContent::default(),
         links: BTreeMap::new(),
@@ -261,13 +282,9 @@ impl super::KernelDocuments {
             Err(refusal) => return Ok(Err(refusal)),
         };
         let source = self.authoring_content(code).await?;
-        let archive = lash_kernel_releases::archive_candidate().map_err(|error| {
-            EnginePortError::Unavailable {
-                message: error.to_string(),
-            }
-        })?;
+        let candidate = candidate().map_err(|message| EnginePortError::Unavailable { message })?;
         let prepared = (|| {
-            let planned = plan(&source, from.link(), &archive)?;
+            let planned = plan(&source, from.link(), candidate)?;
             if let Some(input) = input {
                 check_arguments(input, &source, self.helpers(), &planned.upgrade)?;
             }
