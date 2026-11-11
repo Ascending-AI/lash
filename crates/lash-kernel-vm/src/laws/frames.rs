@@ -11,7 +11,6 @@ use lash_kernel_doc::{Datum, FunctionRegistry, parse_definition};
 use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, int, result, text};
-use crate::machine::Boundary;
 use crate::{Bound, BoundExceeded, Bounds, End, Machine, RunError, Step};
 
 /// The probes: `probe.long(tag)` prints `[tag, i]` for `i` from 0 to 3 and
@@ -479,7 +478,7 @@ fn a_slice_lands_inside_an_expression_callee_and_changes_nothing() {
         };
         let mut embedder = Embedder::with(held, setup(bounds, slice));
         if collect {
-            embedder.machine.boundary = Some(Box::new(|_| Boundary::Collect));
+            embedder.machine.collect_at_steps();
         }
         let end = match embedder.run_to_end(&[]) {
             End::Error(RunError::Bound(exceeded)) => End::Error(RunError::Bound(BoundExceeded {

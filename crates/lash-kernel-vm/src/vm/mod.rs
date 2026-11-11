@@ -277,6 +277,9 @@ pub(crate) struct Vm<H: Heap> {
     /// statement boundary, the machine's values rooted.
     #[cfg(test)]
     pub(crate) chill: Option<fn(&mut H, &[Value])>,
+    /// The laws' collected runs: a collection at each statement boundary.
+    #[cfg(test)]
+    pub(crate) collecting: bool,
 }
 
 impl<H: Heap> Vm<H> {
@@ -384,6 +387,8 @@ impl<H: Heap> Vm<H> {
             sites: false,
             #[cfg(test)]
             chill: None,
+            #[cfg(test)]
+            collecting: false,
         })
     }
 
@@ -779,10 +784,13 @@ impl<H: Heap> Vm<H> {
         });
     }
 
-    /// Pages out every object the heap can, at a statement boundary, under
-    /// the laws' forced-cold runs.
+    /// At a statement boundary, collects under the laws' collected runs and
+    /// pages out every object the heap can under their forced-cold runs.
     #[cfg(test)]
     fn chill(&mut self) {
+        if self.collecting {
+            self.collect();
+        }
         let Some(chill) = self.chill else { return };
         self.tasks.paged = self.tasks.all.len();
         let mut roots = Vec::new();

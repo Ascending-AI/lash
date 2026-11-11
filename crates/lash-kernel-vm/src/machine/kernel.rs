@@ -20,10 +20,6 @@ use crate::{ChargeTape, ExecutionPath, MachineOptions, SiteCounts};
 /// `run` and `deliver`.
 pub struct KernelMachine {
     core: CoreMachine,
-    /// The frozen engine's statement-boundary hook, which the core does not
-    /// run: a run with it set refuses (see [`retired`]).
-    #[cfg(test)]
-    pub(crate) boundary: Option<Box<dyn FnMut(u64) -> super::Boundary>>,
     /// What the laws' observation probes have turned on.
     #[cfg(test)]
     observing: bool,
@@ -45,8 +41,6 @@ impl KernelMachine {
     fn of(core: CoreMachine) -> Self {
         Self {
             core,
-            #[cfg(test)]
-            boundary: None,
             #[cfg(test)]
             observing: false,
             #[cfg(test)]
@@ -86,6 +80,12 @@ impl KernelMachine {
     #[cfg(test)]
     pub(crate) fn force_cold(&mut self) {
         self.core.force_cold();
+    }
+
+    /// Collects at each statement boundary: the laws' collected runs.
+    #[cfg(test)]
+    pub(crate) fn collect_at_steps(&mut self) {
+        self.core.collect_at_steps();
     }
 }
 
@@ -130,10 +130,6 @@ impl Machine for KernelMachine {
     }
 
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
-        #[cfg(test)]
-        if self.boundary.is_some() {
-            retired("a statement-boundary hook");
-        }
         self.core.run(host, slice)
     }
 
@@ -166,18 +162,8 @@ impl crate::perf_witness::Profiling for KernelMachine {
     }
 }
 
-/// A law reached a probe of the frozen engine the core replaced. Its owner
-/// retargets the law to the core after the flip (FIG-7688 phase 2); until
-/// then it fails here, by name.
-#[cfg(test)]
-#[track_caller]
-fn retired(probe: &str) -> ! {
-    panic!("{probe} probes the frozen engine; retarget this law to the core (FIG-7688 phase 2)")
-}
-
-/// The test-only entry points and probes the laws call. Where the core
-/// holds the fact, the probe reads it; where only the frozen engine did,
-/// it fails by name ([`retired`]).
+/// The test-only entry points and probes the laws call, each reading the
+/// fact the core holds.
 #[cfg(test)]
 #[allow(clippy::unused_self, clippy::needless_pass_by_value)]
 impl KernelMachine {

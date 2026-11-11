@@ -363,6 +363,12 @@ impl CoreMachine {
         self.vm.tasks.waits.len() as u64
     }
 
+    /// Collects at each statement boundary: the laws' collected runs.
+    #[cfg(test)]
+    pub(crate) fn collect_at_steps(&mut self) {
+        self.vm.collecting = true;
+    }
+
     /// Pages every object the heap can out at each statement boundary:
     /// the laws' forced-cold runs.
     #[cfg(test)]
