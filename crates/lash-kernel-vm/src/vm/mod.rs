@@ -638,14 +638,15 @@ impl<H: Heap> Vm<H> {
         })
     }
 
-    /// Bills a completion measured before its frame left, and drops the
-    /// call's arguments.
-    fn settle(&mut self, completion: Completion) -> Run<()> {
+    /// Bills a completion measured before `callee`'s frame left, and drops
+    /// the call's arguments. A refusal names the library call that made
+    /// the bill, as a native's does.
+    fn settle(&mut self, completion: Completion, callee: UnitId) -> Run<()> {
         if let Some(from) = completion.from {
             self.cx.billed.truncate(from);
         }
         match completion.units {
-            Some(units) => self.fee(units),
+            Some(units) => self.fee(units).map_err(|flow| self.billed_in(flow, callee)),
             None => Ok(()),
         }
     }
@@ -1711,7 +1712,7 @@ impl<H: Heap> Vm<H> {
         }
         self.heap.release(self.frame_cost(frame.unit));
         self.drop_handlers();
-        self.settle(completion)?;
+        self.settle(completion, frame.unit)?;
         self.cx.stack.truncate(frame.base as usize);
         if let Some(datum) = leaving {
             return Ok(Some(Stop::Returned(datum)));

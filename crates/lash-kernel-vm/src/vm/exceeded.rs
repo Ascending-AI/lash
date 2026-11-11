@@ -7,6 +7,7 @@ use lash_kernel_value::sites::Site;
 
 use super::{Exceeded, Flow, Stop, Vm};
 use crate::Bound;
+use crate::bytecode::program::UnitId;
 use crate::heap::Heap;
 
 impl<H: Heap> Vm<H> {
@@ -144,6 +145,23 @@ impl<H: Heap> Vm<H> {
             || Arc::clone(native),
             |unit| Arc::clone(&self.program.unit(unit).name),
         )
+    }
+
+    /// A stop the completion bill of a call of `callee` raised, its frame
+    /// gone: a charge bound names the library call that made it, as a
+    /// native's does ([`Self::billed_by`]); an authored callee names itself
+    /// where it stands.
+    pub(super) fn billed_in(&self, flow: Flow, callee: UnitId) -> Flow {
+        let unit = self.program.unit(callee);
+        match flow {
+            Flow::Stop(mut stop) if !unit.authored => {
+                if let Stop::Bound(exceeded) = stop.as_mut() {
+                    exceeded.function = Some(self.library_call(&self.named(unit)));
+                }
+                Flow::Stop(stop)
+            }
+            other => other,
+        }
     }
 
     /// A stop native `native`'s own bill raised: a charge or memory bound

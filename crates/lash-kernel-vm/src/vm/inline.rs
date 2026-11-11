@@ -100,7 +100,8 @@ impl<H: Heap> Vm<H> {
         self.cx.stack.truncate(base);
         self.push(value);
         if let Some(units) = units {
-            self.fee(units)?;
+            self.fee(units)
+                .map_err(|flow| self.billed_in(flow, callee))?;
         }
         Ok(None)
     }
@@ -218,7 +219,7 @@ impl<H: Heap> Vm<H> {
         let completion = self.completion(activation.bill, Some(&value))?;
         self.cx.inline = None;
         self.heap.release(self.frame_cost(activation.callee));
-        self.settle(completion)?;
+        self.settle(completion, activation.callee)?;
         self.cx.stack.truncate(activation.base as usize);
         if let Some(unfit) = unfit {
             self.jump(site.at + 1);
@@ -274,7 +275,7 @@ impl<H: Heap> Vm<H> {
         let resume = unit.inlines[activation.site as usize].at + 1;
         self.jump(resume);
         self.heap.release(self.frame_cost(activation.callee));
-        self.settle(completion)?;
+        self.settle(completion, activation.callee)?;
         self.cx.stack.truncate(activation.base as usize);
         Ok(())
     }

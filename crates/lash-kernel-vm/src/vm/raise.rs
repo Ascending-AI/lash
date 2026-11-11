@@ -76,7 +76,7 @@ impl<H: Heap> Vm<H> {
             };
             self.heap.release(self.frame_cost(frame.unit));
             self.drop_handlers();
-            self.settle(completion)?;
+            self.settle(completion, frame.unit)?;
             self.cx.stack.truncate(frame.base as usize);
             if self.cx.frames.is_empty() {
                 return Err(Flow::from(Stop::Uncaught(value)));
