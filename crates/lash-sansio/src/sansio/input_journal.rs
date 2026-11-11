@@ -45,6 +45,14 @@ pub enum MachineInput<I> {
         /// The request, against the one the machine waits on.
         request: AdmittedDelta,
     },
+    /// [`TurnMachine::bind_tool_call_ids`]: the ids the host bound the
+    /// waited calls' model ids to, each pair `(model id, bound id)`.
+    BoundCallIds(
+        Vec<(
+            lash_protocol_types::ToolCallId,
+            lash_protocol_types::ToolCallId,
+        )>,
+    ),
     /// [`TurnMachine::record_unanswered_call_usage`].
     UnansweredUsage(LlmUsage),
     /// [`TurnMachine::record_unknown_call_usage`].
@@ -475,6 +483,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         ));
                     };
                     self.admit_request(id, Arc::new(admitted));
+                }
+                MachineInput::BoundCallIds(ids) => {
+                    self.bind_tool_call_ids(&ids.into_iter().collect());
                 }
                 MachineInput::UnansweredUsage(usage) => self
                     .record_unanswered_call_usage(&usage)
