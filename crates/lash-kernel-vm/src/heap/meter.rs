@@ -133,6 +133,17 @@ pub(crate) fn body(body: &Body) -> u64 {
     OBJECT.saturating_add(length)
 }
 
+/// What a referent holds once opened, before a load of its row: what
+/// [`body`] gives for its placeholder, except that a referent named only
+/// by a ref, whose kind is learned when it is decoded, is a proxy holding
+/// [`OBJECT`] alone, not the cell its placeholder body is.
+pub(crate) fn opening(opening: super::open::Opening<'_>) -> u64 {
+    match opening {
+        super::open::Opening::Proxy(lash_kernel_state::arena::ProxyKind::Unknown) => OBJECT,
+        opening => body(&opening.placeholder()),
+    }
+}
+
 /// What the object `record` describes holds once decoded: exactly what
 /// [`body`] gives for the body it decodes to.
 pub(crate) fn record(record: &Record) -> u64 {

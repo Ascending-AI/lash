@@ -127,8 +127,8 @@ impl SlotHeap {
             },
         );
         let mut values = Vec::with_capacity(root.roots.len());
-        for value in &root.roots {
-            let value = open::value(&mut heap.arena, value, &root.heads).map_err(|reason| {
+        for value_row in &root.roots {
+            let value = open::value(&mut heap.arena, value_row, &root.heads).map_err(|reason| {
                 LoadError::Store(lash_kernel_doc::heap::HeapFault::Malformed(reason))
             })?;
             if let Some(handle) = value.handle()
@@ -137,7 +137,12 @@ impl SlotHeap {
                     .get(handle.index() as usize)
                     .is_none_or(|units| *units == 0)
             {
-                let units = heap.arena.body(handle).map_or(0, super::meter::body);
+                let units = open::values_referents([value_row], &root.heads)
+                    .map_err(|reason| {
+                        LoadError::Store(lash_kernel_doc::heap::HeapFault::Malformed(reason))
+                    })?
+                    .first()
+                    .map_or(0, |(_, opening)| super::meter::opening(*opening));
                 heap.admit(units).map_err(LoadError::Memory)?;
                 heap.place(handle, units);
             }
@@ -281,7 +286,7 @@ impl SlotHeap {
         let mut units = super::meter::record(&row.record);
         for (id, opening) in open::referents(&row.record, &row.heads).unwrap_or_default() {
             if self.arena.entity_handle(open::entity(id)).is_none() {
-                units = units.saturating_add(super::meter::body(&opening.placeholder()));
+                units = units.saturating_add(super::meter::opening(opening));
             }
         }
         units
@@ -579,7 +584,7 @@ impl SlotHeap {
                 .filter(|(id, _)| {
                     seen.insert(*id) && heap.arena.entity_handle(open::entity(*id)).is_none()
                 })
-                .map(|(_, opening)| super::meter::body(&opening.placeholder()))
+                .map(|(_, opening)| super::meter::opening(*opening))
                 .sum();
             let per = match &page.members {
                 Members::List(values) => values.len() as u64,
@@ -597,7 +602,7 @@ impl SlotHeap {
         let fresh: Vec<_> = referents
             .iter()
             .filter(|(id, _)| self.arena.entity_handle(open::entity(*id)).is_none())
-            .map(|(id, opening)| (*id, super::meter::body(&opening.placeholder())))
+            .map(|(id, opening)| (*id, super::meter::opening(*opening)))
             .collect();
         let mut placements = Vec::new();
         let decoded = match &page.members {
@@ -945,7 +950,7 @@ impl Heap for SlotHeap {
             .unwrap_or_default()
             .into_iter()
             .filter(|(id, _)| self.arena.entity_handle(open::entity(*id)).is_none())
-            .map(|(id, opening)| (id, super::meter::body(&opening.placeholder())))
+            .map(|(id, opening)| (id, super::meter::opening(opening)))
             .collect();
         // An immutable's row must be the object every referrer's head
         // certifies, before the run sees a word of it. A payload's row

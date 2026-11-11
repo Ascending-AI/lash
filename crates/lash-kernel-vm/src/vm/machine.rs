@@ -96,52 +96,104 @@ struct Opened<'a> {
 /// The closures of Links other than `link` that `roots` reach through
 /// closures and the cells they capture, one for each callable: code only
 /// its own Link's document holds, so the build compiles it there. A cold
-/// object is loaded as the run would load it to call the closure.
+/// closure or cell is read from its saved row and stays cold: the open
+/// holds no more than the run it continues (contract §2, R10).
 fn foreign_closures(
-    heap: &mut SlotHeap,
+    heap: &SlotHeap,
     roots: &[Value],
     link: lash_kernel_value::LinkId,
 ) -> Result<Vec<lash_kernel_doc::arena::ClosureIdentity>, StartError> {
-    use lash_kernel_doc::{NativeError, Retry};
-    fn load(heap: &mut SlotHeap, roots: &[Value], error: NativeError) -> Result<(), StartError> {
-        let NativeError::Retry(Retry::Cold { object, chunk }) = error else {
-            return Err(linked(format!("a held closure does not read: {error:?}")));
-        };
-        heap.load(object, chunk, &mut |visit| {
-            roots.iter().for_each(&mut *visit)
-        })
-        .map_err(|error| linked(format!("a held closure does not load: {error:?}")))
+    use crate::heap::open;
+    use lash_kernel_doc::arena::ArenaHandle;
+    use lash_kernel_state::paged::run::ids::ObjectId;
+    use lash_kernel_state::paged::run::objects::{ObjectKind, Record, RunValue};
+    /// A closure or cell of the walk: resident in the arena, or only its
+    /// saved row.
+    #[derive(Clone, Copy)]
+    enum At {
+        Held(ArenaHandle),
+        Saved(ObjectId),
     }
-    let mut work: Vec<_> = roots
-        .iter()
-        .filter_map(|value| match value {
-            Value::Closure(handle) => Some(*handle),
-            _ => None,
-        })
-        .collect();
+    let arena = heap.arena();
+    let held = |handle: ArenaHandle| -> Result<At, StartError> {
+        if arena.facts(handle).map_err(linked)?.cold {
+            Ok(At::Saved(open::id_of(arena, handle).map_err(linked)?))
+        } else {
+            Ok(At::Held(handle))
+        }
+    };
+    let saved = |id: ObjectId| -> Result<At, StartError> {
+        match arena.entity_handle(open::entity(id)) {
+            Some(handle) => held(handle),
+            None => Ok(At::Saved(id)),
+        }
+    };
+    let row = |id: ObjectId| -> Result<Record, StartError> {
+        let directory = heap
+            .directory()
+            .ok_or_else(|| linked("a cold closure in a heap with no directory"))?;
+        directory
+            .get(id)
+            .map_err(linked)?
+            .map(|row| row.record)
+            .ok_or_else(|| linked(format!("a held closure's object {} has no row", id.0)))
+    };
+    let mut work = Vec::new();
+    for value in roots {
+        if let Value::Closure(handle) = value {
+            work.push(held(*handle)?);
+        }
+    }
     let mut seen = HashSet::new();
     let mut callables = HashSet::new();
     let mut found = Vec::new();
-    while let Some(handle) = work.pop() {
-        if !seen.insert(handle.index()) {
+    while let Some(at) = work.pop() {
+        let key = match at {
+            At::Held(handle) => (false, u64::from(handle.index())),
+            At::Saved(id) => (true, id.0),
+        };
+        if !seen.insert(key) {
             continue;
         }
-        let (identity, captures) = loop {
-            match heap.arena().closure(handle) {
-                Ok((identity, captures, _)) => break (identity.clone(), captures.to_vec()),
-                Err(error) => load(heap, roots, error)?,
+        let (identity, cells) = match at {
+            At::Held(handle) => {
+                let (identity, captures, _) = arena.closure(handle).map_err(linked)?;
+                let cells = captures
+                    .iter()
+                    .map(|cell| held(*cell))
+                    .collect::<Result<Vec<_>, _>>()?;
+                (identity.clone(), cells)
             }
+            At::Saved(id) => match row(id)? {
+                Record::Closure { code, captures } => (
+                    lash_kernel_doc::arena::ClosureIdentity {
+                        capture_names: code.capture_names.clone(),
+                        callable: code.callable,
+                        site: code.linked_site(),
+                    },
+                    captures
+                        .iter()
+                        .map(|cell| saved(*cell))
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+                _ => return Err(linked(format!("object {} is not a closure", id.0))),
+            },
         };
-        for cell in captures {
-            let value = loop {
-                match heap.arena().cell(cell) {
-                    Ok(value) => break value,
-                    Err(error) => load(heap, roots, error)?,
-                }
+        for cell in cells {
+            let inner = match cell {
+                At::Held(handle) => match arena.cell(handle).map_err(linked)? {
+                    Value::Closure(inner) => Some(held(inner)?),
+                    _ => None,
+                },
+                At::Saved(id) => match row(id)? {
+                    Record::Cell(RunValue::Object(ObjectKind::Closure, inner)) => {
+                        Some(saved(inner)?)
+                    }
+                    Record::Cell(_) => None,
+                    _ => return Err(linked(format!("object {} is not a cell", id.0))),
+                },
             };
-            if let Value::Closure(inner) = value {
-                work.push(inner);
-            }
+            work.extend(inner);
         }
         if identity.callable.link != link && callables.insert(identity.callable) {
             found.push(identity);
@@ -190,12 +242,8 @@ fn build(
                 })
         })
         .collect();
-    let Opened {
-        mut heap,
-        roots,
-        saved,
-    } = opened;
-    let mut closures = foreign_closures(&mut heap, roots, program.link)?;
+    let Opened { heap, roots, saved } = opened;
+    let mut closures = foreign_closures(&heap, roots, program.link)?;
     closures.extend(root.iter().flat_map(|root| root.closures.iter().cloned()));
     let loaded = crate::bytecode::compile::Linked {
         others,
