@@ -534,9 +534,13 @@ impl CoreMachine {
             for (at, param) in params.iter().enumerate() {
                 let value = match start.args.get(at) {
                     Some(datum) => {
-                        let decoded = decoder
-                            .decode(datum, &param.ty)
-                            .map_err(StartError::Decode)?;
+                        let decoded = decoder.decode(datum, &param.ty).map_err(
+                            crate::bytecode::conventions::refused(
+                                code.link,
+                                export.ok_or_else(|| linked("a start parameter has no export"))?,
+                                param,
+                            ),
+                        )?;
                         Self::copy_in(&mut vm, &decoded)?
                     }
                     None if param.optional => Value::Absent,

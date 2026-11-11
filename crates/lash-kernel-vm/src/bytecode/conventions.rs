@@ -212,7 +212,7 @@ pub(crate) fn arguments(
             Some(value) => args.push(
                 decoder
                     .decode(value, &param.ty)
-                    .map_err(StartError::Decode)?,
+                    .map_err(refused(code.link, export, param))?,
             ),
             None if param.optional => break,
             None => {
@@ -266,6 +266,28 @@ pub(crate) fn arguments(
             Ok(Some(args))
         }
         _ => Ok(None),
+    }
+}
+
+/// A start argument's refusal: one that does not fit its parameter's type
+/// is the entry's typed mismatch at `input/<parameter>` (FIG-7143); any
+/// other refusal is the decoder's.
+pub(crate) fn refused(
+    link: lash_kernel_value::content_ids::LinkId,
+    export: &lash_kernel_doc::FunctionExport,
+    param: &lash_kernel_value::Param,
+) -> impl FnOnce(lash_kernel_doc::DecodeRefusal) -> StartError {
+    move |refusal| match refusal {
+        lash_kernel_doc::DecodeRefusal::Type { mismatch } => {
+            StartError::TypeMismatch(Box::new(lash_kernel_value::EntryTypeMismatch {
+                callable: lash_kernel_value::CallableId {
+                    link,
+                    function: export.function,
+                },
+                mismatch: mismatch.within(param.name.as_str()).within("input"),
+            }))
+        }
+        other => StartError::Decode(other),
     }
 }
 
