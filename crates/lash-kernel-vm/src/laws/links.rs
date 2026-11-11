@@ -317,3 +317,18 @@ fn a_finished_run_retains_no_document() {
         "the document outlived its run"
     );
 }
+
+/// LINK-CALL, `K-CLO-001`: the root Link gives each of its declared
+/// functions a trampoline, and a function whose body reads a name of a
+/// scope around it is a closure's and gets none. A plain body of `mid`
+/// would make `inner` over no captures, and that `inner` would replace
+/// the one `make` makes (FIG-7689).
+#[test]
+fn a_closure_made_in_a_closure_of_a_root_function_shares_its_maker_s_variable() {
+    let text = "definition \"function make() -> Any\\nkernel 1\\nmetering statements\\nbody { \
+                let n = 5 let mid = fn() { let inner = fn() { return n } return inner } \
+                let i = apply mid() set n = 6 let r = apply i() return r }\"\n\
+                main { let r = call make() return r }";
+    let (end, _) = super::embedder::run(text);
+    assert_eq!(super::embedder::result(end), super::embedder::int(6));
+}

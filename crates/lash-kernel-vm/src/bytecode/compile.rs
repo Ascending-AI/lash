@@ -708,6 +708,11 @@ impl<'a> Compiler<'a> {
             if !compile {
                 continue;
             }
+            // A body that reads names of a scope around it is a closure's:
+            // its values are closures made where those names are bound.
+            if self.free_names(*id).is_ok_and(|free| !free.is_empty()) {
+                continue;
+            }
             let from = self.units.len();
             if let Err(error) = self.trampoline(*id) {
                 self.refuse_from(from, &error);
