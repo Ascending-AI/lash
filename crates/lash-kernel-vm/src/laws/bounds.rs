@@ -1331,10 +1331,10 @@ main { let r = call descend(&descend, 0) return r }"#;
     }
     assert!(refused >= 6, "the depth bound refused {refused} runs");
     // An operation is one unit of depth whichever implementation answers
-    // (K-BND-002): `main`'s frame fills a bound of 1, so `pair.twice` is
-    // refused there before its native answers, and runs under 2.
+    // (K-BND-002), and `main`'s body is not a call: a bound of 0 refuses
+    // `pair.twice` before its native answers, and it runs under 1.
     const OPERATION: &str = "main { let r = invoke pair.twice(1) return r }";
-    for (call_depth, refuses) in [(1, true), (2, false)] {
+    for (call_depth, refuses) in [(0, true), (1, false)] {
         let bounds = Bounds {
             call_depth,
             ..ROOMY

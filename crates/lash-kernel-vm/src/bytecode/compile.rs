@@ -1322,7 +1322,10 @@ impl<'a> Compiler<'a> {
         self.call(&mut f, callee, argc as u16, site);
         f.emit(Op::Return);
         let name = Arc::from(format!("&{}", definition.name.as_str()));
-        self.seal(f, at, UnitKind::Body(id), argc as u16, name);
+        // The value's call is the one its trampoline makes.
+        let mut unit = self.sealed(f, UnitKind::Body(id), argc as u16, name);
+        unit.call = false;
+        self.put(at, unit);
         Ok(())
     }
 
@@ -1596,6 +1599,7 @@ impl<'a> Compiler<'a> {
             .collect();
         boxed.sort_unstable();
         Unit {
+            call: !matches!(kind, UnitKind::Main | UnitKind::Spawn),
             kind,
             link: self.link,
             covered,

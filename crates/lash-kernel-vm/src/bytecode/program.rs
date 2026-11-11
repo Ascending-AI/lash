@@ -121,6 +121,10 @@ impl Event {
 #[derive(Clone)]
 pub struct Unit {
     pub kind: UnitKind,
+    /// A frame of it is an active call (`K-BND-002`): not `main`'s body, a
+    /// spawn's stub or a function value's trampoline, which make no call
+    /// of their own or only the one call they forward.
+    pub call: bool,
     /// The Link whose code this is: its function values, closures and
     /// operation fills are that Link's.
     pub link: LinkId,

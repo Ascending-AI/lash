@@ -341,7 +341,7 @@ impl<H: Heap> Vm<H> {
         args: &[Value],
     ) -> Option<Run<(Value, Option<u64>)>> {
         let entry = program.native(native);
-        if entry.body.is_some() && self.cx.frames.len() >= self.call_depth as usize {
+        if entry.body.is_some() && self.depth_full() {
             return Some(Err(Flow::from(Stop::bound(
                 self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
             ))));

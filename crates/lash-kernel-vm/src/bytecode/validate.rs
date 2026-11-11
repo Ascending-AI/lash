@@ -798,6 +798,7 @@ mod tests {
         };
         let mut unit = Unit {
             kind: UnitKind::Main,
+            call: false,
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             covered: false,
             params: 0,

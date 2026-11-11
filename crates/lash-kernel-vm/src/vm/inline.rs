@@ -116,7 +116,7 @@ impl<H: Heap> Vm<H> {
         };
         self.meter.leave();
         self.exact = true;
-        if self.cx.frames.len() >= self.call_depth as usize {
+        if self.depth_full() {
             return Err(Flow::from(Stop::bound(
                 self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
             )));
