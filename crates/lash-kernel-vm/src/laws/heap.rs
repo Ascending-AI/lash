@@ -1026,3 +1026,150 @@ fn failed_seal_preserves_assigned_heads_for_retry() {
     assert_eq!(again.roots, sealed.roots);
     assert_eq!(rows(&pages, &again), expected);
 }
+
+/// What `value` copies out as once every chunk the copy reaches is
+/// loaded.
+fn copied(heap: &mut SlotHeap, value: Value, roots: &[Value]) -> lash_kernel_doc::Datum {
+    for _ in 0..10_000 {
+        match crate::data::copy_out(heap.arena(), 100_000, &value) {
+            Ok(datum) => return datum,
+            Err(crate::data::CopyError::Cold { object, chunk }) => heap
+                .load(object, chunk, &mut |visit| {
+                    roots.iter().for_each(&mut *visit)
+                })
+                .expect("a load"),
+            Err(_) => panic!("the copy-out failed"),
+        }
+    }
+    panic!("the copy-out never finished");
+}
+
+/// The cutover contract's chunking rule (`chunked::LARGE`, 256): a list
+/// or table of at most 256 members is one directory row, and one of more
+/// is chunks under an index. A run of 40,000 small records, a map of 256
+/// entries and a list of 257 seals the list's 5 chunks and its index page
+/// and otherwise directory pages only: no small object stages a page of
+/// its own rows.
+#[test]
+fn a_small_object_is_one_row_and_only_a_large_one_takes_chunk_pages() {
+    use lash_kernel_doc::arena::ShortText;
+    use lash_kernel_state::paged::PageKind;
+    let (mut heap, pages) = durable();
+    let id = Value::Text(ShortText::new("id").expect("short"));
+    let key = Value::Text(ShortText::new("key").expect("short"));
+    let mut roots: Vec<Value> = (0..40_000)
+        .map(|i| {
+            make(
+                &mut heap,
+                NewObject::Record(vec![
+                    (id, Value::Int(i)),
+                    (key, Value::Int((i * 7_919) % 40_000)),
+                ]),
+            )
+        })
+        .collect();
+    let map = make(
+        &mut heap,
+        NewObject::Map((0..256).map(|i| (Value::Int(i), Value::Int(-i))).collect()),
+    );
+    let list = make(
+        &mut heap,
+        NewObject::List((0..257).map(Value::Int).collect()),
+    );
+    roots.extend([map, list]);
+    let sealed = heap.seal(&roots).expect("a seal");
+    let mut kinds = BTreeMap::<PageKind, u64>::new();
+    for answer in pages.pages.borrow().values() {
+        *kinds.entry(answer.kind).or_default() += 1;
+    }
+    assert_eq!(kinds.remove(&PageKind::SEQUENCE_LEAF), Some(5), "{kinds:?}");
+    assert_eq!(
+        kinds.remove(&PageKind::SEQUENCE_INDEX),
+        Some(1),
+        "{kinds:?}"
+    );
+    assert!(
+        kinds
+            .keys()
+            .all(|kind| [PageKind::KEYED_LEAF, PageKind::KEYED_INDEX].contains(kind)),
+        "{kinds:?}"
+    );
+    let directory = pages.directory(Some(sealed.directory));
+    let RunValue::Object(ObjectKind::Map, map_id) = sealed.roots[40_000] else {
+        panic!("a map root: {:?}", sealed.roots[40_000]);
+    };
+    let Record::Map(entries) = row(&directory, map_id.0) else {
+        panic!("the map is not one row");
+    };
+    assert_eq!(entries.len(), 256);
+    let (mut heap, roots) =
+        SlotHeap::open(u64::MAX, &sealed, pages.directory(Some(sealed.directory)))
+            .expect("an open");
+    assert_eq!(
+        copied(&mut heap, roots[39_999], &roots),
+        lash_kernel_doc::Datum::Record(vec![
+            (
+                "id".into(),
+                lash_kernel_doc::Datum::Int(Integer::from(39_999))
+            ),
+            (
+                "key".into(),
+                lash_kernel_doc::Datum::Int(Integer::from((39_999 * 7_919) % 40_000))
+            ),
+        ])
+    );
+}
+
+/// Errors nested to the value depth (128) with 256-byte kinds and
+/// messages seal with every page inside the 64 KiB page bound, and reopen
+/// cold holding every level, its kind, message and depth.
+#[test]
+fn errors_at_the_depth_limit_seal_in_bounded_pages_and_reopen_whole() {
+    let (mut heap, pages) = durable();
+    let (kind, message) = ("k".repeat(256), "m".repeat(256));
+    let mut value = Value::Null;
+    for _ in 0..128 {
+        value = heap.error(&kind, &message, value).expect("an error");
+    }
+    let root = make(&mut heap, NewObject::List(vec![value]));
+    let sealed = heap.seal(&[root]).expect("a seal");
+    for answer in pages.pages.borrow().values() {
+        let size = answer.tokens.len() + 32 * answer.children.len() + 32;
+        assert!(size <= 65_536, "a {:?} page of {size} bytes", answer.kind);
+    }
+    let (mut heap, root) = opened(&pages, &sealed, u64::MAX);
+    let lash_kernel_doc::Datum::List(members) = copied(&mut heap, root, &[root]) else {
+        panic!("a list");
+    };
+    let mut datum = &members[0];
+    let mut depth = 0;
+    while let lash_kernel_doc::Datum::Error(error) = datum {
+        assert_eq!(
+            (error.kind.as_str(), error.message.as_str()),
+            (kind.as_str(), message.as_str())
+        );
+        depth += 1;
+        datum = error.raw();
+    }
+    assert_eq!(depth, 128);
+    assert_eq!(datum, &lash_kernel_doc::Datum::Null);
+}
+
+/// A negative integer of 1,501 digits seals and copies out of a cold
+/// reopen with its sign and every digit.
+#[test]
+fn a_cold_integer_copies_out_with_its_sign_and_every_digit() {
+    let integer = Integer::parse(&format!("-1{}", "0".repeat(1500))).expect("an integer");
+    let (mut heap, pages) = durable();
+    let big = make(&mut heap, NewObject::BigInt(integer.clone()));
+    let root = make(&mut heap, NewObject::List(vec![big, Value::Int(1)]));
+    let sealed = heap.seal(&[root]).expect("a seal");
+    let (mut heap, root) = opened(&pages, &sealed, u64::MAX);
+    assert_eq!(
+        copied(&mut heap, root, &[root]),
+        lash_kernel_doc::Datum::List(vec![
+            lash_kernel_doc::Datum::Int(integer),
+            lash_kernel_doc::Datum::Int(Integer::from(1)),
+        ])
+    );
+}

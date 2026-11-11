@@ -138,3 +138,82 @@ fn a_function_in_a_concretely_typed_slot_raises_not_data_naming_its_path() {
         );
     }
 }
+
+/// `K-CLO-004` (cutover contract §2, cells): a crossing freezes an
+/// independent graph. The function crosses with its captures as they are
+/// at the crossing, so a live write after it is in a later crossing and
+/// not in the earlier one, and each start of a crossed function begins
+/// from its frozen captures: over `[1, 2]`, `f(3)` then `f(4)` give
+/// `[1, 2, 3]` and then `[1, 2, 4]`.
+#[test]
+fn a_crossed_function_starts_from_its_frozen_captures_each_time() {
+    use super::embedder::{int, wait_of};
+    use crate::Outcome;
+    let text = "import 4 operation host.take(input: Any) -> Any\nmain {\n  let xs = [1, 2]\n  let f = fn(a) presentation (a: Any) -> Any bare direct { set xs[list.len(xs)] = a return xs }\n  do perform 4(f) as Any\n  set xs[0] = 9\n  do perform 4(f) as Any\n  return 0\n}";
+    let start = |target, args| {
+        let mut machine = <CoreMachine as Machine>::start(
+            core_program(text, None),
+            ROOMY,
+            CellStart {
+                target,
+                args,
+                ..Setup::default().start
+            },
+            Box::new(Source::default()),
+        )
+        .unwrap_or_else(|error| panic!("{error:?}"));
+        let mut crossed = Vec::new();
+        loop {
+            match machine.run(&mut World::default(), u64::MAX).unwrap() {
+                Step::Slice => {}
+                Step::Parked(park) => {
+                    for request in &park.requests {
+                        let Request::Effect(effect) = request;
+                        crossed.push(effect.args[0].clone());
+                        machine
+                            .deliver(wait_of(request), Outcome::Completed(Datum::Null))
+                            .unwrap();
+                    }
+                }
+                Step::Ended(End::Finished(finished)) => return (finished.result, crossed),
+                Step::Ended(other) => panic!("the run did not finish: {other:?}"),
+            }
+        }
+    };
+    let (_, crossed) = start(crate::Target::Main, Vec::new());
+    let [Datum::FunctionValue(before), Datum::FunctionValue(after)] = crossed.as_slice() else {
+        panic!("two crossed functions: {crossed:?}");
+    };
+    let call = |function: &lash_kernel_doc::FunctionValue, arg| {
+        start(
+            crate::Target::Callable(Box::new(function.clone())),
+            vec![int(arg)],
+        )
+        .0
+    };
+    let list = |items: &[i64]| Datum::List(items.iter().map(|n| int(*n)).collect());
+    assert_eq!(call(before, 3), list(&[1, 2, 3]));
+    assert_eq!(call(before, 4), list(&[1, 2, 4]));
+    assert_eq!(call(after, 3), list(&[9, 2, 3]));
+}
+
+/// `K-EFF-002`: a task is no data. A task among an effect's arguments
+/// raises `not_data` before anything is requested, however deep it sits.
+#[test]
+fn a_task_in_an_effect_argument_raises_not_data_before_the_request() {
+    let text = "definition \"function work() -> Any\\nkernel 1\\nmetering statements\\nbody { return 1 }\"\nimport 4 operation host.take(input: Any) -> Any\nmain {\n  let t = spawn call work()\n  do perform 4({plan: [1, t]}) as Any\n  return 0\n}";
+    let mut machine = <CoreMachine as Machine>::start(
+        core_program(text, None),
+        ROOMY,
+        Setup::default().start,
+        Box::new(Source::default()),
+    )
+    .unwrap_or_else(|error| panic!("{error:?}"));
+    match machine.run(&mut World::default(), u64::MAX).unwrap() {
+        Step::Ended(End::Error(RunError::Uncaught {
+            error: Datum::Error(error),
+            ..
+        })) => assert_eq!(error.kind, "not_data", "{}", error.message),
+        other => panic!("the task crossed or a request was made: {other:?}"),
+    }
+}

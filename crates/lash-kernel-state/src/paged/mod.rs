@@ -40,6 +40,7 @@ mod laws {
     mod identity;
     mod metadata;
     mod pages;
+    mod residency;
     pub mod root;
     mod run;
 }

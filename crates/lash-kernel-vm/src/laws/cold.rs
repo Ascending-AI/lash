@@ -225,3 +225,33 @@ mod mixed_cycle {
         assert!(heap.arena().facts(a_handle).is_err(), "a is freed");
     }
 }
+
+/// `K-ITER-003` across a park sealed and reopened cold: a replaced key
+/// keeps its place, a removed and reinserted key moves to the end and is
+/// visited again, and a record's added field follows its first.
+#[test]
+fn map_iteration_survives_removal_and_reinsertion_across_a_cold_reopen() {
+    let mut embedder = Embedder::new(
+        "main {\n  let m = map{1: 10, 2: 20}\n  let r = {z: 3}\n  let first = true\n  for k in m {\n    print k\n    if first {\n      set m[1.0] = 11\n      remove m[1]\n      set m[1] = 12\n      set r.a = 4\n      set first = false\n      do perform 0(\"park\") as Any\n    }\n  }\n  return (m[1], r)\n}",
+    );
+    let result = loop {
+        match embedder.run() {
+            Step::Ended(End::Finished(finished)) => break finished.result,
+            Step::Ended(other) => panic!("the run did not finish: {other:?}"),
+            Step::Slice => {}
+            Step::Parked(_) => {
+                embedder.reopen(true);
+                embedder.deliver_next();
+            }
+        }
+    };
+    let int = |n: i64| Datum::Int(n.into());
+    assert_eq!(embedder.world.printed, vec![int(1), int(2), int(1)]);
+    assert_eq!(
+        result,
+        Datum::Tuple(vec![
+            int(12),
+            Datum::Record(vec![("z".into(), int(3)), ("a".into(), int(4))]),
+        ])
+    );
+}

@@ -128,6 +128,10 @@ pub(super) struct DirtyResidency {
     entry_allocations: usize,
 }
 impl DirtyResidency {
+    #[cfg(test)]
+    pub(super) fn bytes(&self) -> usize {
+        self.bytes
+    }
     fn contains(&self, id: Identity) -> bool {
         self.slots
             .get(id.slot)

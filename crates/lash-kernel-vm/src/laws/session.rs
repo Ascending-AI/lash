@@ -401,3 +401,64 @@ fn a_variable_a_closure_captures_carries_its_value() {
     );
     assert_eq!(second.result, Datum::List(vec![int(1), int(1)]));
 }
+
+/// `K-SES-003` through a cycle: a closure reached only around a cycle of
+/// lists is found from every binding that reaches the cycle, after the
+/// cycle was sealed at a park and reopened cold, so every alias of it is
+/// dropped and named and the data beside them carries.
+#[test]
+fn every_alias_of_a_cold_cycle_holding_a_closure_is_dropped() {
+    let source = Source::default();
+    let aliases: Vec<String> = (0..20).map(|i| format!("alias{i}")).collect();
+    let lets: String = aliases
+        .iter()
+        .map(|name| format!("  let {name} = a\n"))
+        .collect();
+    let text = format!(
+        "main {{\n  let f = fn() {{ return 1 }}\n  let a = []\n  let b = [a, f]\n  set a[0] = b\n  set f = null\n  set b = null\n{lets}  let v = perform 0(7) as Any\n  return v\n}}"
+    );
+    let mut machine = <CoreMachine as Machine>::start(
+        core_program(&text, None),
+        ROOMY,
+        start(None, Vec::new()),
+        Box::new(source.clone()),
+    )
+    .unwrap();
+    let Step::Parked(park) = machine.run(&mut World::default(), u64::MAX).unwrap() else {
+        panic!("the cell never parks");
+    };
+    let sealed = machine
+        .seal(SealBudget {
+            pages: u64::MAX,
+            bytes: u64::MAX,
+        })
+        .unwrap()
+        .unwrap();
+    let root = crate::kernel_internals::sealed_root(&sealed).clone();
+    drop(machine);
+    let mut machine = <CoreMachine as Machine>::open(
+        core_program(&text, None),
+        ROOMY,
+        &lash_kernel_state::kernel_internals::checkpoint(root),
+        Box::new(source.clone()),
+    )
+    .unwrap();
+    for request in &park.requests {
+        machine.deliver(wait_of(request), answer(request)).unwrap();
+    }
+    let end = drive(&mut machine);
+    let mut dropped: Vec<String> = end
+        .not_carried
+        .iter()
+        .map(|(name, why)| {
+            assert_eq!(why, NOT_CARRIED, "{name}");
+            name.as_str().to_owned()
+        })
+        .collect();
+    dropped.sort();
+    let mut expected: Vec<String> = aliases;
+    expected.push("a".into());
+    expected.sort();
+    assert_eq!(dropped, expected);
+    assert_eq!(carried(&end, &source), names(&["b", "f", "v"]));
+}

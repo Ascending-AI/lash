@@ -247,6 +247,71 @@ fn whole<T>(object: ArenaHandle, chunks: &[Chunk<T>]) -> Result<Option<&T>, Nati
     }
 }
 
+/// A list's or a tuple's sequence; a proxy not yet decoded retries.
+fn sequence_body<'a>(
+    objects: &'a (impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
+    handle: ArenaHandle,
+) -> Result<&'a Sequence, NativeError> {
+    if facts
+        .get(handle.index() as usize)
+        .is_none_or(|facts| facts.cold)
+    {
+        return Err(cold(handle));
+    }
+    match body(objects, handle)? {
+        Body::List(sequence) | Body::Tuple(sequence) => Ok(sequence),
+        Body::Cold(_) => Err(cold(handle)),
+        _ => Err(NativeError::Malformed(
+            "a sequence handle names another body",
+        )),
+    }
+}
+
+/// The values of `handle` from position `at` to the end of the chunk that
+/// holds it; a cold chunk retries.
+fn values_from<'a>(
+    objects: &'a (impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
+    handle: ArenaHandle,
+    at: u64,
+) -> Result<&'a [Value], NativeError> {
+    let sequence = sequence_body(objects, facts, handle)?;
+    let (chunk, offset) = sequence.locate(at);
+    match sequence.chunks.resident(chunk) {
+        Some(values) => values
+            .get(offset..)
+            .ok_or(NativeError::Malformed("a sequence chunk is short")),
+        None => Err(Retry::Cold {
+            object: handle,
+            chunk: chunk as u32,
+        }
+        .into()),
+    }
+}
+
+/// Compares two sequences by position: unequal when their lengths
+/// differ, else one chunk at a time from the first.
+fn positions<'a>(
+    objects: &'a (impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
+    left: ArenaHandle,
+    right: ArenaHandle,
+    pending: &mut Vec<Step<'a>>,
+) -> Result<bool, NativeError> {
+    let len = sequence_body(objects, facts, left)?.len;
+    if len != sequence_body(objects, facts, right)?.len {
+        return Ok(false);
+    }
+    pending.push(Step::Positions {
+        left,
+        right,
+        at: 0,
+        len,
+    });
+    Ok(true)
+}
+
 fn sequence(
     objects: &(impl super::Bodies + ?Sized),
     handle: ArenaHandle,
@@ -590,6 +655,15 @@ pub(crate) fn detached_normal(
 enum Step<'a> {
     Pair(Value, Value),
     Sequence(&'a [Value], &'a [Value]),
+    /// Two sequences of one length `len`, compared from position `at`
+    /// one resident chunk at a time, so a difference in an earlier chunk
+    /// ends the comparison before a later chunk is read.
+    Positions {
+        left: ArenaHandle,
+        right: ArenaHandle,
+        at: u64,
+        len: u64,
+    },
     Table {
         left: &'a [Value],
         right: ArenaHandle,
@@ -615,6 +689,29 @@ pub(crate) fn equal(
             Step::Sequence(left, right) => {
                 for (a, b) in left.iter().zip(right).rev() {
                     pending.push(Step::Pair(*a, *b));
+                }
+                continue;
+            }
+            Step::Positions {
+                left,
+                right,
+                at,
+                len,
+            } => {
+                if at < len {
+                    let left_values = values_from(objects, facts, left, at)?;
+                    let right_values = values_from(objects, facts, right, at)?;
+                    let n = left_values.len().min(right_values.len());
+                    if n == 0 {
+                        return Err(NativeError::Malformed("a sequence chunk holds no position"));
+                    }
+                    pending.push(Step::Positions {
+                        left,
+                        right,
+                        at: at + n as u64,
+                        len,
+                    });
+                    pending.push(Step::Sequence(&left_values[..n], &right_values[..n]));
                 }
                 continue;
             }
@@ -669,12 +766,7 @@ pub(crate) fn equal(
             (V::Task(a), V::Task(b)) | (V::TaskRef(a), V::TaskRef(b)) => a == b,
             (V::Closure(a), V::Closure(b)) | (V::ObjectRef(a), V::ObjectRef(b)) => a == b,
             (V::Tuple(left), V::Tuple(right)) => {
-                let (left, right) = (sequence(objects, *left)?, sequence(objects, *right)?);
-                if left.len() != right.len() {
-                    return Ok(false);
-                }
-                pending.push(Step::Sequence(left, right));
-                true
+                positions(objects, facts, *left, *right, &mut pending)?
             }
             (V::Error(left), V::Error(right)) => {
                 match (body(objects, *left)?, body(objects, *right)?) {
@@ -696,12 +788,7 @@ pub(crate) fn equal(
                 if !seen.insert((left.index(), right.index())) {
                     continue;
                 }
-                let (left, right) = (sequence(objects, *left)?, sequence(objects, *right)?);
-                if left.len() != right.len() {
-                    return Ok(false);
-                }
-                pending.push(Step::Sequence(left, right));
-                true
+                positions(objects, facts, *left, *right, &mut pending)?
             }
             (V::Map(left), V::Map(right))
             | (V::Set(left), V::Set(right))

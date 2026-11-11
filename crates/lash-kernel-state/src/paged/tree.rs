@@ -263,6 +263,11 @@ impl<'a> Access<'a> {
     ) -> Result<T, HeapFault> {
         f(&mut *self.source.borrow_mut())
     }
+    /// The weight of the working pages not yet sealed or spilled.
+    #[cfg(test)]
+    pub(crate) fn dirty_bytes(&self) -> usize {
+        self.dirty.borrow().bytes()
+    }
     /// Drops every read page and decoding; later reads fetch them again.
     pub fn clear(&self) {
         *self.resident.borrow_mut() = Default::default();

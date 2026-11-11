@@ -475,3 +475,34 @@ fn a_point_edit_in_a_four_deep_directory_seals_within_its_fixture_ceiling() {
         );
     }
 }
+
+/// `K-VAL-020` on cold lists: two large lists of one length that differ
+/// at their first member compare unequal from their first chunks alone,
+/// so the comparison reads no later chunk of either.
+#[test]
+fn unequal_prefixes_do_not_read_later_chunks() {
+    use lash_kernel_doc::arena::native::Semantics;
+    let store = Counting::default();
+    let mut heap = fresh(&store);
+    let left = counted(&mut heap);
+    let right = make(
+        &mut heap,
+        NewObject::List((1..=N).map(Value::Int).collect()),
+    );
+    let root = heap.seal(&[left, right]).expect("a seal");
+    let (mut heap, roots) = SlotHeap::open(
+        u64::MAX,
+        &root,
+        Directory::open(root.directory, Box::new(store.clone())),
+    )
+    .expect("an open");
+    let (equal, reads, _) = store.during(|| {
+        warm(&mut heap, &roots, |heap| {
+            heap.arena().semantics().equal(&roots[0], &roots[1])
+        })
+    });
+    assert!(!equal);
+    // Each list's row and its first chunk through its index: no later
+    // chunk is read.
+    assert!(reads <= 2 * 3, "the comparison read {reads} pages");
+}
