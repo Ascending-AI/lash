@@ -720,6 +720,9 @@ pub struct Objects {
 #[derive(Debug)]
 struct Slot {
     generation: u32,
+    /// Whether the slot is on the free list: a released slot not yet
+    /// reserved again.
+    listed: std::cell::Cell<bool>,
     body: Body,
 }
 
@@ -788,7 +791,9 @@ impl Objects {
     /// [`Self::install`].
     pub fn reserve(&self) -> ArenaHandle {
         if let Some(index) = self.free.borrow_mut().pop() {
-            let generation = self.slots[index as usize].generation;
+            let slot = &self.slots[index as usize];
+            slot.listed.set(false);
+            let generation = slot.generation;
             return ArenaHandle::new(index, generation);
         }
         let index = self.slots.len() as u32 + self.reserved.get();
@@ -798,7 +803,8 @@ impl Objects {
 
     /// Gives back a slot [`Self::reserve`] took, last reserved first.
     pub(crate) fn unreserve(&self, handle: ArenaHandle) {
-        if (handle.index as usize) < self.slots.len() {
+        if let Some(slot) = self.slots.get(handle.index as usize) {
+            slot.listed.set(true);
             self.free.borrow_mut().push(handle.index);
         } else {
             self.reserved.set(self.reserved.get().saturating_sub(1));
@@ -817,14 +823,13 @@ impl Objects {
         };
         let mut seen = std::collections::HashSet::new();
         seen.try_reserve(handles.len()).map_err(|_| exhausted())?;
-        let free = self.free.borrow();
         let mut end = self.slots.len();
         for handle in handles {
             let index = handle.index as usize;
             let valid = if index < self.slots.len() {
                 self.slots[index].generation == handle.generation
                     && matches!(self.slots[index].body, Body::Free)
-                    && !free.contains(&handle.index)
+                    && !self.slots[index].listed.get()
             } else {
                 let valid = index == end
                     && handle.generation == 0
@@ -858,6 +863,7 @@ impl Objects {
             self.reserved.set(self.reserved.get().saturating_sub(1));
             self.slots.push(Slot {
                 generation: handle.generation,
+                listed: std::cell::Cell::new(false),
                 body,
             });
         } else {
@@ -873,6 +879,7 @@ impl Objects {
         {
             slot.generation = slot.generation.wrapping_add(1);
             slot.body = Body::Free;
+            slot.listed.set(true);
             self.free.get_mut().push(handle.index);
         }
     }
