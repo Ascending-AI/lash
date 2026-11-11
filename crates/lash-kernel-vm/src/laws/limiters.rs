@@ -1110,19 +1110,26 @@ fn huge_charges(
 /// and the `do`, its first.
 #[test]
 fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
-    let refused = |limit: u64, at: u32| {
+    // The bound names the function whose event passed it: `main` at its
+    // loop test, the library call the guest made at its wide fee.
+    let refused = |limit: u64, at: u32, function: &str| {
         format!(
-            "Error(Bound(BoundExceeded {{ bound: Charge, limit: {limit}, function: Some(FunctionName(\"main\")), site: Some(Site {{ unit: Main, path: [{at}] }}) }}))"
+            "Error(Bound(BoundExceeded {{ bound: Charge, limit: {limit}, function: Some(FunctionName(\"{function}\")), site: Some(Site {{ unit: Main, path: [{at}] }}) }}))"
         )
     };
     let documents = [
         (
             "main {\n  let n = 0\n  while num.lt(n, 2) metered 18446744073709551615 {\n    set n = num.add(n, 1)\n  }\n  return n\n}",
             1,
+            "main",
         ),
-        ("main {\n  do invoke law.wide(\"abc\")\n  return 4\n}", 0),
+        (
+            "main {\n  do invoke law.wide(\"abc\")\n  return 4\n}",
+            0,
+            "law.wide",
+        ),
     ];
-    for (text, at) in documents {
+    for (text, at, function) in documents {
         // The charge that precedes the wide event: the least limit it
         // refuses at.
         let pre = (0..10)
@@ -1133,7 +1140,7 @@ fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
             let (end, charged) = if limit < pre {
                 (exact.0.clone(), limit + 1)
             } else {
-                (refused(limit, at), u64::MAX)
+                (refused(limit, at, function), u64::MAX)
             };
             assert_eq!(exact, (end, Some(charged), Vec::new()), "limit {limit}");
             assert_eq!(
