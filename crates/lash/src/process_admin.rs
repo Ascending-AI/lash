@@ -507,7 +507,9 @@ impl Processes {
     /// An engine or definition start states its launch: the environment the
     /// host published under a pin ([`HostArtifacts::publish_process_env`](crate::artifacts::HostArtifacts::publish_process_env))
     /// and its engine settings, which staging holds under the start's key
-    /// and seals onto the row; lash fills in neither (FIG-6034).
+    /// and seals onto the row; lash fills in neither (FIG-6034). A start
+    /// whose environment the process alone holds is
+    /// [`Self::start_with_env`].
     ///
     /// A definition id is a content address, not a permission: lash does not check
     /// that the caller ran or holds the definition; authorizing creation from an id
@@ -528,6 +530,113 @@ impl Processes {
         &self,
         operation: crate::OperationId,
         request: lash_execution_contracts::process::ProcessStartRequest,
+    ) -> Result<lash_execution_contracts::process::ProcessStartReceipt> {
+        self.start_admitting(operation, request, None).await
+    }
+
+    /// Start a process under `env`, an environment the host states now
+    /// rather than one it published under a pin: the process's own claim
+    /// holds it, so it lives exactly as long as the process (FIG-6034 §3.3).
+    ///
+    /// `request`'s launch names `env` by its
+    /// [`stable_ref`](lash_core::ProcessEnv::stable_ref). Inside the start's
+    /// recorded admission `env` is admitted against this core's process
+    /// components and published under the start's `Start(key)` claim
+    /// through the one environment hold, the hold a tool-declared start with
+    /// [`ProcessEnvChoice::New`](lash_core::ProcessEnvChoice::New) runs;
+    /// registration carries it onto the process's record, and the process's
+    /// end releases it. A refused environment is
+    /// [`PluginError::ProcessEnvRefused`](lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused)
+    /// and publishes nothing. A retry under the same key while a process
+    /// holds it is answered that process and publishes nothing again.
+    /// Otherwise as [`Self::start`].
+    ///
+    /// # Errors
+    ///
+    /// A request that carries no launch (a session turn) or whose launch
+    /// names another environment is refused before anything is written;
+    /// otherwise [`Self::start`]'s errors.
+    pub async fn start_with_env(
+        &self,
+        operation: crate::OperationId,
+        request: lash_execution_contracts::process::ProcessStartRequest,
+        env: lash_core::ProcessEnv,
+    ) -> Result<lash_execution_contracts::process::ProcessStartReceipt> {
+        let stated = env.stable_ref().map_err(|error| {
+            EmbedError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "failed to encode process environment: {error}"
+                )),
+            )
+        })?;
+        match request.input.launch() {
+            Some(launch) if launch.env == stated => {}
+            launch => {
+                return Err(EmbedError::Plugin(
+                    lash_execution_contracts::plugin_error::PluginError::Session(match launch {
+                        Some(launch) => format!(
+                            "process start launch names environment `{}`, not the stated \
+                             environment `{stated}`",
+                            launch.env
+                        ),
+                        None => "a session-turn start states no environment".to_owned(),
+                    }),
+                ));
+            }
+        }
+        self.start_admitting(operation, request, Some(self.host_env_admission(env)))
+            .await
+    }
+
+    /// Hold a host-stated environment under the start's `Start(key)` claim
+    /// while no process holds the key (`fresh`), through the one hold path.
+    /// A claim an earlier attempt fenced is met again by staging, which
+    /// adopts what the key retains.
+    fn host_env_admission(
+        &self,
+        env: lash_core::ProcessEnv,
+    ) -> lash_core::runtime::SessionTurnAdmission {
+        let store = Arc::clone(&self.core.env.core.durability.process_env_store);
+        let engines = self.core.host_process_engines.clone();
+        let selection = lash_core::ProcessEnvSelection::New(env);
+        Arc::new(move |fresh, claim| {
+            let store = Arc::clone(&store);
+            let engines = engines.clone();
+            let selection = selection.clone();
+            Box::pin(async move {
+                if !fresh {
+                    return Ok(());
+                }
+                let ports =
+                    lash_core::ProcessEnvPorts::admitting(store.as_ref(), engines.components());
+                match lash_core::hold_process_env(&ports, &claim, &selection).await {
+                    Ok(_) => Ok(()),
+                    Err(lash_core::HoldEnvError::Refused(refusal)) => Err(
+                        lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused {
+                            refusal,
+                        }
+                        .into(),
+                    ),
+                    Err(lash_core::HoldEnvError::Fault(error))
+                        if lash_execution_contracts::process::artifact_referrer_ended(&error)
+                            == Some(&claim.referrer()) =>
+                    {
+                        Ok(())
+                    }
+                    Err(lash_core::HoldEnvError::Fault(error)) => Err(error.into()),
+                    Err(lash_core::HoldEnvError::Admission(error)) => {
+                        Err(lash_execution_contracts::plugin_error::PluginError::from(error).into())
+                    }
+                }
+            })
+        })
+    }
+
+    async fn start_admitting(
+        &self,
+        operation: crate::OperationId,
+        request: lash_execution_contracts::process::ProcessStartRequest,
+        env_admission: Option<lash_core::runtime::SessionTurnAdmission>,
     ) -> Result<lash_execution_contracts::process::ProcessStartReceipt> {
         let scoped_effect_controller = self.operation_context(&operation)?;
         let request = operation.key_start(request);
@@ -564,7 +673,7 @@ impl Processes {
             // registration carries it onto the record. The core-bound
             // operation context holds no actor execution claim of its own,
             // so preparation is retained independently under the start key.
-            let mut session_turn_admission = None;
+            let mut session_turn_admission = env_admission;
             if let lash_execution_contracts::process::ProcessStartTarget::Input(
                 lash_execution_contracts::process::ProcessInput::SessionTurn {
                     create_request, ..

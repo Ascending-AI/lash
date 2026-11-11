@@ -1669,26 +1669,7 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
         let process = receipt
             .unwrap_or_else(|error| panic!("host start {run} prepares and registers: {error}"))
             .process_id;
-        // Every cleanup the start and the release armed is due a day on.
-        let later = lash_core::testing::TestClock::new(
-            u64::try_from(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .expect("the wall clock is past the epoch")
-                    .as_millis(),
-            )
-            .expect("milliseconds fit")
-                + 86_400_000,
-        );
-        for _ in 0..2 {
-            lash_core::runtime::obligations::relay::relay_due(
-                &relay,
-                &later,
-                std::num::NonZeroUsize::new(256).expect("a page"),
-            )
-            .await
-            .expect("the cleanup relay's due pass");
-        }
+        relay_a_day_on(&relay).await;
         assert_eq!(
             lash_execution_contracts::process::load_process_env(env_store.as_ref(), &env_ref)
                 .await
@@ -1704,6 +1685,167 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
 }
 
 on_every_tier!(a_host_starts_preparation_is_held_by_its_own_start: sqlite_memory);
+
+/// Run the cleanup relay twice over every cleanup armed so far, each due a
+/// day on.
+async fn relay_a_day_on(relay: &lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay) {
+    let later = lash_core::testing::TestClock::new(
+        u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("the wall clock is past the epoch")
+                .as_millis(),
+        )
+        .expect("milliseconds fit")
+            + 86_400_000,
+    );
+    for _ in 0..2 {
+        lash_core::runtime::obligations::relay::relay_due(
+            relay,
+            &later,
+            std::num::NonZeroUsize::new(256).expect("a page"),
+        )
+        .await
+        .expect("the cleanup relay's due pass");
+    }
+}
+
+/// A host start that states its environment holds it under the process's
+/// own claim, with no host pin (FIG-6034 §3.3): once the relay has carried
+/// the start's staging onto the record, the process still resolves it; a
+/// retry under the key, before and after the process ends, answers the
+/// original process; once the ended record is pruned and the relay runs, the
+/// environment is released: nothing but the process held it. An environment
+/// admission refuses publishes nothing.
+async fn a_host_stated_environment_lives_as_long_as_its_process(tier: Tier) {
+    let engine: Arc<dyn lash_execution_contracts::process::ProcessEngine> =
+        Arc::new(ScriptEngine {
+            kind: HOLD_ENGINE,
+            advance: holding_engine_advance,
+        });
+    let deployment = deploy(tier, vec![Arc::clone(&engine)], |builder| builder).await;
+    // The relay carries a registered start's staging onto its record by the
+    // record's engine.
+    let relay = lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
+        &deployment.backend,
+        lash_core::ProcessEngineRegistry::new()
+            .with_registration(lash_core::ProcessEngineRegistration::accepting(engine)),
+    );
+    let env_store = deployment.backend.process_env_store();
+    let processes = deployment.core.processes();
+    let request = |env: &lash::process::ProcessEnv| {
+        lash_execution_contracts::process::ProcessStartRequest::engine(
+            HOLD_ENGINE.to_owned(),
+            serde_json::json!({ "run": "stated" }),
+            lash_execution_contracts::process::EngineLaunch::new(
+                env.stable_ref().expect("the environment encodes"),
+                None,
+            ),
+            lash_execution_contracts::process::ProcessOriginator::host(),
+            lash_execution_contracts::process::LifetimeDecision::Detached,
+        )
+    };
+    let resolves = |env_ref: lash::process::ProcessEnvRef| {
+        let env_store = Arc::clone(&env_store);
+        async move {
+            lash_execution_contracts::process::load_process_env(env_store.as_ref(), &env_ref)
+                .await
+                .is_ok()
+        }
+    };
+
+    // An uninstalled component refuses the environment before its bytes are
+    // stored.
+    let refused = environment_of(Vec::new(), &[WRITE_COMPONENT]);
+    let error = processes
+        .start_with_env(
+            lash::OperationId::mint(),
+            request(&refused),
+            refused.clone(),
+        )
+        .await
+        .expect_err("an environment naming an uninstalled component is refused");
+    assert!(
+        matches!(
+            &error,
+            lash::EmbedError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
+                    refusal
+                )
+            ) if refusal.code == lash_core::RuntimeErrorCode::ProcessEnvRefused
+        ),
+        "the refusal is the environment's: {error:?}"
+    );
+    assert!(
+        !resolves(refused.stable_ref().expect("the environment encodes")).await,
+        "a refused environment publishes nothing"
+    );
+
+    let env = environment();
+    let env_ref = env.stable_ref().expect("the environment encodes");
+    let operation = lash::OperationId::new("host-stated-environment");
+    let first = processes
+        .start_with_env(operation.clone(), request(&env), env.clone())
+        .await
+        .expect("the stated environment starts its process");
+    relay_a_day_on(&relay).await;
+    assert!(
+        resolves(env_ref.clone()).await,
+        "the process holds its stated environment with no host pin"
+    );
+    let retried = processes
+        .start_with_env(operation.clone(), request(&env), env.clone())
+        .await
+        .expect("a retry under the key is answered");
+    assert_eq!(retried.process_id, first.process_id);
+
+    processes
+        .cancel(lash::OperationId::mint(), &first.process_id)
+        .await
+        .expect("the process is cancelled");
+    tokio::time::timeout(
+        Duration::from_secs(60),
+        processes.await_output(&first.process_id),
+    )
+    .await
+    .expect("the process ends within a minute")
+    .expect("the process's end is read");
+    let after_end = processes
+        .start_with_env(operation, request(&env), env.clone())
+        .await
+        .expect("a retry after the end is answered");
+    assert_eq!(after_end.process_id, first.process_id);
+    relay_a_day_on(&relay).await;
+    assert!(
+        resolves(env_ref.clone()).await,
+        "the ended process's retained record still holds its environment"
+    );
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while processes
+            .prune(
+                u64::MAX,
+                None,
+                lash_execution_contracts::process::ProjectionWatermark::NoProjector,
+            )
+            .await
+            .expect("terminal processes are pruned")
+            .pruned_processes
+            == 0
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the ended process's record is pruned");
+    relay_a_day_on(&relay).await;
+    assert!(
+        !resolves(env_ref).await,
+        "pruning the process's record releases its stated environment, and nothing \
+         else holds it"
+    );
+}
+
+on_every_tier!(a_host_stated_environment_lives_as_long_as_its_process);
 
 // --- kernel processes ------------------------------------------------------
 
