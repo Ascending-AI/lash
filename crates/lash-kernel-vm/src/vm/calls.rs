@@ -426,6 +426,7 @@ impl<H: Heap> Vm<H> {
         let units = match inline {
             InlineOperation::Kind
             | InlineOperation::Not
+            | InlineOperation::FloatIdentity
             | InlineOperation::Length(_)
             | InlineOperation::Membership(_)
             | InlineOperation::IntegerText(_) => self.formula(entry.charge, args, Some(&value)),
@@ -462,6 +463,7 @@ impl<H: Heap> Vm<H> {
             }
             InlineOperation::Kind
             | InlineOperation::Not
+            | InlineOperation::FloatIdentity
             | InlineOperation::IntegerText(IntegerTextDomain::Decimal)
                 if args.len() == 1 =>
             {

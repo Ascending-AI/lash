@@ -149,8 +149,13 @@ natives!(name, kernel;
             add: kernel("num.add")?,
             concat: kernel("text.concat")?,
         }),
-        "ts.sub" => Arc::new(Subtract {
+        "ts.sub" => Arc::new(FloatPair {
             native: kernel("num.sub")?,
+            operation: lash_kernel_doc::scalar::ScalarOp::Sub,
+        }),
+        "ts.step" => Arc::new(FloatPair {
+            native: kernel("num.add")?,
+            operation: lash_kernel_doc::scalar::ScalarOp::Add,
         }),
         "ts.primitive_to_string" => Arc::new(conversions::PrimitiveToString),
         "ts.to_int32" => Arc::new(bitwise::ToInt32),
@@ -163,7 +168,7 @@ natives!(name, kernel;
             "ts.shr" => lash_kernel_doc::scalar::WordOp::Shr,
             _ => lash_kernel_doc::scalar::WordOp::Ushr,
         })),
-        "ts.to_number" => Arc::new(ToNumber),
+        "ts.to_number" | "ts.to_numeric" => Arc::new(ToNumber),
         "ts.to_boolean" => Arc::new(conversions::ToBoolean),
         "ts.number.format_value" => Arc::new(conversions::NumberToString),
         "ts.number_index" => Arc::new(number_index::NumberIndex {
@@ -314,10 +319,22 @@ fn relate(relation: Relation, args: &[Value]) -> Option<Value> {
     Some(Value::Bool(truth))
 }
 
-/// Float operands already are ECMA Numbers. Every conversion case, including
-/// guest valueOf, is declined to the complete operation body.
+/// `ts.to_number` and `ts.to_numeric`: float operands already are ECMA
+/// Numbers, and each body returns one unchanged. Every conversion case,
+/// including guest valueOf and a BigInt, is declined to the complete
+/// operation body.
 struct ToNumber;
 impl NativeFunction for ToNumber {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            inline: Some(lash_kernel_doc::arena::native::InlineNative {
+                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                operation: lash_kernel_doc::arena::native::InlineOperation::FloatIdentity,
+            }),
+            ..Default::default()
+        }
+    }
+
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         match call.args.values() {
             [value @ Value::Float(_)] => Ok(*value),
@@ -361,16 +378,20 @@ impl NativeFunction for Add {
     }
 }
 
-struct Subtract {
+/// `ts.sub` (`a - b`) and `ts.step` (`++` and `--` after ToNumeric) on two
+/// floats, which each body answers by its kernel operation alone. Every other
+/// pair declines to the body.
+struct FloatPair {
     native: Arc<dyn NativeFunction>,
+    operation: lash_kernel_doc::scalar::ScalarOp,
 }
-impl NativeFunction for Subtract {
+impl NativeFunction for FloatPair {
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
         lash_kernel_doc::NativeSpecialization {
             inline: Some(lash_kernel_doc::arena::native::InlineNative {
                 native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
                 operation: lash_kernel_doc::arena::native::InlineOperation::Scalar {
-                    operation: lash_kernel_doc::scalar::ScalarOp::Sub,
+                    operation: self.operation,
                     domain: lash_kernel_doc::arena::native::ScalarDomain::Floats,
                 },
             }),

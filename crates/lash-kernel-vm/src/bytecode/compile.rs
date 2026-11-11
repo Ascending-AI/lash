@@ -1219,6 +1219,7 @@ impl<'a> Compiler<'a> {
                 | InlineOperation::Kind
                 | InlineOperation::Same
                 | InlineOperation::Not
+                | InlineOperation::FloatIdentity
                 | InlineOperation::Length(_)
                 | InlineOperation::Membership(_)
                 | InlineOperation::IntegerText(_),

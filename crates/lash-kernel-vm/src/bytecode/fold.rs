@@ -335,6 +335,7 @@ fn answers(program: &Program, native: u32, argc: usize) -> Option<InlineOperatio
         InlineOperation::IntegerText(IntegerTextDomain::RadixArgument) => 2,
         InlineOperation::Kind
         | InlineOperation::Not
+        | InlineOperation::FloatIdentity
         | InlineOperation::Length(_)
         | InlineOperation::IntegerText(IntegerTextDomain::Decimal) => 1,
         _ => return None,

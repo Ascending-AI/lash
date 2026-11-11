@@ -1065,6 +1065,8 @@ pub enum InlineOperation {
     Same,
     /// One boolean, with no coercion.
     Not,
+    /// One float, which answers itself: a numeric conversion of a number.
+    FloatIdentity,
     /// One collection of the declared kind, read through the native views.
     /// Cold reads and lengths that cannot be answered inline run normally.
     Length(crate::plan::Collection),
@@ -1122,6 +1124,7 @@ impl InlineOperation {
             (Self::Kind, [_]) => true,
             (Self::Same, [left, right]) => shallow_same(left, right).is_some(),
             (Self::Not, [Value::Bool(_)]) => true,
+            (Self::FloatIdentity, [Value::Float(_)]) => true,
             (Self::Length(kind), [value]) => matches!(
                 (kind, value),
                 (crate::plan::Collection::List, Value::List(_))
@@ -1164,6 +1167,7 @@ impl InlineOperation {
             (Self::Kind, [value]) => KIND_TEXTS[value.kind() as usize].map(Value::Text),
             (Self::Same, [left, right]) => shallow_same(left, right).map(Value::Bool),
             (Self::Not, [Value::Bool(value)]) => Some(Value::Bool(!value)),
+            (Self::FloatIdentity, [value @ Value::Float(_)]) => Some(*value),
             (Self::IntegerText(IntegerTextDomain::Decimal), [Value::Int(word)]) => {
                 ShortText::digits(*word, 10).map(Value::Text)
             }
