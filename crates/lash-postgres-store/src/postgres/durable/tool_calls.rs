@@ -248,6 +248,13 @@ impl super::PostgresDurableStore {
                             .map_err(sqlx_failure)?
                     }
                 };
+                if rows.is_empty()
+                    && let Some(archived) =
+                        super::process_history::tool_calls(snapshot, owner, selection, &limits)
+                            .await?
+                {
+                    return Ok(archived);
+                }
                 let rows = rows
                     .into_iter()
                     .map(

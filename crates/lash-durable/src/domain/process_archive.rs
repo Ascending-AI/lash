@@ -19,8 +19,8 @@
 //! process's reads from it through the same row decoders it uses for rows,
 //! and the selection rules here mirror the statements they replace.
 
-use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core_store::checkpoint_graph::NodeId;
 
@@ -269,7 +269,7 @@ pub struct ProcessArchive<'a> {
     counts: [usize; 4],
     tables: [usize; 3],
     nodes_at: usize,
-    decoded: Cell<usize>,
+    decoded: AtomicUsize,
 }
 
 /// One node read from an archive.
@@ -316,14 +316,14 @@ impl<'a> ProcessArchive<'a> {
             counts,
             tables,
             nodes_at,
-            decoded: Cell::new(HEADER),
+            decoded: AtomicUsize::new(HEADER),
         })
     }
 
     /// How many bytes the reads so far decoded, the header included.
     #[must_use]
     pub fn decoded_bytes(&self) -> usize {
-        self.decoded.get()
+        self.decoded.load(Ordering::Relaxed)
     }
 
     /// The archive's exact size.
@@ -339,7 +339,7 @@ impl<'a> ProcessArchive<'a> {
     }
 
     fn charge(&self, bytes: usize) {
-        self.decoded.set(self.decoded.get().saturating_add(bytes));
+        self.decoded.fetch_add(bytes, Ordering::Relaxed);
     }
 
     fn row(&self, section: usize, at: usize) -> Decoded<Reader<'a>> {

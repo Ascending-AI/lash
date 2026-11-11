@@ -83,6 +83,7 @@ pub(crate) use pages::cut_retirement_holds;
 pub(crate) use pages::retire_roots;
 mod model_calls;
 mod park;
+mod process_history;
 mod process_view;
 pub(crate) mod processes;
 mod prompts;

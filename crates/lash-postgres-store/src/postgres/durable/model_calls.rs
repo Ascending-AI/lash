@@ -146,12 +146,23 @@ impl super::PostgresDurableStore {
     ) -> Result<Vec<lash_protocol_types::llm::types::LlmCallId>, DurableError> {
         self.read(|tx| {
             Box::pin(async move {
-                let ids: Vec<String> = crate::observed_sql::query_scalar(SQL.ids.sql())
+                let mut ids: Vec<String> = crate::observed_sql::query_scalar(SQL.ids.sql())
                     .bind(session.as_str())
                     .bind(owner)
                     .fetch_all(crate::observed_sql::executor(&mut **tx))
                     .await
                     .map_err(sqlx_failure)?;
+                if ids.is_empty()
+                    && let Some((_, models)) = super::process_history::model_calls(
+                        tx,
+                        session,
+                        owner,
+                        lash_durable::domain::process_archive::ModelSelection::Records(None),
+                    )
+                    .await?
+                {
+                    ids = models.into_iter().map(|model| model.call_id).collect();
+                }
                 Ok(ids
                     .into_iter()
                     .map(lash_protocol_types::llm::types::LlmCallId)
@@ -166,8 +177,6 @@ impl super::PostgresDurableStore {
         owner: &str,
         ids: Option<&[lash_protocol_types::llm::types::LlmCallId]>,
     ) -> Result<Vec<ModelCallRecord>, DurableError> {
-        use lash_core_store::{checkpoint_graph::GraphDecoder, model_calls::ModelCallFact};
-        use lash_durable::domain::RunFacts;
         let limits = self.pools.graph_reads.owner();
         self.read_snapshot(|snapshot| {
             Box::pin(async move {
@@ -186,39 +195,66 @@ impl super::PostgresDurableStore {
                     .fetch_all(crate::observed_sql::executor(&mut **snapshot))
                     .await
                     .map_err(sqlx_failure)?;
-                let roots = rows
-                    .iter()
-                    .map(|(_, root, _)| super::node_ref(root))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let nodes = super::graph::walk_within(snapshot, &roots, &limits, None).await?;
-
-                let graph = RunFacts {
-                    nodes,
-                    read_limits: limits,
-                    ..Default::default()
-                };
-                let mut decoder = GraphDecoder::new(&graph, limits);
-                let mut records = Vec::with_capacity(rows.len());
-                for ((id, _, ended), root) in rows.into_iter().zip(roots) {
-                    let fact = ModelCallFact::load(&mut decoder, root)?;
-                    if fact.call_id.0 != id {
-                        return Err(super::corrupt("model call", "row and fact identity differ"));
-                    }
-                    records.push(ModelCallRecord {
-                        call: fact.call,
-                        call_id: fact.call_id,
-                        end: fact.end,
-                        record: fact.record,
-                        ended_at_ms: u64::try_from(ended)
-                            .map_err(|_| super::corrupt("model call", "negative end time"))?,
-                    });
+                if rows.is_empty()
+                    && let Some((bytes, models)) = super::process_history::model_calls(
+                        snapshot,
+                        session,
+                        owner,
+                        lash_durable::domain::process_archive::ModelSelection::Records(ids),
+                    )
+                    .await?
+                {
+                    return super::process_history::model_records(&bytes, models, limits).await;
                 }
-                records.sort_by_key(|record| record.call);
-                Ok(records)
+                let rows = rows
+                    .into_iter()
+                    .map(|(id, root, ended)| Ok((id, super::node_ref(&root)?, ended)))
+                    .collect::<Result<Vec<_>, DurableError>>()?;
+                let roots: Vec<_> = rows.iter().map(|(_, root, _)| *root).collect();
+                let nodes = super::graph::walk_within(snapshot, &roots, &limits, None).await?;
+                decode_records(rows, nodes, limits)
             })
         })
         .await
     }
+}
+
+/// Sealed records from their rows' ids, roots and end instants and the
+/// nodes those roots reach: the record read's decoding, whichever source
+/// answered it.
+pub(super) fn decode_records(
+    rows: Vec<(String, lash_core_store::checkpoint_graph::NodeId, i64)>,
+    nodes: std::collections::BTreeMap<
+        lash_core_store::checkpoint_graph::NodeId,
+        lash_durable::domain::HydratedNode,
+    >,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
+) -> Result<Vec<ModelCallRecord>, DurableError> {
+    use lash_core_store::{checkpoint_graph::GraphDecoder, model_calls::ModelCallFact};
+    use lash_durable::domain::RunFacts;
+    let graph = RunFacts {
+        nodes,
+        read_limits: limits,
+        ..Default::default()
+    };
+    let mut decoder = GraphDecoder::new(&graph, limits);
+    let mut records = Vec::with_capacity(rows.len());
+    for (id, root, ended) in rows {
+        let fact = ModelCallFact::load(&mut decoder, root)?;
+        if fact.call_id.0 != id {
+            return Err(super::corrupt("model call", "row and fact identity differ"));
+        }
+        records.push(ModelCallRecord {
+            call: fact.call,
+            call_id: fact.call_id,
+            end: fact.end,
+            record: fact.record,
+            ended_at_ms: u64::try_from(ended)
+                .map_err(|_| super::corrupt("model call", "negative end time"))?,
+        });
+    }
+    records.sort_by_key(|record| record.call);
+    Ok(records)
 }
 
 pub(super) async fn apply_pin(
@@ -278,6 +314,20 @@ impl super::PostgresDurableStore {
                     .fetch_all(crate::observed_sql::executor(&mut **tx))
                     .await
                     .map_err(sqlx_failure)?;
+                if rows.is_empty()
+                    && let Some((_, models)) = super::process_history::model_calls(
+                        tx,
+                        session,
+                        owner,
+                        lash_durable::domain::process_archive::ModelSelection::Pins { ids, call },
+                    )
+                    .await?
+                {
+                    return models
+                        .into_iter()
+                        .map(|model| lash_durable::domain::process_archive::pin_row(session, model))
+                        .collect();
+                }
                 rows.into_iter()
                     .map(
                         |(

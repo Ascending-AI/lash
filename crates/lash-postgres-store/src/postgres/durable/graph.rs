@@ -61,6 +61,7 @@ use lash_durable::domain::graph::{
 use lash_durable::domain::graph_commit::{
     CheckedGraph, CheckedNode, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
 };
+use lash_durable::domain::process_archive;
 use lash_durable::domain::{ExecKey, OwnerKey, RunSeq};
 use lash_durable::{
     CommitCapacity, CommitLabel, DurableError, Epoch, StoreFailure, StoreFailureKind,
@@ -779,14 +780,79 @@ pub(super) async fn root_of(
             .bind(namespace.as_str())
             .bind(artifact.as_str()),
     };
-    bound
-        .fetch_optional(crate::observed_sql::executor(connection))
+    let root = bound
+        .fetch_optional(crate::observed_sql::executor(&mut *connection))
         .await
         .map_err(db)?
         .flatten()
         .as_deref()
         .map(node_of)
-        .transpose()
+        .transpose()?;
+    if root.is_some() {
+        return Ok(root);
+    }
+    let Some(process) = process_archive::root_process(owner) else {
+        return Ok(None);
+    };
+    match super::process_history::archive_bytes(connection, &process)
+        .await
+        .map_err(db)?
+    {
+        Some(bytes) => archived_root(&bytes, owner),
+        None => Ok(None),
+    }
+}
+
+fn archive_refused(error: process_archive::ArchiveCorrupt) -> GraphRefusal {
+    from_durable(error.into())
+}
+
+fn archived_root(bytes: &[u8], owner: &RootOwner) -> Answer<Option<NodeId>> {
+    let archive = process_archive::ProcessArchive::open(bytes).map_err(archive_refused)?;
+    process_archive::archived_root(&archive, owner).map_err(archive_refused)
+}
+
+/// `owner`'s root graph from its process's history archive `bytes`, with
+/// the refusals a hydration of the same rows gives.
+async fn hydrate_archived(
+    bytes: &[u8],
+    owner: RootOwner,
+    expected: Option<NodeId>,
+    limits: &DecodeLimits,
+) -> Answer<HydratedGraph> {
+    let archive = process_archive::ProcessArchive::open(bytes).map_err(archive_refused)?;
+    let Some(root) = process_archive::archived_root(&archive, &owner).map_err(archive_refused)?
+    else {
+        return Err(GraphRefusal::RootRetired);
+    };
+    if expected.is_some_and(|expected| expected != root) {
+        return Err(GraphRefusal::RevisionConflict);
+    }
+    let nodes = walk_archive(&archive, &[root], limits).await?;
+    Ok(HydratedGraph { owner, root, nodes })
+}
+
+/// The nodes `roots` reach in a process history archive, checked within
+/// `limits` as a walk of the same stored rows checks them: the archive is
+/// the whole read, so a node it lacks is missing.
+pub(super) async fn walk_archive(
+    archive: &process_archive::ProcessArchive<'_>,
+    roots: &[NodeId],
+    limits: &DecodeLimits,
+) -> Answer<BTreeMap<NodeId, HydratedNode>> {
+    let mut found = Found::new();
+    let (mut count, mut total) = (0, 0);
+    for node in archive.reach(roots, false).map_err(archive_refused)? {
+        charge_node(limits, &mut count, &mut total, node.bytes.len())?;
+        found.insert(
+            node.id,
+            (
+                encoding_of(i16::from(node.encoding))?,
+                Some(node.bytes.to_vec()),
+            ),
+        );
+    }
+    walk_found(None, roots, found, Budget { count, total }, limits, None).await
 }
 
 /// `owner`'s root graph, hydrated in one statement on `connection`: its
@@ -800,6 +866,15 @@ pub(super) async fn hydrate_in(
 ) -> Answer<HydratedGraph> {
     let rows = hydrate_rows(connection, &owner).await?;
     let Some(root) = rows.first().and_then(|(root, ..)| root.as_deref()) else {
+        // A finished process's packed history answers from its archive,
+        // read after its rows were found gone: packing only removes rows.
+        if let Some(process) = process_archive::root_process(&owner)
+            && let Some(bytes) = super::process_history::archive_bytes(connection, &process)
+                .await
+                .map_err(db)?
+        {
+            return hydrate_archived(&bytes, owner, expected, limits).await;
+        }
         return Err(GraphRefusal::RootRetired);
     };
     let root = node_of(root)?;
@@ -1338,6 +1413,13 @@ impl PostgresDurableStore {
         self.read_snapshot(|snapshot| {
             Box::pin(async move {
                 let rows = super::run_records::read_limited(snapshot, owner, run, max_rows).await?;
+                if rows.is_empty()
+                    && let Some(archived) =
+                        super::process_history::run_facts(snapshot, owner, run, max_rows, &limits)
+                            .await?
+                {
+                    return Ok(archived);
+                }
                 let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
                 let nodes = walk_within(snapshot, &roots, &limits, None)
                     .await
