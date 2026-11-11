@@ -1373,8 +1373,9 @@ impl<'a> Compiler<'a> {
     /// is checked against: an authored, uncovered caller's call of a
     /// helper body whose signature types something (`K-FN-004`), whether
     /// or not the document carries the helper's definition: a function's
-    /// identity is its content. A native's own arguments are its
-    /// formula's to bound.
+    /// identity is its content. A helper whose definition states a native
+    /// checks its own arguments (`K-FN-007`), whichever implementation the
+    /// plan runs, so its body is held to no contract the native is not.
     pub(crate) fn checked(&self, f: &Fun, id: FunctionId, callee: &Callee) -> Option<Arc<Checked>> {
         let authored = !self.in_library()
             && !f.covered
@@ -1388,7 +1389,11 @@ impl<'a> Compiler<'a> {
         {
             return None;
         }
-        let signature = &self.registry.get(&id)?.definition().signature;
+        let definition = self.registry.get(&id)?.definition();
+        if definition.has_native() {
+            return None;
+        }
+        let signature = &definition.signature;
         let typed = signature.result != lash_kernel_value::Type::Any
             || signature
                 .params
