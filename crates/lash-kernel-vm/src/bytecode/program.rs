@@ -180,6 +180,10 @@ pub struct Unit {
     pub points: Vec<(u32, Point)>,
     /// The fused runs `Op::Fused` names (`fuse`).
     pub fused: Vec<Fused>,
+    /// The block heads' traces `Op::Trace` names, and their micro-ops
+    /// (`trace`).
+    pub traces: Vec<super::trace::Trace>,
+    pub micros: Vec<super::trace::Micro>,
     /// The library bodies expanded in place of their calls (`inline`),
     /// each a region of ops past the unit's own.
     pub inlines: Vec<InlineSite>,
@@ -247,6 +251,7 @@ impl Unit {
     pub fn original(&self, pc: usize) -> Option<Op> {
         match *self.ops.get(pc)? {
             Op::Fused(n) => Some(self.fused[n as usize].first),
+            Op::Trace(n) => Some(Op::Block(self.traces[n as usize].block)),
             Op::Inline(n) => Some(Op::Call(self.inlines[n as usize].call)),
             op => Some(op),
         }

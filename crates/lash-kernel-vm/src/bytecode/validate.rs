@@ -300,8 +300,9 @@ impl Unit {
                         .is_some_and(|site| local(site.slot.saturating_add(5)))
                 }
                 Op::Action(n) => (n as usize) < self.actions.len(),
-                // Fusion writes fused runs after validation.
-                Op::Fused(_) => false,
+                // Fusion writes fused runs, and the trace pass traces,
+                // after validation.
+                Op::Fused(_) | Op::Trace(_) => false,
                 Op::Inline(n) => self
                     .inlines
                     .get(n as usize)
@@ -707,7 +708,8 @@ impl Unit {
             | Op::Fall
             | Op::Unavailable(_)
             | Op::Deopt(_)
-            | Op::Fused(_) => (0, 0),
+            | Op::Fused(_)
+            | Op::Trace(_) => (0, 0),
             Op::Const(_)
             | Op::Local(_)
             | Op::CellGet(_)
@@ -834,6 +836,8 @@ mod tests {
             site: Site::new(SiteUnit::Main, Vec::new()),
             points: Vec::new(),
             fused: Vec::new(),
+            traces: Vec::new(),
+            micros: Vec::new(),
             inlines: Vec::new(),
             folds: Vec::new(),
             origin: Vec::new(),

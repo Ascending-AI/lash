@@ -19,6 +19,12 @@
 //! does not fit, a cancellation) cancels the reservation exactly once: the
 //! reservation is an `Option`, taken when cancelled.
 
+use lash_kernel_doc::{Measure, Value};
+
+use super::{Run, Vm, read};
+use crate::bytecode::charge_tables::RESULT;
+use crate::heap::Heap;
+
 /// A charge refusal: the event would pass the limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Refused {
@@ -189,6 +195,15 @@ impl Meter {
         }
     }
 
+    /// Whether an atomic event of `units` billed now, every reservation
+    /// spent, fits the limit.
+    #[inline]
+    pub(crate) fn fits(&self, units: u64) -> bool {
+        self.used
+            .checked_add(units)
+            .is_some_and(|used| used <= self.limit)
+    }
+
     /// A dynamic fee at an op that has billed `through` of its block: the
     /// reservation is cancelled and the fee billed on the exact path; the
     /// block continues event by event (contract §3).
@@ -213,5 +228,77 @@ impl Meter {
     pub(crate) fn grow(&mut self, more: u64) {
         debug_assert!(self.reserved.is_none());
         self.limit = self.limit.saturating_add(more);
+    }
+}
+
+impl<H: Heap> Vm<H> {
+    /// Evaluates formula `charge` over `args` and `result`.
+    pub(super) fn formula(&self, charge: u32, args: &[Value], result: Option<&Value>) -> Run<u64> {
+        #[cfg(test)]
+        super::charge_work();
+        let formula = self.program.charge(charge);
+        if let Some(units) = formula.constant() {
+            return Ok(units);
+        }
+        // Two arguments and a result of size 1 or 2 read their fee from
+        // the formula's table.
+        if let ([first, second], Some(result)) = (args, result)
+            && let Some(units) = formula.pair([first, second, result])
+        {
+            return Ok(units);
+        }
+        let arena = self.heap.arena();
+        // A sum of sizes over values that hold no member is billed without
+        // its tree, the same amount: such a value's deep size is its size
+        // (`K-CHG-005`). A leaf the arena holds (a long text, bytes, a big
+        // integer) is measured from its body; one it cannot read now takes
+        // the tree, which meets the same read.
+        if let Some(linear) = formula.linear()
+            && let Some(units) = linear.units(|position| {
+                let value = if position == RESULT {
+                    result
+                } else {
+                    args.get(usize::from(position))
+                };
+                match value {
+                    None => Some(0),
+                    Some(value) => crate::data::immediate_size(value).or_else(|| {
+                        crate::data::holds_nothing(value)
+                            .then(|| crate::data::size(arena, value).ok())
+                            .flatten()
+                    }),
+                }
+            })
+        {
+            return Ok(units);
+        }
+        let mut failed = None;
+        let units = formula.evaluate(|position, how| {
+            let value = if position == RESULT {
+                result
+            } else {
+                args.get(usize::from(position))
+            };
+            let Some(value) = value else {
+                return 0;
+            };
+            if let Some(units) = crate::data::immediate_measure(value, how) {
+                return units;
+            }
+            let measured = match how {
+                Measure::Size => crate::data::size(arena, value),
+                Measure::DeepSize => crate::data::deep_size(arena, value),
+                Measure::NestedSize => crate::data::nested_size(arena, value),
+                Measure::Magnitude => Ok(crate::data::magnitude(arena, value)),
+            };
+            measured.unwrap_or_else(|error| {
+                failed = Some(error);
+                0
+            })
+        });
+        match failed {
+            Some(error) => Err(read(error)),
+            None => Ok(units),
+        }
     }
 }

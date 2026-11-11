@@ -1677,6 +1677,8 @@ impl<'a> Compiler<'a> {
             site: Site::new(site, path),
             points,
             fused: Vec::new(),
+            traces: Vec::new(),
+            micros: Vec::new(),
             inlines: Vec::new(),
             folds: Vec::new(),
             origin,

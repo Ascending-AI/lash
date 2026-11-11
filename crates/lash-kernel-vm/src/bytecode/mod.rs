@@ -22,4 +22,5 @@ pub(crate) mod names;
 pub(crate) mod op;
 pub(crate) mod program;
 pub(crate) mod site_tables;
+pub(crate) mod trace;
 pub(crate) mod validate;

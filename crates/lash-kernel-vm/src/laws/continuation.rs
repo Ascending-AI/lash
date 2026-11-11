@@ -1501,3 +1501,19 @@ main { }
     );
     assert_eq!(trace.printed, printed);
 }
+
+/// A run sealed at any slice, mid-way through the straight line a trace
+/// runs, opens cold at the op the seal stands at and finishes with the
+/// result, the prints and the charge of the run never sealed.
+#[test]
+fn a_run_sealed_mid_trace_reopens_cold_alike() {
+    let text = "definition \"function f(a: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let k = 0 while num.lt(k, 2) { set k = num.add(k, 1) } print k return num.mul(a, 2)  }\"\n\nmain { let obj = map{\"a\": 1, \"b\": [2]}\nlet acc = 0\nlet g = fn(x) { return num.add(acc, x) }\nlet j = 0\nwhile num.lt(j, 4) {\nlet p = j\nlet q = p\nlet r = q\nset acc = num.add(acc, call f(r))\nset acc = num.add(acc, obj[\"a\"])\nset acc = apply g(list.len(obj[\"b\"]))\nprint acc\nset j = num.add(j, 1)\n}\nreturn acc }\n";
+    let before = crate::vm::trace::ran();
+    let (reference, _) = drive(text, &[], Drive::new(u64::MAX, false));
+    assert!(crate::vm::trace::ran() > before, "no trace ran");
+    assert_eq!(reference.end, format!("Finished({:?})", int(20)));
+    for slice in 1..=reference.charged {
+        let (reopened, _) = drive(text, &[], Drive::new(slice, true));
+        assert_eq!(reopened, reference, "reopened at slice {slice}");
+    }
+}

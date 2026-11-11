@@ -1398,3 +1398,211 @@ fn a_cold_load_refused_for_memory_refuses_at_its_event_with_the_charge_before_it
     }
     assert!(refused > 0, "no bound refuses the load");
 }
+
+/// The perf rows' loops in core text: Python's on words, TypeScript's on
+/// floats, with a real multiply, an inline call, a closure and a property
+/// read in their bodies.
+const FLOOR_ROWS: [&str; 7] = [
+    r#"main {
+  let j = 0
+  while num.lt(j, 6) {
+    set j = num.add(j, 1)
+  }
+  return 0
+}"#,
+    r#"main {
+  let acc = 0
+  let j = 0
+  while num.lt(j, 3) {
+    let value = 0
+    let i = 0
+    while num.lt(i, 6) {
+      set value = num.add(value, num.mul(i, 3))
+      set i = num.add(i, 1)
+    }
+    set acc = num.add(acc, value)
+    set j = num.add(j, 1)
+  }
+  return acc
+}"#,
+    r#"definition "function f(a: Any) -> Any\nkernel 1\nmetering statements\nbody { return 1 }"
+main {
+  let acc = 0
+  let j = 0
+  while num.lt(j, 3) {
+    let p = j
+    let q = p
+    let r = q
+    set acc = num.add(acc, call f(r))
+    set acc = num.add(acc, call f(j))
+    set j = num.add(j, 1)
+  }
+  return acc
+}"#,
+    r#"main {
+  let acc = 0
+  let f = fn(a) { set acc = num.add(acc, 1) return 0 }
+  let j = 0
+  while num.lt(j, 3) {
+    let p = j
+    let q = p
+    let r = q
+    do apply f(r)
+    do apply f(j)
+    set j = num.add(j, 1)
+  }
+  return acc
+}"#,
+    r#"main {
+  let obj = map{"a": 1, "b": 2}
+  let acc = 0
+  let j = 0
+  while num.lt(j, 3) {
+    let p = j
+    let q = p
+    let r = q
+    set acc = num.add(acc, obj["a"])
+    set acc = num.add(acc, obj["b"])
+    set j = num.add(j, 1)
+  }
+  return acc
+}"#,
+    r#"main {
+  let j = 0.0
+  while real.lt(j, 6.0) {
+    set j = real.add(j, 1.0)
+  }
+  return 0
+}"#,
+    r#"main {
+  let acc = 0.0
+  let j = 0.0
+  while real.lt(j, 3.0) {
+    let value = 0.0
+    let i = 0.0
+    while real.lt(i, 6.0) {
+      set value = real.add(value, real.add(i, i))
+      set i = real.add(i, 1.0)
+    }
+    set acc = real.add(acc, value)
+    set j = real.add(j, 1.0)
+  }
+  return 0
+}"#,
+];
+
+/// The micro-ops a run of `text` took on its traces.
+fn traced(text: &str, limit: u64, exact: bool) -> u64 {
+    let before = crate::vm::trace::ran();
+    core_run(text, limit, u64::MAX, exact, None);
+    crate::vm::trace::ran() - before
+}
+
+/// A trace bills, refuses, slices and grows exactly as the event-by-event
+/// path does (cutover contract §3), at every slice and every limit, with
+/// the guard each trace takes failing at a different op: a block's
+/// prepay or slice test, a fused run's prepay, an inline call's exact
+/// state and a recorded charge's watch.
+#[test]
+fn floor_rows_refuse_and_slice_alike_on_the_prepaid_and_exact_paths() {
+    for text in FLOOR_ROWS {
+        let whole = core_run(text, ROOMY.charge_limit, u64::MAX, true, None);
+        let total = whole.1.expect("charge is metered");
+        assert!(whole.0.starts_with("Int"), "{whole:?}");
+        assert_eq!(
+            core_run(text, ROOMY.charge_limit, u64::MAX, false, None),
+            whole
+        );
+        assert!(
+            traced(text, ROOMY.charge_limit, false) > 0,
+            "no trace ran: {text}"
+        );
+        for slice in 1..=total {
+            let sliced = |exact| {
+                let seen = drive(
+                    text,
+                    Drive {
+                        slice,
+                        exact,
+                        ..Drive::default()
+                    },
+                );
+                (seen.end, seen.charged, seen.printed, seen.slices)
+            };
+            assert_eq!(sliced(false), sliced(true), "slice {slice}: {text}");
+        }
+        for limit in 0..=total + 1 {
+            let exact = core_run(text, limit, u64::MAX, true, None);
+            assert_eq!(
+                core_run(text, limit, u64::MAX, false, None),
+                exact,
+                "limit {limit}"
+            );
+            assert_eq!(
+                core_run(text, limit, 7, false, None),
+                exact,
+                "limit {limit}, sliced"
+            );
+            let grow = total / 3 + 1;
+            let started = core_run(text, limit + grow, u64::MAX, true, None);
+            for exact_path in [false, true] {
+                let limiter = Scripted::answering([LimitDecision::Grow(grow)]);
+                let grown = core_run(text, limit, u64::MAX, exact_path, Some(&limiter));
+                assert_eq!(grown, started, "limit {limit} grown, exact {exact_path}");
+            }
+        }
+    }
+}
+
+/// A fused condition whose answer is not a boolean raises after its call
+/// and the call's fee, once: the trace that ran the call does not hand it
+/// back to be run and billed again.
+#[test]
+fn a_fused_condition_that_is_no_boolean_bills_its_call_once() {
+    for text in [
+        "main { let j = 0 while num.add(j, 1) { set j = 1 } return 0 }",
+        "main { let j = 0 if num.add(j, 1) { set j = 1 } return 0 }",
+    ] {
+        let exact = core_run(text, ROOMY.charge_limit, u64::MAX, true, None);
+        assert!(exact.0.starts_with("Error(Uncaught"), "{exact:?}");
+        assert!(
+            traced(text, ROOMY.charge_limit, false) > 0,
+            "no trace ran: {text}"
+        );
+        for limit in 0..=exact.1.unwrap() + 1 {
+            let exact = core_run(text, limit, u64::MAX, true, None);
+            assert_eq!(
+                core_run(text, limit, u64::MAX, false, None),
+                exact,
+                "limit {limit}: {text}"
+            );
+        }
+    }
+}
+
+/// An operand outside a fused run's words, and an answer its native's
+/// entry declines, give the run back to the dispatcher before any effect:
+/// the native's own call raises, billed as on the exact path.
+#[test]
+fn a_fused_operand_off_its_words_runs_the_native_call() {
+    for text in [
+        "main { let big = 9223372036854775807 let j = 0 while num.lt(j, 2) { set j = num.add(j, 1) } return num.add(big, j) }",
+        "main { let j = 0 let big = 4611686018427387904 while num.lt(j, 2) { set j = num.add(j, 1) } set j = num.mul(big, j) return j }",
+        "main { let j = 0 while num.lt(j, 2) { set j = num.add(j, 1) } return num.add(j, 0.5) }",
+    ] {
+        let exact = core_run(text, ROOMY.charge_limit, u64::MAX, true, None);
+        assert!(exact.0.starts_with("Error(Uncaught"), "{exact:?}");
+        assert!(
+            traced(text, ROOMY.charge_limit, false) > 0,
+            "no trace ran: {text}"
+        );
+        for limit in 0..=exact.1.unwrap() + 1 {
+            let exact = core_run(text, limit, u64::MAX, true, None);
+            assert_eq!(
+                core_run(text, limit, u64::MAX, false, None),
+                exact,
+                "limit {limit}: {text}"
+            );
+        }
+    }
+}

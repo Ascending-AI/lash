@@ -95,12 +95,21 @@ fn words(
     inline: bool,
     operation: lash_kernel_doc::scalar::ScalarOp,
 ) -> Option<lash_kernel_doc::arena::native::InlineNative> {
+    scalar(
+        inline,
+        operation,
+        lash_kernel_doc::arena::native::ScalarDomain::Words,
+    )
+}
+
+fn scalar(
+    inline: bool,
+    operation: lash_kernel_doc::scalar::ScalarOp,
+    domain: lash_kernel_doc::arena::native::ScalarDomain,
+) -> Option<lash_kernel_doc::arena::native::InlineNative> {
     inline.then_some(lash_kernel_doc::arena::native::InlineNative {
         native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
-        operation: lash_kernel_doc::arena::native::InlineOperation::Scalar {
-            operation,
-            domain: lash_kernel_doc::arena::native::ScalarDomain::Words,
-        },
+        operation: lash_kernel_doc::arena::native::InlineOperation::Scalar { operation, domain },
     })
 }
 
@@ -116,6 +125,54 @@ prepared!(
             .map(Value::Int)
             .ok_or_else(|| type_error("num.add passes a word")),
         _ => Err(type_error("num.add takes two integers")),
+    }
+);
+
+/// Declares its inline answer when it holds `true`.
+struct Mul(bool);
+prepared!(
+    Mul,
+    true,
+    |mul: &Mul| words(mul.0, lash_kernel_doc::scalar::ScalarOp::Mul),
+    |args| match args {
+        [Value::Int(a), Value::Int(b)] => a
+            .checked_mul(*b)
+            .map(Value::Int)
+            .ok_or_else(|| type_error("num.mul passes a word")),
+        _ => Err(type_error("num.mul takes two integers")),
+    }
+);
+
+/// A TypeScript number's sum: its operands are floats.
+struct RealAdd(bool);
+prepared!(
+    RealAdd,
+    true,
+    |add: &RealAdd| scalar(
+        add.0,
+        lash_kernel_doc::scalar::ScalarOp::Add,
+        lash_kernel_doc::arena::native::ScalarDomain::WordsOrFloats
+    ),
+    |args| match args {
+        [Value::Float(a), Value::Float(b)] =>
+            Ok(Value::Float(lash_kernel_doc::Float::new(a.get() + b.get()))),
+        _ => Err(type_error("real.add takes two floats")),
+    }
+);
+
+/// A TypeScript number's order: its operands are floats.
+struct RealLess(bool);
+prepared!(
+    RealLess,
+    true,
+    |less: &RealLess| scalar(
+        less.0,
+        lash_kernel_doc::scalar::ScalarOp::Lt,
+        lash_kernel_doc::arena::native::ScalarDomain::WordsOrFloats
+    ),
+    |args| match args {
+        [Value::Float(a), Value::Float(b)] => Ok(Value::Bool(a.get() < b.get())),
+        _ => Err(type_error("real.lt takes two floats")),
     }
 );
 
@@ -351,7 +408,7 @@ fn library_declaring(native_twice: bool, probes: Option<Probes>, inline: bool) -
     let machine = register_machine_functions(&mut registry).unwrap();
     ids.insert("deref", machine.deref);
     ids.insert("tasks.unfinished", machine.tasks_unfinished);
-    let natives: [(&'static str, &str, Arc<dyn NativeFunction>); 9] = [
+    let natives: [(&'static str, &str, Arc<dyn NativeFunction>); 12] = [
         (
             "work.error",
             "() -> Any\nkernel 1\ncharge 1",
@@ -361,6 +418,21 @@ fn library_declaring(native_twice: bool, probes: Option<Probes>, inline: bool) -
             "num.add",
             "(a: Any, b: Any) -> Any\nkernel 1\ncharge 1",
             Arc::new(Add(inline)),
+        ),
+        (
+            "num.mul",
+            "(a: Any, b: Any) -> Any\nkernel 1\ncharge 1",
+            Arc::new(Mul(inline)),
+        ),
+        (
+            "real.add",
+            "(a: Any, b: Any) -> Any\nkernel 1\ncharge 1",
+            Arc::new(RealAdd(inline)),
+        ),
+        (
+            "real.lt",
+            "(a: Any, b: Any) -> Bool\nkernel 1\ncharge 1",
+            Arc::new(RealLess(inline)),
         ),
         (
             "num.lt",

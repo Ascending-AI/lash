@@ -29,13 +29,14 @@ pub(crate) mod members;
 pub(crate) mod plans;
 mod raise;
 pub(crate) mod tasks;
+pub(crate) mod trace;
 pub(crate) mod watch;
 
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::arena::native::{NativeError, NewObject, Retry};
-use lash_kernel_doc::{Datum, Document, Measure, Value};
+use lash_kernel_doc::{Datum, Document, Value};
 use lash_kernel_value::data_limits::KernelDataLimits;
 use lash_kernel_value::names::CallableId;
 use lash_kernel_value::sites::Site;
@@ -62,7 +63,6 @@ pub(crate) fn depth_reads() -> u64 {
     DEPTH_READS.with(std::cell::Cell::get)
 }
 use self::library::Library;
-use crate::bytecode::charge_tables::RESULT;
 use crate::bytecode::op::Op;
 use crate::bytecode::program::{Callee, Constant, LIB, Program, Then, Unit, UnitId, UnitKind};
 use crate::heap::{Heap, LoadError};
@@ -656,76 +656,6 @@ impl<H: Heap> Vm<H> {
         }
     }
 
-    /// Evaluates formula `charge` over `args` and `result`.
-    fn formula(&self, charge: u32, args: &[Value], result: Option<&Value>) -> Run<u64> {
-        #[cfg(test)]
-        charge_work();
-        let formula = self.program.charge(charge);
-        if let Some(units) = formula.constant() {
-            return Ok(units);
-        }
-        // Two arguments and a result of size 1 or 2 read their fee from
-        // the formula's table.
-        if let ([first, second], Some(result)) = (args, result)
-            && let Some(units) = formula.pair([first, second, result])
-        {
-            return Ok(units);
-        }
-        let arena = self.heap.arena();
-        // A sum of sizes over values that hold no member is billed without
-        // its tree, the same amount: such a value's deep size is its size
-        // (`K-CHG-005`). A leaf the arena holds (a long text, bytes, a big
-        // integer) is measured from its body; one it cannot read now takes
-        // the tree, which meets the same read.
-        if let Some(linear) = formula.linear()
-            && let Some(units) = linear.units(|position| {
-                let value = if position == RESULT {
-                    result
-                } else {
-                    args.get(usize::from(position))
-                };
-                match value {
-                    None => Some(0),
-                    Some(value) => crate::data::immediate_size(value).or_else(|| {
-                        crate::data::holds_nothing(value)
-                            .then(|| crate::data::size(arena, value).ok())
-                            .flatten()
-                    }),
-                }
-            })
-        {
-            return Ok(units);
-        }
-        let mut failed = None;
-        let units = formula.evaluate(|position, how| {
-            let value = if position == RESULT {
-                result
-            } else {
-                args.get(usize::from(position))
-            };
-            let Some(value) = value else {
-                return 0;
-            };
-            if let Some(units) = crate::data::immediate_measure(value, how) {
-                return units;
-            }
-            let measured = match how {
-                Measure::Size => crate::data::size(arena, value),
-                Measure::DeepSize => crate::data::deep_size(arena, value),
-                Measure::NestedSize => crate::data::nested_size(arena, value),
-                Measure::Magnitude => Ok(crate::data::magnitude(arena, value)),
-            };
-            measured.unwrap_or_else(|error| {
-                failed = Some(error);
-                0
-            })
-        });
-        match failed {
-            Some(error) => Err(read(error)),
-            None => Ok(units),
-        }
-    }
-
     // --- The heap.
 
     /// Admits `units`, collecting once before it refuses (contract §2).
@@ -957,7 +887,9 @@ impl<H: Heap> Vm<H> {
     /// Pushes a frame of `unit` whose `argc` arguments are the top of the
     /// stack: missing parameters are absent (`K-FN-004`), and each local a
     /// closure shares is boxed into a cell (`K-CLO-001`). Library code
-    /// runs as Link `caller`; an own unit as its own Link.
+    /// runs as Link `caller`; an own unit as its own Link. Inlined into
+    /// its three callers, every call's path.
+    #[inline(always)]
     pub(crate) fn enter(
         &mut self,
         unit: UnitId,
@@ -1190,9 +1122,19 @@ impl<H: Heap> Vm<H> {
                     crate::perf_witness::record(|work| work.vm_steps += 1);
                     self.chill();
                 }
+                // The laws' forced-cold and collected runs stop at every
+                // statement, which a trace runs through.
+                #[cfg(test)]
+                if let Op::Trace(n) = op
+                    && (self.chill.is_some() || self.collecting)
+                {
+                    op = Op::Block(unit.traces[n as usize].block);
+                }
                 // A block head bills nothing and starts no step
                 // (validated): unobserved, it needs no exact step.
-                if self.exact && (self.watch.is_some() || !matches!(op, Op::Block(_))) {
+                if self.exact
+                    && (self.watch.is_some() || !matches!(op, Op::Block(_) | Op::Trace(_)))
+                {
                     // A refusal, a limiter and a slice read the frame at
                     // the op.
                     sync!(pc);
@@ -1219,6 +1161,10 @@ impl<H: Heap> Vm<H> {
                         let block = &unit.blocks[block as usize];
                         self.exact = self.watch.is_some() || !self.meter.enter(block.charge);
                     }
+                    Op::Trace(n) => match self.trace(&program, unit, top, n, base)? {
+                        Some(next) => pc = next,
+                        None => continue 'frames,
+                    },
                     Op::Nop => {}
                     Op::Const(n) => self.push(self.konst(n)),
                     Op::Local(n) => self.push(self.cx.stack[base + usize::from(n)]),
@@ -1657,7 +1603,8 @@ impl<H: Heap> Vm<H> {
             | Op::CaptureGet(_)
             | Op::CaptureSet(_)
             | Op::Return
-            | Op::Fused(_) => return Err(fault("a dispatched op ran out of line")),
+            | Op::Fused(_)
+            | Op::Trace(_) => return Err(fault("a dispatched op ran out of line")),
         }
         Ok(None)
     }

@@ -30,6 +30,54 @@ impl<H: Heap> Vm<H> {
         self.error("type_error", message)
     }
 
+    /// Fused run `fused`'s answer over two word ints `args`, as the
+    /// native's ordinary answer gives it, its fee prepaid on the block's
+    /// reservation. `None`, with nothing done, where it is no such
+    /// answer. An answer of `ints` is an int or a bool, of size two
+    /// exactly when it is a nonzero int.
+    #[inline(always)]
+    pub(super) fn fused_words(&mut self, fused: &Fused, args: [Value; 2]) -> Option<Value> {
+        let (Some(form), [Value::Int(a), Value::Int(b)]) = (&fused.words, args) else {
+            return None;
+        };
+        let value = lash_kernel_doc::scalar::ints(form.operation, a, b)?;
+        let paid = match form.fee {
+            Some(table) if !self.off => {
+                let large = matches!(value, Value::Int(word) if word != 0);
+                self.meter.prepay(
+                    table[usize::from(a != 0) | usize::from(b != 0) << 1 | usize::from(large) << 2],
+                )
+            }
+            _ => true,
+        };
+        paid.then_some(value)
+    }
+
+    /// Fused run `fused`'s other inline answer over `args`, its fee
+    /// prepaid on the block's reservation. `None`, with nothing done,
+    /// where the run goes on from its call ([`Self::fused_slow`]). Out of
+    /// line: what it reads, a trace does not hold through its other
+    /// micro-ops.
+    #[inline(never)]
+    pub(super) fn fused_other(
+        &mut self,
+        program: &Program,
+        unit: &Unit,
+        fused: &Fused,
+        args: [Value; 2],
+    ) -> Run<Option<Value>> {
+        let Callee::Native { native, charged } = unit.calls[fused.site as usize].callee else {
+            return Err(fault("a fused call of no native"));
+        };
+        if let Some(answer) = self.answer(program, native, charged, &args) {
+            let (value, fee) = answer?;
+            if fee.is_none_or(|units| self.meter.prepay(units)) {
+                return Ok(Some(value));
+            }
+        }
+        Ok(None)
+    }
+
     /// A fused run's two call arguments: its pushes read where they are,
     /// below them what the stack holds.
     #[inline(always)]

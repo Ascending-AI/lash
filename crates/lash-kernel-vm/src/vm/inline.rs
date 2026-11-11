@@ -121,6 +121,66 @@ impl<H: Heap> Vm<H> {
         Ok(None)
     }
 
+    /// [`Self::inline_folded`] where a fold holds and nothing it does can
+    /// refuse, read cold or be observed, as one bill: the activation's
+    /// frame admitted and released nets to nothing, and its completion
+    /// fee fits the limit, so it is billed whole. Gives whether it ran;
+    /// where it did not, nothing is done.
+    pub(super) fn inline_fast(&mut self, unit: &Unit, n: u32, folds: &[Fold]) -> Run<bool> {
+        let site = unit.inlines[n as usize];
+        let call = &unit.calls[site.call as usize];
+        let Callee::Unit { charge, .. } = call.callee else {
+            return Ok(false);
+        };
+        if self.watch.is_some() || self.depth_full() {
+            return Ok(false);
+        }
+        let cost = self.frame_cost(site.callee);
+        if self
+            .heap
+            .held()
+            .checked_add(cost)
+            .is_none_or(|held| held > self.heap.bound())
+        {
+            return Ok(false);
+        }
+        let base = self.cx.stack.len() - usize::from(call.argc);
+        let Some((fold, value)) = folds
+            .iter()
+            .find_map(|fold| self.folded(fold, base).map(|value| (fold, value)))
+        else {
+            return Ok(false);
+        };
+        if let Some(checked) = &call.checked
+            && !super::fits::plainly_fits(value, &checked.signature.result)
+        {
+            return Ok(false);
+        }
+        let units = match charge.filter(|_| !self.off) {
+            Some(charge) => match self.formula(charge, &self.cx.stack[base..], Some(&value)) {
+                Ok(units) => Some(units),
+                Err(_) => return Ok(false),
+            },
+            None => None,
+        };
+        // The block's reservation is spent at the call: the fee is billed
+        // on the exact path, where it fits whole.
+        if units.is_some_and(|units| !self.meter.fits(units)) {
+            return Ok(false);
+        }
+        if let Some(frame) = self.cx.frames.last_mut() {
+            frame.pc = fold.leave + 1;
+        }
+        self.meter.leave();
+        self.exact = true;
+        self.cx.stack.truncate(base);
+        self.push(value);
+        if let Some(units) = units {
+            self.fee(units)?;
+        }
+        Ok(true)
+    }
+
     /// The activation of inline site `n` of `unit` as a call's entry
     /// makes it: its depth checked at the call and its frame admitted.
     /// Gives the call's completion formula and argument count.

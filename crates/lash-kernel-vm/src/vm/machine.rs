@@ -299,6 +299,7 @@ fn build(
     let heights = crate::bytecode::validate::validate(&code).map_err(linked)?;
     crate::bytecode::fold::fold(&mut code);
     crate::bytecode::fuse::fuse(&mut code);
+    crate::bytecode::trace::trace(&mut code);
     let off = matches!(bounds.charge, Charge::Off);
     let operations = operations(program, &code, modes)?;
     let mut vm = Vm::new(

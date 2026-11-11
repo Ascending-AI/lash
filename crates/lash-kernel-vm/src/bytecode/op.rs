@@ -17,6 +17,11 @@ pub enum Op {
     /// A block's head: the block of that index in the unit's table starts
     /// here. The dispatcher prepays it, or enters it event by event.
     Block(u32),
+    /// Trace `n` of the unit (`trace`), in place of a block head's
+    /// `Block`: on a prepaid, unobserved block, the head and the ops after
+    /// it run as the trace's micro-ops; otherwise the head runs as its
+    /// `Block`. Only the trace pass writes it, after fusion.
+    Trace(u32),
     /// Does nothing; it carries events that precede a block boundary.
     Nop,
 
