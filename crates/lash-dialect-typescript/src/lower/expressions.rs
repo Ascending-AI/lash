@@ -334,7 +334,7 @@ impl Lowerer<'_> {
                 target,
                 delta,
                 prefix,
-            } => self.lower_update(target, *delta, *prefix),
+            } => self.lower_update(target, *delta, *prefix, true),
             ast::Expr::As { value, ty } => {
                 // The value itself, believed to be what the assertion says;
                 // `as any` says nothing is known of it.
@@ -977,16 +977,26 @@ impl Lowerer<'_> {
 
     /// `++` and `--`: the operand converted to a number, one added or
     /// taken, the result written back. A postfix form gives the number
-    /// before the change.
-    fn lower_update(
+    /// before the change. When nothing reads the value (`used` false), a
+    /// variable proved a number is stepped in place, with no temporary
+    /// holding its old value.
+    pub(super) fn lower_update(
         &mut self,
         target: &ast::AssignTarget,
         delta: f64,
         prefix: bool,
+        used: bool,
     ) -> Lowering<Operand> {
         match target {
             ast::AssignTarget::Ident(name) | ast::AssignTarget::ParenIdent(name) => {
                 let current = self.read(name, None)?;
+                if !used && current.ty.is_number() {
+                    let recipe = &crate::constructs::operators::UPDATE;
+                    let new = self.binary(recipe.numeric, current, Operand::number(delta))?;
+                    let kernel = self.resolve_for_write(name, self.span)?;
+                    self.store(Place::Variable(kernel), new);
+                    return Ok(Operand::undefined());
+                }
                 let (old, new) = self.stepped(current, delta)?;
                 let kernel = self.resolve_for_write(name, self.span)?;
                 self.store(Place::Variable(kernel.clone()), new);

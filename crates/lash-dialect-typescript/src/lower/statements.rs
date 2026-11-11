@@ -222,7 +222,7 @@ impl Lowerer<'_> {
                         self.assign_member_statement(object, property, value)?;
                         Operand::undefined()
                     }
-                    _ => self.lower_expr(expr)?,
+                    _ => self.lower_unused(expr)?,
                 };
                 self.discard(value);
                 Ok(())
@@ -571,11 +571,7 @@ impl Lowerer<'_> {
                 *before_continue = BeforeContinue::Statements(copy_back(&copies));
             }
             if let (Some(first), Some(update)) = (&first, update) {
-                this.unless_first(first, |this| {
-                    let value = this.lower_expr(update)?;
-                    this.discard(value);
-                    Ok(())
-                })?;
+                this.unless_first(first, |this| this.lower_for_update(update))?;
             }
             if let Some(test) = test {
                 let test = this.lower_expr(test)?;
@@ -646,9 +642,22 @@ impl Lowerer<'_> {
     }
 
     fn lower_for_update(&mut self, update: &ast::Expr) -> Lowering<()> {
-        let value = self.lower_expr(update)?;
+        let value = self.lower_unused(update)?;
         self.discard(value);
         Ok(())
+    }
+
+    /// An expression whose value nothing reads: `++` and `--` need not
+    /// hold the value they would give.
+    fn lower_unused(&mut self, expr: &ast::Expr) -> Lowering<Operand> {
+        match expr {
+            ast::Expr::Update {
+                target,
+                delta,
+                prefix,
+            } => self.lower_update(target, *delta, *prefix, false),
+            _ => self.lower_expr(expr),
+        }
     }
 
     /// `if same(raw, ()) { set element = absent }`: the empty tuple is a

@@ -918,3 +918,46 @@ fn standard_depth_admits_five_thousand_guest_calls() {
         Ended::Finished(Datum::Float(lash_kernel_doc::Float::new(5000.0)))
     );
 }
+
+/// FIG-7688: a for-loop's `i++`, whose value nothing reads, steps `i` in
+/// place: `while num.lt(i, n) { set i = num.add(i, 1.0) }`, with no
+/// temporary holding the old value. By K-CHG-002 and the formulas of
+/// `num.lt` (`1 + (deep(a) + deep(b))^2 + deep(result)`, 6 on floats) and
+/// `num.add` (`1 + deep(a) + deep(b) + deep(result)`, 4): `let n = N` and
+/// `let i = 0` cost 2 each, the `while` statement 1, each test 10 (the
+/// test, 3 nodes and 6) and each step 8 (the statement, 3 nodes and 4),
+/// so a run charges 15 + 18N. A one-unit slice stops at every point
+/// between statements and tests: 2, 4, then 15 + 18j after each test and
+/// 23 + 18j after each step, so none falls inside the step. Every larger
+/// slice charges the same.
+#[test]
+fn an_unused_loop_step_holds_no_temporary_and_slices_only_between_statements() {
+    for n in [0u64, 1, 3] {
+        let source = format!("const n = {n}; for (let i = 0; i < n; i++) {{}}");
+        let charge = 15 + 18 * n;
+        let mut points = vec![2, 4];
+        for trip in 0..n {
+            points.extend([15 + 18 * trip, 23 + 18 * trip]);
+        }
+        points.push(charge);
+        for slice in 1..=charge {
+            let (mut machine, text) = start(&source);
+            let mut stops = Vec::new();
+            loop {
+                match machine.run(&mut Console::default(), slice) {
+                    Ok(Step::Slice) => stops.push(machine.meters().charged.unwrap()),
+                    Ok(Step::Ended(End::Finished(_))) => break,
+                    other => panic!("{other:?}\n{text}"),
+                }
+            }
+            assert_eq!(
+                machine.meters().charged,
+                Some(charge),
+                "n = {n}, slice = {slice}\n{text}"
+            );
+            if slice == 1 {
+                assert_eq!(stops, points, "n = {n}\n{text}");
+            }
+        }
+    }
+}
