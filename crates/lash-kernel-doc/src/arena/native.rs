@@ -777,6 +777,21 @@ impl<'call> Nursery<'call> {
         }
     }
 
+    /// A nursery that may hold `room`, listing what it builds in `built`,
+    /// which is empty: storage a caller keeps between calls.
+    #[inline]
+    pub fn reusing(
+        objects: &'call Objects,
+        room: LogicalBytes,
+        built: Vec<(ArenaHandle, NewObject)>,
+    ) -> Self {
+        debug_assert!(built.is_empty());
+        Self {
+            new: built,
+            ..Self::new(objects, room)
+        }
+    }
+
     /// A nursery without memory reservation accounting or a memory bound.
     pub fn unaccounted(objects: &'call Objects) -> Self {
         Self {

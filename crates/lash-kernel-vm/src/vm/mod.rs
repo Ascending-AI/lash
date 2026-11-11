@@ -303,6 +303,12 @@ pub(crate) struct Vm<H: Heap> {
     /// The position proofs of folded short-text key reads (`inline`):
     /// process-local, each checked whole by the arena before it is used.
     pub(crate) lookups: inline::Lookups,
+    /// The storage a native call's nursery lists what it built in, empty
+    /// between calls: kept so a call allocates no list of its own.
+    pub(crate) built: Vec<(
+        lash_kernel_doc::arena::ArenaHandle,
+        lash_kernel_doc::NewObject,
+    )>,
     /// The laws' forced-cold runs: pages every object out at each
     /// statement boundary, the machine's values rooted.
     #[cfg(test)]
@@ -405,6 +411,7 @@ impl<H: Heap> Vm<H> {
             retrying: false,
             sites: false,
             lookups: Default::default(),
+            built: Vec::new(),
             #[cfg(test)]
             chill: None,
             #[cfg(test)]
@@ -664,8 +671,12 @@ impl<H: Heap> Vm<H> {
         {
             return Ok(units);
         }
-        // A sum of sizes over values the arena holds nothing of is billed
-        // without its tree, the same amount.
+        let arena = self.heap.arena();
+        // A sum of sizes over values that hold no member is billed without
+        // its tree, the same amount: such a value's deep size is its size
+        // (`K-CHG-005`). A leaf the arena holds (a long text, bytes, a big
+        // integer) is measured from its body; one it cannot read now takes
+        // the tree, which meets the same read.
         if let Some(linear) = formula.linear()
             && let Some(units) = linear.units(|position| {
                 let value = if position == RESULT {
@@ -673,12 +684,18 @@ impl<H: Heap> Vm<H> {
                 } else {
                     args.get(usize::from(position))
                 };
-                value.map_or(Some(0), crate::data::immediate_size)
+                match value {
+                    None => Some(0),
+                    Some(value) => crate::data::immediate_size(value).or_else(|| {
+                        crate::data::holds_nothing(value)
+                            .then(|| crate::data::size(arena, value).ok())
+                            .flatten()
+                    }),
+                }
             })
         {
             return Ok(units);
         }
-        let arena = self.heap.arena();
         let mut failed = None;
         let units = formula.evaluate(|position, how| {
             let value = if position == RESULT {

@@ -550,16 +550,21 @@ impl Arena {
 
     fn place(&mut self, handle: ArenaHandle, mut facts: Facts) {
         let index = handle.index() as usize;
-        if index >= self.facts.len() {
-            self.facts.resize_with(index + 1, Facts::default);
-        }
         if let Some(entity) = facts.entity() {
             self.entities.insert(entity, handle);
         }
         self.tokens += 1;
         facts.token = self.tokens;
         facts.zero = true;
-        self.facts[index] = facts;
+        // The next slot, where nearly every new object goes, is written once.
+        if index == self.facts.len() {
+            self.facts.push(facts);
+        } else {
+            if index > self.facts.len() {
+                self.facts.resize_with(index + 1, Facts::default);
+            }
+            self.facts[index] = facts;
+        }
         self.zero.push(handle);
     }
 
@@ -861,8 +866,7 @@ impl Arena {
         let mut nursery = lash_kernel_doc::Nursery::unaccounted(self.objects());
         let data = lash_kernel_doc::error_object::native(args, &mut nursery, kind, message, data)?;
         let data = data.value();
-        let new = nursery.into_new();
-        self.install(new)?;
+        self.install(&mut nursery.into_new())?;
         let summary = composite(&self.facts, std::slice::from_ref(&data));
         Ok(Value::Error(self.insert(
             Body::Error(ErrorBody {
@@ -879,7 +883,8 @@ impl Arena {
 
     /// Prepares and atomically installs what a native call built, in reservation
     /// order. None takes a durable id until the ledger or projection gives it.
-    pub fn install(&mut self, mut new: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
+    /// `new` is left empty, its storage kept for the caller's next call.
+    pub fn install(&mut self, new: &mut Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
         match new.as_slice() {
             // A call that built nothing, only held room, installs nothing.
             [] => return Ok(()),
@@ -890,7 +895,7 @@ impl Arena {
             }
             _ => {}
         }
-        self.prepare_install(new)?.publish();
+        self.prepare_install(std::mem::take(new))?.publish();
         Ok(())
     }
 

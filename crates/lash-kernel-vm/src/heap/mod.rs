@@ -70,7 +70,7 @@ pub(crate) trait Heap {
     fn adopt_constant(&mut self, value: Value);
 
     /// Installs what a native call built, in reservation order.
-    fn install(&mut self, built: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError>;
+    fn install(&mut self, built: &mut Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError>;
 
     /// What the error value of `kind`, `message` and `data` holds once
     /// built: its texts, its data object and itself.

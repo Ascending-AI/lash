@@ -732,7 +732,11 @@ fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     .ok_or_else(crate::exhausted)?;
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text_of(out, summary))
+    // Longer than a short text, so it is built.
+    Ok(call.new.allocate(lash_kernel_doc::NewObject::LongText {
+        text: out.into(),
+        summary,
+    }))
 }
 /// [`concat`] of two short texts whose concatenation is short: the same
 /// text, which is inline, so the call builds and holds nothing of the

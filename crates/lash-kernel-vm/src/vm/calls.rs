@@ -214,6 +214,15 @@ impl<H: Heap> Vm<H> {
         entered
     }
 
+    /// Keeps the emptied list a call's nursery built into for the next
+    /// call. The list it replaces is the empty one `std::mem::take` left,
+    /// which owns no storage, so it is forgotten rather than dropped.
+    #[inline(always)]
+    fn keep_built(&mut self, built: Vec<(ArenaHandle, NewObject)>) {
+        debug_assert!(built.is_empty() && self.built.capacity() == 0);
+        std::mem::forget(std::mem::replace(&mut self.built, built));
+    }
+
     /// Calls native `native` over its top `argc` operands; `charged` when
     /// the call bills the definition's formula (`K-CHG-007`).
     fn call_native(
@@ -273,7 +282,8 @@ impl<H: Heap> Vm<H> {
                 let objects = self.heap.objects();
                 let semantics = self.heap.semantics();
                 let room = self.heap.bound().saturating_sub(self.heap.held());
-                let mut nursery = Nursery::new(objects, LogicalBytes(room));
+                let mut nursery =
+                    Nursery::reusing(objects, LogicalBytes(room), std::mem::take(&mut self.built));
                 let mut counter = WorkCounter::new(limit);
                 let answer = implementation.call(NativeCall {
                     args: Args::new(&self.cx.stack[from..], objects, &semantics),
@@ -334,6 +344,7 @@ impl<H: Heap> Vm<H> {
                 }
             }
         };
+        let mut built = built;
         if peak > 0 {
             // Admitted within the room just measured.
             let _fits = self.heap.admit(peak);
@@ -342,11 +353,13 @@ impl<H: Heap> Vm<H> {
                 .iter()
                 .map(|(_, object)| crate::heap::meter::new_object(object))
                 .fold(0, u64::saturating_add);
-            self.heap
-                .install(built)
-                .map_err(|error| self.native(error))?;
+            let installed = self.heap.install(&mut built);
+            self.keep_built(built);
+            installed.map_err(|error| self.native(error))?;
             // The transient part of the peak ends with the call.
             self.heap.release(peak - placed);
+        } else if built.is_empty() {
+            self.keep_built(built);
         }
         // What the call built is installed: from here a cold read resumes
         // its completion, never the native.

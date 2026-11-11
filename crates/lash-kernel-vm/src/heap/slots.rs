@@ -732,13 +732,13 @@ impl Heap for SlotHeap {
         }
     }
 
-    fn install(&mut self, built: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
+    fn install(&mut self, built: &mut Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
         // A native's batch is nearly always a few objects: their schedules
         // wait on the stack while the arena takes the objects.
         let mut few = [(ArenaHandle::new(0, 0), 0); 4];
         let many: Vec<(ArenaHandle, u64)>;
         let placed = if built.len() <= few.len() {
-            for (slot, (handle, object)) in few.iter_mut().zip(&built) {
+            for (slot, (handle, object)) in few.iter_mut().zip(built.iter()) {
                 *slot = (*handle, schedule(object));
             }
             &few[..built.len()]
@@ -790,7 +790,8 @@ impl Heap for SlotHeap {
             )?;
             (value, nursery.into_new())
         };
-        self.install(built)?;
+        let mut built = built;
+        self.install(&mut built)?;
         Ok(value)
     }
 
