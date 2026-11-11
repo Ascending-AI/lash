@@ -214,6 +214,7 @@ impl ArchiveContents {
         let edges_at = bytes_at + content;
         let edges: usize = order.iter().map(|node| node.children.len() * 4).sum();
         let total = edges_at + edges;
+        debug_assert_eq!(total, self.size_with(order.len(), content, edges / 4));
         if total > PROCESS_ARCHIVE_CAP_BYTES {
             return Err(Unpackable::Oversize { bytes: total });
         }
@@ -877,4 +878,449 @@ fn put_opt_i64(out: &mut Vec<u8>, value: Option<i64>) {
             put_i64(out, value);
         }
     }
+}
+
+/// The process whose archive answers a read of `owner`'s run facts.
+#[must_use]
+pub fn fact_process(owner: &super::OwnerKey) -> Option<&lash_vocabulary::identity::ProcessId> {
+    match owner {
+        super::OwnerKey::Process(process) => Some(process),
+        _ => None,
+    }
+}
+
+/// The process whose archive answers a read of `owner`'s tool calls.
+#[must_use]
+pub fn call_process(owner: &super::CallOwner) -> Option<&lash_vocabulary::identity::ProcessId> {
+    match owner {
+        super::CallOwner::Process(process) => Some(process),
+        _ => None,
+    }
+}
+
+/// The session a process's model calls are recorded under.
+#[must_use]
+pub fn model_session(
+    process: &lash_vocabulary::identity::ProcessId,
+) -> lash_kernel_value::identity::SessionId {
+    lash_kernel_value::identity::SessionId::prefixed(MODEL_SESSION_PREFIX, process.as_str())
+}
+
+const MODEL_SESSION_PREFIX: &str = "process:";
+
+/// The process id whose archive answers a read of `session`'s model calls:
+/// its id as stored, unchecked (a lookup by an id no process has finds none).
+#[must_use]
+pub fn model_process(session: &lash_kernel_value::identity::SessionId) -> Option<&str> {
+    session.as_str().strip_prefix(MODEL_SESSION_PREFIX)
+}
+
+impl From<ArchiveCorrupt> for crate::DurableError {
+    fn from(error: ArchiveCorrupt) -> Self {
+        crate::DurableError::Store(crate::StoreFailure {
+            code: None,
+            kind: crate::StoreFailureKind::Corrupt,
+            message: error.to_string(),
+        })
+    }
+}
+
+/// The stores' corruption refusal for a stored value, word for word.
+fn corrupt(what: &str, value: &str) -> crate::DurableError {
+    crate::DurableError::Store(crate::StoreFailure {
+        code: None,
+        kind: crate::StoreFailureKind::Corrupt,
+        message: format!("stored {what} `{value}` does not decode"),
+    })
+}
+
+fn unsigned(value: i64) -> Result<u64, crate::DurableError> {
+    u64::try_from(value).map_err(|error| corrupt("integer", &error.to_string()))
+}
+
+/// An archived fact as the run-fact read answers it: the same decoding and
+/// refusals as a stored row.
+///
+/// # Errors
+///
+/// A corruption refusal for a value a stored row would refuse.
+pub fn fact_row(
+    owner: &super::OwnerKey,
+    fact: ArchivedFact,
+) -> Result<super::RunFactRow, crate::DurableError> {
+    let kind = super::RunFactKind::parse(&fact.kind)
+        .ok_or_else(|| corrupt("run record kind", &fact.kind))?;
+    let call = fact
+        .call_id
+        .map(|call| {
+            lash_protocol_types::ToolCallId::parse(&call)
+                .map_err(|_| corrupt("tool call id", &call))
+        })
+        .transpose()?;
+    Ok(super::RunFactRow {
+        owner: owner.clone(),
+        run: super::RunSeq(unsigned(fact.run_seq)?),
+        ordinal: super::Ordinal(unsigned(fact.ordinal)?),
+        kind,
+        call,
+        record: fact.record,
+        written_epoch: crate::Epoch(fact.written_epoch),
+    })
+}
+
+/// An archived call as the tool-call read answers it.
+///
+/// # Errors
+///
+/// A corruption refusal for a value a stored row would refuse.
+pub fn call_row(
+    owner: &super::CallOwner,
+    call: ArchivedCall,
+) -> Result<super::ToolCallRow, crate::DurableError> {
+    use super::{ToolCallAnswer, ToolCallDecision};
+    Ok(super::ToolCallRow {
+        sequence: u64::try_from(call.admission_seq)
+            .map_err(|_| corrupt("tool call order", "negative"))?,
+        owner: owner.clone(),
+        call: lash_protocol_types::ToolCallId::parse(&call.call_id)
+            .map_err(|_| corrupt("tool call id", &call.call_id))?,
+        execution: super::OwnerKey::parse(&call.execution_owner)
+            .map_err(|_| corrupt("tool call execution", &call.execution_owner))?,
+        run: super::RunSeq(
+            u64::try_from(call.run_seq).map_err(|_| corrupt("tool call run", "negative"))?,
+        ),
+        member: u64::try_from(call.member).map_err(|_| corrupt("tool call member", "negative"))?,
+        decision: match call.decision.as_deref() {
+            None => None,
+            Some("final") => Some(ToolCallDecision::Final),
+            Some("cancel") => Some(ToolCallDecision::Cancel),
+            Some(other) => return Err(corrupt("tool call decision", other)),
+        },
+        answer: call
+            .answer_outcome
+            .map(|outcome| {
+                ToolCallAnswer::from_stored(&outcome, call.body_ref)
+                    .ok_or_else(|| corrupt("tool call answer", &outcome))
+            })
+            .transpose()?,
+    })
+}
+
+/// The archived calls `selection` reads, in the order the stored read
+/// answers them.
+///
+/// # Errors
+///
+/// [`ArchiveCorrupt`] for a row that does not decode.
+pub fn select_calls(
+    archive: &ProcessArchive<'_>,
+    owner: &super::CallOwner,
+    selection: &super::ToolCallSelection,
+) -> Result<Vec<ArchivedCall>, ArchiveCorrupt> {
+    use super::ToolCallSelection;
+    let key = owner.stored();
+    match selection {
+        ToolCallSelection::Calls(calls) => {
+            let named = calls.iter().map(|call| call.as_str()).collect();
+            archive.calls_named(&key, &named)
+        }
+        ToolCallSelection::List { after, limit }
+        | ToolCallSelection::SavedReads { after, limit } => {
+            let (sequence, call) = after.as_ref().map_or((-1, ""), |cursor| {
+                (
+                    i64::try_from(cursor.sequence).unwrap_or(i64::MAX),
+                    cursor.call.as_str(),
+                )
+            });
+            archive.call_page(
+                &key,
+                (sequence, call),
+                *limit as usize,
+                matches!(selection, ToolCallSelection::SavedReads { .. }),
+            )
+        }
+    }
+}
+
+/// What a model-call read selects from an archive.
+#[derive(Clone, Copy, Debug)]
+pub enum ModelSelection<'a> {
+    /// Sealed records, every one or those with the given ids.
+    Records(Option<&'a [lash_protocol_types::llm::types::LlmCallId]>),
+    /// Reservations, every one, those with the given ids, or the one at a
+    /// call key (matched on its exact run).
+    Pins {
+        ids: Option<&'a [lash_protocol_types::llm::types::LlmCallId]>,
+        call: Option<&'a str>,
+    },
+}
+
+/// The archived model calls of `owner` that `selection` reads, in stored
+/// order. `ascii_case_like` is the store's `LIKE`.
+///
+/// # Errors
+///
+/// [`ArchiveCorrupt`] for a row that does not decode.
+pub fn select_models(
+    archive: &ProcessArchive<'_>,
+    owner: &str,
+    selection: ModelSelection<'_>,
+    ascii_case_like: bool,
+) -> Result<Vec<ArchivedModelCall>, ArchiveCorrupt> {
+    let named = |ids: Option<&[lash_protocol_types::llm::types::LlmCallId]>, id: &str| {
+        ids.is_none_or(|ids| ids.iter().any(|named| named.0 == id))
+    };
+    archive.models(|model| match selection {
+        ModelSelection::Records(ids) => {
+            model.record_ref.is_some()
+                && model_owner_matches(&model.run, owner, ascii_case_like)
+                && named(ids, &model.call_id)
+        }
+        ModelSelection::Pins {
+            call: Some(call), ..
+        } => model.record_ref.is_none() && model.run == owner && model.call == call,
+        ModelSelection::Pins { ids, call: None } => {
+            model.record_ref.is_none()
+                && model_owner_matches(&model.run, owner, ascii_case_like)
+                && named(ids, &model.call_id)
+        }
+    })
+}
+
+/// An archived reservation as the pin read answers it.
+///
+/// # Errors
+///
+/// The refusal a stored reservation row would give.
+pub fn pin_row(
+    session: &lash_kernel_value::identity::SessionId,
+    model: ArchivedModelCall,
+) -> Result<super::ModelCallPinRow, crate::DurableError> {
+    let attempt = model
+        .attempt
+        .ok_or_else(|| corrupt("model call reservation", "no attempt"))?;
+    super::model_calls::pin_row(
+        session,
+        &model.run,
+        model.call,
+        model.call_id,
+        attempt,
+        model.answered,
+        (
+            model.enclosing_owner,
+            model.enclosing_run,
+            model.enclosing_call,
+        ),
+    )
+}
+
+/// An archived sealed record's id, root and end instant, as the record read
+/// selects them.
+///
+/// # Errors
+///
+/// A corruption refusal for a row a stored read could not select.
+pub fn record_parts(
+    model: ArchivedModelCall,
+) -> Result<(String, NodeId, i64), crate::DurableError> {
+    match (model.record_ref, model.ended_at_ms) {
+        (Some(root), Some(ended)) => Ok((model.call_id, root, ended)),
+        _ => Err(corrupt("model call", "a sealed record without its end")),
+    }
+}
+
+impl ArchiveContents {
+    /// Every root the rows name, in row order, each once.
+    #[must_use]
+    pub fn roots(&self) -> Vec<NodeId> {
+        let mut seen = BTreeSet::new();
+        self.facts
+            .iter()
+            .map(|fact| Some(fact.record))
+            .chain(
+                self.calls
+                    .iter()
+                    .flat_map(|call| [call.decision_ref, call.body_ref]),
+            )
+            .chain(self.models.iter().map(|model| model.record_ref))
+            .flatten()
+            .filter(|root| seen.insert(*root))
+            .collect()
+    }
+
+    /// Why `process`'s rows cannot be answered from an archive, if they
+    /// cannot: a row its read would refuse, or a call another execution
+    /// answers through. Those histories keep their rows.
+    ///
+    /// # Errors
+    ///
+    /// [`Unpackable::Unsupported`] naming the first such row.
+    pub fn check_supported(
+        &self,
+        process: &lash_vocabulary::identity::ProcessId,
+    ) -> Result<(), Unpackable> {
+        let owner = super::OwnerKey::Process(process.clone());
+        let calls = super::CallOwner::Process(process.clone());
+        let key = owner.stored();
+        let session = model_session(process);
+        for fact in &self.facts {
+            fact_row(&owner, fact.clone())
+                .map_err(|_| Unpackable::Unsupported("a run fact does not decode"))?;
+        }
+        for call in &self.calls {
+            if call.owner_key != key || call.execution_owner != key {
+                return Err(Unpackable::Unsupported(
+                    "a call is executed by another owner",
+                ));
+            }
+            call_row(&calls, call.clone())
+                .map_err(|_| Unpackable::Unsupported("a tool call does not decode"))?;
+        }
+        for model in &self.models {
+            if model.record_ref.is_some() {
+                record_parts(model.clone())
+                    .map_err(|_| Unpackable::Unsupported("a model call record does not decode"))?;
+            } else {
+                pin_row(&session, model.clone()).map_err(|_| {
+                    Unpackable::Unsupported("a model call reservation does not decode")
+                })?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ArchiveContents {
+    /// The exact size an archive of these rows and a closure of `nodes`
+    /// nodes, `bytes` content bytes and `edges` edges encodes to, without
+    /// encoding it: what a packer checks against the cap before it reads
+    /// the closure's bytes.
+    #[must_use]
+    pub fn size_with(&self, nodes: usize, bytes: usize, edges: usize) -> usize {
+        let text = |text: &str| 4 + text.len();
+        let opt_text = |value: &Option<String>| 1 + value.as_deref().map_or(0, text);
+        let opt_int = |value: &Option<i64>| 1 + value.map_or(0, |_| 8);
+        let facts: usize = self
+            .facts
+            .iter()
+            .map(|fact| 8 + 8 + text(&fact.kind) + opt_text(&fact.call_id) + 4 + 8)
+            .sum();
+        let calls: usize = self
+            .calls
+            .iter()
+            .map(|call| {
+                8 + text(&call.call_id)
+                    + text(&call.owner_key)
+                    + text(&call.execution_owner)
+                    + 8
+                    + 8
+                    + 1
+                    + 8
+                    + 1
+                    + [
+                        &call.session_id,
+                        &call.turn_id,
+                        &call.request_id,
+                        &call.origin,
+                        &call.reason,
+                        &call.decision,
+                        &call.answer_outcome,
+                    ]
+                    .into_iter()
+                    .map(opt_text)
+                    .sum::<usize>()
+                    + 4
+                    + 4
+            })
+            .sum();
+        let models: usize = self
+            .models
+            .iter()
+            .map(|model| {
+                text(&model.run)
+                    + text(&model.call)
+                    + text(&model.call_id)
+                    + opt_int(&model.attempt)
+                    + 1
+                    + opt_text(&model.enclosing_owner)
+                    + opt_int(&model.enclosing_run)
+                    + opt_text(&model.enclosing_call)
+                    + 4
+                    + opt_int(&model.ended_at_ms)
+                    + opt_int(&model.written_epoch)
+            })
+            .sum();
+        let tables = (self.facts.len() + self.calls.len() + self.models.len() + 3) * 4;
+        HEADER
+            .saturating_add(tables)
+            .saturating_add(facts + calls + models)
+            .saturating_add(nodes.saturating_mul(NODE_ENTRY))
+            .saturating_add(bytes)
+            .saturating_add(edges.saturating_mul(4))
+    }
+}
+
+/// The most rows of one table a history within the cap can hold: a packer
+/// reads one more and stops.
+pub const PROCESS_ARCHIVE_MAX_ROWS: usize = PROCESS_ARCHIVE_CAP_BYTES / 24;
+
+/// The most nodes a closure within the cap can hold.
+pub const PROCESS_ARCHIVE_MAX_NODES: usize = PROCESS_ARCHIVE_CAP_BYTES / NODE_ENTRY;
+
+/// The process whose archive holds `owner`'s root once its history is
+/// packed, as a process id: a run fact or tool call of a process, or a
+/// model call of a process's session.
+#[must_use]
+pub fn root_process(owner: &super::RootOwner) -> Option<String> {
+    match owner {
+        super::RootOwner::RunFact { owner, .. } | super::RootOwner::ToolCall { owner, .. } => {
+            fact_process(owner).map(|process| process.as_str().to_owned())
+        }
+        super::RootOwner::ModelCall(key) => model_process(&key.session).map(str::to_owned),
+        _ => None,
+    }
+}
+
+/// The root `owner` names in `archive`: what the stored root statement
+/// answers once the rows are packed.
+///
+/// # Errors
+///
+/// [`ArchiveCorrupt`] for a row that does not decode.
+pub fn archived_root(
+    archive: &ProcessArchive<'_>,
+    owner: &super::RootOwner,
+) -> Result<Option<NodeId>, ArchiveCorrupt> {
+    Ok(match owner {
+        super::RootOwner::RunFact {
+            owner,
+            run,
+            ordinal,
+        } => {
+            let (Ok(run), Ok(ordinal)) = (i64::try_from(run.0), i64::try_from(ordinal.0)) else {
+                return Ok(None);
+            };
+            if fact_process(owner).is_none() {
+                return Ok(None);
+            }
+            archive.fact(run, ordinal)?.map(|fact| fact.record)
+        }
+        super::RootOwner::ToolCall { owner, call, part } => archive
+            .call_of(&owner.stored(), call.as_str())?
+            .and_then(|found| match part {
+                super::tool_calls::ToolCallRoot::Decision => found.decision_ref,
+                super::tool_calls::ToolCallRoot::Answer => found.body_ref,
+            }),
+        super::RootOwner::ModelCall(key) => {
+            let (run, call) = (key.call.owner_column(), key.call.call_column());
+            archive
+                .models(|model| {
+                    model.record_ref.is_some() && model.run == run && model.call == call
+                })?
+                .into_iter()
+                .next()
+                .and_then(|model| model.record_ref)
+        }
+        _ => None,
+    })
 }

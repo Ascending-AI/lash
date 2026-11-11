@@ -33,6 +33,7 @@ pub mod mailbox;
 pub mod model_calls;
 pub mod packages;
 pub mod pages;
+pub mod process_history;
 pub mod processes;
 pub mod prompts;
 pub mod run_records;
