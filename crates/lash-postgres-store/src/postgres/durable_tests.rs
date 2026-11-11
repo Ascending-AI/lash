@@ -235,12 +235,17 @@ async fn lo_fence_path(explicit: bool) {
     ))
     .await;
     outcome.unwrap_or_else(|broken| panic!("{broken}"));
+    // A parked release commits in the one call (f4a1ac2e3a), so the stale
+    // park meets the function fence on both paths.
     if explicit {
-        // Takeover reaches the function; park and root-lease work select
-        // the explicit path.
-        assert_eq!(refused, 1, "only takeover reaches the function fence");
+        // The stale draft's admission-root lease selects the explicit path;
+        // park and takeover reach the function.
+        assert_eq!(refused, 2, "park and takeover reach the function fence");
     } else {
-        assert_eq!(refused, 2, "stale graph and takeover each raised LX003");
+        assert_eq!(
+            refused, 3,
+            "stale graph, park and takeover each raised LX003"
+        );
     }
     let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_blobs WHERE hash = $1")
         .bind(lo_fence_staged_hash())
