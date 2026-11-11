@@ -472,9 +472,18 @@ impl SlotHeap {
             .durable
             .as_ref()
             .ok_or_else(|| malformed("a paged payload in a heap with no directory".into()))?;
-        let node = edge
-            .node(durable.directory.access())
-            .map_err(LoadError::Store)?;
+        let whole = lash_kernel_state::arena::take_whole_read(object);
+        let access = durable.directory.access();
+        let node = edge.node(access).map_err(LoadError::Store)?;
+        // A whole read consumes every node: an index's children are
+        // fetched as one batch of siblings, then each is checked against
+        // its edge as it is read.
+        if let PagedNode::Index(children) = &node
+            && whole
+        {
+            let pages: Vec<_> = children.iter().map(|child| child.root.page).collect();
+            access.prefetch(&pages);
+        }
         let (part, edges) = match node {
             PagedNode::Leaf(bytes) => {
                 let wanted = bytes.len() as u64;

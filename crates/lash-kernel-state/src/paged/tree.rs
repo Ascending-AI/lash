@@ -138,6 +138,14 @@ impl<'a> Access<'a> {
             _ => None,
         }
     }
+    /// Fetches `pages`, siblings under one parent, in one bounded round
+    /// trip into the page cache, so their reads that follow find them. A
+    /// fault is left for the read of that page to report.
+    pub fn prefetch(&self, pages: &[PageRef]) {
+        for batch in pages.chunks(super::PagePortLimits::STANDARD.pages) {
+            let _ = self.read_batch(batch);
+        }
+    }
     /// Only explicitly demanded siblings enter this bounded read. Results
     /// stay in request order, including faults; decoding consumes them in
     /// traversal order rather than letting a later I/O fault skip a prefix.

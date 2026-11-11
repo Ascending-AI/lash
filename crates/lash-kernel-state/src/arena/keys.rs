@@ -236,11 +236,14 @@ fn whole<T>(object: ArenaHandle, chunks: &[Chunk<T>]) -> Result<Option<&T>, Nati
     match chunks {
         [] => Ok(None),
         [Chunk::Resident(whole)] => Ok(Some(whole)),
-        chunks => Err(Retry::Cold {
-            object,
-            chunk: super::first_cold(chunks).unwrap_or(0),
+        chunks => {
+            super::wants_whole(object);
+            Err(Retry::Cold {
+                object,
+                chunk: super::first_cold(chunks).unwrap_or(0),
+            }
+            .into())
         }
-        .into()),
     }
 }
 
@@ -398,7 +401,10 @@ fn certify(
 /// holds it, by its content's length ([`identity`]).
 fn long_key(object: Option<ArenaHandle>, body: &Body) -> Result<NormalKey, NativeError> {
     let unread = |chunk: u32| match object {
-        Some(object) => NativeError::from(Retry::Cold { object, chunk }),
+        Some(object) => {
+            super::wants_whole(object);
+            NativeError::from(Retry::Cold { object, chunk })
+        }
         None => NativeError::Malformed("a detached body holds a cold chunk"),
     };
     fn held<T>(chunks: &[Chunk<T>]) -> Result<Option<&T>, u32> {
@@ -523,7 +529,10 @@ fn body_tokens(
     out: &mut TokenWriter,
 ) -> Result<bool, NativeError> {
     let unread = |chunk: u32| match object {
-        Some(object) => NativeError::from(Retry::Cold { object, chunk }),
+        Some(object) => {
+            super::wants_whole(object);
+            NativeError::from(Retry::Cold { object, chunk })
+        }
         None => NativeError::Malformed("a detached body holds a cold chunk"),
     };
     match body {

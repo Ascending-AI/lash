@@ -1663,6 +1663,25 @@ impl Arena {
     }
 }
 
+thread_local! {
+    /// The text or bytes object a whole read last asked for, until the
+    /// heap's next load takes it ([`take_whole_read`]).
+    static WHOLE_READ: std::cell::Cell<Option<ArenaHandle>> = const { std::cell::Cell::new(None) };
+}
+
+/// Marks `object` as wanted whole: its next load may fetch every sibling
+/// of the nodes it expands in one batch. A slice never marks it, so it
+/// reads only the nodes its range addresses.
+pub(crate) fn wants_whole(object: ArenaHandle) {
+    WHOLE_READ.set(Some(object));
+}
+
+/// Whether the read that faulted on `object` wants it whole, clearing
+/// the mark.
+pub fn take_whole_read(object: ArenaHandle) -> bool {
+    WHOLE_READ.take() == Some(object)
+}
+
 /// The first cold chunk of `chunks`.
 pub(crate) fn first_cold<T>(chunks: &[Chunk<T>]) -> Option<u32> {
     chunks
