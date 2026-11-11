@@ -102,7 +102,7 @@ import re
 import subprocess
 import sys
 import tomllib
-from typing import Iterable
+from typing import Callable, Iterable
 
 from discover_version_surfaces import (
     REGISTRY, RUST_SOURCE_PATTERNS, SourceError as CheckError, WorktreeSources,
@@ -403,7 +403,9 @@ RUST_SERDE_IMPL = re.compile(
     r"((?:[A-Za-z_][A-Za-z0-9_]*::)*(?:Serialize|Deserialize|DurableSerialize)(?:\s*<[^>{}]*>)?)"
     r"\s+for\s+([A-Za-z_][A-Za-z0-9_]*)\b"
 )
-def named_rust_items(text: str, names: Iterable[str]) -> dict[str, str]:
+def named_rust_items(
+    text: str, names: Iterable[str], strip: Callable[[str, str], str] | None = None
+) -> dict[str, str]:
     """Every production declaration called one of `names`.
 
     A name several items share (an `as_str` on each of two enums) guards all
@@ -425,7 +427,8 @@ def named_rust_items(text: str, names: Iterable[str]) -> dict[str, str]:
         if SYNTHETIC_NEXT_CFG in strip_rust_trivia(text[start : match.start()]):
             continue
         end = rust_item_end(text, match.start())
-        value = strip_rust_trivia(normalize_rust_derive_lists(text[start:end]))
+        raw = text[start:end] if strip is None else strip(name, text[start:end])
+        value = strip_rust_trivia(normalize_rust_derive_lists(raw))
         key = name
         ordinal = 2
         while key in found:
@@ -451,7 +454,7 @@ def named_rust_serde_impls(text: str, names: Iterable[str]) -> dict[str, str]:
     return found
 
 
-def serde_shapes(text: str) -> dict[str, str]:
+def serde_shapes(text: str, strip: Callable[[str, str], str] | None = None) -> dict[str, str]:
     found: dict[str, str] = {}
     attribute_ranges = rust_outer_attribute_ranges(text)
     excluded_ranges = test_only_module_ranges(text, attribute_ranges)
@@ -465,7 +468,8 @@ def serde_shapes(text: str) -> dict[str, str]:
                 and production_codec_source(text) is None):
             continue
         end = rust_item_end(text, match.start())
-        value = strip_rust_trivia(normalize_rust_derive_lists(text[start:end]))
+        raw = text[start:end] if strip is None else strip(name, text[start:end])
+        value = strip_rust_trivia(normalize_rust_derive_lists(raw))
         key = name
         ordinal = 2
         while key in found:
@@ -1077,7 +1081,9 @@ class ParsedShape:
 
 
 @lru_cache(maxsize=None)
-def parse_shape(text: str, offset: int, *, token_encoded: bool = False) -> ParsedShape:
+def parse_shape(
+    text: str, offset: int, *, token_encoded: bool = False, unwritten: frozenset[str] = frozenset()
+) -> ParsedShape:
     """The types one struct, enum, union or alias serializes."""
     start = rust_item_start_with_attributes(text, offset, rust_outer_attribute_ranges(text))
     end = rust_item_end(text, offset)
@@ -1110,9 +1116,11 @@ def parse_shape(text: str, offset: int, *, token_encoded: bool = False) -> Parse
     def member(inner: _ItemParser, *, named: bool) -> None:
         field_attributes = inner.attributes()
         inner.visibility()
+        field = None
         if named:
             if inner.peek() == ("ident", "r") and inner.tokens[inner.index + 1:inner.index + 2] == (("punct", "#"),):
                 inner.index += 2
+            field = inner.peek()[1]
             inner.index += 2
         tokens = inner.until_comma()
         arguments = serde_arguments(field_attributes)
@@ -1120,6 +1128,9 @@ def parse_shape(text: str, offset: int, *, token_encoded: bool = False) -> Parse
         if _outside_default_build(field_attributes):
             return
         if not token_encoded and ("skip" in keys or {"skip_serializing", "skip_deserializing"} <= keys):
+            return
+        if field in unwritten:
+            # Left out by the rule at `unwritten_fields`.
             return
         refs.extend(type_refs(tokens, scope))
         adapters.extend(
@@ -1999,10 +2010,12 @@ class Reachability:
         if shape.kind.startswith("macro "):
             return (shape.path, shape.name, strip_rust_trivia(_item_text(content, shape.offset)))
         parsed = parse_shape(content, shape.offset)
+        text = without_unwritten_fields(
+            self.view, shape.path, shape.name, content[parsed.start : parsed.end])
         return (
             shape.path,
             shape.name,
-            strip_rust_trivia(normalize_rust_derive_lists(content[parsed.start : parsed.end])),
+            strip_rust_trivia(normalize_rust_derive_lists(text)),
         )
 
     def _expand(self, shape: Shape):
@@ -2045,7 +2058,12 @@ class Reachability:
             self._edges[key] = result
             return result
 
-        parsed = parse_shape(content, shape.offset, token_encoded=bool(codecs))
+        unwritten = frozenset()
+        if codecs:
+            item = parse_shape(content, shape.offset)
+            unwritten = frozenset(field for field, _, _ in unwritten_fields(
+                self.view, shape.path, shape.name, content[item.start : item.end]))
+        parsed = parse_shape(content, shape.offset, token_encoded=bool(codecs), unwritten=unwritten)
         if hand_written and not parsed.derives_serde and not codecs:
             opaque.append(
                 (shape.label, "its Serde impls are hand-written; the impls are guarded")
@@ -2219,14 +2237,17 @@ def _guard_signature(
             signature.append((path, "", apply_elision(path, "", content)))
             covered.update(marker for marker in guard.must_cover if marker in content)
             continue
+        def unwritten(name: str, raw: str, path: str = path) -> str:
+            return without_unwritten_fields(view, path, name, raw)
+
         if guard.kind == "items":
-            items = named_rust_items(content, guard.symbols)
+            items = named_rust_items(content, guard.symbols, unwritten)
             found_symbols.update(name.partition("#")[0] for name in items)
         elif guard.kind == "impls":
             items = named_rust_serde_impls(content, guard.symbols)
             found_symbols.update(items)
         else:
-            items = serde_shapes(content)
+            items = serde_shapes(content, unwritten)
             covered.update(name.partition("#")[0] for name in items)
         signature.extend(
             (path, name, apply_elision(path, name, value))
@@ -2347,6 +2368,36 @@ def codec_entry(view: TreeView, path: str, label: str, raw: str) -> Entry:
     return entry
 
 
+def _module_stem(path: str) -> str:
+    """The module a source file declares: its stem, or its directory's name
+    for a `mod.rs`."""
+    file = Path(path)
+    return file.parent.name if file.stem == "mod" else file.stem
+
+
+def _named_helpers(
+    candidates: Iterable[Entry], qualifiers: set[str | None], caller: str
+) -> tuple[Entry, ...]:
+    """The helpers a call by name reaches. A name the crate defines once is
+    that definition. A name it defines several times is the one in the module
+    the call qualifies (`identity::leaf`), or, for a bare call, the caller's
+    own file's; a call neither settles binds every definition, so an
+    unresolved name never drops a helper from a guard."""
+    candidates = tuple(candidates)
+    if len(candidates) <= 1:
+        return candidates
+    chosen: list[Entry] = []
+    for qualifier in qualifiers:
+        if qualifier is None:
+            local = [entry for entry in candidates if entry[0] == caller]
+        else:
+            local = [entry for entry in candidates if _module_stem(entry[0]) == qualifier]
+        if not local:
+            return candidates
+        chosen.extend(local)
+    return tuple(dict.fromkeys(chosen))
+
+
 def codec_helpers(view: TreeView, crate: str, entries: Iterable[Entry]) -> tuple[Entry, ...]:
     """The free functions and constants codecs call, including helper chains."""
     reach = reachability(view)
@@ -2378,7 +2429,11 @@ def codec_helpers(view: TreeView, crate: str, entries: Iterable[Entry]) -> tuple
         if raw is None:
             continue
         tokens = rust_tokens(raw)
-        wanted = {value for kind, value in tokens if kind == "ident" and value.isupper()}
+        # Each called name with the module that qualifies it at the call
+        # (`identity::leaf(..)`), or None when the call is bare.
+        wanted: dict[str, set[str | None]] = {
+            value: {None} for kind, value in tokens if kind == "ident" and value.isupper()
+        }
         for i, (kind, value) in enumerate(tokens[:-1]):
             if kind != "ident" or tokens[i + 1] != ("punct", "("):
                 continue
@@ -2389,12 +2444,18 @@ def codec_helpers(view: TreeView, crate: str, entries: Iterable[Entry]) -> tuple
                 start -= 2
             if tokens[start][1][:1].isupper():
                 continue
-            wanted.add(value)
-        aliases = {name: segments[-1] for name, segments, _ in reach._file(entry[0]).uses
-                   if segments}
-        wanted.update(aliases[name] for name in tuple(wanted) if name in aliases)
-        for name in wanted:
-            for helper in catalog.get(name, ()):
+            wanted.setdefault(value, set()).add(tokens[i - 2][1] if start < i else None)
+        uses = {name: segments for name, segments, _ in reach._file(entry[0]).uses if segments}
+        # A bare call of an imported name is qualified by its `use` path.
+        for name in tuple(wanted):
+            if name in uses and None in wanted[name]:
+                segments = uses[name]
+                if segments[-1] == name:
+                    wanted[name].discard(None)
+                wanted.setdefault(segments[-1], set()).add(
+                    segments[-2] if len(segments) > 1 else None)
+        for name, qualifiers in wanted.items():
+            for helper in _named_helpers(catalog.get(name, ()), qualifiers, entry[0]):
                 helpers.add(helper)
                 if helper not in seen:
                     seen.add(helper)
@@ -2402,7 +2463,138 @@ def codec_helpers(view: TreeView, crate: str, entries: Iterable[Entry]) -> tuple
     return tuple(sorted(helpers))
 
 
-def token_codec_signature(view: TreeView, shape: Shape) -> tuple[Entry, ...]:
+# --- Fields a token codec never writes ----------------------------------------
+#
+# Rule (FIG-7694): in a type with a token codec, a named field marked
+# `#[serde(skip)]` (or both `skip_serializing` and `skip_deserializing`) that
+# the type's codec never names when it writes (its `encode`, and every helper
+# the codec calls) is written by neither encoding. It is left out of the
+# type's checked text, and its type is not followed. A `decode` may still name
+# it to give it its empty value: a decode that read bytes into a field encode
+# never writes would fail every round-trip law of the type. The codec text
+# stays guarded, so a codec that starts writing the field brings it back into
+# the shape.
+#
+# A codec could still reach such a field through a method this text scan does
+# not see. The law that closes that gap for the one field the rule exempts,
+# `Document.source_evidence`, is
+# `lash-kernel-doc` `tests::source_evidence_never_reaches_a_documents_bytes_or_identity`:
+# documents that differ only in that field have identical canonical bytes,
+# identity, token body and JSON, and it fails when the codec writes the field
+# through a helper. A further field this rule exempts needs a law like it.
+
+SERDE_ATTRIBUTE = re.compile(r"#\[\s*serde\s*\((?P<args>[^\]]*)\)\s*\]")
+FIELD_NAME = re.compile(r"^\s*(?:pub(?:\s*\([^)]*\))?\s+)?(?:r#)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*:")
+
+
+def _serde_skipped(attributes: str) -> bool:
+    keys = {
+        argument.partition("=")[0].strip()
+        for match in SERDE_ATTRIBUTE.finditer(attributes)
+        for argument in match["args"].split(",")
+    }
+    return "skip" in keys or {"skip_serializing", "skip_deserializing"} <= keys
+
+
+def _struct_fields(text: str) -> list[tuple[str, int, int, bool]]:
+    """The named fields of the struct `text` declares: each field's name, its
+    span from its first attribute or doc line to its comma, and whether Serde
+    skips it. An enum, tuple or unit struct has none."""
+    header = re.search(r"\bstruct\s+[A-Za-z_][A-Za-z0-9_]*", text)
+    if header is None:
+        return []
+    depth = 0
+    index = header.end()
+    while index < len(text):
+        char = text[index]
+        if char == "<":
+            depth += 1
+        elif char == ">":
+            depth -= 1
+        elif char in "(;" and depth == 0:
+            return []
+        elif char == "{" and depth == 0:
+            break
+        index += 1
+    else:
+        return []
+    fields: list[tuple[str, int, int, bool]] = []
+    start = index + 1
+    depth = 0
+    index = start
+    while index < len(text):
+        char = text[index]
+        if text.startswith("//", index):
+            index = text.find("\n", index)
+            index = len(text) if index < 0 else index
+            continue
+        if text.startswith("/*", index):
+            index = text.find("*/", index + 2)
+            index = len(text) if index < 0 else index + 2
+            continue
+        if char == '"':
+            index += 1
+            while index < len(text) and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+        elif char in "<([{":
+            depth += 1
+        elif char == ">" and text[index - 1] != "-":
+            depth -= 1
+        elif char in ")]":
+            depth -= 1
+        elif char == "}" and depth > 0:
+            depth -= 1
+        elif (char == "," and depth == 0) or (char == "}" and depth == 0):
+            segment = text[start:index]
+            code = re.sub(r"//[^\n]*|/\*.*?\*/", "", segment, flags=re.S)
+            attributes = "".join(match.group(0) for match in re.finditer(
+                r"#\[(?:[^\[\]]|\[[^\]]*\])*\]", code))
+            bare = re.sub(r"#\[(?:[^\[\]]|\[[^\]]*\])*\]", "", code)
+            name = FIELD_NAME.match(bare)
+            if name:
+                end = index + 1 if char == "," else index
+                fields.append((name["name"], start, end, _serde_skipped(attributes)))
+            if char == "}":
+                break
+            start = index + 1
+        index += 1
+    return fields
+
+
+def unwritten_fields(view: TreeView, path: str, name: str, text: str) -> list[tuple[str, int, int]]:
+    """The fields of type `name`, declared by `text` in `path`, that the rule
+    above leaves out: Serde skips them and its token codec never names them."""
+    fields = [field for field in _struct_fields(text) if field[3]]
+    if not fields:
+        return []
+    codecs = token_codec_signature(view, Shape(path, name, 0, "struct"), own=True)
+    if not codecs:
+        return []
+    written = "\n".join(_without_decode(value) for _, _, value in codecs)
+    return [
+        (field, start, end) for field, start, end, _ in fields
+        if not re.search(rf"\b{re.escape(field)}\b", written)
+    ]
+
+
+def _without_decode(text: str) -> str:
+    """A codec impl's text (guarded entries have their whitespace stripped)
+    without its `decode` method."""
+    match = re.search(r"(?<![A-Za-z0-9_])fn\s*decode\s*[(<]", text)
+    if match is None:
+        return text
+    return text[: match.start()] + text[rust_item_end(text, match.start()) :]
+
+
+def without_unwritten_fields(view: TreeView, path: str, name: str, text: str) -> str:
+    for _, start, end in reversed(unwritten_fields(view, path, name, text)):
+        text = text[:start] + text[end:]
+    return text
+
+
+def token_codec_signature(
+    view: TreeView, shape: Shape, *, own: bool = False
+) -> tuple[Entry, ...]:
     """Find a type's codecs wherever its crate implements them.
 
     Retain each impl and the helpers it calls, without binding unrelated
@@ -2451,6 +2643,8 @@ def token_codec_signature(view: TreeView, shape: Shape) -> tuple[Entry, ...]:
     entries = cache[crate].get(shape.name, [])
     if entries:
         entries = [*entries, *codec_helpers(view, crate, entries)]
+        if own:
+            return tuple(sorted(set(entries)))
         if "primitives" not in cache:
             primitives = []
             primitive_crates = set()

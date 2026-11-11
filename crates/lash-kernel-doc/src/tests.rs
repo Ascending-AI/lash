@@ -875,3 +875,60 @@ fn a_batch_names_each_reserved_slot_once_and_a_refusal_releases_nothing() {
     assert!(objects.prepare_install([taken].into_iter()).is_ok());
     assert_eq!(objects.reserve().index(), first.index());
 }
+
+/// `K-ID-003`: source evidence sits beside a document, outside its identity.
+/// Two documents that differ only in their evidence have the same canonical
+/// bytes, identity, token body and JSON. The version checker leaves a
+/// skipped field its codec never names out of a document's guarded shape on
+/// the strength of this law (`scripts/check_version_bumps.py`).
+#[test]
+fn source_evidence_never_reaches_a_documents_bytes_or_identity() {
+    use crate::{
+        DeclaredLocal, Document, IdentifiedDocument, ImplicitTextConversion, NumberPolicy,
+        SourceEvidence, SourceOperandType,
+    };
+    use lash_kernel_value::names::Name;
+    use lash_kernel_value::types::Type;
+
+    let mut bare = Document::new(NumberPolicy::Float, vec![]);
+    for name in ["app.one", "app.two", "app.three"] {
+        let definition = definition(name, false);
+        bare.functions.insert(definition.identity(), definition);
+    }
+    let mut evidenced = bare.clone();
+    for (n, id) in bare.functions.keys().enumerate() {
+        evidenced.source_evidence.insert(
+            *id,
+            SourceEvidence {
+                implicit_text_conversions: vec![ImplicitTextConversion {
+                    span: None,
+                    operand_type: SourceOperandType::Union(vec![
+                        SourceOperandType::Null,
+                        SourceOperandType::Text,
+                    ]),
+                }],
+                declared_locals: (0..=n)
+                    .map(|local| DeclaredLocal {
+                        name: Name::new(format!("local{local}")),
+                        ty: Type::Json,
+                    })
+                    .collect(),
+            },
+        );
+    }
+    assert_eq!(evidenced.source_evidence.len(), 3);
+
+    assert_eq!(evidenced.canonical_bytes(), bare.canonical_bytes());
+    assert_eq!(evidenced.identity(), bare.identity());
+    assert_eq!(
+        lash_kernel_value::tokens::encode_body(&evidenced),
+        lash_kernel_value::tokens::encode_body(&bare)
+    );
+    assert_eq!(evidenced.to_json().unwrap(), bare.to_json().unwrap());
+    let (evidenced, bare) = (
+        IdentifiedDocument::new(evidenced),
+        IdentifiedDocument::new(bare),
+    );
+    assert_eq!(evidenced.id(), bare.id());
+    assert_eq!(evidenced.body(), bare.body());
+}
