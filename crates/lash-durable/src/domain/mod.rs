@@ -37,6 +37,9 @@ pub mod namespace_value;
 /// Persistent-heap page publication, leases and retirement (FIG-6195):
 /// declared ahead of the cutover, implemented by nothing yet.
 pub mod pages;
+/// A finished process's history packed into one archive on its row
+/// (FIG-7701).
+pub mod process_archive;
 pub mod processes;
 pub mod prompts;
 pub use lash_core_store::tool_run::OperationRun;
