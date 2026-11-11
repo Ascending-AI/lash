@@ -1101,13 +1101,16 @@ fn huge_charges(
 /// Contract §3 and `K-CHG-003` at the top of `u64`. A `metered u64::MAX`
 /// loop test shares its block with one-unit events, so the block's fixed
 /// sum passes `u64::MAX` and the block runs event by event: at every limit
-/// it refuses where the exact path does, and at `u64::MAX` it refuses the
-/// test. `law.wide("abc")`'s formula saturates to `u64::MAX` (a wrapping
-/// one is `2^63 - 3`, which fits), so it too refuses at every limit. A run
-/// ends at the charge that passed its bound (`K-CHG-008`): one past the
-/// limit at a one-unit event, the saturated `u64::MAX` at either wide
-/// one. Each refusal stands in its statement: the loop, main's second,
-/// and the `do`, its first.
+/// it refuses where the exact path does. `law.wide("abc")`'s formula
+/// saturates to `u64::MAX` (a wrapping one is `2^63 - 3`, which fits), so
+/// it too refuses at every limit below `u64::MAX`. A run ends at the
+/// charge that passed its bound (`K-CHG-008`): one past the limit at a
+/// one-unit event, the saturated `u64::MAX` at either wide one. Each
+/// refusal stands in its statement: the loop, main's second, and the
+/// `do`, its first. A run's charge saturates as its formulas do, so a run
+/// bounded at `u64::MAX` is never refused: it finishes at charge
+/// `u64::MAX`, as the protocol corpus's `K-CHG-006` case "magnitude of
+/// 18446744073709551616 is 18446744073709551615" does.
 #[test]
 fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
     // The bound names the function whose event passed it: `main` at its
@@ -1122,14 +1125,16 @@ fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
             "main {\n  let n = 0\n  while num.lt(n, 2) metered 18446744073709551615 {\n    set n = num.add(n, 1)\n  }\n  return n\n}",
             1,
             "main",
+            "Int(Integer(2))",
         ),
         (
             "main {\n  do invoke law.wide(\"abc\")\n  return 4\n}",
             0,
             "law.wide",
+            "Int(Integer(4))",
         ),
     ];
-    for (text, at, function) in documents {
+    for (text, at, function, finished) in documents {
         // The charge that precedes the wide event: the least limit it
         // refuses at.
         let pre = (0..10)
@@ -1139,6 +1144,8 @@ fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
             let exact = core_run(text, limit, u64::MAX, true, None);
             let (end, charged) = if limit < pre {
                 (exact.0.clone(), limit + 1)
+            } else if limit == u64::MAX {
+                (finished.to_owned(), u64::MAX)
             } else {
                 (refused(limit, at, function), u64::MAX)
             };

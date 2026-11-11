@@ -133,11 +133,13 @@ impl Meter {
 
     /// Bills `units` one-unit events on the exact path. At a refusal the
     /// units that fit are billed and the first that passes is refused.
+    /// A run's charge saturates at `2^64 - 1` (`K-CHG-003`), so a run
+    /// bounded there is never refused.
     #[inline]
     pub(crate) fn units(&mut self, units: u64) -> Result<(), Refused> {
         debug_assert!(self.reserved.is_none(), "exact billing in a prepaid block");
-        match self.used.checked_add(units) {
-            Some(used) if used <= self.limit => {
+        match self.used.saturating_add(units) {
+            used if used <= self.limit => {
                 self.used = used;
                 Ok(())
             }
@@ -156,8 +158,8 @@ impl Meter {
     #[inline]
     pub(crate) fn atomic(&mut self, units: u64) -> Result<(), Refused> {
         debug_assert!(self.reserved.is_none(), "exact billing in a prepaid block");
-        match self.used.checked_add(units) {
-            Some(used) if used <= self.limit => {
+        match self.used.saturating_add(units) {
+            used if used <= self.limit => {
                 self.used = used;
                 Ok(())
             }
@@ -199,9 +201,7 @@ impl Meter {
     /// spent, fits the limit.
     #[inline]
     pub(crate) fn fits(&self, units: u64) -> bool {
-        self.used
-            .checked_add(units)
-            .is_some_and(|used| used <= self.limit)
+        self.used.saturating_add(units) <= self.limit
     }
 
     /// A dynamic fee at an op that has billed `through` of its block: the
